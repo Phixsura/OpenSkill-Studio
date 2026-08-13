@@ -205,7 +205,7 @@ class EvaluationService:
             if task.retries < 3:
                 task.status = EvalStatus.PENDING
             else:
-                task.status = EvalStatus.FAILED # pragma: no cover
+                task.status = EvalStatus.FAILED  # pragma: no cover
             await self.db.flush()
             log.warning("eval_parse_failed", task_id=task.id, retries=task.retries)
 

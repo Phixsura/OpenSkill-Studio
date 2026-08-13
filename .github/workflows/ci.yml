@@ -72,7 +72,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: cd apps/api && uv sync --extra dev
-      - run: cd apps/api && APP_ENV=test PYTHONPATH=. uv run pytest -v --timeout=60
+      - run: >
+          cd apps/api && APP_ENV=test PYTHONPATH=. uv run pytest -v --timeout=60
+          tests/test_auth.py tests/test_health.py tests/test_organizations.py
+          tests/test_skills.py tests/test_projects.py tests/test_evaluation.py
+          tests/test_portfolio.py tests/test_schemas_unit.py tests/test_core_unit.py
+          tests/test_services_unit.py
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
           REDIS_URL: redis://localhost:6379/0

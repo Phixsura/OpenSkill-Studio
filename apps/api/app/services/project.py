@@ -351,7 +351,7 @@ class ProjectService:
                 ExpiresIn=3600,
             )
             return url
-        raise AppError("S3_ERROR", "Could not generate download URL", 500) # pragma: no cover
+        raise AppError("S3_ERROR", "Could not generate download URL", 500)  # pragma: no cover
 
     async def delete_file(self, file_id: str, user_id: str) -> None:
         item = await self.db.get(SubmissionItem, file_id)
@@ -455,7 +455,7 @@ class ProjectService:
 
         now = datetime.now(UTC)
         if now <= project.deadline if project.deadline else True:
-            return "on_time" # pragma: no cover
+            return "on_time"  # pragma: no cover
 
         # Check personal extension
         ext_result = await self.db.execute(
