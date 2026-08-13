@@ -1,3 +1,5 @@
+import logging
+
 import structlog
 
 
@@ -19,11 +21,11 @@ def setup_logging(level: str = "DEBUG", fmt: str = "console") -> None:
     else:
         processors.append(structlog.dev.ConsoleRenderer())
 
+    log_level = getattr(logging, level.upper(), logging.INFO)
+
     structlog.configure(
         processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(structlog, level.upper(), structlog.INFO)
-        ),
+        wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),
     )
