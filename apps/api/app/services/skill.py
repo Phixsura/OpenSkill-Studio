@@ -413,7 +413,8 @@ class SkillService:
         # Count skills in org
         skills_result = await self.db.execute(
             select(func.count(Skill.id)).where(
-                Skill.org_id == org_id, Skill.status == ContentStatus.PUBLISHED
+                Skill.org_id == org_id,
+                Skill.status != ContentStatus.ARCHIVED,
             )
         )
         skills_total = skills_result.scalar_one()
