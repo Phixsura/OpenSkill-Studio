@@ -127,6 +127,21 @@ async def get_my_item(
     return DataResponse(data=PortfolioItemResponse.model_validate(item))
 
 
+@router.put("/portfolio/items/reorder", status_code=200)
+async def reorder_my_items(
+    body: dict,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    svc = PortfolioService(db)
+    item_ids = body.get("item_ids", [])
+    for i, iid in enumerate(item_ids):
+        item = await svc.get_item(iid)
+        if item.user_id == user.id:
+            item.sort_order = i
+    await db.commit()
+    return {"message": "Items reordered"}
+
+
 @router.put("/portfolio/items/{item_id}", response_model=DataResponse[PortfolioItemResponse])
 async def update_my_item(
     item_id: str, body: UpdatePortfolioItemRequest,
@@ -146,21 +161,6 @@ async def delete_my_item(
     svc = PortfolioService(db)
     await svc.delete_item(item_id, user.id)
     await db.commit()
-
-
-@router.put("/portfolio/items/reorder", status_code=200)
-async def reorder_my_items(
-    body: dict,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
-):
-    svc = PortfolioService(db)
-    item_ids = body.get("item_ids", [])
-    for i, item_id in enumerate(item_ids):
-        item = await svc.get_item(item_id)
-        if item.user_id == user.id:
-            item.sort_order = i
-    await db.commit()
-    return {"message": "Items reordered"}
 
 
 @router.post("/portfolio/upload-cover", response_model=DataResponse[dict])

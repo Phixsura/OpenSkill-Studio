@@ -61,6 +61,19 @@ async def create_category(
     return DataResponse(data=CategoryResponse.model_validate(cat))
 
 
+@router.put("/orgs/{org_id}/categories/reorder", status_code=200)
+async def reorder_categories(
+    org_id: str, body: ReorderRequest,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    svc = SkillService(db)
+    for item in body.items:
+        await svc.update_category(item.id, sort_order=item.sort_order)
+    await db.commit()
+    return {"message": "Categories reordered"}
+
+
 @router.put("/orgs/{org_id}/categories/{category_id}", response_model=DataResponse[CategoryResponse])
 async def update_category(
     org_id: str, category_id: str, body: UpdateCategoryRequest,
@@ -366,18 +379,6 @@ async def get_category(
     cat = await svc.get_category(category_id)
     return DataResponse(data=CategoryResponse.model_validate(cat))
 
-
-@router.put("/orgs/{org_id}/categories/reorder", status_code=200)
-async def reorder_categories(
-    org_id: str, body: ReorderRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
-):
-    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
-    svc = SkillService(db)
-    for item in body.items:
-        await svc.update_category(item.id, sort_order=item.sort_order)
-    await db.commit()
-    return {"message": "Categories reordered"}
 
 
 @router.put("/orgs/{org_id}/skills/{skill_id}/exercises/reorder", status_code=200)
