@@ -41,12 +41,14 @@ ignore = ["E501", "B008", "UP046", "UP042", "SIM117"]
 
 [tool.ruff.lint.per-file-ignores]
 "migrations/env.py" = ["E402"]
+"migrations/versions/*" = ["E501", "W291"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
 [dependency-groups]

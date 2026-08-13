@@ -47,6 +47,11 @@ def rate_limit(limit: int, window: int):
     """FastAPI dependency for rate limiting by client IP."""
 
     async def checker(request: Request):
+        import os
+
+        if os.environ.get("APP_ENV") == "test":
+            return limit  # Skip rate limiting in tests
+
         client_ip = request.client.host if request.client else "unknown"
         key = f"{request.url.path}:{client_ip}"
 

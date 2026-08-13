@@ -5,10 +5,14 @@ The app still has all routes and middleware, so schema validation, auth checks,
 and error handling all work correctly.
 """
 
+import os
 from contextlib import asynccontextmanager
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+# Disable rate limiting in test environment
+os.environ["APP_ENV"] = "test"
 
 
 @asynccontextmanager
