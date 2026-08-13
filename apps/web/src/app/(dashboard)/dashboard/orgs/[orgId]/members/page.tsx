@@ -60,7 +60,7 @@ export default function MembersPage() {
         <div>
           <h1 className="text-3xl font-bold">Members</h1>
           <p className="mt-1 text-[hsl(var(--muted-foreground))]">
-            {total} member{total !== 1 ? "s" : ""}
+            {isLoading ? "Loading members..." : `${total} member${total !== 1 ? "s" : ""}`}
           </p>
         </div>
         <Button onClick={() => setShowInvite(!showInvite)}>Invite</Button>

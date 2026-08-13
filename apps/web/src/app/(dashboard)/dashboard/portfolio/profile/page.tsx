@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -27,12 +27,29 @@ export default function EditProfilePage() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
 
+  // Initialize form with existing profile data
+  useEffect(() => {
+    if (profile && Object.keys(form).length === 0) {
+      setForm({
+        headline: profile.headline ?? "",
+        bio: profile.bio ?? "",
+        location: profile.location ?? "",
+        website_url: profile.website_url ?? "",
+      });
+    }
+  }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const saveMutation = useMutation({
-    mutationFn: () =>
-      apiWithAuth("/portfolio/profile", {
+    mutationFn: () => {
+      // Convert empty strings to null for optional URL fields
+      const payload = Object.fromEntries(
+        Object.entries(form).map(([k, v]) => [k, v === "" ? null : v]),
+      );
+      return apiWithAuth("/portfolio/profile", {
         method: "PUT",
-        body: JSON.stringify(form),
-      }),
+        body: JSON.stringify(payload),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["portfolio-profile"] });
       setMessage("Profile saved.");
@@ -52,35 +69,39 @@ export default function EditProfilePage() {
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{profile.username}</p>
         </div>
         <div>
-          <label className="block text-sm font-medium">Headline</label>
+          <label htmlFor="headline" className="block text-sm font-medium">Headline</label>
           <Input
-            defaultValue={profile.headline ?? ""}
+            id="headline"
+            value={form.headline ?? profile.headline ?? ""}
             onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))}
             placeholder="AI Developer & Prompt Engineer"
             className="mt-1"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium">Bio</label>
+          <label htmlFor="bio" className="block text-sm font-medium">Bio</label>
           <textarea
+            id="bio"
             className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
             rows={5}
-            defaultValue={profile.bio ?? ""}
+            value={form.bio ?? profile.bio ?? ""}
             onChange={(e) => setForm((f) => ({ ...f, bio: e.target.value }))}
           />
         </div>
         <div>
-          <label className="block text-sm font-medium">Location</label>
+          <label htmlFor="location" className="block text-sm font-medium">Location</label>
           <Input
-            defaultValue={profile.location ?? ""}
+            id="location"
+            value={form.location ?? profile.location ?? ""}
             onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
             className="mt-1"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium">Website</label>
+          <label htmlFor="website" className="block text-sm font-medium">Website</label>
           <Input
-            defaultValue={profile.website_url ?? ""}
+            id="website"
+            value={form.website_url ?? profile.website_url ?? ""}
             onChange={(e) => setForm((f) => ({ ...f, website_url: e.target.value }))}
             className="mt-1"
           />

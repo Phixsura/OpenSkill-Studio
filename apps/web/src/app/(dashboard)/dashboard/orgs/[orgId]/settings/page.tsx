@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,16 +25,20 @@ export default function OrgSettingsPage() {
   });
 
   const org = data?.data;
-  const [name, setName] = useState(org?.name ?? "");
-  const [description, setDescription] = useState(org?.description ?? "");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [synced, setSynced] = useState(false);
 
-  // Sync when data loads
-  if (org && !name && org.name) {
-    setName(org.name);
-    setDescription(org.description ?? "");
-  }
+  // Sync form when data first loads
+  useEffect(() => {
+    if (org && !synced) {
+      setName(org.name);
+      setDescription(org.description ?? "");
+      setSynced(true);
+    }
+  }, [org, synced]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

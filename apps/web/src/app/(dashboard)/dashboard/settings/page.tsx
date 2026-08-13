@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,13 @@ export default function SettingsPage() {
   const accessToken = useAuthStore((s) => s.accessToken);
 
   const [displayName, setDisplayName] = useState(user?.display_name ?? "");
+
+  // Sync display name when user data becomes available (e.g. after refresh)
+  useEffect(() => {
+    if (user?.display_name && !displayName) {
+      setDisplayName(user.display_name);
+    }
+  }, [user?.display_name]); // eslint-disable-line react-hooks/exhaustive-deps
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
