@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "http://localhost:8000";
 
 interface PublicProfile {
   username: string;

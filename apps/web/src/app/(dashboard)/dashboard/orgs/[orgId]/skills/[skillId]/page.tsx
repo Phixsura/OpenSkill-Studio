@@ -30,7 +30,7 @@ interface ExerciseItem {
 export default function SkillDetailPage() {
   const { orgId, skillId } = useParams<{ orgId: string; skillId: string }>();
 
-  const { data: skillData } = useQuery({
+  const { data: skillData, isLoading, isError } = useQuery({
     queryKey: ["skill", orgId, skillId],
     queryFn: () => apiWithAuth<{ data: SkillDetail }>(`/orgs/${orgId}/skills/${skillId}`),
   });
@@ -44,8 +44,11 @@ export default function SkillDetailPage() {
   const skill = skillData?.data;
   const exercises = exerciseData?.data ?? [];
 
-  if (!skill) {
+  if (isLoading) {
     return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  }
+  if (isError || !skill) {
+    return <p className="text-[hsl(var(--destructive))]">Failed to load skill.</p>;
   }
 
   return (

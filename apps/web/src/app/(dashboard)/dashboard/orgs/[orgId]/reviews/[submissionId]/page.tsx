@@ -23,7 +23,7 @@ export default function ReviewDetailPage() {
   const queryClient = useQueryClient();
 
   // We need to find the project_id — fetch the submission directly
-  const { data } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["review-submission", submissionId],
     queryFn: async () => {
       // The submission endpoint requires project_id, so we search pending first
@@ -60,7 +60,8 @@ export default function ReviewDetailPage() {
     onError: (err) => setError(err instanceof ApiError ? err.message : "Review failed"),
   });
 
-  if (!sub) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isError || !sub) return <p className="text-[hsl(var(--destructive))]">Submission not found.</p>;
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">

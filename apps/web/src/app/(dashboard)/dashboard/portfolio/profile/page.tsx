@@ -18,7 +18,7 @@ interface Profile {
 export default function EditProfilePage() {
   const queryClient = useQueryClient();
 
-  const { data } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["portfolio-profile"],
     queryFn: () => apiWithAuth<{ data: Profile }>("/portfolio/profile"),
   });
@@ -39,7 +39,8 @@ export default function EditProfilePage() {
     },
   });
 
-  if (!profile) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isError || !profile) return <p className="text-[hsl(var(--destructive))]">Failed to load profile.</p>;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

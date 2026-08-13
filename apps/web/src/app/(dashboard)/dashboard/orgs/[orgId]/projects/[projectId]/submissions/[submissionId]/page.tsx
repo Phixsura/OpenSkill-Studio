@@ -21,7 +21,7 @@ export default function SubmissionDetailPage() {
     orgId: string; projectId: string; submissionId: string;
   }>();
 
-  const { data } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["submission", submissionId],
     queryFn: () =>
       apiWithAuth<{ data: SubmissionDetail }>(
@@ -30,7 +30,8 @@ export default function SubmissionDetailPage() {
   });
 
   const sub = data?.data;
-  if (!sub) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isError || !sub) return <p className="text-[hsl(var(--destructive))]">Failed to load submission.</p>;
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">

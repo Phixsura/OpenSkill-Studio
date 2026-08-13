@@ -18,13 +18,16 @@ interface ProgressData {
 export default function ProgressPage() {
   const { orgId } = useParams<{ orgId: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["progress", orgId],
     queryFn: () => apiWithAuth<ProgressData>(`/orgs/${orgId}/progress/me`),
   });
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  }
+  if (isError || !data) {
+    return <p className="text-[hsl(var(--destructive))]">Failed to load progress.</p>;
   }
 
   return (

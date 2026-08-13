@@ -29,7 +29,7 @@ export default function ExercisePage() {
   const { orgId, exerciseId } = useParams<{ orgId: string; exerciseId: string }>();
   const queryClient = useQueryClient();
 
-  const { data: exData } = useQuery({
+  const { data: exData, isLoading, isError } = useQuery({
     queryKey: ["exercise", exerciseId],
     queryFn: () => apiWithAuth<{ data: ExerciseDetail }>(`/orgs/${orgId}/exercises/${exerciseId}`),
   });
@@ -61,8 +61,11 @@ export default function ExercisePage() {
     },
   });
 
-  if (!exercise) {
+  if (isLoading) {
     return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  }
+  if (isError || !exercise) {
+    return <p className="text-[hsl(var(--destructive))]">Failed to load exercise.</p>;
   }
 
   return (

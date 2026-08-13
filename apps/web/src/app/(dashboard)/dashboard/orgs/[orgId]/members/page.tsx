@@ -1,8 +1,11 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { apiWithAuth } from "@/lib/api";
 
 interface MemberUser {
@@ -22,6 +25,10 @@ interface OrgMember {
 
 export default function MembersPage() {
   const { orgId } = useParams<{ orgId: string }>();
+  const queryClient = useQueryClient();
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteRole, setInviteRole] = useState("student");
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["org-members", orgId],
@@ -29,6 +36,19 @@ export default function MembersPage() {
       apiWithAuth<{ data: OrgMember[]; meta: { total: number } }>(
         `/orgs/${orgId}/members`,
       ),
+  });
+
+  const inviteMutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth<{ data: { code: string } }>(`/orgs/${orgId}/invite-links`, {
+        method: "POST",
+        body: JSON.stringify({ role: inviteRole, max_uses: 10 }),
+      }),
+    onSuccess: (result) => {
+      const code = result.data.code;
+      setInviteLink(`${window.location.origin}/join/${code}`);
+      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
+    },
   });
 
   const members = data?.data ?? [];
@@ -43,7 +63,45 @@ export default function MembersPage() {
             {total} member{total !== 1 ? "s" : ""}
           </p>
         </div>
+        <Button onClick={() => setShowInvite(!showInvite)}>Invite</Button>
       </div>
+
+      {showInvite && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <h3 className="font-medium">Create Invite Link</h3>
+          <div className="flex items-center gap-3">
+            <label className="text-sm">Role:</label>
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value)}
+              className="rounded border px-2 py-1 text-sm"
+            >
+              <option value="student">Student</option>
+              <option value="instructor">Instructor</option>
+              <option value="admin">Admin</option>
+            </select>
+            <Button
+              size="sm"
+              onClick={() => inviteMutation.mutate()}
+              disabled={inviteMutation.isPending}
+            >
+              {inviteMutation.isPending ? "Creating..." : "Generate Link"}
+            </Button>
+          </div>
+          {inviteLink && (
+            <div className="flex items-center gap-2">
+              <Input value={inviteLink} readOnly className="font-mono text-xs" />
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => navigator.clipboard.writeText(inviteLink)}
+              >
+                Copy
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
 

@@ -41,7 +41,7 @@ interface SubmissionItem {
 export default function ProjectDetailPage() {
   const { orgId, projectId } = useParams<{ orgId: string; projectId: string }>();
 
-  const { data: projectData } = useQuery({
+  const { data: projectData, isLoading, isError } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => apiWithAuth<{ data: ProjectDetail }>(`/orgs/${orgId}/projects/${projectId}`),
   });
@@ -55,7 +55,8 @@ export default function ProjectDetailPage() {
   const project = projectData?.data;
   const submissions = subsData?.data ?? [];
 
-  if (!project) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isError || !project) return <p className="text-[hsl(var(--destructive))]">Failed to load project.</p>;
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
