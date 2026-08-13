@@ -45,13 +45,28 @@ async def lifespan(app: FastAPI):
         else:
             raise
 
-    # 3. Verify MinIO / S3 bucket
+    # 3. Verify MinIO / S3 bucket (with timeout)
     try:
-        from app.core.storage import ensure_bucket, get_s3_client
+        import asyncio
 
-        async for client in get_s3_client():
-            await ensure_bucket(client)
-            log.info("s3_bucket_ready", bucket=settings.s3_bucket)
+        import aioboto3
+
+        async def _check_s3():
+            session = aioboto3.Session()
+            async with session.client(
+                "s3",
+                endpoint_url=settings.s3_endpoint,
+                aws_access_key_id=settings.s3_access_key,
+                aws_secret_access_key=settings.s3_secret_key,
+                region_name=settings.s3_region,
+            ) as client:
+                try:
+                    await client.head_bucket(Bucket=settings.s3_bucket)
+                except Exception:
+                    await client.create_bucket(Bucket=settings.s3_bucket)
+                log.info("s3_bucket_ready", bucket=settings.s3_bucket)
+
+        await asyncio.wait_for(_check_s3(), timeout=5)
     except Exception as exc:
         if settings.app_env == "development":
             log.warning("s3_unavailable", error=str(exc))
