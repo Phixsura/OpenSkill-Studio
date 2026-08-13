@@ -98,7 +98,9 @@ async def test_auth_refresh_not_refresh_type():
     db = _mock_db()
     svc = AuthService(db)
 
-    with patch("app.services.auth.decode_token", return_value={"type": "access", "sub": "x", "jti": "y"}):
+    with patch(
+        "app.services.auth.decode_token", return_value={"type": "access", "sub": "x", "jti": "y"}
+    ):
         with pytest.raises(TokenInvalidError, match="Not a refresh"):
             await svc.refresh_tokens("fake-token")
 
@@ -111,7 +113,9 @@ async def test_auth_refresh_token_not_found():
     db.execute = AsyncMock(return_value=_mock_result(value=None))
 
     svc = AuthService(db)
-    with patch("app.services.auth.decode_token", return_value={"type": "refresh", "sub": "x", "jti": "y"}):
+    with patch(
+        "app.services.auth.decode_token", return_value={"type": "refresh", "sub": "x", "jti": "y"}
+    ):
         with pytest.raises(TokenInvalidError, match="not found"):
             await svc.refresh_tokens("fake-token")
 
@@ -128,7 +132,9 @@ async def test_auth_refresh_token_reuse():
     svc = AuthService(db)
     svc._revoke_all_user_tokens = AsyncMock()
 
-    with patch("app.services.auth.decode_token", return_value={"type": "refresh", "sub": "x", "jti": "y"}):
+    with patch(
+        "app.services.auth.decode_token", return_value={"type": "refresh", "sub": "x", "jti": "y"}
+    ):
         with pytest.raises(TokenReuseError):
             await svc.refresh_tokens("fake-token")
 
@@ -451,7 +457,9 @@ async def test_file_too_large():
     svc = ProjectService(db)
     big_content = b"x" * (51 * 1024 * 1024)
     with pytest.raises(FileTooLargeError):
-        await svc.upload_file("sub1", "del1", "big.bin", big_content, "application/octet-stream", "user1")
+        await svc.upload_file(
+            "sub1", "del1", "big.bin", big_content, "application/octet-stream", "user1"
+        )
 
 
 # ── EvaluationService ────────────────────────────────────

@@ -55,12 +55,8 @@ class Organization(Base):
         default=OrgStatus.ACTIVE,
     )
     settings: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
-    created_by: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -100,15 +96,11 @@ class OrgMember(Base):
         Enum(MemberStatus, name="member_status", create_constraint=True),
         default=MemberStatus.ACTIVE,
     )
-    joined_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     invited_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -135,20 +127,14 @@ class OrgInvitation(Base):
         default=OrgRole.STUDENT,
     )
     token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    invited_by: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id"), nullable=False
-    )
+    invited_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
     status: Mapped[InviteStatus] = mapped_column(
         Enum(InviteStatus, name="invite_status", create_constraint=True),
         default=InviteStatus.PENDING,
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    accepted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     organization: Mapped["Organization"] = relationship(back_populates="invitations")
@@ -168,16 +154,10 @@ class OrgInviteLink(Base):
     )
     max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
     use_count: Mapped[int] = mapped_column(Integer, default=0)
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_by: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id"), nullable=False
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     organization: Mapped["Organization"] = relationship(back_populates="invite_links")

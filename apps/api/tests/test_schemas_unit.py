@@ -160,7 +160,9 @@ def test_project_title_too_long():
 
     with pytest.raises(ValidationError):
         CreateProjectRequest(
-            title="X" * 201, description="d", instructions="i",
+            title="X" * 201,
+            description="d",
+            instructions="i",
             rubric=[{"criterion": "x", "max_score": 10}],
         )
 
@@ -170,7 +172,10 @@ def test_project_rubric_empty():
 
     with pytest.raises(ValidationError):
         CreateProjectRequest(
-            title="Valid", description="d", instructions="i", rubric=[],
+            title="Valid",
+            description="d",
+            instructions="i",
+            rubric=[],
         )
 
 
@@ -210,7 +215,9 @@ def test_skill_name_too_long():
 
     with pytest.raises(ValidationError):
         CreateSkillRequest(
-            category_id="x", name="X" * 201, description="d",
+            category_id="x",
+            name="X" * 201,
+            description="d",
         )
 
 

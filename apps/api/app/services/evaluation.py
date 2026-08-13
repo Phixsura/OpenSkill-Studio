@@ -66,7 +66,9 @@ class BudgetExceededError(AppError):
 
 class EvalNotEnabledError(AppError):
     def __init__(self):
-        super().__init__("EVAL_NOT_ENABLED", "AI evaluation is not enabled for this organization", 422)
+        super().__init__(
+            "EVAL_NOT_ENABLED", "AI evaluation is not enabled for this organization", 422
+        )
 
 
 # ── Service ───────────────────────────────────────────────────
@@ -79,7 +81,10 @@ class EvaluationService:
     # ── Trigger ──
 
     async def trigger_evaluation(
-        self, org_id: str, submission_id: str, eval_type: str,
+        self,
+        org_id: str,
+        submission_id: str,
+        eval_type: str,
     ) -> EvaluationTask:
         """Create an evaluation task and execute inline (Phase 1)."""
         # Check budget
@@ -195,8 +200,11 @@ class EvaluationService:
             await self.db.flush()
 
             log.info(
-                "eval_completed", task_id=task.id, score=total_score,
-                tokens=response.input_tokens + response.output_tokens, cost=cost,
+                "eval_completed",
+                task_id=task.id,
+                score=total_score,
+                tokens=response.input_tokens + response.output_tokens,
+                cost=cost,
             )
 
         except json.JSONDecodeError:
@@ -219,8 +227,12 @@ class EvaluationService:
     # ── Task CRUD ──
 
     async def list_tasks(
-        self, org_id: str, status: str | None = None,
-        eval_type: str | None = None, page: int = 1, per_page: int = 20,
+        self,
+        org_id: str,
+        status: str | None = None,
+        eval_type: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
     ) -> tuple[list[EvaluationTask], int]:
         base = select(EvaluationTask).where(EvaluationTask.org_id == org_id)
         if status:
@@ -443,12 +455,14 @@ Please evaluate the submission against the rubric above."""
                 continue
             max_s = rubric_item.get("max_score", 0)
             clamped = max(0, min(score_item.get("score", 0), max_s))
-            scores.append({
-                "criterion": score_item["criterion"],
-                "score": clamped,
-                "max_score": max_s,
-                "feedback": score_item.get("feedback", ""),
-            })
+            scores.append(
+                {
+                    "criterion": score_item["criterion"],
+                    "score": clamped,
+                    "max_score": max_s,
+                    "feedback": score_item.get("feedback", ""),
+                }
+            )
             total += clamped
             max_total += max_s
 
@@ -486,5 +500,7 @@ Please evaluate the submission against the rubric above."""
         usage.total_tasks = (usage.total_tasks or 0) + 1
         usage.total_input_tokens = (usage.total_input_tokens or 0) + (task.input_tokens or 0)
         usage.total_output_tokens = (usage.total_output_tokens or 0) + (task.output_tokens or 0)
-        usage.total_cost_usd = (usage.total_cost_usd or Decimal("0")) + (task.cost_usd or Decimal("0"))
+        usage.total_cost_usd = (usage.total_cost_usd or Decimal("0")) + (
+            task.cost_usd or Decimal("0")
+        )
         await self.db.flush()

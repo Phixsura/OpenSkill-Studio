@@ -72,8 +72,13 @@ async def test_check_rate_limit_redis_unavailable():
 def test_calculate_cost_anthropic_sonnet():
     from app.core.llm import LLMResponse, calculate_cost
 
-    resp = LLMResponse(content="x", input_tokens=1_000_000, output_tokens=0,
-                       model="claude-sonnet-5", provider="anthropic")
+    resp = LLMResponse(
+        content="x",
+        input_tokens=1_000_000,
+        output_tokens=0,
+        model="claude-sonnet-5",
+        provider="anthropic",
+    )
     cost = calculate_cost(resp)
     assert cost == 3.0
 
@@ -81,8 +86,13 @@ def test_calculate_cost_anthropic_sonnet():
 def test_calculate_cost_openai_mini():
     from app.core.llm import LLMResponse, calculate_cost
 
-    resp = LLMResponse(content="x", input_tokens=1_000_000, output_tokens=1_000_000,
-                       model="gpt-4o-mini", provider="openai")
+    resp = LLMResponse(
+        content="x",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        model="gpt-4o-mini",
+        provider="openai",
+    )
     cost = calculate_cost(resp)
     assert cost == pytest.approx(0.75, abs=0.01)
 

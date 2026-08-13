@@ -36,8 +36,11 @@ class AnthropicClient(LLMClient):
         self.model = model
 
     async def complete(
-        self, system_prompt: str, user_prompt: str,
-        max_tokens: int = 4096, temperature: float = 0.1,
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.1,
     ) -> LLMResponse:
         response = await self.client.messages.create(
             model=self.model,
@@ -65,8 +68,11 @@ class OpenAIClient(LLMClient):
         self.model = model
 
     async def complete(
-        self, system_prompt: str, user_prompt: str,
-        max_tokens: int = 4096, temperature: float = 0.1,
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.1,
     ) -> LLMResponse:
         response = await self.client.chat.completions.create(
             model=self.model,

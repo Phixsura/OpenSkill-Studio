@@ -172,11 +172,17 @@ def test_can_manage_member_logic():
 
     # Instructor can manage student only
     assert service._can_manage_member(make_member(OrgRole.INSTRUCTOR), make_member(OrgRole.STUDENT))
-    assert not service._can_manage_member(make_member(OrgRole.INSTRUCTOR), make_member(OrgRole.ADMIN))
+    assert not service._can_manage_member(
+        make_member(OrgRole.INSTRUCTOR), make_member(OrgRole.ADMIN)
+    )
 
     # Student cannot manage anyone
-    assert not service._can_manage_member(make_member(OrgRole.STUDENT), make_member(OrgRole.STUDENT))
-    assert not service._can_manage_member(make_member(OrgRole.STUDENT), make_member(OrgRole.INSTRUCTOR))
+    assert not service._can_manage_member(
+        make_member(OrgRole.STUDENT), make_member(OrgRole.STUDENT)
+    )
+    assert not service._can_manage_member(
+        make_member(OrgRole.STUDENT), make_member(OrgRole.INSTRUCTOR)
+    )
 
 
 def test_slug_generation():

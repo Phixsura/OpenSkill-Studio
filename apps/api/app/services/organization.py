@@ -38,7 +38,9 @@ class OrgNotFoundError(AppError):
 
 class SlugAlreadyExistsError(AppError):
     def __init__(self):
-        super().__init__("SLUG_ALREADY_EXISTS", "An organization with this slug already exists", 409)
+        super().__init__(
+            "SLUG_ALREADY_EXISTS", "An organization with this slug already exists", 409
+        )
 
 
 class AlreadyMemberError(AppError):
@@ -53,7 +55,9 @@ class CannotRemoveOwnerError(AppError):
 
 class InsufficientOrgPermissionError(AppError):
     def __init__(self):
-        super().__init__("INSUFFICIENT_ORG_PERMISSION", "Insufficient organization permissions", 403)
+        super().__init__(
+            "INSUFFICIENT_ORG_PERMISSION", "Insufficient organization permissions", 403
+        )
 
 
 class InviteLinkInvalidError(AppError):
@@ -92,9 +96,7 @@ class OrgService:
             slug = self._generate_slug(name)
 
         # Check slug uniqueness
-        existing = await self.db.execute(
-            select(Organization).where(Organization.slug == slug)
-        )
+        existing = await self.db.execute(select(Organization).where(Organization.slug == slug))
         if existing.scalar_one_or_none() is not None:
             raise SlugAlreadyExistsError()
 
@@ -173,9 +175,7 @@ class OrgService:
         self, org_id: str, user_id: str, role: OrgRole, invited_by: str | None = None
     ) -> OrgMember:
         # Check existing
-        stmt = select(OrgMember).where(
-            OrgMember.org_id == org_id, OrgMember.user_id == user_id
-        )
+        stmt = select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
         result = await self.db.execute(stmt)
         existing = result.scalar_one_or_none()
 
@@ -245,9 +245,7 @@ class OrgService:
         if role:
             base = base.where(OrgMember.role == OrgRole(role))
 
-        total_result = await self.db.execute(
-            select(func.count()).select_from(base.subquery())
-        )
+        total_result = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_result.scalar_one()
 
         result = await self.db.execute(
@@ -332,7 +330,9 @@ class OrgService:
             invited += 1
 
         await self.db.flush()
-        return InviteResult(invited=invited, already_member=already_member, already_invited=already_invited)
+        return InviteResult(
+            invited=invited, already_member=already_member, already_invited=already_invited
+        )
 
     async def get_invitations(self, org_id: str) -> list[OrgInvitation]:
         result = await self.db.execute(
@@ -433,9 +433,7 @@ class OrgService:
         await self.db.flush()
 
     async def join_by_code(self, code: str, user_id: str) -> OrgMember:
-        result = await self.db.execute(
-            select(OrgInviteLink).where(OrgInviteLink.code == code)
-        )
+        result = await self.db.execute(select(OrgInviteLink).where(OrgInviteLink.code == code))
         link = result.scalar_one_or_none()
 
         if link is None or not link.is_active:
@@ -445,9 +443,7 @@ class OrgService:
         if link.max_uses and link.use_count >= link.max_uses:
             raise InviteLinkInvalidError("Invite link has reached maximum uses")
 
-        member = await self.add_member(
-            org_id=link.org_id, user_id=user_id, role=link.role
-        )
+        member = await self.add_member(org_id=link.org_id, user_id=user_id, role=link.role)
         link.use_count += 1
         await self.db.flush()
         return member

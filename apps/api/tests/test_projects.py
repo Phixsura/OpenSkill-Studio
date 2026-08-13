@@ -16,9 +16,15 @@ async def test_list_projects_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_create_project_requires_auth(client):
-    r = await client.post("/api/v1/orgs/fake/projects", json={
-        "title": "Test", "description": "D", "instructions": "I", "rubric": [{"criterion": "X", "max_score": 10}]
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/projects",
+        json={
+            "title": "Test",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "X", "max_score": 10}],
+        },
+    )
     assert r.status_code == 401
 
 
@@ -30,9 +36,9 @@ async def test_get_project_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_create_deliverable_requires_auth(client):
-    r = await client.post("/api/v1/orgs/fake/projects/fake/deliverables", json={
-        "name": "README", "type": "file"
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/projects/fake/deliverables", json={"name": "README", "type": "file"}
+    )
     assert r.status_code == 401
 
 
@@ -56,9 +62,9 @@ async def test_upload_file_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_create_review_requires_auth(client):
-    r = await client.post("/api/v1/orgs/fake/submissions/fake/reviews", json={
-        "status": "approved", "score": 90
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/submissions/fake/reviews", json={"status": "approved", "score": 90}
+    )
     assert r.status_code == 401
 
 
@@ -70,9 +76,10 @@ async def test_pending_reviews_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_grant_extension_requires_auth(client):
-    r = await client.post("/api/v1/orgs/fake/projects/fake/extensions", json={
-        "user_id": "x", "new_deadline": "2026-12-31T00:00:00Z"
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/projects/fake/extensions",
+        json={"user_id": "x", "new_deadline": "2026-12-31T00:00:00Z"},
+    )
     assert r.status_code == 401
 
 
@@ -81,17 +88,24 @@ async def test_grant_extension_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_create_project_title_too_short(client):
-    r = await client.post("/api/v1/orgs/fake/projects", json={
-        "title": "A", "description": "D", "instructions": "I", "rubric": [{"criterion": "X"}]
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/projects",
+        json={
+            "title": "A",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "X"}],
+        },
+    )
     assert r.status_code in (401, 422)
 
 
 @pytest.mark.asyncio
 async def test_create_project_empty_rubric(client):
-    r = await client.post("/api/v1/orgs/fake/projects", json={
-        "title": "Test Project", "description": "D", "instructions": "I", "rubric": []
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/projects",
+        json={"title": "Test Project", "description": "D", "instructions": "I", "rubric": []},
+    )
     assert r.status_code in (401, 422)
 
 

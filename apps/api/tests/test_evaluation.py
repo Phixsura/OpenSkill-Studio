@@ -13,9 +13,13 @@ from app.services.evaluation import EvaluationService
 
 @pytest.mark.asyncio
 async def test_trigger_evaluation_requires_auth(client):
-    r = await client.post("/api/v1/orgs/fake/evaluation/trigger", json={
-        "submission_id": "x", "type": "submission_review",
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/evaluation/trigger",
+        json={
+            "submission_id": "x",
+            "type": "submission_review",
+        },
+    )
     assert r.status_code == 401
 
 
@@ -66,17 +70,24 @@ async def test_update_eval_settings_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_trigger_invalid_type(client):
-    r = await client.post("/api/v1/orgs/fake/evaluation/trigger", json={
-        "submission_id": "x", "type": "invalid",
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/evaluation/trigger",
+        json={
+            "submission_id": "x",
+            "type": "invalid",
+        },
+    )
     assert r.status_code in (401, 422)
 
 
 @pytest.mark.asyncio
 async def test_trigger_missing_submission_id(client):
-    r = await client.post("/api/v1/orgs/fake/evaluation/trigger", json={
-        "type": "submission_review",
-    })
+    r = await client.post(
+        "/api/v1/orgs/fake/evaluation/trigger",
+        json={
+            "type": "submission_review",
+        },
+    )
     assert r.status_code in (401, 422)
 
 
@@ -111,8 +122,11 @@ def test_calculate_cost_openai():
 
 def test_calculate_cost_unknown_model():
     resp = LLMResponse(
-        content="test", input_tokens=100, output_tokens=50,
-        model="unknown-model", provider="unknown",
+        content="test",
+        input_tokens=100,
+        output_tokens=50,
+        model="unknown-model",
+        provider="unknown",
     )
     cost = calculate_cost(resp)
     assert cost == 0
@@ -126,15 +140,17 @@ def test_parse_evaluation_response_valid():
         {"criterion": "Quality", "max_score": 50},
         {"criterion": "Creativity", "max_score": 50},
     ]
-    llm_output = json.dumps({
-        "scores": [
-            {"criterion": "Quality", "score": 40, "max_score": 50, "feedback": "Good"},
-            {"criterion": "Creativity", "score": 35, "max_score": 50, "feedback": "Nice"},
-        ],
-        "overall_feedback": "Well done",
-        "strengths": ["Clear"],
-        "improvements": ["More detail"],
-    })
+    llm_output = json.dumps(
+        {
+            "scores": [
+                {"criterion": "Quality", "score": 40, "max_score": 50, "feedback": "Good"},
+                {"criterion": "Creativity", "score": 35, "max_score": 50, "feedback": "Nice"},
+            ],
+            "overall_feedback": "Well done",
+            "strengths": ["Clear"],
+            "improvements": ["More detail"],
+        }
+    )
 
     result = EvaluationService._parse_evaluation_response(llm_output, rubric)
     assert result["total_score"] == 75
@@ -161,12 +177,14 @@ def test_parse_evaluation_response_with_code_block():
 
 def test_parse_evaluation_response_clamps_score():
     rubric = [{"criterion": "Quality", "max_score": 50}]
-    llm_output = json.dumps({
-        "scores": [{"criterion": "Quality", "score": 999, "max_score": 50, "feedback": ""}],
-        "overall_feedback": "",
-        "strengths": [],
-        "improvements": [],
-    })
+    llm_output = json.dumps(
+        {
+            "scores": [{"criterion": "Quality", "score": 999, "max_score": 50, "feedback": ""}],
+            "overall_feedback": "",
+            "strengths": [],
+            "improvements": [],
+        }
+    )
 
     result = EvaluationService._parse_evaluation_response(llm_output, rubric)
     assert result["scores"][0]["score"] == 50  # clamped
@@ -174,12 +192,14 @@ def test_parse_evaluation_response_clamps_score():
 
 def test_parse_evaluation_response_negative_score():
     rubric = [{"criterion": "Quality", "max_score": 50}]
-    llm_output = json.dumps({
-        "scores": [{"criterion": "Quality", "score": -10, "max_score": 50, "feedback": ""}],
-        "overall_feedback": "",
-        "strengths": [],
-        "improvements": [],
-    })
+    llm_output = json.dumps(
+        {
+            "scores": [{"criterion": "Quality", "score": -10, "max_score": 50, "feedback": ""}],
+            "overall_feedback": "",
+            "strengths": [],
+            "improvements": [],
+        }
+    )
 
     result = EvaluationService._parse_evaluation_response(llm_output, rubric)
     assert result["scores"][0]["score"] == 0  # clamped to 0

@@ -20,8 +20,13 @@ def _e():
 
 
 async def _u(db, role=UserRole.STUDENT):
-    u = User(email=_e(), password_hash=hash_password("Test123!"),
-             display_name="Last", role=role, status=UserStatus.ACTIVE)
+    u = User(
+        email=_e(),
+        password_hash=hash_password("Test123!"),
+        display_name="Last",
+        role=role,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -30,6 +35,7 @@ async def _u(db, role=UserRole.STUDENT):
 @pytest_asyncio.fixture
 async def db():
     from app.core.database import engine
+
     async with AsyncSessionLocal() as s:
         yield s
         await s.rollback()
@@ -44,7 +50,9 @@ async def c():
     from app.main import app
 
     @asynccontextmanager
-    async def noop(a): yield
+    async def noop(a):
+        yield
+
     o = app.router.lifespan_context
     app.router.lifespan_context = noop
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -54,15 +62,20 @@ async def c():
 
 
 async def _auth(c):
-    r = await c.post("/api/v1/auth/register", json={"email": _e(), "password": "Test123!", "display_name": "LL"})
+    r = await c.post(
+        "/api/v1/auth/register", json={"email": _e(), "password": "Test123!", "display_name": "LL"}
+    )
     d = r.json()
     return {"Authorization": f"Bearer {d['access_token']}"}, d["user"]
 
 
 async def _admin_h(c):
     e = _e()
-    await c.post("/api/v1/auth/register", json={"email": e, "password": "Admin123!", "display_name": "Adm"})
+    await c.post(
+        "/api/v1/auth/register", json={"email": e, "password": "Admin123!", "display_name": "Adm"}
+    )
     from sqlalchemy import select, update
+
     async with AsyncSessionLocal() as db:
         await db.execute(update(User).where(User.email == e).values(role=UserRole.ADMIN))
         await db.commit()
@@ -84,8 +97,7 @@ async def test_lifespan_postgres_fail_production():
     """Cover lines 31-35: postgres fail in production raises."""
     from app.main import app, lifespan
 
-    with patch("app.main.settings") as ms, \
-         patch("app.main.engine") as me:
+    with patch("app.main.settings") as ms, patch("app.main.engine") as me:
         ms.app_env = "production"
         ms.log_level = "DEBUG"
         ms.log_format = "console"
@@ -103,8 +115,10 @@ async def test_lifespan_redis_fail_dev():
     """Cover lines 42-46: redis fail in dev warns."""
     from app.main import app, lifespan
 
-    with patch("app.main.redis_pool", side_effect=Exception("no redis")), \
-         patch("app.main.settings") as ms:
+    with (
+        patch("app.main.redis_pool", side_effect=Exception("no redis")),
+        patch("app.main.settings") as ms,
+    ):
         ms.app_env = "development"
         ms.log_level = "DEBUG"
         ms.log_format = "console"
@@ -124,6 +138,7 @@ async def test_lifespan_redis_fail_dev():
 async def test_deps_invalid_token_type(c):
     """Cover line 26: token type != access."""
     from app.core.security import create_refresh_token
+
     token, _, _ = create_refresh_token("fake-id")
     r = await c.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401
@@ -212,7 +227,9 @@ async def test_admin_invalid_role(c):
     """Cover lines 71,75-76: invalid role value."""
     ah, _ = await _admin_h(c)
     _, u2 = await _auth(c)
-    r = await c.put(f"/api/v1/admin/users/{u2['id']}/role", json={"role": "invalid_role"}, headers=ah)
+    r = await c.put(
+        f"/api/v1/admin/users/{u2['id']}/role", json={"role": "invalid_role"}, headers=ah
+    )
     assert r.status_code == 422
 
 
@@ -246,6 +263,7 @@ async def test_auth_refresh_via_cookie(c):
     """Cover lines 165-167, 189: refresh endpoint body."""
     async with AsyncSessionLocal() as db:
         from app.services.auth import AuthService
+
         svc = AuthService(db)
         reg = await svc.register(_e(), "Valid123!", "RefC")
         await db.commit()
@@ -267,7 +285,9 @@ async def test_auth_verify_email_endpoint_redirect(c):
 @pytest.mark.asyncio
 async def test_auth_reset_endpoint(c):
     """Cover lines 243-244: reset password endpoint."""
-    r = await c.post("/api/v1/auth/reset-password", json={"token": "bad", "new_password": "NewP123!"})
+    r = await c.post(
+        "/api/v1/auth/reset-password", json={"token": "bad", "new_password": "NewP123!"}
+    )
     assert r.status_code == 401
 
 
@@ -281,7 +301,9 @@ async def test_org_revoke_invite_endpoint(c):
     oid = await _org(c, h)
 
     # Create invite
-    await c.post(f"/api/v1/orgs/{oid}/invites", json={"emails": [_e()], "role": "student"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/invites", json={"emails": [_e()], "role": "student"}, headers=h
+    )
     r2 = await c.get(f"/api/v1/orgs/{oid}/invites", headers=h)
     invites = r2.json()["data"]
     if invites:
@@ -304,7 +326,9 @@ async def test_org_add_member_invalid_role(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     _, u2 = await _auth(c)
-    r = await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "invalid"}, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "invalid"}, headers=h
+    )
     assert r.status_code == 422
 
 
@@ -313,7 +337,9 @@ async def test_org_invite_invalid_role(c):
     """Cover lines 340-341: invalid role in invite."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    r = await c.post(f"/api/v1/orgs/{oid}/invites", json={"emails": [_e()], "role": "invalid"}, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/invites", json={"emails": [_e()], "role": "invalid"}, headers=h
+    )
     assert r.status_code == 422
 
 
@@ -336,9 +362,11 @@ async def test_eval_retry_cancel_endpoints(c):
 
     # Create a task via DB
     from app.models.evaluation import EvalStatus, EvalType, EvaluationTask
+
     async with AsyncSessionLocal() as db:
-        task = EvaluationTask(org_id=oid, type=EvalType.SUBMISSION_REVIEW,
-                              status=EvalStatus.FAILED, config={})
+        task = EvaluationTask(
+            org_id=oid, type=EvalType.SUBMISSION_REVIEW, status=EvalStatus.FAILED, config={}
+        )
         db.add(task)
         await db.commit()
         await db.refresh(task)
@@ -351,8 +379,9 @@ async def test_eval_retry_cancel_endpoints(c):
 
     # Create pending task for cancel
     async with AsyncSessionLocal() as db:
-        task2 = EvaluationTask(org_id=oid, type=EvalType.SUBMISSION_REVIEW,
-                               status=EvalStatus.PENDING, config={})
+        task2 = EvaluationTask(
+            org_id=oid, type=EvalType.SUBMISSION_REVIEW, status=EvalStatus.PENDING, config={}
+        )
         db.add(task2)
         await db.commit()
         await db.refresh(task2)
@@ -377,6 +406,7 @@ async def test_portfolio_upload_cover_endpoint(c):
         yield mock_client
 
     import io
+
     with patch("app.core.storage.get_s3_client", return_value=fake_s3()):
         files = {"file": ("cover.jpg", io.BytesIO(b"\xff\xd8" + b"\x00" * 50), "image/jpeg")}
         r = await c.post("/api/v1/portfolio/upload-cover", headers=h, files=files)
@@ -388,6 +418,7 @@ async def test_portfolio_upload_cover_too_large(c):
     """Cover line 180: file too large."""
     h, _ = await _auth(c)
     import io
+
     big = io.BytesIO(b"\x00" * (11 * 1024 * 1024))
     files = {"file": ("big.jpg", big, "image/jpeg")}
     r = await c.post("/api/v1/portfolio/upload-cover", headers=h, files=files)
@@ -441,8 +472,22 @@ async def test_portfolio_create_from_submission(db):
     await db.flush()
 
     proj_svc = ProjectService(db)
-    proj = await proj_svc.create_project(org.id, "PortProj", None, "D", "I", "beginner", 100,
-                                          [{"criterion": "Q", "max_score": 100}], None, None, 0, 0, None, u.id)
+    proj = await proj_svc.create_project(
+        org.id,
+        "PortProj",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        u.id,
+    )
     sub = await proj_svc.create_submission(org.id, proj.id, u.id)
     await proj_svc.submit_draft(sub.id, u.id)
     await proj_svc.create_review(sub.id, u.id, "approved", 90, None, "Great")
@@ -450,7 +495,9 @@ async def test_portfolio_create_from_submission(db):
 
     port_svc = PortfolioService(db)
     await port_svc.get_or_create_profile(u.id)
-    item = await port_svc.create_item(u.id, "From Sub", "Desc", sub.id, ["ai"], None, None, "public", True)
+    item = await port_svc.create_item(
+        u.id, "From Sub", "Desc", sub.id, ["ai"], None, None, "public", True
+    )
     assert item.source_project == "PortProj"
     assert item.score == 90
 
@@ -464,15 +511,27 @@ async def test_project_file_download_endpoint(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "DL Proj", "description": "D", "instructions": "I",
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "DL Proj",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
     pid = r.json()["data"]["id"]
 
-    r2 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/deliverables", json={
-        "name": "File", "type": "file", "required": False,
-    }, headers=h)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+        json={
+            "name": "File",
+            "type": "file",
+            "required": False,
+        },
+        headers=h,
+    )
     did = r2.json()["data"]["id"]
 
     r3 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
@@ -486,17 +545,24 @@ async def test_project_file_download_endpoint(c):
         yield mock_client
 
     import io
+
     with patch("app.core.storage.get_s3_client", return_value=fake_s3()):
         files = {"file": ("code.py", io.BytesIO(b"print('hi')"), "text/x-python")}
-        r4 = await c.post(f"/api/v1/orgs/{oid}/submissions/{subid}/files",
-                           headers=h, data={"deliverable_id": did}, files=files)
+        r4 = await c.post(
+            f"/api/v1/orgs/{oid}/submissions/{subid}/files",
+            headers=h,
+            data={"deliverable_id": did},
+            files=files,
+        )
 
     if r4.status_code == 201:
         file_id = r4.json()["data"]["id"]
         # Download
         mock_client.generate_presigned_url = AsyncMock(return_value="https://dl/url")
         with patch("app.core.storage.get_s3_client", return_value=fake_s3()):
-            r5 = await c.get(f"/api/v1/orgs/{oid}/submissions/{subid}/files/{file_id}/download", headers=h)
+            r5 = await c.get(
+                f"/api/v1/orgs/{oid}/submissions/{subid}/files/{file_id}/download", headers=h
+            )
             assert r5.status_code == 200
 
         # Delete file
@@ -517,8 +583,11 @@ async def test_skills_reorder_cross_org(c):
     cid = r.json()["data"]["id"]
 
     # Reorder with the correct category — should work
-    r2 = await c.put(f"/api/v1/orgs/{oid}/categories/reorder",
-                      json={"items": [{"id": cid, "sort_order": 0}]}, headers=h)
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/categories/reorder",
+        json={"items": [{"id": cid, "sort_order": 0}]},
+        headers=h,
+    )
     assert r2.status_code == 200
 
 

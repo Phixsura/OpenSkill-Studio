@@ -281,7 +281,9 @@ async def test_org_invite_and_link(db):
     await db.flush()
 
     # Invite
-    result = await svc.invite_members(org.id, [f"inv-{uuid.uuid4().hex[:6]}@test.com"], OrgRole.STUDENT, user.id)
+    result = await svc.invite_members(
+        org.id, [f"inv-{uuid.uuid4().hex[:6]}@test.com"], OrgRole.STUDENT, user.id
+    )
     assert result.invited == 1
 
     # Link
@@ -360,10 +362,21 @@ async def test_skill_full_crud(db):
 
     # Skill
     skill = await svc.create_skill(
-        org.id, cat.id, "Prompting", None, "Learn prompts", "# Content",
-        "beginner", 30, ["ai"], None, user.id,
+        org.id,
+        cat.id,
+        "Prompting",
+        None,
+        "Learn prompts",
+        "# Content",
+        "beginner",
+        30,
+        ["ai"],
+        None,
+        user.id,
     )
-    skills, total = await svc.list_skills(org.id, category_id=cat.id, difficulty="beginner", tag="ai", q="Prompt")
+    skills, total = await svc.list_skills(
+        org.id, category_id=cat.id, difficulty="beginner", tag="ai", q="Prompt"
+    )
     assert total >= 1
     await svc.update_skill(skill.id, description="Updated")
     detail = await svc.get_skill(skill.id)
@@ -375,7 +388,9 @@ async def test_skill_full_crud(db):
     await svc.publish_skill(skill.id)
 
     # Prerequisites
-    skill2 = await svc.create_skill(org.id, cat.id, "Advanced", None, "Adv", None, "advanced", None, None, [skill.id], user.id)
+    skill2 = await svc.create_skill(
+        org.id, cat.id, "Advanced", None, "Adv", None, "advanced", None, None, [skill.id], user.id
+    )
     prereqs = await svc.get_skill_prerequisites(skill2.id)
     assert len(prereqs) == 1
     await svc.set_prerequisites(skill2.id, [skill.id])
@@ -383,9 +398,14 @@ async def test_skill_full_crud(db):
     # Exercise
 
     ex = await svc.create_exercise(
-        org.id, skill.id, "MCQ Test", "Pick one", "multiple_choice",
+        org.id,
+        skill.id,
+        "MCQ Test",
+        "Pick one",
+        "multiple_choice",
         {"correct": ["a"], "options": [{"id": "a", "text": "Right"}, {"id": "b", "text": "Wrong"}]},
-        100, user.id,
+        100,
+        user.id,
     )
     exercises = await svc.list_exercises(skill.id)
     assert len(exercises) >= 1
@@ -416,7 +436,9 @@ async def test_skill_full_crud(db):
     assert unlocked is True
 
     # Grade manually
-    ex2 = await svc.create_exercise(org.id, skill.id, "Text Q", "Answer", "text_answer", {}, 100, user.id)
+    ex2 = await svc.create_exercise(
+        org.id, skill.id, "Text Q", "Answer", "text_answer", {}, 100, user.id
+    )
     attempt3 = await svc.submit_attempt(org.id, ex2.id, user.id, {"text": "My answer"})
     graded = await svc.grade_attempt(attempt3.id, 80, "Good job")
     assert graded.score == 80
@@ -449,9 +471,20 @@ async def test_project_full_flow(db):
 
     # Create
     project = await svc.create_project(
-        org.id, "Chatbot", None, "Build it", "Use API", "intermediate",
-        100, [{"criterion": "Q", "max_score": 60}, {"criterion": "D", "max_score": 40}],
-        None, None, 20, 3, None, user.id,
+        org.id,
+        "Chatbot",
+        None,
+        "Build it",
+        "Use API",
+        "intermediate",
+        100,
+        [{"criterion": "Q", "max_score": 60}, {"criterion": "D", "max_score": 40}],
+        None,
+        None,
+        20,
+        3,
+        None,
+        user.id,
     )
     assert project.slug
 
@@ -516,7 +549,9 @@ async def test_project_full_flow(db):
 
     # Extension
     user2 = await _user(db)
-    ext = await svc.grant_extension(project.id, user2.id, datetime.now(UTC) + timedelta(days=30), "Reason", user.id)
+    ext = await svc.grant_extension(
+        project.id, user2.id, datetime.now(UTC) + timedelta(days=30), "Reason", user.id
+    )
     assert ext.extended_deadline
 
     # Delete
@@ -536,8 +571,20 @@ async def test_project_review_revision_and_reject(db):
 
     svc = ProjectService(db)
     project = await svc.create_project(
-        org.id, "RevProj", None, "D", "I", "beginner", 100,
-        [{"criterion": "Q", "max_score": 100}], None, None, 0, 0, None, user.id,
+        org.id,
+        "RevProj",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        user.id,
     )
     await db.flush()
 
@@ -612,7 +659,9 @@ async def test_portfolio_full_flow(db):
     assert profile.username
 
     # Update
-    updated = await svc.update_profile(user.id, headline="AI Dev", bio="Building", location="Beijing")
+    updated = await svc.update_profile(
+        user.id, headline="AI Dev", bio="Building", location="Beijing"
+    )
     assert updated.headline == "AI Dev"
 
     # Username
@@ -620,9 +669,13 @@ async def test_portfolio_full_flow(db):
     await svc.set_username(user.id, new_name)
 
     # Create items
-    item1 = await svc.create_item(user.id, "Project A", "Desc A", None, ["ai"], None, None, "public", True)
+    item1 = await svc.create_item(
+        user.id, "Project A", "Desc A", None, ["ai"], None, None, "public", True
+    )
     assert item1.slug
-    item2 = await svc.create_item(user.id, "Project B", None, None, None, None, None, "unlisted", False)
+    item2 = await svc.create_item(
+        user.id, "Project B", None, None, None, None, None, "unlisted", False
+    )
     await db.flush()
 
     # List

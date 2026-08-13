@@ -36,9 +36,14 @@ async def c():
 
 async def _auth(c):
     """Register + return (headers, user)."""
-    r = await c.post("/api/v1/auth/register", json={
-        "email": _email(), "password": "TestPass123!", "display_name": "Cov",
-    })
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={
+            "email": _email(),
+            "password": "TestPass123!",
+            "display_name": "Cov",
+        },
+    )
     d = r.json()
     return {"Authorization": f"Bearer {d['access_token']}"}, d["user"]
 
@@ -66,13 +71,21 @@ async def test_auth_forgot_password(c):
 @pytest.mark.asyncio
 async def test_auth_change_password(c):
     email = _email()
-    await c.post("/api/v1/auth/register", json={"email": email, "password": "OldPass123!", "display_name": "CP"})
+    await c.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "OldPass123!", "display_name": "CP"},
+    )
     r = await c.post("/api/v1/auth/login", json={"email": email, "password": "OldPass123!"})
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
-    r2 = await c.post("/api/v1/auth/change-password", json={
-        "old_password": "OldPass123!", "new_password": "NewPass123!",
-    }, headers=h)
+    r2 = await c.post(
+        "/api/v1/auth/change-password",
+        json={
+            "old_password": "OldPass123!",
+            "new_password": "NewPass123!",
+        },
+        headers=h,
+    )
     assert r2.status_code == 204
 
     # Login with new password
@@ -109,12 +122,16 @@ async def test_auth_logout(c):
 async def test_admin_list_get_role_delete(c):
     # Register admin-level user
     email = _email()
-    await c.post("/api/v1/auth/register", json={"email": email, "password": "Admin123!", "display_name": "Admin"})
+    await c.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "Admin123!", "display_name": "Admin"},
+    )
     # Make admin via DB directly
     from sqlalchemy import select, update
 
     from app.core.database import AsyncSessionLocal
     from app.models.user import User, UserRole
+
     async with AsyncSessionLocal() as db:
         await db.execute(update(User).where(User.email == email).values(role=UserRole.ADMIN))
         await db.commit()
@@ -122,6 +139,7 @@ async def test_admin_list_get_role_delete(c):
         admin = result.scalar_one()
 
     from app.core.security import create_access_token
+
     h = {"Authorization": f"Bearer {create_access_token(admin.id, admin.email, 'admin')}"}
 
     # List users
@@ -135,11 +153,16 @@ async def test_admin_list_get_role_delete(c):
 
     # Create another user to modify
     email2 = _email()
-    r3 = await c.post("/api/v1/auth/register", json={"email": email2, "password": "Test123!", "display_name": "Target"})
+    r3 = await c.post(
+        "/api/v1/auth/register",
+        json={"email": email2, "password": "Test123!", "display_name": "Target"},
+    )
     target_id = r3.json()["user"]["id"]
 
     # Change role
-    r4 = await c.put(f"/api/v1/admin/users/{target_id}/role", json={"role": "instructor"}, headers=h)
+    r4 = await c.put(
+        f"/api/v1/admin/users/{target_id}/role", json={"role": "instructor"}, headers=h
+    )
     assert r4.status_code == 200
 
     # Soft delete
@@ -160,7 +183,9 @@ async def test_org_full_crud(c):
     assert r.status_code == 200
 
     # Settings
-    r2 = await c.put(f"/api/v1/orgs/{oid}/settings", json={"settings": {"max_members": 50}}, headers=h)
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/settings", json={"settings": {"max_members": 50}}, headers=h
+    )
     assert r2.status_code == 200
 
     # Invite link
@@ -174,7 +199,9 @@ async def test_org_full_crud(c):
     assert r4.status_code == 200
 
     # Toggle link
-    r5 = await c.put(f"/api/v1/orgs/{oid}/invite-links/{link_id}", json={"is_active": False}, headers=h)
+    r5 = await c.put(
+        f"/api/v1/orgs/{oid}/invite-links/{link_id}", json={"is_active": False}, headers=h
+    )
     assert r5.status_code == 200
 
     # List invitations
@@ -182,9 +209,14 @@ async def test_org_full_crud(c):
     assert r6.status_code == 200
 
     # Invite by email
-    r7 = await c.post(f"/api/v1/orgs/{oid}/invites", json={
-        "emails": [_email()], "role": "student",
-    }, headers=h)
+    r7 = await c.post(
+        f"/api/v1/orgs/{oid}/invites",
+        json={
+            "emails": [_email()],
+            "role": "student",
+        },
+        headers=h,
+    )
     assert r7.status_code == 200
 
     # Join by code with another user
@@ -216,11 +248,19 @@ async def test_skills_full_flow(c):
     await c.put(f"/api/v1/orgs/{oid}/categories/{cid}", json={"name": "AI Programming"}, headers=h)
 
     # Skills
-    r2 = await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "category_id": cid, "name": "Python Basics", "description": "Learn Python",
-        "learning_content": "# Python\n\nLearn the basics.", "difficulty": "beginner",
-        "tags": ["python", "beginner"], "estimated_minutes": 30,
-    }, headers=h)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={
+            "category_id": cid,
+            "name": "Python Basics",
+            "description": "Learn Python",
+            "learning_content": "# Python\n\nLearn the basics.",
+            "difficulty": "beginner",
+            "tags": ["python", "beginner"],
+            "estimated_minutes": 30,
+        },
+        headers=h,
+    )
     sid = r2.json()["data"]["id"]
 
     # List with filters
@@ -237,27 +277,53 @@ async def test_skills_full_flow(c):
     await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/publish", headers=h)
 
     # Prerequisites
-    r3 = await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "category_id": cid, "name": "Advanced Python", "description": "Advanced",
-        "prerequisites": [sid],
-    }, headers=h)
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={
+            "category_id": cid,
+            "name": "Advanced Python",
+            "description": "Advanced",
+            "prerequisites": [sid],
+        },
+        headers=h,
+    )
     sid2 = r3.json()["data"]["id"]
 
     # Set prerequisites
-    await c.put(f"/api/v1/orgs/{oid}/skills/{sid2}/prerequisites", json={"prerequisite_ids": [sid]}, headers=h)
+    await c.put(
+        f"/api/v1/orgs/{oid}/skills/{sid2}/prerequisites",
+        json={"prerequisite_ids": [sid]},
+        headers=h,
+    )
     # Get tree
     await c.get(f"/api/v1/orgs/{oid}/skills/{sid2}/tree", headers=h)
 
     # Exercises
-    r4 = await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/exercises", json={
-        "title": "MCQ 1", "description": "Pick", "type": "multiple_choice",
-        "config": {"correct": ["a"], "options": [{"id": "a", "text": "Right"}, {"id": "b", "text": "Wrong"}]},
-    }, headers=h)
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/skills/{sid}/exercises",
+        json={
+            "title": "MCQ 1",
+            "description": "Pick",
+            "type": "multiple_choice",
+            "config": {
+                "correct": ["a"],
+                "options": [{"id": "a", "text": "Right"}, {"id": "b", "text": "Wrong"}],
+            },
+        },
+        headers=h,
+    )
     eid = r4.json()["data"]["id"]
 
-    r5 = await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/exercises", json={
-        "title": "Text Q", "description": "Answer", "type": "text_answer", "config": {},
-    }, headers=h)
+    r5 = await c.post(
+        f"/api/v1/orgs/{oid}/skills/{sid}/exercises",
+        json={
+            "title": "Text Q",
+            "description": "Answer",
+            "type": "text_answer",
+            "config": {},
+        },
+        headers=h,
+    )
     eid2 = r5.json()["data"]["id"]
 
     # Get exercise
@@ -266,15 +332,23 @@ async def test_skills_full_flow(c):
     await c.put(f"/api/v1/orgs/{oid}/exercises/{eid}", json={"title": "Updated MCQ"}, headers=h)
 
     # Submit MCQ (correct)
-    r6 = await c.post(f"/api/v1/orgs/{oid}/exercises/{eid}/attempts", json={
-        "answer": {"selected": ["a"]},
-    }, headers=h)
+    r6 = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{eid}/attempts",
+        json={
+            "answer": {"selected": ["a"]},
+        },
+        headers=h,
+    )
     assert r6.json()["data"]["is_correct"] is True
 
     # Submit MCQ (wrong)
-    r7 = await c.post(f"/api/v1/orgs/{oid}/exercises/{eid}/attempts", json={
-        "answer": {"selected": ["b"]},
-    }, headers=h)
+    r7 = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{eid}/attempts",
+        json={
+            "answer": {"selected": ["b"]},
+        },
+        headers=h,
+    )
     assert r7.json()["data"]["is_correct"] is False
 
     # List attempts
@@ -289,13 +363,22 @@ async def test_skills_full_flow(c):
     # Grading
     await c.get(f"/api/v1/orgs/{oid}/grading/pending", headers=h)
     # Grade text answer (submit first)
-    r8 = await c.post(f"/api/v1/orgs/{oid}/exercises/{eid2}/attempts", json={
-        "answer": {"text": "My answer"},
-    }, headers=h)
+    r8 = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{eid2}/attempts",
+        json={
+            "answer": {"text": "My answer"},
+        },
+        headers=h,
+    )
     attempt_id = r8.json()["data"]["id"]
-    r9 = await c.post(f"/api/v1/orgs/{oid}/grading/attempts/{attempt_id}", json={
-        "score": 80, "feedback": "Good",
-    }, headers=h)
+    r9 = await c.post(
+        f"/api/v1/orgs/{oid}/grading/attempts/{attempt_id}",
+        json={
+            "score": 80,
+            "feedback": "Good",
+        },
+        headers=h,
+    )
     assert r9.status_code == 200
 
     # Delete exercise
@@ -315,11 +398,22 @@ async def test_projects_full_flow(c):
     oid = await _org(c, h)
 
     # Create project
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "AI Chatbot", "description": "Build one", "instructions": "Use the API",
-        "rubric": [{"criterion": "Quality", "max_score": 60}, {"criterion": "Design", "max_score": 40}],
-        "max_score": 100, "late_penalty_pct": 20, "max_submissions": 3,
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "AI Chatbot",
+            "description": "Build one",
+            "instructions": "Use the API",
+            "rubric": [
+                {"criterion": "Quality", "max_score": 60},
+                {"criterion": "Design", "max_score": 40},
+            ],
+            "max_score": 100,
+            "late_penalty_pct": 20,
+            "max_submissions": 3,
+        },
+        headers=h,
+    )
     pid = r.json()["data"]["id"]
 
     # List
@@ -332,12 +426,20 @@ async def test_projects_full_flow(c):
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
 
     # Deliverables
-    r2 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/deliverables", json={
-        "name": "Source Code", "type": "file", "required": True,
-    }, headers=h)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+        json={
+            "name": "Source Code",
+            "type": "file",
+            "required": True,
+        },
+        headers=h,
+    )
     did = r2.json()["data"]["id"]
     await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/deliverables", headers=h)
-    await c.put(f"/api/v1/orgs/{oid}/projects/{pid}/deliverables/{did}", json={"name": "Code"}, headers=h)
+    await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/deliverables/{did}", json={"name": "Code"}, headers=h
+    )
 
     # Set skills
     await c.put(f"/api/v1/orgs/{oid}/projects/{pid}/skills", json={"skill_ids": []}, headers=h)
@@ -348,9 +450,13 @@ async def test_projects_full_flow(c):
     assert r3.json()["data"]["version"] == 1
 
     # Update submission (add text item)
-    await c.put(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}", json={
-        "items": [{"deliverable_id": did, "type": "text", "content": "Here is my code"}],
-    }, headers=h)
+    await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}",
+        json={
+            "items": [{"deliverable_id": did, "type": "text", "content": "Here is my code"}],
+        },
+        headers=h,
+    )
 
     # Submit
     r4 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}/submit", headers=h)
@@ -362,10 +468,16 @@ async def test_projects_full_flow(c):
     await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}", headers=h)
 
     # Review (approve)
-    r5 = await c.post(f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews", json={
-        "status": "approved", "score": 85, "feedback": "Well done",
-        "score_breakdown": {"Quality": 50, "Design": 35},
-    }, headers=h)
+    r5 = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
+        json={
+            "status": "approved",
+            "score": 85,
+            "feedback": "Well done",
+            "score_breakdown": {"Quality": 50, "Design": 35},
+        },
+        headers=h,
+    )
     assert r5.status_code == 201
 
     # List reviews
@@ -389,10 +501,18 @@ async def test_projects_full_flow(c):
     # Extension
     h2, u2 = await _auth(c)
     # Add second user to org
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h)
-    r9 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/extensions", json={
-        "user_id": u2["id"], "new_deadline": "2027-12-31T00:00:00Z", "reason": "Medical",
-    }, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h
+    )
+    r9 = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/extensions",
+        json={
+            "user_id": u2["id"],
+            "new_deadline": "2027-12-31T00:00:00Z",
+            "reason": "Medical",
+        },
+        headers=h,
+    )
     assert r9.status_code == 201
 
     # Unpublish + Delete deliverable + Delete project
@@ -410,9 +530,15 @@ async def test_evaluation_full_flow(c):
     oid = await _org(c, h)
 
     # Enable evaluation in settings
-    await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={
-        "enabled": True, "auto_evaluate": False, "monthly_budget_usd": 100,
-    }, headers=h)
+    await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={
+            "enabled": True,
+            "auto_evaluate": False,
+            "monthly_budget_usd": 100,
+        },
+        headers=h,
+    )
 
     # Get settings
     r = await c.get(f"/api/v1/orgs/{oid}/settings/evaluation", headers=h)
@@ -441,13 +567,17 @@ async def test_portfolio_full_flow(c):
     r.json()["data"]["username"]
 
     # Update profile
-    r2 = await c.put("/api/v1/portfolio/profile", json={
-        "headline": "AI Developer",
-        "bio": "Building the future",
-        "location": "Beijing",
-        "website_url": "https://example.com",
-        "social_links": {"github": "https://github.com/test"},
-    }, headers=h)
+    r2 = await c.put(
+        "/api/v1/portfolio/profile",
+        json={
+            "headline": "AI Developer",
+            "bio": "Building the future",
+            "location": "Beijing",
+            "website_url": "https://example.com",
+            "social_links": {"github": "https://github.com/test"},
+        },
+        headers=h,
+    )
     assert r2.status_code == 200
 
     # Change username
@@ -456,16 +586,29 @@ async def test_portfolio_full_flow(c):
     assert r3.status_code == 200
 
     # Create items
-    r4 = await c.post("/api/v1/portfolio/items", json={
-        "title": "Project Alpha", "description": "My best work",
-        "tags": ["ai", "python"], "visibility": "public", "featured": True,
-    }, headers=h)
+    r4 = await c.post(
+        "/api/v1/portfolio/items",
+        json={
+            "title": "Project Alpha",
+            "description": "My best work",
+            "tags": ["ai", "python"],
+            "visibility": "public",
+            "featured": True,
+        },
+        headers=h,
+    )
     assert r4.status_code == 201
     item_id = r4.json()["data"]["id"]
 
-    r5 = await c.post("/api/v1/portfolio/items", json={
-        "title": "Project Beta", "tags": ["ml"], "visibility": "unlisted",
-    }, headers=h)
+    r5 = await c.post(
+        "/api/v1/portfolio/items",
+        json={
+            "title": "Project Beta",
+            "tags": ["ml"],
+            "visibility": "unlisted",
+        },
+        headers=h,
+    )
     item2_id = r5.json()["data"]["id"]
 
     # List items
@@ -477,15 +620,24 @@ async def test_portfolio_full_flow(c):
     assert r7.status_code == 200
 
     # Update item
-    r8 = await c.put(f"/api/v1/portfolio/items/{item_id}", json={
-        "title": "Project Alpha v2", "show_score": True,
-    }, headers=h)
+    r8 = await c.put(
+        f"/api/v1/portfolio/items/{item_id}",
+        json={
+            "title": "Project Alpha v2",
+            "show_score": True,
+        },
+        headers=h,
+    )
     assert r8.status_code == 200
 
     # Reorder
-    r9 = await c.put("/api/v1/portfolio/items/reorder", json={
-        "item_ids": [item2_id, item_id],
-    }, headers=h)
+    r9 = await c.put(
+        "/api/v1/portfolio/items/reorder",
+        json={
+            "item_ids": [item2_id, item_id],
+        },
+        headers=h,
+    )
     assert r9.status_code == 200
 
     # Badges

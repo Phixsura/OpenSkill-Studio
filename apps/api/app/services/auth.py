@@ -208,11 +208,10 @@ class AuthService:
 
     # ── Change password ──
 
-    async def change_password(
-        self, user: User, old_password: str, new_password: str
-    ) -> None:
+    async def change_password(self, user: User, old_password: str, new_password: str) -> None:
         if not user.has_password or not verify_password(
-            old_password, user.password_hash  # type: ignore[arg-type]
+            old_password,
+            user.password_hash,  # type: ignore[arg-type]
         ):
             raise InvalidCredentialsError()
 
@@ -271,9 +270,7 @@ class AuthService:
         """Validate reset token and set new password."""
         token_hash = sha256(raw_token.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(PasswordResetToken).where(
-                PasswordResetToken.token_hash == token_hash
-            )
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
         )
         token_record = stmt_result.scalar_one_or_none()
 
@@ -306,9 +303,7 @@ class AuthService:
         """Validate verification token and mark email as verified."""
         token_hash = sha256(raw_token.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(EmailVerificationToken).where(
-                EmailVerificationToken.token_hash == token_hash
-            )
+            select(EmailVerificationToken).where(EmailVerificationToken.token_hash == token_hash)
         )
         token_record = stmt_result.scalar_one_or_none()
 

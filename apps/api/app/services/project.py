@@ -72,7 +72,11 @@ class MissingDeliverablesError(AppError):
 
 class FileTooLargeError(AppError):
     def __init__(self):
-        super().__init__("FILE_TOO_LARGE", f"File exceeds maximum size of {MAX_FILE_SIZE // (1024*1024)}MB", 413)
+        super().__init__(
+            "FILE_TOO_LARGE",
+            f"File exceeds maximum size of {MAX_FILE_SIZE // (1024 * 1024)}MB",
+            413,
+        )
 
 
 # ── Service ───────────────────────────────────────────────────
@@ -85,11 +89,21 @@ class ProjectService:
     # ── Project CRUD ──
 
     async def create_project(
-        self, org_id: str, title: str, slug: str | None, description: str,
-        instructions: str, difficulty: str, max_score: int, rubric: list[dict],
-        deadline: datetime | None, late_deadline: datetime | None,
-        late_penalty_pct: int, max_submissions: int,
-        skill_ids: list[str] | None, created_by: str,
+        self,
+        org_id: str,
+        title: str,
+        slug: str | None,
+        description: str,
+        instructions: str,
+        difficulty: str,
+        max_score: int,
+        rubric: list[dict],
+        deadline: datetime | None,
+        late_deadline: datetime | None,
+        late_penalty_pct: int,
+        max_submissions: int,
+        skill_ids: list[str] | None,
+        created_by: str,
     ) -> Project:
         if slug is None:
             slug = self._generate_slug(title)
@@ -100,10 +114,18 @@ class ProjectService:
             diff = DifficultyLevel.INTERMEDIATE
 
         project = Project(
-            org_id=org_id, title=title, slug=slug, description=description,
-            instructions=instructions, difficulty=diff, max_score=max_score,
-            rubric=rubric, deadline=deadline, late_deadline=late_deadline,
-            late_penalty_pct=late_penalty_pct, max_submissions=max_submissions,
+            org_id=org_id,
+            title=title,
+            slug=slug,
+            description=description,
+            instructions=instructions,
+            difficulty=diff,
+            max_score=max_score,
+            rubric=rubric,
+            deadline=deadline,
+            late_deadline=late_deadline,
+            late_penalty_pct=late_penalty_pct,
+            max_submissions=max_submissions,
             created_by=created_by,
         )
         self.db.add(project)
@@ -116,8 +138,11 @@ class ProjectService:
         return project
 
     async def list_projects(
-        self, org_id: str, status: str | None = None,
-        page: int = 1, per_page: int = 20,
+        self,
+        org_id: str,
+        status: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
     ) -> tuple[list[Project], int]:
         base = select(Project).where(Project.org_id == org_id)
         if status:
@@ -129,7 +154,8 @@ class ProjectService:
         offset = (page - 1) * per_page
         result = await self.db.execute(
             base.order_by(Project.deadline.asc().nulls_last(), Project.created_at.desc())
-            .offset(offset).limit(per_page)
+            .offset(offset)
+            .limit(per_page)
         )
         return list(result.scalars().all()), total
 
@@ -180,17 +206,30 @@ class ProjectService:
     # ── Deliverables ──
 
     async def create_deliverable(
-        self, project_id: str, name: str, description: str | None,
-        deliverable_type: str, required: bool, config: dict, sort_order: int,
+        self,
+        project_id: str,
+        name: str,
+        description: str | None,
+        deliverable_type: str,
+        required: bool,
+        config: dict,
+        sort_order: int,
     ) -> ProjectDeliverable:
         try:
             dtype = DeliverableType(deliverable_type)
         except ValueError as exc:
-            raise AppError("INVALID_TYPE", f"Invalid deliverable type: {deliverable_type}", 422) from exc
+            raise AppError(
+                "INVALID_TYPE", f"Invalid deliverable type: {deliverable_type}", 422
+            ) from exc
 
         deliverable = ProjectDeliverable(
-            project_id=project_id, name=name, description=description,
-            type=dtype, required=required, config=config, sort_order=sort_order,
+            project_id=project_id,
+            name=name,
+            description=description,
+            type=dtype,
+            required=required,
+            config=config,
+            sort_order=sort_order,
         )
         self.db.add(deliverable)
         await self.db.flush()
@@ -224,7 +263,10 @@ class ProjectService:
     # ── Submissions ──
 
     async def create_submission(
-        self, org_id: str, project_id: str, user_id: str,
+        self,
+        org_id: str,
+        project_id: str,
+        user_id: str,
     ) -> Submission:
         project = await self.get_project(project_id)
         count = await self._count_user_submissions(project_id, user_id)
@@ -233,8 +275,11 @@ class ProjectService:
             raise MaxSubmissionsReachedError(project.max_submissions)
 
         submission = Submission(
-            org_id=org_id, project_id=project_id, user_id=user_id,
-            version=count + 1, status=SubmissionStatus.DRAFT,
+            org_id=org_id,
+            project_id=project_id,
+            user_id=user_id,
+            version=count + 1,
+            status=SubmissionStatus.DRAFT,
         )
         self.db.add(submission)
         await self.db.flush()
@@ -247,8 +292,11 @@ class ProjectService:
         return sub
 
     async def list_submissions(
-        self, project_id: str, user_id: str | None = None,
-        page: int = 1, per_page: int = 20,
+        self,
+        project_id: str,
+        user_id: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
     ) -> tuple[list[Submission], int]:
         base = select(Submission).where(Submission.project_id == project_id)
         if user_id:
@@ -285,7 +333,9 @@ class ProjectService:
         sub.is_late = timing == "late"
         await self.db.flush()
 
-        log.info("submission_submitted", submission_id=sub.id, version=sub.version, is_late=sub.is_late)
+        log.info(
+            "submission_submitted", submission_id=sub.id, version=sub.version, is_late=sub.is_late
+        )
         return sub
 
     async def delete_submission(self, submission_id: str, user_id: str) -> None:
@@ -300,8 +350,12 @@ class ProjectService:
     # ── Files ──
 
     async def upload_file(
-        self, submission_id: str, deliverable_id: str,
-        file_name: str, file_content: bytes, content_type: str,
+        self,
+        submission_id: str,
+        deliverable_id: str,
+        file_name: str,
+        file_content: bytes,
+        content_type: str,
         user_id: str,
     ) -> SubmissionItem:
         sub = await self.get_submission(submission_id)
@@ -315,7 +369,9 @@ class ProjectService:
 
         # Clean filename
         safe_name = re.sub(r"[^\w.\-]", "_", file_name)
-        file_key = f"orgs/{sub.org_id}/submissions/{submission_id}/{deliverable_id}/{ULID()}_{safe_name}"
+        file_key = (
+            f"orgs/{sub.org_id}/submissions/{submission_id}/{deliverable_id}/{ULID()}_{safe_name}"
+        )
 
         # Upload to S3
         from app.core.storage import get_s3_client
@@ -329,9 +385,13 @@ class ProjectService:
             )
 
         item = SubmissionItem(
-            submission_id=submission_id, deliverable_id=deliverable_id,
-            type=ItemType.FILE, file_key=file_key, file_name=file_name,
-            file_size=len(file_content), mime_type=content_type,
+            submission_id=submission_id,
+            deliverable_id=deliverable_id,
+            type=ItemType.FILE,
+            file_key=file_key,
+            file_name=file_name,
+            file_size=len(file_content),
+            mime_type=content_type,
         )
         self.db.add(item)
         await self.db.flush()
@@ -370,8 +430,12 @@ class ProjectService:
     # ── Reviews ──
 
     async def create_review(
-        self, submission_id: str, reviewer_id: str,
-        status: str, score: int | None, score_breakdown: dict | None,
+        self,
+        submission_id: str,
+        reviewer_id: str,
+        status: str,
+        score: int | None,
+        score_breakdown: dict | None,
         feedback: str | None,
     ) -> SubmissionReview:
         sub = await self.get_submission(submission_id)
@@ -380,9 +444,13 @@ class ProjectService:
         review_status = ReviewStatus(status)
 
         review = SubmissionReview(
-            submission_id=submission_id, reviewer_id=reviewer_id,
-            reviewer_type=ReviewerType.INSTRUCTOR, status=review_status,
-            score=score, score_breakdown=score_breakdown, feedback=feedback,
+            submission_id=submission_id,
+            reviewer_id=reviewer_id,
+            reviewer_type=ReviewerType.INSTRUCTOR,
+            status=review_status,
+            score=score,
+            score_breakdown=score_breakdown,
+            feedback=feedback,
         )
         self.db.add(review)
 
@@ -410,7 +478,10 @@ class ProjectService:
         return list(result.scalars().all())
 
     async def get_pending_reviews(
-        self, org_id: str, page: int = 1, per_page: int = 20,
+        self,
+        org_id: str,
+        page: int = 1,
+        per_page: int = 20,
     ) -> tuple[list[Submission], int]:
         base = select(Submission).where(
             Submission.org_id == org_id,
@@ -428,21 +499,32 @@ class ProjectService:
     # ── Extensions ──
 
     async def grant_extension(
-        self, project_id: str, user_id: str, new_deadline: datetime,
-        reason: str | None, granted_by: str,
+        self,
+        project_id: str,
+        user_id: str,
+        new_deadline: datetime,
+        reason: str | None,
+        granted_by: str,
     ) -> SubmissionExtension:
         project = await self.get_project(project_id)
 
         ext = SubmissionExtension(
-            project_id=project_id, user_id=user_id,
+            project_id=project_id,
+            user_id=user_id,
             original_deadline=project.deadline or datetime.now(UTC),
-            extended_deadline=new_deadline, reason=reason,
+            extended_deadline=new_deadline,
+            reason=reason,
             granted_by=granted_by,
         )
         self.db.add(ext)
         await self.db.flush()
 
-        log.info("extension_granted", project_id=project_id, user_id=user_id, deadline=new_deadline.isoformat())
+        log.info(
+            "extension_granted",
+            project_id=project_id,
+            user_id=user_id,
+            deadline=new_deadline.isoformat(),
+        )
         return ext
 
     # ── Timing ──
@@ -508,7 +590,8 @@ class ProjectService:
     async def _count_user_submissions(self, project_id: str, user_id: str) -> int:
         result = await self.db.execute(
             select(func.count(Submission.id)).where(
-                Submission.project_id == project_id, Submission.user_id == user_id,
+                Submission.project_id == project_id,
+                Submission.user_id == user_id,
             )
         )
         return result.scalar_one()

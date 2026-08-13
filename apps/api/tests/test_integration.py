@@ -37,9 +37,14 @@ async def client():
 
 async def _register(cl):
     email = _unique_email()
-    r = await cl.post("/api/v1/auth/register", json={
-        "email": email, "password": "TestPass123!", "display_name": "IntTest",
-    })
+    r = await cl.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "TestPass123!",
+            "display_name": "IntTest",
+        },
+    )
     assert r.status_code == 201, f"Register failed ({r.status_code}): {r.text}"
     data = r.json()
     headers = {"Authorization": f"Bearer {data['access_token']}"}
@@ -51,9 +56,14 @@ async def _register(cl):
 
 @pytest.mark.asyncio
 async def test_register_creates_user(client):
-    r = await client.post("/api/v1/auth/register", json={
-        "email": _unique_email(), "password": "Valid123!", "display_name": "New User",
-    })
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": _unique_email(),
+            "password": "Valid123!",
+            "display_name": "New User",
+        },
+    )
     assert r.status_code == 201
     assert r.json()["user"]["role"] == "student"
 
@@ -61,12 +71,21 @@ async def test_register_creates_user(client):
 @pytest.mark.asyncio
 async def test_login_success(client):
     email = _unique_email()
-    await client.post("/api/v1/auth/register", json={
-        "email": email, "password": "TestPass123!", "display_name": "Login",
-    })
-    r = await client.post("/api/v1/auth/login", json={
-        "email": email, "password": "TestPass123!",
-    })
+    await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "TestPass123!",
+            "display_name": "Login",
+        },
+    )
+    r = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": email,
+            "password": "TestPass123!",
+        },
+    )
     assert r.status_code == 200
     assert "access_token" in r.json()
 
@@ -74,9 +93,14 @@ async def test_login_success(client):
 @pytest.mark.asyncio
 async def test_login_wrong_password(client):
     email = _unique_email()
-    await client.post("/api/v1/auth/register", json={
-        "email": email, "password": "TestPass123!", "display_name": "WP",
-    })
+    await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "TestPass123!",
+            "display_name": "WP",
+        },
+    )
     r = await client.post("/api/v1/auth/login", json={"email": email, "password": "Wrong123!"})
     assert r.status_code == 401
 
@@ -84,12 +108,22 @@ async def test_login_wrong_password(client):
 @pytest.mark.asyncio
 async def test_register_duplicate(client):
     email = _unique_email()
-    await client.post("/api/v1/auth/register", json={
-        "email": email, "password": "Valid123!", "display_name": "First",
-    })
-    r = await client.post("/api/v1/auth/register", json={
-        "email": email, "password": "Valid123!", "display_name": "Second",
-    })
+    await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "Valid123!",
+            "display_name": "First",
+        },
+    )
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "Valid123!",
+            "display_name": "Second",
+        },
+    )
     assert r.status_code == 409
 
 
@@ -123,52 +157,91 @@ async def test_org_skill_project_portfolio_flow(client):
     headers, _ = await _register(client)
 
     # Org
-    r = await client.post("/api/v1/orgs", json={"name": f"Org-{uuid.uuid4().hex[:6]}"}, headers=headers)
+    r = await client.post(
+        "/api/v1/orgs", json={"name": f"Org-{uuid.uuid4().hex[:6]}"}, headers=headers
+    )
     assert r.status_code == 201
     org_id = r.json()["data"]["id"]
 
     # Category + Skill + Exercise
-    r2 = await client.post(f"/api/v1/orgs/{org_id}/categories", json={"name": "AI"}, headers=headers)
+    r2 = await client.post(
+        f"/api/v1/orgs/{org_id}/categories", json={"name": "AI"}, headers=headers
+    )
     cat_id = r2.json()["data"]["id"]
 
-    r3 = await client.post(f"/api/v1/orgs/{org_id}/skills", json={
-        "category_id": cat_id, "name": "Prompting", "description": "Learn",
-    }, headers=headers)
+    r3 = await client.post(
+        f"/api/v1/orgs/{org_id}/skills",
+        json={
+            "category_id": cat_id,
+            "name": "Prompting",
+            "description": "Learn",
+        },
+        headers=headers,
+    )
     skill_id = r3.json()["data"]["id"]
 
-    r4 = await client.post(f"/api/v1/orgs/{org_id}/skills/{skill_id}/exercises", json={
-        "title": "MCQ", "description": "Pick", "type": "multiple_choice",
-        "config": {"correct": ["a"], "options": [{"id": "a", "text": "Right"}]},
-    }, headers=headers)
+    r4 = await client.post(
+        f"/api/v1/orgs/{org_id}/skills/{skill_id}/exercises",
+        json={
+            "title": "MCQ",
+            "description": "Pick",
+            "type": "multiple_choice",
+            "config": {"correct": ["a"], "options": [{"id": "a", "text": "Right"}]},
+        },
+        headers=headers,
+    )
     ex_id = r4.json()["data"]["id"]
 
     # Attempt
-    r5 = await client.post(f"/api/v1/orgs/{org_id}/exercises/{ex_id}/attempts", json={
-        "answer": {"selected": ["a"]},
-    }, headers=headers)
+    r5 = await client.post(
+        f"/api/v1/orgs/{org_id}/exercises/{ex_id}/attempts",
+        json={
+            "answer": {"selected": ["a"]},
+        },
+        headers=headers,
+    )
     assert r5.json()["data"]["is_correct"] is True
 
     # Project + Submission + Review
-    r6 = await client.post(f"/api/v1/orgs/{org_id}/projects", json={
-        "title": "Chatbot", "description": "Build", "instructions": "Go",
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=headers)
+    r6 = await client.post(
+        f"/api/v1/orgs/{org_id}/projects",
+        json={
+            "title": "Chatbot",
+            "description": "Build",
+            "instructions": "Go",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=headers,
+    )
     proj_id = r6.json()["data"]["id"]
 
     r7 = await client.post(f"/api/v1/orgs/{org_id}/projects/{proj_id}/submissions", headers=headers)
     sub_id = r7.json()["data"]["id"]
-    await client.post(f"/api/v1/orgs/{org_id}/projects/{proj_id}/submissions/{sub_id}/submit", headers=headers)
+    await client.post(
+        f"/api/v1/orgs/{org_id}/projects/{proj_id}/submissions/{sub_id}/submit", headers=headers
+    )
 
-    r8 = await client.post(f"/api/v1/orgs/{org_id}/submissions/{sub_id}/reviews", json={
-        "status": "approved", "score": 95, "feedback": "Great!",
-    }, headers=headers)
+    r8 = await client.post(
+        f"/api/v1/orgs/{org_id}/submissions/{sub_id}/reviews",
+        json={
+            "status": "approved",
+            "score": 95,
+            "feedback": "Great!",
+        },
+        headers=headers,
+    )
     assert r8.status_code == 201
 
     # Portfolio
     r9 = await client.get("/api/v1/portfolio/profile", headers=headers)
     assert r9.status_code == 200
 
-    r10 = await client.post("/api/v1/portfolio/items", json={
-        "title": "My Project", "tags": ["ai"],
-    }, headers=headers)
+    r10 = await client.post(
+        "/api/v1/portfolio/items",
+        json={
+            "title": "My Project",
+            "tags": ["ai"],
+        },
+        headers=headers,
+    )
     assert r10.status_code == 201

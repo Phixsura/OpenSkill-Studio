@@ -58,9 +58,7 @@ class GradingMethod(str, enum.Enum):
 
 class SkillCategory(Base):
     __tablename__ = "skill_categories"
-    __table_args__ = (
-        Index("uq_category_org_slug", "org_id", "slug", unique=True),
-    )
+    __table_args__ = (Index("uq_category_org_slug", "org_id", "slug", unique=True),)
 
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(
@@ -81,7 +79,9 @@ class SkillCategory(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    skills: Mapped[list["Skill"]] = relationship(back_populates="category", cascade="all, delete-orphan")
+    skills: Mapped[list["Skill"]] = relationship(
+        back_populates="category", cascade="all, delete-orphan"
+    )
 
 
 class Skill(Base):
@@ -122,14 +122,14 @@ class Skill(Base):
     )
 
     category: Mapped["SkillCategory"] = relationship(back_populates="skills")
-    exercises: Mapped[list["Exercise"]] = relationship(back_populates="skill", cascade="all, delete-orphan")
+    exercises: Mapped[list["Exercise"]] = relationship(
+        back_populates="skill", cascade="all, delete-orphan"
+    )
 
 
 class SkillPrerequisite(Base):
     __tablename__ = "skill_prerequisites"
-    __table_args__ = (
-        CheckConstraint("skill_id != prerequisite_id", name="ck_no_self_prereq"),
-    )
+    __table_args__ = (CheckConstraint("skill_id != prerequisite_id", name="ck_no_self_prereq"),)
 
     skill_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("skills.id", ondelete="CASCADE"), primary_key=True
@@ -141,9 +141,7 @@ class SkillPrerequisite(Base):
 
 class Exercise(Base):
     __tablename__ = "exercises"
-    __table_args__ = (
-        Index("ix_exercises_skill_order", "skill_id", "sort_order"),
-    )
+    __table_args__ = (Index("ix_exercises_skill_order", "skill_id", "sort_order"),)
 
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(

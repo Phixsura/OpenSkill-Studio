@@ -16,8 +16,13 @@ from app.models.user import User, UserRole, UserStatus
 
 
 async def _user(db, role=UserRole.STUDENT):
-    u = User(email=f"fin-{uuid.uuid4().hex[:8]}@test.com", password_hash=hash_password("Test123!"),
-             display_name="Final", role=role, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"fin-{uuid.uuid4().hex[:8]}@test.com",
+        password_hash=hash_password("Test123!"),
+        display_name="Final",
+        role=role,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -26,6 +31,7 @@ async def _user(db, role=UserRole.STUDENT):
 @pytest_asyncio.fixture
 async def db():
     from app.core.database import engine
+
     async with AsyncSessionLocal() as session:
         yield session
         await session.rollback()
@@ -141,7 +147,9 @@ async def test_org_revoke_invitation(db):
     org = await svc.create("RevInvOrg", None, None, user.id)
     await db.flush()
 
-    await svc.invite_members(org.id, [f"inv-{uuid.uuid4().hex[:6]}@test.com"], OrgRole.STUDENT, user.id)
+    await svc.invite_members(
+        org.id, [f"inv-{uuid.uuid4().hex[:6]}@test.com"], OrgRole.STUDENT, user.id
+    )
     await db.flush()
 
     invites = await svc.get_invitations(org.id)
@@ -188,11 +196,20 @@ async def test_project_deadline_closed(db):
 
     svc = ProjectService(db)
     project = await svc.create_project(
-        org.id, "DLProj", None, "D", "I", "beginner", 100,
+        org.id,
+        "DLProj",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
         [{"criterion": "Q", "max_score": 100}],
         datetime.now(UTC) - timedelta(days=2),  # Past deadline
         datetime.now(UTC) - timedelta(days=1),  # Past late deadline
-        20, 0, None, user.id,
+        20,
+        0,
+        None,
+        user.id,
     )
     sub = await svc.create_submission(org.id, project.id, user.id)
     await db.flush()
@@ -213,11 +230,20 @@ async def test_project_late_submission(db):
 
     svc = ProjectService(db)
     project = await svc.create_project(
-        org.id, "LateProj", None, "D", "I", "beginner", 100,
+        org.id,
+        "LateProj",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
         [{"criterion": "Q", "max_score": 100}],
         datetime.now(UTC) - timedelta(hours=1),  # Past deadline
-        datetime.now(UTC) + timedelta(days=7),   # Late deadline still open
-        20, 0, None, user.id,
+        datetime.now(UTC) + timedelta(days=7),  # Late deadline still open
+        20,
+        0,
+        None,
+        user.id,
     )
     sub = await svc.create_submission(org.id, project.id, user.id)
     await db.flush()
@@ -241,11 +267,20 @@ async def test_project_late_penalty_applied(db):
 
     svc = ProjectService(db)
     project = await svc.create_project(
-        org.id, "PenProj", None, "D", "I", "beginner", 100,
+        org.id,
+        "PenProj",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
         [{"criterion": "Q", "max_score": 100}],
         datetime.now(UTC) - timedelta(hours=1),
         datetime.now(UTC) + timedelta(days=7),
-        25, 0, None, user.id,
+        25,
+        0,
+        None,
+        user.id,
     )
     sub = await svc.create_submission(org.id, project.id, user.id)
     await db.flush()
@@ -276,7 +311,9 @@ async def test_unhandled_exception_handler():
     from app.main import app
 
     @asynccontextmanager
-    async def noop(a): yield
+    async def noop(a):
+        yield
+
     app.router.lifespan_context = noop
 
     # Hit a nonexistent endpoint to trigger 404 (covered by http_error_handler)

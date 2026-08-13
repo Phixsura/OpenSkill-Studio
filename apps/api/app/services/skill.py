@@ -70,14 +70,24 @@ class SkillService:
     # ── Categories ──
 
     async def create_category(
-        self, org_id: str, name: str, slug: str | None, description: str | None,
-        icon: str | None, created_by: str,
+        self,
+        org_id: str,
+        name: str,
+        slug: str | None,
+        description: str | None,
+        icon: str | None,
+        created_by: str,
     ) -> SkillCategory:
         if slug is None:
             slug = self._generate_slug(name)
         cat = SkillCategory(
-            org_id=org_id, name=name, slug=slug, description=description,
-            icon=icon, status=ContentStatus.PUBLISHED, created_by=created_by,
+            org_id=org_id,
+            name=name,
+            slug=slug,
+            description=description,
+            icon=icon,
+            status=ContentStatus.PUBLISHED,
+            created_by=created_by,
         )
         self.db.add(cat)
         await self.db.flush()
@@ -113,10 +123,18 @@ class SkillService:
     # ── Skills ──
 
     async def create_skill(
-        self, org_id: str, category_id: str, name: str, slug: str | None,
-        description: str, learning_content: str | None, difficulty: str,
-        estimated_minutes: int | None, tags: list[str] | None,
-        prerequisite_ids: list[str] | None, created_by: str,
+        self,
+        org_id: str,
+        category_id: str,
+        name: str,
+        slug: str | None,
+        description: str,
+        learning_content: str | None,
+        difficulty: str,
+        estimated_minutes: int | None,
+        tags: list[str] | None,
+        prerequisite_ids: list[str] | None,
+        created_by: str,
     ) -> Skill:
         if slug is None:
             slug = self._generate_slug(name)
@@ -127,10 +145,16 @@ class SkillService:
             diff = DifficultyLevel.BEGINNER
 
         skill = Skill(
-            org_id=org_id, category_id=category_id, name=name, slug=slug,
-            description=description, learning_content=learning_content,
-            difficulty=diff, estimated_minutes=estimated_minutes,
-            tags=tags or [], created_by=created_by,
+            org_id=org_id,
+            category_id=category_id,
+            name=name,
+            slug=slug,
+            description=description,
+            learning_content=learning_content,
+            difficulty=diff,
+            estimated_minutes=estimated_minutes,
+            tags=tags or [],
+            created_by=created_by,
         )
         self.db.add(skill)
         await self.db.flush()
@@ -142,9 +166,15 @@ class SkillService:
         return skill
 
     async def list_skills(
-        self, org_id: str, category_id: str | None = None, difficulty: str | None = None,
-        status: str | None = None, tag: str | None = None, q: str | None = None,
-        page: int = 1, per_page: int = 20,
+        self,
+        org_id: str,
+        category_id: str | None = None,
+        difficulty: str | None = None,
+        status: str | None = None,
+        tag: str | None = None,
+        q: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
     ) -> tuple[list[Skill], int]:
         base = select(Skill).where(Skill.org_id == org_id)
 
@@ -176,9 +206,9 @@ class SkillService:
 
     async def get_skill_prerequisites(self, skill_id: str) -> list[Skill]:
         result = await self.db.execute(
-            select(Skill).join(
-                SkillPrerequisite, SkillPrerequisite.prerequisite_id == Skill.id
-            ).where(SkillPrerequisite.skill_id == skill_id)
+            select(Skill)
+            .join(SkillPrerequisite, SkillPrerequisite.prerequisite_id == Skill.id)
+            .where(SkillPrerequisite.skill_id == skill_id)
         )
         return list(result.scalars().all())
 
@@ -217,8 +247,15 @@ class SkillService:
     # ── Exercises ──
 
     async def create_exercise(
-        self, org_id: str, skill_id: str, title: str, description: str,
-        exercise_type: str, config: dict, max_score: int, created_by: str,
+        self,
+        org_id: str,
+        skill_id: str,
+        title: str,
+        description: str,
+        exercise_type: str,
+        config: dict,
+        max_score: int,
+        created_by: str,
     ) -> Exercise:
         try:
             etype = ExerciseType(exercise_type)
@@ -226,8 +263,14 @@ class SkillService:
             raise AppError("INVALID_EXERCISE_TYPE", f"Invalid type: {exercise_type}", 422) from exc
 
         exercise = Exercise(
-            org_id=org_id, skill_id=skill_id, title=title, description=description,
-            type=etype, config=config, max_score=max_score, created_by=created_by,
+            org_id=org_id,
+            skill_id=skill_id,
+            title=title,
+            description=description,
+            type=etype,
+            config=config,
+            max_score=max_score,
+            created_by=created_by,
         )
         self.db.add(exercise)
         await self.db.flush()
@@ -263,7 +306,11 @@ class SkillService:
     # ── Attempts ──
 
     async def submit_attempt(
-        self, org_id: str, exercise_id: str, user_id: str, answer: dict,
+        self,
+        org_id: str,
+        exercise_id: str,
+        user_id: str,
+        answer: dict,
     ) -> ExerciseAttempt:
         exercise = await self.get_exercise(exercise_id)
 
@@ -272,7 +319,10 @@ class SkillService:
             raise SkillLockedError()
 
         attempt = ExerciseAttempt(
-            org_id=org_id, exercise_id=exercise_id, user_id=user_id, answer=answer,
+            org_id=org_id,
+            exercise_id=exercise_id,
+            user_id=user_id,
+            answer=answer,
         )
 
         # Auto-grade MCQ
@@ -309,7 +359,10 @@ class SkillService:
         return list(result.scalars().all())
 
     async def grade_attempt(
-        self, attempt_id: str, score: int, feedback: str | None,
+        self,
+        attempt_id: str,
+        score: int,
+        feedback: str | None,
     ) -> ExerciseAttempt:
         attempt = await self.db.get(ExerciseAttempt, attempt_id)
         if attempt is None:
@@ -384,8 +437,9 @@ class SkillService:
 
         # Count completed exercises (at least one correct attempt)
         done_result = await self.db.execute(
-            select(func.sum(SkillProgress.exercises_done))
-            .where(SkillProgress.user_id == user_id, SkillProgress.org_id == org_id)
+            select(func.sum(SkillProgress.exercises_done)).where(
+                SkillProgress.user_id == user_id, SkillProgress.org_id == org_id
+            )
         )
         exercises_done = done_result.scalar_one() or 0
 
@@ -443,8 +497,9 @@ class SkillService:
 
             # Get prerequisites of current
             result = await self.db.execute(
-                select(SkillPrerequisite.prerequisite_id)
-                .where(SkillPrerequisite.skill_id == current)
+                select(SkillPrerequisite.prerequisite_id).where(
+                    SkillPrerequisite.skill_id == current
+                )
             )
             for row in result.scalars():
                 queue.append(row)
@@ -457,11 +512,13 @@ class SkillService:
         done = 0
         for ex in exercises:
             result = await self.db.execute(
-                select(ExerciseAttempt).where(
+                select(ExerciseAttempt)
+                .where(
                     ExerciseAttempt.exercise_id == ex.id,
                     ExerciseAttempt.user_id == user_id,
                     ExerciseAttempt.is_correct == True,  # noqa: E712
-                ).limit(1)
+                )
+                .limit(1)
             )
             if result.scalar_one_or_none():
                 done += 1
@@ -476,7 +533,9 @@ class SkillService:
 
         if progress is None:
             progress = SkillProgress(
-                org_id=org_id, skill_id=skill_id, user_id=user_id,
+                org_id=org_id,
+                skill_id=skill_id,
+                user_id=user_id,
             )
             self.db.add(progress)
 

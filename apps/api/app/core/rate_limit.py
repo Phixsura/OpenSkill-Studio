@@ -11,9 +11,7 @@ from app.core.redis import redis_pool
 log = structlog.get_logger()
 
 
-async def check_rate_limit(
-    key: str, limit: int, window_seconds: int
-) -> tuple[bool, int]:
+async def check_rate_limit(key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
     """
     Sliding window rate limit via Redis sorted set.
     Returns (is_allowed, remaining_requests).

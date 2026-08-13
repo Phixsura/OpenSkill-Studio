@@ -29,8 +29,6 @@ router = APIRouter(tags=["Organizations"])
 # ── Helpers ───────────────────────────────────────────────
 
 
-
-
 def _link_response(link, base_url: str = "http://localhost:3000") -> InviteLinkResponse:
     return InviteLinkResponse(
         id=link.id,
@@ -49,7 +47,9 @@ async def _member_response(member, db: AsyncSession) -> OrgMemberResponse:
     user = await db.get(User, member.user_id)
     return OrgMemberResponse(
         id=member.id,
-        user=OrgMemberUserResponse.model_validate(user) if user else OrgMemberUserResponse(
+        user=OrgMemberUserResponse.model_validate(user)
+        if user
+        else OrgMemberUserResponse(
             id=member.user_id, email="", display_name="Unknown", avatar_url=None
         ),
         role=member.role.value,
@@ -78,8 +78,14 @@ async def create_org(
 
     count = await service.get_member_count(org.id)
     resp = OrgResponse(
-        id=org.id, name=org.name, slug=org.slug, description=org.description,
-        logo_url=org.logo_url, role="owner", member_count=count, created_at=org.created_at,
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        description=org.description,
+        logo_url=org.logo_url,
+        role="owner",
+        member_count=count,
+        created_at=org.created_at,
     )
     return DataResponse(data=resp)
 
@@ -93,9 +99,14 @@ async def list_my_orgs(
     orgs = await service.get_user_orgs(user.id)
     items = [
         OrgResponse(
-            id=o["org"].id, name=o["org"].name, slug=o["org"].slug,
-            description=o["org"].description, logo_url=o["org"].logo_url,
-            role=o["role"], member_count=o["member_count"], created_at=o["org"].created_at,
+            id=o["org"].id,
+            name=o["org"].name,
+            slug=o["org"].slug,
+            description=o["org"].description,
+            logo_url=o["org"].logo_url,
+            role=o["role"],
+            member_count=o["member_count"],
+            created_at=o["org"].created_at,
         )
         for o in orgs
     ]
@@ -114,9 +125,16 @@ async def get_org(
     count = await service.get_member_count(org_id)
 
     resp = OrgDetailResponse(
-        id=org.id, name=org.name, slug=org.slug, description=org.description,
-        logo_url=org.logo_url, status=org.status.value, settings=org.settings or {},
-        created_by=org.created_by, role=member.role.value, member_count=count,
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        description=org.description,
+        logo_url=org.logo_url,
+        status=org.status.value,
+        settings=org.settings or {},
+        created_by=org.created_by,
+        role=member.role.value,
+        member_count=count,
         created_at=org.created_at,
     )
     return DataResponse(data=resp)
@@ -138,8 +156,13 @@ async def update_org(
     count = await service.get_member_count(org_id)
 
     resp = OrgResponse(
-        id=org.id, name=org.name, slug=org.slug, description=org.description,
-        logo_url=org.logo_url, member_count=count, created_at=org.created_at,
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        description=org.description,
+        logo_url=org.logo_url,
+        member_count=count,
+        created_at=org.created_at,
     )
     return DataResponse(data=resp)
 
@@ -170,9 +193,16 @@ async def update_org_settings(
     member = await service._get_active_member(org_id, user.id)
 
     resp = OrgDetailResponse(
-        id=org.id, name=org.name, slug=org.slug, description=org.description,
-        logo_url=org.logo_url, status=org.status.value, settings=org.settings or {},
-        created_by=org.created_by, role=member.role.value, member_count=count,
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        description=org.description,
+        logo_url=org.logo_url,
+        status=org.status.value,
+        settings=org.settings or {},
+        created_by=org.created_by,
+        role=member.role.value,
+        member_count=count,
         created_at=org.created_at,
     )
     return DataResponse(data=resp)
@@ -198,7 +228,9 @@ async def list_members(
     return ListResponse(
         data=items,
         meta=PaginationMeta(
-            total=total, page=page, per_page=per_page,
+            total=total,
+            page=page,
+            per_page=per_page,
             has_more=(page * per_page) < total,
         ),
     )
@@ -271,12 +303,19 @@ async def list_invitations(
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     service = OrgService(db)
     invites = await service.get_invitations(org_id)
-    return DataResponse(data=[
-        {"id": inv.id, "email": inv.email, "role": inv.role.value,
-         "status": inv.status.value, "expires_at": inv.expires_at.isoformat(),
-         "created_at": inv.created_at.isoformat()}
-        for inv in invites
-    ])
+    return DataResponse(
+        data=[
+            {
+                "id": inv.id,
+                "email": inv.email,
+                "role": inv.role.value,
+                "status": inv.status.value,
+                "expires_at": inv.expires_at.isoformat(),
+                "created_at": inv.created_at.isoformat(),
+            }
+            for inv in invites
+        ]
+    )
 
 
 @router.delete("/orgs/{org_id}/invites/{invite_id}", status_code=204)
@@ -341,7 +380,9 @@ async def create_invite_link(
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
 
     service = OrgService(db)
-    link = await service.create_invite_link(org_id, role, body.max_uses, body.expires_in_days, user.id)
+    link = await service.create_invite_link(
+        org_id, role, body.max_uses, body.expires_in_days, user.id
+    )
     await db.commit()
     return DataResponse(data=_link_response(link))
 
@@ -358,7 +399,9 @@ async def list_invite_links(
     return DataResponse(data=[_link_response(lnk) for lnk in links])
 
 
-@router.put("/orgs/{org_id}/invite-links/{link_id}", response_model=DataResponse[InviteLinkResponse])
+@router.put(
+    "/orgs/{org_id}/invite-links/{link_id}", response_model=DataResponse[InviteLinkResponse]
+)
 async def toggle_invite_link(
     org_id: str,
     link_id: str,

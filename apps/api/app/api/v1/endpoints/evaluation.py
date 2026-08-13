@@ -19,15 +19,19 @@ router = APIRouter(tags=["AI Evaluation"])
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
-
-
 # ── Trigger ──────────────────────────────────────────────
 
 
-@router.post("/orgs/{org_id}/evaluation/trigger", response_model=DataResponse[EvalTaskResponse], status_code=201)
+@router.post(
+    "/orgs/{org_id}/evaluation/trigger",
+    response_model=DataResponse[EvalTaskResponse],
+    status_code=201,
+)
 async def trigger_evaluation(
-    org_id: str, body: TriggerEvaluationRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    body: TriggerEvaluationRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
@@ -41,23 +45,33 @@ async def trigger_evaluation(
 
 @router.get("/orgs/{org_id}/evaluation/tasks", response_model=ListResponse[EvalTaskResponse])
 async def list_eval_tasks(
-    org_id: str, status: str | None = None, eval_type: str | None = None,
-    page: int = 1, per_page: int = 20,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    status: str | None = None,
+    eval_type: str | None = None,
+    page: int = 1,
+    per_page: int = 20,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
     tasks, total = await svc.list_tasks(org_id, status, eval_type, page, per_page)
     return ListResponse(
         data=[EvalTaskResponse.model_validate(t) for t in tasks],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=(page * per_page) < total),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
+        ),
     )
 
 
-@router.get("/orgs/{org_id}/evaluation/tasks/{task_id}", response_model=DataResponse[EvalTaskResponse])
+@router.get(
+    "/orgs/{org_id}/evaluation/tasks/{task_id}", response_model=DataResponse[EvalTaskResponse]
+)
 async def get_eval_task(
-    org_id: str, task_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    task_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
@@ -67,10 +81,14 @@ async def get_eval_task(
     return DataResponse(data=EvalTaskResponse.model_validate(task))
 
 
-@router.post("/orgs/{org_id}/evaluation/tasks/{task_id}/retry", response_model=DataResponse[EvalTaskResponse])
+@router.post(
+    "/orgs/{org_id}/evaluation/tasks/{task_id}/retry", response_model=DataResponse[EvalTaskResponse]
+)
 async def retry_eval_task(
-    org_id: str, task_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    task_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
@@ -82,10 +100,15 @@ async def retry_eval_task(
     return DataResponse(data=EvalTaskResponse.model_validate(task))
 
 
-@router.post("/orgs/{org_id}/evaluation/tasks/{task_id}/cancel", response_model=DataResponse[EvalTaskResponse])
+@router.post(
+    "/orgs/{org_id}/evaluation/tasks/{task_id}/cancel",
+    response_model=DataResponse[EvalTaskResponse],
+)
 async def cancel_eval_task(
-    org_id: str, task_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    task_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
@@ -103,7 +126,8 @@ async def cancel_eval_task(
 @router.get("/orgs/{org_id}/evaluation/usage", response_model=EvalUsageResponse)
 async def get_eval_usage(
     org_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
@@ -116,7 +140,8 @@ async def get_eval_usage(
 @router.get("/orgs/{org_id}/settings/evaluation", response_model=EvalSettingsResponse)
 async def get_eval_settings(
     org_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
@@ -125,8 +150,10 @@ async def get_eval_settings(
 
 @router.put("/orgs/{org_id}/settings/evaluation", response_model=EvalSettingsResponse)
 async def update_eval_settings(
-    org_id: str, body: UpdateEvalSettingsRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    body: UpdateEvalSettingsRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     svc = EvaluationService(db)

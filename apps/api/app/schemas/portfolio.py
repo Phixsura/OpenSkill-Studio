@@ -3,11 +3,34 @@ from datetime import datetime
 
 from pydantic import BaseModel, field_validator
 
-RESERVED_USERNAMES = frozenset({
-    "admin", "api", "app", "auth", "blog", "dashboard", "docs", "help",
-    "login", "logout", "register", "settings", "status", "support", "www",
-    "health", "about", "pricing", "terms", "privacy", "u", "orgs", "join", "invite",
-})
+RESERVED_USERNAMES = frozenset(
+    {
+        "admin",
+        "api",
+        "app",
+        "auth",
+        "blog",
+        "dashboard",
+        "docs",
+        "help",
+        "login",
+        "logout",
+        "register",
+        "settings",
+        "status",
+        "support",
+        "www",
+        "health",
+        "about",
+        "pricing",
+        "terms",
+        "privacy",
+        "u",
+        "orgs",
+        "join",
+        "invite",
+    }
+)
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){2,38}[a-z0-9]$")
 

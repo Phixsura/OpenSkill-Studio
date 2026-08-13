@@ -31,9 +31,14 @@ async def c():
 
 
 async def _auth(c):
-    r = await c.post("/api/v1/auth/register", json={
-        "email": _email(), "password": "TestPass123!", "display_name": "Err",
-    })
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={
+            "email": _email(),
+            "password": "TestPass123!",
+            "display_name": "Err",
+        },
+    )
     d = r.json()
     return {"Authorization": f"Bearer {d['access_token']}"}, d["user"]
 
@@ -55,9 +60,14 @@ async def test_login_nonexistent(c):
 @pytest.mark.asyncio
 async def test_change_password_wrong_old(c):
     h, _ = await _auth(c)
-    r = await c.post("/api/v1/auth/change-password", json={
-        "old_password": "Wrong123!", "new_password": "New123456!",
-    }, headers=h)
+    r = await c.post(
+        "/api/v1/auth/change-password",
+        json={
+            "old_password": "Wrong123!",
+            "new_password": "New123456!",
+        },
+        headers=h,
+    )
     assert r.status_code == 401
 
 
@@ -69,9 +79,13 @@ async def test_refresh_no_cookie(c):
 
 @pytest.mark.asyncio
 async def test_reset_password_bad_token(c):
-    r = await c.post("/api/v1/auth/reset-password", json={
-        "token": "bad-token", "new_password": "NewPass123!",
-    })
+    r = await c.post(
+        "/api/v1/auth/reset-password",
+        json={
+            "token": "bad-token",
+            "new_password": "NewPass123!",
+        },
+    )
     assert r.status_code == 401
 
 
@@ -108,10 +122,14 @@ async def test_org_member_role_update(c):
 
     # Add member
     h2, u2 = await _auth(c)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h
+    )
 
     # Update role
-    r = await c.put(f"/api/v1/orgs/{oid}/members/{u2['id']}", json={"role": "instructor"}, headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/members/{u2['id']}", json={"role": "instructor"}, headers=h
+    )
     assert r.status_code == 200
 
     # Remove member
@@ -125,7 +143,9 @@ async def test_invite_link_join_active(c):
     oid = await _org(c, h)
 
     # Create active link
-    r = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student", "max_uses": 5}, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/invite-links", json={"role": "student", "max_uses": 5}, headers=h
+    )
     code = r.json()["data"]["code"]
 
     # Join with new user
@@ -160,24 +180,46 @@ async def test_exercise_wrong_answer(c):
     r = await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Test"}, headers=h)
     cid = r.json()["data"]["id"]
 
-    r2 = await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "category_id": cid, "name": "Skill", "description": "D",
-    }, headers=h)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={
+            "category_id": cid,
+            "name": "Skill",
+            "description": "D",
+        },
+        headers=h,
+    )
     sid = r2.json()["data"]["id"]
 
-    r3 = await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/exercises", json={
-        "title": "Quiz MCQ", "description": "D", "type": "multiple_choice",
-        "config": {"correct": ["b", "c"], "options": [
-            {"id": "a", "text": "W"}, {"id": "b", "text": "R"}, {"id": "c", "text": "R2"},
-        ], "multiple": True},
-    }, headers=h)
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/skills/{sid}/exercises",
+        json={
+            "title": "Quiz MCQ",
+            "description": "D",
+            "type": "multiple_choice",
+            "config": {
+                "correct": ["b", "c"],
+                "options": [
+                    {"id": "a", "text": "W"},
+                    {"id": "b", "text": "R"},
+                    {"id": "c", "text": "R2"},
+                ],
+                "multiple": True,
+            },
+        },
+        headers=h,
+    )
     assert r3.status_code == 201, f"Exercise create failed: {r3.text}"
     eid = r3.json()["data"]["id"]
 
     # Wrong answer
-    r4 = await c.post(f"/api/v1/orgs/{oid}/exercises/{eid}/attempts", json={
-        "answer": {"selected": ["a"]},
-    }, headers=h)
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{eid}/attempts",
+        json={
+            "answer": {"selected": ["a"]},
+        },
+        headers=h,
+    )
     assert r4.json()["data"]["is_correct"] is False
     assert r4.json()["data"]["score"] == 0
 
@@ -190,9 +232,15 @@ async def test_skill_delete_and_list(c):
     r = await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Del"}, headers=h)
     cid = r.json()["data"]["id"]
 
-    r2 = await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "category_id": cid, "name": "ToDelete", "description": "D",
-    }, headers=h)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={
+            "category_id": cid,
+            "name": "ToDelete",
+            "description": "D",
+        },
+        headers=h,
+    )
     sid = r2.json()["data"]["id"]
     await c.delete(f"/api/v1/orgs/{oid}/skills/{sid}", headers=h)
 
@@ -217,10 +265,16 @@ async def test_submission_not_owner(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "Project Test", "description": "D", "instructions": "I",
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Project Test",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
     pid = r.json()["data"]["id"]
 
     r2 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
@@ -229,7 +283,9 @@ async def test_submission_not_owner(c):
 
     # Try to submit with different user
     h2, u2 = await _auth(c)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h
+    )
     r3 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}/submit", headers=h2)
     assert r3.status_code == 403
 
@@ -239,10 +295,16 @@ async def test_review_revision_requested(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "Rev", "description": "D", "instructions": "I",
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Rev",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
     pid = r.json()["data"]["id"]
 
     r2 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
@@ -250,9 +312,14 @@ async def test_review_revision_requested(c):
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}/submit", headers=h)
 
     # Review: request revision
-    r3 = await c.post(f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews", json={
-        "status": "revision_requested", "feedback": "Needs work",
-    }, headers=h)
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
+        json={
+            "status": "revision_requested",
+            "feedback": "Needs work",
+        },
+        headers=h,
+    )
     assert r3.status_code == 201
 
     # Check status
@@ -265,19 +332,31 @@ async def test_review_rejected(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "Rej", "description": "D", "instructions": "I",
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Rej",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
     pid = r.json()["data"]["id"]
 
     r2 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
     sub_id = r2.json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}/submit", headers=h)
 
-    r3 = await c.post(f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews", json={
-        "status": "rejected", "score": 20, "feedback": "Poor",
-    }, headers=h)
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
+        json={
+            "status": "rejected",
+            "score": 20,
+            "feedback": "Poor",
+        },
+        headers=h,
+    )
     assert r3.status_code == 201
 
 

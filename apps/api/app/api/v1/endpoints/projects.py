@@ -27,8 +27,6 @@ from app.services.project import ProjectService
 router = APIRouter(tags=["Projects & Submissions"])
 
 
-
-
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
@@ -53,39 +51,63 @@ async def _verify_submission_org(svc: ProjectService, submission_id: str, org_id
 
 @router.get("/orgs/{org_id}/projects", response_model=ListResponse[ProjectResponse])
 async def list_projects(
-    org_id: str, status: str | None = None, page: int = 1, per_page: int = 20,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    status: str | None = None,
+    page: int = 1,
+    per_page: int = 20,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
     projects, total = await svc.list_projects(org_id, status, page, per_page)
     return ListResponse(
         data=[ProjectResponse.model_validate(p) for p in projects],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=(page * per_page) < total),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
+        ),
     )
 
 
-@router.post("/orgs/{org_id}/projects", response_model=DataResponse[ProjectResponse], status_code=201)
+@router.post(
+    "/orgs/{org_id}/projects", response_model=DataResponse[ProjectResponse], status_code=201
+)
 async def create_project(
-    org_id: str, body: CreateProjectRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    body: CreateProjectRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     project = await svc.create_project(
-        org_id, body.title, body.slug, body.description, body.instructions,
-        body.difficulty, body.max_score, body.rubric, body.deadline,
-        body.late_deadline, body.late_penalty_pct, body.max_submissions,
-        body.skill_ids, user.id,
+        org_id,
+        body.title,
+        body.slug,
+        body.description,
+        body.instructions,
+        body.difficulty,
+        body.max_score,
+        body.rubric,
+        body.deadline,
+        body.late_deadline,
+        body.late_penalty_pct,
+        body.max_submissions,
+        body.skill_ids,
+        user.id,
     )
     await db.commit()
     return DataResponse(data=ProjectResponse.model_validate(project))
 
 
-@router.get("/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectDetailResponse])
+@router.get(
+    "/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectDetailResponse]
+)
 async def get_project(
-    org_id: str, project_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -105,8 +127,11 @@ async def get_project(
 
 @router.put("/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectResponse])
 async def update_project(
-    org_id: str, project_id: str, body: UpdateProjectRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    body: UpdateProjectRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
@@ -118,8 +143,10 @@ async def update_project(
 
 @router.delete("/orgs/{org_id}/projects/{project_id}", status_code=204)
 async def delete_project(
-    org_id: str, project_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
@@ -128,10 +155,14 @@ async def delete_project(
     await db.commit()
 
 
-@router.post("/orgs/{org_id}/projects/{project_id}/publish", response_model=DataResponse[ProjectResponse])
+@router.post(
+    "/orgs/{org_id}/projects/{project_id}/publish", response_model=DataResponse[ProjectResponse]
+)
 async def publish_project(
-    org_id: str, project_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
@@ -141,10 +172,14 @@ async def publish_project(
     return DataResponse(data=ProjectResponse.model_validate(project))
 
 
-@router.post("/orgs/{org_id}/projects/{project_id}/unpublish", response_model=DataResponse[ProjectResponse])
+@router.post(
+    "/orgs/{org_id}/projects/{project_id}/unpublish", response_model=DataResponse[ProjectResponse]
+)
 async def unpublish_project(
-    org_id: str, project_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
@@ -156,8 +191,11 @@ async def unpublish_project(
 
 @router.put("/orgs/{org_id}/projects/{project_id}/skills", status_code=200)
 async def set_project_skills(
-    org_id: str, project_id: str, body: dict,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
@@ -167,15 +205,24 @@ async def set_project_skills(
     return {"message": "Project skills updated"}
 
 
-@router.post("/orgs/{org_id}/projects/{project_id}/extensions", response_model=DataResponse[ExtensionResponse], status_code=201)
+@router.post(
+    "/orgs/{org_id}/projects/{project_id}/extensions",
+    response_model=DataResponse[ExtensionResponse],
+    status_code=201,
+)
 async def grant_extension(
-    org_id: str, project_id: str, body: GrantExtensionRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    body: GrantExtensionRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
-    ext = await svc.grant_extension(project_id, body.user_id, body.new_deadline, body.reason, user.id)
+    ext = await svc.grant_extension(
+        project_id, body.user_id, body.new_deadline, body.reason, user.id
+    )
     await db.commit()
     return DataResponse(data=ExtensionResponse.model_validate(ext))
 
@@ -183,10 +230,15 @@ async def grant_extension(
 # ── Deliverables ─────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/projects/{project_id}/deliverables", response_model=DataResponse[list[DeliverableResponse]])
+@router.get(
+    "/orgs/{org_id}/projects/{project_id}/deliverables",
+    response_model=DataResponse[list[DeliverableResponse]],
+)
 async def list_deliverables(
-    org_id: str, project_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -194,25 +246,44 @@ async def list_deliverables(
     return DataResponse(data=[DeliverableResponse.model_validate(d) for d in deliverables])
 
 
-@router.post("/orgs/{org_id}/projects/{project_id}/deliverables", response_model=DataResponse[DeliverableResponse], status_code=201)
+@router.post(
+    "/orgs/{org_id}/projects/{project_id}/deliverables",
+    response_model=DataResponse[DeliverableResponse],
+    status_code=201,
+)
 async def create_deliverable(
-    org_id: str, project_id: str, body: CreateDeliverableRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    body: CreateDeliverableRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     d = await svc.create_deliverable(
-        project_id, body.name, body.description, body.type,
-        body.required, body.config, body.sort_order,
+        project_id,
+        body.name,
+        body.description,
+        body.type,
+        body.required,
+        body.config,
+        body.sort_order,
     )
     await db.commit()
     return DataResponse(data=DeliverableResponse.model_validate(d))
 
 
-@router.put("/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}", response_model=DataResponse[DeliverableResponse])
+@router.put(
+    "/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}",
+    response_model=DataResponse[DeliverableResponse],
+)
 async def update_deliverable(
-    org_id: str, project_id: str, deliverable_id: str, body: UpdateDeliverableRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    deliverable_id: str,
+    body: UpdateDeliverableRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
@@ -221,10 +292,15 @@ async def update_deliverable(
     return DataResponse(data=DeliverableResponse.model_validate(d))
 
 
-@router.delete("/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}", status_code=204)
+@router.delete(
+    "/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}", status_code=204
+)
 async def delete_deliverable(
-    org_id: str, project_id: str, deliverable_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    deliverable_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
@@ -235,10 +311,17 @@ async def delete_deliverable(
 # ── Submissions ──────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/projects/{project_id}/submissions", response_model=ListResponse[SubmissionResponse])
+@router.get(
+    "/orgs/{org_id}/projects/{project_id}/submissions",
+    response_model=ListResponse[SubmissionResponse],
+)
 async def list_submissions(
-    org_id: str, project_id: str, page: int = 1, per_page: int = 20,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    page: int = 1,
+    per_page: int = 20,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -247,14 +330,22 @@ async def list_submissions(
     submissions, total = await svc.list_submissions(project_id, uid, page, per_page)
     return ListResponse(
         data=[SubmissionResponse.model_validate(s) for s in submissions],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=(page * per_page) < total),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
+        ),
     )
 
 
-@router.post("/orgs/{org_id}/projects/{project_id}/submissions", response_model=DataResponse[SubmissionResponse], status_code=201)
+@router.post(
+    "/orgs/{org_id}/projects/{project_id}/submissions",
+    response_model=DataResponse[SubmissionResponse],
+    status_code=201,
+)
 async def create_submission(
-    org_id: str, project_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -264,10 +355,16 @@ async def create_submission(
     return DataResponse(data=SubmissionResponse.model_validate(sub))
 
 
-@router.get("/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}", response_model=DataResponse[SubmissionDetailResponse])
+@router.get(
+    "/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}",
+    response_model=DataResponse[SubmissionDetailResponse],
+)
 async def get_submission(
-    org_id: str, project_id: str, submission_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    submission_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -282,9 +379,12 @@ async def get_submission(
 
     from app.models.project import SubmissionItem, SubmissionReview
 
-    items_r = await db.execute(select(SubmissionItem).where(SubmissionItem.submission_id == submission_id))
+    items_r = await db.execute(
+        select(SubmissionItem).where(SubmissionItem.submission_id == submission_id)
+    )
     reviews_r = await db.execute(
-        select(SubmissionReview).where(SubmissionReview.submission_id == submission_id)
+        select(SubmissionReview)
+        .where(SubmissionReview.submission_id == submission_id)
         .order_by(SubmissionReview.created_at.desc())
     )
 
@@ -296,10 +396,17 @@ async def get_submission(
     return DataResponse(data=resp)
 
 
-@router.put("/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}", response_model=DataResponse[SubmissionResponse])
+@router.put(
+    "/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}",
+    response_model=DataResponse[SubmissionResponse],
+)
 async def update_submission(
-    org_id: str, project_id: str, submission_id: str, body: dict,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    submission_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update a draft submission (e.g. add text/link items)."""
     await require_org_member(org_id, user, db)
@@ -325,10 +432,16 @@ async def update_submission(
     return DataResponse(data=SubmissionResponse.model_validate(sub))
 
 
-@router.post("/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}/submit", response_model=DataResponse[SubmissionResponse])
+@router.post(
+    "/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}/submit",
+    response_model=DataResponse[SubmissionResponse],
+)
 async def submit_draft(
-    org_id: str, project_id: str, submission_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    submission_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -339,8 +452,11 @@ async def submit_draft(
 
 @router.delete("/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}", status_code=204)
 async def delete_submission(
-    org_id: str, project_id: str, submission_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    project_id: str,
+    submission_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -351,20 +467,30 @@ async def delete_submission(
 # ── Files ────────────────────────────────────────────────
 
 
-@router.post("/orgs/{org_id}/submissions/{submission_id}/files", response_model=DataResponse[FileResponse], status_code=201)
+@router.post(
+    "/orgs/{org_id}/submissions/{submission_id}/files",
+    response_model=DataResponse[FileResponse],
+    status_code=201,
+)
 async def upload_file(
-    org_id: str, submission_id: str,
+    org_id: str,
+    submission_id: str,
     deliverable_id: str = Form(...),
     file: UploadFile = File(...),
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
     await _verify_submission_org(svc, submission_id, org_id)
     content = await file.read()
     item = await svc.upload_file(
-        submission_id, deliverable_id, file.filename or "unnamed",
-        content, file.content_type or "application/octet-stream", user.id,
+        submission_id,
+        deliverable_id,
+        file.filename or "unnamed",
+        content,
+        file.content_type or "application/octet-stream",
+        user.id,
     )
     await db.commit()
     return DataResponse(data=FileResponse.model_validate(item))
@@ -372,8 +498,11 @@ async def upload_file(
 
 @router.get("/orgs/{org_id}/submissions/{submission_id}/files/{file_id}/download")
 async def download_file(
-    org_id: str, submission_id: str, file_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    submission_id: str,
+    file_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -387,8 +516,11 @@ async def download_file(
 
 @router.delete("/orgs/{org_id}/submissions/{submission_id}/files/{file_id}", status_code=204)
 async def delete_file(
-    org_id: str, submission_id: str, file_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    submission_id: str,
+    file_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -399,10 +531,15 @@ async def delete_file(
 # ── Reviews ──────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/submissions/{submission_id}/reviews", response_model=DataResponse[list[ReviewResponse]])
+@router.get(
+    "/orgs/{org_id}/submissions/{submission_id}/reviews",
+    response_model=DataResponse[list[ReviewResponse]],
+)
 async def list_reviews(
-    org_id: str, submission_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    submission_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
@@ -413,16 +550,28 @@ async def list_reviews(
     return DataResponse(data=[ReviewResponse.model_validate(r) for r in reviews])
 
 
-@router.post("/orgs/{org_id}/submissions/{submission_id}/reviews", response_model=DataResponse[ReviewResponse], status_code=201)
+@router.post(
+    "/orgs/{org_id}/submissions/{submission_id}/reviews",
+    response_model=DataResponse[ReviewResponse],
+    status_code=201,
+)
 async def create_review(
-    org_id: str, submission_id: str, body: CreateReviewRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    submission_id: str,
+    body: CreateReviewRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     await _verify_submission_org(svc, submission_id, org_id)
     review = await svc.create_review(
-        submission_id, user.id, body.status, body.score, body.score_breakdown, body.feedback,
+        submission_id,
+        user.id,
+        body.status,
+        body.score,
+        body.score_breakdown,
+        body.feedback,
     )
     await db.commit()
     return DataResponse(data=ReviewResponse.model_validate(review))
@@ -433,13 +582,18 @@ async def create_review(
 
 @router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[SubmissionResponse])
 async def pending_reviews(
-    org_id: str, page: int = 1, per_page: int = 20,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    page: int = 1,
+    per_page: int = 20,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     submissions, total = await svc.get_pending_reviews(org_id, page, per_page)
     return ListResponse(
         data=[SubmissionResponse.model_validate(s) for s in submissions],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=(page * per_page) < total),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
+        ),
     )

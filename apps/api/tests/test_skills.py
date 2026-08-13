@@ -25,7 +25,9 @@ async def test_list_skills_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_create_skill_requires_auth(client):
-    r = await client.post("/api/v1/orgs/fake/skills", json={"name": "X", "description": "Y", "category_id": "z"})
+    r = await client.post(
+        "/api/v1/orgs/fake/skills", json={"name": "X", "description": "Y", "category_id": "z"}
+    )
     assert r.status_code == 401
 
 

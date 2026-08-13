@@ -12,8 +12,13 @@ from app.models.user import User, UserRole, UserStatus
 
 
 async def _u(db):
-    u = User(email=f"al-{uuid.uuid4().hex[:8]}@test.com", password_hash=hash_password("Test123!"),
-             display_name="AbsLast", role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"al-{uuid.uuid4().hex[:8]}@test.com",
+        password_hash=hash_password("Test123!"),
+        display_name="AbsLast",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -22,6 +27,7 @@ async def _u(db):
 @pytest_asyncio.fixture
 async def db():
     from app.core.database import engine
+
     async with AsyncSessionLocal() as s:
         yield s
         await s.rollback()
@@ -43,6 +49,7 @@ def test_all_error_constructors():
         ProjectNotFoundError,
         SubmissionNotFoundError,
     )
+
     ProjectNotFoundError()
     DeliverableNotFoundError()
     SubmissionNotFoundError()
@@ -57,6 +64,7 @@ def test_all_error_constructors():
         EvalNotEnabledError,
         EvalTaskNotFoundError,
     )
+
     EvalTaskNotFoundError()
     BudgetExceededError()
     EvalNotEnabledError()
@@ -70,6 +78,7 @@ def test_all_error_constructors():
         OrgNotFoundError,
         SlugAlreadyExistsError,
     )
+
     OrgNotFoundError()
     SlugAlreadyExistsError()
     AlreadyMemberError()
@@ -83,6 +92,7 @@ def test_all_error_constructors():
         ProfileNotFoundError,
         UsernameUnavailableError,
     )
+
     ProfileNotFoundError()
     UsernameUnavailableError()
     ItemNotFoundError()
@@ -95,6 +105,7 @@ def test_all_error_constructors():
         SkillLockedError,
         SkillNotFoundError,
     )
+
     CategoryNotFoundError()
     SkillNotFoundError()
     ExerciseNotFoundError()
@@ -119,8 +130,20 @@ async def test_project_create_with_invalid_difficulty(db):
 
     svc = ProjectService(db)
     proj = await svc.create_project(
-        org.id, "PDProj", None, "D", "I", "invalid_diff", 100,
-        [{"criterion": "Q", "max_score": 100}], None, None, 0, 0, None, u.id,
+        org.id,
+        "PDProj",
+        None,
+        "D",
+        "I",
+        "invalid_diff",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        u.id,
     )
     assert proj.difficulty.value == "intermediate"
 
@@ -139,14 +162,27 @@ async def test_project_create_with_skills(db):
 
     skill_svc = SkillService(db)
     cat = await skill_svc.create_category(org.id, "PC", None, None, None, u.id)
-    skill = await skill_svc.create_skill(org.id, cat.id, "PSkill", None, "D", None, "beginner", None, None, None, u.id)
+    skill = await skill_svc.create_skill(
+        org.id, cat.id, "PSkill", None, "D", None, "beginner", None, None, None, u.id
+    )
     await db.flush()
 
     svc = ProjectService(db)
     proj = await svc.create_project(
-        org.id, "PSProj", None, "D", "I", "beginner", 100,
-        [{"criterion": "Q", "max_score": 100}], None, None, 0, 0,
-        [skill.id], u.id,  # Pass skill_ids
+        org.id,
+        "PSProj",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        [skill.id],
+        u.id,  # Pass skill_ids
     )
     sids = await svc.get_project_skill_ids(proj.id)
     assert skill.id in sids
@@ -180,8 +216,22 @@ async def test_project_update_difficulty(db):
     await db.flush()
 
     svc = ProjectService(db)
-    proj = await svc.create_project(org.id, "PUProj", None, "D", "I", "beginner", 100,
-                                     [{"criterion": "Q", "max_score": 100}], None, None, 0, 0, None, u.id)
+    proj = await svc.create_project(
+        org.id,
+        "PUProj",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        u.id,
+    )
     updated = await svc.update_project(proj.id, difficulty="expert")
     assert updated.difficulty.value == "expert"
 
@@ -196,6 +246,7 @@ async def test_eval_list_with_type_filter(db):
 
     u = await _u(db)
     from app.services.organization import OrgService
+
     org_svc = OrgService(db)
     org = await org_svc.create("ELOrg", None, None, u.id)
     await db.flush()
@@ -287,6 +338,7 @@ async def test_org_accept_invite_wrong_email(db):
     from sqlalchemy import select
 
     from app.models.organization import OrgInvitation
+
     result = await db.execute(select(OrgInvitation).where(OrgInvitation.email == u2.email))
     invite = result.scalar_one()
     raw = s.token_urlsafe(32)
@@ -310,6 +362,7 @@ async def test_portfolio_public_profile_private(db):
     svc = PortfolioService(db)
     profile = await svc.get_or_create_profile(u.id)
     from app.models.portfolio import ProfileVisibility
+
     profile.visibility = ProfileVisibility.PRIVATE
     await db.flush()
 
@@ -326,6 +379,7 @@ async def test_portfolio_public_items_private(db):
     svc = PortfolioService(db)
     profile = await svc.get_or_create_profile(u.id)
     from app.models.portfolio import ProfileVisibility
+
     profile.visibility = ProfileVisibility.PRIVATE
     await db.flush()
 
@@ -342,6 +396,7 @@ async def test_portfolio_public_item_private(db):
     svc = PortfolioService(db)
     profile = await svc.get_or_create_profile(u.id)
     from app.models.portfolio import ProfileVisibility
+
     profile.visibility = ProfileVisibility.PRIVATE
     await db.flush()
 
@@ -373,8 +428,22 @@ async def test_portfolio_create_from_submission_with_project(db):
     await db.flush()
 
     proj_svc = ProjectService(db)
-    proj = await proj_svc.create_project(org.id, "DenProj", None, "D", "I", "beginner", 100,
-                                          [{"criterion": "Q", "max_score": 100}], None, None, 0, 0, None, u.id)
+    proj = await proj_svc.create_project(
+        org.id,
+        "DenProj",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        u.id,
+    )
     sub = await proj_svc.create_submission(org.id, proj.id, u.id)
     await proj_svc.submit_draft(sub.id, u.id)
     await proj_svc.create_review(sub.id, u.id, "approved", 95, None, "Great")
@@ -382,7 +451,9 @@ async def test_portfolio_create_from_submission_with_project(db):
 
     port_svc = PortfolioService(db)
     await port_svc.get_or_create_profile(u.id)
-    item = await port_svc.create_item(u.id, "DenItem", "Desc", sub.id, None, None, None, "public", False)
+    item = await port_svc.create_item(
+        u.id, "DenItem", "Desc", sub.id, None, None, None, "public", False
+    )
     assert item.source_org_name is not None
     assert item.source_project == "DenProj"
     assert item.score == 95
@@ -403,11 +474,19 @@ async def test_portfolio_badge_visibility(db):
 
     svc_s = SkillService(db)
     cat = await svc_s.create_category(org.id, "BVC", None, None, None, u.id)
-    skill = await svc_s.create_skill(org.id, cat.id, "BVS", None, "D", None, "beginner", None, None, None, u.id)
+    skill = await svc_s.create_skill(
+        org.id, cat.id, "BVS", None, "D", None, "beginner", None, None, None, u.id
+    )
     await db.flush()
 
-    badge = SkillBadge(user_id=u.id, skill_id=skill.id, org_id=org.id,
-                        skill_name="BVS", category_name="BVC", completion_pct=80)
+    badge = SkillBadge(
+        user_id=u.id,
+        skill_id=skill.id,
+        org_id=org.id,
+        skill_name="BVS",
+        category_name="BVC",
+        completion_pct=80,
+    )
     db.add(badge)
     await db.flush()
 

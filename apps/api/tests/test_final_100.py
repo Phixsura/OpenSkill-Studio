@@ -23,8 +23,13 @@ def _e():
 
 
 async def _u(db, role=UserRole.STUDENT):
-    u = User(email=_e(), password_hash=hash_password("Test123!"),
-             display_name="Final100", role=role, status=UserStatus.ACTIVE)
+    u = User(
+        email=_e(),
+        password_hash=hash_password("Test123!"),
+        display_name="Final100",
+        role=role,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -33,6 +38,7 @@ async def _u(db, role=UserRole.STUDENT):
 @pytest_asyncio.fixture
 async def db():
     from app.core.database import engine
+
     async with AsyncSessionLocal() as s:
         yield s
         await s.rollback()
@@ -49,6 +55,7 @@ async def c():
     @asynccontextmanager
     async def noop(a):
         yield
+
     o = app.router.lifespan_context
     app.router.lifespan_context = noop
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -58,7 +65,10 @@ async def c():
 
 
 async def _auth(c):
-    r = await c.post("/api/v1/auth/register", json={"email": _e(), "password": "Test123!", "display_name": "F100"})
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={"email": _e(), "password": "Test123!", "display_name": "F100"},
+    )
     d = r.json()
     return {"Authorization": f"Bearer {d['access_token']}"}, d["user"]
 
@@ -90,7 +100,9 @@ async def test_deps_org_member_wrong_role(c):
 
     # Add second user as student
     h2, u2 = await _auth(c)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h
+    )
 
     # Student tries instructor-only action → 403
     r = await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Nope"}, headers=h2)
@@ -105,14 +117,17 @@ async def test_health_ready_db_error():
     """Cover lines 26-27: database check returns error."""
 
     with patch("app.api.v1.endpoints.health.get_db") as mock_get_db:
+
         async def bad_db():
             mock_session = AsyncMock()
             mock_session.execute = AsyncMock(side_effect=Exception("db down"))
             yield mock_session
+
         mock_get_db.return_value = bad_db()
 
         # Can't easily mock FastAPI Depends, use direct call instead
         from app.api.v1.endpoints.health import readiness
+
         mock_db = AsyncMock()
         mock_db.execute = AsyncMock(side_effect=Exception("db down"))
         result = await readiness(db=mock_db)
@@ -127,13 +142,13 @@ async def test_auth_logout_with_cookie(c):
     """Cover lines 165-167: logout processes cookie."""
     async with AsyncSessionLocal() as db:
         from app.services.auth import AuthService
+
         svc = AuthService(db)
         reg = await svc.register(_e(), "Valid123!", "LogC")
         await db.commit()
 
     h = {"Authorization": f"Bearer {reg.access_token}"}
-    r = await c.post("/api/v1/auth/logout", headers=h,
-                      cookies={"refresh_token": reg.refresh_token})
+    r = await c.post("/api/v1/auth/logout", headers=h, cookies={"refresh_token": reg.refresh_token})
     assert r.status_code == 204
 
 
@@ -151,6 +166,7 @@ async def test_auth_reset_password_endpoint_success(c):
     """Cover lines 243-244: successful password reset via endpoint."""
     async with AsyncSessionLocal() as db:
         from app.services.auth import AuthService
+
         svc = AuthService(db)
         email = _e()
         await svc.register(email, "Valid123!", "ResetE")
@@ -161,7 +177,10 @@ async def test_auth_reset_password_endpoint_success(c):
         from sqlalchemy import select
 
         from app.models.user import PasswordResetToken
-        result = await db.execute(select(PasswordResetToken).order_by(PasswordResetToken.created_at.desc()))
+
+        result = await db.execute(
+            select(PasswordResetToken).order_by(PasswordResetToken.created_at.desc())
+        )
         token_record = result.scalars().first()
         raw = secrets.token_urlsafe(32)
         token_record.token_hash = sha256(raw.encode()).hexdigest()
@@ -178,6 +197,7 @@ async def test_auth_verify_email_endpoint_success(c):
     """Cover lines 259-260: successful email verification redirect."""
     async with AsyncSessionLocal() as db:
         from app.services.auth import AuthService
+
         svc = AuthService(db)
         email = _e()
         await svc.register(email, "Valid123!", "VerE")
@@ -186,7 +206,10 @@ async def test_auth_verify_email_endpoint_success(c):
         from sqlalchemy import select
 
         from app.models.user import EmailVerificationToken
-        result = await db.execute(select(EmailVerificationToken).order_by(EmailVerificationToken.created_at.desc()))
+
+        result = await db.execute(
+            select(EmailVerificationToken).order_by(EmailVerificationToken.created_at.desc())
+        )
         token_record = result.scalars().first()
         raw = secrets.token_urlsafe(32)
         token_record.token_hash = sha256(raw.encode()).hexdigest()
@@ -210,9 +233,11 @@ async def test_eval_task_wrong_org(c):
 
     # Create task in org1
     from app.models.evaluation import EvalStatus, EvalType, EvaluationTask
+
     async with AsyncSessionLocal() as db:
-        task = EvaluationTask(org_id=oid1, type=EvalType.SUBMISSION_REVIEW,
-                              status=EvalStatus.PENDING, config={})
+        task = EvaluationTask(
+            org_id=oid1, type=EvalType.SUBMISSION_REVIEW, status=EvalStatus.PENDING, config={}
+        )
         db.add(task)
         await db.commit()
         await db.refresh(task)
@@ -238,9 +263,13 @@ async def test_org_update_member_invalid_role(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     h2, u2 = await _auth(c)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h
+    )
 
-    r = await c.put(f"/api/v1/orgs/{oid}/members/{u2['id']}", json={"role": "superadmin"}, headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/members/{u2['id']}", json={"role": "superadmin"}, headers=h
+    )
     assert r.status_code == 422
 
 
@@ -263,6 +292,7 @@ async def test_org_accept_invite_endpoint(c):
     # Create invite for u2's email
     from app.models.organization import OrgRole
     from app.services.organization import OrgService
+
     async with AsyncSessionLocal() as db:
         svc = OrgService(db)
         await svc.invite_members(oid, [u2["email"]], OrgRole.STUDENT, u2["id"])
@@ -271,6 +301,7 @@ async def test_org_accept_invite_endpoint(c):
         from sqlalchemy import select
 
         from app.models.organization import OrgInvitation
+
         result = await db.execute(select(OrgInvitation).where(OrgInvitation.email == u2["email"]))
         invite = result.scalar_one()
         raw = secrets.token_urlsafe(32)
@@ -294,22 +325,34 @@ async def test_portfolio_badge_toggle_endpoint(c):
     # Create a skill + badge via DB
     from app.models.portfolio import SkillBadge
     from app.services.skill import SkillService
+
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
+
         u_result = await db.execute(select(User).order_by(User.created_at.desc()).limit(1))
         user = u_result.scalar_one()
 
         svc = SkillService(db)
         cat = await svc.create_category(oid, "BC", None, None, None, user.id)
-        skill = await svc.create_skill(oid, cat.id, "BS", None, "D", None, "beginner", None, None, None, user.id)
-        badge = SkillBadge(user_id=user.id, skill_id=skill.id, org_id=oid,
-                           skill_name="BS", category_name="BC", completion_pct=100)
+        skill = await svc.create_skill(
+            oid, cat.id, "BS", None, "D", None, "beginner", None, None, None, user.id
+        )
+        badge = SkillBadge(
+            user_id=user.id,
+            skill_id=skill.id,
+            org_id=oid,
+            skill_name="BS",
+            category_name="BC",
+            completion_pct=100,
+        )
         db.add(badge)
         await db.commit()
         await db.refresh(badge)
         badge_id = badge.id
 
-    r = await c.put(f"/api/v1/portfolio/badges/{badge_id}", json={"show_on_profile": False}, headers=h)
+    r = await c.put(
+        f"/api/v1/portfolio/badges/{badge_id}", json={"show_on_profile": False}, headers=h
+    )
     assert r.status_code == 200
 
 
@@ -324,10 +367,16 @@ async def test_project_cross_org_checks(c):
     oid2 = await _org(c, h)
 
     # Create project in org1
-    r = await c.post(f"/api/v1/orgs/{oid1}/projects", json={
-        "title": "Cross", "description": "D", "instructions": "I",
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid1}/projects",
+        json={
+            "title": "Cross",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
     pid = r.json()["data"]["id"]
 
     # Try to get from org2 → 404 (line 39: _verify_project_org)
@@ -349,10 +398,16 @@ async def test_project_submission_access_denied(c):
     h1, u1 = await _auth(c)
     oid = await _org(c, h1)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "Access", "description": "D", "instructions": "I",
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h1)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Access",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h1,
+    )
     pid = r.json()["data"]["id"]
 
     r2 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h1)
@@ -361,7 +416,9 @@ async def test_project_submission_access_denied(c):
 
     # Add u2 as student
     h2, u2 = await _auth(c)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h1)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h1
+    )
 
     # Student tries to view owner's submission → 403 (line 278)
     r3 = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{subid}", headers=h2)
@@ -382,10 +439,16 @@ async def test_project_update_draft_wrong_owner(c):
     h1, _ = await _auth(c)
     oid = await _org(c, h1)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "UpdDr", "description": "D", "instructions": "I",
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h1)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "UpdDr",
+            "description": "D",
+            "instructions": "I",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h1,
+    )
     pid = r.json()["data"]["id"]
 
     r2 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h1)
@@ -395,8 +458,9 @@ async def test_project_update_draft_wrong_owner(c):
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{subid}/submit", headers=h1)
 
     # Try to update non-draft → 422 (line 311)
-    r3 = await c.put(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{subid}",
-                      json={"items": []}, headers=h1)
+    r3 = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{subid}", json={"items": []}, headers=h1
+    )
     assert r3.status_code == 422
 
 
@@ -413,14 +477,26 @@ async def test_skill_exercise_wrong_org(c):
     # Create exercise in org1
     r = await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "WO"}, headers=h)
     cid = r.json()["data"]["id"]
-    r2 = await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "category_id": cid, "name": "WOSkill", "description": "D",
-    }, headers=h)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid1}/skills",
+        json={
+            "category_id": cid,
+            "name": "WOSkill",
+            "description": "D",
+        },
+        headers=h,
+    )
     sid = r2.json()["data"]["id"]
-    r3 = await c.post(f"/api/v1/orgs/{oid1}/skills/{sid}/exercises", json={
-        "title": "WOEx", "description": "D", "type": "multiple_choice",
-        "config": {"correct": ["a"], "options": [{"id": "a", "text": "A"}]},
-    }, headers=h)
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid1}/skills/{sid}/exercises",
+        json={
+            "title": "WOEx",
+            "description": "D",
+            "type": "multiple_choice",
+            "config": {"correct": ["a"], "options": [{"id": "a", "text": "A"}]},
+        },
+        headers=h,
+    )
     eid = r3.json()["data"]["id"]
 
     # Try to update from org2 → 404 (lines 238-239)
@@ -440,9 +516,15 @@ async def test_skill_progress_null(c):
 
     r = await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "NP"}, headers=h)
     cid = r.json()["data"]["id"]
-    r2 = await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "category_id": cid, "name": "NoProgress", "description": "D",
-    }, headers=h)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={
+            "category_id": cid,
+            "name": "NoProgress",
+            "description": "D",
+        },
+        headers=h,
+    )
     sid = r2.json()["data"]["id"]
 
     r3 = await c.get(f"/api/v1/orgs/{oid}/progress/me/skills/{sid}", headers=h)
@@ -464,8 +546,11 @@ async def test_category_reorder_wrong_org(c):
     cid = r.json()["data"]["id"]
 
     # Reorder from org2 with org1's category → 404
-    r2 = await c.put(f"/api/v1/orgs/{oid2}/categories/reorder",
-                      json={"items": [{"id": cid, "sort_order": 0}]}, headers=h)
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid2}/categories/reorder",
+        json={"items": [{"id": cid, "sort_order": 0}]},
+        headers=h,
+    )
     assert r2.status_code == 404
 
 
@@ -485,10 +570,15 @@ async def test_lifespan_s3_error_dev():
         ms.database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/openskill"
 
         # S3 import will fail → caught as warning
-        with patch.dict("sys.modules", {"app.core.storage": MagicMock(
-            get_s3_client=MagicMock(side_effect=Exception("no s3")),
-            ensure_bucket=AsyncMock(),
-        )}):
+        with patch.dict(
+            "sys.modules",
+            {
+                "app.core.storage": MagicMock(
+                    get_s3_client=MagicMock(side_effect=Exception("no s3")),
+                    ensure_bucket=AsyncMock(),
+                )
+            },
+        ):
             try:
                 async with lifespan(app):
                     pass
@@ -553,9 +643,6 @@ async def test_auth_forgot_existing_tokens_cleared(db):
     await db.flush()
 
 
-
-
-
 @pytest.mark.asyncio
 async def test_auth_verify_already_used(db):
     """Cover line 318: verification token already used."""
@@ -597,9 +684,6 @@ async def test_auth_verify_expired(db):
 
     with pytest.raises(TokenInvalidError, match="expired"):
         await svc.verify_email(raw)
-
-
-
 
 
 @pytest.mark.asyncio
@@ -651,8 +735,9 @@ async def test_skill_invalid_difficulty(db):
 
     svc = SkillService(db)
     cat = await svc.create_category(org.id, "DC", None, None, None, u.id)
-    skill = await svc.create_skill(org.id, cat.id, "DSkill", None, "D", None,
-                                    "invalid_difficulty", None, None, None, u.id)
+    skill = await svc.create_skill(
+        org.id, cat.id, "DSkill", None, "D", None, "invalid_difficulty", None, None, None, u.id
+    )
     assert skill.difficulty.value == "beginner"
 
 
@@ -685,7 +770,9 @@ async def test_skill_update_difficulty(db):
 
     svc = SkillService(db)
     cat = await svc.create_category(org.id, "UC", None, None, None, u.id)
-    skill = await svc.create_skill(org.id, cat.id, "USkill", None, "D", None, "beginner", None, None, None, u.id)
+    skill = await svc.create_skill(
+        org.id, cat.id, "USkill", None, "D", None, "beginner", None, None, None, u.id
+    )
     updated = await svc.update_skill(skill.id, difficulty="advanced")
     assert updated.difficulty.value == "advanced"
 
@@ -704,7 +791,9 @@ async def test_skill_invalid_exercise_type(db):
 
     svc = SkillService(db)
     cat = await svc.create_category(org.id, "IC", None, None, None, u.id)
-    skill = await svc.create_skill(org.id, cat.id, "ISkill", None, "D", None, "beginner", None, None, None, u.id)
+    skill = await svc.create_skill(
+        org.id, cat.id, "ISkill", None, "D", None, "beginner", None, None, None, u.id
+    )
     await db.flush()
 
     with pytest.raises(AppError, match="Invalid type"):
@@ -724,9 +813,19 @@ async def test_skill_attempt_string_answer(db):
 
     svc = SkillService(db)
     cat = await svc.create_category(org.id, "SC", None, None, None, u.id)
-    skill = await svc.create_skill(org.id, cat.id, "SSkill", None, "D", None, "beginner", None, None, None, u.id)
-    ex = await svc.create_exercise(org.id, skill.id, "SEx", "D", "multiple_choice",
-                                    {"correct": ["a"], "options": [{"id": "a", "text": "A"}]}, 100, u.id)
+    skill = await svc.create_skill(
+        org.id, cat.id, "SSkill", None, "D", None, "beginner", None, None, None, u.id
+    )
+    ex = await svc.create_exercise(
+        org.id,
+        skill.id,
+        "SEx",
+        "D",
+        "multiple_choice",
+        {"correct": ["a"], "options": [{"id": "a", "text": "A"}]},
+        100,
+        u.id,
+    )
     await db.flush()
 
     # Send answer as string (not list)
@@ -757,9 +856,12 @@ async def test_skill_is_unlocked_with_incomplete_prereq(db):
 
     svc = SkillService(db)
     cat = await svc.create_category(org.id, "LC", None, None, None, u.id)
-    prereq = await svc.create_skill(org.id, cat.id, "PreReq", None, "D", None, "beginner", None, None, None, u.id)
-    advanced = await svc.create_skill(org.id, cat.id, "Advanced", None, "D", None, "advanced", None, None,
-                                       [prereq.id], u.id)
+    prereq = await svc.create_skill(
+        org.id, cat.id, "PreReq", None, "D", None, "beginner", None, None, None, u.id
+    )
+    advanced = await svc.create_skill(
+        org.id, cat.id, "Advanced", None, "D", None, "advanced", None, None, [prereq.id], u.id
+    )
     await db.flush()
 
     # prereq not completed → advanced should be locked

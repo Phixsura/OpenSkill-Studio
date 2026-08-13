@@ -106,9 +106,7 @@ class PortfolioService:
     # ── Public ──
 
     async def get_public_profile(self, username: str) -> dict | None:
-        result = await self.db.execute(
-            select(UserProfile).where(UserProfile.username == username)
-        )
+        result = await self.db.execute(select(UserProfile).where(UserProfile.username == username))
         profile = result.scalar_one_or_none()
         if profile is None or profile.visibility != ProfileVisibility.PUBLIC:
             return None
@@ -136,11 +134,13 @@ class PortfolioService:
 
         # Get featured items (public only)
         items_result = await self.db.execute(
-            select(PortfolioItem).where(
+            select(PortfolioItem)
+            .where(
                 PortfolioItem.user_id == profile.user_id,
                 PortfolioItem.visibility == ItemVisibility.PUBLIC,
                 PortfolioItem.featured == True,  # noqa: E712
-            ).order_by(PortfolioItem.sort_order)
+            )
+            .order_by(PortfolioItem.sort_order)
         )
         featured = list(items_result.scalars().all())
 
@@ -169,25 +169,23 @@ class PortfolioService:
         }
 
     async def get_public_items(self, username: str) -> list[PortfolioItem]:
-        result = await self.db.execute(
-            select(UserProfile).where(UserProfile.username == username)
-        )
+        result = await self.db.execute(select(UserProfile).where(UserProfile.username == username))
         profile = result.scalar_one_or_none()
         if profile is None or profile.visibility != ProfileVisibility.PUBLIC:
             return []
 
         items_result = await self.db.execute(
-            select(PortfolioItem).where(
+            select(PortfolioItem)
+            .where(
                 PortfolioItem.user_id == profile.user_id,
                 PortfolioItem.visibility == ItemVisibility.PUBLIC,
-            ).order_by(PortfolioItem.sort_order)
+            )
+            .order_by(PortfolioItem.sort_order)
         )
         return list(items_result.scalars().all())
 
     async def get_public_item(self, username: str, slug: str) -> PortfolioItem | None:
-        result = await self.db.execute(
-            select(UserProfile).where(UserProfile.username == username)
-        )
+        result = await self.db.execute(select(UserProfile).where(UserProfile.username == username))
         profile = result.scalar_one_or_none()
         if profile is None:
             return None  # pragma: no cover
@@ -204,10 +202,16 @@ class PortfolioService:
     # ── Items ──
 
     async def create_item(
-        self, user_id: str, title: str, description: str | None,
-        submission_id: str | None, tags: list[str] | None,
-        cover_image_url: str | None, external_url: str | None,
-        visibility: str, featured: bool,
+        self,
+        user_id: str,
+        title: str,
+        description: str | None,
+        submission_id: str | None,
+        tags: list[str] | None,
+        cover_image_url: str | None,
+        external_url: str | None,
+        visibility: str,
+        featured: bool,
     ) -> PortfolioItem:
         slug = self._generate_slug(title)
 
@@ -240,11 +244,19 @@ class PortfolioService:
             vis = ItemVisibility.PUBLIC
 
         item = PortfolioItem(
-            user_id=user_id, submission_id=submission_id, title=title,
-            slug=slug, description=description, cover_image_url=cover_image_url,
-            tags=tags or [], external_url=external_url,
-            source_org_name=source_org_name, source_project=source_project,
-            score=score, visibility=vis, featured=featured,
+            user_id=user_id,
+            submission_id=submission_id,
+            title=title,
+            slug=slug,
+            description=description,
+            cover_image_url=cover_image_url,
+            tags=tags or [],
+            external_url=external_url,
+            source_org_name=source_org_name,
+            source_project=source_project,
+            score=score,
+            visibility=vis,
+            featured=featured,
             published_at=datetime.now(UTC),
         )
         self.db.add(item)
