@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /u/
+Disallow: /dashboard/
+Disallow: /api/
+Sitemap: https://openskill.studio/sitemap.xml

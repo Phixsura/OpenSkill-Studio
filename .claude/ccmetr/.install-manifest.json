@@ -1,0 +1,39 @@
+{
+  "mode": "merge",
+  "target": "/Users/phj/Develop/OpenSkill-Studio/.claude",
+  "timestamp": "2026-08-13T03:54:33Z",
+  "added": [
+    "ccmetr/bin",
+    "skills/metr-bug",
+    "skills/metr-cancel",
+    "skills/metr-confusing",
+    "skills/metr-continue",
+    "skills/metr-ditch",
+    "skills/metr-finish",
+    "skills/metr-help",
+    "skills/metr-idea",
+    "skills/metr-list",
+    "skills/metr-note",
+    "skills/metr-temp",
+    "skills/metr-start",
+    "skills/metr-status"
+  ],
+  "settings_keys_merged": [
+    "hooks",
+    "statusLine",
+    "permissions"
+  ],
+  "permission_added": "Bash(.claude/ccmetr/bin/ccmetr *)",
+  "hook_command_substring": "/ccmetr/bin/",
+  "statusLine_was_set": true,
+  "prior_statusLine": {
+    "type": "command",
+    "command": "${CLAUDE_PROJECT_DIR}/.claude/ccmetr/bin/statusline",
+    "refreshInterval": 5,
+    "padding": 1
+  },
+  "schema_was_added": false,
+  "gitignore_created": false,
+  "gitignore_lines_appended": [],
+  "wrote_settings_local": true
+}
