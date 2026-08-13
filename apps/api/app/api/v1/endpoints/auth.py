@@ -25,7 +25,7 @@ COOKIE_OPTS = {
     "secure": settings.app_env != "development",
     "samesite": "lax",
     "max_age": settings.refresh_token_expire_days * 24 * 3600,
-    "path": "/api/v1/auth",
+    "path": "/",
 }
 
 
