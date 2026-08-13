@@ -25,7 +25,11 @@ def api(method, path, body=None, headers=None, expect=200):
     req = urllib.request.Request(url, data=data, headers=h, method=method)
     try:
         resp = urllib.request.urlopen(req)
-        result = json.loads(resp.read()) if resp.headers.get("content-type", "").startswith("application/json") else {}
+        result = (
+            json.loads(resp.read())
+            if resp.headers.get("content-type", "").startswith("application/json")
+            else {}
+        )
         if resp.status == expect:
             PASS += 1
             return result
@@ -45,9 +49,9 @@ def api(method, path, body=None, headers=None, expect=200):
 
 
 def section(name):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def check(label, condition):
@@ -73,7 +77,12 @@ check("redis ok", r.get("components", {}).get("redis") == "ok")
 # ════════════════════════════════════════════════════════
 section("2. Auth: Register + Login")
 email = "smoke-test@example.com"
-r = api("POST", "/auth/register", {"email": email, "password": "Smoke123!", "display_name": "Smoke Test"}, expect=201)
+r = api(
+    "POST",
+    "/auth/register",
+    {"email": email, "password": "Smoke123!", "display_name": "Smoke Test"},
+    expect=201,
+)
 if not r.get("access_token"):
     # Already exists, login instead
     r = api("POST", "/auth/login", {"email": email, "password": "Smoke123!"})
@@ -87,7 +96,12 @@ section("3. Auth: Me + Update + Sessions")
 r = api("GET", "/auth/me", headers=AUTH)
 check("/me returns user", r.get("data", {}).get("email") == email)
 
-r = api("PUT", "/auth/me", {"display_name": "Smoke Updated", "avatar_url": "https://img.com/a.jpg"}, headers=AUTH)
+r = api(
+    "PUT",
+    "/auth/me",
+    {"display_name": "Smoke Updated", "avatar_url": "https://img.com/a.jpg"},
+    headers=AUTH,
+)
 check("update display_name", r.get("data", {}).get("display_name") == "Smoke Updated")
 check("update avatar_url", r.get("data", {}).get("avatar_url") == "https://img.com/a.jpg")
 
@@ -128,7 +142,13 @@ r = api("GET", f"/orgs/{oid}/members", headers=AUTH)
 check("list members", r.get("meta", {}).get("total") == 1)
 
 # Invite link
-r = api("POST", f"/orgs/{oid}/invite-links", {"role": "student", "max_uses": 5}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/invite-links",
+    {"role": "student", "max_uses": 5},
+    headers=AUTH,
+    expect=201,
+)
 check("create invite link", bool(r.get("data", {}).get("code")))
 link_code = r.get("data", {}).get("code", "")
 
@@ -148,11 +168,21 @@ cid = r.get("data", {}).get("id", "")
 r = api("GET", f"/orgs/{oid}/categories", headers=AUTH)
 check("list categories", len(r.get("data", [])) >= 1)
 
-r = api("POST", f"/orgs/{oid}/skills", {
-    "category_id": cid, "name": "Prompt Engineering", "description": "Master prompts",
-    "learning_content": "# Prompting\n\nLearn to write effective prompts.",
-    "difficulty": "beginner", "tags": ["ai", "llm"], "estimated_minutes": 30,
-}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/skills",
+    {
+        "category_id": cid,
+        "name": "Prompt Engineering",
+        "description": "Master prompts",
+        "learning_content": "# Prompting\n\nLearn to write effective prompts.",
+        "difficulty": "beginner",
+        "tags": ["ai", "llm"],
+        "estimated_minutes": 30,
+    },
+    headers=AUTH,
+    expect=201,
+)
 check("create skill", r.get("data", {}).get("name") == "Prompt Engineering")
 sid = r.get("data", {}).get("id", "")
 
@@ -172,35 +202,67 @@ r = api("POST", f"/orgs/{oid}/skills/{sid}/unpublish", headers=AUTH)
 check("unpublish skill", r.get("data", {}).get("status") == "draft")
 
 # Exercise (MCQ)
-r = api("POST", f"/orgs/{oid}/skills/{sid}/exercises", {
-    "title": "MCQ: Prompting", "description": "Pick the best",
-    "type": "multiple_choice",
-    "config": {"correct": ["b"], "options": [
-        {"id": "a", "text": "Ignore context"}, {"id": "b", "text": "Provide examples"},
-    ], "explanation": "Few-shot prompting uses examples."},
-}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/skills/{sid}/exercises",
+    {
+        "title": "MCQ: Prompting",
+        "description": "Pick the best",
+        "type": "multiple_choice",
+        "config": {
+            "correct": ["b"],
+            "options": [
+                {"id": "a", "text": "Ignore context"},
+                {"id": "b", "text": "Provide examples"},
+            ],
+            "explanation": "Few-shot prompting uses examples.",
+        },
+    },
+    headers=AUTH,
+    expect=201,
+)
 check("create MCQ exercise", r.get("data", {}).get("type") == "multiple_choice")
 eid = r.get("data", {}).get("id", "")
 
 # Exercise (Text)
-r = api("POST", f"/orgs/{oid}/skills/{sid}/exercises", {
-    "title": "Text: Explain CoT", "description": "Write an explanation",
-    "type": "text_answer", "config": {},
-}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/skills/{sid}/exercises",
+    {
+        "title": "Text: Explain CoT",
+        "description": "Write an explanation",
+        "type": "text_answer",
+        "config": {},
+    },
+    headers=AUTH,
+    expect=201,
+)
 eid2 = r.get("data", {}).get("id", "")
 
 r = api("GET", f"/orgs/{oid}/skills/{sid}/exercises", headers=AUTH)
 check("list exercises", len(r.get("data", [])) >= 2)
 
 # Submit correct MCQ
-r = api("POST", f"/orgs/{oid}/exercises/{eid}/attempts", {"answer": {"selected": ["b"]}}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/exercises/{eid}/attempts",
+    {"answer": {"selected": ["b"]}},
+    headers=AUTH,
+    expect=201,
+)
 check("MCQ correct → auto-grade", r.get("data", {}).get("is_correct") is True)
 check("MCQ score=100", r.get("data", {}).get("score") == 100)
 check("MCQ graded_by=auto", r.get("data", {}).get("graded_by") == "auto")
 check("MCQ feedback", r.get("data", {}).get("feedback") is not None)
 
 # Submit wrong MCQ
-r = api("POST", f"/orgs/{oid}/exercises/{eid}/attempts", {"answer": {"selected": ["a"]}}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/exercises/{eid}/attempts",
+    {"answer": {"selected": ["a"]}},
+    headers=AUTH,
+    expect=201,
+)
 check("MCQ wrong → score=0", r.get("data", {}).get("score") == 0)
 check("MCQ wrong → is_correct=False", r.get("data", {}).get("is_correct") is False)
 
@@ -209,7 +271,13 @@ r = api("GET", f"/orgs/{oid}/exercises/{eid}/attempts", headers=AUTH)
 check("attempt history", len(r.get("data", [])) >= 2)
 
 # Submit text answer
-r = api("POST", f"/orgs/{oid}/exercises/{eid2}/attempts", {"answer": {"text": "Chain of thought means..."}}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/exercises/{eid2}/attempts",
+    {"answer": {"text": "Chain of thought means..."}},
+    headers=AUTH,
+    expect=201,
+)
 check("text answer submitted", r.get("data", {}).get("score") is None)
 aid = r.get("data", {}).get("id", "")
 
@@ -218,7 +286,12 @@ r = api("GET", f"/orgs/{oid}/grading/pending", headers=AUTH)
 check("pending grading list", len(r.get("data", [])) >= 1)
 
 # Manual grade
-r = api("POST", f"/orgs/{oid}/grading/attempts/{aid}", {"score": 85, "feedback": "Good explanation!"}, headers=AUTH)
+r = api(
+    "POST",
+    f"/orgs/{oid}/grading/attempts/{aid}",
+    {"score": 85, "feedback": "Good explanation!"},
+    headers=AUTH,
+)
 check("manual grade", r.get("data", {}).get("score") == 85)
 
 # Progress
@@ -230,16 +303,24 @@ check("skill progress", r.get("data") is not None)
 
 # ════════════════════════════════════════════════════════
 section("7. Projects + Submissions + Reviews")
-r = api("POST", f"/orgs/{oid}/projects", {
-    "title": "AI Chatbot", "description": "Build one",
-    "instructions": "## Task\nBuild a chatbot using the OpenAI API.",
-    "rubric": [
-        {"criterion": "Functionality", "max_score": 40},
-        {"criterion": "Code Quality", "max_score": 30},
-        {"criterion": "Innovation", "max_score": 30},
-    ],
-    "max_score": 100, "late_penalty_pct": 20,
-}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/projects",
+    {
+        "title": "AI Chatbot",
+        "description": "Build one",
+        "instructions": "## Task\nBuild a chatbot using the OpenAI API.",
+        "rubric": [
+            {"criterion": "Functionality", "max_score": 40},
+            {"criterion": "Code Quality", "max_score": 30},
+            {"criterion": "Innovation", "max_score": 30},
+        ],
+        "max_score": 100,
+        "late_penalty_pct": 20,
+    },
+    headers=AUTH,
+    expect=201,
+)
 check("create project", r.get("data", {}).get("title") == "AI Chatbot")
 pid = r.get("data", {}).get("id", "")
 
@@ -250,9 +331,17 @@ r = api("GET", f"/orgs/{oid}/projects/{pid}", headers=AUTH)
 check("project detail has rubric", len(r.get("data", {}).get("rubric", [])) == 3)
 
 # Deliverable
-r = api("POST", f"/orgs/{oid}/projects/{pid}/deliverables", {
-    "name": "Source Code", "type": "text", "required": False,
-}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/projects/{pid}/deliverables",
+    {
+        "name": "Source Code",
+        "type": "text",
+        "required": False,
+    },
+    headers=AUTH,
+    expect=201,
+)
 check("create deliverable", r.get("data", {}).get("name") == "Source Code")
 
 # Submission lifecycle
@@ -265,10 +354,18 @@ check("submit draft", r.get("data", {}).get("status") == "submitted")
 check("not late", r.get("data", {}).get("is_late") is False)
 
 # Review: approve
-r = api("POST", f"/orgs/{oid}/submissions/{subid}/reviews", {
-    "status": "approved", "score": 92, "feedback": "Excellent chatbot!",
-    "score_breakdown": {"Functionality": 38, "Code Quality": 28, "Innovation": 26},
-}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    f"/orgs/{oid}/submissions/{subid}/reviews",
+    {
+        "status": "approved",
+        "score": 92,
+        "feedback": "Excellent chatbot!",
+        "score_breakdown": {"Functionality": 38, "Code Quality": 28, "Innovation": 26},
+    },
+    headers=AUTH,
+    expect=201,
+)
 check("review approved", r.get("data", {}).get("status") == "approved")
 check("review score=92", r.get("data", {}).get("score") == 92)
 
@@ -294,9 +391,16 @@ section("8. AI Evaluation Settings")
 r = api("GET", f"/orgs/{oid}/settings/evaluation", headers=AUTH)
 check("eval settings default", r.get("enabled") is False)
 
-r = api("PUT", f"/orgs/{oid}/settings/evaluation", {
-    "enabled": True, "monthly_budget_usd": 50, "auto_evaluate": False,
-}, headers=AUTH)
+r = api(
+    "PUT",
+    f"/orgs/{oid}/settings/evaluation",
+    {
+        "enabled": True,
+        "monthly_budget_usd": 50,
+        "auto_evaluate": False,
+    },
+    headers=AUTH,
+)
 check("update eval settings", r.get("enabled") is True)
 
 r = api("GET", f"/orgs/{oid}/evaluation/usage", headers=AUTH)
@@ -311,17 +415,33 @@ r = api("GET", "/portfolio/profile", headers=AUTH)
 check("get profile", r.get("data", {}).get("username") is not None)
 username = r.get("data", {}).get("username", "")
 
-r = api("PUT", "/portfolio/profile", {
-    "headline": "AI Builder", "bio": "Building the future",
-    "location": "Beijing", "website_url": "https://example.com",
-    "social_links": {"github": "https://github.com/smoke"},
-}, headers=AUTH)
+r = api(
+    "PUT",
+    "/portfolio/profile",
+    {
+        "headline": "AI Builder",
+        "bio": "Building the future",
+        "location": "Beijing",
+        "website_url": "https://example.com",
+        "social_links": {"github": "https://github.com/smoke"},
+    },
+    headers=AUTH,
+)
 check("update profile", r.get("data", {}).get("headline") == "AI Builder")
 
-r = api("POST", "/portfolio/items", {
-    "title": "My Chatbot Project", "description": "Built with OpenAI",
-    "tags": ["ai", "chatbot"], "visibility": "public", "featured": True,
-}, headers=AUTH, expect=201)
+r = api(
+    "POST",
+    "/portfolio/items",
+    {
+        "title": "My Chatbot Project",
+        "description": "Built with OpenAI",
+        "tags": ["ai", "chatbot"],
+        "visibility": "public",
+        "featured": True,
+    },
+    headers=AUTH,
+    expect=201,
+)
 check("create portfolio item", r.get("data", {}).get("title") == "My Chatbot Project")
 iid = r.get("data", {}).get("id", "")
 
@@ -350,17 +470,24 @@ section("11. Error Handling")
 r = api("GET", "/auth/me", expect=401)
 check("401 on no auth", True)
 
-r = api("POST", "/auth/register", {"email": "bad", "password": "x", "display_name": "X"}, expect=422)
+r = api(
+    "POST", "/auth/register", {"email": "bad", "password": "x", "display_name": "X"}, expect=422
+)
 check("422 on validation", True)
 
 r = api("GET", f"/orgs/{oid}/skills/nonexistent", headers=AUTH, expect=404)
 check("404 on not found", True)
 
-r = api("POST", "/auth/register", {"email": email, "password": "Smoke123!", "display_name": "Dup"}, expect=409)
+r = api(
+    "POST",
+    "/auth/register",
+    {"email": email, "password": "Smoke123!", "display_name": "Dup"},
+    expect=409,
+)
 check("409 on duplicate", True)
 
 # ════════════════════════════════════════════════════════
-print(f"\n{'='*60}")
+print(f"\n{'=' * 60}")
 print(f"  RESULTS: {PASS} passed, {FAIL} failed")
-print(f"{'='*60}")
+print(f"{'=' * 60}")
 sys.exit(1 if FAIL > 0 else 0)
