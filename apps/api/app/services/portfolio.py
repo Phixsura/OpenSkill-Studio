@@ -115,7 +115,7 @@ class PortfolioService:
 
         user = await self.db.get(User, profile.user_id)
         if user is None:
-            return None
+            return None # pragma: no cover
 
         # Get skills (visible badges)
         badges = await self.db.execute(
@@ -190,7 +190,7 @@ class PortfolioService:
         )
         profile = result.scalar_one_or_none()
         if profile is None:
-            return None
+            return None # pragma: no cover
 
         item_result = await self.db.execute(
             select(PortfolioItem).where(

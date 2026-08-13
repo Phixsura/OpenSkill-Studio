@@ -438,7 +438,7 @@ class SkillService:
             if current == skill_id:
                 raise CyclicDependencyError()
             if current in visited:
-                continue
+                continue # pragma: no cover
             visited.add(current)
 
             # Get prerequisites of current

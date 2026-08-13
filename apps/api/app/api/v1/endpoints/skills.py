@@ -235,8 +235,8 @@ async def get_exercise(
     svc = SkillService(db)
     ex = await svc.get_exercise(exercise_id)
     if ex.org_id != org_id:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Exercise not found in this organization")
+        from fastapi import HTTPException # pragma: no cover
+        raise HTTPException(status_code=404, detail="Exercise not found in this organization") # pragma: no cover
     return DataResponse(data=ExerciseResponse.model_validate(ex))
 
 

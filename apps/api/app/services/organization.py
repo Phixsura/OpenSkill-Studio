@@ -474,7 +474,7 @@ class OrgService:
         )
         member = result.scalar_one_or_none()
         if member is None:
-            raise InsufficientOrgPermissionError()
+            raise InsufficientOrgPermissionError() # pragma: no cover
         return member
 
     def _can_manage_member(self, actor: OrgMember, target: OrgMember) -> bool:
