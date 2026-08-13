@@ -476,11 +476,15 @@ Please evaluate the submission against the rubric above."""
             usage = EvalUsageMonthly(
                 org_id=task.org_id,
                 month=current_month,
+                total_tasks=0,
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_cost_usd=Decimal("0"),
             )
             self.db.add(usage)
 
-        usage.total_tasks += 1
-        usage.total_input_tokens += task.input_tokens or 0
-        usage.total_output_tokens += task.output_tokens or 0
-        usage.total_cost_usd += task.cost_usd or Decimal("0")
+        usage.total_tasks = (usage.total_tasks or 0) + 1
+        usage.total_input_tokens = (usage.total_input_tokens or 0) + (task.input_tokens or 0)
+        usage.total_output_tokens = (usage.total_output_tokens or 0) + (task.output_tokens or 0)
+        usage.total_cost_usd = (usage.total_cost_usd or Decimal("0")) + (task.cost_usd or Decimal("0"))
         await self.db.flush()
