@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -69,6 +69,9 @@ async def reorder_categories(
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
     for item in body.items:
+        cat = await svc.get_category(item.id)
+        if cat.org_id != org_id:
+            raise HTTPException(status_code=404, detail="Category not in this org")
         await svc.update_category(item.id, sort_order=item.sort_order)
     await db.commit()
     return {"message": "Categories reordered"}
