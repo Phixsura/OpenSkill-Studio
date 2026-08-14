@@ -382,6 +382,9 @@ async def delete_exercise(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    ex = await svc.get_exercise(exercise_id)
+    if ex.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Exercise not found")
     await svc.delete_exercise(exercise_id)
     await db.commit()
 

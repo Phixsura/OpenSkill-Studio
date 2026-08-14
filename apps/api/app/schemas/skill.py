@@ -132,7 +132,7 @@ class CreateExerciseRequest(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"multiple_choice", "text_answer", "code_answer"}
+        allowed = {"multiple_choice", "text_answer", "code_submission"}
         if v not in allowed:
             raise ValueError(f"Exercise type must be one of: {', '.join(sorted(allowed))}")
         return v
