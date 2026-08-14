@@ -47,6 +47,19 @@ class CreateProjectRequest(BaseModel):
     def validate_rubric(cls, v: list) -> list:
         if not v:
             raise ValueError("Rubric must have at least one criterion")
+        if len(v) > 20:
+            raise ValueError("Rubric must have at most 20 criteria")
+        for item in v:
+            if not isinstance(item, dict):
+                raise ValueError("Each rubric item must be an object")
+            if "criterion" not in item:
+                raise ValueError("Each rubric item must have a 'criterion' key")
+            if "max_score" not in item:
+                raise ValueError("Each rubric item must have a 'max_score' key")
+            if not isinstance(item.get("criterion"), str) or len(item["criterion"]) > 200:
+                raise ValueError("Criterion name must be a string of 200 chars or less")
+            if not isinstance(item.get("max_score"), (int, float)) or item["max_score"] < 0:
+                raise ValueError("Criterion max_score must be a non-negative number")
         return v
 
     @field_validator("slug")
