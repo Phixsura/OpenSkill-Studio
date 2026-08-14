@@ -196,7 +196,8 @@ async def upload_cover_image(
     from app.core.storage import get_s3_client
 
     # Validate content type
-    allowed_types = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+    # SVG excluded — can contain <script> tags (XSS vector)
+    allowed_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
     if file.content_type not in allowed_types:
         raise HTTPException(
             status_code=422, detail=f"File type must be one of: {', '.join(sorted(allowed_types))}"
