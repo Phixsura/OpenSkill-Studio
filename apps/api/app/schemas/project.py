@@ -41,6 +41,27 @@ class CreateProjectRequest(BaseModel):
             raise ValueError("Rubric must have at least one criterion")
         return v
 
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 200:
+            raise ValueError("slug must not exceed 200 characters")
+        return v
+
+    @field_validator("late_penalty_pct")
+    @classmethod
+    def validate_late_penalty_pct(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100):
+            raise ValueError("late_penalty_pct must be between 0 and 100")
+        return v
+
+    @field_validator("max_submissions")
+    @classmethod
+    def validate_max_submissions(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 1000):
+            raise ValueError("max_submissions must be between 0 and 1000")
+        return v
+
 
 class UpdateProjectRequest(BaseModel):
     title: str | None = None
@@ -64,6 +85,27 @@ class UpdateProjectRequest(BaseModel):
         return v
 
     max_submissions: int | None = None
+
+    @field_validator("max_score")
+    @classmethod
+    def validate_max_score(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 10000):
+            raise ValueError("max_score must be between 0 and 10000")
+        return v
+
+    @field_validator("late_penalty_pct")
+    @classmethod
+    def validate_late_penalty_pct(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100):
+            raise ValueError("late_penalty_pct must be between 0 and 100")
+        return v
+
+    @field_validator("max_submissions")
+    @classmethod
+    def validate_max_submissions(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 1000):
+            raise ValueError("max_submissions must be between 0 and 1000")
+        return v
 
 
 class ProjectResponse(BaseModel):
@@ -217,8 +259,20 @@ class CreateReviewRequest(BaseModel):
             raise ValueError(f"Status must be one of: {', '.join(valid)}")
         return v
 
+    # ── Extension ────────────────────────────────────────────
+    @field_validator("feedback")
+    @classmethod
+    def validate_feedback(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("feedback must not exceed 10000 characters")
+        return v
 
-# ── Extension ────────────────────────────────────────────
+    @field_validator("score")
+    @classmethod
+    def validate_score(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 10000):
+            raise ValueError("score must be between 0 and 10000")
+        return v
 
 
 class GrantExtensionRequest(BaseModel):

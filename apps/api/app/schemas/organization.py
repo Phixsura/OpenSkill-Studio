@@ -18,6 +18,13 @@ class CreateOrgRequest(BaseModel):
             raise ValueError("Organization name must not exceed 100 characters")
         return v
 
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 200:
+            raise ValueError("slug must not exceed 200 characters")
+        return v
+
 
 class UpdateOrgRequest(BaseModel):
     name: str | None = None
@@ -115,6 +122,20 @@ class CreateInviteLinkRequest(BaseModel):
     role: str = "student"
     max_uses: int | None = None
     expires_in_days: int | None = None
+
+    @field_validator("max_uses")
+    @classmethod
+    def validate_max_uses(cls, v):
+        if v is not None and isinstance(v, int) and (v < 1 or v > 10000):
+            raise ValueError("max_uses must be between 1 and 10000")
+        return v
+
+    @field_validator("expires_in_days")
+    @classmethod
+    def validate_expires_in_days(cls, v):
+        if v is not None and isinstance(v, int) and (v < 1 or v > 365):
+            raise ValueError("expires_in_days must be between 1 and 365")
+        return v
 
 
 class InviteLinkResponse(BaseModel):

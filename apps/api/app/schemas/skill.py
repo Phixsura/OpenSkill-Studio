@@ -19,6 +19,13 @@ class CreateCategoryRequest(BaseModel):
             raise ValueError("Name must be 2-100 characters")
         return v
 
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 200:
+            raise ValueError("slug must not exceed 200 characters")
+        return v
+
 
 class UpdateCategoryRequest(BaseModel):
     name: str | None = None
@@ -105,6 +112,20 @@ class CreateSkillRequest(BaseModel):
             raise ValueError("Name must be 2-200 characters")
         return v
 
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 200:
+            raise ValueError("slug must not exceed 200 characters")
+        return v
+
+    @field_validator("estimated_minutes")
+    @classmethod
+    def validate_estimated_minutes(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 9999):
+            raise ValueError("estimated_minutes must be between 0 and 9999")
+        return v
+
 
 class UpdateSkillRequest(BaseModel):
     category_id: str | None = None
@@ -130,6 +151,13 @@ class UpdateSkillRequest(BaseModel):
     def validate_description(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 10000:
             raise ValueError("Description must be 10,000 characters or less")
+        return v
+
+    @field_validator("estimated_minutes")
+    @classmethod
+    def validate_estimated_minutes(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 9999):
+            raise ValueError("estimated_minutes must be between 0 and 9999")
         return v
 
 
@@ -209,6 +237,13 @@ class UpdateExerciseRequest(BaseModel):
     def validate_description(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 2000:
             raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("max_score")
+    @classmethod
+    def validate_max_score(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 10000):
+            raise ValueError("max_score must be between 0 and 10000")
         return v
 
 
