@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
+  output: "standalone",
   // Dev proxy: /api/* → FastAPI, eliminates CORS issues
   async rewrites() {
     return [
@@ -23,6 +24,10 @@ const config: NextConfig = {
           {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=()",
+          },
+          {
+            key: "X-XSS-Protection",
+            value: "0",
           },
         ],
       },

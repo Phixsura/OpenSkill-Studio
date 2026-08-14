@@ -11,4 +11,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # X-XSS-Protection set to 0 — the auditor is deprecated and can itself
         # introduce vulnerabilities. CSP is the correct replacement.
         response.headers["X-XSS-Protection"] = "0"
+        # Content-Security-Policy: restrict script/style sources
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
         return response
