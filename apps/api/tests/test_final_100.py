@@ -148,7 +148,8 @@ async def test_auth_logout_with_cookie(c):
         await db.commit()
 
     h = {"Authorization": f"Bearer {reg.access_token}"}
-    r = await c.post("/api/v1/auth/logout", headers=h, cookies={"refresh_token": reg.refresh_token})
+    c.cookies.set("refresh_token", reg.refresh_token)
+    r = await c.post("/api/v1/auth/logout", headers=h)
     assert r.status_code == 204
 
 

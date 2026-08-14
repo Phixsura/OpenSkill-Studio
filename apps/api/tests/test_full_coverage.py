@@ -142,7 +142,8 @@ async def test_auth_refresh(c):
     )
     # The refresh token is in a cookie; httpx tracks cookies
     cookies = r.cookies
-    r2 = await c.post("/api/v1/auth/refresh", cookies=cookies)
+    c.cookies.update(cookies)
+    r2 = await c.post("/api/v1/auth/refresh")
     # May succeed or fail depending on cookie path matching
     assert r2.status_code in (200, 401)
 

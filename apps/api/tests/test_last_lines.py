@@ -267,7 +267,8 @@ async def test_auth_refresh_via_cookie(c):
         svc = AuthService(db)
         reg = await svc.register(_e(), "Valid123!", "RefC")
         await db.commit()
-    r = await c.post("/api/v1/auth/refresh", cookies={"refresh_token": reg.refresh_token})
+    c.cookies.set("refresh_token", reg.refresh_token)
+    r = await c.post("/api/v1/auth/refresh")
     assert r.status_code == 200
 
 

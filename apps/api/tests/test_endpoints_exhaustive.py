@@ -122,7 +122,8 @@ async def test_auth_refresh_handler(c):
         reg = await svc.register(e, "Valid123!", "Refresh")
         await db.commit()
         # Use the raw refresh token as cookie
-        r = await c.post("/api/v1/auth/refresh", cookies={"refresh_token": reg.refresh_token})
+        c.cookies.set("refresh_token", reg.refresh_token)
+        r = await c.post("/api/v1/auth/refresh")
         assert r.status_code == 200
         assert "access_token" in r.json()
 
