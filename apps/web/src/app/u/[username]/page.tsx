@@ -80,7 +80,7 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
           {profile.headline && <p className="text-lg text-[hsl(var(--muted-foreground))]">{profile.headline}</p>}
           {profile.location && <p className="text-sm text-[hsl(var(--muted-foreground))]">{profile.location}</p>}
           <div className="mt-2 flex gap-3">
-            {Object.entries(profile.social_links)
+            {Object.entries(profile.social_links || {})
               .filter(([, url]) => typeof url === "string" && /^https?:\/\//i.test(url))
               .map(([platform, url]) => (
               <a key={platform} href={url} target="_blank" rel="noopener noreferrer"
@@ -90,11 +90,11 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
         </div>
       </div>
 
-      {profile.skills.length > 0 && (
+      {(profile.skills ?? []).length > 0 && (
         <section className="mt-8">
           <h2 className="text-lg font-semibold mb-3">Skills</h2>
           <div className="flex flex-wrap gap-2">
-            {profile.skills.map((s) => (
+            {(profile.skills ?? []).map((s) => (
               <span key={s.name} className={`rounded-full px-3 py-1 text-sm font-medium ${
                 s.completed ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                   : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"}`}>
@@ -105,11 +105,11 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
         </section>
       )}
 
-      {profile.featured_items.length > 0 && (
+      {(profile.featured_items ?? []).length > 0 && (
         <section className="mt-8">
           <h2 className="text-lg font-semibold mb-3">Featured Projects</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {profile.featured_items.map((item) => (
+            {(profile.featured_items ?? []).map((item) => (
               <a key={item.slug} href={`/u/${profile.username}/${item.slug}`}
                 className="group block overflow-hidden rounded-lg border transition-shadow hover:shadow-md">
                 <div className="aspect-video w-full bg-[hsl(var(--secondary))] flex items-center justify-center">

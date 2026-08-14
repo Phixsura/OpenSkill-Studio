@@ -469,7 +469,7 @@ Please evaluate the submission against the rubric above."""
             clamped = max(0, min(score_item.get("score", 0), max_s))
             scores.append(
                 {
-                    "criterion": score_item["criterion"],
+                    "criterion": score_item.get("criterion", "Unknown"),
                     "score": clamped,
                     "max_score": max_s,
                     "feedback": score_item.get("feedback", ""),

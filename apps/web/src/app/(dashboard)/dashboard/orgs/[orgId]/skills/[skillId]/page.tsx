@@ -121,11 +121,11 @@ export default function SkillDetailPage() {
           </dl>
         </div>
 
-        {skill.prerequisites.length > 0 && (
+        {(skill.prerequisites ?? []).length > 0 && (
           <div className="rounded-lg border p-4">
             <h3 className="text-sm font-semibold">Prerequisites</h3>
             <ul className="mt-2 space-y-1">
-              {skill.prerequisites.map((p) => (
+              {(skill.prerequisites ?? []).map((p) => (
                 <li key={p.id}>
                   <Link
                     href={`/dashboard/orgs/${orgId}/skills/${p.id}`}
@@ -139,11 +139,11 @@ export default function SkillDetailPage() {
           </div>
         )}
 
-        {skill.tags.length > 0 && (
+        {(skill.tags ?? []).length > 0 && (
           <div className="rounded-lg border p-4">
             <h3 className="text-sm font-semibold">Tags</h3>
             <div className="mt-2 flex flex-wrap gap-1">
-              {skill.tags.map((tag) => (
+              {(skill.tags ?? []).map((tag) => (
                 <span
                   key={tag}
                   className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs"
