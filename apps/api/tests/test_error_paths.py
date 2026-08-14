@@ -103,7 +103,7 @@ async def test_verify_email_bad_token(c):
 async def test_org_not_found(c):
     h, _ = await _auth(c)
     r = await c.get("/api/v1/orgs/nonexistent", headers=h)
-    assert r.status_code == 403  # Not a member
+    assert r.status_code == 404  # Org not found
 
 
 @pytest.mark.asyncio

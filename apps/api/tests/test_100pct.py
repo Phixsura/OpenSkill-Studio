@@ -594,7 +594,7 @@ async def test_deps_require_org_member_not_member(db):
     u = await _u(db)
     with pytest.raises(HTTPException) as exc_info:
         await require_org_member("nonexistent-org", u, db)
-    assert exc_info.value.status_code == 403
+    assert exc_info.value.status_code == 404  # Org not found (checked before membership)
 
 
 # ═══════ Exceptions: unhandled handler ═══════
