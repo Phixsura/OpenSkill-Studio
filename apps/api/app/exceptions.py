@@ -49,6 +49,23 @@ def register_exception_handlers(app: FastAPI) -> None:
             content={"error": {"code": "HTTP_ERROR", "message": exc.detail}},
         )
 
+    @app.exception_handler(ValueError)
+    async def value_error_handler(request: Request, exc: ValueError):
+        """Catch DB-level value errors (e.g. null bytes, integer overflow)."""
+        msg = str(exc)
+        if "null" in msg.lower() or "overflow" in msg.lower() or "out of range" in msg.lower():
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": {
+                        "code": "INVALID_VALUE",
+                        "message": "Request contains invalid characters or values",
+                    }
+                },
+            )
+        # Re-raise others to the generic handler
+        raise exc
+
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
         log.error(

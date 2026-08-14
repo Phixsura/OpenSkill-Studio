@@ -167,6 +167,13 @@ class CreateExerciseRequest(BaseModel):
     config: dict
     max_score: int = 100
 
+    @field_validator("max_score")
+    @classmethod
+    def validate_max_score(cls, v: int) -> int:
+        if v < 0 or v > 10000:
+            raise ValueError("Max score must be between 0 and 10,000")
+        return v
+
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
