@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,8 +21,12 @@ export default function CreateOrgPage() {
     .replace(/^-|-$/g, "")
     .slice(0, 100);
 
+  const submitting = useRef(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
     setError(null);
     setLoading(true);
 
@@ -40,6 +44,7 @@ export default function CreateOrgPage() {
       setError(err instanceof ApiError ? err.message : "Failed to create organization.");
     } finally {
       setLoading(false);
+      submitting.current = false;
     }
   };
 

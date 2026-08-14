@@ -24,6 +24,14 @@ export default function DashboardLayout({
 
   useEffect(() => setMounted(true), []);
 
+  // Redirect to login if auth state is cleared (e.g. bfcache after logout)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  useEffect(() => {
+    if (mounted && !isAuthenticated) {
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+    }
+  }, [mounted, isAuthenticated, router, pathname]);
+
   const handleLogout = async () => {
     try {
       const token = useAuthStore.getState().accessToken;
