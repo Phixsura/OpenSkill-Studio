@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "http://localhost:8000";
@@ -60,7 +62,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ use
       </div>
       {item.description && (
         <div className="prose prose-sm mt-6 max-w-none dark:prose-invert">
-          <p>{item.description}</p>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.description}</ReactMarkdown>
         </div>
       )}
       {item.external_url && (
