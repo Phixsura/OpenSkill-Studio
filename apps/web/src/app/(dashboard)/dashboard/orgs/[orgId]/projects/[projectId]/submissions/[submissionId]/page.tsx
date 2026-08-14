@@ -52,7 +52,7 @@ export default function SubmissionDetailPage() {
       <div>
         <h2 className="text-lg font-semibold">Deliverables</h2>
         <div className="mt-3 space-y-2">
-          {sub.items.map((item) => (
+          {(sub.items ?? []).map((item) => (
             <div key={item.id} className="rounded-lg border p-3 text-sm">
               {item.type === "file" && (
                 <span>📎 {item.file_name}</span>
@@ -62,7 +62,7 @@ export default function SubmissionDetailPage() {
               )}
             </div>
           ))}
-          {sub.items.length === 0 && (
+          {(sub.items ?? []).length === 0 && (
             <p className="text-sm text-[hsl(var(--muted-foreground))]">No items uploaded.</p>
           )}
         </div>
@@ -72,7 +72,7 @@ export default function SubmissionDetailPage() {
       <div>
         <h2 className="text-lg font-semibold">Reviews</h2>
         <div className="mt-3 space-y-3">
-          {sub.reviews.map((r) => (
+          {(sub.reviews ?? []).map((r) => (
             <div key={r.id} className="rounded-lg border p-4">
               <div className="flex items-center justify-between text-sm">
                 <span>
@@ -91,7 +91,7 @@ export default function SubmissionDetailPage() {
               </p>
             </div>
           ))}
-          {sub.reviews.length === 0 && (
+          {(sub.reviews ?? []).length === 0 && (
             <p className="text-sm text-[hsl(var(--muted-foreground))]">No reviews yet.</p>
           )}
         </div>

@@ -109,9 +109,9 @@ export default function SkillsListPage() {
             <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))] line-clamp-2">
               {skill.description}
             </p>
-            {skill.tags.length > 0 && (
+            {(skill.tags ?? []).length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1">
-                {skill.tags.map((tag) => (
+                {(skill.tags ?? []).map((tag) => (
                   <span
                     key={tag}
                     className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs"

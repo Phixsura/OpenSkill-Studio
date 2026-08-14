@@ -74,7 +74,7 @@ export default function ReviewDetailPage() {
       <div>
         <h2 className="text-lg font-semibold">Deliverables</h2>
         <div className="mt-3 space-y-2">
-          {sub.items.map((item) => (
+          {(sub.items ?? []).map((item) => (
             <div key={item.id} className="rounded-lg border p-3 text-sm">
               {item.type === "file" ? `📎 ${item.file_name}` : item.content}
             </div>
@@ -135,11 +135,11 @@ export default function ReviewDetailPage() {
       </div>
 
       {/* Previous reviews */}
-      {sub.reviews.length > 0 && (
+      {(sub.reviews ?? []).length > 0 && (
         <div>
           <h2 className="text-lg font-semibold">Previous Reviews</h2>
           <div className="mt-3 space-y-3">
-            {sub.reviews.map((r) => (
+            {(sub.reviews ?? []).map((r) => (
               <div key={r.id} className="rounded-lg border p-4 text-sm">
                 <div className="flex justify-between">
                   <span className="capitalize">{r.status.replace("_", " ")}</span>

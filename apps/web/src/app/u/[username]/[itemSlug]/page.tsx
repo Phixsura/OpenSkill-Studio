@@ -56,7 +56,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ use
         <p className="mt-2 text-lg font-bold">⭐ {item.score}/100</p>
       )}
       <div className="mt-4 flex flex-wrap gap-2">
-        {item.tags.map((tag) => (
+        {(item.tags ?? []).map((tag) => (
           <span key={tag} className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1 text-sm">{tag}</span>
         ))}
       </div>

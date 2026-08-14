@@ -121,7 +121,7 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
                     <span className="text-sm text-[hsl(var(--muted-foreground))]">⭐ {item.score}/100</span>
                   )}
                   <div className="mt-2 flex flex-wrap gap-1">
-                    {item.tags.map((tag) => (
+                    {(item.tags ?? []).map((tag) => (
                       <span key={tag} className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">{tag}</span>
                     ))}
                   </div>

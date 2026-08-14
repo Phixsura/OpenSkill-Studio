@@ -75,7 +75,7 @@ export default function ProjectDetailPage() {
         <div>
           <h2 className="text-xl font-semibold">Deliverables</h2>
           <div className="mt-3 space-y-2">
-            {project.deliverables.map((d) => (
+            {(project.deliverables ?? []).map((d) => (
               <div key={d.id} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
                 <span className="capitalize text-[hsl(var(--muted-foreground))]">{d.type}</span>
                 <span className="font-medium">{d.name}</span>
@@ -97,7 +97,7 @@ export default function ProjectDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {project.rubric.map((r, i) => (
+                {(project.rubric ?? []).map((r, i) => (
                   <tr key={i} className="border-t">
                     <td className="px-4 py-2">{r.criterion}</td>
                     <td className="px-4 py-2 text-right">{r.max_score}</td>
