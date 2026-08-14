@@ -7,8 +7,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Application
     app_env: str = "development"
-    debug: bool = True
-    log_level: str = "DEBUG"
+    debug: bool = False  # Override via DEBUG=true env var
+    log_level: str = "INFO"
     log_format: str = "console"  # console | json
 
     # Database
@@ -56,6 +56,18 @@ class Settings(BaseSettings):
     def parse_cors(cls, v: object) -> object:
         if isinstance(v, str):
             return json.loads(v)
+        return v
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        import os
+
+        if (
+            os.environ.get("APP_ENV") not in ("development", "test", None)
+            and v == "dev-secret-change-me-in-production"
+        ):
+            raise ValueError("JWT_SECRET must be set to a unique value in production")
         return v
 
     model_config = {

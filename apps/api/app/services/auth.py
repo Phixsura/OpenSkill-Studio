@@ -85,6 +85,8 @@ class AuthService:
         ip_address: str | None = None,
         device_info: str | None = None,
     ) -> AuthResult:
+        email = email.strip().lower()
+
         # Check uniqueness
         existing = await self.db.execute(select(User).where(User.email == email))
         if existing.scalar_one_or_none() is not None:
@@ -117,6 +119,7 @@ class AuthService:
         ip_address: str | None = None,
         device_info: str | None = None,
     ) -> AuthResult:
+        email = email.strip().lower()
         stmt_result = await self.db.execute(select(User).where(User.email == email))
         user = stmt_result.scalar_one_or_none()
 
@@ -224,6 +227,7 @@ class AuthService:
 
     async def forgot_password(self, email: str) -> None:
         """Generate a reset token and send email. Always succeeds (no user enumeration)."""
+        email = email.strip().lower()
         stmt_result = await self.db.execute(select(User).where(User.email == email))
         user = stmt_result.scalar_one_or_none()
 

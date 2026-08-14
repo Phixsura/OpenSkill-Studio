@@ -8,5 +8,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # X-XSS-Protection set to 0 — the auditor is deprecated and can itself
+        # introduce vulnerabilities. CSP is the correct replacement.
+        response.headers["X-XSS-Protection"] = "0"
         return response
