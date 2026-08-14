@@ -447,8 +447,13 @@ Please evaluate the submission against the rubric above."""
         total = 0
         max_total = 0
         for score_item in data.get("scores", []):
+            score_criterion = (score_item.get("criterion") or "").strip().lower()
             rubric_item = next(
-                (r for r in rubric if r.get("criterion") == score_item.get("criterion")),
+                (
+                    r
+                    for r in rubric
+                    if (r.get("criterion") or "").strip().lower() == score_criterion
+                ),
                 None,
             )
             if rubric_item is None:
