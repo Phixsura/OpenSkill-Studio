@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ interface AuthResponse {
 
 export default function RegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const setAuth = useAuthStore((s) => s.setAuth);
 
   const [displayName, setDisplayName] = useState("");
@@ -65,7 +66,10 @@ export default function RegisterPage() {
             Please verify your email to unlock all features.
           </p>
         </div>
-        <Button onClick={() => router.push("/dashboard")} className="w-full">
+        <Button onClick={() => {
+          const redirect = searchParams.get("redirect") ?? "/dashboard";
+          router.push(redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/dashboard");
+        }} className="w-full">
           Continue to Dashboard
         </Button>
       </>
