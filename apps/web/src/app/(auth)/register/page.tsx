@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,14 @@ export default function RegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  // Redirect if already logged in (unless coming from invite)
+  useEffect(() => {
+    if (isAuthenticated && !searchParams.get("redirect")) {
+      router.replace("/dashboard");
+    }
+  }, [isAuthenticated, router, searchParams]);
 
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
