@@ -143,6 +143,15 @@ class UpdateSkillRequest(BaseModel):
     estimated_minutes: int | None = None
     tags: list[str] | None = None
 
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str | None) -> str | None:
+        if v is not None:
+            allowed = {"beginner", "intermediate", "advanced"}
+            if v not in allowed:
+                raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
+        return v
+
     @field_validator("tags")
     @classmethod
     def validate_tags(cls, v: list[str] | None) -> list[str] | None:

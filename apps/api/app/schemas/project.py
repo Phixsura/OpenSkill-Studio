@@ -19,6 +19,14 @@ class CreateProjectRequest(BaseModel):
     max_submissions: int = 0
     skill_ids: list[str] | None = None
 
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str) -> str:
+        allowed = {"beginner", "intermediate", "advanced"}
+        if v not in allowed:
+            raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
+        return v
+
     @field_validator("max_score")
     @classmethod
     def validate_max_score(cls, v: int) -> int:
@@ -73,6 +81,15 @@ class UpdateProjectRequest(BaseModel):
     deadline: datetime | None = None
     late_deadline: datetime | None = None
     late_penalty_pct: int | None = None
+
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str | None) -> str | None:
+        if v is not None:
+            allowed = {"beginner", "intermediate", "advanced"}
+            if v not in allowed:
+                raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
+        return v
 
     @field_validator("title")
     @classmethod
