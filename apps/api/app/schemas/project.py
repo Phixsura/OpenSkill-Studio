@@ -45,6 +45,17 @@ class UpdateProjectRequest(BaseModel):
     deadline: datetime | None = None
     late_deadline: datetime | None = None
     late_penalty_pct: int | None = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) < 2 or len(v) > 200:
+            raise ValueError("Title must be 2-200 characters")
+        return v
+
     max_submissions: int | None = None
 
 

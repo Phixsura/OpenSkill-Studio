@@ -94,6 +94,23 @@ class UpdateSkillRequest(BaseModel):
     estimated_minutes: int | None = None
     tags: list[str] | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) < 2 or len(v) > 200:
+            raise ValueError("Name must be 2-200 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10000:
+            raise ValueError("Description must be 10,000 characters or less")
+        return v
+
 
 class SkillResponse(BaseModel):
     id: str

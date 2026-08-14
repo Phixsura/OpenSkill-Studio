@@ -24,6 +24,18 @@ class UpdateOrgRequest(BaseModel):
     description: str | None = None
     logo_url: str | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Organization name must be at least 2 characters")
+        if len(v) > 100:
+            raise ValueError("Organization name must not exceed 100 characters")
+        return v
+
 
 class OrgResponse(BaseModel):
     id: str
