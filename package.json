@@ -1,0 +1,44 @@
+{
+  "name": "openskill-studio",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:web": "turbo dev --filter=web",
+    "dev:api": "cd apps/api && uv run uvicorn app.main:app --reload --reload-dir app --port 8000",
+    "build": "turbo build",
+    "lint": "turbo lint && cd apps/api && uv run ruff check .",
+    "lint:fix": "turbo lint -- --fix && cd apps/api && uv run ruff check . --fix",
+    "test": "turbo test && cd apps/api && uv run pytest",
+    "test:web": "turbo test --filter=web",
+    "test:api": "cd apps/api && uv run pytest",
+    "type-check": "turbo type-check",
+    "types:generate": "openapi-typescript http://localhost:8000/api/v1/openapi.json -o packages/shared/src/api-types.ts",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v && docker compose up -d",
+    "db:migrate": "cd apps/api && uv run alembic upgrade head",
+    "db:generate": "cd apps/api && uv run alembic revision --autogenerate -m",
+    "db:reset": "cd apps/api && uv run alembic downgrade base && uv run alembic upgrade head",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9",
+    "lint-staged": "^15",
+    "openapi-typescript": "^7",
+    "playwright": "^1.62.1",
+    "turbo": "^2"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22"
+  }
+}

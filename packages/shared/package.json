@@ -1,0 +1,15 @@
+{
+  "name": "@openskill/shared",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@openskill/typescript-config": "workspace:*",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      production:
+        patterns: ["*"]
+        exclude-patterns: ["@types/*", "eslint*", "prettier*"]
+      dev:
+        patterns: ["@types/*", "eslint*", "prettier*"]
+
+  - package-ecosystem: pip
+    directory: /apps/api
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

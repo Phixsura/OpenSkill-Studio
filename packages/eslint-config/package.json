@@ -1,0 +1,10 @@
+{
+  "name": "@openskill/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "@next/eslint-plugin-next": "^15",
+    "eslint-plugin-jsx-a11y": "^6"
+  }
+}
