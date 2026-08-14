@@ -25,12 +25,18 @@ export default function DashboardLayout({
   useEffect(() => setMounted(true), []);
 
   // Redirect to login if auth state is cleared (e.g. bfcache after logout)
+  // Delay check to allow AuthInitializer to complete token refresh
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   useEffect(() => {
-    if (mounted && !isAuthenticated) {
-      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
-    }
-  }, [mounted, isAuthenticated, router, pathname]);
+    if (!mounted) return;
+    // Wait for AuthInitializer to attempt refresh before checking
+    const timer = setTimeout(() => {
+      if (!useAuthStore.getState().isAuthenticated) {
+        router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+      }
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [mounted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = async () => {
     try {

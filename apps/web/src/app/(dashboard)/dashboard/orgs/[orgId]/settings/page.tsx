@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ interface OrgDetail {
 
 export default function OrgSettingsPage() {
   const { orgId } = useParams<{ orgId: string }>();
+  const queryClient = useQueryClient();
 
   const { data } = useQuery({
     queryKey: ["org", orgId],
@@ -50,6 +51,8 @@ export default function OrgSettingsPage() {
         method: "PUT",
         body: JSON.stringify({ name, description: description || null }),
       });
+      queryClient.invalidateQueries({ queryKey: ["org", orgId] });
+      queryClient.invalidateQueries({ queryKey: ["my-orgs"] });
       setMessage("Settings saved.");
     } catch (err) {
       setMessage(err instanceof ApiError ? err.message : "Failed to save.");
