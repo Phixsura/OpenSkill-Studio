@@ -129,21 +129,27 @@ export default function SubmitPage() {
 
       <Button
         onClick={async () => {
-          // Save text/link items before submitting
-          for (const [delivId, content] of Object.entries(textInputs)) {
-            if (content.trim()) {
-              try {
-                await apiWithAuth(
-                  `/orgs/${orgId}/submissions/${submissionId}/items`,
-                  {
-                    method: "POST",
-                    body: JSON.stringify({ deliverable_id: delivId, content }),
-                  },
-                );
-              } catch {
-                setError(`Failed to save content for deliverable.`);
-                return;
-              }
+          // Save text/link items via the submission update endpoint
+          const items = Object.entries(textInputs)
+            .filter(([, content]) => content.trim())
+            .map(([delivId, content]) => ({
+              deliverable_id: delivId,
+              content: content.trim(),
+              type: "text",
+            }));
+
+          if (items.length > 0) {
+            try {
+              await apiWithAuth(
+                `/orgs/${orgId}/projects/${projectId}/submissions/${submissionId}`,
+                {
+                  method: "PUT",
+                  body: JSON.stringify({ items }),
+                },
+              );
+            } catch {
+              setError("Failed to save deliverable content.");
+              return;
             }
           }
           submitDraft.mutate();
