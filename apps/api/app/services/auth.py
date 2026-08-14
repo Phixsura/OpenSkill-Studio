@@ -164,8 +164,10 @@ class AuthService:
         if payload.get("type") != "refresh":
             raise TokenInvalidError("Not a refresh token")
 
-        jti = payload["jti"]
-        user_id = payload["sub"]
+        jti = payload.get("jti")
+        user_id = payload.get("sub")
+        if not jti or not user_id:
+            raise TokenInvalidError("Malformed token payload")
 
         # Look up token record by hash
         token_hash = sha256(jti.encode()).hexdigest()

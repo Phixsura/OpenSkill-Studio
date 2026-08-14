@@ -147,8 +147,8 @@ class EvaluationService:
 
             # Parse result
             result = self._parse_evaluation_response(response.content, project.rubric)
-            total_score = result["total_score"]
-            max_score = result["max_score"]
+            total_score = result.get("total_score", 0)
+            max_score = result.get("max_score", 0)
 
             # Determine review status
             threshold = DEFAULT_PASS_THRESHOLD
@@ -165,8 +165,8 @@ class EvaluationService:
                 reviewer_type=ReviewerType.AI,
                 status=review_status,
                 score=total_score,
-                score_breakdown={"scores": result["scores"]},
-                feedback=result["overall_feedback"],
+                score_breakdown={"scores": result.get("scores", [])},
+                feedback=result.get("overall_feedback", ""),
             )
             self.db.add(review)
 
@@ -429,12 +429,19 @@ Please evaluate the submission against the rubric above."""
     @staticmethod
     def _parse_evaluation_response(response: str, rubric: list[dict] | dict) -> dict:
         """Parse LLM response into structured result."""
-        # Extract JSON
+        # Extract JSON from markdown code blocks
         json_str = response
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0]
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0]
+        try:
+            if "```json" in response:
+                parts = response.split("```json", 1)
+                if len(parts) > 1:
+                    json_str = parts[1].split("```", 1)[0]
+            elif "```" in response:
+                parts = response.split("```", 2)
+                if len(parts) > 1:
+                    json_str = parts[1]
+        except (IndexError, ValueError):
+            pass  # Fall through to json.loads which will raise JSONDecodeError
 
         data = json.loads(json_str.strip())
 
