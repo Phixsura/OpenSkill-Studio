@@ -24,6 +24,20 @@ class UpdateOrgRequest(BaseModel):
     description: str | None = None
     logo_url: str | None = None
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("logo_url")
+    @classmethod
+    def validate_logo_url(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 500:
+            raise ValueError("Logo Url must not exceed 500 characters")
+        return v
+
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str | None) -> str | None:

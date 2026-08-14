@@ -113,6 +113,20 @@ class UpdateDeliverableRequest(BaseModel):
     config: dict | None = None
     sort_order: int | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Name must not exceed 200 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
+
 
 class DeliverableResponse(BaseModel):
     id: str

@@ -140,6 +140,34 @@ class UpdatePortfolioItemRequest(BaseModel):
     featured: bool | None = None
     show_score: bool | None = None
 
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Title must not exceed 200 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("cover_image_url")
+    @classmethod
+    def validate_cover_image_url(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 500:
+            raise ValueError("Cover Image Url must not exceed 500 characters")
+        return v
+
+    @field_validator("external_url")
+    @classmethod
+    def validate_external_url(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 500:
+            raise ValueError("External Url must not exceed 500 characters")
+        return v
+
 
 class PortfolioItemResponse(BaseModel):
     id: str

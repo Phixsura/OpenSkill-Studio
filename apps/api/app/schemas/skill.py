@@ -26,6 +26,27 @@ class UpdateCategoryRequest(BaseModel):
     icon: str | None = None
     sort_order: int | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Name must not exceed 200 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("icon")
+    @classmethod
+    def validate_icon(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 50:
+            raise ValueError("Icon must not exceed 50 characters")
+        return v
+
 
 class CategoryResponse(BaseModel):
     id: str
@@ -168,6 +189,20 @@ class UpdateExerciseRequest(BaseModel):
     description: str | None = None
     config: dict | None = None
     max_score: int | None = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Title must not exceed 200 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
 
 
 class ExerciseResponse(BaseModel):
