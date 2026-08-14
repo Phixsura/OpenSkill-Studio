@@ -345,11 +345,13 @@ class SkillService:
             attempt.is_correct = is_correct
             attempt.graded_by = GradingMethod.AUTO
             attempt.graded_at = datetime.now(UTC)
-            attempt.feedback = (
-                exercise.config.get("explanation", "")
-                if is_correct
-                else f"Incorrect. The correct answer is: {', '.join(correct)}"
-            )
+            explanation = exercise.config.get("explanation", "")
+            if is_correct:
+                attempt.feedback = explanation or "Correct!"
+            else:
+                attempt.feedback = (
+                    f"Incorrect. {explanation}" if explanation else "Incorrect. Try again."
+                )
 
         self.db.add(attempt)
         await self.db.flush()
@@ -521,7 +523,8 @@ class SkillService:
         exercises = await self.list_exercises(skill_id)
         total = len(exercises)
 
-        # Count exercises with at least one correct/graded attempt
+        # Count exercises with at least one graded attempt (score not null)
+        # For MCQ: is_correct=True means correct. For text: any graded attempt counts.
         done = 0
         for ex in exercises:
             result = await self.db.execute(
@@ -529,7 +532,7 @@ class SkillService:
                 .where(
                     ExerciseAttempt.exercise_id == ex.id,
                     ExerciseAttempt.user_id == user_id,
-                    ExerciseAttempt.is_correct == True,  # noqa: E712
+                    ExerciseAttempt.score.is_not(None),
                 )
                 .limit(1)
             )

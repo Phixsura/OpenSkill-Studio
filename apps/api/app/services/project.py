@@ -539,15 +539,12 @@ class ProjectService:
 
     async def get_submission_timing(self, project: Project, user_id: str) -> str:
         """Return 'on_time', 'late', or 'closed'."""
-        effective = await self._get_effective_deadline(project, user_id)
-        if effective is None:
-            return "on_time"
+        if project.deadline is None:
+            return "on_time"  # No deadline set
 
         now = datetime.now(UTC)
-        if now <= project.deadline if project.deadline else True:
-            return "on_time"  # pragma: no cover
 
-        # Check personal extension
+        # Check personal extension first
         ext_result = await self.db.execute(
             select(SubmissionExtension).where(
                 SubmissionExtension.project_id == project.id,
@@ -555,27 +552,21 @@ class ProjectService:
             )
         )
         ext = ext_result.scalar_one_or_none()
+
+        # On time: before deadline or before personal extension
+        if now <= project.deadline:
+            return "on_time"
         if ext and now <= ext.extended_deadline:
             return "on_time"
 
+        # Late: between deadline and late_deadline
         if project.late_deadline and now <= project.late_deadline:
             return "late"
 
+        # Closed: past all deadlines
         return "closed"
 
     # ── Helpers ──
-
-    async def _get_effective_deadline(self, project: Project, user_id: str) -> datetime | None:
-        ext_result = await self.db.execute(
-            select(SubmissionExtension).where(
-                SubmissionExtension.project_id == project.id,
-                SubmissionExtension.user_id == user_id,
-            )
-        )
-        ext = ext_result.scalar_one_or_none()
-        if ext:
-            return ext.extended_deadline
-        return project.late_deadline or project.deadline
 
     async def _validate_required_deliverables(self, submission: Submission) -> None:
         deliverables = await self.list_deliverables(submission.project_id)
