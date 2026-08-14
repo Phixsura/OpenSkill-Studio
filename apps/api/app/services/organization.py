@@ -131,7 +131,11 @@ class OrgService:
                 func.count(OrgMember.id).over(partition_by=Organization.id).label("member_count"),
             )
             .join(OrgMember, OrgMember.org_id == Organization.id)
-            .where(OrgMember.user_id == user_id, OrgMember.status == MemberStatus.ACTIVE)
+            .where(
+                OrgMember.user_id == user_id,
+                OrgMember.status == MemberStatus.ACTIVE,
+                Organization.status != OrgStatus.ARCHIVED,
+            )
             .order_by(Organization.created_at.desc())
         )
         result = await self.db.execute(stmt)
@@ -147,7 +151,7 @@ class OrgService:
 
     async def get_org(self, org_id: str) -> Organization:
         org = await self.db.get(Organization, org_id)
-        if org is None:
+        if org is None or org.status == OrgStatus.ARCHIVED:
             raise OrgNotFoundError()
         return org
 
