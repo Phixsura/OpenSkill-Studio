@@ -53,7 +53,7 @@ export default function NewProjectPage() {
           body: JSON.stringify({
             title,
             description,
-            instructions: instructions || undefined,
+            instructions: instructions.trim() || "No instructions provided.",
             max_score: parseInt(maxScore) || 100,
             rubric,
           }),
@@ -122,6 +122,7 @@ export default function NewProjectPage() {
           </label>
           <textarea
             id="instructions"
+            required
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
             rows={6}
