@@ -56,7 +56,7 @@ async def test_main_lifespan_full():
         yield mock_client
 
     with (
-        patch("app.core.storage.get_s3_client", return_value=fake_s3()),
+        patch("app.core.storage.get_s3_client", side_effect=lambda: fake_s3()),
         patch("app.core.storage.ensure_bucket", new_callable=AsyncMock),
     ):
         async with lifespan(app):

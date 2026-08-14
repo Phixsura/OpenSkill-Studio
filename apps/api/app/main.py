@@ -49,21 +49,11 @@ async def lifespan(app: FastAPI):
     try:
         import asyncio
 
-        import aioboto3
+        from app.core.storage import ensure_bucket, get_s3_client
 
         async def _check_s3():
-            session = aioboto3.Session()
-            async with session.client(
-                "s3",
-                endpoint_url=settings.s3_endpoint,
-                aws_access_key_id=settings.s3_access_key,
-                aws_secret_access_key=settings.s3_secret_key,
-                region_name=settings.s3_region,
-            ) as client:
-                try:
-                    await client.head_bucket(Bucket=settings.s3_bucket)
-                except Exception:
-                    await client.create_bucket(Bucket=settings.s3_bucket)
+            async for client in get_s3_client():
+                await ensure_bucket(client)
                 log.info("s3_bucket_ready", bucket=settings.s3_bucket)
 
         await asyncio.wait_for(_check_s3(), timeout=5)
