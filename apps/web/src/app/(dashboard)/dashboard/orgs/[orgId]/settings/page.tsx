@@ -97,7 +97,7 @@ export default function OrgSettingsPage() {
         </div>
 
         {message && (
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">{message}</p>
+          <p className={`text-sm ${message.toLowerCase().includes("fail") ? "text-red-600" : "text-green-600"}`}>{message}</p>
         )}
 
         <Button type="submit" disabled={saving}>
