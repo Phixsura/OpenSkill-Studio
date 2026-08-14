@@ -351,7 +351,7 @@ class SkillService:
         # Auto-grade MCQ
         if exercise.type == ExerciseType.MULTIPLE_CHOICE:
             correct = exercise.config.get("correct", [])
-            user_answer = answer.get("selected", [])
+            user_answer = answer.get("selected") or []
             if isinstance(user_answer, str):
                 user_answer = [user_answer]
             is_correct = sorted(user_answer) == sorted(correct)

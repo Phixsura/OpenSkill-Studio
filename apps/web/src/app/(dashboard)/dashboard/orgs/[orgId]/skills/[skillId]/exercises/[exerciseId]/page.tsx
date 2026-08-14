@@ -102,7 +102,19 @@ export default function ExercisePage() {
         )}
 
         <Button
-          onClick={() => { setLastResult(null); submitMutation.mutate(); }}
+          onClick={() => {
+            // Validate answer before submitting
+            if (exercise.type === "multiple_choice" && !(answer.selected as string[])?.length) {
+              setError("Please select an answer.");
+              return;
+            }
+            if (exercise.type === "text_answer" && !(answer.text as string)?.trim()) {
+              setError("Please enter your answer.");
+              return;
+            }
+            setLastResult(null);
+            submitMutation.mutate();
+          }}
           disabled={submitMutation.isPending}
           className="mt-4"
         >
