@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -26,6 +26,12 @@ from app.schemas.skill import (
 from app.services.skill import SkillService
 
 router = APIRouter(tags=["Skills & Exercises"])
+
+
+def _verify_org(resource, org_id: str, label: str = "Resource") -> None:
+    """Verify a resource belongs to the specified org (IDOR protection)."""
+    if getattr(resource, "org_id", None) != org_id:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
 
 
 # ── Categories ───────────────────────────────────────────
@@ -96,6 +102,8 @@ async def update_category(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    cat = await svc.get_category(category_id)
+    _verify_org(cat, org_id, "Category")
     cat = await svc.update_category(category_id, **body.model_dump(exclude_none=True))
     await db.commit()
     return DataResponse(data=CategoryResponse.model_validate(cat))
@@ -110,6 +118,8 @@ async def delete_category(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    cat = await svc.get_category(category_id)
+    _verify_org(cat, org_id, "Category")
     await svc.delete_category(category_id)
     await db.commit()
 
@@ -125,8 +135,8 @@ async def list_skills(
     status: str | None = None,
     tag: str | None = None,
     q: str | None = None,
-    page: int = 1,
-    per_page: int = 20,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -179,6 +189,7 @@ async def get_skill(
     await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     prereqs = await svc.get_skill_prerequisites(skill_id)
     resp = SkillDetailResponse(
         **SkillResponse.model_validate(skill).model_dump(),
@@ -198,6 +209,8 @@ async def update_skill(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     skill = await svc.update_skill(skill_id, **body.model_dump(exclude_none=True))
     await db.commit()
     return DataResponse(data=SkillResponse.model_validate(skill))
@@ -212,6 +225,8 @@ async def delete_skill(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     await svc.delete_skill(skill_id)
     await db.commit()
 
@@ -225,6 +240,8 @@ async def publish_skill(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     skill = await svc.publish_skill(skill_id)
     await db.commit()
     return DataResponse(data=SkillResponse.model_validate(skill))
@@ -241,6 +258,8 @@ async def unpublish_skill(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     skill = await svc.unpublish_skill(skill_id)
     await db.commit()
     return DataResponse(data=SkillResponse.model_validate(skill))
@@ -255,8 +274,10 @@ async def set_prerequisites(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
-    prerequisite_ids = body.get("prerequisite_ids", [])
     svc = SkillService(db)
+    skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
+    prerequisite_ids = body.get("prerequisite_ids", [])
     await svc.set_prerequisites(skill_id, prerequisite_ids)
     await db.commit()
     return {"message": "Prerequisites updated"}
@@ -277,6 +298,8 @@ async def list_exercises(
 ):
     await require_org_member(org_id, user, db)
     svc = SkillService(db)
+    skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     exercises = await svc.list_exercises(skill_id)
     return DataResponse(data=[ExerciseResponse.model_validate(e) for e in exercises])
 
@@ -314,6 +337,8 @@ async def create_exercise(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     ex = await svc.create_exercise(
         org_id,
         skill_id,
@@ -378,6 +403,8 @@ async def submit_attempt(
 ):
     await require_org_member(org_id, user, db)
     svc = SkillService(db)
+    ex = await svc.get_exercise(exercise_id)
+    _verify_org(ex, org_id, "Exercise")
     attempt = await svc.submit_attempt(org_id, exercise_id, user.id, body.answer)
     await db.commit()
     return DataResponse(data=AttemptResponse.model_validate(attempt))
@@ -395,6 +422,8 @@ async def list_my_attempts(
 ):
     await require_org_member(org_id, user, db)
     svc = SkillService(db)
+    ex = await svc.get_exercise(exercise_id)
+    _verify_org(ex, org_id, "Exercise")
     attempts = await svc.get_user_attempts(exercise_id, user.id)
     return DataResponse(data=[AttemptResponse.model_validate(a) for a in attempts])
 
@@ -459,6 +488,8 @@ async def grade_attempt(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    attempt = await svc.get_attempt(attempt_id)
+    _verify_org(attempt, org_id, "Attempt")
     attempt = await svc.grade_attempt(attempt_id, body.score, body.feedback)
     await db.commit()
     return DataResponse(data=AttemptResponse.model_validate(attempt))
@@ -479,6 +510,7 @@ async def get_category(
     await require_org_member(org_id, user, db)
     svc = SkillService(db)
     cat = await svc.get_category(category_id)
+    _verify_org(cat, org_id, "Category")
     return DataResponse(data=CategoryResponse.model_validate(cat))
 
 
@@ -492,6 +524,8 @@ async def reorder_exercises(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
+    skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     for item in body.items:
         await svc.update_exercise(item.id, sort_order=item.sort_order)
     await db.commit()
@@ -509,6 +543,7 @@ async def get_skill_tree(
     await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
+    _verify_org(skill, org_id, "Skill")
     prereqs = await svc.get_skill_prerequisites(skill_id)
     return {
         "skill": SkillResponse.model_validate(skill),

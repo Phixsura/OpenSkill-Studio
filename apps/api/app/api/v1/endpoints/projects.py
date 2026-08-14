@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -53,8 +53,8 @@ async def _verify_submission_org(svc: ProjectService, submission_id: str, org_id
 async def list_projects(
     org_id: str,
     status: str | None = None,
-    page: int = 1,
-    per_page: int = 20,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -287,6 +287,9 @@ async def update_deliverable(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
+    d = await svc.get_deliverable(deliverable_id)
+    if d.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Deliverable not found")
     d = await svc.update_deliverable(deliverable_id, **body.model_dump(exclude_none=True))
     await db.commit()
     return DataResponse(data=DeliverableResponse.model_validate(d))
@@ -304,6 +307,9 @@ async def delete_deliverable(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
+    d = await svc.get_deliverable(deliverable_id)
+    if d.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Deliverable not found")
     await svc.delete_deliverable(deliverable_id)
     await db.commit()
 
@@ -318,8 +324,8 @@ async def delete_deliverable(
 async def list_submissions(
     org_id: str,
     project_id: str,
-    page: int = 1,
-    per_page: int = 20,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -583,8 +589,8 @@ async def create_review(
 @router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[SubmissionResponse])
 async def pending_reviews(
     org_id: str,
-    page: int = 1,
-    per_page: int = 20,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,19 +25,25 @@ export default function EvalSettingsPage() {
     queryFn: () => apiWithAuth<EvalSettings>(`/orgs/${orgId}/settings/evaluation`),
   });
 
-  const [enabled, setEnabled] = useState(settings?.enabled ?? false);
-  const [budget, setBudget] = useState(settings?.monthly_budget_usd?.toString() ?? "");
-  const [model, setModel] = useState(settings?.default_model ?? "claude-sonnet-5");
-  const [autoEval, setAutoEval] = useState(settings?.auto_evaluate ?? false);
-  const [threshold, setThreshold] = useState(settings?.pass_threshold?.toString() ?? "0.6");
+  const [enabled, setEnabled] = useState(false);
+  const [budget, setBudget] = useState("");
+  const [model, setModel] = useState("claude-sonnet-5");
+  const [autoEval, setAutoEval] = useState(false);
+  const [threshold, setThreshold] = useState("0.6");
   const [message, setMessage] = useState<string | null>(null);
+  const [synced, setSynced] = useState(false);
 
-  // Sync when data loads
-  if (settings && !message) {
-    if (enabled !== settings.enabled) setEnabled(settings.enabled);
-    if (model !== settings.default_model) setModel(settings.default_model);
-    if (autoEval !== settings.auto_evaluate) setAutoEval(settings.auto_evaluate);
-  }
+  // Sync all fields when data first loads
+  useEffect(() => {
+    if (settings && !synced) {
+      setEnabled(settings.enabled);
+      setBudget(settings.monthly_budget_usd?.toString() ?? "");
+      setModel(settings.default_model);
+      setAutoEval(settings.auto_evaluate);
+      setThreshold(settings.pass_threshold?.toString() ?? "0.6");
+      setSynced(true);
+    }
+  }, [settings, synced]);
 
   const saveMutation = useMutation({
     mutationFn: () =>

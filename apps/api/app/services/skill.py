@@ -282,16 +282,22 @@ class SkillService:
     async def list_exercises(self, skill_id: str) -> list[Exercise]:
         result = await self.db.execute(
             select(Exercise)
-            .where(Exercise.skill_id == skill_id)
+            .where(Exercise.skill_id == skill_id, Exercise.status != ContentStatus.ARCHIVED)
             .order_by(Exercise.sort_order, Exercise.created_at)
         )
         return list(result.scalars().all())
 
     async def get_exercise(self, exercise_id: str) -> Exercise:
         ex = await self.db.get(Exercise, exercise_id)
-        if ex is None:
+        if ex is None or ex.status == ContentStatus.ARCHIVED:
             raise ExerciseNotFoundError()
         return ex
+
+    async def get_attempt(self, attempt_id: str) -> ExerciseAttempt:
+        attempt = await self.db.get(ExerciseAttempt, attempt_id)
+        if attempt is None:
+            raise AppError("ATTEMPT_NOT_FOUND", "Attempt not found", 404)
+        return attempt
 
     async def update_exercise(self, exercise_id: str, **fields) -> Exercise:
         ex = await self.get_exercise(exercise_id)
@@ -433,9 +439,12 @@ class SkillService:
         completed = status_counts.get("completed", 0)
         in_progress = status_counts.get("in_progress", 0)
 
-        # Count exercises
+        # Count exercises (exclude archived)
         exercises_result = await self.db.execute(
-            select(func.count(Exercise.id)).where(Exercise.org_id == org_id)
+            select(func.count(Exercise.id)).where(
+                Exercise.org_id == org_id,
+                Exercise.status != ContentStatus.ARCHIVED,
+            )
         )
         exercises_total = exercises_result.scalar_one()
 

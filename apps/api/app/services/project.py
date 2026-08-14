@@ -245,6 +245,12 @@ class ProjectService:
         )
         return list(result.scalars().all())
 
+    async def get_deliverable(self, deliverable_id: str) -> ProjectDeliverable:
+        d = await self.db.get(ProjectDeliverable, deliverable_id)
+        if d is None:
+            raise DeliverableNotFoundError()
+        return d
+
     async def update_deliverable(self, deliverable_id: str, **fields) -> ProjectDeliverable:
         d = await self.db.get(ProjectDeliverable, deliverable_id)
         if d is None:

@@ -40,7 +40,8 @@ export default function LoginPage() {
         credentials: "include",
       });
       setAuth(data.access_token, data.user);
-      router.push(searchParams.get("redirect") ?? "/dashboard");
+      const redirect = searchParams.get("redirect") ?? "/dashboard";
+      router.push(redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/dashboard");
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Login failed. Please try again.",
