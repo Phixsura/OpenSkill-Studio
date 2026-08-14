@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -17,6 +17,9 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const { user, clearAuth } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   const handleLogout = async () => {
     try {
@@ -51,14 +54,14 @@ export default function DashboardLayout({
     <div className="border-t p-4">
       <div className="flex items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-sm font-medium text-[hsl(var(--primary-foreground))]">
-          {user?.display_name?.charAt(0)?.toUpperCase() ?? "?"}
+          {mounted ? (user?.display_name?.charAt(0)?.toUpperCase() ?? "?") : "·"}
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">
-            {user?.display_name ?? "User"}
+            {mounted ? (user?.display_name ?? "User") : " "}
           </p>
           <p className="truncate text-xs text-[hsl(var(--muted-foreground))]">
-            {user?.email}
+            {mounted ? user?.email : " "}
           </p>
         </div>
       </div>
