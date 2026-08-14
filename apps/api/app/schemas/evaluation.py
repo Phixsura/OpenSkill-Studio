@@ -1,5 +1,4 @@
 from datetime import datetime
-from decimal import Decimal
 
 from pydantic import BaseModel, field_validator
 
@@ -32,7 +31,7 @@ class EvalTaskResponse(BaseModel):
     llm_model: str | None
     input_tokens: int | None
     output_tokens: int | None
-    cost_usd: Decimal | None
+    cost_usd: float | None
     duration_ms: int | None
     retries: int
     started_at: datetime | None
