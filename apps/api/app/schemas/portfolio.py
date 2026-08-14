@@ -175,6 +175,13 @@ class UpdatePortfolioItemRequest(BaseModel):
             raise ValueError("External Url must not exceed 500 characters")
         return v
 
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            return [t.strip() for t in v if t.strip()]
+        return v
+
 
 class PortfolioItemResponse(BaseModel):
     id: str

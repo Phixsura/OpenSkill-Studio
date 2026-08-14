@@ -176,6 +176,13 @@ class UpdateSkillRequest(BaseModel):
             raise ValueError("Description must be 10,000 characters or less")
         return v
 
+    @field_validator("learning_content")
+    @classmethod
+    def validate_learning_content(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100000:
+            raise ValueError("Learning content must be 100,000 characters or less")
+        return v
+
     @field_validator("estimated_minutes")
     @classmethod
     def validate_estimated_minutes(cls, v):

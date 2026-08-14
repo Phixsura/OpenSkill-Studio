@@ -103,6 +103,13 @@ class UpdateProjectRequest(BaseModel):
 
     max_submissions: int | None = None
 
+    @field_validator("rubric")
+    @classmethod
+    def validate_rubric(cls, v: list[dict] | None) -> list[dict] | None:
+        if v is not None and len(v) == 0:
+            raise ValueError("Rubric must have at least one criterion")
+        return v
+
     @field_validator("max_score")
     @classmethod
     def validate_max_score(cls, v):
