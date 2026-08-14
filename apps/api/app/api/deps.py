@@ -68,7 +68,12 @@ async def require_org_member(
     """Shared helper: verify user is an active org member, optionally with required roles."""
     from sqlalchemy import select
 
-    from app.models.organization import MemberStatus, OrgMember
+    from app.models.organization import MemberStatus, Organization, OrgMember, OrgStatus
+
+    # Check org exists and is not archived
+    org = await db.get(Organization, org_id)
+    if org is None or org.status == OrgStatus.ARCHIVED:
+        raise HTTPException(status_code=404, detail="Organization not found")
 
     result = await db.execute(
         select(OrgMember).where(
