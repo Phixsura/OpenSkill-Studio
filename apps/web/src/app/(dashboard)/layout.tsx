@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { useTheme } from "next-themes";
+
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
@@ -16,6 +18,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { user, clearAuth } = useAuthStore();
+  const { theme, setTheme } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -118,6 +121,20 @@ export default function DashboardLayout({
         </div>
 
         <nav className="flex-1 space-y-1 p-3">{navLinks}</nav>
+
+        {/* Theme toggle */}
+        {mounted && (
+          <div className="px-3 pb-2">
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-[hsl(var(--secondary))]"
+              aria-label="Toggle theme"
+            >
+              {theme === "dark" ? "☀️ Light mode" : "🌙 Dark mode"}
+            </button>
+          </div>
+        )}
+
         {userSection}
       </aside>
 
