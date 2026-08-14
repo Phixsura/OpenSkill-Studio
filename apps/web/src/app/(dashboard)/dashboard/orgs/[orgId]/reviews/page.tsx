@@ -70,7 +70,7 @@ export default function ReviewDashboardPage() {
                 </td>
                 <td className="px-4 py-3">v{s.version}</td>
                 <td className="px-4 py-3 text-[hsl(var(--muted-foreground))]">
-                  {new Date(s.submitted_at).toLocaleDateString()}
+                  {s.submitted_at ? new Date(s.submitted_at).toLocaleDateString() : "—"}
                 </td>
                 <td className="px-4 py-3">
                   {s.is_late && <span className="text-yellow-600">Late</span>}
