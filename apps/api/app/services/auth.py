@@ -158,8 +158,8 @@ class AuthService:
     ) -> AuthResult:
         try:
             payload = decode_token(raw_refresh_token)
-        except Exception as e:
-            raise TokenInvalidError(str(e)) from e
+        except Exception:
+            raise TokenInvalidError("Invalid or expired refresh token") from None
 
         if payload.get("type") != "refresh":
             raise TokenInvalidError("Not a refresh token")
