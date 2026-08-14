@@ -54,6 +54,14 @@ class CreateSkillRequest(BaseModel):
     tags: list[str] | None = None
     prerequisites: list[str] | None = None
 
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str) -> str:
+        allowed = {"beginner", "intermediate", "advanced"}
+        if v not in allowed:
+            raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
+        return v
+
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:

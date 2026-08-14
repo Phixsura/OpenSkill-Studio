@@ -96,14 +96,14 @@ class SkillService:
     async def list_categories(self, org_id: str) -> list[SkillCategory]:
         result = await self.db.execute(
             select(SkillCategory)
-            .where(SkillCategory.org_id == org_id)
+            .where(SkillCategory.org_id == org_id, SkillCategory.status != ContentStatus.ARCHIVED)
             .order_by(SkillCategory.sort_order, SkillCategory.name)
         )
         return list(result.scalars().all())
 
     async def get_category(self, category_id: str) -> SkillCategory:
         cat = await self.db.get(SkillCategory, category_id)
-        if cat is None:
+        if cat is None or cat.status == ContentStatus.ARCHIVED:
             raise CategoryNotFoundError()
         return cat
 
