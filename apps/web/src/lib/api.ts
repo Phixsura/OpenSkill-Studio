@@ -49,6 +49,11 @@ async function refreshAccessToken(): Promise<string> {
 
   if (!res.ok) {
     useAuthStore.getState().clearAuth();
+    // Redirect to login — session expired
+    if (typeof window !== "undefined") {
+      const current = window.location.pathname;
+      window.location.href = `/login?redirect=${encodeURIComponent(current)}`;
+    }
     throw new ApiError(401, "SESSION_EXPIRED", "Please log in again");
   }
 
