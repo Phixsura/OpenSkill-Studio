@@ -62,8 +62,8 @@ class PortfolioService:
             raise AppError("USER_NOT_FOUND", "User not found", 404)
 
         base = re.sub(r"[^a-z0-9]+", "-", user.display_name.lower()).strip("-")
-        if len(base) < 4:
-            base = f"{base}-{secrets.token_hex(3)}"
+        if not base or len(base) < 3:
+            base = f"user-{secrets.token_hex(3)}"
         username = base[:40]
 
         # Ensure uniqueness
