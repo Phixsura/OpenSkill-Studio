@@ -81,6 +81,12 @@ export default function ReviewDashboardPage() {
           </tbody>
         </table>
       </div>
+
+      {submissions.length < total && (
+        <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
+          Showing {submissions.length} of {total} pending reviews
+        </p>
+      )}
     </div>
   );
 }

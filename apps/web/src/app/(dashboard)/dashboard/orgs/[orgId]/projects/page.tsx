@@ -88,6 +88,12 @@ export default function ProjectsListPage() {
           </Link>
         ))}
       </div>
+
+      {data?.meta && projects.length < data.meta.total && (
+        <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
+          Showing {projects.length} of {data.meta.total} projects
+        </p>
+      )}
     </div>
   );
 }

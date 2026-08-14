@@ -145,6 +145,12 @@ export default function MembersPage() {
           </tbody>
         </table>
       </div>
+
+      {members.length < total && (
+        <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
+          Showing {members.length} of {total} members
+        </p>
+      )}
     </div>
   );
 }

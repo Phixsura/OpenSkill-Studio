@@ -124,6 +124,12 @@ export default function SkillsListPage() {
           </Link>
         ))}
       </div>
+
+      {data?.meta && skills.length < data.meta.total && (
+        <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
+          Showing {skills.length} of {data.meta.total} skills
+        </p>
+      )}
     </div>
   );
 }

@@ -130,6 +130,12 @@ export default function EvaluationPage() {
           </tbody>
         </table>
       </div>
+
+      {tasksData?.meta && tasks.length < tasksData.meta.total && (
+        <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
+          Showing {tasks.length} of {tasksData.meta.total} tasks
+        </p>
+      )}
     </div>
   );
 }
