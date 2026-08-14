@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth } from "@/lib/api";
 
@@ -48,11 +49,16 @@ export default function SkillsListPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Skills</h1>
-        <p className="mt-1 text-[hsl(var(--muted-foreground))]">
-          Browse and practice skills in this organization.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Skills</h1>
+          <p className="mt-1 text-[hsl(var(--muted-foreground))]">
+            Browse and practice skills in this organization.
+          </p>
+        </div>
+        <Link href={`/dashboard/orgs/${orgId}/skills/new`}>
+          <Button size="sm">New Skill</Button>
+        </Link>
       </div>
 
       <div className="flex gap-3">

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
+import { Button } from "@/components/ui/button";
 import { apiWithAuth } from "@/lib/api";
 
 interface ProjectItem {
@@ -51,6 +52,9 @@ export default function ProjectsListPage() {
             View and submit project assignments.
           </p>
         </div>
+        <Link href={`/dashboard/orgs/${orgId}/projects/new`}>
+          <Button size="sm">New Project</Button>
+        </Link>
       </div>
 
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
