@@ -46,18 +46,23 @@ export default function ExercisePage() {
   const [answer, setAnswer] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
 
+  const [lastResult, setLastResult] = useState<Attempt | null>(null);
+
   const submitMutation = useMutation({
     mutationFn: () =>
       apiWithAuth<{ data: Attempt }>(`/orgs/${orgId}/exercises/${exerciseId}/attempts`, {
         method: "POST",
         body: JSON.stringify({ answer }),
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["attempts", exerciseId] });
+      setAnswer({});
       setError(null);
+      setLastResult(res.data);
     },
     onError: (err) => {
       setError(err instanceof ApiError ? err.message : "Submission failed.");
+      setLastResult(null);
     },
   });
 
@@ -97,12 +102,23 @@ export default function ExercisePage() {
         )}
 
         <Button
-          onClick={() => submitMutation.mutate()}
+          onClick={() => { setLastResult(null); submitMutation.mutate(); }}
           disabled={submitMutation.isPending}
           className="mt-4"
         >
           {submitMutation.isPending ? "Submitting..." : "Submit"}
         </Button>
+
+        {lastResult && (
+          <div className={`mt-4 rounded-md p-4 ${lastResult.is_correct ? "bg-green-50 dark:bg-green-950" : "bg-red-50 dark:bg-red-950"}`}>
+            <p className={`font-semibold ${lastResult.is_correct ? "text-green-700 dark:text-green-300" : "text-red-700 dark:text-red-300"}`}>
+              {lastResult.is_correct ? "✅ Correct!" : "❌ Incorrect"} — {lastResult.score}/{exercise.max_score} pts
+            </p>
+            {lastResult.feedback && (
+              <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{lastResult.feedback}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Attempt history */}

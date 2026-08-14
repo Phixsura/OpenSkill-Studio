@@ -1,13 +1,22 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
+import { Button } from "@/components/ui/button";
 import { apiWithAuth } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 
 interface HealthData {
   status: string;
   components?: Record<string, string>;
+}
+
+interface OrgItem {
+  id: string;
+  name: string;
+  role: string;
+  member_count: number;
 }
 
 export default function DashboardPage() {
@@ -18,6 +27,13 @@ export default function DashboardPage() {
     queryFn: () => apiWithAuth<HealthData>("/health/ready"),
     refetchInterval: 60_000,
   });
+
+  const { data: orgsData } = useQuery({
+    queryKey: ["my-orgs"],
+    queryFn: () => apiWithAuth<{ data: OrgItem[] }>("/orgs"),
+  });
+
+  const orgs = orgsData?.data ?? [];
 
   return (
     <div className="space-y-8">
@@ -49,16 +65,65 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Placeholder sections */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <PlaceholderCard
-          title="Your Skills"
-          description="Track your learning progress across AI skills."
-        />
-        <PlaceholderCard
-          title="Active Projects"
-          description="View and submit your project assignments."
-        />
+      {/* Organizations */}
+      <div>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Your Organizations</h2>
+          <Link href="/dashboard/orgs/new">
+            <Button size="sm">Create Organization</Button>
+          </Link>
+        </div>
+
+        {orgs.length === 0 ? (
+          <div className="mt-4 rounded-lg border border-dashed p-8 text-center">
+            <p className="text-[hsl(var(--muted-foreground))]">
+              You haven&apos;t joined any organizations yet.
+            </p>
+            <Link href="/dashboard/orgs/new">
+              <Button className="mt-3">Create your first organization</Button>
+            </Link>
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {orgs.map((org) => (
+              <Link
+                key={org.id}
+                href={`/dashboard/orgs/${org.id}`}
+                className="block rounded-lg border p-4 transition-shadow hover:shadow-md"
+              >
+                <h3 className="font-semibold">{org.name}</h3>
+                <div className="mt-2 flex items-center gap-3 text-xs text-[hsl(var(--muted-foreground))]">
+                  <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 capitalize">
+                    {org.role}
+                  </span>
+                  <span>{org.member_count} member{org.member_count !== 1 ? "s" : ""}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Quick links */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Link
+          href="/dashboard/portfolio"
+          className="rounded-lg border p-5 transition-shadow hover:shadow-sm"
+        >
+          <h3 className="font-semibold">Portfolio</h3>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            Manage your public profile and showcase your work.
+          </p>
+        </Link>
+        <Link
+          href="/dashboard/settings"
+          className="rounded-lg border p-5 transition-shadow hover:shadow-sm"
+        >
+          <h3 className="font-semibold">Settings</h3>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            Update your display name and account preferences.
+          </p>
+        </Link>
       </div>
     </div>
   );
@@ -83,26 +148,6 @@ function StatusCard({
     <div className="rounded-lg border p-4">
       <p className="text-sm text-[hsl(var(--muted-foreground))]">{title}</p>
       <p className={`mt-1 text-lg font-semibold ${colors[color]}`}>{value}</p>
-    </div>
-  );
-}
-
-function PlaceholderCard({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="rounded-lg border border-dashed p-6 text-center">
-      <h3 className="font-semibold">{title}</h3>
-      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-        {description}
-      </p>
-      <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">
-        Coming soon
-      </p>
     </div>
   );
 }
