@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useTheme } from "next-themes";
 
@@ -24,19 +24,18 @@ export default function DashboardLayout({
 
   useEffect(() => setMounted(true), []);
 
-  // Redirect to login if auth state is cleared (e.g. bfcache after logout)
-  // Delay check to allow AuthInitializer to complete token refresh
+  // Redirect to login when auth is lost (logout, session expiry, bfcache)
+  // Track: once authenticated, redirect if it becomes false
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const wasAuthenticated = useRef(false);
   useEffect(() => {
-    if (!mounted) return;
-    // Wait for AuthInitializer to attempt refresh before checking
-    const timer = setTimeout(() => {
-      if (!useAuthStore.getState().isAuthenticated) {
-        router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
-      }
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [mounted]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (isAuthenticated) {
+      wasAuthenticated.current = true;
+    } else if (wasAuthenticated.current && mounted) {
+      // Was logged in, now logged out → redirect
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+    }
+  }, [isAuthenticated, mounted, router, pathname]);
 
   const handleLogout = async () => {
     try {
