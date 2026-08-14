@@ -130,20 +130,26 @@ export default function NewSkillPage() {
             <label htmlFor="category" className="block text-sm font-medium">
               Category
             </label>
-            <select
-              id="category"
-              required
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
-            >
-              <option value="">Select category</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            {categories.length === 0 ? (
+              <p className="mt-1 text-sm text-[hsl(var(--destructive))]">
+                No categories yet. Create a category first via the API or ask an admin.
+              </p>
+            ) : (
+              <select
+                id="category"
+                required
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+                className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+              >
+                <option value="">Select category</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div>
