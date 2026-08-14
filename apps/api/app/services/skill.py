@@ -184,6 +184,9 @@ class SkillService:
             base = base.where(Skill.difficulty == DifficultyLevel(difficulty))
         if status:
             base = base.where(Skill.status == ContentStatus(status))
+        else:
+            # By default, exclude archived skills
+            base = base.where(Skill.status != ContentStatus.ARCHIVED)
         if tag:
             base = base.where(Skill.tags.contains([tag]))
         if q:
@@ -200,7 +203,7 @@ class SkillService:
 
     async def get_skill(self, skill_id: str) -> Skill:
         skill = await self.db.get(Skill, skill_id)
-        if skill is None:
+        if skill is None or skill.status == ContentStatus.ARCHIVED:
             raise SkillNotFoundError()
         return skill
 

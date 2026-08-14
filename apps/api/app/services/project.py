@@ -147,6 +147,8 @@ class ProjectService:
         base = select(Project).where(Project.org_id == org_id)
         if status:
             base = base.where(Project.status == ContentStatus(status))
+        else:
+            base = base.where(Project.status != ContentStatus.ARCHIVED)
 
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
@@ -161,7 +163,7 @@ class ProjectService:
 
     async def get_project(self, project_id: str) -> Project:
         project = await self.db.get(Project, project_id)
-        if project is None:
+        if project is None or project.status == ContentStatus.ARCHIVED:
             raise ProjectNotFoundError()
         return project
 
