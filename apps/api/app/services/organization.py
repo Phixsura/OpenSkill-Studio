@@ -8,6 +8,7 @@ from hashlib import sha256
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.email import get_email_sender
@@ -98,7 +99,7 @@ class OrgService:
         # Check slug uniqueness
         existing = await self.db.execute(select(Organization).where(Organization.slug == slug))
         if existing.scalar_one_or_none() is not None:
-            raise SlugAlreadyExistsError()
+            raise SlugAlreadyExistsError() from None
 
         org = Organization(
             name=name,
@@ -107,7 +108,11 @@ class OrgService:
             created_by=created_by,
         )
         self.db.add(org)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise SlugAlreadyExistsError() from None
 
         # Creator becomes owner
         member = OrgMember(
@@ -450,7 +455,10 @@ class OrgService:
         await self.db.flush()
 
     async def join_by_code(self, code: str, user_id: str) -> OrgMember:
-        result = await self.db.execute(select(OrgInviteLink).where(OrgInviteLink.code == code))
+        # Use FOR UPDATE to prevent race condition on use_count
+        result = await self.db.execute(
+            select(OrgInviteLink).where(OrgInviteLink.code == code).with_for_update()
+        )
         link = result.scalar_one_or_none()
 
         if link is None or not link.is_active:

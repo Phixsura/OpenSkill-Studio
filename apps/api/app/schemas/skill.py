@@ -62,6 +62,20 @@ class CreateSkillRequest(BaseModel):
             raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        if len(v) > 10000:
+            raise ValueError("Description must be 10,000 characters or less")
+        return v
+
+    @field_validator("learning_content")
+    @classmethod
+    def validate_learning_content(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100000:
+            raise ValueError("Learning content must be 100,000 characters or less")
+        return v
+
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
@@ -114,6 +128,14 @@ class CreateExerciseRequest(BaseModel):
     type: str
     config: dict
     max_score: int = 100
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        allowed = {"multiple_choice", "text_answer", "code_answer"}
+        if v not in allowed:
+            raise ValueError(f"Exercise type must be one of: {', '.join(sorted(allowed))}")
+        return v
 
     @field_validator("title")
     @classmethod

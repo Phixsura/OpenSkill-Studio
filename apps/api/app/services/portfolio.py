@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -96,11 +97,15 @@ class PortfolioService:
             )
         )
         if existing.scalar_one_or_none() is not None:
-            raise UsernameUnavailableError()
+            raise UsernameUnavailableError() from None
 
         profile = await self.get_or_create_profile(user_id)
         profile.username = username
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise UsernameUnavailableError() from None
         return profile
 
     # ── Public ──

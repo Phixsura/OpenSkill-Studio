@@ -49,6 +49,9 @@ export default function MembersPage() {
       setInviteLink(`${window.location.origin}/join/${code}`);
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
+    onError: () => {
+      setInviteLink(null);
+    },
   });
 
   const members = data?.data ?? [];

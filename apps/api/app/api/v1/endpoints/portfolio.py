@@ -195,6 +195,13 @@ async def upload_cover_image(
     from app.config import settings
     from app.core.storage import get_s3_client
 
+    # Validate content type
+    allowed_types = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=422, detail=f"File type must be one of: {', '.join(sorted(allowed_types))}"
+        )
+
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:  # 10 MB limit for covers
         raise HTTPException(status_code=413, detail="Cover image must be under 10MB")

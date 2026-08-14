@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -15,6 +16,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { user, clearAuth } = useAuthStore();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -32,51 +34,94 @@ export default function DashboardLayout({
     }
   };
 
+  const closeSidebar = () => setSidebarOpen(false);
+
+  const navLinks = (
+    <>
+      <NavLink href="/dashboard" active={pathname === "/dashboard"} onClick={closeSidebar}>Dashboard</NavLink>
+      <NavLink href="/dashboard/orgs" active={pathname.startsWith("/dashboard/orgs")} onClick={closeSidebar}>Organizations</NavLink>
+      <NavLink href="/dashboard/skills" active={pathname === "/dashboard/skills"} onClick={closeSidebar}>Skills</NavLink>
+      <NavLink href="/dashboard/projects" active={pathname === "/dashboard/projects"} onClick={closeSidebar}>Projects</NavLink>
+      <NavLink href="/dashboard/portfolio" active={pathname.startsWith("/dashboard/portfolio")} onClick={closeSidebar}>Portfolio</NavLink>
+      <NavLink href="/dashboard/settings" active={pathname === "/dashboard/settings"} onClick={closeSidebar}>Settings</NavLink>
+    </>
+  );
+
+  const userSection = (
+    <div className="border-t p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-sm font-medium text-[hsl(var(--primary-foreground))]">
+          {user?.display_name?.charAt(0)?.toUpperCase() ?? "?"}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">
+            {user?.display_name ?? "User"}
+          </p>
+          <p className="truncate text-xs text-[hsl(var(--muted-foreground))]">
+            {user?.email}
+          </p>
+        </div>
+      </div>
+      <button
+        onClick={handleLogout}
+        className="mt-3 w-full rounded-md border px-3 py-1.5 text-sm hover:bg-[hsl(var(--secondary))]"
+      >
+        Log out
+      </button>
+    </div>
+  );
+
   return (
     <div className="flex h-screen">
-      {/* Sidebar */}
-      <aside className="flex w-64 flex-col border-r bg-[hsl(var(--card))]">
+      {/* Mobile header */}
+      <div className="fixed left-0 right-0 top-0 z-40 flex items-center border-b bg-[hsl(var(--card))] px-4 py-3 md:hidden">
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="mr-3 rounded-md p-1 hover:bg-[hsl(var(--secondary))]"
+          aria-label="Toggle menu"
+        >
+          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {sidebarOpen ? (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            )}
+          </svg>
+        </button>
+        <Link href="/dashboard" className="text-lg font-bold">
+          OpenSkill Studio
+        </Link>
+      </div>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={closeSidebar}
+        />
+      )}
+
+      {/* Sidebar — hidden on mobile, shown on md+ */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r bg-[hsl(var(--card))] transition-transform md:static md:translate-x-0",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
         <div className="border-b p-4">
           <Link href="/dashboard" className="text-lg font-bold">
             OpenSkill Studio
           </Link>
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
-          <NavLink href="/dashboard" active={pathname === "/dashboard"}>Dashboard</NavLink>
-          <NavLink href="/dashboard/orgs" active={pathname.startsWith("/dashboard/orgs")}>Organizations</NavLink>
-          <NavLink href="/dashboard/skills" active={pathname === "/dashboard/skills"}>Skills</NavLink>
-          <NavLink href="/dashboard/projects" active={pathname === "/dashboard/projects"}>Projects</NavLink>
-          <NavLink href="/dashboard/portfolio" active={pathname.startsWith("/dashboard/portfolio")}>Portfolio</NavLink>
-          <NavLink href="/dashboard/settings" active={pathname === "/dashboard/settings"}>Settings</NavLink>
-        </nav>
-
-        {/* User section */}
-        <div className="border-t p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-sm font-medium text-[hsl(var(--primary-foreground))]">
-              {user?.display_name?.charAt(0)?.toUpperCase() ?? "?"}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">
-                {user?.display_name ?? "User"}
-              </p>
-              <p className="truncate text-xs text-[hsl(var(--muted-foreground))]">
-                {user?.email}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="mt-3 w-full rounded-md border px-3 py-1.5 text-sm hover:bg-[hsl(var(--secondary))]"
-          >
-            Log out
-          </button>
-        </div>
+        <nav className="flex-1 space-y-1 p-3">{navLinks}</nav>
+        {userSection}
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto p-8">{children}</main>
+      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        <div className="p-4 md:p-8">{children}</div>
+      </main>
     </div>
   );
 }
@@ -85,14 +130,17 @@ function NavLink({
   href,
   children,
   active,
+  onClick,
 }: {
   href: string;
   children: React.ReactNode;
   active?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <Link
       href={href}
+      onClick={onClick}
       className={cn(
         "block rounded-md px-3 py-2 text-sm",
         active

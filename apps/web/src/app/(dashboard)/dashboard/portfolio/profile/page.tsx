@@ -54,6 +54,9 @@ export default function EditProfilePage() {
       queryClient.invalidateQueries({ queryKey: ["portfolio-profile"] });
       setMessage("Profile saved.");
     },
+    onError: () => {
+      setMessage("Failed to save profile.");
+    },
   });
 
   if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
