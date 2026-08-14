@@ -82,6 +82,13 @@ class CreateSkillRequest(BaseModel):
     tags: list[str] | None = None
     prerequisites: list[str] | None = None
 
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            return [t.strip() for t in v if t.strip()]
+        return v
+
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str) -> str:
@@ -135,6 +142,13 @@ class UpdateSkillRequest(BaseModel):
     difficulty: str | None = None
     estimated_minutes: int | None = None
     tags: list[str] | None = None
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            return [t.strip() for t in v if t.strip()]
+        return v
 
     @field_validator("name")
     @classmethod
