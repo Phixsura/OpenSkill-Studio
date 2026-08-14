@@ -7,6 +7,7 @@ from hashlib import sha256
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.email import get_email_sender
@@ -100,7 +101,11 @@ class AuthService:
             status=UserStatus.ACTIVE,
         )
         self.db.add(user)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise EmailAlreadyExistsError() from None
 
         # Generate email verification token
         await self._create_email_verification(user)

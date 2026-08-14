@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -90,7 +91,13 @@ class SkillService:
             created_by=created_by,
         )
         self.db.add(cat)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            cat.slug = f"{cat.slug}-{secrets.token_hex(3)}"
+            self.db.add(cat)
+            await self.db.flush()
         return cat
 
     async def list_categories(self, org_id: str) -> list[SkillCategory]:
@@ -157,7 +164,14 @@ class SkillService:
             created_by=created_by,
         )
         self.db.add(skill)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            # Slug collision — append random suffix and retry
+            skill.slug = f"{skill.slug}-{secrets.token_hex(3)}"
+            self.db.add(skill)
+            await self.db.flush()
 
         if prerequisite_ids:
             await self._set_prerequisites(skill.id, prerequisite_ids)

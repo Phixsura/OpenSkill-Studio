@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
@@ -129,7 +130,13 @@ class ProjectService:
             created_by=created_by,
         )
         self.db.add(project)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            project.slug = f"{project.slug}-{secrets.token_hex(3)}"
+            self.db.add(project)
+            await self.db.flush()
 
         if skill_ids:
             await self._set_project_skills(project.id, skill_ids)
