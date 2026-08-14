@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth, ApiError } from "@/lib/api";
+import { useAuthStore } from "@/stores/auth";
 
 interface Deliverable {
   id: string;
@@ -89,10 +90,12 @@ export default function SubmitPage() {
                   formData.append("file", file);
                   formData.append("deliverable_id", d.id);
                   try {
+                    const token = useAuthStore.getState().accessToken;
                     await fetch(`/api/v1/orgs/${orgId}/submissions/${submissionId}/files`, {
                       method: "POST",
                       body: formData,
                       credentials: "include",
+                      headers: token ? { Authorization: `Bearer ${token}` } : {},
                     });
                   } catch {
                     setError("File upload failed");
@@ -124,7 +127,29 @@ export default function SubmitPage() {
         ))}
       </div>
 
-      <Button onClick={() => submitDraft.mutate()} disabled={submitDraft.isPending}>
+      <Button
+        onClick={async () => {
+          // Save text/link items before submitting
+          for (const [delivId, content] of Object.entries(textInputs)) {
+            if (content.trim()) {
+              try {
+                await apiWithAuth(
+                  `/orgs/${orgId}/submissions/${submissionId}/items`,
+                  {
+                    method: "POST",
+                    body: JSON.stringify({ deliverable_id: delivId, content }),
+                  },
+                );
+              } catch {
+                setError(`Failed to save content for deliverable.`);
+                return;
+              }
+            }
+          }
+          submitDraft.mutate();
+        }}
+        disabled={submitDraft.isPending}
+      >
         {submitDraft.isPending ? "Submitting..." : "Submit"}
       </Button>
     </div>
