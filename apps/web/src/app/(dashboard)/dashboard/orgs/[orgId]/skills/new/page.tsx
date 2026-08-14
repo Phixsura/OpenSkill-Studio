@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ interface Category {
 export default function NewSkillPage() {
   const { orgId } = useParams<{ orgId: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { data: catData } = useQuery({
     queryKey: ["categories", orgId],
@@ -67,6 +68,7 @@ export default function NewSkillPage() {
           }),
         },
       );
+      queryClient.invalidateQueries({ queryKey: ["skills", orgId] });
       router.push(`/dashboard/orgs/${orgId}/skills/${res.data.id}`);
     } catch (err) {
       setError(
@@ -130,6 +132,7 @@ export default function NewSkillPage() {
             </label>
             <select
               id="category"
+              required
               value={categoryId}
               onChange={(e) => setCategoryId(e.target.value)}
               className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"

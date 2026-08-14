@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { apiWithAuth, ApiError } from "@/lib/api";
 
 export default function CreateOrgPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
@@ -39,6 +41,7 @@ export default function CreateOrgPage() {
           description: description || undefined,
         }),
       });
+      queryClient.invalidateQueries({ queryKey: ["my-orgs"] });
       router.push(`/dashboard/orgs/${res.data.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create organization.");

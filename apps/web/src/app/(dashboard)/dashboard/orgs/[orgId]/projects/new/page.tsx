@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { apiWithAuth, ApiError } from "@/lib/api";
 export default function NewProjectPage() {
   const { orgId } = useParams<{ orgId: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -57,6 +59,7 @@ export default function NewProjectPage() {
           }),
         },
       );
+      queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
       router.push(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
     } catch (err) {
       setError(

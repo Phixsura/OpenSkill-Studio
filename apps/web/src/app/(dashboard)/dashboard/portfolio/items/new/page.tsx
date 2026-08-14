@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { apiWithAuth, ApiError } from "@/lib/api";
 
 export default function NewPortfolioItemPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
@@ -31,7 +32,10 @@ export default function NewPortfolioItemPage() {
           featured,
         }),
       }),
-    onSuccess: () => router.push("/dashboard/portfolio"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["portfolio-items"] });
+      router.push("/dashboard/portfolio");
+    },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Failed to create."),
   });
 
