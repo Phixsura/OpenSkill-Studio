@@ -887,11 +887,19 @@ async def add_prompt_item(
     await _verify_submission_org(svc, submission_id, org_id)
     prompt_data = {
         "prompt": body.prompt,
+        "negative_prompt": body.negative_prompt,
         "tool": body.tool,
         "model": body.model,
+        "seed": body.seed,
+        "cfg_scale": body.cfg_scale,
+        "steps": body.steps,
+        "sampler": body.sampler,
+        "resources": body.resources,
         "parameters": body.parameters,
         "notes": body.notes,
     }
+    # Drop nulls to keep stored JSON compact
+    prompt_data = {k: v for k, v in prompt_data.items() if v is not None}
     item = await svc.add_prompt_item(submission_id, body.deliverable_id, prompt_data, user.id)
     await db.commit()
     return DataResponse(data=SubmissionItemResponse.model_validate(item))

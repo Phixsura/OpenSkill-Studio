@@ -476,3 +476,85 @@ def test_submission_item_response_has_file_flag():
     )
     r2 = SubmissionItemResponse.model_validate(text_item)
     assert r2.has_file is False
+
+
+# ── Prompt schema: industry fields ──
+
+
+def test_prompt_request_industry_fields_valid():
+    from app.schemas.project import PromptItemRequest
+
+    req = PromptItemRequest(
+        deliverable_id="X",
+        prompt="a shot",
+        negative_prompt="blurry",
+        seed=2049363429,
+        cfg_scale=4.5,
+        steps=30,
+        sampler="Euler a",
+        resources=[
+            {"type": "checkpoint", "name": "WAI-illustrious", "version": "v17.0"},
+            {"type": "lora", "name": "style-x", "weight": 0.8},
+        ],
+    )
+    assert req.seed == 2049363429
+    assert req.resources[1]["weight"] == 0.8
+
+
+def test_prompt_request_seed_out_of_range():
+    from pydantic import ValidationError
+
+    from app.schemas.project import PromptItemRequest
+
+    with pytest.raises(ValidationError):
+        PromptItemRequest(deliverable_id="X", prompt="p", seed=2**32)
+    with pytest.raises(ValidationError):
+        PromptItemRequest(deliverable_id="X", prompt="p", seed=-1)
+
+
+def test_prompt_request_too_many_resources():
+    from pydantic import ValidationError
+
+    from app.schemas.project import PromptItemRequest
+
+    with pytest.raises(ValidationError):
+        PromptItemRequest(
+            deliverable_id="X",
+            prompt="p",
+            resources=[{"type": "lora", "name": f"r{i}"} for i in range(21)],
+        )
+
+
+def test_prompt_request_bad_resource_shape():
+    from pydantic import ValidationError
+
+    from app.schemas.project import PromptItemRequest
+
+    with pytest.raises(ValidationError):
+        PromptItemRequest(deliverable_id="X", prompt="p", resources=[{"name": "no type"}])
+    with pytest.raises(ValidationError):
+        PromptItemRequest(
+            deliverable_id="X",
+            prompt="p",
+            resources=[{"type": "lora", "name": "x", "weight": 99}],
+        )
+
+
+def test_prompt_request_negative_prompt_cap():
+    from pydantic import ValidationError
+
+    from app.schemas.project import PromptItemRequest
+
+    with pytest.raises(ValidationError):
+        PromptItemRequest(deliverable_id="X", prompt="p", negative_prompt="n" * 10001)
+
+
+def test_prompt_request_cfg_steps_bounds():
+    from pydantic import ValidationError
+
+    from app.schemas.project import PromptItemRequest
+
+    with pytest.raises(ValidationError):
+        PromptItemRequest(deliverable_id="X", prompt="p", cfg_scale=101)
+    with pytest.raises(ValidationError):
+        PromptItemRequest(deliverable_id="X", prompt="p", steps=1001)

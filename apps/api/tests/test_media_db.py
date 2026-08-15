@@ -627,3 +627,96 @@ async def test_ai_visual_e2e_flow(db):
     fresh = await svc.get_submission(sub.id)
     assert fresh.status.value == "approved"
     assert fresh.final_score == 92
+
+
+# ══════════════════════════════════════════════════════════
+# Generation metadata extraction on upload
+# ══════════════════════════════════════════════════════════
+
+A1111_INFOTEXT = (
+    "cinematic watch on marble, dramatic light\n"
+    "Negative prompt: blurry, low quality\n"
+    "Steps: 30, Sampler: Euler a, CFG scale: 4.5, Seed: 987654321, Size: 832x1216"
+)
+
+
+def _png_with_parameters(text: str) -> bytes:
+    import struct as _s
+    import zlib as _z
+
+    sig = b"\x89PNG\r\n\x1a\n"
+
+    def chunk(ctype, data):
+        return (
+            _s.pack(">I", len(data))
+            + ctype
+            + data
+            + _s.pack(">I", _z.crc32(ctype + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = chunk(b"IHDR", _s.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0))
+    text_chunk = chunk(b"tEXt", b"parameters\x00" + text.encode("latin-1"))
+    iend = chunk(b"IEND", b"")
+    return sig + ihdr + text_chunk + iend
+
+
+@pytest.mark.asyncio
+async def test_upload_extracts_a1111_metadata(db):
+    """PNG with embedded A1111 infotext → generation dict stored in content."""
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "image")
+
+    png = _png_with_parameters(A1111_INFOTEXT)
+    item = await svc.upload_file(sub.id, d.id, "gen.png", png, "image/png", user.id)
+
+    assert item.content is not None
+    parsed = json.loads(item.content)
+    gen = parsed["generation"]
+    assert gen["source"] == "a1111"
+    assert gen["prompt"].startswith("cinematic watch")
+    assert gen["negative_prompt"] == "blurry, low quality"
+    assert gen["seed"] == 987654321
+    assert gen["cfg_scale"] == 4.5
+    assert gen["steps"] == 30
+    assert gen["sampler"] == "Euler a"
+
+
+@pytest.mark.asyncio
+async def test_upload_plain_png_no_metadata(db):
+    """PNG without embedded metadata → content stays NULL."""
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "image")
+    item = await svc.upload_file(sub.id, d.id, "plain.png", PNG, "image/png", user.id)
+    assert item.content is None
+
+
+@pytest.mark.asyncio
+async def test_upload_file_type_skips_extraction(db):
+    """Legacy FILE deliverables don't run extraction (back-compat)."""
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "file")
+    png = _png_with_parameters(A1111_INFOTEXT)
+    item = await svc.upload_file(sub.id, d.id, "gen.png", png, "image/png", user.id)
+    assert item.content is None
+
+
+@pytest.mark.asyncio
+async def test_prompt_item_industry_fields_roundtrip(db):
+    """New industry fields (seed/negative/cfg/steps/sampler/resources) roundtrip."""
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "prompt")
+
+    data = {
+        "prompt": "cinematic shot",
+        "negative_prompt": "blurry",
+        "seed": 42,
+        "cfg_scale": 7.0,
+        "steps": 25,
+        "sampler": "dpmpp_2m",
+        "resources": [{"type": "lora", "name": "style-x", "weight": 0.8}],
+    }
+    item = await svc.add_prompt_item(sub.id, d.id, data, user.id)
+    parsed = json.loads(item.content)
+    assert parsed["seed"] == 42
+    assert parsed["negative_prompt"] == "blurry"
+    assert parsed["resources"][0]["weight"] == 0.8

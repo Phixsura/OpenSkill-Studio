@@ -19,8 +19,11 @@ PNG_SIG = b"\x89PNG\r\n\x1a\n"
 
 
 def _chunk(ctype: bytes, data: bytes) -> bytes:
-    return struct.pack(">I", len(data)) + ctype + data + struct.pack(
-        ">I", zlib.crc32(ctype + data) & 0xFFFFFFFF
+    return (
+        struct.pack(">I", len(data))
+        + ctype
+        + data
+        + struct.pack(">I", zlib.crc32(ctype + data) & 0xFFFFFFFF)
     )
 
 
