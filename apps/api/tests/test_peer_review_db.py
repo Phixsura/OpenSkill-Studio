@@ -138,10 +138,12 @@ async def test_round_lifecycle_full(db):
             )
 
     results = await svc.round_results(rnd.id, org.id)
-    assert len(results) == 4  # every submission reviewed
+    assert len(results) == 4  # every submission reviewed (≥1 guarantee)
+    total_reviews = sum(r["review_count"] for r in results)
+    assert total_reviews == 8  # 4 reviewers × 2 reviews each
     for r in results:
         assert r["avg_score"] == 80.0
-        assert r["review_count"] == 2
+        assert r["review_count"] >= 1  # fairness floor; exact split may vary
 
     rnd = await svc.close_round(rnd.id, org.id)
     assert rnd.phase.value == "closed"

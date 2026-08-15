@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ export default function PeerAssessPage() {
   const search = useSearchParams();
   const submissionId = search.get("submission");
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { data: projectData } = useQuery({
     queryKey: ["project", projectId],
@@ -92,6 +93,8 @@ export default function PeerAssessPage() {
           feedback: feedback.trim() || undefined,
         }),
       });
+      queryClient.invalidateQueries({ queryKey: ["peer-my"] });
+      queryClient.invalidateQueries({ queryKey: ["peer-rounds", projectId] });
       router.push(`/dashboard/orgs/${orgId}/projects/${projectId}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to submit assessment");
