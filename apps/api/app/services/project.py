@@ -598,13 +598,15 @@ class ProjectService:
                 raise FileTooLargeError(limit // (1024 * 1024))
 
     async def _next_item_version(self, submission_id: str, deliverable_id: str) -> int:
+        # max(version)+1, NOT count+1 — after deleting a middle version, count+1
+        # would collide with an existing version number.
         result = await self.db.execute(
-            select(func.count(SubmissionItem.id)).where(
+            select(func.max(SubmissionItem.version)).where(
                 SubmissionItem.submission_id == submission_id,
                 SubmissionItem.deliverable_id == deliverable_id,
             )
         )
-        return result.scalar_one() + 1
+        return (result.scalar_one() or 0) + 1
 
     async def upload_file(
         self,
@@ -634,12 +636,21 @@ class ProjectService:
 
         # max_files caps total stored items for this deliverable. Single-slot
         # deliverables (max_files=1) are exempt so "replace with new version"
-        # keeps working; multi-slot ones can free space via delete_file.
+        # keeps working; multi-slot ones can free space via delete_file. Count
+        # actual stored files (not the version counter, which only grows) so
+        # deleting frees a slot.
         config = deliverable.config or {}
         max_files = config.get("max_files")
+        if isinstance(max_files, int) and max_files > 1:
+            count_result = await self.db.execute(
+                select(func.count(SubmissionItem.id)).where(
+                    SubmissionItem.submission_id == submission_id,
+                    SubmissionItem.deliverable_id == deliverable_id,
+                )
+            )
+            if count_result.scalar_one() >= max_files:
+                raise MaxFilesReachedError(max_files)
         version = await self._next_item_version(submission_id, deliverable_id)
-        if isinstance(max_files, int) and max_files > 1 and version > max_files:
-            raise MaxFilesReachedError(max_files)
 
         # Clean filename
         safe_name = re.sub(r"[^\w.\-]", "_", file_name)

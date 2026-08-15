@@ -1785,3 +1785,63 @@ async def test_partial_deadline_update_preserves_ordering(c):
         f"/api/v1/orgs/{oid}/projects/{pid}", json={"deadline": "2030-06-03T00:00:00Z"}, headers=h
     )
     assert r.status_code == 200
+
+
+def _mini_png(color: int = 1) -> bytes:
+    import struct
+    import zlib
+
+    sig = b"\x89PNG\r\n\x1a\n"
+
+    def ch(t, d):
+        crc = zlib.crc32(t + d) & 0xFFFFFFFF
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", crc)
+
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    return sig + ch(b"IHDR", ihdr) + ch(b"IDAT", zlib.compress(bytes((color,) * 3))) + ch(b"IEND", b"")
+
+
+@pytest.mark.asyncio
+async def test_version_numbers_unique_after_delete(c):
+    """Deleting a middle version must not cause the next upload to reuse a
+    version number (was count+1 → collision; now max+1). And max_files must
+    free a slot when a file is deleted."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Version Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Img", "type": "image", "config": {"max_files": 2}, "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+
+    async def up(color):
+        return await c.post(
+            f"/api/v1/orgs/{oid}/submissions/{sid}/files",
+            files={"file": (f"f{color}.png", _mini_png(color), "image/png")},
+            data={"deliverable_id": did},
+            headers=h,
+        )
+
+    r1 = await up(10)
+    f1 = r1.json()["data"]["id"]
+    await up(20)
+    # 3rd blocked by max_files=2
+    assert (await up(30)).status_code == 422
+    # delete v1 → slot freed AND next version is max+1 (3), not a reused number
+    await c.delete(f"/api/v1/orgs/{oid}/submissions/{sid}/files/{f1}", headers=h)
+    r3 = await up(40)
+    assert r3.status_code == 201
+    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    versions = [i["version"] for i in det["items"] if i["deliverable_id"] == did]
+    assert len(versions) == len(set(versions)), f"duplicate versions: {versions}"
