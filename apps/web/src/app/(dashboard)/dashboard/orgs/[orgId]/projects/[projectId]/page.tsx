@@ -45,10 +45,12 @@ interface ProjectAsset {
 
 interface SubmissionItem {
   id: string;
+  user_id: string;
   version: number;
   status: string;
   submitted_at: string | null;
   final_score: number | null;
+  author_name: string;
 }
 
 export default function ProjectDetailPage() {
@@ -70,6 +72,13 @@ export default function ProjectDetailPage() {
     queryFn: () => apiWithAuth<{ data: { role: string | null } }>(`/orgs/${orgId}`),
   });
   const orgRole = orgData?.data?.role;
+  const isInstructor = ["owner", "admin", "instructor"].includes(orgRole ?? "");
+
+  const { data: meData } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => apiWithAuth<{ data: { id: string } }>(`/auth/me`),
+  });
+  const myId = meData?.data?.id;
 
   const { data: assetsData } = useQuery({
     queryKey: ["project-assets", projectId],
@@ -77,9 +86,11 @@ export default function ProjectDetailPage() {
       apiWithAuth<{ data: ProjectAsset[] }>(`/orgs/${orgId}/projects/${projectId}/assets`),
   });
 
-  // For workflow status: pull the full items of my latest submission so each
-  // stage can show completion state + the latest submitted asset.
-  const latestSubId = subsData?.data?.[0]?.id;
+  // For workflow status: pull the full items of MY latest submission so each
+  // stage can show completion state + the latest submitted asset. Instructors
+  // see everyone's rows in subsData, so filter to own first.
+  const mySubs = (subsData?.data ?? []).filter((s) => !myId || s.user_id === myId);
+  const latestSubId = mySubs[0]?.id;
   const { data: latestSubDetail } = useQuery({
     queryKey: ["latest-sub-items", projectId, latestSubId],
     enabled: !!latestSubId,
@@ -290,13 +301,15 @@ export default function ProjectDetailPage() {
         <PeerReviewSection
           orgId={orgId}
           projectId={projectId}
-          isInstructor={["owner", "admin", "instructor"].includes(orgRole ?? "")}
+          isInstructor={isInstructor}
         />
 
         {/* Submissions */}
         <div>
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">My Submissions</h2>
+            <h2 className="text-xl font-semibold">
+              {isInstructor ? "Submissions" : "My Submissions"}
+            </h2>
             <Link href={`/dashboard/orgs/${orgId}/projects/${projectId}/submit`}>
               <Button>New Submission</Button>
             </Link>
@@ -311,7 +324,22 @@ export default function ProjectDetailPage() {
                 href={`/dashboard/orgs/${orgId}/projects/${projectId}/submissions/${s.id}`}
                 className="flex items-center justify-between rounded-lg border p-3 text-sm hover:shadow-sm"
               >
-                <span>v{s.version} — <span className="capitalize">{s.status.replace("_", " ")}</span></span>
+                <span className="flex items-center gap-2">
+                  {isInstructor && (
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[hsl(var(--secondary))] text-xs font-semibold uppercase">
+                      {s.author_name?.[0] ?? "?"}
+                    </span>
+                  )}
+                  {isInstructor && <span className="font-medium">{s.author_name}</span>}
+                  <span>
+                    v{s.version} — <span className="capitalize">{s.status.replace("_", " ")}</span>
+                  </span>
+                  {s.submitted_at && (
+                    <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                      {new Date(s.submitted_at).toLocaleString()}
+                    </span>
+                  )}
+                </span>
                 {s.final_score !== null && (
                   <span className="font-mono font-bold">{s.final_score}/{project.max_score}</span>
                 )}

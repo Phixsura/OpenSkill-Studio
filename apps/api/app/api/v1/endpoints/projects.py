@@ -18,6 +18,7 @@ from app.schemas.project import (
     ExtensionResponse,
     FileResponse,
     GrantExtensionRequest,
+    PendingReviewResponse,
     ProjectDetailResponse,
     ProjectResponse,
     PromptItemRequest,
@@ -25,6 +26,7 @@ from app.schemas.project import (
     SubmissionDetailResponse,
     SubmissionItemResponse,
     SubmissionResponse,
+    SubmissionWithAuthorResponse,
     TemplateResponse,
     UpdateDeliverableRequest,
     UpdateProjectRequest,
@@ -347,7 +349,7 @@ async def delete_deliverable(
 
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/submissions",
-    response_model=ListResponse[SubmissionResponse],
+    response_model=ListResponse[SubmissionWithAuthorResponse],
 )
 async def list_submissions(
     org_id: str,
@@ -361,9 +363,15 @@ async def list_submissions(
     svc = ProjectService(db)
     # Instructor sees all, student sees own
     uid = None if member.role in INSTRUCTOR_ROLES else user.id
-    submissions, total = await svc.list_submissions(project_id, uid, page, per_page)
+    rows, total = await svc.list_submissions(project_id, uid, page, per_page)
     return ListResponse(
-        data=[SubmissionResponse.model_validate(s) for s in submissions],
+        data=[
+            SubmissionWithAuthorResponse(
+                **SubmissionResponse.model_validate(sub).model_dump(),
+                author_name=author_name,
+            )
+            for sub, author_name in rows
+        ],
         meta=PaginationMeta(
             total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
         ),
@@ -643,7 +651,7 @@ async def create_review(
 # ── Review Dashboard ─────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[SubmissionResponse])
+@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[PendingReviewResponse])
 async def pending_reviews(
     org_id: str,
     page: int = Query(default=1, ge=1),
@@ -653,9 +661,16 @@ async def pending_reviews(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
-    submissions, total = await svc.get_pending_reviews(org_id, page, per_page)
+    rows, total = await svc.get_pending_reviews(org_id, page, per_page)
     return ListResponse(
-        data=[SubmissionResponse.model_validate(s) for s in submissions],
+        data=[
+            PendingReviewResponse(
+                **SubmissionResponse.model_validate(sub).model_dump(),
+                author_name=author_name,
+                project_title=project_title,
+            )
+            for sub, author_name, project_title, _pid in rows
+        ],
         meta=PaginationMeta(
             total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
         ),
