@@ -265,7 +265,15 @@ class PortfolioService:
             published_at=datetime.now(UTC),
         )
         self.db.add(item)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            # Slug collides with the user's existing item (same title) — the
+            # (user_id, slug) unique index would 500. Append a random suffix.
+            await self.db.rollback()
+            item.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
+            self.db.add(item)
+            await self.db.flush()
         return item
 
     async def list_items(self, user_id: str) -> list[PortfolioItem]:

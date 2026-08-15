@@ -1291,3 +1291,42 @@ async def test_grade_attempt_score_bounds(c):
     ).json()["data"]["id"]
     r = await c.post(f"/api/v1/orgs/{oid}/grading/attempts/{att}", json={"score": -5}, headers=h)
     assert r.status_code == 422
+
+
+# ── Portfolio slug collision + profile bounds (bug-hunt round 10) ──
+
+
+@pytest.mark.asyncio
+async def test_portfolio_duplicate_title_no_500(c):
+    """Two items with the same title collide on (user_id, slug) — must not 500."""
+    h, _ = await _auth(c)
+    r1 = await c.post(
+        "/api/v1/portfolio/items",
+        json={"title": "My Great Work", "visibility": "public"},
+        headers=h,
+    )
+    assert r1.status_code == 201
+    r2 = await c.post(
+        "/api/v1/portfolio/items",
+        json={"title": "My Great Work", "visibility": "public"},
+        headers=h,
+    )
+    assert r2.status_code == 201
+    assert r1.json()["data"]["slug"] != r2.json()["data"]["slug"]
+
+
+@pytest.mark.asyncio
+async def test_profile_field_bounds(c):
+    """Profile text fields, visibility enum, and social links are bounded."""
+    h, _ = await _auth(c)
+    bad_bodies = [
+        {"headline": "x" * 300},
+        {"bio": "y" * 6000},
+        {"location": "z" * 300},
+        {"visibility": "bogus"},
+        {"social_links": {"a": "notaurl"}},
+        {"website_url": "ftp://evil"},
+    ]
+    for body in bad_bodies:
+        r = await c.put("/api/v1/portfolio/profile", json=body, headers=h)
+        assert r.status_code == 422, f"{body} -> {r.status_code}"

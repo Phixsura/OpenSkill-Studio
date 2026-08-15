@@ -50,16 +50,53 @@ class UpdateProfileRequest(BaseModel):
     @field_validator("website_url")
     @classmethod
     def validate_website_url(cls, v: str | None) -> str | None:
-        if v is not None and not re.match(r"^https?://", v, re.IGNORECASE):
-            raise ValueError("URL must start with http:// or https://")
+        if v is not None and v != "":
+            if len(v) > 500:
+                raise ValueError("URL must be 500 characters or less")
+            if not re.match(r"^https?://", v, re.IGNORECASE):
+                raise ValueError("URL must start with http:// or https://")
+        return v
+
+    @field_validator("headline")
+    @classmethod
+    def validate_headline(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Headline must be 200 characters or less")
+        return v
+
+    @field_validator("bio")
+    @classmethod
+    def validate_bio(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 5000:
+            raise ValueError("Bio must be 5,000 characters or less")
+        return v
+
+    @field_validator("location")
+    @classmethod
+    def validate_location(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Location must be 200 characters or less")
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str | None) -> str | None:
+        if v is not None and v not in {"public", "private"}:
+            raise ValueError("visibility must be one of: public, private")
         return v
 
     @field_validator("social_links")
     @classmethod
     def validate_social_links(cls, v: dict | None) -> dict | None:
         if v is not None:
+            if len(v) > 20:
+                raise ValueError("At most 20 social links")
             for key, url in v.items():
-                if not isinstance(url, str) or not re.match(r"^https?://", url, re.IGNORECASE):
+                if not isinstance(key, str) or len(key) > 50:
+                    raise ValueError("Social link keys must be strings of 50 chars or less")
+                if not isinstance(url, str) or len(url) > 500:
+                    raise ValueError(f"Social link '{key}' must be a URL of 500 chars or less")
+                if not re.match(r"^https?://", url, re.IGNORECASE):
                     raise ValueError(f"Social link '{key}' must be a valid http/https URL")
         return v
 
