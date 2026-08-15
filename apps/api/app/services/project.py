@@ -523,8 +523,9 @@ class ProjectService:
 
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
-        if sub.status != SubmissionStatus.DRAFT:
-            raise InvalidStateError("Only drafts can be submitted")
+        # A draft OR a revision-requested submission can be (re)submitted.
+        if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
+            raise InvalidStateError("Only drafts or revision-requested submissions can be submitted")
 
         # Check required deliverables
         await self._validate_required_deliverables(sub)
@@ -609,8 +610,8 @@ class ProjectService:
         sub = await self.get_submission(submission_id)
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
-        if sub.status != SubmissionStatus.DRAFT:
-            raise InvalidStateError("Can only upload to drafts")
+        if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
+            raise InvalidStateError("Can only upload while the submission is editable")
 
         # Deliverable must exist and belong to this submission's project
         deliverable = await self.get_deliverable(deliverable_id)
@@ -723,8 +724,8 @@ class ProjectService:
         sub = await self.get_submission(item.submission_id)
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
-        if sub.status != SubmissionStatus.DRAFT:
-            raise InvalidStateError("Can only delete files from drafts")
+        if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
+            raise InvalidStateError("Can only delete files while the submission is editable")
 
         # Best-effort S3 cleanup — don't leave orphaned objects behind
         if item.file_key:
@@ -1249,8 +1250,8 @@ class ProjectService:
         sub = await self.get_submission(submission_id)
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
-        if sub.status != SubmissionStatus.DRAFT:
-            raise InvalidStateError("Can only add prompts to drafts")
+        if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
+            raise InvalidStateError("Can only add prompts while the submission is editable")
 
         deliverable = await self.get_deliverable(deliverable_id)
         if deliverable.project_id != sub.project_id:

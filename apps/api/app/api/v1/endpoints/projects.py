@@ -485,8 +485,10 @@ async def update_submission(
         raise HTTPException(status_code=404, detail="Submission not found in this project")
     if sub.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your submission")
-    if sub.status.value != "draft":
-        raise HTTPException(status_code=422, detail="Only drafts can be updated")
+    # A submission is editable while it's a draft OR after an instructor sent
+    # it back for revision — otherwise the revision loop is a dead end.
+    if sub.status.value not in ("draft", "revision_requested"):
+        raise HTTPException(status_code=422, detail="This submission can no longer be edited")
 
     from app.models.project import ItemType, SubmissionItem
 

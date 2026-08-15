@@ -1694,3 +1694,61 @@ async def test_student_cannot_attempt_unpublished_skill(c):
     await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=ho)
     r = await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=hs)
     assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_revision_requested_edit_and_resubmit(c):
+    """After an instructor requests a revision, the learner must be able to
+    edit the submission and resubmit it — the revision loop must not dead-end."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Revision Loop Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Text D", "type": "text", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+
+    # instructor requests revision
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "revision_requested", "feedback": "add more"},
+        headers=h,
+    )
+    assert r.status_code == 201
+
+    # learner edits + resubmits
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}",
+        json={"items": [{"deliverable_id": did, "type": "text", "content": "revised"}]},
+        headers=h,
+    )
+    assert r.status_code == 200
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "submitted"
+
+    # an APPROVED submission is locked (not editable)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "approved", "score": 90},
+        headers=h,
+    )
+    assert r.status_code == 201
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}",
+        json={"items": [{"deliverable_id": did, "type": "text", "content": "sneaky"}]},
+        headers=h,
+    )
+    assert r.status_code == 422
