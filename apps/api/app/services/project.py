@@ -21,6 +21,7 @@ from app.core.media import (
 )
 from app.exceptions import AppError
 from app.models.project import (
+    CommentAnchorType,
     DeliverableType,
     ItemType,
     Project,
@@ -31,6 +32,7 @@ from app.models.project import (
     ReviewerType,
     ReviewStatus,
     Submission,
+    SubmissionComment,
     SubmissionExtension,
     SubmissionItem,
     SubmissionReview,
@@ -1202,3 +1204,97 @@ class ProjectService:
             version=version,
         )
         return item
+
+    # ── Anchored comments ─────────────────────────────────────
+
+    async def add_comment(
+        self,
+        org_id: str,
+        submission_id: str,
+        item_id: str,
+        author_id: str,
+        *,
+        text: str,
+        anchor_type: str = "global",
+        timestamp_ms: int | None = None,
+        duration_ms: int | None = None,
+        region: dict | None = None,
+        parent_id: str | None = None,
+    ) -> SubmissionComment:
+        sub = await self.get_submission(submission_id)
+
+        # Item must belong to this submission
+        item = await self.db.get(SubmissionItem, item_id)
+        if item is None or item.submission_id != submission_id:
+            raise AppError("ITEM_NOT_FOUND", "Submission item not found", 404)
+
+        try:
+            anchor = CommentAnchorType(anchor_type)
+        except ValueError as exc:
+            raise AppError("INVALID_ANCHOR", f"Invalid anchor type: {anchor_type}", 422) from exc
+
+        # Anchor consistency
+        if anchor == CommentAnchorType.TIME and timestamp_ms is None:
+            raise AppError("INVALID_ANCHOR", "Time anchor requires timestamp_ms", 422)
+        if anchor == CommentAnchorType.REGION and not region:
+            raise AppError("INVALID_ANCHOR", "Region anchor requires region geometry", 422)
+        if anchor != CommentAnchorType.TIME:
+            timestamp_ms = None
+            duration_ms = None
+        if anchor != CommentAnchorType.REGION:
+            region = None
+
+        # Replies inherit the thread; must reference a comment on the same item
+        if parent_id:
+            parent = await self.db.get(SubmissionComment, parent_id)
+            if parent is None or parent.item_id != item_id:
+                raise AppError("COMMENT_NOT_FOUND", "Parent comment not found", 404)
+            if parent.parent_id is not None:
+                # Keep threads one level deep (Frame.io model)
+                parent_id = parent.parent_id
+
+        comment = SubmissionComment(
+            org_id=org_id,
+            submission_id=submission_id,
+            item_id=item_id,
+            author_id=author_id,
+            parent_id=parent_id,
+            text=text,
+            anchor_type=anchor,
+            timestamp_ms=timestamp_ms,
+            duration_ms=duration_ms,
+            region=region,
+        )
+        self.db.add(comment)
+        await self.db.flush()
+        log.info("comment_added", submission_id=submission_id, item_id=item_id, anchor=anchor.value)
+        return comment
+
+    async def list_comments(self, submission_id: str) -> list[SubmissionComment]:
+        result = await self.db.execute(
+            select(SubmissionComment)
+            .where(SubmissionComment.submission_id == submission_id)
+            .order_by(SubmissionComment.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def get_comment(self, comment_id: str, org_id: str) -> SubmissionComment:
+        comment = await self.db.get(SubmissionComment, comment_id)
+        if comment is None or comment.org_id != org_id:
+            raise AppError("COMMENT_NOT_FOUND", "Comment not found", 404)
+        return comment
+
+    async def set_comment_completed(
+        self, comment_id: str, org_id: str, completed: bool
+    ) -> SubmissionComment:
+        comment = await self.get_comment(comment_id, org_id)
+        comment.completed = completed
+        await self.db.flush()
+        return comment
+
+    async def delete_comment(self, comment_id: str, org_id: str, user_id: str) -> None:
+        comment = await self.get_comment(comment_id, org_id)
+        if comment.author_id != user_id:
+            raise AppError("PERMISSION_DENIED", "Only the author can delete a comment", 403)
+        await self.db.delete(comment)
+        await self.db.flush()

@@ -211,6 +211,61 @@ class SubmissionItem(Base):
     submission: Mapped["Submission"] = relationship(back_populates="items")
 
 
+class CommentAnchorType(str, enum.Enum):
+    """How a comment is attached to a submission item (Frame.io semantics):
+    GLOBAL = the whole asset; TIME = a video/audio timestamp (with optional
+    range duration); REGION = a normalized-coordinate area on an image."""
+
+    GLOBAL = "global"
+    TIME = "time"
+    REGION = "region"
+
+
+class SubmissionComment(Base):
+    """Anchored, threaded feedback on a single submission item.
+
+    Region geometry follows the Annotorious/W3C Web Annotation convention:
+    normalized 0-1 coordinates stored as {type, bounds:{minX,minY,maxX,maxY}}
+    so annotations are resolution- and zoom-independent.
+    """
+
+    __tablename__ = "submission_comments"
+    __table_args__ = (
+        Index("ix_comments_item_created", "item_id", "created_at"),
+        Index("ix_comments_submission", "submission_id"),
+    )
+
+    id: Mapped[str] = ulid_pk()
+    org_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    submission_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("submission_items.id", ondelete="CASCADE"), nullable=False
+    )
+    author_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("submission_comments.id", ondelete="CASCADE"), nullable=True
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    anchor_type: Mapped[CommentAnchorType] = mapped_column(
+        Enum(CommentAnchorType, name="comment_anchor_type", create_constraint=True),
+        default=CommentAnchorType.GLOBAL,
+    )
+    # TIME anchor: position and optional range, in milliseconds
+    timestamp_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # REGION anchor: normalized geometry JSON
+    region: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SubmissionReview(Base):
     __tablename__ = "submission_reviews"
     __table_args__ = (Index("ix_reviews_sub_created", "submission_id", "created_at"),)
