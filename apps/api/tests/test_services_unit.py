@@ -470,6 +470,11 @@ async def test_eval_budget_exceeded():
     from app.services.evaluation import BudgetExceededError, EvaluationService
 
     db = _mock_db()
+    # trigger_evaluation now validates the submission belongs to the org before
+    # checking budget — return a matching submission so we reach the budget path.
+    submission = MagicMock()
+    submission.org_id = "org1"
+    db.get = AsyncMock(return_value=submission)
     svc = EvaluationService(db)
     svc.check_budget = AsyncMock(return_value=False)
 

@@ -1394,3 +1394,56 @@ async def test_admin_cannot_add_owner_directly(c):
         f"/api/v1/orgs/{oid}/members", json={"user_id": target["id"], "role": "owner"}, headers=ha
     )
     assert r.status_code == 403
+
+
+# ── Evaluation trigger scoping + pagination bounds (bug-hunt round 13) ──
+
+
+@pytest.mark.asyncio
+async def test_trigger_evaluation_scoping(c):
+    """Triggering an eval on a bogus or cross-org submission → 404, not FK 500
+    and not an eval (charging budget) against another org's work."""
+    h, _ = await _auth(c)
+    org_a = await _org(c, h)
+    org_b = await _org(c, h)
+    await c.put(f"/api/v1/orgs/{org_a}/settings/evaluation", json={"enabled": True}, headers=h)
+
+    # bogus submission
+    r = await c.post(
+        f"/api/v1/orgs/{org_a}/evaluation/trigger",
+        json={"submission_id": "01BOGUSBOGUSBOGUSBOGUSBOGU", "type": "submission_review"},
+        headers=h,
+    )
+    assert r.status_code == 404
+
+    # cross-org submission
+    rp = await c.post(
+        f"/api/v1/orgs/{org_b}/projects",
+        json={
+            "title": "B Trigger Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    pid = rp.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{org_b}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{org_b}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{org_a}/evaluation/trigger",
+        json={"submission_id": sid, "type": "submission_review"},
+        headers=h,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_eval_and_admin_pagination_bounds(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for q in ("page=0", "page=-1", "per_page=0", "per_page=99999"):
+        r = await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?{q}", headers=h)
+        assert r.status_code == 422, f"eval ?{q} -> {r.status_code}"

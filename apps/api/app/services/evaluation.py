@@ -87,6 +87,13 @@ class EvaluationService:
         eval_type: str,
     ) -> EvaluationTask:
         """Create an evaluation task and execute inline (Phase 1)."""
+        # The submission must exist AND belong to this org — otherwise a bogus
+        # id 500s on the FK and a cross-org id would run an eval (and charge
+        # budget) against another org's submission.
+        submission = await self.db.get(Submission, submission_id)
+        if submission is None or submission.org_id != org_id:
+            raise AppError("SUBMISSION_NOT_FOUND", "Submission not found", 404)
+
         # Check budget
         if not await self.check_budget(org_id):
             raise BudgetExceededError()
