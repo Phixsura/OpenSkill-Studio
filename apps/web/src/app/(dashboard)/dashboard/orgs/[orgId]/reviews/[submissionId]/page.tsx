@@ -5,6 +5,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  AnnotatedImage,
+  type CommentRegion,
+  type ItemComment,
+} from "@/components/annotated-media";
+import { CommentPanel } from "@/components/comment-panel";
 import { GenerationData, parseGenerationMeta } from "@/components/generation-data";
 import { MediaPreview } from "@/components/media-preview";
 import { PromptDisplay } from "@/components/prompt-display";
@@ -56,6 +62,20 @@ export default function ReviewDetailPage() {
   const [score, setScore] = useState("");
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Anchored comments
+  const { data: commentsData, refetch: refetchComments } = useQuery({
+    queryKey: ["submission-comments", submissionId],
+    queryFn: () =>
+      apiWithAuth<{ data: ItemComment[] }>(`/orgs/${orgId}/submissions/${submissionId}/comments`),
+  });
+  const comments = commentsData?.data ?? [];
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [annotatingItem, setAnnotatingItem] = useState<string | null>(null);
+  const [pendingRegion, setPendingRegion] = useState<{
+    itemId: string;
+    region: CommentRegion;
+  } | null>(null);
 
   const reviewMutation = useMutation({
     mutationFn: (status: string) =>
@@ -119,11 +139,43 @@ export default function ReviewDetailPage() {
                     <PromptDisplay content={latest.content} />
                   ) : latest.type === "file" ? (
                     <div className="space-y-2">
-                      <MediaPreview
-                        downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
-                        mimeType={latest.mime_type}
-                        fileName={latest.file_name}
-                      />
+                      {latest.mime_type?.startsWith("image/") ? (
+                        <div className="space-y-1.5">
+                          <AnnotatedImage
+                            downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
+                            fileName={latest.file_name}
+                            comments={comments.filter((c) => c.item_id === latest.id)}
+                            activeCommentId={activeCommentId}
+                            onSelectComment={setActiveCommentId}
+                            drawing={annotatingItem === latest.id}
+                            onDrawRegion={(region) => {
+                              setPendingRegion({ itemId: latest.id, region });
+                              setAnnotatingItem(null);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className={`rounded border px-2 py-0.5 text-xs ${
+                              annotatingItem === latest.id
+                                ? "border-blue-500 text-blue-600"
+                                : "hover:bg-[hsl(var(--secondary))]"
+                            }`}
+                            onClick={() =>
+                              setAnnotatingItem(annotatingItem === latest.id ? null : latest.id)
+                            }
+                          >
+                            {annotatingItem === latest.id
+                              ? "Drawing… drag on the image"
+                              : "✏️ Annotate region"}
+                          </button>
+                        </div>
+                      ) : (
+                        <MediaPreview
+                          downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
+                          mimeType={latest.mime_type}
+                          fileName={latest.file_name}
+                        />
+                      )}
                       {(() => {
                         const gen = parseGenerationMeta(latest.content);
                         return gen ? <GenerationData meta={gen} /> : null;
@@ -132,6 +184,24 @@ export default function ReviewDetailPage() {
                   ) : (
                     <p className="whitespace-pre-wrap text-sm">{latest.content}</p>
                   )}
+
+                  {/* Anchored comments for this item */}
+                  <div className="mt-3">
+                    <CommentPanel
+                      orgId={orgId}
+                      submissionId={submissionId}
+                      itemId={latest.id}
+                      comments={comments}
+                      onChanged={() => refetchComments()}
+                      activeCommentId={activeCommentId}
+                      onSelectComment={setActiveCommentId}
+                      pendingRegion={
+                        pendingRegion?.itemId === latest.id ? pendingRegion.region : null
+                      }
+                      onClearPendingRegion={() => setPendingRegion(null)}
+                      canComment
+                    />
+                  </div>
                 </div>
 
                 {history.length > 0 && (

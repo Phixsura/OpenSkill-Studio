@@ -2,8 +2,28 @@
 
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
+import {
+  AnnotatedImage,
+  type CommentRegion,
+  type ItemComment,
+} from "@/components/annotated-media";
+import { CommentPanel } from "@/components/comment-panel";
+import { GenerationData, parseGenerationMeta } from "@/components/generation-data";
+import { MediaPreview } from "@/components/media-preview";
+import { PromptDisplay } from "@/components/prompt-display";
 import { apiWithAuth } from "@/lib/api";
+
+interface SubItem {
+  id: string;
+  deliverable_id: string;
+  type: string;
+  file_name: string | null;
+  mime_type: string | null;
+  content: string | null;
+  version: number;
+}
 
 interface SubmissionDetail {
   id: string;
@@ -12,7 +32,7 @@ interface SubmissionDetail {
   submitted_at: string | null;
   is_late: boolean;
   final_score: number | null;
-  items: { id: string; deliverable_id: string; type: string; file_name: string | null; content: string | null }[];
+  items: SubItem[];
   reviews: { id: string; reviewer_type: string; status: string; score: number | null; feedback: string | null; created_at: string }[];
 }
 
@@ -29,9 +49,30 @@ export default function SubmissionDetailPage() {
       ),
   });
 
+  const { data: commentsData, refetch: refetchComments } = useQuery({
+    queryKey: ["submission-comments", submissionId],
+    queryFn: () =>
+      apiWithAuth<{ data: ItemComment[] }>(`/orgs/${orgId}/submissions/${submissionId}/comments`),
+  });
+  const comments = commentsData?.data ?? [];
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [annotatingItem, setAnnotatingItem] = useState<string | null>(null);
+  const [pendingRegion, setPendingRegion] = useState<{
+    itemId: string;
+    region: CommentRegion;
+  } | null>(null);
+
   const sub = data?.data;
   if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
   if (isError || !sub) return <p className="text-[hsl(var(--destructive))]">Failed to load submission.</p>;
+
+  // Group items by deliverable, show latest version per group
+  const byDeliverable = new Map<string, SubItem[]>();
+  for (const item of sub.items ?? []) {
+    const list = byDeliverable.get(item.deliverable_id) ?? [];
+    list.push(item);
+    byDeliverable.set(item.deliverable_id, list);
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -48,20 +89,98 @@ export default function SubmissionDetailPage() {
         )}
       </div>
 
-      {/* Files / Items */}
+      {/* Deliverables with previews + anchored feedback */}
       <div>
         <h2 className="text-lg font-semibold">Deliverables</h2>
-        <div className="mt-3 space-y-2">
-          {(sub.items ?? []).map((item) => (
-            <div key={item.id} className="rounded-lg border p-3 text-sm">
-              {item.type === "file" && (
-                <span>📎 {item.file_name}</span>
-              )}
-              {item.type !== "file" && (
-                <p className="text-[hsl(var(--muted-foreground))]">{item.content}</p>
-              )}
-            </div>
-          ))}
+        <div className="mt-3 space-y-3">
+          {[...byDeliverable.entries()].map(([deliverableId, items]) => {
+            const sorted = [...items].sort((a, b) => b.version - a.version);
+            const latest = sorted[0];
+            if (!latest) return null;
+            return (
+              <div key={deliverableId} className="rounded-lg border p-4">
+                {latest.file_name && (
+                  <div className="mb-2 flex items-center gap-2 text-sm">
+                    <span className="font-medium">{latest.file_name}</span>
+                    {latest.version > 1 && (
+                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+                        v{latest.version}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {latest.type === "prompt" ? (
+                  <PromptDisplay content={latest.content} />
+                ) : latest.type === "file" ? (
+                  <div className="space-y-2">
+                    {latest.mime_type?.startsWith("image/") ? (
+                      <div className="space-y-1.5">
+                        <AnnotatedImage
+                          downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
+                          fileName={latest.file_name}
+                          comments={comments.filter((c) => c.item_id === latest.id)}
+                          activeCommentId={activeCommentId}
+                          onSelectComment={setActiveCommentId}
+                          drawing={annotatingItem === latest.id}
+                          onDrawRegion={(region) => {
+                            setPendingRegion({ itemId: latest.id, region });
+                            setAnnotatingItem(null);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className={`rounded border px-2 py-0.5 text-xs ${
+                            annotatingItem === latest.id
+                              ? "border-blue-500 text-blue-600"
+                              : "hover:bg-[hsl(var(--secondary))]"
+                          }`}
+                          onClick={() =>
+                            setAnnotatingItem(annotatingItem === latest.id ? null : latest.id)
+                          }
+                        >
+                          {annotatingItem === latest.id
+                            ? "Drawing… drag on the image"
+                            : "✏️ Annotate region"}
+                        </button>
+                      </div>
+                    ) : (
+                      <MediaPreview
+                        downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
+                        mimeType={latest.mime_type}
+                        fileName={latest.file_name}
+                      />
+                    )}
+                    {(() => {
+                      const gen = parseGenerationMeta(latest.content);
+                      return gen ? <GenerationData meta={gen} /> : null;
+                    })()}
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap text-sm text-[hsl(var(--muted-foreground))]">
+                    {latest.content}
+                  </p>
+                )}
+
+                <div className="mt-3">
+                  <CommentPanel
+                    orgId={orgId}
+                    submissionId={submissionId}
+                    itemId={latest.id}
+                    comments={comments}
+                    onChanged={() => refetchComments()}
+                    activeCommentId={activeCommentId}
+                    onSelectComment={setActiveCommentId}
+                    pendingRegion={
+                      pendingRegion?.itemId === latest.id ? pendingRegion.region : null
+                    }
+                    onClearPendingRegion={() => setPendingRegion(null)}
+                    canComment
+                  />
+                </div>
+              </div>
+            );
+          })}
           {(sub.items ?? []).length === 0 && (
             <p className="text-sm text-[hsl(var(--muted-foreground))]">No items uploaded.</p>
           )}
