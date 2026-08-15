@@ -17,6 +17,7 @@ import { GenerationData, parseGenerationMeta } from "@/components/generation-dat
 import { MediaPreview } from "@/components/media-preview";
 import { PromptDisplay } from "@/components/prompt-display";
 import { VersionCompare } from "@/components/version-compare";
+import { VersionHistory } from "@/components/version-history";
 import { apiWithAuth, ApiError } from "@/lib/api";
 
 interface SubItem {
@@ -28,6 +29,7 @@ interface SubItem {
   content: string | null;
   version: number;
   note: string | null;
+  created_at: string;
 }
 
 interface SubmissionDetail {
@@ -213,29 +215,20 @@ export default function ReviewDetailPage() {
                   </div>
                 </div>
 
-                {history.length > 0 && (
-                  <div className="mt-2 space-y-2">
-                    {latest.type === "file" && (
-                      <VersionCompare
-                        items={sorted}
-                        downloadPath={(itemId) =>
-                          `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
-                        }
-                      />
-                    )}
-                    <details className="text-xs text-[hsl(var(--muted-foreground))]">
-                      <summary className="cursor-pointer">
-                        Previous versions ({history.length})
-                      </summary>
-                      <ul className="mt-1 space-y-0.5 pl-4">
-                        {history.map((h) => (
-                          <li key={h.id}>
-                            v{h.version} — {h.file_name ?? h.type}
-                            {h.note ? ` (${h.note})` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
+                {history.length > 0 && latest.type === "file" && (
+                  <div className="mt-2 flex flex-wrap items-start gap-2">
+                    <VersionHistory
+                      items={sorted}
+                      downloadPath={(itemId) =>
+                        `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
+                      }
+                    />
+                    <VersionCompare
+                      items={sorted}
+                      downloadPath={(itemId) =>
+                        `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
+                      }
+                    />
                   </div>
                 )}
               </div>

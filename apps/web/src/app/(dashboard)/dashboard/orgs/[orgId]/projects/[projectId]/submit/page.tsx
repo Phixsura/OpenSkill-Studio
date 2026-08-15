@@ -92,6 +92,8 @@ export default function SubmitPage() {
   const [promptInputs, setPromptInputs] = useState<Record<string, PromptFormState>>({});
   const [uploaded, setUploaded] = useState<Record<string, UploadedItem[]>>({});
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
+  // Optional "what changed" note attached to the next upload of a deliverable
+  const [versionNotes, setVersionNotes] = useState<Record<string, string>>({});
   const [savedPrompts, setSavedPrompts] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [submissionId, setSubmissionId] = useState<string | null>(null);
@@ -137,6 +139,8 @@ export default function SubmitPage() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("deliverable_id", d.id);
+      const note = versionNotes[d.id]?.trim();
+      if (note) formData.append("note", note);
       const token = useAuthStore.getState().accessToken;
       const res = await fetch(`/api/v1/orgs/${orgId}/submissions/${submissionId}/files`, {
         method: "POST",
@@ -166,6 +170,7 @@ export default function SubmitPage() {
         generation,
       };
       setUploaded((prev) => ({ ...prev, [d.id]: [...(prev[d.id] ?? []), item] }));
+      setVersionNotes((n) => ({ ...n, [d.id]: "" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "File upload failed");
     } finally {
@@ -317,6 +322,17 @@ export default function SubmitPage() {
                       e.target.value = "";
                     }}
                   />
+                  {latest && (
+                    <input
+                      type="text"
+                      placeholder="What changed in this version? (optional note)"
+                      value={versionNotes[d.id] ?? ""}
+                      onChange={(e) =>
+                        setVersionNotes((n) => ({ ...n, [d.id]: e.target.value }))
+                      }
+                      className="block w-full rounded-md border px-2 py-1 text-xs"
+                    />
+                  )}
                   {uploading[d.id] && (
                     <p className="text-xs text-[hsl(var(--muted-foreground))]">Uploading…</p>
                   )}
