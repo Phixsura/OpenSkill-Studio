@@ -1,33 +1,72 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MediaPreview } from "@/components/media-preview";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 
 interface Deliverable {
   id: string;
   name: string;
+  description: string | null;
   type: string;
   required: boolean;
+  config: {
+    accepted_formats?: string[];
+    max_files?: number;
+    max_file_size_mb?: number;
+  };
+  sort_order: number;
 }
+
+interface UploadedItem {
+  id: string;
+  file_name: string | null;
+  mime_type: string | null;
+  version: number;
+}
+
+const MEDIA_TYPES = new Set(["image", "video", "audio", "reference", "final_output", "file"]);
+
+const DEFAULT_ACCEPT: Record<string, string> = {
+  image: "image/png,image/jpeg,image/webp,image/gif",
+  video: "video/mp4,video/webm",
+  audio: "audio/mpeg,audio/wav,audio/mp4,audio/x-m4a",
+  reference: "image/*,video/*,audio/*,application/pdf",
+  final_output: "image/*,video/*,audio/*,application/pdf",
+  file: "",
+};
 
 export default function SubmitPage() {
   const { orgId, projectId } = useParams<{ orgId: string; projectId: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { data: projectData } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () =>
-      apiWithAuth<{ data: { deliverables: Deliverable[] } }>(`/orgs/${orgId}/projects/${projectId}`),
+      apiWithAuth<{ data: { title: string; project_type: string; deliverables: Deliverable[] } }>(
+        `/orgs/${orgId}/projects/${projectId}`,
+      ),
   });
 
-  const deliverables = projectData?.data?.deliverables ?? [];
+  const project = projectData?.data;
+  const deliverables = [...(project?.deliverables ?? [])].sort(
+    (a, b) => a.sort_order - b.sort_order,
+  );
+
   const [textInputs, setTextInputs] = useState<Record<string, string>>({});
+  const [promptInputs, setPromptInputs] = useState<
+    Record<string, { prompt: string; tool: string; model: string; parameters: string; notes: string }>
+  >({});
+  const [uploaded, setUploaded] = useState<Record<string, UploadedItem[]>>({});
+  const [uploading, setUploading] = useState<Record<string, boolean>>({});
+  const [savedPrompts, setSavedPrompts] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [submissionId, setSubmissionId] = useState<string | null>(null);
 
@@ -45,16 +84,99 @@ export default function SubmitPage() {
       apiWithAuth(`/orgs/${orgId}/projects/${projectId}/submissions/${submissionId}/submit`, {
         method: "POST",
       }),
-    onSuccess: () => router.push(`/dashboard/orgs/${orgId}/projects/${projectId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["submissions", projectId] });
+      router.push(`/dashboard/orgs/${orgId}/projects/${projectId}`);
+    },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Failed to submit"),
   });
+
+  const handleFileUpload = async (d: Deliverable, file: File) => {
+    setError(null);
+
+    // Client-side pre-checks for friendlier errors
+    const maxMb = d.config?.max_file_size_mb ?? 50;
+    if (file.size > maxMb * 1024 * 1024) {
+      setError(`"${file.name}" exceeds the ${maxMb}MB limit for ${d.name}.`);
+      return;
+    }
+    const accepted = d.config?.accepted_formats;
+    if (accepted?.length && !accepted.includes(file.type)) {
+      setError(`"${file.type || "unknown type"}" is not accepted for ${d.name}. Allowed: ${accepted.join(", ")}`);
+      return;
+    }
+
+    setUploading((u) => ({ ...u, [d.id]: true }));
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("deliverable_id", d.id);
+      const token = useAuthStore.getState().accessToken;
+      const res = await fetch(`/api/v1/orgs/${orgId}/submissions/${submissionId}/files`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error?.message ?? body?.detail ?? `Upload failed (${res.status})`);
+      }
+      const body = await res.json();
+      const item: UploadedItem = {
+        id: body.data.id,
+        file_name: body.data.file_name ?? file.name,
+        mime_type: body.data.mime_type ?? file.type,
+        version: body.data.version ?? 1,
+      };
+      setUploaded((prev) => ({ ...prev, [d.id]: [...(prev[d.id] ?? []), item] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "File upload failed");
+    } finally {
+      setUploading((u) => ({ ...u, [d.id]: false }));
+    }
+  };
+
+  const handlePromptSave = async (d: Deliverable) => {
+    setError(null);
+    const p = promptInputs[d.id];
+    if (!p?.prompt?.trim()) {
+      setError(`Please enter a prompt for ${d.name}.`);
+      return;
+    }
+    let parameters: Record<string, unknown> | undefined;
+    if (p.parameters?.trim()) {
+      try {
+        parameters = JSON.parse(p.parameters);
+      } catch {
+        setError("Parameters must be valid JSON (e.g. {\"aspect_ratio\": \"9:16\"}).");
+        return;
+      }
+    }
+    try {
+      await apiWithAuth(`/orgs/${orgId}/submissions/${submissionId}/prompt-items`, {
+        method: "POST",
+        body: JSON.stringify({
+          deliverable_id: d.id,
+          prompt: p.prompt.trim(),
+          tool: p.tool?.trim() || undefined,
+          model: p.model?.trim() || undefined,
+          parameters,
+          notes: p.notes?.trim() || undefined,
+        }),
+      });
+      setSavedPrompts((s) => ({ ...s, [d.id]: true }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to save prompt");
+    }
+  };
 
   if (!submissionId) {
     return (
       <div className="mx-auto max-w-2xl space-y-6">
         <h1 className="text-3xl font-bold">New Submission</h1>
         <p className="text-[hsl(var(--muted-foreground))]">
-          Create a draft submission, then upload your deliverables.
+          Create a draft submission, then complete your deliverables.
         </p>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <Button onClick={() => createDraft.mutate()} disabled={createDraft.isPending}>
@@ -64,67 +186,202 @@ export default function SubmitPage() {
     );
   }
 
+  const isWorkflow = project?.project_type === "ai_visual";
+
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-3xl font-bold">Upload Deliverables</h1>
+    <div className="mx-auto max-w-3xl space-y-6">
+      <h1 className="text-3xl font-bold">
+        {isWorkflow ? "Production Workflow" : "Upload Deliverables"}
+      </h1>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="space-y-4">
-        {deliverables.map((d) => (
-          <div key={d.id} className="rounded-lg border p-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium">{d.name}</h3>
-              {d.required && <span className="text-xs text-red-500">Required</span>}
+        {deliverables.map((d, idx) => {
+          const items = uploaded[d.id] ?? [];
+          const latest = items[items.length - 1];
+          const done =
+            items.length > 0 || savedPrompts[d.id] || (textInputs[d.id]?.trim()?.length ?? 0) > 0;
+
+          return (
+            <div key={d.id} className="rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {isWorkflow && (
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                        done
+                          ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200"
+                          : "bg-[hsl(var(--secondary))] text-[hsl(var(--muted-foreground))]"
+                      }`}
+                    >
+                      {done ? "✓" : idx + 1}
+                    </span>
+                  )}
+                  <h3 className="font-medium">{d.name}</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs capitalize">
+                    {d.type.replace("_", " ")}
+                  </span>
+                  {d.required && <span className="text-xs text-red-500">Required</span>}
+                </div>
+              </div>
+              {d.description && (
+                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{d.description}</p>
+              )}
+
+              {/* Media / file upload */}
+              {MEDIA_TYPES.has(d.type) && (
+                <div className="mt-3 space-y-3">
+                  <input
+                    type="file"
+                    accept={
+                      d.config?.accepted_formats?.join(",") || DEFAULT_ACCEPT[d.type] || undefined
+                    }
+                    disabled={uploading[d.id]}
+                    className="block w-full text-sm"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileUpload(d, file);
+                      e.target.value = "";
+                    }}
+                  />
+                  {uploading[d.id] && (
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">Uploading…</p>
+                  )}
+
+                  {latest && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="font-medium">{latest.file_name}</span>
+                        {latest.version > 1 && (
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+                            v{latest.version}
+                          </span>
+                        )}
+                      </div>
+                      <MediaPreview
+                        downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
+                        mimeType={latest.mime_type}
+                        fileName={latest.file_name}
+                      />
+                      {items.length > 1 && (
+                        <details className="text-xs text-[hsl(var(--muted-foreground))]">
+                          <summary className="cursor-pointer">
+                            Version history ({items.length} versions)
+                          </summary>
+                          <ul className="mt-1 space-y-0.5 pl-4">
+                            {[...items].reverse().map((it) => (
+                              <li key={it.id}>
+                                v{it.version} — {it.file_name}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                      <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                        Upload again to replace (previous versions are kept).
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Prompt form */}
+              {d.type === "prompt" && (
+                <div className="mt-3 space-y-2">
+                  {savedPrompts[d.id] ? (
+                    <p className="text-sm text-green-600">✓ Prompt saved</p>
+                  ) : (
+                    <>
+                      <textarea
+                        className="block w-full rounded-md border bg-transparent px-3 py-2 font-mono text-sm"
+                        rows={4}
+                        maxLength={10000}
+                        placeholder="Your generation prompt..."
+                        value={promptInputs[d.id]?.prompt ?? ""}
+                        onChange={(e) =>
+                          setPromptInputs((p) => ({
+                            ...p,
+                            [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), prompt: e.target.value },
+                          }))
+                        }
+                      />
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Input
+                          placeholder="Tool (e.g. Seedream)"
+                          value={promptInputs[d.id]?.tool ?? ""}
+                          onChange={(e) =>
+                            setPromptInputs((p) => ({
+                              ...p,
+                              [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), tool: e.target.value },
+                            }))
+                          }
+                        />
+                        <Input
+                          placeholder="Model (optional)"
+                          value={promptInputs[d.id]?.model ?? ""}
+                          onChange={(e) =>
+                            setPromptInputs((p) => ({
+                              ...p,
+                              [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), model: e.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                      <Input
+                        placeholder='Parameters JSON, e.g. {"aspect_ratio": "9:16"} (optional)'
+                        value={promptInputs[d.id]?.parameters ?? ""}
+                        onChange={(e) =>
+                          setPromptInputs((p) => ({
+                            ...p,
+                            [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), parameters: e.target.value },
+                          }))
+                        }
+                      />
+                      <Input
+                        placeholder="Notes (optional)"
+                        value={promptInputs[d.id]?.notes ?? ""}
+                        onChange={(e) =>
+                          setPromptInputs((p) => ({
+                            ...p,
+                            [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), notes: e.target.value },
+                          }))
+                        }
+                      />
+                      <Button variant="secondary" size="sm" onClick={() => handlePromptSave(d)}>
+                        Save Prompt
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Text / markdown */}
+              {(d.type === "text" || d.type === "markdown") && (
+                <textarea
+                  className="mt-3 block w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+                  rows={4}
+                  placeholder={`Enter ${d.name}...`}
+                  value={textInputs[d.id] ?? ""}
+                  onChange={(e) => setTextInputs({ ...textInputs, [d.id]: e.target.value })}
+                />
+              )}
+
+              {/* Link */}
+              {d.type === "link" && (
+                <Input
+                  type="url"
+                  placeholder="https://..."
+                  className="mt-3"
+                  value={textInputs[d.id] ?? ""}
+                  onChange={(e) => setTextInputs({ ...textInputs, [d.id]: e.target.value })}
+                />
+              )}
             </div>
-            <p className="mt-1 text-xs capitalize text-[hsl(var(--muted-foreground))]">{d.type}</p>
-
-            {d.type === "file" && (
-              <input
-                type="file"
-                className="mt-3 block w-full text-sm"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const formData = new FormData();
-                  formData.append("file", file);
-                  formData.append("deliverable_id", d.id);
-                  try {
-                    const token = useAuthStore.getState().accessToken;
-                    await fetch(`/api/v1/orgs/${orgId}/submissions/${submissionId}/files`, {
-                      method: "POST",
-                      body: formData,
-                      credentials: "include",
-                      headers: token ? { Authorization: `Bearer ${token}` } : {},
-                    });
-                  } catch {
-                    setError("File upload failed");
-                  }
-                }}
-              />
-            )}
-
-            {(d.type === "text" || d.type === "markdown") && (
-              <textarea
-                className="mt-3 block w-full rounded-md border bg-transparent px-3 py-2 text-sm"
-                rows={4}
-                placeholder={`Enter ${d.name}...`}
-                value={textInputs[d.id] ?? ""}
-                onChange={(e) => setTextInputs({ ...textInputs, [d.id]: e.target.value })}
-              />
-            )}
-
-            {d.type === "link" && (
-              <Input
-                type="url"
-                placeholder="https://..."
-                className="mt-3"
-                value={textInputs[d.id] ?? ""}
-                onChange={(e) => setTextInputs({ ...textInputs, [d.id]: e.target.value })}
-              />
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <Button

@@ -5,7 +5,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { MediaPreview } from "@/components/media-preview";
+import { PromptDisplay } from "@/components/prompt-display";
 import { apiWithAuth, ApiError } from "@/lib/api";
+
+interface SubItem {
+  id: string;
+  deliverable_id: string;
+  type: string;
+  file_name: string | null;
+  mime_type: string | null;
+  content: string | null;
+  version: number;
+  note: string | null;
+}
 
 interface SubmissionDetail {
   id: string;
@@ -13,7 +26,7 @@ interface SubmissionDetail {
   version: number;
   status: string;
   is_late: boolean;
-  items: { id: string; type: string; file_name: string | null; content: string | null }[];
+  items: SubItem[];
   reviews: { id: string; status: string; score: number | null; feedback: string | null; created_at: string }[];
 }
 
@@ -70,15 +83,68 @@ export default function ReviewDetailPage() {
         {sub.is_late && <span className="text-sm text-yellow-600">Late submission</span>}
       </div>
 
-      {/* Submitted items */}
+      {/* Submitted items — grouped by deliverable, latest version first */}
       <div>
         <h2 className="text-lg font-semibold">Deliverables</h2>
-        <div className="mt-3 space-y-2">
-          {(sub.items ?? []).map((item) => (
-            <div key={item.id} className="rounded-lg border p-3 text-sm">
-              {item.type === "file" ? `📎 ${item.file_name}` : item.content}
-            </div>
-          ))}
+        <div className="mt-3 space-y-3">
+          {Object.entries(
+            (sub.items ?? []).reduce<Record<string, SubItem[]>>((acc, item) => {
+              (acc[item.deliverable_id] ??= []).push(item);
+              return acc;
+            }, {}),
+          ).map(([deliverableId, items]) => {
+            const sorted = [...items].sort((a, b) => b.version - a.version);
+            const latest = sorted[0];
+            if (!latest) return null;
+            const history = sorted.slice(1);
+            return (
+              <div key={deliverableId} className="rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm">
+                  {latest.file_name && <span className="font-medium">{latest.file_name}</span>}
+                  {latest.version > 1 && (
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+                      v{latest.version}
+                    </span>
+                  )}
+                  {latest.note && (
+                    <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                      📝 {latest.note}
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-2">
+                  {latest.type === "prompt" ? (
+                    <PromptDisplay content={latest.content} />
+                  ) : latest.type === "file" ? (
+                    <MediaPreview
+                      downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
+                      mimeType={latest.mime_type}
+                      fileName={latest.file_name}
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap text-sm">{latest.content}</p>
+                  )}
+                </div>
+
+                {history.length > 0 && (
+                  <details className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
+                    <summary className="cursor-pointer">
+                      Previous versions ({history.length})
+                    </summary>
+                    <ul className="mt-1 space-y-0.5 pl-4">
+                      {history.map((h) => (
+                        <li key={h.id}>
+                          v{h.version} — {h.file_name ?? h.type}
+                          {h.note ? ` (${h.note})` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
