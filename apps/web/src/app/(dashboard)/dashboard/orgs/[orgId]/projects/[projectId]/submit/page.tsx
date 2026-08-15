@@ -247,11 +247,50 @@ export default function SubmitPage() {
   };
 
   if (!submissionId) {
+    const requiredCount = deliverables.filter((d) => d.required).length;
     return (
       <div className="mx-auto max-w-2xl space-y-6">
-        <h1 className="text-3xl font-bold">New Submission</h1>
-        <p className="text-[hsl(var(--muted-foreground))]">
-          Create a draft submission, then complete your deliverables.
+        <div>
+          <h1 className="text-3xl font-bold">New Submission</h1>
+          {project?.title && (
+            <p className="mt-1 text-[hsl(var(--muted-foreground))]">{project.title}</p>
+          )}
+        </div>
+
+        {/* Preview the work ahead before the learner commits to a draft */}
+        {deliverables.length > 0 && (
+          <div className="rounded-lg border p-4">
+            <p className="text-sm font-semibold">
+              What you&apos;ll submit
+              <span className="ml-2 font-normal text-[hsl(var(--muted-foreground))]">
+                {deliverables.length} deliverable{deliverables.length !== 1 ? "s" : ""}
+                {requiredCount > 0 ? ` · ${requiredCount} required` : ""}
+              </span>
+            </p>
+            <ol className="mt-3 space-y-2">
+              {deliverables.map((d, i) => (
+                <li key={d.id} className="flex items-center gap-3 text-sm">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--secondary))] text-xs font-medium">
+                    {i + 1}
+                  </span>
+                  <span className="font-medium">{d.name}</span>
+                  <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs capitalize">
+                    {d.type.replace("_", " ")}
+                  </span>
+                  {d.required ? (
+                    <span className="text-xs text-red-600">Required</span>
+                  ) : (
+                    <span className="text-xs text-[hsl(var(--muted-foreground))]">Optional</span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">
+          Starting a draft lets you save work in progress — nothing is sent for review until you
+          press Submit.
         </p>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <Button onClick={() => createDraft.mutate()} disabled={createDraft.isPending}>
