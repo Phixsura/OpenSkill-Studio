@@ -363,6 +363,15 @@ class ProjectService:
                 if k == "difficulty":
                     v = DifficultyLevel(v)
                 setattr(project, k, v)
+        # Validate the ordering on the COMBINED (post-update) values — a partial
+        # update that changes only one of deadline/late_deadline can otherwise
+        # leave a late_deadline earlier than the deadline (negative late window).
+        if (
+            project.deadline is not None
+            and project.late_deadline is not None
+            and project.late_deadline < project.deadline
+        ):
+            raise InvalidStateError("late_deadline must be on or after deadline")
         await self.db.flush()
         return project
 

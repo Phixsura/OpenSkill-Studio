@@ -1752,3 +1752,36 @@ async def test_revision_requested_edit_and_resubmit(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_partial_deadline_update_preserves_ordering(c):
+    """A partial project update changing only `deadline` must not push it past
+    an existing late_deadline (the schema model_validator only fires when both
+    fields are present in the request)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Partial Deadline Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+                "deadline": "2030-06-01T00:00:00Z",
+                "late_deadline": "2030-06-05T00:00:00Z",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    # push deadline past the existing late_deadline via a partial update
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}", json={"deadline": "2030-06-10T00:00:00Z"}, headers=h
+    )
+    assert r.status_code == 422
+    # a valid partial update still works
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}", json={"deadline": "2030-06-03T00:00:00Z"}, headers=h
+    )
+    assert r.status_code == 200
