@@ -270,6 +270,19 @@ class SubmissionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SubmissionWithAuthorResponse(SubmissionResponse):
+    """Submission list row with the author's display name."""
+
+    author_name: str
+
+
+class PendingReviewResponse(SubmissionResponse):
+    """Pending-review row enriched with author + project context."""
+
+    author_name: str
+    project_title: str
+
+
 class SubmissionItemResponse(BaseModel):
     id: str
     deliverable_id: str
