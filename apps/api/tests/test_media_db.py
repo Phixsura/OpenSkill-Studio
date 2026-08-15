@@ -304,6 +304,24 @@ async def test_upload_max_files_enforced(db):
 
 
 @pytest.mark.asyncio
+async def test_upload_path_traversal_sanitized(db):
+    """A malicious filename must not escape the object-key prefix."""
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "image")
+    item = await svc.upload_file(sub.id, d.id, "../../../etc/passwd.png", PNG, "image/png", user.id)
+    prefix = f"orgs/{org.id}/submissions/{sub.id}/{d.id}/"
+    # Key stays within the submission prefix
+    assert item.file_key.startswith(prefix)
+    # The sanitized filename (everything after the prefix) has NO path
+    # separators — so ".." cannot traverse; it's just literal dots in a
+    # flat name. This is the actual anti-traversal property.
+    tail = item.file_key[len(prefix) :]
+    assert "/" not in tail
+    assert "\\" not in tail
+    assert "/etc/" not in item.file_key
+
+
+@pytest.mark.asyncio
 async def test_version_history_preserved(db):
     """Re-uploading to the same deliverable increments version, keeps old rows."""
     from sqlalchemy import select
@@ -321,6 +339,9 @@ async def test_version_history_preserved(db):
 
     assert (v1.version, v2.version, v3.version) == (1, 2, 3)
     assert v2.note == "fixed color"
+    # §7: each version records its uploader
+    assert v1.uploaded_by == user.id
+    assert v2.uploaded_by == user.id
 
     result = await db.execute(
         select(SubmissionItem).where(

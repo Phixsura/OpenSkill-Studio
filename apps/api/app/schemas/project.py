@@ -275,15 +275,24 @@ class SubmissionItemResponse(BaseModel):
     deliverable_id: str
     type: str
     content: str | None
-    file_key: str | None
+    # file_key (raw S3 object key) is intentionally NOT exposed — downloads go
+    # through the presigned-URL endpoint. has_file signals a downloadable file.
+    has_file: bool = False
     file_name: str | None
     file_size: int | None
     mime_type: str | None
     version: int = 1
     note: str | None = None
+    uploaded_by: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def model_validate(cls, obj, *args, **kwargs):  # type: ignore[override]
+        inst = super().model_validate(obj, *args, **kwargs)
+        inst.has_file = bool(getattr(obj, "file_key", None))
+        return inst
 
 
 class ReviewResponse(BaseModel):
@@ -363,7 +372,7 @@ class ExtensionResponse(BaseModel):
 
 class FileResponse(BaseModel):
     id: str
-    file_key: str | None
+    # raw S3 key not exposed — clients use the presigned download endpoint
     file_name: str | None
     file_size: int | None
     mime_type: str | None

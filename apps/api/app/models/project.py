@@ -203,6 +203,9 @@ class SubmissionItem(Base):
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("users.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     submission: Mapped["Submission"] = relationship(back_populates="items")

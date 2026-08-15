@@ -37,6 +37,14 @@ def upgrade() -> None:
         sa.Column("version", sa.Integer(), server_default="1", nullable=False),
     )
     op.add_column("submission_items", sa.Column("note", sa.Text(), nullable=True))
+    op.add_column("submission_items", sa.Column("uploaded_by", sa.String(26), nullable=True))
+    op.create_foreign_key(
+        "fk_submission_items_uploaded_by",
+        "submission_items",
+        "users",
+        ["uploaded_by"],
+        ["id"],
+    )
 
     op.create_table(
         "project_templates",
@@ -122,6 +130,8 @@ def downgrade() -> None:
     op.drop_table("project_assets")
     op.drop_index("ix_templates_org_status", table_name="project_templates")
     op.drop_table("project_templates")
+    op.drop_constraint("fk_submission_items_uploaded_by", "submission_items", type_="foreignkey")
+    op.drop_column("submission_items", "uploaded_by")
     op.drop_column("submission_items", "note")
     op.drop_column("submission_items", "version")
     op.drop_column("projects", "project_type")

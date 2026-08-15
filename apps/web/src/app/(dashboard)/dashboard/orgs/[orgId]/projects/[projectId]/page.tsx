@@ -70,23 +70,41 @@ export default function ProjectDetailPage() {
       apiWithAuth<{ data: ProjectAsset[] }>(`/orgs/${orgId}/projects/${projectId}/assets`),
   });
 
-  // For workflow status: which deliverables have items in my latest submission
+  // For workflow status: pull the full items of my latest submission so each
+  // stage can show completion state + the latest submitted asset.
   const latestSubId = subsData?.data?.[0]?.id;
   const { data: latestSubDetail } = useQuery({
     queryKey: ["latest-sub-items", projectId, latestSubId],
     enabled: !!latestSubId,
     queryFn: () =>
-      apiWithAuth<{ data: { items: { deliverable_id: string }[] } }>(
-        `/orgs/${orgId}/projects/${projectId}/submissions/${latestSubId}`,
-      ),
+      apiWithAuth<{
+        data: {
+          items: {
+            id: string;
+            deliverable_id: string;
+            type: string;
+            file_name: string | null;
+            mime_type: string | null;
+            version: number;
+          }[];
+        };
+      }>(`/orgs/${orgId}/projects/${projectId}/submissions/${latestSubId}`),
   });
 
   const project = projectData?.data;
   const submissions = subsData?.data ?? [];
   const assets = assetsData?.data ?? [];
-  const completedDeliverables = new Set(
-    (latestSubDetail?.data?.items ?? []).map((i) => i.deliverable_id),
-  );
+
+  // Latest item per deliverable (highest version) from my latest submission.
+  const latestItemByDeliverable = new Map<
+    string,
+    { id: string; type: string; file_name: string | null; mime_type: string | null; version: number }
+  >();
+  for (const it of latestSubDetail?.data?.items ?? []) {
+    const prev = latestItemByDeliverable.get(it.deliverable_id);
+    if (!prev || it.version > prev.version) latestItemByDeliverable.set(it.deliverable_id, it);
+  }
+  const completedDeliverables = new Set(latestItemByDeliverable.keys());
 
   if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
   if (isError || !project) return <p className="text-[hsl(var(--destructive))]">Failed to load project.</p>;
@@ -137,47 +155,85 @@ export default function ProjectDetailPage() {
             {project.project_type === "ai_visual" ? "Production Workflow" : "Deliverables"}
           </h2>
           {project.project_type === "ai_visual" ? (
-            <ol className="mt-3 space-y-0">
-              {[...(project.deliverables ?? [])]
-                .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-                .map((d, idx, arr) => {
-                  const done = completedDeliverables.has(d.id);
-                  return (
-                    <li key={d.id} className="relative flex gap-4 pb-6 last:pb-0">
-                      {/* Connector line */}
-                      {idx < arr.length - 1 && (
-                        <span
-                          className="absolute left-[15px] top-8 h-full w-0.5 bg-[hsl(var(--border))]"
-                          aria-hidden
-                        />
-                      )}
-                      <span
-                        className={`z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                          done
-                            ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200"
-                            : "border bg-[hsl(var(--background))] text-[hsl(var(--muted-foreground))]"
-                        }`}
-                      >
-                        {done ? "✓" : idx + 1}
-                      </span>
-                      <div className="pt-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{d.name}</span>
-                          <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs capitalize">
-                            {d.type.replace("_", " ")}
-                          </span>
-                          {d.required && <span className="text-xs text-red-500">Required</span>}
-                        </div>
-                        {d.description && (
-                          <p className="mt-0.5 text-sm text-[hsl(var(--muted-foreground))]">
-                            {d.description}
-                          </p>
+            (() => {
+              const ordered = [...(project.deliverables ?? [])].sort(
+                (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+              );
+              // "Current" = first incomplete stage (the one the learner is on).
+              const currentIdx = ordered.findIndex((d) => !completedDeliverables.has(d.id));
+              return (
+                <ol className="mt-3 space-y-0">
+                  {ordered.map((d, idx, arr) => {
+                    const done = completedDeliverables.has(d.id);
+                    const isCurrent = idx === currentIdx;
+                    const latestItem = latestItemByDeliverable.get(d.id);
+                    return (
+                      <li key={d.id} className="relative flex gap-4 pb-6 last:pb-0">
+                        {idx < arr.length - 1 && (
+                          <span
+                            className="absolute left-[15px] top-8 h-full w-0.5 bg-[hsl(var(--border))]"
+                            aria-hidden
+                          />
                         )}
-                      </div>
-                    </li>
-                  );
-                })}
-            </ol>
+                        <span
+                          className={`z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                            done
+                              ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200"
+                              : isCurrent
+                                ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200"
+                                : "border bg-[hsl(var(--background))] text-[hsl(var(--muted-foreground))]"
+                          }`}
+                        >
+                          {done ? "✓" : idx + 1}
+                        </span>
+                        <div className="flex-1 pt-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{d.name}</span>
+                            <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs capitalize">
+                              {d.type.replace("_", " ")}
+                            </span>
+                            {d.required ? (
+                              <span className="text-xs text-red-500">Required</span>
+                            ) : (
+                              <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                                Optional
+                              </span>
+                            )}
+                            <span
+                              className={`ml-auto text-xs font-medium ${
+                                done
+                                  ? "text-green-600"
+                                  : isCurrent
+                                    ? "text-blue-600"
+                                    : "text-[hsl(var(--muted-foreground))]"
+                              }`}
+                            >
+                              {done ? "Done" : isCurrent ? "In Progress" : "Not Started"}
+                            </span>
+                          </div>
+                          {d.description && (
+                            <p className="mt-0.5 text-sm text-[hsl(var(--muted-foreground))]">
+                              {d.description}
+                            </p>
+                          )}
+                          {/* Latest submitted asset thumbnail */}
+                          {latestItem && latestItem.type === "file" && (
+                            <div className="mt-2">
+                              <MediaPreview
+                                downloadPath={`/orgs/${orgId}/submissions/${latestSubId}/files/${latestItem.id}/download`}
+                                mimeType={latestItem.mime_type}
+                                fileName={latestItem.file_name}
+                                className="max-h-32"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              );
+            })()
           ) : (
             <div className="mt-3 space-y-2">
               {(project.deliverables ?? []).map((d) => (

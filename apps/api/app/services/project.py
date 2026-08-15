@@ -646,6 +646,7 @@ class ProjectService:
             mime_type=content_type,
             version=version,
             note=note,
+            uploaded_by=user_id,
         )
         self.db.add(item)
         await self.db.flush()
@@ -1174,6 +1175,7 @@ class ProjectService:
             type=ItemType.PROMPT,
             content=json.dumps(prompt_data, ensure_ascii=False),
             version=version,
+            uploaded_by=user_id,
         )
         self.db.add(item)
         await self.db.flush()

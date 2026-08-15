@@ -417,3 +417,62 @@ def test_validate_media_upload_file_type_unrestricted():
     svc = ProjectService.__new__(ProjectService)
     # FILE deliverables accept anything (back-compat)
     svc._validate_media_upload(d, b"anything at all", "application/zip")
+
+
+# ── Storage: raw object keys must not leak to clients ──
+
+
+def test_submission_item_response_hides_file_key():
+    """file_key (raw S3 path) must not be a field on the response schema."""
+    from app.schemas.project import SubmissionItemResponse
+
+    assert "file_key" not in SubmissionItemResponse.model_fields
+    assert "has_file" in SubmissionItemResponse.model_fields
+
+
+def test_file_response_hides_file_key():
+    from app.schemas.project import FileResponse
+
+    assert "file_key" not in FileResponse.model_fields
+
+
+def test_submission_item_response_has_file_flag():
+    """has_file reflects presence of a file_key on the ORM object."""
+    from types import SimpleNamespace
+
+    from app.schemas.project import SubmissionItemResponse
+
+    with_file = SimpleNamespace(
+        id="i1",
+        deliverable_id="d1",
+        type="file",
+        content=None,
+        file_key="orgs/x/submissions/y/z/abc_file.png",
+        file_name="file.png",
+        file_size=10,
+        mime_type="image/png",
+        version=1,
+        note=None,
+        uploaded_by="u1",
+        created_at=__import__("datetime").datetime.now(),
+    )
+    r = SubmissionItemResponse.model_validate(with_file)
+    assert r.has_file is True
+    assert not hasattr(r, "file_key")
+
+    text_item = SimpleNamespace(
+        id="i2",
+        deliverable_id="d1",
+        type="text",
+        content="hello",
+        file_key=None,
+        file_name=None,
+        file_size=None,
+        mime_type=None,
+        version=1,
+        note=None,
+        uploaded_by="u1",
+        created_at=__import__("datetime").datetime.now(),
+    )
+    r2 = SubmissionItemResponse.model_validate(text_item)
+    assert r2.has_file is False
