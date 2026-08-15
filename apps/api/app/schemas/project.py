@@ -393,6 +393,25 @@ def _validate_template_deliverables(v: list) -> list:
     return v
 
 
+def _validate_rubric_items(v: list) -> list:
+    """Same per-item rubric rules as project creation — a template's rubric is
+    copied verbatim into a project, so it must satisfy project constraints."""
+    if not v:
+        raise ValueError("Rubric must have at least one criterion")
+    if len(v) > 20:
+        raise ValueError("Rubric must have at most 20 criteria")
+    for item in v:
+        if not isinstance(item, dict):
+            raise ValueError("Each rubric item must be an object")
+        if "criterion" not in item or "max_score" not in item:
+            raise ValueError("Each rubric item must have 'criterion' and 'max_score'")
+        if not isinstance(item.get("criterion"), str) or len(item["criterion"]) > 200:
+            raise ValueError("Criterion name must be a string of 200 chars or less")
+        if not isinstance(item.get("max_score"), (int, float)) or item["max_score"] < 0:
+            raise ValueError("Criterion max_score must be a non-negative number")
+    return v
+
+
 class CreateTemplateRequest(BaseModel):
     name: str
     description: str
@@ -433,11 +452,7 @@ class CreateTemplateRequest(BaseModel):
     @field_validator("rubric")
     @classmethod
     def validate_rubric(cls, v: list) -> list:
-        if not v:
-            raise ValueError("Rubric must have at least one criterion")
-        if len(v) > 20:
-            raise ValueError("Rubric must have at most 20 criteria")
-        return v
+        return _validate_rubric_items(v)
 
     @field_validator("deliverables")
     @classmethod
@@ -477,6 +492,13 @@ class UpdateTemplateRequest(BaseModel):
     def validate_deliverables(cls, v: list | None) -> list | None:
         if v is not None:
             return _validate_template_deliverables(v)
+        return v
+
+    @field_validator("rubric")
+    @classmethod
+    def validate_rubric(cls, v: list | None) -> list | None:
+        if v is not None:
+            return _validate_rubric_items(v)
         return v
 
 

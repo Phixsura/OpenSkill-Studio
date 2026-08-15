@@ -242,6 +242,38 @@ def test_template_request_valid():
     assert req.deliverables[0]["type"] == "image"
 
 
+def test_template_request_bad_rubric_keys_rejected():
+    """A template rubric is copied verbatim into a project, so it must satisfy
+    the same per-item constraints (criterion + max_score keys)."""
+    from pydantic import ValidationError
+
+    from app.schemas.project import CreateTemplateRequest
+
+    with pytest.raises(ValidationError):
+        CreateTemplateRequest(
+            name="Bad Rubric Template",
+            description="d",
+            instructions="i",
+            rubric=[{"wrong": "keys"}],
+            deliverables=[],
+        )
+
+
+def test_template_request_negative_rubric_score_rejected():
+    from pydantic import ValidationError
+
+    from app.schemas.project import CreateTemplateRequest
+
+    with pytest.raises(ValidationError):
+        CreateTemplateRequest(
+            name="Neg Rubric Template",
+            description="d",
+            instructions="i",
+            rubric=[{"criterion": "Q", "max_score": -5}],
+            deliverables=[],
+        )
+
+
 def test_prompt_request_empty_prompt_rejected():
     from pydantic import ValidationError
 
