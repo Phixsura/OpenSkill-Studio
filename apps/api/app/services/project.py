@@ -1,5 +1,6 @@
 """Project, submission, review, and file upload service."""
 
+import json
 import re
 import secrets
 from datetime import UTC, datetime
@@ -11,13 +12,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from app.config import settings
+from app.core.media import (
+    AUDIO_MIMES,
+    IMAGE_MIMES,
+    MEDIA_ALL,
+    VIDEO_MIMES,
+    content_matches_mime,
+)
 from app.exceptions import AppError
 from app.models.project import (
     DeliverableType,
     ItemType,
     Project,
+    ProjectAsset,
     ProjectDeliverable,
     ProjectSkill,
+    ProjectTemplate,
     ReviewerType,
     ReviewStatus,
     Submission,
@@ -31,6 +41,17 @@ from app.models.skill import ContentStatus, DifficultyLevel
 log = structlog.get_logger()
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+PROJECT_TYPES = {"general", "ai_visual"}
+
+# Per-deliverable-type MIME whitelist. FILE stays unrestricted (back-compat).
+MEDIA_MIME_WHITELIST: dict[DeliverableType, set[str]] = {
+    DeliverableType.IMAGE: IMAGE_MIMES,
+    DeliverableType.VIDEO: VIDEO_MIMES,
+    DeliverableType.AUDIO: AUDIO_MIMES,
+    DeliverableType.REFERENCE: MEDIA_ALL,
+    DeliverableType.FINAL_OUTPUT: MEDIA_ALL,
+}
 
 
 # ── Errors ────────────────────────────────────────────────────
@@ -72,12 +93,169 @@ class MissingDeliverablesError(AppError):
 
 
 class FileTooLargeError(AppError):
-    def __init__(self):
+    def __init__(self, limit_mb: int = MAX_FILE_SIZE // (1024 * 1024)):
         super().__init__(
             "FILE_TOO_LARGE",
-            f"File exceeds maximum size of {MAX_FILE_SIZE // (1024 * 1024)}MB",
+            f"File exceeds maximum size of {limit_mb}MB",
             413,
         )
+
+
+class UnsupportedMediaTypeError(AppError):
+    def __init__(self, mime: str):
+        super().__init__(
+            "UNSUPPORTED_MEDIA_TYPE",
+            f"Content type '{mime}' is not accepted for this deliverable",
+            422,
+        )
+
+
+class ContentTypeMismatchError(AppError):
+    def __init__(self):
+        super().__init__(
+            "CONTENT_TYPE_MISMATCH",
+            "File content does not match the declared content type",
+            422,
+        )
+
+
+class MaxFilesReachedError(AppError):
+    def __init__(self, limit: int):
+        super().__init__(
+            "MAX_FILES_REACHED",
+            f"Maximum of {limit} files reached for this deliverable",
+            422,
+        )
+
+
+class TemplateNotFoundError(AppError):
+    def __init__(self):
+        super().__init__("TEMPLATE_NOT_FOUND", "Project template not found", 404)
+
+
+class AssetNotFoundError(AppError):
+    def __init__(self):
+        super().__init__("ASSET_NOT_FOUND", "Project asset not found", 404)
+
+
+# ── Builtin templates ─────────────────────────────────────────
+# Defined in code (not DB) so they ship with the app, need no seeding,
+# and are available to every organization out of the box.
+
+BUILTIN_TEMPLATES: list[dict] = [
+    {
+        "id": "builtin-ai-product-ad",
+        "name": "AI Product Advertisement",
+        "description": (
+            "Produce a complete AI-generated product advertisement: from client "
+            "brief through concept, prompt design, key visuals, and storyboard "
+            "to the final video deliverable."
+        ),
+        "instructions": (
+            "# AI Product Advertisement\n\n"
+            "Work through the production pipeline stage by stage. Each stage has "
+            "a deliverable — complete them in order.\n\n"
+            "1. **Client Brief** — summarize the client's product, audience, and goals.\n"
+            "2. **Creative Concept** — describe your creative direction in markdown.\n"
+            "3. **Reference Assets** — collect style/brand references.\n"
+            "4. **Prompt Design** — craft and document your generation prompts.\n"
+            "5. **Key Visuals** — generate and upload the hero images.\n"
+            "6. **Storyboard** — assemble the shot sequence as images.\n"
+            "7. **Video Clips** — generate the individual video segments.\n"
+            "8. **Final Video** — deliver the finished advertisement."
+        ),
+        "project_type": "ai_visual",
+        "difficulty": "intermediate",
+        "suggested_minutes": 480,
+        "max_score": 100,
+        "rubric": [
+            {"criterion": "Concept & Brief Alignment", "max_score": 20},
+            {"criterion": "Prompt Craftsmanship", "max_score": 20},
+            {"criterion": "Visual Quality", "max_score": 25},
+            {"criterion": "Storytelling & Storyboard", "max_score": 15},
+            {"criterion": "Final Video Production", "max_score": 20},
+        ],
+        "deliverables": [
+            {
+                "name": "Client Brief",
+                "description": "Summary of the product, target audience, and campaign goals.",
+                "type": "text",
+                "required": True,
+                "config": {},
+                "sort_order": 0,
+            },
+            {
+                "name": "Creative Concept",
+                "description": "Creative direction, mood, and visual language (markdown).",
+                "type": "markdown",
+                "required": True,
+                "config": {},
+                "sort_order": 1,
+            },
+            {
+                "name": "Reference Assets",
+                "description": "Style, brand, or product references you are working from.",
+                "type": "reference",
+                "required": False,
+                "config": {"max_files": 10, "max_file_size_mb": 25},
+                "sort_order": 2,
+            },
+            {
+                "name": "Prompt Design",
+                "description": "The generation prompt(s) with tool, model, and parameters.",
+                "type": "prompt",
+                "required": True,
+                "config": {},
+                "sort_order": 3,
+            },
+            {
+                "name": "Key Visuals",
+                "description": "Hero images for the advertisement.",
+                "type": "image",
+                "required": True,
+                "config": {
+                    "accepted_formats": ["image/png", "image/jpeg", "image/webp"],
+                    "max_files": 5,
+                    "max_file_size_mb": 25,
+                },
+                "sort_order": 4,
+            },
+            {
+                "name": "Storyboard",
+                "description": "Ordered shot sequence as images.",
+                "type": "image",
+                "required": True,
+                "config": {
+                    "accepted_formats": ["image/png", "image/jpeg", "image/webp"],
+                    "max_files": 12,
+                    "max_file_size_mb": 25,
+                },
+                "sort_order": 5,
+            },
+            {
+                "name": "Video Clips",
+                "description": "Individual generated video segments.",
+                "type": "video",
+                "required": False,
+                "config": {"max_files": 8, "max_file_size_mb": 50},
+                "sort_order": 6,
+            },
+            {
+                "name": "Final Video",
+                "description": "The finished advertisement video.",
+                "type": "final_output",
+                "required": True,
+                "config": {
+                    "accepted_formats": ["video/mp4", "video/webm"],
+                    "max_files": 1,
+                    "max_file_size_mb": 50,
+                },
+                "sort_order": 7,
+            },
+        ],
+        "skill_names": ["Prompt Engineering", "AI Image Generation", "AI Video Production"],
+    },
+]
 
 
 # ── Service ───────────────────────────────────────────────────
@@ -105,6 +283,7 @@ class ProjectService:
         max_submissions: int,
         skill_ids: list[str] | None,
         created_by: str,
+        project_type: str = "general",
     ) -> Project:
         if slug is None:
             slug = self._generate_slug(title)
@@ -120,6 +299,7 @@ class ProjectService:
             slug=slug,
             description=description,
             instructions=instructions,
+            project_type=project_type if project_type in PROJECT_TYPES else "general",
             difficulty=diff,
             max_score=max_score,
             rubric=rubric,
@@ -364,6 +544,46 @@ class ProjectService:
 
     # ── Files ──
 
+    def _validate_media_upload(
+        self,
+        deliverable: ProjectDeliverable,
+        file_content: bytes,
+        content_type: str,
+    ) -> None:
+        """MIME whitelist + magic-byte + per-deliverable config enforcement."""
+        whitelist = MEDIA_MIME_WHITELIST.get(deliverable.type)
+        config = deliverable.config or {}
+
+        if whitelist is not None:
+            allowed = whitelist
+            # Instructor-configured accepted_formats can only NARROW the safe set
+            accepted = config.get("accepted_formats")
+            if isinstance(accepted, list) and accepted:
+                narrowed = {m.lower() for m in accepted if isinstance(m, str)} & whitelist
+                if narrowed:
+                    allowed = narrowed
+            if content_type.lower() not in allowed:
+                raise UnsupportedMediaTypeError(content_type)
+            # Never trust the declared type: sniff actual file signature
+            if not content_matches_mime(file_content[:16], content_type):
+                raise ContentTypeMismatchError()
+
+        # Per-deliverable size limit — can only tighten, never exceed global cap
+        max_mb = config.get("max_file_size_mb")
+        if isinstance(max_mb, (int, float)) and max_mb > 0:
+            limit = min(int(max_mb) * 1024 * 1024, MAX_FILE_SIZE)
+            if len(file_content) > limit:
+                raise FileTooLargeError(limit // (1024 * 1024))
+
+    async def _next_item_version(self, submission_id: str, deliverable_id: str) -> int:
+        result = await self.db.execute(
+            select(func.count(SubmissionItem.id)).where(
+                SubmissionItem.submission_id == submission_id,
+                SubmissionItem.deliverable_id == deliverable_id,
+            )
+        )
+        return result.scalar_one() + 1
+
     async def upload_file(
         self,
         submission_id: str,
@@ -372,6 +592,7 @@ class ProjectService:
         file_content: bytes,
         content_type: str,
         user_id: str,
+        note: str | None = None,
     ) -> SubmissionItem:
         sub = await self.get_submission(submission_id)
         if sub.user_id != user_id:
@@ -379,8 +600,24 @@ class ProjectService:
         if sub.status != SubmissionStatus.DRAFT:
             raise InvalidStateError("Can only upload to drafts")
 
+        # Deliverable must exist and belong to this submission's project
+        deliverable = await self.get_deliverable(deliverable_id)
+        if deliverable.project_id != sub.project_id:
+            raise DeliverableNotFoundError()
+
         if len(file_content) > MAX_FILE_SIZE:
             raise FileTooLargeError()
+
+        self._validate_media_upload(deliverable, file_content, content_type)
+
+        # max_files caps total stored items for this deliverable. Single-slot
+        # deliverables (max_files=1) are exempt so "replace with new version"
+        # keeps working; multi-slot ones can free space via delete_file.
+        config = deliverable.config or {}
+        max_files = config.get("max_files")
+        version = await self._next_item_version(submission_id, deliverable_id)
+        if isinstance(max_files, int) and max_files > 1 and version > max_files:
+            raise MaxFilesReachedError(max_files)
 
         # Clean filename
         safe_name = re.sub(r"[^\w.\-]", "_", file_name)
@@ -407,9 +644,18 @@ class ProjectService:
             file_name=file_name,
             file_size=len(file_content),
             mime_type=content_type,
+            version=version,
+            note=note,
         )
         self.db.add(item)
         await self.db.flush()
+        log.info(
+            "file_uploaded",
+            submission_id=submission_id,
+            deliverable_id=deliverable_id,
+            version=version,
+            size=len(file_content),
+        )
         return item
 
     async def get_download_url(self, file_id: str) -> str:
@@ -419,10 +665,17 @@ class ProjectService:
 
         from app.core.storage import get_s3_client
 
+        params: dict = {"Bucket": settings.s3_bucket, "Key": item.file_key}
+        # Pin content type from DB (never trust stored object metadata) and
+        # force inline disposition so media previews render in-browser.
+        if item.mime_type:
+            params["ResponseContentType"] = item.mime_type
+            params["ResponseContentDisposition"] = "inline"
+
         async for client in get_s3_client():
             url = await client.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": settings.s3_bucket, "Key": item.file_key},
+                Params=params,
                 ExpiresIn=3600,
             )
             return url
@@ -438,6 +691,16 @@ class ProjectService:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
         if sub.status != SubmissionStatus.DRAFT:
             raise InvalidStateError("Can only delete files from drafts")
+
+        # Best-effort S3 cleanup — don't leave orphaned objects behind
+        if item.file_key:
+            from app.core.storage import get_s3_client
+
+            try:
+                async for client in get_s3_client():
+                    await client.delete_object(Bucket=settings.s3_bucket, Key=item.file_key)
+            except Exception:  # noqa: BLE001
+                log.warning("file_s3_delete_failed", file_id=file_id, key=item.file_key)
 
         await self.db.delete(item)
         await self.db.flush()
@@ -625,3 +888,299 @@ class ProjectService:
         if len(slug) < 3:
             slug = f"{slug}-{secrets.token_hex(3)}"
         return slug[:200]
+
+    # ── Project Templates ─────────────────────────────────────
+
+    async def create_template(
+        self,
+        org_id: str,
+        created_by: str,
+        *,
+        name: str,
+        description: str,
+        instructions: str,
+        project_type: str = "general",
+        difficulty: str = "intermediate",
+        suggested_minutes: int | None = None,
+        max_score: int = 100,
+        rubric: list[dict],
+        deliverables: list[dict],
+        skill_names: list[str] | None = None,
+    ) -> ProjectTemplate:
+        try:
+            diff = DifficultyLevel(difficulty)
+        except ValueError:
+            diff = DifficultyLevel.INTERMEDIATE
+
+        template = ProjectTemplate(
+            org_id=org_id,
+            name=name,
+            description=description,
+            instructions=instructions,
+            project_type=project_type if project_type in PROJECT_TYPES else "general",
+            difficulty=diff,
+            suggested_minutes=suggested_minutes,
+            max_score=max_score,
+            rubric=rubric,
+            deliverables=deliverables,
+            skill_names=skill_names or [],
+            created_by=created_by,
+        )
+        self.db.add(template)
+        await self.db.flush()
+        log.info("template_created", template_id=template.id, org_id=org_id)
+        return template
+
+    async def list_templates(self, org_id: str) -> tuple[list[dict], list[ProjectTemplate]]:
+        """Return (builtin template dicts, org-created templates)."""
+        result = await self.db.execute(
+            select(ProjectTemplate)
+            .where(
+                ProjectTemplate.org_id == org_id,
+                ProjectTemplate.status != ContentStatus.ARCHIVED,
+            )
+            .order_by(ProjectTemplate.created_at.desc())
+        )
+        return list(BUILTIN_TEMPLATES), list(result.scalars().all())
+
+    async def get_template(self, template_id: str, org_id: str) -> ProjectTemplate | dict:
+        """Builtin templates are addressable by their 'builtin-' id."""
+        if template_id.startswith("builtin-"):
+            for t in BUILTIN_TEMPLATES:
+                if t["id"] == template_id:
+                    return t
+            raise TemplateNotFoundError()
+
+        template = await self.db.get(ProjectTemplate, template_id)
+        if (
+            template is None
+            or template.org_id != org_id
+            or template.status == ContentStatus.ARCHIVED
+        ):
+            raise TemplateNotFoundError()
+        return template
+
+    async def update_template(self, template_id: str, org_id: str, **fields) -> ProjectTemplate:
+        template = await self.get_template(template_id, org_id)
+        if isinstance(template, dict):
+            raise AppError("BUILTIN_READONLY", "Built-in templates cannot be modified", 422)
+        for k, v in fields.items():
+            if v is not None and hasattr(template, k):
+                if k == "difficulty":
+                    v = DifficultyLevel(v)
+                setattr(template, k, v)
+        await self.db.flush()
+        return template
+
+    async def delete_template(self, template_id: str, org_id: str) -> None:
+        template = await self.get_template(template_id, org_id)
+        if isinstance(template, dict):
+            raise AppError("BUILTIN_READONLY", "Built-in templates cannot be deleted", 422)
+        template.status = ContentStatus.ARCHIVED
+        await self.db.flush()
+
+    async def create_project_from_template(
+        self,
+        org_id: str,
+        template_id: str,
+        created_by: str,
+        title: str | None = None,
+    ) -> Project:
+        """Instantiate a project from a template.
+
+        Deliverables are deep-copied into real ProjectDeliverable rows, so the
+        resulting project and the template are fully independent.
+        """
+        template = await self.get_template(template_id, org_id)
+
+        if isinstance(template, dict):
+            src = template
+        else:
+            src = {
+                "name": template.name,
+                "description": template.description,
+                "instructions": template.instructions,
+                "project_type": template.project_type,
+                "difficulty": template.difficulty.value,
+                "max_score": template.max_score,
+                "rubric": template.rubric,
+                "deliverables": template.deliverables,
+            }
+
+        project = await self.create_project(
+            org_id=org_id,
+            title=title or src["name"],
+            slug=None,
+            description=src["description"],
+            instructions=src["instructions"],
+            difficulty=src["difficulty"],
+            max_score=src["max_score"],
+            rubric=[dict(r) for r in src["rubric"]],
+            deadline=None,
+            late_deadline=None,
+            late_penalty_pct=0,
+            max_submissions=0,
+            skill_ids=None,
+            created_by=created_by,
+            project_type=src.get("project_type", "general"),
+        )
+
+        for d in src.get("deliverables", []):
+            await self.create_deliverable(
+                project.id,
+                d["name"],
+                d.get("description"),
+                d["type"],
+                d.get("required", True),
+                dict(d.get("config") or {}),
+                d.get("sort_order", 0),
+            )
+
+        await self.db.flush()
+        log.info(
+            "project_created_from_template",
+            project_id=project.id,
+            template_id=template_id,
+            org_id=org_id,
+        )
+        return project
+
+    # ── Project Assets (instructor reference material) ────────
+
+    async def upload_asset(
+        self,
+        org_id: str,
+        project_id: str,
+        name: str,
+        description: str | None,
+        file_name: str,
+        file_content: bytes,
+        content_type: str,
+        uploaded_by: str,
+    ) -> ProjectAsset:
+        await self.get_project(project_id)
+
+        if len(file_content) > MAX_FILE_SIZE:
+            raise FileTooLargeError()
+
+        # Assets must be previewable media or PDF — sniff to block spoofing
+        if content_type.lower() not in MEDIA_ALL:
+            raise UnsupportedMediaTypeError(content_type)
+        if not content_matches_mime(file_content[:16], content_type):
+            raise ContentTypeMismatchError()
+
+        safe_name = re.sub(r"[^\w.\-]", "_", file_name)
+        file_key = f"orgs/{org_id}/projects/{project_id}/assets/{ULID()}_{safe_name}"
+
+        from app.core.storage import get_s3_client
+
+        async for client in get_s3_client():
+            await client.put_object(
+                Bucket=settings.s3_bucket,
+                Key=file_key,
+                Body=file_content,
+                ContentType=content_type,
+            )
+
+        asset = ProjectAsset(
+            org_id=org_id,
+            project_id=project_id,
+            name=name,
+            description=description,
+            file_key=file_key,
+            file_name=file_name,
+            file_size=len(file_content),
+            mime_type=content_type,
+            uploaded_by=uploaded_by,
+        )
+        self.db.add(asset)
+        await self.db.flush()
+        log.info("asset_uploaded", asset_id=asset.id, project_id=project_id)
+        return asset
+
+    async def list_assets(self, project_id: str) -> list[ProjectAsset]:
+        result = await self.db.execute(
+            select(ProjectAsset)
+            .where(ProjectAsset.project_id == project_id)
+            .order_by(ProjectAsset.sort_order, ProjectAsset.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def get_asset(self, asset_id: str, org_id: str) -> ProjectAsset:
+        asset = await self.db.get(ProjectAsset, asset_id)
+        if asset is None or asset.org_id != org_id:
+            raise AssetNotFoundError()
+        return asset
+
+    async def get_asset_download_url(self, asset_id: str, org_id: str) -> str:
+        asset = await self.get_asset(asset_id, org_id)
+
+        from app.core.storage import get_s3_client
+
+        async for client in get_s3_client():
+            url = await client.generate_presigned_url(
+                "get_object",
+                Params={
+                    "Bucket": settings.s3_bucket,
+                    "Key": asset.file_key,
+                    "ResponseContentType": asset.mime_type,
+                    "ResponseContentDisposition": "inline",
+                },
+                ExpiresIn=3600,
+            )
+            return url
+        raise AppError("S3_ERROR", "Could not generate download URL", 500)  # pragma: no cover
+
+    async def delete_asset(self, asset_id: str, org_id: str) -> None:
+        asset = await self.get_asset(asset_id, org_id)
+
+        from app.core.storage import get_s3_client
+
+        try:
+            async for client in get_s3_client():
+                await client.delete_object(Bucket=settings.s3_bucket, Key=asset.file_key)
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            log.warning("asset_s3_delete_failed", asset_id=asset_id, key=asset.file_key)
+
+        await self.db.delete(asset)
+        await self.db.flush()
+
+    # ── Prompt items ──────────────────────────────────────────
+
+    async def add_prompt_item(
+        self,
+        submission_id: str,
+        deliverable_id: str,
+        prompt_data: dict,
+        user_id: str,
+    ) -> SubmissionItem:
+        sub = await self.get_submission(submission_id)
+        if sub.user_id != user_id:
+            raise AppError("PERMISSION_DENIED", "Not your submission", 403)
+        if sub.status != SubmissionStatus.DRAFT:
+            raise InvalidStateError("Can only add prompts to drafts")
+
+        deliverable = await self.get_deliverable(deliverable_id)
+        if deliverable.project_id != sub.project_id:
+            raise DeliverableNotFoundError()
+        if deliverable.type != DeliverableType.PROMPT:
+            raise AppError("INVALID_TYPE", "Deliverable is not a prompt deliverable", 422)
+
+        version = await self._next_item_version(submission_id, deliverable_id)
+
+        item = SubmissionItem(
+            submission_id=submission_id,
+            deliverable_id=deliverable_id,
+            type=ItemType.PROMPT,
+            content=json.dumps(prompt_data, ensure_ascii=False),
+            version=version,
+        )
+        self.db.add(item)
+        await self.db.flush()
+        log.info(
+            "prompt_item_added",
+            submission_id=submission_id,
+            deliverable_id=deliverable_id,
+            version=version,
+        )
+        return item
