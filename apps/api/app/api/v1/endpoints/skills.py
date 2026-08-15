@@ -408,10 +408,19 @@ async def submit_attempt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     ex = await svc.get_exercise(exercise_id)
     _verify_org(ex, org_id, "Exercise")
+    # Students may only attempt exercises of a PUBLISHED skill; instructors can
+    # attempt a draft skill's exercises to test them before publishing.
+    from app.models.skill import ContentStatus
+
+    instructor_roles = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    if member.role not in instructor_roles:
+        skill = await svc.get_skill(ex.skill_id)
+        if skill.status != ContentStatus.PUBLISHED:
+            raise HTTPException(status_code=422, detail="Skill is not published")
     attempt = await svc.submit_attempt(org_id, exercise_id, user.id, body.answer)
     await db.commit()
     return DataResponse(data=AttemptResponse.model_validate(attempt))

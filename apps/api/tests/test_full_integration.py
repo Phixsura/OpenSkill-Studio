@@ -1655,3 +1655,42 @@ async def test_extension_reason_bounded(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_attempt_unpublished_skill(c):
+    """A student must not attempt exercises of a draft skill; the instructor
+    may (to test), and the student can once it's published."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=ho)).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={"name": "Publish Gate Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={"title": "Ex", "description": "d", "type": "text_answer", "config": {}, "max_score": 10},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+
+    # instructor can attempt the draft skill's exercise
+    r = await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=ho)
+    assert r.status_code == 201
+
+    # student cannot, while draft
+    hs, _ = await _auth(c)
+    link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+    await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+    r = await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=hs)
+    assert r.status_code == 422
+
+    # published → student can
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=ho)
+    r = await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=hs)
+    assert r.status_code == 201
