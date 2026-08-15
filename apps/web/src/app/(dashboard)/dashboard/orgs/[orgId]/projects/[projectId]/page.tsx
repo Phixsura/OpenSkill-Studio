@@ -7,13 +7,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { Button } from "@/components/ui/button";
+import { MediaPreview } from "@/components/media-preview";
 import { apiWithAuth } from "@/lib/api";
 
 interface Deliverable {
   id: string;
   name: string;
+  description?: string | null;
   type: string;
   required: boolean;
+  sort_order?: number;
 }
 
 interface ProjectDetail {
@@ -21,6 +24,7 @@ interface ProjectDetail {
   title: string;
   description: string;
   instructions: string;
+  project_type: string;
   rubric: { criterion: string; max_score: number; description?: string }[];
   difficulty: string;
   max_score: number;
@@ -28,6 +32,14 @@ interface ProjectDetail {
   late_deadline: string | null;
   late_penalty_pct: number;
   deliverables: Deliverable[];
+}
+
+interface ProjectAsset {
+  id: string;
+  name: string;
+  description: string | null;
+  file_name: string;
+  mime_type: string;
 }
 
 interface SubmissionItem {
@@ -52,8 +64,47 @@ export default function ProjectDetailPage() {
       apiWithAuth<{ data: SubmissionItem[] }>(`/orgs/${orgId}/projects/${projectId}/submissions`),
   });
 
+  const { data: assetsData } = useQuery({
+    queryKey: ["project-assets", projectId],
+    queryFn: () =>
+      apiWithAuth<{ data: ProjectAsset[] }>(`/orgs/${orgId}/projects/${projectId}/assets`),
+  });
+
+  // For workflow status: pull the full items of my latest submission so each
+  // stage can show completion state + the latest submitted asset.
+  const latestSubId = subsData?.data?.[0]?.id;
+  const { data: latestSubDetail } = useQuery({
+    queryKey: ["latest-sub-items", projectId, latestSubId],
+    enabled: !!latestSubId,
+    queryFn: () =>
+      apiWithAuth<{
+        data: {
+          items: {
+            id: string;
+            deliverable_id: string;
+            type: string;
+            file_name: string | null;
+            mime_type: string | null;
+            version: number;
+          }[];
+        };
+      }>(`/orgs/${orgId}/projects/${projectId}/submissions/${latestSubId}`),
+  });
+
   const project = projectData?.data;
   const submissions = subsData?.data ?? [];
+  const assets = assetsData?.data ?? [];
+
+  // Latest item per deliverable (highest version) from my latest submission.
+  const latestItemByDeliverable = new Map<
+    string,
+    { id: string; type: string; file_name: string | null; mime_type: string | null; version: number }
+  >();
+  for (const it of latestSubDetail?.data?.items ?? []) {
+    const prev = latestItemByDeliverable.get(it.deliverable_id);
+    if (!prev || it.version > prev.version) latestItemByDeliverable.set(it.deliverable_id, it);
+  }
+  const completedDeliverables = new Set(latestItemByDeliverable.keys());
 
   if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
   if (isError || !project) return <p className="text-[hsl(var(--destructive))]">Failed to load project.</p>;
@@ -71,18 +122,138 @@ export default function ProjectDetailPage() {
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{project.instructions}</ReactMarkdown>
         </div>
 
-        {/* Deliverables */}
-        <div>
-          <h2 className="text-xl font-semibold">Deliverables</h2>
-          <div className="mt-3 space-y-2">
-            {(project.deliverables ?? []).map((d) => (
-              <div key={d.id} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
-                <span className="capitalize text-[hsl(var(--muted-foreground))]">{d.type}</span>
-                <span className="font-medium">{d.name}</span>
-                {d.required && <span className="text-xs text-red-500">Required</span>}
-              </div>
-            ))}
+        {/* Reference Assets */}
+        {assets.length > 0 && (
+          <div>
+            <h2 className="text-xl font-semibold">Reference Assets</h2>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {assets.map((a) => (
+                <div key={a.id} className="rounded-lg border p-3">
+                  <p className="text-sm font-medium">{a.name}</p>
+                  {a.description && (
+                    <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">
+                      {a.description}
+                    </p>
+                  )}
+                  <div className="mt-2">
+                    <MediaPreview
+                      downloadPath={`/orgs/${orgId}/projects/${projectId}/assets/${a.id}/download`}
+                      mimeType={a.mime_type}
+                      fileName={a.file_name}
+                      className="max-h-40"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
+        )}
+
+        {/* Deliverables — workflow timeline for AI visual, flat list otherwise */}
+        <div>
+          <h2 className="text-xl font-semibold">
+            {project.project_type === "ai_visual" ? "Production Workflow" : "Deliverables"}
+          </h2>
+          {project.project_type === "ai_visual" ? (
+            (() => {
+              const ordered = [...(project.deliverables ?? [])].sort(
+                (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+              );
+              // "Current" = the work frontier: the first incomplete stage at or
+              // after the last completed one. This way, optional stages the
+              // learner skipped to reach a later stage read as "Not Started"
+              // rather than falsely grabbing the "In Progress" marker.
+              let lastDoneIdx = -1;
+              ordered.forEach((d, i) => {
+                if (completedDeliverables.has(d.id)) lastDoneIdx = i;
+              });
+              const currentIdx = ordered.findIndex(
+                (d, i) => i >= lastDoneIdx && !completedDeliverables.has(d.id),
+              );
+              return (
+                <ol className="mt-3 space-y-0">
+                  {ordered.map((d, idx, arr) => {
+                    const done = completedDeliverables.has(d.id);
+                    const isCurrent = idx === currentIdx;
+                    const latestItem = latestItemByDeliverable.get(d.id);
+                    return (
+                      <li key={d.id} className="relative flex gap-4 pb-6 last:pb-0">
+                        {idx < arr.length - 1 && (
+                          <span
+                            className="absolute left-[15px] top-8 h-full w-0.5 bg-[hsl(var(--border))]"
+                            aria-hidden
+                          />
+                        )}
+                        <span
+                          className={`z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                            done
+                              ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200"
+                              : isCurrent
+                                ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200"
+                                : "border bg-[hsl(var(--background))] text-[hsl(var(--muted-foreground))]"
+                          }`}
+                        >
+                          {done ? "✓" : idx + 1}
+                        </span>
+                        <div className="flex-1 pt-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{d.name}</span>
+                            <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs capitalize">
+                              {d.type.replace("_", " ")}
+                            </span>
+                            {d.required ? (
+                              <span className="text-xs text-red-500">Required</span>
+                            ) : (
+                              <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                                Optional
+                              </span>
+                            )}
+                            <span
+                              className={`ml-auto text-xs font-medium ${
+                                done
+                                  ? "text-green-600"
+                                  : isCurrent
+                                    ? "text-blue-600"
+                                    : "text-[hsl(var(--muted-foreground))]"
+                              }`}
+                            >
+                              {done ? "Done" : isCurrent ? "In Progress" : "Not Started"}
+                            </span>
+                          </div>
+                          {d.description && (
+                            <p className="mt-0.5 text-sm text-[hsl(var(--muted-foreground))]">
+                              {d.description}
+                            </p>
+                          )}
+                          {/* Latest submitted asset thumbnail */}
+                          {latestItem && latestItem.type === "file" && (
+                            <div className="mt-2">
+                              <MediaPreview
+                                downloadPath={`/orgs/${orgId}/submissions/${latestSubId}/files/${latestItem.id}/download`}
+                                mimeType={latestItem.mime_type}
+                                fileName={latestItem.file_name}
+                                className="max-h-32"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              );
+            })()
+          ) : (
+            <div className="mt-3 space-y-2">
+              {(project.deliverables ?? []).map((d) => (
+                <div key={d.id} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
+                  <span className="capitalize text-[hsl(var(--muted-foreground))]">{d.type}</span>
+                  <span className="font-medium">{d.name}</span>
+                  {d.required && <span className="text-xs text-red-500">Required</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Rubric */}

@@ -1,12 +1,23 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth, ApiError } from "@/lib/api";
+
+interface Template {
+  id: string;
+  name: string;
+  description: string;
+  project_type: string;
+  difficulty: string;
+  suggested_minutes: number | null;
+  deliverables: { name: string; type: string; required?: boolean }[];
+  builtin: boolean;
+}
 
 export default function NewProjectPage() {
   const { orgId } = useParams<{ orgId: string }>();
@@ -16,12 +27,43 @@ export default function NewProjectPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [projectType, setProjectType] = useState("general");
   const [maxScore, setMaxScore] = useState("100");
   const [rubricText, setRubricText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
 
   const submitting = useRef(false);
+
+  const { data: templatesData } = useQuery({
+    queryKey: ["project-templates", orgId],
+    queryFn: () =>
+      apiWithAuth<{ data: Template[] }>(`/orgs/${orgId}/project-templates`),
+  });
+  const templates = templatesData?.data ?? [];
+
+  const handleUseTemplate = async (templateId: string) => {
+    if (submitting.current) return;
+    submitting.current = true;
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await apiWithAuth<{ data: { id: string } }>(
+        `/orgs/${orgId}/projects/from-template`,
+        {
+          method: "POST",
+          body: JSON.stringify({ template_id: templateId }),
+        },
+      );
+      queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
+      router.push(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to create from template.");
+      setLoading(false);
+      submitting.current = false;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,6 +96,7 @@ export default function NewProjectPage() {
             title,
             description,
             instructions: instructions.trim() || "No instructions provided.",
+            project_type: projectType,
             max_score: parseInt(maxScore) || 100,
             rubric,
           }),
@@ -86,7 +129,112 @@ export default function NewProjectPage() {
         </div>
       )}
 
+      {/* Template gallery */}
+      {templates.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold">Start from a template</h2>
+          <div className="mt-3 space-y-3">
+            {templates.map((t) => (
+              <div key={t.id} className="rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{t.name}</span>
+                      {t.builtin && (
+                        <span className="rounded-full bg-[hsl(var(--primary))] px-2 py-0.5 text-xs text-[hsl(var(--primary-foreground))]">
+                          Built-in
+                        </span>
+                      )}
+                      {t.project_type === "ai_visual" && (
+                        <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900 dark:text-purple-200">
+                          AI Visual
+                        </span>
+                      )}
+                      <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs capitalize">
+                        {t.difficulty}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+                      {t.description}
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-1 text-xs text-[hsl(var(--primary))] hover:underline"
+                      onClick={() =>
+                        setExpandedTemplate(expandedTemplate === t.id ? null : t.id)
+                      }
+                    >
+                      {expandedTemplate === t.id ? "Hide" : "Show"} {t.deliverables.length} workflow
+                      stages
+                    </button>
+                  </div>
+                  <Button
+                    size="sm"
+                    disabled={loading}
+                    onClick={() => handleUseTemplate(t.id)}
+                  >
+                    Use template
+                  </Button>
+                </div>
+                {expandedTemplate === t.id && (
+                  <ol className="mt-3 space-y-1 border-t pt-3 text-sm">
+                    {t.deliverables.map((d, i) => (
+                      <li key={i} className="flex items-center gap-2">
+                        <span className="w-5 text-right text-xs text-[hsl(var(--muted-foreground))]">
+                          {i + 1}.
+                        </span>
+                        <span>{d.name}</span>
+                        <span className="rounded-full bg-[hsl(var(--secondary))] px-1.5 py-0.5 text-xs capitalize">
+                          {d.type.replace("_", " ")}
+                        </span>
+                        {d.required === false && (
+                          <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                            optional
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <div className="h-px flex-1 bg-[hsl(var(--border))]" />
+            <span className="text-xs uppercase text-[hsl(var(--muted-foreground))]">
+              or start blank
+            </span>
+            <div className="h-px flex-1 bg-[hsl(var(--border))]" />
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium">Project type</label>
+          <div className="mt-1 flex gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="project_type"
+                value="general"
+                checked={projectType === "general"}
+                onChange={() => setProjectType("general")}
+              />
+              General
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="project_type"
+                value="ai_visual"
+                checked={projectType === "ai_visual"}
+                onChange={() => setProjectType("ai_visual")}
+              />
+              AI Visual (media workflow)
+            </label>
+          </div>
+        </div>
         <div>
           <label htmlFor="title" className="block text-sm font-medium">
             Project title
