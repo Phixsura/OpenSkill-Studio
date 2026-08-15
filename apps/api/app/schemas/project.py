@@ -377,6 +377,8 @@ class FileResponse(BaseModel):
     file_size: int | None
     mime_type: str | None
     version: int = 1
+    # Generation metadata JSON extracted from the file (item.content)
+    content: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { GenerationData, parseGenerationMeta } from "@/components/generation-data";
 import { MediaPreview } from "@/components/media-preview";
 import { PromptDisplay } from "@/components/prompt-display";
 import { apiWithAuth, ApiError } from "@/lib/api";
@@ -117,11 +118,17 @@ export default function ReviewDetailPage() {
                   {latest.type === "prompt" ? (
                     <PromptDisplay content={latest.content} />
                   ) : latest.type === "file" ? (
-                    <MediaPreview
-                      downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
-                      mimeType={latest.mime_type}
-                      fileName={latest.file_name}
-                    />
+                    <div className="space-y-2">
+                      <MediaPreview
+                        downloadPath={`/orgs/${orgId}/submissions/${submissionId}/files/${latest.id}/download`}
+                        mimeType={latest.mime_type}
+                        fileName={latest.file_name}
+                      />
+                      {(() => {
+                        const gen = parseGenerationMeta(latest.content);
+                        return gen ? <GenerationData meta={gen} /> : null;
+                      })()}
+                    </div>
                   ) : (
                     <p className="whitespace-pre-wrap text-sm">{latest.content}</p>
                   )}
