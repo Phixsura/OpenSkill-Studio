@@ -76,6 +76,19 @@ async def update_user_role(
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
 
     old_role = user.role
+
+    # Prevent removing the last active admin — demoting the final admin would
+    # lock the platform out of all admin operations.
+    if old_role == UserRole.ADMIN and new_role != UserRole.ADMIN:
+        admin_count = await db.execute(
+            select(func.count(User.id)).where(
+                User.role == UserRole.ADMIN,
+                User.status == UserStatus.ACTIVE,
+            )
+        )
+        if admin_count.scalar_one() <= 1:
+            raise HTTPException(status_code=422, detail="Cannot demote the last admin")
+
     user.role = new_role
     await db.commit()
     await db.refresh(user)
@@ -106,6 +119,17 @@ async def soft_delete_user(
 
     if user.id == admin.id:
         raise HTTPException(status_code=422, detail="Cannot delete yourself")
+
+    # Don't delete the last active admin (platform lockout)
+    if user.role == UserRole.ADMIN:
+        admin_count = await db.execute(
+            select(func.count(User.id)).where(
+                User.role == UserRole.ADMIN,
+                User.status == UserStatus.ACTIVE,
+            )
+        )
+        if admin_count.scalar_one() <= 1:
+            raise HTTPException(status_code=422, detail="Cannot delete the last admin")
 
     user.status = UserStatus.DELETED
     await db.commit()

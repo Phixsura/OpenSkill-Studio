@@ -233,7 +233,11 @@ async def forgot_password(
 # ── Reset password ────────────────────────────────────────
 
 
-@router.post("/reset-password", status_code=200)
+@router.post(
+    "/reset-password",
+    status_code=200,
+    dependencies=[Depends(rate_limit(5, 900))],
+)
 async def reset_password(
     body: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
@@ -247,7 +251,7 @@ async def reset_password(
 # ── Email verification ───────────────────────────────────
 
 
-@router.get("/verify-email")
+@router.get("/verify-email", dependencies=[Depends(rate_limit(10, 900))])
 async def verify_email(
     token: str = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -260,7 +264,11 @@ async def verify_email(
     return RedirectResponse(url=f"{settings.frontend_url}/login?verified=true")
 
 
-@router.post("/resend-verification", status_code=200)
+@router.post(
+    "/resend-verification",
+    status_code=200,
+    dependencies=[Depends(rate_limit(3, 900))],
+)
 async def resend_verification(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
