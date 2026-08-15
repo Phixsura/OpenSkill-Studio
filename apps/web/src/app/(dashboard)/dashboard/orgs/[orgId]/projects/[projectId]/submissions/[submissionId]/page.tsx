@@ -3,6 +3,8 @@
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import {
   AnnotatedImage,
@@ -156,6 +158,12 @@ export default function SubmissionDetailPage() {
                       const gen = parseGenerationMeta(latest.content);
                       return gen ? <GenerationData meta={gen} /> : null;
                     })()}
+                  </div>
+                ) : latest.type === "markdown" ? (
+                  <div className="prose prose-sm max-w-none dark:prose-invert">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {latest.content ?? ""}
+                    </ReactMarkdown>
                   </div>
                 ) : (
                   <p className="whitespace-pre-wrap text-sm text-[hsl(var(--muted-foreground))]">

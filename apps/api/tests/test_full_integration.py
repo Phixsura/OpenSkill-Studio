@@ -666,3 +666,53 @@ async def test_health_readiness_components(c):
     assert r.status_code == 200
     assert "database" in r.json()["components"]
     assert "redis" in r.json()["components"]
+
+
+# ── Markdown submission items (issue #9 §3: markdown must remain supported) ──
+
+
+@pytest.mark.asyncio
+async def test_markdown_item_roundtrip(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "MD Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    pid = r.json()["data"]["id"]
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+        json={"name": "Concept", "type": "markdown", "required": True},
+        headers=h,
+    )
+    did = r2.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+
+    r3 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
+    sub_id = r3.json()["data"]["id"]
+
+    # markdown item type must be accepted (was a 500 before the enum fix)
+    r4 = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}",
+        json={"items": [{"deliverable_id": did, "type": "markdown", "content": "## Head\n\n**bold**"}]},
+        headers=h,
+    )
+    assert r4.status_code == 200
+
+    r5 = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}", headers=h)
+    items = r5.json()["data"]["items"]
+    assert any(i["type"] == "markdown" and i["content"].startswith("## Head") for i in items)
+
+    # invalid type → 422, not 500
+    r6 = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}",
+        json={"items": [{"deliverable_id": did, "type": "nonsense", "content": "x"}]},
+        headers=h,
+    )
+    assert r6.status_code == 422

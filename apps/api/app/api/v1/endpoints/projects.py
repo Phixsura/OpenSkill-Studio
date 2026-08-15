@@ -461,14 +461,19 @@ async def update_submission(
         raise HTTPException(status_code=403, detail="Not your submission")
     if sub.status.value != "draft":
         raise HTTPException(status_code=422, detail="Only drafts can be updated")
-    # Allow adding text/link items via body
+    # Allow adding text/markdown/link items via body
     from app.models.project import ItemType, SubmissionItem
 
     for item_data in body.get("items", []):
+        raw_type = item_data.get("type", "text")
+        try:
+            item_type = ItemType(raw_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid item type: {raw_type}") from exc
         item = SubmissionItem(
             submission_id=submission_id,
             deliverable_id=item_data.get("deliverable_id"),
-            type=ItemType(item_data.get("type", "text")),
+            type=item_type,
             content=item_data.get("content"),
         )
         db.add(item)

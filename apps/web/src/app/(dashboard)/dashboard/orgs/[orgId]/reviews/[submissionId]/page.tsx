@@ -3,6 +3,8 @@
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -181,6 +183,12 @@ export default function ReviewDetailPage() {
                         const gen = parseGenerationMeta(latest.content);
                         return gen ? <GenerationData meta={gen} /> : null;
                       })()}
+                    </div>
+                  ) : latest.type === "markdown" ? (
+                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {latest.content ?? ""}
+                      </ReactMarkdown>
                     </div>
                   ) : (
                     <p className="whitespace-pre-wrap text-sm">{latest.content}</p>
