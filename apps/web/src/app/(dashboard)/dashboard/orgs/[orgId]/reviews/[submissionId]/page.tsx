@@ -3,6 +3,8 @@
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +17,7 @@ import { GenerationData, parseGenerationMeta } from "@/components/generation-dat
 import { MediaPreview } from "@/components/media-preview";
 import { PromptDisplay } from "@/components/prompt-display";
 import { VersionCompare } from "@/components/version-compare";
+import { VersionHistory } from "@/components/version-history";
 import { apiWithAuth, ApiError } from "@/lib/api";
 
 interface SubItem {
@@ -26,6 +29,7 @@ interface SubItem {
   content: string | null;
   version: number;
   note: string | null;
+  created_at: string;
 }
 
 interface SubmissionDetail {
@@ -182,6 +186,12 @@ export default function ReviewDetailPage() {
                         return gen ? <GenerationData meta={gen} /> : null;
                       })()}
                     </div>
+                  ) : latest.type === "markdown" ? (
+                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {latest.content ?? ""}
+                      </ReactMarkdown>
+                    </div>
                   ) : (
                     <p className="whitespace-pre-wrap text-sm">{latest.content}</p>
                   )}
@@ -205,29 +215,20 @@ export default function ReviewDetailPage() {
                   </div>
                 </div>
 
-                {history.length > 0 && (
-                  <div className="mt-2 space-y-2">
-                    {latest.type === "file" && (
-                      <VersionCompare
-                        items={sorted}
-                        downloadPath={(itemId) =>
-                          `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
-                        }
-                      />
-                    )}
-                    <details className="text-xs text-[hsl(var(--muted-foreground))]">
-                      <summary className="cursor-pointer">
-                        Previous versions ({history.length})
-                      </summary>
-                      <ul className="mt-1 space-y-0.5 pl-4">
-                        {history.map((h) => (
-                          <li key={h.id}>
-                            v{h.version} — {h.file_name ?? h.type}
-                            {h.note ? ` (${h.note})` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
+                {history.length > 0 && latest.type === "file" && (
+                  <div className="mt-2 flex flex-wrap items-start gap-2">
+                    <VersionHistory
+                      items={sorted}
+                      downloadPath={(itemId) =>
+                        `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
+                      }
+                    />
+                    <VersionCompare
+                      items={sorted}
+                      downloadPath={(itemId) =>
+                        `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
+                      }
+                    />
                   </div>
                 )}
               </div>

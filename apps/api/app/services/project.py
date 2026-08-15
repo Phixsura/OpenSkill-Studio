@@ -494,7 +494,10 @@ class ProjectService:
         user_id: str | None = None,
         page: int = 1,
         per_page: int = 20,
-    ) -> tuple[list[Submission], int]:
+    ) -> tuple[list[tuple[Submission, str]], int]:
+        """List submissions with author display names as (submission, name) tuples."""
+        from app.models.user import User as UserModel
+
         base = select(Submission).where(Submission.project_id == project_id)
         if user_id:
             base = base.where(Submission.user_id == user_id)
@@ -503,10 +506,17 @@ class ProjectService:
         total = total_r.scalar_one()
 
         offset = (page - 1) * per_page
-        result = await self.db.execute(
-            base.order_by(Submission.version.desc()).offset(offset).limit(per_page)
+        joined = (
+            select(Submission, UserModel.display_name)
+            .join(UserModel, UserModel.id == Submission.user_id)
+            .where(Submission.project_id == project_id)
         )
-        return list(result.scalars().all()), total
+        if user_id:
+            joined = joined.where(Submission.user_id == user_id)
+        result = await self.db.execute(
+            joined.order_by(Submission.created_at.desc()).offset(offset).limit(per_page)
+        )
+        return [(sub, name) for sub, name in result.all()], total
 
     async def submit_draft(self, submission_id: str, user_id: str) -> Submission:
         sub = await self.get_submission(submission_id)
@@ -779,7 +789,14 @@ class ProjectService:
         org_id: str,
         page: int = 1,
         per_page: int = 20,
-    ) -> tuple[list[Submission], int]:
+    ) -> tuple[list[tuple[Submission, str, str, str]], int]:
+        """Pending submissions enriched with author display name and project title.
+
+        Returns (submission, author_name, project_title, project_id) tuples so
+        the review dashboard can show WHO submitted WHAT — not bare ULIDs.
+        """
+        from app.models.user import User as UserModel
+
         base = select(Submission).where(
             Submission.org_id == org_id,
             Submission.status == SubmissionStatus.SUBMITTED,
@@ -789,9 +806,19 @@ class ProjectService:
 
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(Submission.submitted_at).offset(offset).limit(per_page)
+            select(Submission, UserModel.display_name, Project.title)
+            .join(UserModel, UserModel.id == Submission.user_id)
+            .join(Project, Project.id == Submission.project_id)
+            .where(
+                Submission.org_id == org_id,
+                Submission.status == SubmissionStatus.SUBMITTED,
+            )
+            .order_by(Submission.submitted_at)
+            .offset(offset)
+            .limit(per_page)
         )
-        return list(result.scalars().all()), total
+        rows = [(sub, name, title, sub.project_id) for sub, name, title in result.all()]
+        return rows, total
 
     # ── Extensions ──
 

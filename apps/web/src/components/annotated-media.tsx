@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { Lightbox } from "@/components/lightbox";
 import { apiWithAuth } from "@/lib/api";
 
 export interface CommentRegion {
@@ -55,6 +56,7 @@ export function AnnotatedImage({
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [dragCurrent, setDragCurrent] = useState<{ x: number; y: number } | null>(null);
 
@@ -143,9 +145,15 @@ export function AnnotatedImage({
       <img
         src={url}
         alt={fileName ?? "submission"}
-        className="max-h-[32rem] w-auto rounded-md border"
+        className={`max-h-[32rem] w-auto rounded-md border ${drawing ? "" : "cursor-zoom-in"}`}
         draggable={false}
+        onClick={() => {
+          if (!drawing) setExpanded(true);
+        }}
       />
+      {expanded && (
+        <Lightbox url={url} alt={fileName ?? "submission"} onClose={() => setExpanded(false)} />
+      )}
 
       {/* Existing region annotations */}
       {regionComments.map((c, i) => {
