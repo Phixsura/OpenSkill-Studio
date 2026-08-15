@@ -716,3 +716,37 @@ async def test_markdown_item_roundtrip(c):
         headers=h,
     )
     assert r6.status_code == 422
+
+
+# ── /me/overview dashboard aggregate ──
+
+
+@pytest.mark.asyncio
+async def test_me_overview(c):
+    h, _ = await _auth(c)
+    # empty state: no orgs
+    r0 = await c.get("/api/v1/me/overview", headers=h)
+    assert r0.status_code == 200
+    d0 = r0.json()["data"]
+    assert d0["drafts"] == []
+    assert d0["peer_assessments_pending"] == 0
+
+    # with a draft submission
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Overview Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    pid = r.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
+
+    r1 = await c.get("/api/v1/me/overview", headers=h)
+    d1 = r1.json()["data"]
+    assert any(dr["project_title"] == "Overview Project" for dr in d1["drafts"])
