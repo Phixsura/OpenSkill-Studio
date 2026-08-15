@@ -65,7 +65,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ use
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.description}</ReactMarkdown>
         </div>
       )}
-      {item.external_url && (
+      {item.external_url && /^https?:\/\//i.test(item.external_url) && (
         <a href={item.external_url} target="_blank" rel="noopener noreferrer"
           className="mt-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline">
           View Project →

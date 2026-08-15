@@ -1447,3 +1447,42 @@ async def test_eval_and_admin_pagination_bounds(c):
     for q in ("page=0", "page=-1", "per_page=0", "per_page=99999"):
         r = await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?{q}", headers=h)
         assert r.status_code == 422, f"eval ?{q} -> {r.status_code}"
+
+
+# ── Upload sniffer edge cases + public-page url scheme (bug-hunt round 15) ──
+
+
+@pytest.mark.asyncio
+async def test_upload_sniffer_edge_cases(c):
+    """Empty, truncated, and mime-mismatched uploads must 422, never 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    rp = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={"title": "Sniff Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+        headers=h,
+    )
+    pid = rp.json()["data"]["id"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Image D", "type": "image", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+
+    cases = [
+        ("empty.png", b"", "image/png"),
+        ("tiny.png", b"\x89PN", "image/png"),
+        ("fake.png", b"\xff\xd8\xff\xe0" + b"\x00" * 20, "image/png"),  # jpeg magic, png declared
+    ]
+    for name, data_bytes, mime in cases:
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/submissions/{sid}/files",
+            files={"file": (name, data_bytes, mime)},
+            data={"deliverable_id": did},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{name} -> {r.status_code}"
