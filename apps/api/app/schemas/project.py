@@ -5,11 +5,27 @@ from pydantic import BaseModel, field_validator
 # ── Project ───────────────────────────────────────────────
 
 
+VALID_PROJECT_TYPES = {"general", "ai_visual"}
+VALID_DELIVERABLE_TYPES = {
+    "file",
+    "text",
+    "link",
+    "markdown",
+    "image",
+    "video",
+    "audio",
+    "prompt",
+    "reference",
+    "final_output",
+}
+
+
 class CreateProjectRequest(BaseModel):
     title: str
     slug: str | None = None
     description: str
     instructions: str
+    project_type: str = "general"
     difficulty: str = "intermediate"
     max_score: int = 100
     rubric: list[dict]
@@ -18,6 +34,15 @@ class CreateProjectRequest(BaseModel):
     late_penalty_pct: int = 0
     max_submissions: int = 0
     skill_ids: list[str] | None = None
+
+    @field_validator("project_type")
+    @classmethod
+    def validate_project_type(cls, v: str) -> str:
+        if v not in VALID_PROJECT_TYPES:
+            raise ValueError(
+                f"Project type must be one of: {', '.join(sorted(VALID_PROJECT_TYPES))}"
+            )
+        return v
 
     @field_validator("difficulty")
     @classmethod
@@ -150,6 +175,7 @@ class ProjectResponse(BaseModel):
     title: str
     slug: str
     description: str
+    project_type: str
     difficulty: str
     max_score: int
     deadline: datetime | None
@@ -253,6 +279,8 @@ class SubmissionItemResponse(BaseModel):
     file_name: str | None
     file_size: int | None
     mime_type: str | None
+    version: int = 1
+    note: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -339,5 +367,206 @@ class FileResponse(BaseModel):
     file_name: str | None
     file_size: int | None
     mime_type: str | None
+    version: int = 1
 
     model_config = {"from_attributes": True}
+
+
+# ── Project Templates ────────────────────────────────────
+
+
+def _validate_template_deliverables(v: list) -> list:
+    if len(v) > 30:
+        raise ValueError("At most 30 deliverables per template")
+    for d in v:
+        if not isinstance(d, dict):
+            raise ValueError("Each deliverable must be an object")
+        name = d.get("name")
+        if not isinstance(name, str) or not (2 <= len(name.strip()) <= 200):
+            raise ValueError("Each deliverable needs a name of 2-200 characters")
+        dtype = d.get("type")
+        if dtype not in VALID_DELIVERABLE_TYPES:
+            raise ValueError(f"Invalid deliverable type: {dtype}")
+        config = d.get("config", {})
+        if config is not None and not isinstance(config, dict):
+            raise ValueError("Deliverable config must be an object")
+    return v
+
+
+class CreateTemplateRequest(BaseModel):
+    name: str
+    description: str
+    instructions: str
+    project_type: str = "general"
+    difficulty: str = "intermediate"
+    suggested_minutes: int | None = None
+    max_score: int = 100
+    rubric: list[dict]
+    deliverables: list[dict] = []
+    skill_names: list[str] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 2 or len(v) > 200:
+            raise ValueError("Name must be 2-200 characters")
+        return v
+
+    @field_validator("project_type")
+    @classmethod
+    def validate_project_type(cls, v: str) -> str:
+        if v not in VALID_PROJECT_TYPES:
+            raise ValueError(
+                f"Project type must be one of: {', '.join(sorted(VALID_PROJECT_TYPES))}"
+            )
+        return v
+
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str) -> str:
+        allowed = {"beginner", "intermediate", "advanced"}
+        if v not in allowed:
+            raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
+        return v
+
+    @field_validator("rubric")
+    @classmethod
+    def validate_rubric(cls, v: list) -> list:
+        if not v:
+            raise ValueError("Rubric must have at least one criterion")
+        if len(v) > 20:
+            raise ValueError("Rubric must have at most 20 criteria")
+        return v
+
+    @field_validator("deliverables")
+    @classmethod
+    def validate_deliverables(cls, v: list) -> list:
+        return _validate_template_deliverables(v)
+
+    @field_validator("suggested_minutes")
+    @classmethod
+    def validate_suggested_minutes(cls, v: int | None) -> int | None:
+        if v is not None and (v < 0 or v > 99999):
+            raise ValueError("suggested_minutes must be between 0 and 99999")
+        return v
+
+
+class UpdateTemplateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    instructions: str | None = None
+    difficulty: str | None = None
+    suggested_minutes: int | None = None
+    max_score: int | None = None
+    rubric: list[dict] | None = None
+    deliverables: list[dict] | None = None
+    skill_names: list[str] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if len(v) < 2 or len(v) > 200:
+                raise ValueError("Name must be 2-200 characters")
+        return v
+
+    @field_validator("deliverables")
+    @classmethod
+    def validate_deliverables(cls, v: list | None) -> list | None:
+        if v is not None:
+            return _validate_template_deliverables(v)
+        return v
+
+
+class TemplateResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    instructions: str
+    project_type: str
+    difficulty: str
+    suggested_minutes: int | None
+    max_score: int
+    rubric: list
+    deliverables: list
+    skill_names: list
+    builtin: bool = False
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CreateFromTemplateRequest(BaseModel):
+    template_id: str
+    title: str | None = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if len(v) < 2 or len(v) > 200:
+                raise ValueError("Title must be 2-200 characters")
+        return v
+
+
+# ── Project Assets ───────────────────────────────────────
+
+
+class AssetResponse(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    description: str | None
+    file_name: str
+    file_size: int
+    mime_type: str
+    sort_order: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Prompt Items ─────────────────────────────────────────
+
+
+class PromptItemRequest(BaseModel):
+    deliverable_id: str
+    prompt: str
+    tool: str | None = None
+    model: str | None = None
+    parameters: dict | None = None
+    notes: str | None = None
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Prompt must not be empty")
+        if len(v) > 10000:
+            raise ValueError("Prompt must be 10,000 characters or less")
+        return v
+
+    @field_validator("tool", "model")
+    @classmethod
+    def validate_tool_model(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100:
+            raise ValueError("Tool/model name must be 100 characters or less")
+        return v
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Notes must be 2,000 characters or less")
+        return v
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameters(cls, v: dict | None) -> dict | None:
+        if v is not None and len(str(v)) > 5000:
+            raise ValueError("Parameters object is too large")
+        return v
