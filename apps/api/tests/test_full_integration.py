@@ -1330,3 +1330,25 @@ async def test_profile_field_bounds(c):
     for body in bad_bodies:
         r = await c.put("/api/v1/portfolio/profile", json=body, headers=h)
         assert r.status_code == 422, f"{body} -> {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_portfolio_item_create_bounds(c):
+    """Portfolio item create validates url scheme/length, visibility enum,
+    description length, and tag count (public-page inputs)."""
+    h, _ = await _auth(c)
+    bad_bodies = [
+        {"title": "OK", "external_url": "javascript:alert(1)"},
+        {"title": "OK", "visibility": "bogus"},
+        {"title": "OK", "description": "x" * 3000},
+        {"title": "OK", "tags": ["a"] * 40},
+    ]
+    for body in bad_bodies:
+        r = await c.post("/api/v1/portfolio/items", json=body, headers=h)
+        assert r.status_code == 422, f"{body} -> {r.status_code}"
+    r = await c.post(
+        "/api/v1/portfolio/items",
+        json={"title": "Valid Item", "external_url": "https://x.com", "visibility": "unlisted"},
+        headers=h,
+    )
+    assert r.status_code == 201

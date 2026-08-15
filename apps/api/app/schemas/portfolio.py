@@ -162,7 +162,13 @@ class CreatePortfolioItemRequest(BaseModel):
     @classmethod
     def validate_tags(cls, v: list[str] | None) -> list[str] | None:
         if v is not None:
-            return [t.strip() for t in v if t.strip()]
+            cleaned = [t.strip() for t in v if isinstance(t, str) and t.strip()]
+            if len(cleaned) > 30:
+                raise ValueError("At most 30 tags")
+            for t in cleaned:
+                if len(t) > 50:
+                    raise ValueError("Each tag must be 50 characters or less")
+            return cleaned
         return v
 
     @field_validator("title")
@@ -171,6 +177,30 @@ class CreatePortfolioItemRequest(BaseModel):
         v = v.strip()
         if len(v) < 2 or len(v) > 200:
             raise ValueError("Title must be 2-200 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("external_url", "cover_image_url")
+    @classmethod
+    def validate_urls(cls, v: str | None) -> str | None:
+        if v is not None and v != "":
+            if len(v) > 500:
+                raise ValueError("URL must be 500 characters or less")
+            if not re.match(r"^https?://", v, re.IGNORECASE):
+                raise ValueError("URL must start with http:// or https://")
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str) -> str:
+        if v not in {"public", "unlisted", "private"}:
+            raise ValueError("visibility must be one of: public, unlisted, private")
         return v
 
 
@@ -216,7 +246,20 @@ class UpdatePortfolioItemRequest(BaseModel):
     @classmethod
     def validate_tags(cls, v: list[str] | None) -> list[str] | None:
         if v is not None:
-            return [t.strip() for t in v if t.strip()]
+            cleaned = [t.strip() for t in v if isinstance(t, str) and t.strip()]
+            if len(cleaned) > 30:
+                raise ValueError("At most 30 tags")
+            for t in cleaned:
+                if len(t) > 50:
+                    raise ValueError("Each tag must be 50 characters or less")
+            return cleaned
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str | None) -> str | None:
+        if v is not None and v not in {"public", "unlisted", "private"}:
+            raise ValueError("visibility must be one of: public, unlisted, private")
         return v
 
 
