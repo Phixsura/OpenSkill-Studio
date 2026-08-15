@@ -1565,3 +1565,43 @@ async def test_unbounded_text_fields_now_bounded(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_duplicate_prerequisites_and_project_skills(c):
+    """Repeated ids in prerequisites / project-skills must not 500 on the
+    composite primary key — they should be de-duplicated."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+
+    async def mk_skill(name):
+        return (
+            await c.post(
+                f"/api/v1/orgs/{oid}/skills",
+                json={"name": name, "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+                headers=h,
+            )
+        ).json()["data"]["id"]
+
+    a = await mk_skill("Skill A Dup")
+    b = await mk_skill("Skill B Dup")
+
+    # duplicate prerequisite ids
+    r = await c.put(f"/api/v1/orgs/{oid}/skills/{a}/prerequisites", json={"prerequisite_ids": [b, b, b]}, headers=h)
+    assert r.status_code == 200
+
+    # self-prerequisite → cycle 422
+    r = await c.put(f"/api/v1/orgs/{oid}/skills/{a}/prerequisites", json={"prerequisite_ids": [a]}, headers=h)
+    assert r.status_code == 422
+
+    # duplicate project-skill ids
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Dup Skill Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid}/projects/{pid}/skills", json={"skill_ids": [a, a, b]}, headers=h)
+    assert r.status_code == 200

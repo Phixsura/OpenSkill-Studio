@@ -961,7 +961,9 @@ class ProjectService:
         )
         for ps in existing.scalars():
             await self.db.delete(ps)
-        for sid in skill_ids:
+        await self.db.flush()
+        # De-dup: a repeated skill_id would violate the composite PK with a 500.
+        for sid in dict.fromkeys(skill_ids):
             self.db.add(ProjectSkill(project_id=project_id, skill_id=sid))
         await self.db.flush()
 

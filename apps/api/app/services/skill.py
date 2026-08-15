@@ -519,8 +519,13 @@ class SkillService:
             if missing:
                 raise SkillNotFoundError()
 
+        # De-duplicate while preserving order — a repeated id would otherwise
+        # violate the (skill_id, prerequisite_id) primary key with a 500.
+        seen: set[str] = set()
+        unique_ids = [pid for pid in prerequisite_ids if not (pid in seen or seen.add(pid))]
+
         # Cycle detection via BFS
-        await self._detect_cycle(skill_id, prerequisite_ids)
+        await self._detect_cycle(skill_id, unique_ids)
 
         # Remove existing prerequisites
         existing = await self.db.execute(
@@ -528,9 +533,12 @@ class SkillService:
         )
         for p in existing.scalars():
             await self.db.delete(p)
+        # Flush the deletes before re-inserting so a replaced-with-same set
+        # doesn't collide on the primary key within one transaction.
+        await self.db.flush()
 
         # Add new
-        for pid in prerequisite_ids:
+        for pid in unique_ids:
             self.db.add(SkillPrerequisite(skill_id=skill_id, prerequisite_id=pid))
         await self.db.flush()
 
