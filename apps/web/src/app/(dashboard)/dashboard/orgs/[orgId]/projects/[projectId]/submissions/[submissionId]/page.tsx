@@ -16,6 +16,7 @@ import { GenerationData, parseGenerationMeta } from "@/components/generation-dat
 import { MediaPreview } from "@/components/media-preview";
 import { PromptDisplay } from "@/components/prompt-display";
 import { VersionCompare } from "@/components/version-compare";
+import { VersionHistory } from "@/components/version-history";
 import { apiWithAuth } from "@/lib/api";
 
 interface SubItem {
@@ -26,6 +27,8 @@ interface SubItem {
   mime_type: string | null;
   content: string | null;
   version: number;
+  note: string | null;
+  created_at: string;
 }
 
 interface SubmissionDetail {
@@ -172,7 +175,13 @@ export default function SubmissionDetailPage() {
                 )}
 
                 {latest.type === "file" && sorted.length > 1 && (
-                  <div className="mt-2">
+                  <div className="mt-2 flex flex-wrap items-start gap-2">
+                    <VersionHistory
+                      items={sorted}
+                      downloadPath={(itemId) =>
+                        `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
+                      }
+                    />
                     <VersionCompare
                       items={sorted}
                       downloadPath={(itemId) =>
