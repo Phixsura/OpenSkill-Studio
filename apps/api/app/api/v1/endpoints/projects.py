@@ -399,9 +399,15 @@ async def create_submission(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await _verify_project_org(svc, project_id, org_id)
+    project = await _verify_project_org(svc, project_id, org_id)
+    # Students may only submit to a published project; instructors can submit
+    # to a draft to test the flow before publishing.
+    from app.models.skill import ContentStatus
+
+    if project.status != ContentStatus.PUBLISHED and member.role not in INSTRUCTOR_ROLES:
+        raise HTTPException(status_code=422, detail="Project is not open for submissions")
     sub = await svc.create_submission(org_id, project_id, user.id)
     await db.commit()
     return DataResponse(data=SubmissionResponse.model_validate(sub))

@@ -1605,3 +1605,53 @@ async def test_duplicate_prerequisites_and_project_skills(c):
     ).json()["data"]["id"]
     r = await c.put(f"/api/v1/orgs/{oid}/projects/{pid}/skills", json={"skill_ids": [a, a, b]}, headers=h)
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_submit_to_unpublished_project(c):
+    """A student must not create a submission on a draft/unpublished project;
+    an instructor still may (to test the flow)."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Draft Only Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+
+    # instructor (owner) may submit to the draft
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=ho)
+    assert r.status_code == 201
+
+    # student may not
+    hs, _ = await _auth(c)
+    link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+    await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)
+    assert r.status_code == 422
+
+    # once published, the student can
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)
+    assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_extension_reason_bounded(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Ext Reason Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/extensions",
+        json={"user_id": "01BOGUSBOGUSBOGUSBOGUSBOGU", "new_deadline": "2030-01-01T00:00:00Z", "reason": "x" * 2000},
+        headers=h,
+    )
+    assert r.status_code == 422

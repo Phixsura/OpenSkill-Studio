@@ -433,6 +433,13 @@ class GrantExtensionRequest(BaseModel):
     new_deadline: datetime
     reason: str | None = None
 
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 1000:
+            raise ValueError("Reason must be 1,000 characters or less")
+        return v
+
 
 class ExtensionResponse(BaseModel):
     id: str
