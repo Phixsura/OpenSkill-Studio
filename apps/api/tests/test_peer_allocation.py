@@ -100,3 +100,17 @@ def test_progressive_fairness():
             per_reviewer[r] += 1
         counts = sorted(per_reviewer.values())
         assert counts[0] >= 1  # nobody left with zero
+
+
+def test_num_reviews_exceeds_pool():
+    """num_reviews larger than (n-1) cannot give everyone that many — the
+    allocator must still never self-assign or duplicate, capping at n-1."""
+    from collections import Counter
+
+    subs, reviewers = _setup(3)
+    pairs = allocate_reviews(subs, reviewers, 10, rng=random.Random(1))
+    for r, s in pairs:
+        assert subs[s] != r  # no self-review
+    assert len(pairs) == len(set(pairs))  # no duplicates
+    for _r, cnt in Counter(r for r, _s in pairs).items():
+        assert cnt <= 2  # at most n-1 = 2 distinct peers
