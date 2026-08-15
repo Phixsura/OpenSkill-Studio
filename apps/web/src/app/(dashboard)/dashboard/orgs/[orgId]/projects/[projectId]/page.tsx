@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 
 import { Button } from "@/components/ui/button";
 import { MediaPreview } from "@/components/media-preview";
+import { PeerReviewSection } from "@/components/peer-review-section";
 import { apiWithAuth } from "@/lib/api";
 
 interface Deliverable {
@@ -63,6 +64,12 @@ export default function ProjectDetailPage() {
     queryFn: () =>
       apiWithAuth<{ data: SubmissionItem[] }>(`/orgs/${orgId}/projects/${projectId}/submissions`),
   });
+
+  const { data: orgData } = useQuery({
+    queryKey: ["org", orgId],
+    queryFn: () => apiWithAuth<{ data: { role: string | null } }>(`/orgs/${orgId}`),
+  });
+  const orgRole = orgData?.data?.role;
 
   const { data: assetsData } = useQuery({
     queryKey: ["project-assets", projectId],
@@ -278,6 +285,13 @@ export default function ProjectDetailPage() {
             </table>
           </div>
         </div>
+
+        {/* Peer Review */}
+        <PeerReviewSection
+          orgId={orgId}
+          projectId={projectId}
+          isInstructor={["owner", "admin", "instructor"].includes(orgRole ?? "")}
+        />
 
         {/* Submissions */}
         <div>

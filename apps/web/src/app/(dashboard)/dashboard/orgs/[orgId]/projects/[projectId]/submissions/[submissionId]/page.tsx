@@ -13,6 +13,7 @@ import { CommentPanel } from "@/components/comment-panel";
 import { GenerationData, parseGenerationMeta } from "@/components/generation-data";
 import { MediaPreview } from "@/components/media-preview";
 import { PromptDisplay } from "@/components/prompt-display";
+import { VersionCompare } from "@/components/version-compare";
 import { apiWithAuth } from "@/lib/api";
 
 interface SubItem {
@@ -160,6 +161,17 @@ export default function SubmissionDetailPage() {
                   <p className="whitespace-pre-wrap text-sm text-[hsl(var(--muted-foreground))]">
                     {latest.content}
                   </p>
+                )}
+
+                {latest.type === "file" && sorted.length > 1 && (
+                  <div className="mt-2">
+                    <VersionCompare
+                      items={sorted}
+                      downloadPath={(itemId) =>
+                        `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
+                      }
+                    />
+                  </div>
                 )}
 
                 <div className="mt-3">

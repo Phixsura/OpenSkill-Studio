@@ -211,6 +211,87 @@ class SubmissionItem(Base):
     submission: Mapped["Submission"] = relationship(back_populates="items")
 
 
+class PeerReviewPhase(str, enum.Enum):
+    """Peer review round lifecycle (Moodle Workshop phases, simplified):
+    SETUP → learners submit; ASSESSMENT → allocations exist, peers review;
+    CLOSED → scores aggregated and visible."""
+
+    SETUP = "setup"
+    ASSESSMENT = "assessment"
+    CLOSED = "closed"
+
+
+class PeerAssessmentStatus(str, enum.Enum):
+    PENDING = "pending"
+    SUBMITTED = "submitted"
+
+
+class PeerReviewRound(Base):
+    """A peer-review cycle on a project.
+
+    Configuration follows the Teachfloor/Moodle model: N reviews per
+    reviewer, optional anonymity, optional self-review, reuse of the
+    project rubric for structured scoring.
+    """
+
+    __tablename__ = "peer_review_rounds"
+    __table_args__ = (Index("ix_pr_rounds_project", "project_id"),)
+
+    id: Mapped[str] = ulid_pk()
+    org_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    num_reviews: Mapped[int] = mapped_column(Integer, default=2)  # per reviewer
+    anonymous: Mapped[bool] = mapped_column(Boolean, default=True)
+    include_self_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    phase: Mapped[PeerReviewPhase] = mapped_column(
+        Enum(PeerReviewPhase, name="peer_review_phase", create_constraint=True),
+        default=PeerReviewPhase.SETUP,
+    )
+    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PeerAssessment(Base):
+    """One reviewer's assessment of one submission within a round."""
+
+    __tablename__ = "peer_assessments"
+    __table_args__ = (
+        Index("uq_peer_assessment", "round_id", "submission_id", "reviewer_id", unique=True),
+        Index("ix_peer_assessments_reviewer", "round_id", "reviewer_id"),
+    )
+
+    id: Mapped[str] = ulid_pk()
+    round_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("peer_review_rounds.id", ondelete="CASCADE"), nullable=False
+    )
+    submission_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False
+    )
+    reviewer_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    is_self_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[PeerAssessmentStatus] = mapped_column(
+        Enum(PeerAssessmentStatus, name="peer_assessment_status", create_constraint=True),
+        default=PeerAssessmentStatus.PENDING,
+    )
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Per-rubric-dimension scores: [{criterion, score, max_score}]
+    score_breakdown: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class CommentAnchorType(str, enum.Enum):
     """How a comment is attached to a submission item (Frame.io semantics):
     GLOBAL = the whole asset; TIME = a video/audio timestamp (with optional

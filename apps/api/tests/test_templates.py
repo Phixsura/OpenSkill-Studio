@@ -671,3 +671,60 @@ def test_comment_request_text_cap():
 
     with pytest.raises(ValidationError):
         CreateCommentRequest(item_id="X", text="x" * 5001)
+
+
+# ── Peer review: auth + schema ──
+
+
+@pytest.mark.asyncio
+async def test_peer_round_create_requires_auth(client):
+    r = await client.post(f"/api/v1/orgs/{ORG}/peer-review-rounds", json={})
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_peer_my_assessments_requires_auth(client):
+    r = await client.get(f"/api/v1/orgs/{ORG}/peer-review-rounds/RID/my-assessments")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_peer_results_requires_auth(client):
+    r = await client.get(f"/api/v1/orgs/{ORG}/peer-review-rounds/RID/results")
+    assert r.status_code == 401
+
+
+def test_peer_round_num_reviews_bounds():
+    from pydantic import ValidationError
+
+    from app.schemas.peer_review import CreateRoundRequest
+
+    with pytest.raises(ValidationError):
+        CreateRoundRequest(project_id="P", name="R1", num_reviews=0)
+    with pytest.raises(ValidationError):
+        CreateRoundRequest(project_id="P", name="R1", num_reviews=11)
+    ok = CreateRoundRequest(project_id="P", name="R1", num_reviews=3)
+    assert ok.num_reviews == 3
+
+
+def test_peer_assessment_schema():
+    from pydantic import ValidationError
+
+    from app.schemas.peer_review import SubmitAssessmentRequest
+
+    ok = SubmitAssessmentRequest(
+        score=85, score_breakdown=[{"criterion": "Q", "score": 85}], feedback="good"
+    )
+    assert ok.score == 85
+    with pytest.raises(ValidationError):
+        SubmitAssessmentRequest(score=-1)
+    with pytest.raises(ValidationError):
+        SubmitAssessmentRequest(score=50, score_breakdown=[{"no_criterion": True}])
+
+
+def test_peer_assessment_response_hides_reviewer():
+    """Default assessment response omits reviewer_id (anonymity-safe)."""
+    from app.schemas.peer_review import AssessmentResponse, AssessmentWithReviewerResponse
+
+    assert "reviewer_id" not in AssessmentResponse.model_fields
+    assert "reviewer_id" in AssessmentWithReviewerResponse.model_fields
