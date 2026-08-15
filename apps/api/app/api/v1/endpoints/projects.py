@@ -230,7 +230,10 @@ async def set_project_skills(
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
-    await svc.set_project_skills(project_id, body.get("skill_ids", []))
+    skill_ids = body.get("skill_ids", [])
+    if not isinstance(skill_ids, list) or not all(isinstance(s, str) for s in skill_ids):
+        raise HTTPException(status_code=422, detail="skill_ids must be a list of strings")
+    await svc.set_project_skills(project_id, skill_ids)
     await db.commit()
     return {"message": "Project skills updated"}
 

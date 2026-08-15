@@ -278,6 +278,10 @@ async def set_prerequisites(
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
     prerequisite_ids = body.get("prerequisite_ids", [])
+    if not isinstance(prerequisite_ids, list) or not all(
+        isinstance(p, str) for p in prerequisite_ids
+    ):
+        raise HTTPException(status_code=422, detail="prerequisite_ids must be a list of strings")
     await svc.set_prerequisites(skill_id, prerequisite_ids)
     await db.commit()
     return {"message": "Prerequisites updated"}

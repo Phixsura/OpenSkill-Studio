@@ -322,7 +322,12 @@ async def test_project_extension_check(db):
     )
     await db.flush()
 
+    from app.models.organization import OrgRole
+
     u2 = await _u(db)
+    # u2 must be a member of the org to receive an extension
+    await org_svc.add_member(org.id, u2.id, OrgRole.STUDENT, invited_by=u.id)
+    await db.flush()
     # Grant extension
     await svc.grant_extension(
         proj.id, u2.id, datetime.now(UTC) + timedelta(days=7), "Medical", u.id

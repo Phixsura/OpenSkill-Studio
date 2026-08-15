@@ -220,3 +220,17 @@ class SkillBadgeResponse(BaseModel):
 
 class ToggleBadgeRequest(BaseModel):
     show_on_profile: bool
+
+
+class ReorderItemsRequest(BaseModel):
+    item_ids: list[str]
+
+    @field_validator("item_ids")
+    @classmethod
+    def validate_item_ids(cls, v: list) -> list:
+        if len(v) > 500:
+            raise ValueError("Too many items to reorder")
+        for iid in v:
+            if not isinstance(iid, str):
+                raise ValueError("item_ids must be a list of strings")
+        return v

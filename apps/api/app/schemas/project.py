@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 # ── Project ───────────────────────────────────────────────
 
@@ -108,6 +108,18 @@ class CreateProjectRequest(BaseModel):
             raise ValueError("max_submissions must be between 0 and 1000")
         return v
 
+    @model_validator(mode="after")
+    def validate_deadline_ordering(self):
+        # A late_deadline before the deadline makes the "late" window negative,
+        # so on-time submissions get judged "closed". Reject the inconsistency.
+        if (
+            self.deadline is not None
+            and self.late_deadline is not None
+            and self.late_deadline < self.deadline
+        ):
+            raise ValueError("late_deadline must be on or after deadline")
+        return self
+
 
 class UpdateProjectRequest(BaseModel):
     title: str | None = None
@@ -168,6 +180,18 @@ class UpdateProjectRequest(BaseModel):
         if v is not None and isinstance(v, int) and (v < 0 or v > 1000):
             raise ValueError("max_submissions must be between 0 and 1000")
         return v
+
+    @model_validator(mode="after")
+    def validate_deadline_ordering(self):
+        # Only enforce when BOTH are supplied in this partial update; if only one
+        # is sent, the service-side combination should be validated there.
+        if (
+            self.deadline is not None
+            and self.late_deadline is not None
+            and self.late_deadline < self.deadline
+        ):
+            raise ValueError("late_deadline must be on or after deadline")
+        return self
 
 
 class ProjectResponse(BaseModel):

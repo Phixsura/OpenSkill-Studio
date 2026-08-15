@@ -345,8 +345,10 @@ async def add_member_directly(
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     user_id = body.get("user_id")
     role_str = body.get("role", "student")
-    if not user_id:
-        raise HTTPException(status_code=422, detail="user_id is required")
+    if not user_id or not isinstance(user_id, str):
+        raise HTTPException(status_code=422, detail="user_id is required and must be a string")
+    if not isinstance(role_str, str):
+        raise HTTPException(status_code=422, detail="role must be a string")
     try:
         role = OrgRole(role_str)
     except ValueError as exc:

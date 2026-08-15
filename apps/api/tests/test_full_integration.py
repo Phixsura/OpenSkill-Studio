@@ -1014,3 +1014,95 @@ async def test_project_endpoints_verify_project_belongs_to_org(c):
             body = {"name": "Injected Deliverable", "type": "text", "required": False}
         r = await c.request(method, path, json=body, headers=h)
         assert r.status_code == 404, f"{method} {path} → {r.status_code} (cross-org confusion)"
+
+
+# ── Wrong-type / raw-body validation regressions (bug-hunt round 7) ──
+
+
+@pytest.mark.asyncio
+async def test_raw_body_wrong_types_no_500(c):
+    """Raw-dict endpoints must 422 on wrong-typed fields, not 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Raw Body Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    pid = r.json()["data"]["id"]
+
+    # project skills: non-list / list of non-strings → 422
+    for bad in ({"skill_ids": "nope"}, {"skill_ids": 123}, {"skill_ids": [1, 2]}):
+        r = await c.put(f"/api/v1/orgs/{oid}/projects/{pid}/skills", json=bad, headers=h)
+        assert r.status_code == 422, f"{bad} -> {r.status_code}"
+
+    # portfolio reorder: non-list → 422
+    r = await c.put("/api/v1/portfolio/items/reorder", json={"item_ids": "nope"}, headers=h)
+    assert r.status_code == 422
+
+    # add member with non-string user_id → 422 (not FK 500)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": 123, "role": "student"}, headers=h
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_extension_requires_org_member(c):
+    """Granting an extension to a bogus or non-member user → 404, not FK 500
+    and not a phantom extension for an outsider."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Extension Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    pid = r.json()["data"]["id"]
+
+    # bogus user
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/extensions",
+        json={"user_id": "01BOGUSBOGUSBOGUSBOGUSBOGU", "new_deadline": "2030-01-01T00:00:00Z"},
+        headers=h,
+    )
+    assert r.status_code == 404
+
+    # real user who is not a member of this org
+    h2, u2 = await _auth(c)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/extensions",
+        json={"user_id": u2["id"], "new_deadline": "2030-01-01T00:00:00Z"},
+        headers=h,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_deadline_ordering_rejected(c):
+    """late_deadline before deadline makes the late window negative — reject it."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Deadline Order Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+            "deadline": "2030-06-01T00:00:00Z",
+            "late_deadline": "2030-05-01T00:00:00Z",
+        },
+        headers=h,
+    )
+    assert r.status_code == 422

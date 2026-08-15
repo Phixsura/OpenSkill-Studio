@@ -9,6 +9,7 @@ from app.schemas.portfolio import (
     PortfolioItemResponse,
     ProfileResponse,
     PublicProfileResponse,
+    ReorderItemsRequest,
     SkillBadgeResponse,
     ToggleBadgeRequest,
     UpdatePortfolioItemRequest,
@@ -143,12 +144,12 @@ async def get_my_item(
 
 @router.put("/portfolio/items/reorder", status_code=200)
 async def reorder_my_items(
-    body: dict,
+    body: ReorderItemsRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     svc = PortfolioService(db)
-    item_ids = body.get("item_ids", [])
+    item_ids = body.item_ids
     for i, iid in enumerate(item_ids):
         item = await svc.get_item(iid)
         if item.user_id == user.id:

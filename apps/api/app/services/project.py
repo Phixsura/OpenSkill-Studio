@@ -849,6 +849,20 @@ class ProjectService:
     ) -> SubmissionExtension:
         project = await self.get_project(project_id)
 
+        # The recipient must be an active member of the project's org — otherwise
+        # a bogus id 500s on the FK and a real outsider gets a phantom extension.
+        from app.models.organization import MemberStatus, OrgMember
+
+        member = await self.db.execute(
+            select(OrgMember.id).where(
+                OrgMember.org_id == project.org_id,
+                OrgMember.user_id == user_id,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
+        )
+        if member.scalar_one_or_none() is None:
+            raise AppError("USER_NOT_FOUND", "User is not a member of this organization", 404)
+
         ext = SubmissionExtension(
             project_id=project_id,
             user_id=user_id,

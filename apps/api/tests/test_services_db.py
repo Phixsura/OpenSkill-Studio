@@ -548,7 +548,11 @@ async def test_project_full_flow(db):
     pending, ptotal = await svc.get_pending_reviews(org.id)
 
     # Extension
+    from app.models.organization import OrgRole
+
     user2 = await _user(db)
+    await org_svc.add_member(org.id, user2.id, OrgRole.STUDENT, invited_by=user.id)
+    await db.flush()
     ext = await svc.grant_extension(
         project.id, user2.id, datetime.now(UTC) + timedelta(days=30), "Reason", user.id
     )
