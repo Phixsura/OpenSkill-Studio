@@ -41,6 +41,7 @@ class ItemType(str, enum.Enum):
     TEXT = "text"
     LINK = "link"
     PROMPT = "prompt"
+    MARKDOWN = "markdown"
 
 
 class SubmissionStatus(str, enum.Enum):

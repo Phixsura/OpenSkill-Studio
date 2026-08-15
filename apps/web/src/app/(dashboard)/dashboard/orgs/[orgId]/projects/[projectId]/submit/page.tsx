@@ -499,7 +499,8 @@ export default function SubmitPage() {
             .map(([delivId, content]) => ({
               deliverable_id: delivId,
               content: content.trim(),
-              type: "text",
+              // Preserve the deliverable's declared format so markdown renders as markdown
+              type: deliverables.find((d) => d.id === delivId)?.type === "markdown" ? "markdown" : "text",
             }));
 
           if (items.length > 0) {
