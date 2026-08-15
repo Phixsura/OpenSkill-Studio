@@ -318,6 +318,20 @@ class GradeAttemptRequest(BaseModel):
     score: int
     feedback: str | None = None
 
+    @field_validator("score")
+    @classmethod
+    def validate_score(cls, v: int) -> int:
+        if v < 0 or v > 10000:
+            raise ValueError("Score must be between 0 and 10,000")
+        return v
+
+    @field_validator("feedback")
+    @classmethod
+    def validate_feedback(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10000:
+            raise ValueError("Feedback must be 10,000 characters or less")
+        return v
+
 
 # ── Progress ──────────────────────────────────────────────
 

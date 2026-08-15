@@ -348,13 +348,25 @@ class SkillService:
             answer=answer,
         )
 
-        # Auto-grade MCQ
+        # Auto-grade MCQ. config.correct and answer.selected are untrusted:
+        # coerce both to lists of strings so a malformed value can't 500 the
+        # grader (sorted() on an int / mixed types raises TypeError).
         if exercise.type == ExerciseType.MULTIPLE_CHOICE:
-            correct = exercise.config.get("correct", [])
-            user_answer = answer.get("selected") or []
-            if isinstance(user_answer, str):
+            raw_correct = exercise.config.get("correct", [])
+            if isinstance(raw_correct, (str, int, float)):
+                raw_correct = [raw_correct]
+            elif not isinstance(raw_correct, list):
+                raw_correct = []
+            correct = sorted(str(x) for x in raw_correct)
+
+            user_answer = answer.get("selected")
+            if isinstance(user_answer, (str, int, float)):
                 user_answer = [user_answer]
-            is_correct = sorted(user_answer) == sorted(correct)
+            elif not isinstance(user_answer, list):
+                user_answer = []
+            user_answer = sorted(str(x) for x in user_answer)
+
+            is_correct = user_answer == correct
             attempt.score = exercise.max_score if is_correct else 0
             attempt.is_correct = is_correct
             attempt.graded_by = GradingMethod.AUTO
@@ -549,8 +561,12 @@ class SkillService:
         exercises = await self.list_exercises(skill_id)
         total = len(exercises)
 
-        # Count exercises with at least one graded attempt (score not null)
-        # For MCQ: is_correct=True means correct. For text: any graded attempt counts.
+        # An exercise counts as "done" only when the learner has PASSED it —
+        # a graded attempt with is_correct=True. A wrong MCQ (score=0,
+        # is_correct=False) is graded but not passed; counting it as done
+        # marked skills 100% complete on wrong answers and unlocked the next
+        # skill. A pass threshold of 60% of max_score defines "correct" for
+        # manually-graded exercises (see grade_attempt).
         done = 0
         for ex in exercises:
             result = await self.db.execute(
@@ -558,7 +574,7 @@ class SkillService:
                 .where(
                     ExerciseAttempt.exercise_id == ex.id,
                     ExerciseAttempt.user_id == user_id,
-                    ExerciseAttempt.score.is_not(None),
+                    ExerciseAttempt.is_correct.is_(True),
                 )
                 .limit(1)
             )

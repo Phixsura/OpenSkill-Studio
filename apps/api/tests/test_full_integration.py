@@ -1147,3 +1147,147 @@ async def test_org_settings_second_update_persists(c):
     # both keys should survive across separate updates
     # (GET org may not return settings; assert via a fresh settings write round-trip)
     assert r.status_code == 200
+
+
+# ── Skill progress + MCQ grading robustness (bug-hunt round 9) ──
+
+
+@pytest.mark.asyncio
+async def test_wrong_mcq_does_not_complete_skill(c):
+    """A skill must not be marked completed (and its dependents unlocked) when
+    the learner only ever answered its MCQ incorrectly."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Progress Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"correct": ["a"], "options": []},
+                "max_score": 10,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    # wrong answer → graded (score 0) but NOT passed
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": ["b"]}},
+        headers=h,
+    )
+    assert r.json()["data"]["is_correct"] is False
+    prog = await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)
+    assert prog.json()["skills_completed"] == 0
+
+    # correct answer → skill completes
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": ["a"]}},
+        headers=h,
+    )
+    assert r.json()["data"]["is_correct"] is True
+    prog = await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)
+    assert prog.json()["skills_completed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_mcq_grading_tolerates_malformed_config_and_answer(c):
+    """Malformed config.correct or answer.selected must not 500 the grader."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Robust Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    # config.correct is a bare int
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"correct": 123, "options": []},
+                "max_score": 10,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    for ans in ({"selected": [1, "a"]}, {"selected": {"x": 1}}, {"selected": 123}):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": ans}, headers=h
+        )
+        assert r.status_code < 500, f"{ans} -> {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_grade_attempt_score_bounds(c):
+    """Instructor grade with out-of-range score → 422, not silent overflow."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Grade Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Text",
+                "description": "d",
+                "type": "text_answer",
+                "config": {},
+                "max_score": 100,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    att = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+            json={"answer": {"text": "hi"}},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/grading/attempts/{att}", json={"score": -5}, headers=h)
+    assert r.status_code == 422
