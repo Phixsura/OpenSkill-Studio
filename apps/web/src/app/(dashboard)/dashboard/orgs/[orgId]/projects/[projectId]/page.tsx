@@ -159,8 +159,17 @@ export default function ProjectDetailPage() {
               const ordered = [...(project.deliverables ?? [])].sort(
                 (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
               );
-              // "Current" = first incomplete stage (the one the learner is on).
-              const currentIdx = ordered.findIndex((d) => !completedDeliverables.has(d.id));
+              // "Current" = the work frontier: the first incomplete stage at or
+              // after the last completed one. This way, optional stages the
+              // learner skipped to reach a later stage read as "Not Started"
+              // rather than falsely grabbing the "In Progress" marker.
+              let lastDoneIdx = -1;
+              ordered.forEach((d, i) => {
+                if (completedDeliverables.has(d.id)) lastDoneIdx = i;
+              });
+              const currentIdx = ordered.findIndex(
+                (d, i) => i >= lastDoneIdx && !completedDeliverables.has(d.id),
+              );
               return (
                 <ol className="mt-3 space-y-0">
                   {ordered.map((d, idx, arr) => {
