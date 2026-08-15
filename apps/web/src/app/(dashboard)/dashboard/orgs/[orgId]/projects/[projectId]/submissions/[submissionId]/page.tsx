@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -54,6 +55,12 @@ export default function SubmissionDetailPage() {
         `/orgs/${orgId}/projects/${projectId}/submissions/${submissionId}`,
       ),
   });
+
+  const { data: orgData } = useQuery({
+    queryKey: ["org", orgId],
+    queryFn: () => apiWithAuth<{ data: { role: string | null } }>(`/orgs/${orgId}`),
+  });
+  const isInstructor = ["owner", "admin", "instructor"].includes(orgData?.data?.role ?? "");
 
   const { data: commentsData, refetch: refetchComments } = useQuery({
     queryKey: ["submission-comments", submissionId],
@@ -239,9 +246,22 @@ export default function SubmissionDetailPage() {
               </p>
             </div>
           ))}
-          {(sub.reviews ?? []).length === 0 && (
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">No reviews yet.</p>
-          )}
+          {(sub.reviews ?? []).length === 0 &&
+            (isInstructor && sub.status === "submitted" ? (
+              <div className="flex items-center justify-between rounded-lg border border-dashed p-4">
+                <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                  This submission is waiting for review.
+                </p>
+                <Link
+                  href={`/dashboard/orgs/${orgId}/reviews/${submissionId}`}
+                  className="rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90"
+                >
+                  Start review →
+                </Link>
+              </div>
+            ) : (
+              <p className="text-sm text-[hsl(var(--muted-foreground))]">No reviews yet.</p>
+            ))}
         </div>
       </div>
     </div>

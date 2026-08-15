@@ -243,7 +243,7 @@ export default function ProjectDetailPage() {
                               {d.description}
                             </p>
                           )}
-                          {/* Latest submitted asset thumbnail */}
+                          {/* Latest submitted asset thumbnail + provenance */}
                           {latestItem && latestItem.type === "file" && (
                             <div className="mt-2">
                               <MediaPreview
@@ -252,6 +252,10 @@ export default function ProjectDetailPage() {
                                 fileName={latestItem.file_name}
                                 className="max-h-32"
                               />
+                              <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                                {latestItem.file_name}
+                                {latestItem.version > 1 ? ` · v${latestItem.version}` : ""}
+                              </p>
                             </div>
                           )}
                         </div>
