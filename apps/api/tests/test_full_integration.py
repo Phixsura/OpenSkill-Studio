@@ -1486,3 +1486,49 @@ async def test_upload_sniffer_edge_cases(c):
             headers=h,
         )
         assert r.status_code == 422, f"{name} -> {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_deliverable_config_and_type_validation(c):
+    """Deliverable type must be a known enum and config values must be sane —
+    a garbage max_file_size_mb / non-list accepted_formats silently disables
+    upload enforcement, so it must be rejected at definition time."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Cfg Val Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    bad_configs = [
+        {"max_files": "abc"},
+        {"max_file_size_mb": -5},
+        {"accepted_formats": "nope"},
+        {"max_files": 0},
+    ]
+    for cfg in bad_configs:
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Img D", "type": "image", "config": cfg, "required": False},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{cfg} -> {r.status_code}"
+
+    # unknown type
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+        json={"name": "X", "type": "bogus", "required": False},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # valid config
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+        json={"name": "Good D", "type": "image", "config": {"max_files": 5, "max_file_size_mb": 25, "accepted_formats": ["image/png"]}, "required": False},
+        headers=h,
+    )
+    assert r.status_code == 201

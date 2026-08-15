@@ -20,6 +20,31 @@ VALID_DELIVERABLE_TYPES = {
 }
 
 
+def _validate_deliverable_config(v: dict | None) -> dict | None:
+    """Validate a deliverable's config shape so bad values can't corrupt
+    upload enforcement (a negative max_file_size_mb or a non-list
+    accepted_formats silently disables the limit / narrowing)."""
+    if v is None:
+        return v
+    if not isinstance(v, dict):
+        raise ValueError("config must be an object")
+    mf = v.get("max_files")
+    if mf is not None and (not isinstance(mf, int) or isinstance(mf, bool) or mf < 1 or mf > 100):
+        raise ValueError("config.max_files must be an integer between 1 and 100")
+    ms = v.get("max_file_size_mb")
+    if ms is not None and (
+        not isinstance(ms, (int, float)) or isinstance(ms, bool) or ms <= 0 or ms > 500
+    ):
+        raise ValueError("config.max_file_size_mb must be a number between 1 and 500")
+    af = v.get("accepted_formats")
+    if af is not None:
+        if not isinstance(af, list) or not all(isinstance(x, str) for x in af):
+            raise ValueError("config.accepted_formats must be a list of MIME strings")
+        if len(af) > 50:
+            raise ValueError("config.accepted_formats has too many entries")
+    return v
+
+
 class CreateProjectRequest(BaseModel):
     title: str
     slug: str | None = None
@@ -241,6 +266,18 @@ class CreateDeliverableRequest(BaseModel):
             raise ValueError("Name must be 2-200 characters")
         return v
 
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        if v not in VALID_DELIVERABLE_TYPES:
+            raise ValueError(f"Invalid deliverable type: {v}")
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: dict) -> dict:
+        return _validate_deliverable_config(v)
+
 
 class UpdateDeliverableRequest(BaseModel):
     name: str | None = None
@@ -262,6 +299,11 @@ class UpdateDeliverableRequest(BaseModel):
         if v is not None and len(v) > 2000:
             raise ValueError("Description must not exceed 2000 characters")
         return v
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: dict | None) -> dict | None:
+        return _validate_deliverable_config(v)
 
 
 class DeliverableResponse(BaseModel):
@@ -435,9 +477,7 @@ def _validate_template_deliverables(v: list) -> list:
         dtype = d.get("type")
         if dtype not in VALID_DELIVERABLE_TYPES:
             raise ValueError(f"Invalid deliverable type: {dtype}")
-        config = d.get("config", {})
-        if config is not None and not isinstance(config, dict):
-            raise ValueError("Deliverable config must be an object")
+        _validate_deliverable_config(d.get("config", {}))
     return v
 
 
