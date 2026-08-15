@@ -272,6 +272,7 @@ async def list_deliverables(
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
     deliverables = await svc.list_deliverables(project_id)
     return DataResponse(data=[DeliverableResponse.model_validate(d) for d in deliverables])
 
@@ -290,6 +291,7 @@ async def create_deliverable(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
     d = await svc.create_deliverable(
         project_id,
         body.name,
@@ -317,6 +319,7 @@ async def update_deliverable(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
     d = await svc.get_deliverable(deliverable_id)
     if d.project_id != project_id:
         raise HTTPException(status_code=404, detail="Deliverable not found")
@@ -337,6 +340,7 @@ async def delete_deliverable(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
     d = await svc.get_deliverable(deliverable_id)
     if d.project_id != project_id:
         raise HTTPException(status_code=404, detail="Deliverable not found")
@@ -361,6 +365,9 @@ async def list_submissions(
 ):
     member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    # Project must belong to this org — otherwise a member of org A could list
+    # submissions of org B's project by embedding B's project_id in A's path.
+    await _verify_project_org(svc, project_id, org_id)
     # Instructor sees all, student sees own
     uid = None if member.role in INSTRUCTOR_ROLES else user.id
     rows, total = await svc.list_submissions(project_id, uid, page, per_page)
@@ -524,6 +531,9 @@ async def submit_draft(
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    sub = await _verify_submission_org(svc, submission_id, org_id)
+    if sub.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Submission not found in this project")
     sub = await svc.submit_draft(submission_id, user.id)
     await db.commit()
     return DataResponse(data=SubmissionResponse.model_validate(sub))
@@ -539,6 +549,9 @@ async def delete_submission(
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    sub = await _verify_submission_org(svc, submission_id, org_id)
+    if sub.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Submission not found in this project")
     await svc.delete_submission(submission_id, user.id)
     await db.commit()
 

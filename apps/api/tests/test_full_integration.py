@@ -961,3 +961,56 @@ async def test_download_url_scoped_to_submission(c):
         headers=ha,
     )
     assert r.status_code == 404
+
+
+# ── Cross-org parent-confusion regressions (bug-hunt round 6) ──
+
+
+@pytest.mark.asyncio
+async def test_project_endpoints_verify_project_belongs_to_org(c):
+    """A member of org A must not reach org B's project via A's org path —
+    the project_id in the URL must be verified against the path org_id.
+    Covers list/submit/deliverable endpoints that previously only checked
+    org membership, not project ownership."""
+    h, _ = await _auth(c)
+    org_a = await _org(c, h)
+    org_b = await _org(c, h)
+
+    # Build a project + deliverable + submission in org B
+    r = await c.post(
+        f"/api/v1/orgs/{org_b}/projects",
+        json={
+            "title": "Org B Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    pid_b = r.json()["data"]["id"]
+    rd = await c.post(
+        f"/api/v1/orgs/{org_b}/projects/{pid_b}/deliverables",
+        json={"name": "B Deliverable", "type": "text", "required": False},
+        headers=h,
+    )
+    did_b = rd.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{org_b}/projects/{pid_b}/publish", headers=h)
+    rs = await c.post(f"/api/v1/orgs/{org_b}/projects/{pid_b}/submissions", headers=h)
+    sid_b = rs.json()["data"]["id"]
+
+    # Every one of these uses org_a in the path but B's resources → 404
+    probes = [
+        ("GET", f"/api/v1/orgs/{org_a}/projects/{pid_b}/submissions"),
+        ("GET", f"/api/v1/orgs/{org_a}/projects/{pid_b}/deliverables"),
+        ("POST", f"/api/v1/orgs/{org_a}/projects/{pid_b}/deliverables"),
+        ("PUT", f"/api/v1/orgs/{org_a}/projects/{pid_b}/deliverables/{did_b}"),
+        ("DELETE", f"/api/v1/orgs/{org_a}/projects/{pid_b}/deliverables/{did_b}"),
+        ("POST", f"/api/v1/orgs/{org_a}/projects/{pid_b}/submissions/{sid_b}/submit"),
+        ("DELETE", f"/api/v1/orgs/{org_a}/projects/{pid_b}/submissions/{sid_b}"),
+    ]
+    for method, path in probes:
+        body = None
+        if method in ("POST", "PUT"):
+            body = {"name": "Injected Deliverable", "type": "text", "required": False}
+        r = await c.request(method, path, json=body, headers=h)
+        assert r.status_code == 404, f"{method} {path} → {r.status_code} (cross-org confusion)"
