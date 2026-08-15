@@ -461,16 +461,26 @@ async def update_submission(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a draft submission (e.g. add text/link items)."""
+    """Update a draft submission (e.g. add text/markdown/link items)."""
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    sub = await svc.get_submission(submission_id)
+    sub = await _verify_submission_org(svc, submission_id, org_id)
+    if sub.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Submission not found in this project")
     if sub.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your submission")
     if sub.status.value != "draft":
         raise HTTPException(status_code=422, detail="Only drafts can be updated")
-    # Allow adding text/markdown/link items via body
+
     from app.models.project import ItemType, SubmissionItem
+
+    # File and prompt items have dedicated endpoints with their own
+    # validation (upload / prompt-items) — only inline content types here.
+    allowed_types = {ItemType.TEXT, ItemType.MARKDOWN, ItemType.LINK}
+    max_content = 100_000  # 100KB of text is beyond any legitimate inline item
+
+    # Validate every deliverable belongs to THIS project before writing rows
+    project_deliverables = {d.id for d in await svc.list_deliverables(project_id)}
 
     for item_data in body.get("items", []):
         raw_type = item_data.get("type", "text")
@@ -478,11 +488,22 @@ async def update_submission(
             item_type = ItemType(raw_type)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Invalid item type: {raw_type}") from exc
+        if item_type not in allowed_types:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Item type '{raw_type}' must be created via its dedicated endpoint",
+            )
+        deliverable_id = item_data.get("deliverable_id")
+        if not deliverable_id or deliverable_id not in project_deliverables:
+            raise HTTPException(status_code=422, detail="Unknown deliverable for this project")
+        content = item_data.get("content")
+        if content is not None and (not isinstance(content, str) or len(content) > max_content):
+            raise HTTPException(status_code=422, detail="Item content too large or invalid")
         item = SubmissionItem(
             submission_id=submission_id,
-            deliverable_id=item_data.get("deliverable_id"),
+            deliverable_id=deliverable_id,
             type=item_type,
-            content=item_data.get("content"),
+            content=content,
         )
         db.add(item)
     await db.commit()
@@ -581,7 +602,7 @@ async def download_file(
         )
         if pr.scalar_one_or_none() is None:
             raise HTTPException(status_code=403, detail="Access denied")
-    url = await svc.get_download_url(file_id)
+    url = await svc.get_download_url(file_id, submission_id=submission_id)
     return {"download_url": url}
 
 

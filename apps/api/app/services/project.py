@@ -687,9 +687,14 @@ class ProjectService:
         )
         return item
 
-    async def get_download_url(self, file_id: str) -> str:
+    async def get_download_url(self, file_id: str, submission_id: str | None = None) -> str:
         item = await self.db.get(SubmissionItem, file_id)
         if item is None or not item.file_key:
+            raise AppError("FILE_NOT_FOUND", "File not found", 404)
+        # The file must belong to the submission the caller was authorized for —
+        # otherwise a user can pass their own submission path + another user's
+        # file_id and receive a presigned URL for a file they can't access (IDOR).
+        if submission_id is not None and item.submission_id != submission_id:
             raise AppError("FILE_NOT_FOUND", "File not found", 404)
 
         from app.core.storage import get_s3_client
@@ -747,6 +752,18 @@ class ProjectService:
     ) -> SubmissionReview:
         sub = await self.get_submission(submission_id)
         project = await self.get_project(sub.project_id)
+
+        # Only submitted work can be reviewed — a draft hasn't been handed in
+        if sub.status in (SubmissionStatus.DRAFT,):
+            raise InvalidStateError("Cannot review a draft submission")
+
+        # Score cannot exceed this project's configured maximum
+        if score is not None and score > project.max_score:
+            raise AppError(
+                "SCORE_EXCEEDS_MAX",
+                f"Score {score} exceeds project maximum of {project.max_score}",
+                422,
+            )
 
         review_status = ReviewStatus(status)
 
@@ -912,6 +929,19 @@ class ProjectService:
         return result.scalar_one()
 
     async def _set_project_skills(self, project_id: str, skill_ids: list[str]) -> None:
+        # Every skill must exist AND belong to the project's org (bogus IDs
+        # 500 on the FK; cross-org links would leak another org's skills).
+        if skill_ids:
+            from app.models.skill import Skill
+
+            project = await self.get_project(project_id)
+            found = await self.db.execute(
+                select(Skill.id).where(Skill.id.in_(skill_ids), Skill.org_id == project.org_id)
+            )
+            valid = set(found.scalars())
+            if set(skill_ids) - valid:
+                raise AppError("SKILL_NOT_FOUND", "Skill not found in this organization", 404)
+
         existing = await self.db.execute(
             select(ProjectSkill).where(ProjectSkill.project_id == project_id)
         )

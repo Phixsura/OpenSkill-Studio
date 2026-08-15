@@ -752,3 +752,212 @@ async def test_me_overview(c):
     r1 = await c.get("/api/v1/me/overview", headers=h)
     d1 = r1.json()["data"]
     assert any(dr["project_title"] == "Overview Project" for dr in d1["drafts"])
+
+
+# ── Adversarial regressions (bug-hunt round: update_submission, FK injection, IDOR) ──
+
+
+@pytest.mark.asyncio
+async def test_update_submission_rejects_foreign_deliverable(c):
+    """deliverable_id from another project must not be accepted (was: 200)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    async def mk_project():
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Adversarial Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+        pid = r.json()["data"]["id"]
+        rd = await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Text Deliverable", "type": "text", "required": False},
+            headers=h,
+        )
+        did = rd.json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+        rs = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
+        return pid, did, rs.json()["data"]["id"]
+
+    pid1, did1, sid1 = await mk_project()
+    pid2, did2, sid2 = await mk_project()
+
+    # foreign deliverable
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid1}/submissions/{sid1}",
+        json={"items": [{"deliverable_id": did2, "type": "text", "content": "x"}]},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # bogus deliverable → 422, not 500
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid1}/submissions/{sid1}",
+        json={
+            "items": [
+                {"deliverable_id": "01BOGUSBOGUSBOGUSBOGUSBOGU", "type": "text", "content": "x"}
+            ]
+        },
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # phantom file item via JSON → 422 (files have a dedicated endpoint)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid1}/submissions/{sid1}",
+        json={"items": [{"deliverable_id": did1, "type": "file", "content": "fake"}]},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # cross-project path confusion (sid1 via pid2) → 404
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid2}/submissions/{sid1}",
+        json={"items": [{"deliverable_id": did1, "type": "text", "content": "x"}]},
+        headers=h,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_project_skills_reject_unknown(c):
+    """Bogus skill id in set_project_skills → 404, not a 500 FK violation."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Skill Link Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    pid = r.json()["data"]["id"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/skills",
+        json={"skill_ids": ["01BOGUSBOGUSBOGUSBOGUSBOGU"]},
+        headers=h,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_member_unknown_user(c):
+    """Adding a nonexistent user → 404, not a 500 FK violation."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": "01BOGUSBOGUSBOGUSBOGUSBOGU", "role": "student"},
+        headers=h,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_review_rejects_draft_and_over_max(c):
+    """Cannot review a draft; score cannot exceed project max."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Review Bounds Project",
+            "description": "d",
+            "instructions": "i",
+            "max_score": 100,
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    pid = r.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    rs = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
+    sid = rs.json()["data"]["id"]
+
+    # review a draft → 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "approved", "score": 80},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # submit, then score above project max → 422
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "approved", "score": 150},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_download_url_scoped_to_submission(c):
+    """A file_id from another submission cannot be fetched via one's own
+    submission path (IDOR guard on get_download_url)."""
+    import struct
+    import zlib
+
+    def _png():
+        sig = b"\x89PNG\r\n\x1a\n"
+
+        def chunk(t, d):
+            crc = zlib.crc32(t + d) & 0xFFFFFFFF
+            return struct.pack(">I", len(d)) + t + d + struct.pack(">I", crc)
+
+        ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+        idat = zlib.compress(b"\x00\xff\x00\x00")
+        return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+
+    async def mk_file(hh):
+        oid = await _org(c, hh)
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "IDOR Probe Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hh,
+        )
+        pid = r.json()["data"]["id"]
+        rd = await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Image Deliverable", "type": "image", "required": False},
+            headers=hh,
+        )
+        did = rd.json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hh)
+        rs = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hh)
+        sid = rs.json()["data"]["id"]
+        rf = await c.post(
+            f"/api/v1/orgs/{oid}/submissions/{sid}/files",
+            files={"file": ("f.png", _png(), "image/png")},
+            data={"deliverable_id": did},
+            headers=hh,
+        )
+        assert rf.status_code == 201, rf.text[:200]
+        return oid, sid, rf.json()["data"]["id"]
+
+    hv, _ = await _auth(c)
+    _, _, victim_file_id = await mk_file(hv)
+    ha, _ = await _auth(c)
+    attacker_org, attacker_sub, _ = await mk_file(ha)
+
+    # attacker's own submission path + victim's file_id → 404
+    r = await c.get(
+        f"/api/v1/orgs/{attacker_org}/submissions/{attacker_sub}/files/{victim_file_id}/download",
+        headers=ha,
+    )
+    assert r.status_code == 404

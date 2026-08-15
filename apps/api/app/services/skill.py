@@ -495,6 +495,18 @@ class SkillService:
     # ── Helpers ──
 
     async def _set_prerequisites(self, skill_id: str, prerequisite_ids: list[str]) -> None:
+        # Every prerequisite must exist AND live in the same org as the skill
+        # (otherwise bogus IDs 500 on the FK and cross-org links leak data).
+        if prerequisite_ids:
+            skill = await self.get_skill(skill_id)
+            found = await self.db.execute(
+                select(Skill.id).where(Skill.id.in_(prerequisite_ids), Skill.org_id == skill.org_id)
+            )
+            valid = {row for row in found.scalars()}
+            missing = set(prerequisite_ids) - valid
+            if missing:
+                raise SkillNotFoundError()
+
         # Cycle detection via BFS
         await self._detect_cycle(skill_id, prerequisite_ids)
 

@@ -183,6 +183,11 @@ class OrgService:
     async def add_member(
         self, org_id: str, user_id: str, role: OrgRole, invited_by: str | None = None
     ) -> OrgMember:
+        # User must exist (bogus IDs otherwise 500 on the FK insert)
+        user_check = await self.db.execute(select(User.id).where(User.id == user_id))
+        if user_check.scalar_one_or_none() is None:
+            raise AppError("USER_NOT_FOUND", "User not found", 404)
+
         # Check existing
         stmt = select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
         result = await self.db.execute(stmt)
