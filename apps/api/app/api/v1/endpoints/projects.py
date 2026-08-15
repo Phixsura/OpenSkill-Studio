@@ -404,9 +404,20 @@ async def get_submission(
     svc = ProjectService(db)
     sub = await _verify_submission_org(svc, submission_id, org_id)
 
-    # Only owner or instructor+ can view
+    # Owner, instructor+, or an allocated peer reviewer can view
     if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
-        raise HTTPException(status_code=403, detail="Access denied")
+        from sqlalchemy import select as _select
+
+        from app.models.project import PeerAssessment
+
+        pr = await db.execute(
+            _select(PeerAssessment.id).where(
+                PeerAssessment.submission_id == submission_id,
+                PeerAssessment.reviewer_id == user.id,
+            )
+        )
+        if pr.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="Access denied")
 
     # Load items and reviews
     from sqlalchemy import select
@@ -543,9 +554,20 @@ async def download_file(
     member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
     sub = await _verify_submission_org(svc, submission_id, org_id)
-    # Only owner or instructor+ can download
+    # Owner, instructor+, or an allocated peer reviewer can download
     if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
-        raise HTTPException(status_code=403, detail="Access denied")
+        from sqlalchemy import select as _select
+
+        from app.models.project import PeerAssessment
+
+        pr = await db.execute(
+            _select(PeerAssessment.id).where(
+                PeerAssessment.submission_id == submission_id,
+                PeerAssessment.reviewer_id == user.id,
+            )
+        )
+        if pr.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="Access denied")
     url = await svc.get_download_url(file_id)
     return {"download_url": url}
 
