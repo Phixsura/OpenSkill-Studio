@@ -18,7 +18,6 @@ from app.schemas.project import (
     ExtensionResponse,
     FileResponse,
     GrantExtensionRequest,
-    PendingReviewResponse,
     ProjectDetailResponse,
     ProjectResponse,
     PromptItemRequest,
@@ -26,7 +25,6 @@ from app.schemas.project import (
     SubmissionDetailResponse,
     SubmissionItemResponse,
     SubmissionResponse,
-    SubmissionWithAuthorResponse,
     TemplateResponse,
     UpdateDeliverableRequest,
     UpdateProjectRequest,
@@ -349,7 +347,7 @@ async def delete_deliverable(
 
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/submissions",
-    response_model=ListResponse[SubmissionWithAuthorResponse],
+    response_model=ListResponse[SubmissionResponse],
 )
 async def list_submissions(
     org_id: str,
@@ -363,15 +361,9 @@ async def list_submissions(
     svc = ProjectService(db)
     # Instructor sees all, student sees own
     uid = None if member.role in INSTRUCTOR_ROLES else user.id
-    rows, total = await svc.list_submissions(project_id, uid, page, per_page)
+    submissions, total = await svc.list_submissions(project_id, uid, page, per_page)
     return ListResponse(
-        data=[
-            SubmissionWithAuthorResponse(
-                **SubmissionResponse.model_validate(sub).model_dump(),
-                author_name=author_name,
-            )
-            for sub, author_name in rows
-        ],
+        data=[SubmissionResponse.model_validate(s) for s in submissions],
         meta=PaginationMeta(
             total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
         ),
@@ -469,19 +461,14 @@ async def update_submission(
         raise HTTPException(status_code=403, detail="Not your submission")
     if sub.status.value != "draft":
         raise HTTPException(status_code=422, detail="Only drafts can be updated")
-    # Allow adding text/markdown/link items via body
+    # Allow adding text/link items via body
     from app.models.project import ItemType, SubmissionItem
 
     for item_data in body.get("items", []):
-        raw_type = item_data.get("type", "text")
-        try:
-            item_type = ItemType(raw_type)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f"Invalid item type: {raw_type}") from exc
         item = SubmissionItem(
             submission_id=submission_id,
             deliverable_id=item_data.get("deliverable_id"),
-            type=item_type,
+            type=ItemType(item_data.get("type", "text")),
             content=item_data.get("content"),
         )
         db.add(item)
@@ -651,7 +638,7 @@ async def create_review(
 # ── Review Dashboard ─────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[PendingReviewResponse])
+@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[SubmissionResponse])
 async def pending_reviews(
     org_id: str,
     page: int = Query(default=1, ge=1),
@@ -661,16 +648,9 @@ async def pending_reviews(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
-    rows, total = await svc.get_pending_reviews(org_id, page, per_page)
+    submissions, total = await svc.get_pending_reviews(org_id, page, per_page)
     return ListResponse(
-        data=[
-            PendingReviewResponse(
-                **SubmissionResponse.model_validate(sub).model_dump(),
-                author_name=author_name,
-                project_title=project_title,
-            )
-            for sub, author_name, project_title, _pid in rows
-        ],
+        data=[SubmissionResponse.model_validate(s) for s in submissions],
         meta=PaginationMeta(
             total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
         ),

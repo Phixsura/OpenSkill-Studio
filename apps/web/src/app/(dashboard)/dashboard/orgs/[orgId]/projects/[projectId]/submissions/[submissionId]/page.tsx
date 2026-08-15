@@ -1,11 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 import {
   AnnotatedImage,
@@ -17,7 +14,6 @@ import { GenerationData, parseGenerationMeta } from "@/components/generation-dat
 import { MediaPreview } from "@/components/media-preview";
 import { PromptDisplay } from "@/components/prompt-display";
 import { VersionCompare } from "@/components/version-compare";
-import { VersionHistory } from "@/components/version-history";
 import { apiWithAuth } from "@/lib/api";
 
 interface SubItem {
@@ -28,8 +24,6 @@ interface SubItem {
   mime_type: string | null;
   content: string | null;
   version: number;
-  note: string | null;
-  created_at: string;
 }
 
 interface SubmissionDetail {
@@ -55,12 +49,6 @@ export default function SubmissionDetailPage() {
         `/orgs/${orgId}/projects/${projectId}/submissions/${submissionId}`,
       ),
   });
-
-  const { data: orgData } = useQuery({
-    queryKey: ["org", orgId],
-    queryFn: () => apiWithAuth<{ data: { role: string | null } }>(`/orgs/${orgId}`),
-  });
-  const isInstructor = ["owner", "admin", "instructor"].includes(orgData?.data?.role ?? "");
 
   const { data: commentsData, refetch: refetchComments } = useQuery({
     queryKey: ["submission-comments", submissionId],
@@ -169,12 +157,6 @@ export default function SubmissionDetailPage() {
                       return gen ? <GenerationData meta={gen} /> : null;
                     })()}
                   </div>
-                ) : latest.type === "markdown" ? (
-                  <div className="prose prose-sm max-w-none dark:prose-invert">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {latest.content ?? ""}
-                    </ReactMarkdown>
-                  </div>
                 ) : (
                   <p className="whitespace-pre-wrap text-sm text-[hsl(var(--muted-foreground))]">
                     {latest.content}
@@ -182,13 +164,7 @@ export default function SubmissionDetailPage() {
                 )}
 
                 {latest.type === "file" && sorted.length > 1 && (
-                  <div className="mt-2 flex flex-wrap items-start gap-2">
-                    <VersionHistory
-                      items={sorted}
-                      downloadPath={(itemId) =>
-                        `/orgs/${orgId}/submissions/${submissionId}/files/${itemId}/download`
-                      }
-                    />
+                  <div className="mt-2">
                     <VersionCompare
                       items={sorted}
                       downloadPath={(itemId) =>
@@ -246,22 +222,9 @@ export default function SubmissionDetailPage() {
               </p>
             </div>
           ))}
-          {(sub.reviews ?? []).length === 0 &&
-            (isInstructor && sub.status === "submitted" ? (
-              <div className="flex items-center justify-between rounded-lg border border-dashed p-4">
-                <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                  This submission is waiting for review.
-                </p>
-                <Link
-                  href={`/dashboard/orgs/${orgId}/reviews/${submissionId}`}
-                  className="rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90"
-                >
-                  Start review →
-                </Link>
-              </div>
-            ) : (
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">No reviews yet.</p>
-            ))}
+          {(sub.reviews ?? []).length === 0 && (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">No reviews yet.</p>
+          )}
         </div>
       </div>
     </div>

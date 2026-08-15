@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { Lightbox } from "@/components/lightbox";
 import { apiWithAuth } from "@/lib/api";
 
 interface MediaPreviewProps {
@@ -23,7 +22,6 @@ export function MediaPreview({ downloadPath, mimeType, fileName, className }: Me
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(false);
 
   const family = mimeType?.split("/")[0] ?? "";
 
@@ -68,19 +66,13 @@ export function MediaPreview({ downloadPath, mimeType, fileName, className }: Me
 
   if (family === "image") {
     return (
-      <>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={url}
-          alt={fileName ?? "preview"}
-          loading="lazy"
-          onClick={() => setExpanded(true)}
-          className={`max-h-80 w-auto cursor-zoom-in rounded-md border object-contain ${className ?? ""}`}
-        />
-        {expanded && (
-          <Lightbox url={url} alt={fileName ?? "preview"} onClose={() => setExpanded(false)} />
-        )}
-      </>
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt={fileName ?? "preview"}
+        loading="lazy"
+        className={`max-h-80 w-auto rounded-md border object-contain ${className ?? ""}`}
+      />
     );
   }
 

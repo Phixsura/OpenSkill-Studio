@@ -14,8 +14,6 @@ interface PendingSub {
   status: string;
   submitted_at: string;
   is_late: boolean;
-  author_name: string;
-  project_title: string;
 }
 
 export default function ReviewDashboardPage() {
@@ -53,41 +51,30 @@ export default function ReviewDashboardPage() {
         <table className="w-full text-sm">
           <thead className="bg-[hsl(var(--secondary))]">
             <tr>
-              <th className="px-4 py-3 text-left">Learner</th>
-              <th className="px-4 py-3 text-left">Project</th>
+              <th className="px-4 py-3 text-left">Submission</th>
               <th className="px-4 py-3 text-left">Version</th>
               <th className="px-4 py-3 text-left">Submitted</th>
               <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-right" />
             </tr>
           </thead>
           <tbody>
             {submissions.map((s) => (
               <tr key={s.id} className="border-t hover:bg-[hsl(var(--secondary))]">
                 <td className="px-4 py-3">
-                  <span className="flex items-center gap-2 font-medium">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[hsl(var(--secondary))] text-xs font-semibold uppercase">
-                      {s.author_name?.[0] ?? "?"}
-                    </span>
-                    {s.author_name}
-                  </span>
+                  <Link
+                    href={`/dashboard/orgs/${orgId}/reviews/${s.id}`}
+                    className="font-medium hover:underline"
+                  >
+                    {s.id.slice(0, 12)}...
+                  </Link>
                 </td>
-                <td className="px-4 py-3">{s.project_title}</td>
                 <td className="px-4 py-3">v{s.version}</td>
                 <td className="px-4 py-3 text-[hsl(var(--muted-foreground))]">
-                  {s.submitted_at ? new Date(s.submitted_at).toLocaleString() : "—"}
+                  {s.submitted_at ? new Date(s.submitted_at).toLocaleDateString() : "—"}
                 </td>
                 <td className="px-4 py-3">
                   {s.is_late && <span className="text-yellow-600">Late</span>}
                   {!s.is_late && <span className="text-green-600">On time</span>}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Link
-                    href={`/dashboard/orgs/${orgId}/reviews/${s.id}`}
-                    className="rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90"
-                  >
-                    Review →
-                  </Link>
                 </td>
               </tr>
             ))}

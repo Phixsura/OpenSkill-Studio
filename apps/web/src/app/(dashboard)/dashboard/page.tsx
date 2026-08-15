@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button";
 import { apiWithAuth } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 
+interface HealthData {
+  status: string;
+  components?: Record<string, string>;
+}
+
 interface OrgItem {
   id: string;
   name: string;
@@ -14,45 +19,21 @@ interface OrgItem {
   member_count: number;
 }
 
-interface Overview {
-  drafts: {
-    submission_id: string;
-    project_id: string;
-    org_id: string;
-    project_title: string;
-  }[];
-  peer_assessments_pending: number;
-  reviews_received: {
-    review_id: string;
-    score: number | null;
-    created_at: string;
-    project_id: string;
-    org_id: string;
-    submission_id: string;
-    project_title: string;
-  }[];
-  pending_reviews_to_grade: number;
-}
-
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
+
+  const { data: health } = useQuery({
+    queryKey: ["health-ready"],
+    queryFn: () => apiWithAuth<HealthData>("/health/ready"),
+    refetchInterval: 60_000,
+  });
 
   const { data: orgsData } = useQuery({
     queryKey: ["my-orgs"],
     queryFn: () => apiWithAuth<{ data: OrgItem[] }>("/orgs"),
   });
 
-  const { data: overviewData } = useQuery({
-    queryKey: ["my-overview"],
-    queryFn: () => apiWithAuth<{ data: Overview }>("/me/overview"),
-  });
-
   const orgs = orgsData?.data ?? [];
-  const ov = overviewData?.data;
-  const hasTodos =
-    (ov?.drafts.length ?? 0) > 0 ||
-    (ov?.peer_assessments_pending ?? 0) > 0 ||
-    (ov?.pending_reviews_to_grade ?? 0) > 0;
 
   return (
     <div className="space-y-8">
@@ -65,69 +46,24 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* To-dos: actionable work, not infrastructure status */}
-      {hasTodos && (
-        <div className="space-y-3">
-          <h2 className="text-xl font-semibold">To do</h2>
-
-          {(ov?.pending_reviews_to_grade ?? 0) > 0 && (
-            <div className="flex items-center justify-between rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950">
-              <p className="text-sm">
-                <span className="font-semibold">{ov?.pending_reviews_to_grade}</span> submission
-                {(ov?.pending_reviews_to_grade ?? 0) !== 1 ? "s" : ""} waiting for your review
-              </p>
-            </div>
-          )}
-
-          {(ov?.peer_assessments_pending ?? 0) > 0 && (
-            <div className="flex items-center justify-between rounded-lg border p-4">
-              <p className="text-sm">
-                🤝 <span className="font-semibold">{ov?.peer_assessments_pending}</span> peer
-                review{(ov?.peer_assessments_pending ?? 0) !== 1 ? "s" : ""} assigned to you
-              </p>
-            </div>
-          )}
-
-          {ov?.drafts.map((d) => (
-            <Link
-              key={d.submission_id}
-              href={`/dashboard/orgs/${d.org_id}/projects/${d.project_id}/submit`}
-              className="flex items-center justify-between rounded-lg border p-4 text-sm hover:shadow-sm"
-            >
-              <span>
-                ✏️ Draft in progress — <span className="font-medium">{d.project_title}</span>
-              </span>
-              <span className="text-xs text-[hsl(var(--muted-foreground))]">Continue →</span>
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {/* Recent feedback on my work */}
-      {(ov?.reviews_received.length ?? 0) > 0 && (
-        <div>
-          <h2 className="text-xl font-semibold">Recent feedback</h2>
-          <div className="mt-3 space-y-2">
-            {ov?.reviews_received.map((r) => (
-              <Link
-                key={r.review_id}
-                href={`/dashboard/orgs/${r.org_id}/projects/${r.project_id}/submissions/${r.submission_id}`}
-                className="flex items-center justify-between rounded-lg border p-3 text-sm hover:shadow-sm"
-              >
-                <span>
-                  📋 <span className="font-medium">{r.project_title}</span> was reviewed
-                </span>
-                <span className="flex items-center gap-3">
-                  {r.score !== null && <span className="font-mono font-bold">{r.score} pts</span>}
-                  <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                    {new Date(r.created_at).toLocaleDateString()}
-                  </span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Status cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatusCard
+          title="API Status"
+          value={health?.status === "ok" ? "Online" : "Checking..."}
+          color={health?.status === "ok" ? "green" : "yellow"}
+        />
+        <StatusCard
+          title="Database"
+          value={health?.components?.database ?? "—"}
+          color={health?.components?.database === "ok" ? "green" : "red"}
+        />
+        <StatusCard
+          title="Cache"
+          value={health?.components?.redis ?? "—"}
+          color={health?.components?.redis === "ok" ? "green" : "red"}
+        />
+      </div>
 
       {/* Organizations */}
       <div>
@@ -189,6 +125,29 @@ export default function DashboardPage() {
           </p>
         </Link>
       </div>
+    </div>
+  );
+}
+
+function StatusCard({
+  title,
+  value,
+  color,
+}: {
+  title: string;
+  value: string;
+  color: "green" | "red" | "yellow";
+}) {
+  const colors = {
+    green: "text-green-600 dark:text-green-400",
+    red: "text-red-600 dark:text-red-400",
+    yellow: "text-yellow-600 dark:text-yellow-400",
+  };
+
+  return (
+    <div className="rounded-lg border p-4">
+      <p className="text-sm text-[hsl(var(--muted-foreground))]">{title}</p>
+      <p className={`mt-1 text-lg font-semibold ${colors[color]}`}>{value}</p>
     </div>
   );
 }
