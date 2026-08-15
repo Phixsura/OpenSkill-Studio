@@ -1532,3 +1532,36 @@ async def test_deliverable_config_and_type_validation(c):
         headers=h,
     )
     assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_unbounded_text_fields_now_bounded(c):
+    """Org/category description and exercise config were unbounded storage
+    surfaces — confirm they now reject oversized input."""
+    h, _ = await _auth(c)
+    # org description
+    r = await c.post("/api/v1/orgs", json={"name": "Big Org", "description": "x" * 3000}, headers=h)
+    assert r.status_code == 422
+
+    oid = await _org(c, h)
+    # category description
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/categories", json={"name": "Cat", "description": "y" * 3000}, headers=h
+    )
+    assert r.status_code == 422
+
+    # exercise config blob
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat2"}, headers=h)).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={"name": "Skill EX", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+        json={"title": "Ex", "description": "d", "type": "text_answer", "config": {"blob": "z" * 25000}, "max_score": 10},
+        headers=h,
+    )
+    assert r.status_code == 422

@@ -26,6 +26,20 @@ class CreateCategoryRequest(BaseModel):
             raise ValueError("slug must not exceed 200 characters")
         return v
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("icon")
+    @classmethod
+    def validate_icon(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100:
+            raise ValueError("Icon must not exceed 100 characters")
+        return v
+
 
 class UpdateCategoryRequest(BaseModel):
     name: str | None = None
@@ -246,6 +260,22 @@ class CreateExerciseRequest(BaseModel):
         v = v.strip()
         if len(v) < 2 or len(v) > 200:
             raise ValueError("Title must be 2-200 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        if len(v) > 5000:
+            raise ValueError("Description must be 5,000 characters or less")
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: dict) -> dict:
+        # Bound the config JSON so an MCQ options/correct blob can't be used
+        # for unbounded storage abuse.
+        if len(str(v)) > 20000:
+            raise ValueError("config is too large")
         return v
 
 
