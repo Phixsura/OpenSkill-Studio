@@ -27,12 +27,20 @@ class DeliverableType(str, enum.Enum):
     TEXT = "text"
     LINK = "link"
     MARKDOWN = "markdown"
+    # AI visual production media types
+    IMAGE = "image"
+    VIDEO = "video"
+    AUDIO = "audio"
+    PROMPT = "prompt"
+    REFERENCE = "reference"
+    FINAL_OUTPUT = "final_output"
 
 
 class ItemType(str, enum.Enum):
     FILE = "file"
     TEXT = "text"
     LINK = "link"
+    PROMPT = "prompt"
 
 
 class SubmissionStatus(str, enum.Enum):
@@ -72,6 +80,9 @@ class Project(Base):
     slug: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    project_type: Mapped[str] = mapped_column(
+        String(20), default="general", server_default="general", nullable=False
+    )
     difficulty: Mapped[DifficultyLevel] = mapped_column(
         Enum(DifficultyLevel, name="difficulty_level", create_constraint=True),
         default=DifficultyLevel.INTERMEDIATE,
@@ -190,6 +201,8 @@ class SubmissionItem(Base):
     file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     submission: Mapped["Submission"] = relationship(back_populates="items")
@@ -235,4 +248,69 @@ class SubmissionExtension(Base):
     extended_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     granted_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectTemplate(Base):
+    """Reusable project blueprint. Deliverables are stored as a JSONB list
+    and copied to real ProjectDeliverable rows at instantiation, so editing
+    a project created from a template never affects the template."""
+
+    __tablename__ = "project_templates"
+    __table_args__ = (Index("ix_templates_org_status", "org_id", "status"),)
+
+    id: Mapped[str] = ulid_pk()
+    org_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    project_type: Mapped[str] = mapped_column(
+        String(20), default="general", server_default="general", nullable=False
+    )
+    difficulty: Mapped[DifficultyLevel] = mapped_column(
+        Enum(DifficultyLevel, name="difficulty_level", create_constraint=True),
+        default=DifficultyLevel.INTERMEDIATE,
+    )
+    suggested_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_score: Mapped[int] = mapped_column(Integer, default=100)
+    rubric: Mapped[list] = mapped_column(JSONB, nullable=False)
+    # list of {name, description, type, required, config, sort_order}
+    deliverables: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    skill_names: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    status: Mapped[ContentStatus] = mapped_column(
+        Enum(ContentStatus, name="content_status", create_constraint=True),
+        default=ContentStatus.PUBLISHED,
+    )
+    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProjectAsset(Base):
+    """Instructor-provided reference material attached to a project
+    (brand logos, style references, client briefs). Visible to all org
+    members; not part of any learner submission."""
+
+    __tablename__ = "project_assets"
+    __table_args__ = (Index("ix_assets_project_order", "project_id", "sort_order"),)
+
+    id: Mapped[str] = ulid_pk()
+    org_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    uploaded_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
