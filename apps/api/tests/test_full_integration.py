@@ -1352,3 +1352,45 @@ async def test_portfolio_item_create_bounds(c):
         headers=h,
     )
     assert r.status_code == 201
+
+
+# ── Invite privilege-escalation guard (bug-hunt round 12) ──
+
+
+@pytest.mark.asyncio
+async def test_inviter_cannot_grant_higher_role(c):
+    """An instructor must not create an invite link / email invite for a role
+    above their own (admin/owner) — that would be privilege escalation."""
+    # owner sets up org + instructor member
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    hi, _ = await _auth(c)
+    link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "instructor"}, headers=ho)
+    await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hi)
+
+    for role in ("admin", "owner"):
+        r = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": role}, headers=hi)
+        assert r.status_code == 403, f"instructor created {role} link: {r.status_code}"
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/invites", json={"emails": ["x@y.com"], "role": role}, headers=hi
+        )
+        assert r.status_code == 403, f"instructor invited {role}: {r.status_code}"
+
+    # instructor CAN still invite a student
+    r = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=hi)
+    assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_add_owner_directly(c):
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    ha, _ = await _auth(c)
+    link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "admin"}, headers=ho)
+    await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=ha)
+    # a real target user
+    ht, target = await _auth(c)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": target["id"], "role": "owner"}, headers=ha
+    )
+    assert r.status_code == 403

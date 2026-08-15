@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
-from app.models.organization import OrgRole
+from app.models.organization import ROLE_HIERARCHY, OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.organization import (
@@ -278,11 +278,18 @@ async def invite_members(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    actor = await require_org_member(
+        org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR
+    )
     try:
         role = OrgRole(body.role)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
+
+    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+        raise HTTPException(
+            status_code=403, detail="Cannot invite a member at a role higher than your own"
+        )
 
     service = OrgService(db)
     result = await service.invite_members(org_id, body.emails, role, user.id)
@@ -342,7 +349,7 @@ async def add_member_directly(
     db: AsyncSession = Depends(get_db),
 ):
     """Directly add an existing user to the org (admin+)."""
-    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    actor = await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     user_id = body.get("user_id")
     role_str = body.get("role", "student")
     if not user_id or not isinstance(user_id, str):
@@ -353,6 +360,12 @@ async def add_member_directly(
         role = OrgRole(role_str)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {role_str}") from exc
+
+    # Cannot add a member at a role higher than your own (admin adding an owner)
+    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+        raise HTTPException(
+            status_code=403, detail="Cannot add a member at a role higher than your own"
+        )
 
     service = OrgService(db)
     member = await service.add_member(org_id, user_id, role, invited_by=user.id)
@@ -375,11 +388,20 @@ async def create_invite_link(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    actor = await require_org_member(
+        org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR
+    )
     try:
         role = OrgRole(body.role)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
+
+    # An inviter cannot mint a link that grants a role at or above their own —
+    # otherwise an instructor could create an admin/owner link and escalate.
+    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+        raise HTTPException(
+            status_code=403, detail="Cannot create an invite for a role higher than your own"
+        )
 
     service = OrgService(db)
     link = await service.create_invite_link(
