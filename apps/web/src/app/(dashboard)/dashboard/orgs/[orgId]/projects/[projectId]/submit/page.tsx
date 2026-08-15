@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MediaPreview } from "@/components/media-preview";
+import { GenerationData, type GenerationMeta } from "@/components/generation-data";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 
@@ -29,7 +30,34 @@ interface UploadedItem {
   file_name: string | null;
   mime_type: string | null;
   version: number;
+  generation?: GenerationMeta | null;
 }
+
+interface PromptFormState {
+  prompt: string;
+  negative_prompt: string;
+  tool: string;
+  model: string;
+  seed: string;
+  cfg_scale: string;
+  steps: string;
+  sampler: string;
+  parameters: string;
+  notes: string;
+}
+
+const EMPTY_PROMPT_FORM: PromptFormState = {
+  prompt: "",
+  negative_prompt: "",
+  tool: "",
+  model: "",
+  seed: "",
+  cfg_scale: "",
+  steps: "",
+  sampler: "",
+  parameters: "",
+  notes: "",
+};
 
 const MEDIA_TYPES = new Set(["image", "video", "audio", "reference", "final_output", "file"]);
 
@@ -61,9 +89,7 @@ export default function SubmitPage() {
   );
 
   const [textInputs, setTextInputs] = useState<Record<string, string>>({});
-  const [promptInputs, setPromptInputs] = useState<
-    Record<string, { prompt: string; tool: string; model: string; parameters: string; notes: string }>
-  >({});
+  const [promptInputs, setPromptInputs] = useState<Record<string, PromptFormState>>({});
   const [uploaded, setUploaded] = useState<Record<string, UploadedItem[]>>({});
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
   const [savedPrompts, setSavedPrompts] = useState<Record<string, boolean>>({});
@@ -123,11 +149,21 @@ export default function SubmitPage() {
         throw new Error(body?.error?.message ?? body?.detail ?? `Upload failed (${res.status})`);
       }
       const body = await res.json();
+      // Parse extracted generation metadata, if the server found any
+      let generation: GenerationMeta | null = null;
+      if (body.data.content) {
+        try {
+          generation = JSON.parse(body.data.content)?.generation ?? null;
+        } catch {
+          generation = null;
+        }
+      }
       const item: UploadedItem = {
         id: body.data.id,
         file_name: body.data.file_name ?? file.name,
         mime_type: body.data.mime_type ?? file.type,
         version: body.data.version ?? 1,
+        generation,
       };
       setUploaded((prev) => ({ ...prev, [d.id]: [...(prev[d.id] ?? []), item] }));
     } catch (err) {
@@ -153,14 +189,26 @@ export default function SubmitPage() {
         return;
       }
     }
+    const seed = p.seed?.trim() ? parseInt(p.seed, 10) : undefined;
+    const cfgScale = p.cfg_scale?.trim() ? parseFloat(p.cfg_scale) : undefined;
+    const steps = p.steps?.trim() ? parseInt(p.steps, 10) : undefined;
+    if (seed !== undefined && Number.isNaN(seed)) {
+      setError("Seed must be a number.");
+      return;
+    }
     try {
       await apiWithAuth(`/orgs/${orgId}/submissions/${submissionId}/prompt-items`, {
         method: "POST",
         body: JSON.stringify({
           deliverable_id: d.id,
           prompt: p.prompt.trim(),
+          negative_prompt: p.negative_prompt?.trim() || undefined,
           tool: p.tool?.trim() || undefined,
           model: p.model?.trim() || undefined,
+          seed,
+          cfg_scale: cfgScale !== undefined && !Number.isNaN(cfgScale) ? cfgScale : undefined,
+          steps: steps !== undefined && !Number.isNaN(steps) ? steps : undefined,
+          sampler: p.sampler?.trim() || undefined,
           parameters,
           notes: p.notes?.trim() || undefined,
         }),
@@ -169,6 +217,28 @@ export default function SubmitPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to save prompt");
     }
+  };
+
+  /** Civitai-Remix semantics for teaching: prefill the prompt form from
+   * generation metadata extracted from an uploaded image. */
+  const fillPromptFromMeta = (meta: GenerationMeta) => {
+    const promptDeliverable = deliverables.find((d) => d.type === "prompt");
+    if (!promptDeliverable) return;
+    setPromptInputs((prev) => ({
+      ...prev,
+      [promptDeliverable.id]: {
+        ...EMPTY_PROMPT_FORM,
+        ...prev[promptDeliverable.id],
+        prompt: meta.prompt ?? prev[promptDeliverable.id]?.prompt ?? "",
+        negative_prompt: meta.negative_prompt ?? "",
+        model: meta.model ?? prev[promptDeliverable.id]?.model ?? "",
+        seed: meta.seed != null ? String(meta.seed) : "",
+        cfg_scale: meta.cfg_scale != null ? String(meta.cfg_scale) : "",
+        steps: meta.steps != null ? String(meta.steps) : "",
+        sampler: meta.sampler ?? "",
+      },
+    }));
+    setSavedPrompts((s) => ({ ...s, [promptDeliverable.id]: false }));
   };
 
   if (!submissionId) {
@@ -266,6 +336,20 @@ export default function SubmitPage() {
                         mimeType={latest.mime_type}
                         fileName={latest.file_name}
                       />
+                      {latest.generation && (
+                        <div className="space-y-1.5">
+                          <GenerationData meta={latest.generation} />
+                          {deliverables.some((x) => x.type === "prompt") && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => fillPromptFromMeta(latest.generation!)}
+                            >
+                              ✨ Fill prompt form from this image
+                            </Button>
+                          )}
+                        </div>
+                      )}
                       {items.length > 1 && (
                         <details className="text-xs text-[hsl(var(--muted-foreground))]">
                           <summary className="cursor-pointer">
@@ -288,75 +372,98 @@ export default function SubmitPage() {
                 </div>
               )}
 
-              {/* Prompt form */}
-              {d.type === "prompt" && (
-                <div className="mt-3 space-y-2">
-                  {savedPrompts[d.id] ? (
-                    <p className="text-sm text-green-600">✓ Prompt saved</p>
-                  ) : (
-                    <>
-                      <textarea
-                        className="block w-full rounded-md border bg-transparent px-3 py-2 font-mono text-sm"
-                        rows={4}
-                        maxLength={10000}
-                        placeholder="Your generation prompt..."
-                        value={promptInputs[d.id]?.prompt ?? ""}
-                        onChange={(e) =>
-                          setPromptInputs((p) => ({
-                            ...p,
-                            [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), prompt: e.target.value },
-                          }))
-                        }
-                      />
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Input
-                          placeholder="Tool (e.g. Seedream)"
-                          value={promptInputs[d.id]?.tool ?? ""}
-                          onChange={(e) =>
-                            setPromptInputs((p) => ({
-                              ...p,
-                              [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), tool: e.target.value },
-                            }))
-                          }
-                        />
-                        <Input
-                          placeholder="Model (optional)"
-                          value={promptInputs[d.id]?.model ?? ""}
-                          onChange={(e) =>
-                            setPromptInputs((p) => ({
-                              ...p,
-                              [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), model: e.target.value },
-                            }))
-                          }
-                        />
-                      </div>
-                      <Input
-                        placeholder='Parameters JSON, e.g. {"aspect_ratio": "9:16"} (optional)'
-                        value={promptInputs[d.id]?.parameters ?? ""}
-                        onChange={(e) =>
-                          setPromptInputs((p) => ({
-                            ...p,
-                            [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), parameters: e.target.value },
-                          }))
-                        }
-                      />
-                      <Input
-                        placeholder="Notes (optional)"
-                        value={promptInputs[d.id]?.notes ?? ""}
-                        onChange={(e) =>
-                          setPromptInputs((p) => ({
-                            ...p,
-                            [d.id]: { ...(p[d.id] ?? { prompt: "", tool: "", model: "", parameters: "", notes: "" }), notes: e.target.value },
-                          }))
-                        }
-                      />
-                      <Button variant="secondary" size="sm" onClick={() => handlePromptSave(d)}>
-                        Save Prompt
-                      </Button>
-                    </>
-                  )}
-                </div>
-              )}
+              {/* Prompt form (industry fields: negative/seed/cfg/steps/sampler) */}
+              {d.type === "prompt" &&
+                (() => {
+                  const form = promptInputs[d.id] ?? EMPTY_PROMPT_FORM;
+                  const set = (field: keyof PromptFormState) => (
+                    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+                  ) =>
+                    setPromptInputs((p) => ({
+                      ...p,
+                      [d.id]: { ...(p[d.id] ?? EMPTY_PROMPT_FORM), [field]: e.target.value },
+                    }));
+                  return (
+                    <div className="mt-3 space-y-2">
+                      {savedPrompts[d.id] ? (
+                        <p className="text-sm text-green-600">✓ Prompt saved</p>
+                      ) : (
+                        <>
+                          <textarea
+                            className="block w-full rounded-md border bg-transparent px-3 py-2 font-mono text-sm"
+                            rows={4}
+                            maxLength={10000}
+                            placeholder="Your generation prompt..."
+                            value={form.prompt}
+                            onChange={set("prompt")}
+                          />
+                          <textarea
+                            className="block w-full rounded-md border bg-transparent px-3 py-2 font-mono text-sm"
+                            rows={2}
+                            maxLength={10000}
+                            placeholder="Negative prompt (optional)"
+                            value={form.negative_prompt}
+                            onChange={set("negative_prompt")}
+                          />
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <Input
+                              placeholder="Tool (e.g. Seedream)"
+                              value={form.tool}
+                              onChange={set("tool")}
+                            />
+                            <Input
+                              placeholder="Model (optional)"
+                              value={form.model}
+                              onChange={set("model")}
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <Input
+                              placeholder="Seed"
+                              inputMode="numeric"
+                              value={form.seed}
+                              onChange={set("seed")}
+                            />
+                            <Input
+                              placeholder="CFG"
+                              inputMode="decimal"
+                              value={form.cfg_scale}
+                              onChange={set("cfg_scale")}
+                            />
+                            <Input
+                              placeholder="Steps"
+                              inputMode="numeric"
+                              value={form.steps}
+                              onChange={set("steps")}
+                            />
+                            <Input
+                              placeholder="Sampler"
+                              value={form.sampler}
+                              onChange={set("sampler")}
+                            />
+                          </div>
+                          <Input
+                            placeholder='Extra parameters JSON, e.g. {"aspect_ratio": "9:16"} (optional)'
+                            value={form.parameters}
+                            onChange={set("parameters")}
+                          />
+                          <Input
+                            placeholder="Notes (optional)"
+                            value={form.notes}
+                            onChange={set("notes")}
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handlePromptSave(d)}
+                          >
+                            Save Prompt
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
 
               {/* Text / markdown */}
               {(d.type === "text" || d.type === "markdown") && (

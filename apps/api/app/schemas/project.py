@@ -377,6 +377,8 @@ class FileResponse(BaseModel):
     file_size: int | None
     mime_type: str | None
     version: int = 1
+    # Generation metadata JSON extracted from the file (item.content)
+    content: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -564,10 +566,23 @@ class AssetResponse(BaseModel):
 
 
 class PromptItemRequest(BaseModel):
+    """Prompt deliverable submission.
+
+    Field vocabulary follows the AI-creation industry convention
+    (Civitai/A1111/ComfyUI): seed, negative prompt, cfg_scale, steps,
+    sampler, and resource references with weights.
+    """
+
     deliverable_id: str
     prompt: str
+    negative_prompt: str | None = None
     tool: str | None = None
     model: str | None = None
+    seed: int | None = None
+    cfg_scale: float | None = None
+    steps: int | None = None
+    sampler: str | None = None
+    resources: list[dict] | None = None
     parameters: dict | None = None
     notes: str | None = None
 
@@ -581,11 +596,66 @@ class PromptItemRequest(BaseModel):
             raise ValueError("Prompt must be 10,000 characters or less")
         return v
 
-    @field_validator("tool", "model")
+    @field_validator("negative_prompt")
+    @classmethod
+    def validate_negative_prompt(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10000:
+            raise ValueError("Negative prompt must be 10,000 characters or less")
+        return v
+
+    @field_validator("tool", "model", "sampler")
     @classmethod
     def validate_tool_model(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 100:
-            raise ValueError("Tool/model name must be 100 characters or less")
+            raise ValueError("Tool/model/sampler name must be 100 characters or less")
+        return v
+
+    @field_validator("seed")
+    @classmethod
+    def validate_seed(cls, v: int | None) -> int | None:
+        # Unsigned 32-bit range — SD/Runway ecosystem convention
+        if v is not None and (v < 0 or v > 2**32 - 1):
+            raise ValueError("Seed must be in the unsigned 32-bit range")
+        return v
+
+    @field_validator("cfg_scale")
+    @classmethod
+    def validate_cfg_scale(cls, v: float | None) -> float | None:
+        if v is not None and (v < 0 or v > 100):
+            raise ValueError("CFG scale must be between 0 and 100")
+        return v
+
+    @field_validator("steps")
+    @classmethod
+    def validate_steps(cls, v: int | None) -> int | None:
+        if v is not None and (v < 0 or v > 1000):
+            raise ValueError("Steps must be between 0 and 1000")
+        return v
+
+    @field_validator("resources")
+    @classmethod
+    def validate_resources(cls, v: list[dict] | None) -> list[dict] | None:
+        if v is None:
+            return v
+        if len(v) > 20:
+            raise ValueError("At most 20 resources")
+        for r in v:
+            if not isinstance(r, dict):
+                raise ValueError("Each resource must be an object")
+            rtype = r.get("type")
+            name = r.get("name")
+            if not isinstance(rtype, str) or not rtype or len(rtype) > 50:
+                raise ValueError("Resource type must be a string of 1-50 characters")
+            if not isinstance(name, str) or not name or len(name) > 200:
+                raise ValueError("Resource name must be a string of 1-200 characters")
+            weight = r.get("weight")
+            if weight is not None and (
+                not isinstance(weight, (int, float)) or weight < -10 or weight > 10
+            ):
+                raise ValueError("Resource weight must be a number between -10 and 10")
+            version = r.get("version")
+            if version is not None and (not isinstance(version, str) or len(version) > 100):
+                raise ValueError("Resource version must be a string of 100 characters or less")
         return v
 
     @field_validator("notes")

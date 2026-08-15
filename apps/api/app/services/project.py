@@ -636,10 +636,25 @@ class ProjectService:
                 ContentType=content_type,
             )
 
+        # Auto-extract generation metadata from AI-tool PNGs (A1111/ComfyUI).
+        # Stored as JSON in the item's content column (NULL otherwise).
+        gen_content = None
+        if deliverable.type in (
+            DeliverableType.IMAGE,
+            DeliverableType.REFERENCE,
+            DeliverableType.FINAL_OUTPUT,
+        ):
+            from app.core.genmeta import extract_generation_metadata
+
+            gen_meta = extract_generation_metadata(file_content, content_type)
+            if gen_meta:
+                gen_content = json.dumps({"generation": gen_meta}, ensure_ascii=False)
+
         item = SubmissionItem(
             submission_id=submission_id,
             deliverable_id=deliverable_id,
             type=ItemType.FILE,
+            content=gen_content,
             file_key=file_key,
             file_name=file_name,
             file_size=len(file_content),
@@ -656,6 +671,7 @@ class ProjectService:
             deliverable_id=deliverable_id,
             version=version,
             size=len(file_content),
+            has_gen_meta=gen_content is not None,
         )
         return item
 
