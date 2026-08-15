@@ -671,3 +671,96 @@ class PromptItemRequest(BaseModel):
         if v is not None and len(str(v)) > 5000:
             raise ValueError("Parameters object is too large")
         return v
+
+
+# ── Anchored Comments ────────────────────────────────────
+
+
+VALID_ANCHOR_TYPES = {"global", "time", "region"}
+VALID_REGION_SHAPES = {"rectangle", "ellipse", "point"}
+
+
+class CreateCommentRequest(BaseModel):
+    item_id: str
+    text: str
+    anchor_type: str = "global"
+    timestamp_ms: int | None = None
+    duration_ms: int | None = None
+    region: dict | None = None
+    parent_id: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Comment text must not be empty")
+        if len(v) > 5000:
+            raise ValueError("Comment must be 5,000 characters or less")
+        return v
+
+    @field_validator("anchor_type")
+    @classmethod
+    def validate_anchor_type(cls, v: str) -> str:
+        if v not in VALID_ANCHOR_TYPES:
+            raise ValueError(f"Anchor type must be one of: {', '.join(sorted(VALID_ANCHOR_TYPES))}")
+        return v
+
+    @field_validator("timestamp_ms", "duration_ms")
+    @classmethod
+    def validate_times(cls, v: int | None) -> int | None:
+        # up to 24h in ms — no legitimate media exceeds this here
+        if v is not None and (v < 0 or v > 86_400_000):
+            raise ValueError("Timestamp/duration must be between 0 and 86,400,000 ms")
+        return v
+
+    @field_validator("region")
+    @classmethod
+    def validate_region(cls, v: dict | None) -> dict | None:
+        """Normalized-coordinate geometry (Annotorious/W3C convention):
+        {type: rectangle|ellipse|point, bounds: {minX,minY,maxX,maxY}} with
+        all values in [0,1] and min <= max."""
+        if v is None:
+            return v
+        shape = v.get("type")
+        if shape not in VALID_REGION_SHAPES:
+            raise ValueError(
+                f"Region type must be one of: {', '.join(sorted(VALID_REGION_SHAPES))}"
+            )
+        bounds = v.get("bounds")
+        if not isinstance(bounds, dict):
+            raise ValueError("Region must include bounds")
+        try:
+            min_x = float(bounds["minX"])
+            min_y = float(bounds["minY"])
+            max_x = float(bounds["maxX"])
+            max_y = float(bounds["maxY"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Region bounds must have numeric minX/minY/maxX/maxY") from exc
+        for val in (min_x, min_y, max_x, max_y):
+            if val < 0 or val > 1:
+                raise ValueError("Region coordinates must be normalized to [0, 1]")
+        if min_x > max_x or min_y > max_y:
+            raise ValueError("Region bounds must satisfy min <= max")
+        # Store only the validated shape — drop unknown keys
+        return {
+            "type": shape,
+            "bounds": {"minX": min_x, "minY": min_y, "maxX": max_x, "maxY": max_y},
+        }
+
+
+class CommentResponse(BaseModel):
+    id: str
+    submission_id: str
+    item_id: str
+    author_id: str
+    parent_id: str | None
+    text: str
+    anchor_type: str
+    timestamp_ms: int | None
+    duration_ms: int | None
+    region: dict | None
+    completed: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

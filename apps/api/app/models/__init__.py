@@ -23,6 +23,7 @@ from app.models.portfolio import (  # noqa: F401
     UserProfile,
 )
 from app.models.project import (  # noqa: F401
+    CommentAnchorType,
     DeliverableType,
     ItemType,
     Project,
@@ -33,6 +34,7 @@ from app.models.project import (  # noqa: F401
     ReviewerType,
     ReviewStatus,
     Submission,
+    SubmissionComment,
     SubmissionExtension,
     SubmissionItem,
     SubmissionReview,
