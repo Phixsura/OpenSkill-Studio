@@ -7,6 +7,8 @@ from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.project import (
     AssetResponse,
+    CommentResponse,
+    CreateCommentRequest,
     CreateDeliverableRequest,
     CreateFromTemplateRequest,
     CreateProjectRequest,
@@ -903,3 +905,95 @@ async def add_prompt_item(
     item = await svc.add_prompt_item(submission_id, body.deliverable_id, prompt_data, user.id)
     await db.commit()
     return DataResponse(data=SubmissionItemResponse.model_validate(item))
+
+
+# ── Anchored Comments ────────────────────────────────────
+
+
+@router.get(
+    "/orgs/{org_id}/submissions/{submission_id}/comments",
+    response_model=DataResponse[list[CommentResponse]],
+)
+async def list_comments(
+    org_id: str,
+    submission_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    member = await require_org_member(org_id, user, db)
+    svc = ProjectService(db)
+    sub = await _verify_submission_org(svc, submission_id, org_id)
+    # Same visibility as the submission itself: owner or instructor+
+    if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    comments = await svc.list_comments(submission_id)
+    return DataResponse(data=[CommentResponse.model_validate(c) for c in comments])
+
+
+@router.post(
+    "/orgs/{org_id}/submissions/{submission_id}/comments",
+    response_model=DataResponse[CommentResponse],
+    status_code=201,
+)
+async def create_comment(
+    org_id: str,
+    submission_id: str,
+    body: CreateCommentRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    member = await require_org_member(org_id, user, db)
+    svc = ProjectService(db)
+    sub = await _verify_submission_org(svc, submission_id, org_id)
+    # Owner and instructors can comment (feedback is a two-way conversation)
+    if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    comment = await svc.add_comment(
+        org_id,
+        submission_id,
+        body.item_id,
+        user.id,
+        text=body.text,
+        anchor_type=body.anchor_type,
+        timestamp_ms=body.timestamp_ms,
+        duration_ms=body.duration_ms,
+        region=body.region,
+        parent_id=body.parent_id,
+    )
+    await db.commit()
+    return DataResponse(data=CommentResponse.model_validate(comment))
+
+
+@router.put(
+    "/orgs/{org_id}/comments/{comment_id}/completed",
+    response_model=DataResponse[CommentResponse],
+)
+async def set_comment_completed(
+    org_id: str,
+    comment_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    member = await require_org_member(org_id, user, db)
+    svc = ProjectService(db)
+    comment = await svc.get_comment(comment_id, org_id)
+    sub = await svc.get_submission(comment.submission_id)
+    if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    comment = await svc.set_comment_completed(comment_id, org_id, bool(body.get("completed")))
+    await db.commit()
+    return DataResponse(data=CommentResponse.model_validate(comment))
+
+
+@router.delete("/orgs/{org_id}/comments/{comment_id}", status_code=204)
+async def delete_comment(
+    org_id: str,
+    comment_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_org_member(org_id, user, db)
+    svc = ProjectService(db)
+    await svc.delete_comment(comment_id, org_id, user.id)
+    await db.commit()

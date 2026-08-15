@@ -720,3 +720,149 @@ async def test_prompt_item_industry_fields_roundtrip(db):
     assert parsed["seed"] == 42
     assert parsed["negative_prompt"] == "blurry"
     assert parsed["resources"][0]["weight"] == 0.8
+
+
+# ══════════════════════════════════════════════════════════
+# Anchored comments
+# ══════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_comment_global_and_region(db):
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "image")
+    item = await svc.upload_file(sub.id, d.id, "kv.png", PNG, "image/png", user.id)
+
+    c1 = await svc.add_comment(org.id, sub.id, item.id, user.id, text="Nice composition")
+    assert c1.anchor_type.value == "global"
+    assert c1.region is None
+
+    c2 = await svc.add_comment(
+        org.id,
+        sub.id,
+        item.id,
+        user.id,
+        text="Logo is soft here",
+        anchor_type="region",
+        region={
+            "type": "rectangle",
+            "bounds": {"minX": 0.1, "minY": 0.1, "maxX": 0.4, "maxY": 0.3},
+        },
+    )
+    assert c2.anchor_type.value == "region"
+    assert c2.region["bounds"]["maxX"] == 0.4
+
+    comments = await svc.list_comments(sub.id)
+    assert len(comments) == 2
+
+
+@pytest.mark.asyncio
+async def test_comment_time_anchor_and_consistency(db):
+    from app.exceptions import AppError
+
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "video")
+    item = await svc.upload_file(sub.id, d.id, "clip.mp4", MP4, "video/mp4", user.id)
+
+    c = await svc.add_comment(
+        org.id,
+        sub.id,
+        item.id,
+        user.id,
+        text="Cut is too abrupt",
+        anchor_type="time",
+        timestamp_ms=4200,
+        duration_ms=1500,
+    )
+    assert c.timestamp_ms == 4200
+    assert c.duration_ms == 1500
+
+    # time anchor without timestamp → 422
+    with pytest.raises(AppError) as exc:
+        await svc.add_comment(org.id, sub.id, item.id, user.id, text="x", anchor_type="time")
+    assert exc.value.code == "INVALID_ANCHOR"
+
+    # region anchor without region → 422
+    with pytest.raises(AppError) as exc:
+        await svc.add_comment(org.id, sub.id, item.id, user.id, text="x", anchor_type="region")
+    assert exc.value.code == "INVALID_ANCHOR"
+
+    # global anchor discards stray coordinates
+    c2 = await svc.add_comment(
+        org.id,
+        sub.id,
+        item.id,
+        user.id,
+        text="overall",
+        timestamp_ms=999,
+    )
+    assert c2.timestamp_ms is None
+
+
+@pytest.mark.asyncio
+async def test_comment_threading_one_level(db):
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "image")
+    item = await svc.upload_file(sub.id, d.id, "kv.png", PNG, "image/png", user.id)
+
+    root = await svc.add_comment(org.id, sub.id, item.id, user.id, text="root")
+    reply = await svc.add_comment(org.id, sub.id, item.id, user.id, text="reply", parent_id=root.id)
+    assert reply.parent_id == root.id
+
+    # Reply-to-reply flattens to the root (one-level threads)
+    deep = await svc.add_comment(org.id, sub.id, item.id, user.id, text="deep", parent_id=reply.id)
+    assert deep.parent_id == root.id
+
+
+@pytest.mark.asyncio
+async def test_comment_complete_and_delete(db):
+    from app.exceptions import AppError
+
+    user, org, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org, user, "image")
+    item = await svc.upload_file(sub.id, d.id, "kv.png", PNG, "image/png", user.id)
+    c = await svc.add_comment(org.id, sub.id, item.id, user.id, text="todo: fix color")
+
+    updated = await svc.set_comment_completed(c.id, org.id, True)
+    assert updated.completed is True
+
+    # Non-author cannot delete
+    stranger = await _user(db)
+    with pytest.raises(AppError) as exc:
+        await svc.delete_comment(c.id, org.id, stranger.id)
+    assert exc.value.status_code == 403
+
+    await svc.delete_comment(c.id, org.id, user.id)
+    assert await svc.list_comments(sub.id) == []
+
+
+@pytest.mark.asyncio
+async def test_comment_org_isolation(db):
+    from app.exceptions import AppError
+
+    user_a, org_a, svc = await _setup(db)
+    _, d, sub = await _project_with_deliverable(svc, org_a, user_a, "image")
+    item = await svc.upload_file(sub.id, d.id, "kv.png", PNG, "image/png", user_a.id)
+    c = await svc.add_comment(org_a.id, sub.id, item.id, user_a.id, text="secret feedback")
+
+    user_b = await _user(db)
+    org_b = await _org_with_member(db, user_b)
+    with pytest.raises(AppError):
+        await svc.get_comment(c.id, org_b.id)
+    with pytest.raises(AppError):
+        await svc.set_comment_completed(c.id, org_b.id, True)
+
+
+@pytest.mark.asyncio
+async def test_comment_foreign_item_rejected(db):
+    from app.exceptions import AppError
+
+    user, org, svc = await _setup(db)
+    _, d1, sub1 = await _project_with_deliverable(svc, org, user, "image")
+    _, d2, sub2 = await _project_with_deliverable(svc, org, user, "image")
+    item2 = await svc.upload_file(sub2.id, d2.id, "other.png", PNG, "image/png", user.id)
+
+    # Comment on sub1 referencing sub2's item → 404
+    with pytest.raises(AppError) as exc:
+        await svc.add_comment(org.id, sub1.id, item2.id, user.id, text="cross-item")
+    assert exc.value.code == "ITEM_NOT_FOUND"

@@ -1221,7 +1221,7 @@ class ProjectService:
         region: dict | None = None,
         parent_id: str | None = None,
     ) -> SubmissionComment:
-        sub = await self.get_submission(submission_id)
+        await self.get_submission(submission_id)  # 404 if missing
 
         # Item must belong to this submission
         item = await self.db.get(SubmissionItem, item_id)

@@ -558,3 +558,116 @@ def test_prompt_request_cfg_steps_bounds():
         PromptItemRequest(deliverable_id="X", prompt="p", cfg_scale=101)
     with pytest.raises(ValidationError):
         PromptItemRequest(deliverable_id="X", prompt="p", steps=1001)
+
+
+# ── Anchored comments: auth + schema ──
+
+
+@pytest.mark.asyncio
+async def test_comments_list_requires_auth(client):
+    r = await client.get(f"/api/v1/orgs/{ORG}/submissions/{SUB}/comments")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_comments_create_requires_auth(client):
+    r = await client.post(
+        f"/api/v1/orgs/{ORG}/submissions/{SUB}/comments",
+        json={"item_id": "X", "text": "hi"},
+    )
+    assert r.status_code == 401
+
+
+def test_comment_request_empty_text_rejected():
+    from pydantic import ValidationError
+
+    from app.schemas.project import CreateCommentRequest
+
+    with pytest.raises(ValidationError):
+        CreateCommentRequest(item_id="X", text="   ")
+
+
+def test_comment_request_invalid_anchor():
+    from pydantic import ValidationError
+
+    from app.schemas.project import CreateCommentRequest
+
+    with pytest.raises(ValidationError):
+        CreateCommentRequest(item_id="X", text="t", anchor_type="pixel")
+
+
+def test_comment_request_region_normalized():
+    from app.schemas.project import CreateCommentRequest
+
+    req = CreateCommentRequest(
+        item_id="X",
+        text="fix the logo here",
+        anchor_type="region",
+        region={
+            "type": "rectangle",
+            "bounds": {"minX": 0.1, "minY": 0.2, "maxX": 0.5, "maxY": 0.6},
+            "junk_key": "dropped",
+        },
+    )
+    assert req.region == {
+        "type": "rectangle",
+        "bounds": {"minX": 0.1, "minY": 0.2, "maxX": 0.5, "maxY": 0.6},
+    }
+
+
+def test_comment_request_region_out_of_range():
+    from pydantic import ValidationError
+
+    from app.schemas.project import CreateCommentRequest
+
+    with pytest.raises(ValidationError):
+        CreateCommentRequest(
+            item_id="X",
+            text="t",
+            anchor_type="region",
+            region={"type": "rectangle", "bounds": {"minX": -0.1, "minY": 0, "maxX": 1, "maxY": 1}},
+        )
+    with pytest.raises(ValidationError):
+        CreateCommentRequest(
+            item_id="X",
+            text="t",
+            anchor_type="region",
+            region={
+                "type": "rectangle",
+                "bounds": {"minX": 0.9, "minY": 0, "maxX": 0.1, "maxY": 1},
+            },
+        )
+
+
+def test_comment_request_region_bad_shape():
+    from pydantic import ValidationError
+
+    from app.schemas.project import CreateCommentRequest
+
+    with pytest.raises(ValidationError):
+        CreateCommentRequest(
+            item_id="X",
+            text="t",
+            anchor_type="region",
+            region={"type": "hexagon", "bounds": {"minX": 0, "minY": 0, "maxX": 1, "maxY": 1}},
+        )
+
+
+def test_comment_request_timestamp_bounds():
+    from pydantic import ValidationError
+
+    from app.schemas.project import CreateCommentRequest
+
+    with pytest.raises(ValidationError):
+        CreateCommentRequest(item_id="X", text="t", anchor_type="time", timestamp_ms=-1)
+    with pytest.raises(ValidationError):
+        CreateCommentRequest(item_id="X", text="t", anchor_type="time", timestamp_ms=90_000_000)
+
+
+def test_comment_request_text_cap():
+    from pydantic import ValidationError
+
+    from app.schemas.project import CreateCommentRequest
+
+    with pytest.raises(ValidationError):
+        CreateCommentRequest(item_id="X", text="x" * 5001)
