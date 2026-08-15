@@ -313,7 +313,9 @@ class EvaluationService:
             "total_cost_usd": spent,
             "month": current_month.isoformat(),
             "budget_usd": budget,
-            "budget_remaining": (budget - spent) if budget else None,
+            # `budget` of 0 is a real (zero) budget, not "unlimited" — only None
+            # means unlimited. `if budget` would wrongly treat 0 as unlimited.
+            "budget_remaining": (budget - spent) if budget is not None else None,
         }
 
     async def check_budget(self, org_id: str) -> bool:
@@ -367,8 +369,11 @@ class EvaluationService:
         if org is None:
             raise AppError("ORG_NOT_FOUND", "Organization not found", 404)
 
-        current = org.settings or {}
-        eval_cfg = current.get("ai_evaluation", {})
+        # Rebuild the dict tree so SQLAlchemy's change detection fires — mutating
+        # a nested dict in place leaves the top-level reference unchanged, so a
+        # plain JSONB column is NOT marked dirty and the update is silently lost.
+        current = dict(org.settings or {})
+        eval_cfg = dict(current.get("ai_evaluation", {}))
         for k, v in updates.items():
             if v is not None:
                 eval_cfg[k] = v

@@ -482,8 +482,9 @@ class OrgService:
 
     async def update_settings(self, org_id: str, settings: dict) -> Organization:
         org = await self.get_org(org_id)
-        current = org.settings or {}
-        current.update(settings)
+        # New dict so SQLAlchemy detects the change — mutating org.settings in
+        # place leaves the reference identical and the update is not persisted.
+        current = {**(org.settings or {}), **settings}
         org.settings = current
         await self.db.flush()
         return org
