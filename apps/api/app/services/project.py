@@ -817,9 +817,7 @@ class ProjectService:
             .offset(offset)
             .limit(per_page)
         )
-        rows = [
-            (sub, name, title, sub.project_id) for sub, name, title in result.all()
-        ]
+        rows = [(sub, name, title, sub.project_id) for sub, name, title in result.all()]
         return rows, total
 
     # ── Extensions ──

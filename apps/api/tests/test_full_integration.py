@@ -700,7 +700,9 @@ async def test_markdown_item_roundtrip(c):
     # markdown item type must be accepted (was a 500 before the enum fix)
     r4 = await c.put(
         f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}",
-        json={"items": [{"deliverable_id": did, "type": "markdown", "content": "## Head\n\n**bold**"}]},
+        json={
+            "items": [{"deliverable_id": did, "type": "markdown", "content": "## Head\n\n**bold**"}]
+        },
         headers=h,
     )
     assert r4.status_code == 200
