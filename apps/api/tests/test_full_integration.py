@@ -3772,3 +3772,60 @@ async def test_show_score_masks_public_score(c):
     await c.put(f"/api/v1/portfolio/items/{item['id']}", json={"show_score": True}, headers=h)
     r = await c.get(f"/api/v1/u/{un}/items/{item['slug']}")
     assert r.json()["data"]["score"] == 92
+
+
+@pytest.mark.asyncio
+async def test_anonymous_round_masks_author_in_submission_detail(c):
+    """In an anonymous peer round, the allocated reviewer could read the
+    author's user_id straight off the submission detail — defeating
+    anonymity (bug #108). Non-anonymous rounds keep the author visible."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Anon Detail Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+
+    studs = []
+    for _ in range(2):
+        hs, us = await _auth(c)
+        link = await c.post(
+            f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho
+        )
+        await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()[
+            "data"
+        ]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
+        studs.append((hs, us["id"]))
+
+    rid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/peer-review-rounds",
+            json={"project_id": pid, "name": "R1", "num_reviews": 1, "anonymous": True},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
+
+    h0 = studs[0][0]
+    my = (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=h0)
+    ).json()["data"]
+    target = my[0]["submission_id"]
+    r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{target}", headers=h0)
+    assert r.status_code == 200
+    assert r.json()["data"]["user_id"] == ""  # author masked
+
+    # instructor still sees the author
+    r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{target}", headers=ho)
+    assert r.json()["data"]["user_id"] != ""

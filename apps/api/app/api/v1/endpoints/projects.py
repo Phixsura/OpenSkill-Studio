@@ -431,19 +431,25 @@ async def get_submission(
     sub = await _verify_submission_org(svc, submission_id, org_id)
 
     # Owner, instructor+, or an allocated peer reviewer can view
+    mask_author = False
     if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
         from sqlalchemy import select as _select
 
-        from app.models.project import PeerAssessment
+        from app.models.project import PeerAssessment, PeerReviewRound
 
         pr = await db.execute(
-            _select(PeerAssessment.id).where(
+            _select(PeerReviewRound.anonymous)
+            .join(PeerAssessment, PeerAssessment.round_id == PeerReviewRound.id)
+            .where(
                 PeerAssessment.submission_id == submission_id,
                 PeerAssessment.reviewer_id == user.id,
             )
         )
-        if pr.scalar_one_or_none() is None:
+        row = pr.first()
+        if row is None:
             raise HTTPException(status_code=403, detail="Access denied")
+        # Anonymous round: the reviewer must not learn whose work this is.
+        mask_author = bool(row[0])
 
     # Load items and reviews
     from sqlalchemy import select
@@ -459,8 +465,11 @@ async def get_submission(
         .order_by(SubmissionReview.created_at.desc())
     )
 
+    base = SubmissionResponse.model_validate(sub).model_dump()
+    if mask_author:
+        base["user_id"] = ""
     resp = SubmissionDetailResponse(
-        **SubmissionResponse.model_validate(sub).model_dump(),
+        **base,
         items=[SubmissionItemResponse.model_validate(i) for i in items_r.scalars()],
         reviews=[ReviewResponse.model_validate(r) for r in reviews_r.scalars()],
     )
