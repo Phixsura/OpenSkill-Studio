@@ -4470,3 +4470,22 @@ async def test_slug_caps_match_columns(c):
         f"/api/v1/orgs/{oid}/categories", json={"name": "Slug Cat", "slug": "s" * 150}, headers=h
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_location_and_icon_caps_match_columns(c):
+    """Two more cap/column mismatches (same class as #123/#125): profile
+    location cap 200 vs String(100) column; category icon cap 100 vs
+    String(50) column — both 500ed in the mismatch range (bug #126)."""
+    h, _ = await _auth(c)
+    r = await c.put("/api/v1/portfolio/profile", json={"location": "L" * 150}, headers=h)
+    assert r.status_code == 422
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/categories", json={"name": "Icon Cat", "icon": "I" * 80}, headers=h
+    )
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/categories", json={"name": "Icon Cat", "icon": "sparkles"}, headers=h
+    )
+    assert r.status_code == 201

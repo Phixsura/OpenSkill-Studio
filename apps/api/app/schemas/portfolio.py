@@ -82,8 +82,9 @@ class UpdateProfileRequest(BaseModel):
     @field_validator("location")
     @classmethod
     def validate_location(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 200:
-            raise ValueError("Location must be 200 characters or less")
+        # Column is String(100).
+        if v is not None and len(v) > 100:
+            raise ValueError("Location must be 100 characters or less")
         return v
 
     @field_validator("visibility")

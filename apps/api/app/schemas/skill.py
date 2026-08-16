@@ -36,8 +36,9 @@ class CreateCategoryRequest(BaseModel):
     @field_validator("icon")
     @classmethod
     def validate_icon(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 100:
-            raise ValueError("Icon must not exceed 100 characters")
+        # Column is String(50).
+        if v is not None and len(v) > 50:
+            raise ValueError("Icon must not exceed 50 characters")
         return v
 
 
