@@ -2906,3 +2906,52 @@ async def test_late_penalty_and_max_submissions(c):
     assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 201
     assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 201
     assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_grading_queue_routing_and_scoping(c):
+    """Auto-graded MCQ stays out of the manual grading queue; a text answer
+    enters it and leaves once graded; grading a bogus/cross-org attempt 404s."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={"name": "Grading Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    mcq = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={"title": "MCQ", "description": "d", "type": "multiple_choice", "config": {"correct": ["a"], "options": []}, "max_score": 10},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    txt = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={"title": "Text", "description": "d", "type": "text_answer", "config": {}, "max_score": 10},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
+
+    mcq_att = (await c.post(f"/api/v1/orgs/{oid}/exercises/{mcq}/attempts", json={"answer": {"selected": ["a"]}}, headers=h)).json()["data"]
+    assert mcq_att["graded_by"] == "auto"
+    txt_att = (await c.post(f"/api/v1/orgs/{oid}/exercises/{txt}/attempts", json={"answer": {"text": "ans"}}, headers=h)).json()["data"]
+    assert txt_att["graded_by"] is None
+
+    pend = (await c.get(f"/api/v1/orgs/{oid}/grading/pending", headers=h)).json()["data"]
+    ids = {a["id"] for a in pend}
+    assert mcq_att["id"] not in ids  # auto-graded excluded
+    assert txt_att["id"] in ids  # awaiting manual grade
+
+    # grade the text answer → leaves the queue
+    assert (await c.post(f"/api/v1/orgs/{oid}/grading/attempts/{txt_att['id']}", json={"score": 8}, headers=h)).status_code == 200
+    pend = (await c.get(f"/api/v1/orgs/{oid}/grading/pending", headers=h)).json()["data"]
+    assert txt_att["id"] not in {a["id"] for a in pend}
+
+    # bogus attempt id → 404
+    assert (await c.post(f"/api/v1/orgs/{oid}/grading/attempts/01BOGUSBOGUSBOGUSBOGUSBOGU", json={"score": 5}, headers=h)).status_code == 404
