@@ -4665,3 +4665,58 @@ async def test_archived_prereq_does_not_lock_forever(c):
         headers=hs,
     )
     assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_peer_round_deadline_enforced(c):
+    """PeerReviewRound.deadline was stored but never checked — assessments
+    could be submitted indefinitely after it passed (bug #130)."""
+    from datetime import UTC, datetime, timedelta
+
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Deadline Round Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+    studs = []
+    for _ in range(2):
+        hs, _ = await _auth(c)
+        link = await c.post(
+            f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho
+        )
+        await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()[
+            "data"
+        ]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
+        studs.append(hs)
+
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    rid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/peer-review-rounds",
+            json={"project_id": pid, "name": "R1", "num_reviews": 1, "deadline": past},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
+    my = (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=studs[0])
+    ).json()["data"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/peer-assessments/{my[0]['id']}/submit",
+        json={"score": 50},
+        headers=studs[0],
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "DEADLINE_PASSED"
