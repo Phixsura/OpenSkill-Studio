@@ -2656,3 +2656,31 @@ async def test_progress_categories_populated(c):
     assert entry["skills_total"] == 2
     assert entry["skills_completed"] == 0
     assert entry["completion_percentage"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_single_skill_progress_includes_name(c):
+    """GET /progress/me/skills/{id} must return the skill_name (was always ''
+    because SkillProgress has no skill_name column)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={"name": "Python Mastery", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={"title": "Ex", "description": "d", "type": "text_answer", "config": {}, "max_score": 10},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=h)
+    d = (await c.get(f"/api/v1/orgs/{oid}/progress/me/skills/{sk}", headers=h)).json()["data"]
+    assert d is not None
+    assert d["skill_name"] == "Python Mastery"

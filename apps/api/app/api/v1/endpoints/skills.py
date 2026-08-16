@@ -474,6 +474,10 @@ async def get_my_skill_progress(
     if progress is None:
         return DataResponse(data=None)
     resp = SkillProgressResponse.model_validate(progress)
+    # SkillProgress has no skill_name column — populate it so the field isn't
+    # returned as an empty string.
+    skill = await svc.get_skill(skill_id)
+    resp.skill_name = skill.name
     return DataResponse(data=resp)
 
 
