@@ -3029,3 +3029,36 @@ async def test_private_profile_hides_item_detail(c):
     assert (await c.put("/api/v1/portfolio/profile", json={"visibility": "private"}, headers=h)).status_code == 200
     assert (await c.get(f"/api/v1/u/{un}")).status_code == 404
     assert (await c.get(f"/api/v1/u/{un}/items/{item['slug']}")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_overview_excludes_removed_org_work(c):
+    """/me/overview must not surface drafts/reviews from orgs the user was
+    removed from — those are dead links that 403 when opened (bug #100)."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await _org(c, hs)  # student keeps one active org so the early-return doesn't mask the bug
+    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi)
+
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Overview Proj",
+                "description": "d" * 10,
+                "instructions": "i" * 10,
+                "rubric": [{"criterion": "Quality", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=hi)
+    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=hs)).status_code == 201
+
+    d = (await c.get("/api/v1/me/overview", headers=hs)).json()["data"]
+    assert len(d["drafts"]) == 1
+
+    assert (await c.delete(f"/api/v1/orgs/{oid}/members/{us['id']}", headers=hi)).status_code == 204
+    d = (await c.get("/api/v1/me/overview", headers=hs)).json()["data"]
+    assert d["drafts"] == []

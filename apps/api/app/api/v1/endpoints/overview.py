@@ -61,6 +61,9 @@ async def my_overview(
         .where(
             Submission.user_id == user.id,
             Submission.status == SubmissionStatus.DRAFT,
+            # Only orgs the user is still an active member of — a removed
+            # member would otherwise see dead links they can no longer open.
+            Submission.org_id.in_(org_ids),
         )
         .order_by(Submission.created_at.desc())
         .limit(5)
@@ -79,6 +82,7 @@ async def my_overview(
             PeerAssessment.reviewer_id == user.id,
             PeerAssessment.status == PeerAssessmentStatus.PENDING,
             PeerReviewRound.phase == PeerReviewPhase.ASSESSMENT,
+            PeerReviewRound.org_id.in_(org_ids),
         )
     )
     peer_pending = peer_r.scalar_one()
@@ -96,7 +100,7 @@ async def my_overview(
         )
         .join(Submission, Submission.id == SubmissionReview.submission_id)
         .join(Project, Project.id == Submission.project_id)
-        .where(Submission.user_id == user.id)
+        .where(Submission.user_id == user.id, Submission.org_id.in_(org_ids))
         .order_by(SubmissionReview.created_at.desc())
         .limit(5)
     )
