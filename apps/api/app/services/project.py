@@ -350,9 +350,15 @@ class ProjectService:
         status: str | None = None,
         page: int = 1,
         per_page: int = 20,
+        *,
+        published_only: bool = False,
     ) -> tuple[list[Project], int]:
         base = select(Project).where(Project.org_id == org_id)
-        if status:
+        if published_only:
+            # Students must not see draft projects an instructor is still
+            # authoring (their instructions, deadlines, and reference assets).
+            base = base.where(Project.status == ContentStatus.PUBLISHED)
+        elif status:
             try:
                 base = base.where(Project.status == ContentStatus(status))
             except ValueError as exc:

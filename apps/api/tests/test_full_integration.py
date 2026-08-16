@@ -4970,3 +4970,53 @@ async def test_round_results_exclude_pending_and_self(c):
     assert len(results) == 1  # only the one submitted assessment aggregates
     assert results[0]["avg_score"] == 80.0
     assert results[0]["review_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_draft_projects_hidden_from_students(c):
+    """Skills gate visibility on publish status, but projects did not — a
+    student could list and read a draft project's instructions, deadline,
+    rubric, deliverables, and reference assets before publication
+    (bug #139). Instructors still see drafts; publishing reveals it."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Draft Secret",
+                "description": "unreleased",
+                "instructions": "i" * 10,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]
+
+    # student: invisible everywhere while draft
+    assert (await c.get(f"/api/v1/orgs/{oid}/projects/{p['id']}", headers=hs)).status_code == 404
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/projects/{p['id']}/deliverables", headers=hs)
+    ).status_code == 404
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/projects/{p['id']}/assets", headers=hs)
+    ).status_code == 404
+    titles = [
+        x["title"] for x in (await c.get(f"/api/v1/orgs/{oid}/projects", headers=hs)).json()["data"]
+    ]
+    assert "Draft Secret" not in titles
+
+    # instructor sees it
+    assert (await c.get(f"/api/v1/orgs/{oid}/projects/{p['id']}", headers=hi)).status_code == 200
+
+    # publish → student can see it
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=hi)
+    assert (await c.get(f"/api/v1/orgs/{oid}/projects/{p['id']}", headers=hs)).status_code == 200
+    titles = [
+        x["title"] for x in (await c.get(f"/api/v1/orgs/{oid}/projects", headers=hs)).json()["data"]
+    ]
+    assert "Draft Secret" in titles

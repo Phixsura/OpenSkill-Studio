@@ -50,6 +50,17 @@ async def _verify_project_org(svc: ProjectService, project_id: str, org_id: str)
     return project
 
 
+async def _verify_project_visible(svc: ProjectService, project_id: str, org_id: str, member):
+    """Like _verify_project_org, but a draft project is invisible (404) to
+    non-instructors — its content must not leak before publication."""
+    from app.models.skill import ContentStatus
+
+    project = await _verify_project_org(svc, project_id, org_id)
+    if member.role not in INSTRUCTOR_ROLES and project.status != ContentStatus.PUBLISHED:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
 async def _verify_submission_org(svc: ProjectService, submission_id: str, org_id: str):
     """Load submission and verify it belongs to the given org."""
     sub = await svc.get_submission(submission_id)
@@ -89,9 +100,13 @@ async def list_projects(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    projects, total = await svc.list_projects(org_id, status, page, per_page)
+    # Students only see published projects; instructors see drafts too.
+    published_only = member.role not in INSTRUCTOR_ROLES
+    projects, total = await svc.list_projects(
+        org_id, status, page, per_page, published_only=published_only
+    )
     return ListResponse(
         data=[ProjectResponse.model_validate(p) for p in projects],
         meta=PaginationMeta(
@@ -141,9 +156,11 @@ async def get_project(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    project = await _verify_project_org(svc, project_id, org_id)
+    # A draft project is only visible to instructors — a student with the id
+    # must not read its instructions/deadline/rubric before it's published.
+    project = await _verify_project_visible(svc, project_id, org_id, member)
     deliverables = await svc.list_deliverables(project_id)
     skill_ids = await svc.get_project_skill_ids(project_id)
 
@@ -275,9 +292,9 @@ async def list_deliverables(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await _verify_project_org(svc, project_id, org_id)
+    await _verify_project_visible(svc, project_id, org_id, member)
     deliverables = await svc.list_deliverables(project_id)
     return DataResponse(data=[DeliverableResponse.model_validate(d) for d in deliverables])
 
@@ -939,9 +956,9 @@ async def list_assets(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await _verify_project_org(svc, project_id, org_id)
+    await _verify_project_visible(svc, project_id, org_id, member)
     assets = await svc.list_assets(project_id)
     return DataResponse(data=[AssetResponse.model_validate(a) for a in assets])
 
