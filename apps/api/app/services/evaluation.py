@@ -157,8 +157,11 @@ class EvaluationService:
             total_score = result.get("total_score", 0)
             max_score = result.get("max_score", 0)
 
-            # Determine review status
-            threshold = DEFAULT_PASS_THRESHOLD
+            # Determine review status — honor the org's configured threshold
+            # (the settings API accepts pass_threshold; using only the module
+            # default made that setting a no-op).
+            eval_settings = await self.get_eval_settings(task.org_id)
+            threshold = eval_settings.get("pass_threshold", DEFAULT_PASS_THRESHOLD)
             review_status = (
                 ReviewStatus.APPROVED
                 if max_score > 0 and total_score / max_score >= threshold

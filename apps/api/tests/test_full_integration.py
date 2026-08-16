@@ -3829,3 +3829,57 @@ async def test_anonymous_round_masks_author_in_submission_detail(c):
     # instructor still sees the author
     r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{target}", headers=ho)
     assert r.json()["data"]["user_id"] != ""
+
+
+@pytest.mark.asyncio
+async def test_pass_threshold_setting_honored(c):
+    """The org's pass_threshold setting was accepted by the settings API but
+    never read — evaluation always used the 0.6 module default (bug #109).
+    With threshold 0.9, a 70/100 eval must request revision, not approve."""
+    from unittest.mock import AsyncMock, patch
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={"enabled": True, "pass_threshold": 0.9},
+        headers=h,
+    )
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Threshold Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+
+    class _Resp:
+        content = '{"scores":[{"criterion":"Q","score":70,"max_score":100,"feedback":"ok"}],"overall_feedback":"g","strengths":[],"improvements":[]}'
+        input_tokens = 10
+        output_tokens = 20
+        provider = "anthropic"
+        model = "claude-sonnet-5"
+
+    fake = AsyncMock()
+    fake.complete = AsyncMock(return_value=_Resp())
+    with patch("app.services.evaluation.create_llm_client", return_value=fake):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/evaluation/trigger",
+            json={"submission_id": sid, "type": "submission_review"},
+            headers=h,
+        )
+    assert r.json()["data"]["status"] == "completed"
+    sub = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
+        "data"
+    ]
+    assert sub["status"] == "revision_requested"  # 0.7 < 0.9 threshold
