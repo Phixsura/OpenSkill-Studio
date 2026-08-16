@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, field_validator
@@ -36,8 +37,13 @@ class UpdateProfileRequest(BaseModel):
     @field_validator("avatar_url")
     @classmethod
     def validate_avatar_url(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
+        if v is None:
+            return v
+        if len(v) > 500:
             raise ValueError("Avatar Url must not exceed 500 characters")
+        # Rendered as <img src> — javascript:/data: would be stored XSS.
+        if v and not re.match(r"^https?://", v, re.IGNORECASE):
+            raise ValueError("Avatar URL must start with http:// or https://")
         return v
 
 

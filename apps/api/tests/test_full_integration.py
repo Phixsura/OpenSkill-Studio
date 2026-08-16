@@ -2990,3 +2990,24 @@ async def test_org_logo_url_scheme_restricted(c):
     r = await c.put(f"/api/v1/orgs/{oid}", json={"logo_url": "https://cdn.example.com/logo.png"}, headers=h)
     assert r.status_code == 200
     assert r.json()["data"]["logo_url"] == "https://cdn.example.com/logo.png"
+
+
+@pytest.mark.asyncio
+async def test_avatar_and_portfolio_update_url_schemes(c):
+    """avatar_url (bug #97) and portfolio-item update URLs (bug #98) must
+    reject javascript:/data: schemes — update was bypassing the create-time
+    validation, and avatar_url had no scheme check at all."""
+    h, _ = await _auth(c)
+
+    r = await c.put("/api/v1/auth/me", json={"avatar_url": "javascript:alert(1)"}, headers=h)
+    assert r.status_code == 422
+    r = await c.put("/api/v1/auth/me", json={"avatar_url": "https://cdn.example.com/a.png"}, headers=h)
+    assert r.status_code == 200
+
+    iid = (await c.post("/api/v1/portfolio/items", json={"title": "URL Item"}, headers=h)).json()["data"]["id"]
+    r = await c.put(f"/api/v1/portfolio/items/{iid}", json={"external_url": "javascript:alert(1)"}, headers=h)
+    assert r.status_code == 422
+    r = await c.put(f"/api/v1/portfolio/items/{iid}", json={"cover_image_url": "data:text/html,<x>"}, headers=h)
+    assert r.status_code == 422
+    r = await c.put(f"/api/v1/portfolio/items/{iid}", json={"external_url": "https://example.com/w"}, headers=h)
+    assert r.status_code == 200

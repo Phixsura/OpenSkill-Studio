@@ -228,18 +228,15 @@ class UpdatePortfolioItemRequest(BaseModel):
             raise ValueError("Description must not exceed 2000 characters")
         return v
 
-    @field_validator("cover_image_url")
+    @field_validator("external_url", "cover_image_url")
     @classmethod
-    def validate_cover_image_url(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
-            raise ValueError("Cover Image Url must not exceed 500 characters")
-        return v
-
-    @field_validator("external_url")
-    @classmethod
-    def validate_external_url(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
-            raise ValueError("External Url must not exceed 500 characters")
+    def validate_urls(cls, v: str | None) -> str | None:
+        # Same rules as create — update must not be a scheme-validation bypass.
+        if v is not None and v != "":
+            if len(v) > 500:
+                raise ValueError("URL must be 500 characters or less")
+            if not re.match(r"^https?://", v, re.IGNORECASE):
+                raise ValueError("URL must start with http:// or https://")
         return v
 
     @field_validator("tags")
