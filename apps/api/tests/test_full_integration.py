@@ -4754,3 +4754,24 @@ async def test_submission_version_unique_after_delete(c):
         "data"
     ]
     assert s3["version"] == 3  # not a duplicate of 2
+
+
+@pytest.mark.asyncio
+async def test_org_settings_hidden_from_non_admins(c):
+    """GET /orgs/{id} returned the full settings blob (AI budget, eval
+    config) to every member — students could read the org's spend caps
+    (bug #132). Settings are now admin/owner-only in the detail response."""
+    ho, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, ho)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=ho
+    )
+    await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={"enabled": True, "monthly_budget_usd": 500},
+        headers=ho,
+    )
+    assert (await c.get(f"/api/v1/orgs/{oid}", headers=hs)).json()["data"]["settings"] == {}
+    owner_settings = (await c.get(f"/api/v1/orgs/{oid}", headers=ho)).json()["data"]["settings"]
+    assert owner_settings["ai_evaluation"]["monthly_budget_usd"] == 500

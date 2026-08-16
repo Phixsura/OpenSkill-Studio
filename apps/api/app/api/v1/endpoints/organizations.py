@@ -124,6 +124,10 @@ async def get_org(
     org = await service.get_org(org_id)
     count = await service.get_member_count(org_id)
 
+    # Settings hold admin configuration (AI budget, eval config) — students
+    # and instructors don't need them and must not see the org's spend caps.
+    show_settings = member.role in (OrgRole.OWNER, OrgRole.ADMIN)
+
     resp = OrgDetailResponse(
         id=org.id,
         name=org.name,
@@ -131,7 +135,7 @@ async def get_org(
         description=org.description,
         logo_url=org.logo_url,
         status=org.status.value,
-        settings=org.settings or {},
+        settings=(org.settings or {}) if show_settings else {},
         created_by=org.created_by,
         role=member.role.value,
         member_count=count,
