@@ -2232,3 +2232,43 @@ async def test_reorder_exercises_rejects_foreign_exercise(c):
         headers=h,
     )
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_portfolio_item_cannot_link_foreign_submission(c):
+    """Linking another user's submission to your portfolio item must 404."""
+    hv, _ = await _auth(c)
+    oid = await _org(c, hv)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "PF Link Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=hv,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hv)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hv)).json()["data"]["id"]
+
+    ha, _ = await _auth(c)
+    r = await c.post(
+        "/api/v1/portfolio/items",
+        json={"title": "Stolen Work", "submission_id": sid, "visibility": "public"},
+        headers=ha,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_username_collision_and_format(c):
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    import uuid as _uuid
+
+    uname = f"taken{_uuid.uuid4().hex[:6]}"
+    assert (await c.put("/api/v1/portfolio/username", json={"username": uname}, headers=h1)).status_code == 200
+    # same name (case-insensitive) taken by another user → 409
+    assert (await c.put("/api/v1/portfolio/username", json={"username": uname.upper()}, headers=h2)).status_code == 409
+    # reserved / malformed → 422
+    for bad in ("admin", "ab", "has space", "x" * 50):
+        r = await c.put("/api/v1/portfolio/username", json={"username": bad}, headers=h2)
+        assert r.status_code == 422, f"{bad!r} -> {r.status_code}"
