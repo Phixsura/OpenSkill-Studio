@@ -24,6 +24,15 @@ router = APIRouter(tags=["Portfolio"])
 # ── Public (no auth) ─────────────────────────────────────
 
 
+def _public_item(item) -> PortfolioItemResponse:
+    """Serialize for the public page — honor the show_score privacy toggle
+    by masking the score when it's off."""
+    resp = PortfolioItemResponse.model_validate(item)
+    if not resp.show_score:
+        resp.score = None
+    return resp
+
+
 @router.get("/u/{username}", response_model=PublicProfileResponse)
 async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
     svc = PortfolioService(db)
@@ -32,9 +41,7 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Profile not found")
 
     # Convert featured items to response format
-    profile["featured_items"] = [
-        PortfolioItemResponse.model_validate(i) for i in profile["featured_items"]
-    ]
+    profile["featured_items"] = [_public_item(i) for i in profile["featured_items"]]
     return profile
 
 
@@ -42,7 +49,7 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
 async def get_public_items(username: str, db: AsyncSession = Depends(get_db)):
     svc = PortfolioService(db)
     items = await svc.get_public_items(username)
-    return DataResponse(data=[PortfolioItemResponse.model_validate(i) for i in items])
+    return DataResponse(data=[_public_item(i) for i in items])
 
 
 @router.get("/u/{username}/items/{slug}", response_model=DataResponse[PortfolioItemResponse])
@@ -51,7 +58,7 @@ async def get_public_item(username: str, slug: str, db: AsyncSession = Depends(g
     item = await svc.get_public_item(username, slug)
     if item is None:
         raise HTTPException(status_code=404, detail="Item not found")
-    return DataResponse(data=PortfolioItemResponse.model_validate(item))
+    return DataResponse(data=_public_item(item))
 
 
 # ── Profile Management ───────────────────────────────────

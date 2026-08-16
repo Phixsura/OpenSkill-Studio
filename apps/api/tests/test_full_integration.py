@@ -3720,3 +3720,55 @@ async def test_skill_badges_sync_from_progress(c):
     )
     skills = (await c.get(f"/api/v1/u/{un}")).json()["skills"]
     assert not any(s["name"] == "Badge Skill" for s in skills)
+
+
+@pytest.mark.asyncio
+async def test_show_score_masks_public_score(c):
+    """show_score=False (the default) must hide the score on all public
+    endpoints — it was returned verbatim, making the privacy toggle a no-op
+    (bug #107)."""
+    h, _ = await _auth(c)
+    un = f"user{uuid.uuid4().hex[:8]}"
+    await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)
+    oid = await _org(c, h)
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Score Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}/submit", headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "approved", "score": 92},
+        headers=h,
+    )
+    item = (
+        await c.post(
+            "/api/v1/portfolio/items",
+            json={"title": "Scored Work", "submission_id": sid},
+            headers=h,
+        )
+    ).json()["data"]
+    assert item["score"] == 92 and item["show_score"] is False  # owner sees it
+
+    # public: masked while show_score is off
+    r = await c.get(f"/api/v1/u/{un}/items/{item['slug']}")
+    assert r.json()["data"]["score"] is None
+    r = await c.get(f"/api/v1/u/{un}/items")
+    assert r.json()["data"][0]["score"] is None
+
+    # owner opts in → public sees it
+    await c.put(f"/api/v1/portfolio/items/{item['id']}", json={"show_score": True}, headers=h)
+    r = await c.get(f"/api/v1/u/{un}/items/{item['slug']}")
+    assert r.json()["data"]["score"] == 92
