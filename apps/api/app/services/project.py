@@ -501,11 +501,21 @@ class ProjectService:
         if project.max_submissions > 0 and count >= project.max_submissions:
             raise MaxSubmissionsReachedError(project.max_submissions)
 
+        # Version = max existing + 1, not count + 1 — deleting a draft would
+        # otherwise reuse a version number that already exists.
+        max_ver_r = await self.db.execute(
+            select(func.max(Submission.version)).where(
+                Submission.project_id == project_id,
+                Submission.user_id == user_id,
+            )
+        )
+        next_version = (max_ver_r.scalar_one() or 0) + 1
+
         submission = Submission(
             org_id=org_id,
             project_id=project_id,
             user_id=user_id,
-            version=count + 1,
+            version=next_version,
             status=SubmissionStatus.DRAFT,
         )
         self.db.add(submission)

@@ -4720,3 +4720,37 @@ async def test_peer_round_deadline_enforced(c):
     )
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "DEADLINE_PASSED"
+
+
+@pytest.mark.asyncio
+async def test_submission_version_unique_after_delete(c):
+    """Submission versions used count+1 — deleting a draft then creating a
+    new one produced two submissions with the same version (bug #131, same
+    class as the item-version fix #66). Now max+1."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Ver Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=h)
+    s1 = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=h)).json()[
+        "data"
+    ]
+    s2 = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=h)).json()[
+        "data"
+    ]
+    assert (s1["version"], s2["version"]) == (1, 2)
+    await c.delete(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{s1['id']}", headers=h)
+    s3 = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=h)).json()[
+        "data"
+    ]
+    assert s3["version"] == 3  # not a duplicate of 2
