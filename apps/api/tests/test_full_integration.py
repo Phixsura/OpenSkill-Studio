@@ -5081,3 +5081,56 @@ async def test_draft_skills_and_templates_hidden_from_students(c):
     # publish → student sees the skill
     await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=hi)
     assert (await c.get(f"/api/v1/orgs/{oid}/skills/{sk}", headers=hs)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_draft_skill_exercises_hidden_from_students(c):
+    """#140 gated skill reads, but the standalone exercise endpoints
+    bypassed it — a student could read a draft skill's questions via
+    GET /exercises/{id} and the skill's exercise list (bug #141).
+    Exercises now inherit their skill's draft visibility."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=hi)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Draft Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Secret Ex",
+                "description": "q",
+                "type": "multiple_choice",
+                "config": {"correct": ["a"], "options": ["a", "b"]},
+                "max_score": 10,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+
+    assert (await c.get(f"/api/v1/orgs/{oid}/exercises/{ex}", headers=hs)).status_code == 404
+    assert (await c.get(f"/api/v1/orgs/{oid}/skills/{sk}/exercises", headers=hs)).status_code == 404
+    # instructor unaffected
+    assert (await c.get(f"/api/v1/orgs/{oid}/exercises/{ex}", headers=hi)).status_code == 200
+
+    # publish → student can read (answer key still stripped, per #127)
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=hi)
+    r = await c.get(f"/api/v1/orgs/{oid}/exercises/{ex}", headers=hs)
+    assert r.status_code == 200
+    assert "correct" not in r.json()["data"]["config"]

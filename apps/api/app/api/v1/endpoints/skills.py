@@ -48,6 +48,15 @@ def _exercise_response(ex, member) -> ExerciseResponse:
     return resp
 
 
+def _require_skill_visible(skill, member) -> None:
+    """A draft skill's content — including its exercises — is instructor-only
+    until published. Mirrors the project/skill read gates (#139/#140)."""
+    from app.models.skill import ContentStatus
+
+    if member.role not in _INSTRUCTOR_ROLES and skill.status != ContentStatus.PUBLISHED:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+
 # ── Categories ───────────────────────────────────────────
 
 
@@ -327,6 +336,7 @@ async def list_exercises(
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
+    _require_skill_visible(skill, member)
     exercises = await svc.list_exercises(skill_id)
     return DataResponse(data=[_exercise_response(e, member) for e in exercises])
 
@@ -342,11 +352,11 @@ async def get_exercise(
     svc = SkillService(db)
     ex = await svc.get_exercise(exercise_id)
     if ex.org_id != org_id:
-        from fastapi import HTTPException  # pragma: no cover
-
-        raise HTTPException(
-            status_code=404, detail="Exercise not found in this organization"
-        )  # pragma: no cover
+        raise HTTPException(status_code=404, detail="Exercise not found in this organization")
+    # An exercise inherits its skill's draft visibility — otherwise a student
+    # reads a draft skill's questions via the standalone exercise endpoint.
+    skill = await svc.get_skill(ex.skill_id)
+    _require_skill_visible(skill, member)
     return DataResponse(data=_exercise_response(ex, member))
 
 
