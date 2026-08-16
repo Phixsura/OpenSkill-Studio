@@ -4054,3 +4054,24 @@ async def test_template_skill_names_linked_on_instantiation(c):
     ).json()["data"]["id"]
     detail = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}", headers=h)).json()["data"]
     assert detail["skill_ids"] == [sk]
+
+
+@pytest.mark.asyncio
+async def test_deleted_user_tokens_invalid(c):
+    """Access tokens must die when a user is soft-deleted (verify-only lock:
+    get_current_user and refresh_tokens both check is_active)."""
+    from sqlalchemy import update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.user import User, UserRole
+
+    h, u = await _auth(c)
+    async with AsyncSessionLocal() as db:
+        await db.execute(update(User).where(User.id == u["id"]).values(role=UserRole.ADMIN))
+        await db.commit()
+
+    h2, u2 = await _auth(c)
+    r = await c.delete(f"/api/v1/admin/users/{u2['id']}", headers=h)
+    assert r.status_code == 204
+    r = await c.get("/api/v1/auth/me", headers=h2)
+    assert r.status_code == 401
