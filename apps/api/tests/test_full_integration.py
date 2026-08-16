@@ -2975,3 +2975,18 @@ async def test_join_archived_org_rejected(c):
     assert r.status_code == 422
     orgs = (await c.get("/api/v1/orgs", headers=h2)).json()["data"]
     assert all(o["id"] != oid for o in orgs)
+
+
+@pytest.mark.asyncio
+async def test_org_logo_url_scheme_restricted(c):
+    """logo_url is rendered as <img src>; javascript:/data: schemes must be
+    rejected (stored-XSS vector, bug #96). https stays accepted."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.put(f"/api/v1/orgs/{oid}", json={"logo_url": "javascript:alert(1)"}, headers=h)
+    assert r.status_code == 422
+    r = await c.put(f"/api/v1/orgs/{oid}", json={"logo_url": "data:text/html,<script>1</script>"}, headers=h)
+    assert r.status_code == 422
+    r = await c.put(f"/api/v1/orgs/{oid}", json={"logo_url": "https://cdn.example.com/logo.png"}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["logo_url"] == "https://cdn.example.com/logo.png"

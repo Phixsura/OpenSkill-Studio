@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, field_validator
@@ -48,8 +49,14 @@ class UpdateOrgRequest(BaseModel):
     @field_validator("logo_url")
     @classmethod
     def validate_logo_url(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
+        if v is None:
+            return v
+        if len(v) > 500:
             raise ValueError("Logo Url must not exceed 500 characters")
+        # Rendered as <img src> in the UI — restrict to http(s) so a stored
+        # javascript:/data: URL can't become an XSS vector.
+        if v and not re.match(r"^https?://", v, re.IGNORECASE):
+            raise ValueError("Logo URL must start with http:// or https://")
         return v
 
     @field_validator("name")
