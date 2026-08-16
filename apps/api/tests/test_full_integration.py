@@ -4913,3 +4913,60 @@ async def test_upload_note_bounded(c):
         headers=h,
     )
     assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_round_results_exclude_pending_and_self(c):
+    """Verify-only lock (rounds 95-96): round_results aggregates only
+    SUBMITTED, non-self assessments — a pending (never submitted)
+    assessment must not drag the average."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Agg Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+    studs = []
+    for _ in range(3):
+        hs, _ = await _auth(c)
+        link = await c.post(
+            f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho
+        )
+        await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()[
+            "data"
+        ]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
+        studs.append(hs)
+    rid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/peer-review-rounds",
+            json={"project_id": pid, "name": "R1", "num_reviews": 1},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
+    # only student 0 submits their assessment; others stay pending
+    my = (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=studs[0])
+    ).json()["data"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/peer-assessments/{my[0]['id']}/submit",
+        json={"score": 80},
+        headers=studs[0],
+    )
+    results = (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=ho)
+    ).json()["data"]
+    assert len(results) == 1  # only the one submitted assessment aggregates
+    assert results[0]["avg_score"] == 80.0
+    assert results[0]["review_count"] == 1
