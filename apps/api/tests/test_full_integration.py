@@ -2316,3 +2316,24 @@ async def test_review_score_breakdown_bounded(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_id_list_and_settings_bounds(c):
+    """skill_ids / skill_names lists and the org settings dict are bounded."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={"title": "IL Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}], "skill_ids": ["x"] * 300},
+        headers=h,
+    )
+    assert r.status_code == 422
+    r = await c.put(f"/api/v1/orgs/{oid}/settings", json={"settings": {"blob": "z" * 25000}}, headers=h)
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/project-templates",
+        json={"name": "T", "description": "d", "instructions": "i", "difficulty": "intermediate", "rubric": [{"criterion": "Q", "max_score": 100}], "deliverables": [], "skill_names": ["x"] * 300},
+        headers=h,
+    )
+    assert r.status_code == 422

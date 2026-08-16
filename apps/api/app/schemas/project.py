@@ -133,6 +133,11 @@ class CreateProjectRequest(BaseModel):
             raise ValueError("max_submissions must be between 0 and 1000")
         return v
 
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, v):
+        return _validate_id_list(v, "skill_ids")
+
     @model_validator(mode="after")
     def validate_deadline_ordering(self):
         # A late_deadline before the deadline makes the "late" window negative,
@@ -495,6 +500,18 @@ def _validate_template_deliverables(v: list) -> list:
     return v
 
 
+def _validate_id_list(v: list | None, label: str, max_len: int = 200) -> list | None:
+    """Bound a list of string ids/names so it can't be an unbounded blob."""
+    if v is None:
+        return v
+    if len(v) > 200:
+        raise ValueError(f"At most 200 {label}")
+    for x in v:
+        if not isinstance(x, str) or len(x) > max_len:
+            raise ValueError(f"Each {label} entry must be a string of {max_len} chars or less")
+    return v
+
+
 def _validate_rubric_items(v: list) -> list:
     """Same per-item rubric rules as project creation — a template's rubric is
     copied verbatim into a project, so it must satisfy project constraints."""
@@ -568,6 +585,11 @@ class CreateTemplateRequest(BaseModel):
             raise ValueError("suggested_minutes must be between 0 and 99999")
         return v
 
+    @field_validator("skill_names")
+    @classmethod
+    def validate_skill_names(cls, v):
+        return _validate_id_list(v, "skill_names")
+
 
 class UpdateTemplateRequest(BaseModel):
     name: str | None = None
@@ -602,6 +624,11 @@ class UpdateTemplateRequest(BaseModel):
         if v is not None:
             return _validate_rubric_items(v)
         return v
+
+    @field_validator("skill_names")
+    @classmethod
+    def validate_skill_names(cls, v):
+        return _validate_id_list(v, "skill_names")
 
 
 class TemplateResponse(BaseModel):

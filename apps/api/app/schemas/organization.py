@@ -173,3 +173,11 @@ class UpdateMemberRoleRequest(BaseModel):
 
 class UpdateOrgSettingsRequest(BaseModel):
     settings: dict
+
+    @field_validator("settings")
+    @classmethod
+    def validate_settings(cls, v: dict) -> dict:
+        # Bound the settings JSON blob so it can't be used for unbounded storage.
+        if len(str(v)) > 20000:
+            raise ValueError("settings object is too large")
+        return v
