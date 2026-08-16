@@ -4798,3 +4798,21 @@ async def test_cover_upload_rejects_oversize_streaming(c):
         headers=h,
     )
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_member_emails_hidden_from_students(c):
+    """The members roster returned every member's email to any org member —
+    a student could harvest all classmates' addresses (bug #134). Emails
+    are now instructor+-only; names/avatars stay visible."""
+    ho, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, ho)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=ho
+    )
+    rows = (await c.get(f"/api/v1/orgs/{oid}/members", headers=hs)).json()["data"]
+    assert all(r["user"]["email"] == "" for r in rows)
+    assert all(r["user"]["display_name"] for r in rows)
+    rows = (await c.get(f"/api/v1/orgs/{oid}/members", headers=ho)).json()["data"]
+    assert any("@" in r["user"]["email"] for r in rows)

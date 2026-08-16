@@ -43,15 +43,23 @@ def _link_response(link, base_url: str = "http://localhost:3000") -> InviteLinkR
     )
 
 
-async def _member_response(member, db: AsyncSession) -> OrgMemberResponse:
+async def _member_response(
+    member, db: AsyncSession, *, include_email: bool = True
+) -> OrgMemberResponse:
     user = await db.get(User, member.user_id)
+    if user:
+        user_resp = OrgMemberUserResponse.model_validate(user)
+        # Students don't need classmates' email addresses — exposing them to
+        # every member makes the roster an email-harvesting endpoint.
+        if not include_email:
+            user_resp.email = ""
+    else:
+        user_resp = OrgMemberUserResponse(
+            id=member.user_id, email="", display_name="Unknown", avatar_url=None
+        )
     return OrgMemberResponse(
         id=member.id,
-        user=OrgMemberUserResponse.model_validate(user)
-        if user
-        else OrgMemberUserResponse(
-            id=member.user_id, email="", display_name="Unknown", avatar_url=None
-        ),
+        user=user_resp,
         role=member.role.value,
         status=member.status.value,
         joined_at=member.joined_at,
@@ -224,11 +232,12 @@ async def list_members(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    actor = await require_org_member(org_id, user, db)
     service = OrgService(db)
     members, total = await service.get_members(org_id, page, per_page, role)
 
-    items = [await _member_response(m, db) for m in members]
+    can_see_emails = actor.role in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    items = [await _member_response(m, db, include_email=can_see_emails) for m in members]
     return ListResponse(
         data=items,
         meta=PaginationMeta(
