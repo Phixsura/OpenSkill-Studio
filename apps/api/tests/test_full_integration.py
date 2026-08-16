@@ -3011,3 +3011,21 @@ async def test_avatar_and_portfolio_update_url_schemes(c):
     assert r.status_code == 422
     r = await c.put(f"/api/v1/portfolio/items/{iid}", json={"external_url": "https://example.com/w"}, headers=h)
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_private_profile_hides_item_detail(c):
+    """When a profile is private, the public item-detail endpoint must 404 —
+    it was leaking items even though profile + list were hidden (bug #99)."""
+    h, _ = await _auth(c)
+    un = f"user{uuid.uuid4().hex[:8]}"
+    assert (await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)).status_code == 200
+    item = (await c.post("/api/v1/portfolio/items", json={"title": "Secret Work"}, headers=h)).json()["data"]
+
+    # public profile → item visible
+    assert (await c.get(f"/api/v1/u/{un}/items/{item['slug']}")).status_code == 200
+
+    # private profile → everything hidden, including item detail
+    assert (await c.put("/api/v1/portfolio/profile", json={"visibility": "private"}, headers=h)).status_code == 200
+    assert (await c.get(f"/api/v1/u/{un}")).status_code == 404
+    assert (await c.get(f"/api/v1/u/{un}/items/{item['slug']}")).status_code == 404

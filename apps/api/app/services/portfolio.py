@@ -192,8 +192,10 @@ class PortfolioService:
     async def get_public_item(self, username: str, slug: str) -> PortfolioItem | None:
         result = await self.db.execute(select(UserProfile).where(UserProfile.username == username))
         profile = result.scalar_one_or_none()
-        if profile is None:
-            return None  # pragma: no cover
+        # A private profile hides everything — item detail must not leak what
+        # the profile page and item list already refuse to show.
+        if profile is None or profile.visibility != ProfileVisibility.PUBLIC:
+            return None
 
         item_result = await self.db.execute(
             select(PortfolioItem).where(
