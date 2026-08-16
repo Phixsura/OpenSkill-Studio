@@ -106,7 +106,7 @@ class CreateSkillRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str) -> str:
-        allowed = {"beginner", "intermediate", "advanced"}
+        allowed = {"beginner", "intermediate", "advanced", "expert"}
         if v not in allowed:
             raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -161,7 +161,7 @@ class UpdateSkillRequest(BaseModel):
     @classmethod
     def validate_difficulty(cls, v: str | None) -> str | None:
         if v is not None:
-            allowed = {"beginner", "intermediate", "advanced"}
+            allowed = {"beginner", "intermediate", "advanced", "expert"}
             if v not in allowed:
                 raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v

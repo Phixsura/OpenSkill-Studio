@@ -2272,3 +2272,25 @@ async def test_username_collision_and_format(c):
     for bad in ("admin", "ab", "has space", "x" * 50):
         r = await c.put("/api/v1/portfolio/username", json={"username": bad}, headers=h2)
         assert r.status_code == 422, f"{bad!r} -> {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_expert_difficulty_and_bad_filters(c):
+    """`expert` is a valid difficulty (DB enum + FE dropdown) and must be
+    accepted; bad difficulty/status filter query params must 422, not 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+
+    # expert skill accepted
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={"name": "Expert Skill", "description": "d" * 10, "difficulty": "expert", "category_id": cat},
+        headers=h,
+    )
+    assert r.status_code == 201
+
+    # bad filters → 422, not 500
+    assert (await c.get(f"/api/v1/orgs/{oid}/skills?difficulty=bogus", headers=h)).status_code == 422
+    assert (await c.get(f"/api/v1/orgs/{oid}/skills?status=bogus", headers=h)).status_code == 422
+    assert (await c.get(f"/api/v1/orgs/{oid}/projects?status=bogus", headers=h)).status_code == 422

@@ -195,9 +195,16 @@ class SkillService:
         if category_id:
             base = base.where(Skill.category_id == category_id)
         if difficulty:
-            base = base.where(Skill.difficulty == DifficultyLevel(difficulty))
+            # Bad query-string values must not 500 on the enum coercion.
+            try:
+                base = base.where(Skill.difficulty == DifficultyLevel(difficulty))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid difficulty: {difficulty}", 422) from exc
         if status:
-            base = base.where(Skill.status == ContentStatus(status))
+            try:
+                base = base.where(Skill.status == ContentStatus(status))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid status: {status}", 422) from exc
         else:
             # By default, exclude archived skills
             base = base.where(Skill.status != ContentStatus.ARCHIVED)

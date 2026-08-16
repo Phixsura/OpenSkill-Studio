@@ -353,7 +353,10 @@ class ProjectService:
     ) -> tuple[list[Project], int]:
         base = select(Project).where(Project.org_id == org_id)
         if status:
-            base = base.where(Project.status == ContentStatus(status))
+            try:
+                base = base.where(Project.status == ContentStatus(status))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid status: {status}", 422) from exc
         else:
             base = base.where(Project.status != ContentStatus.ARCHIVED)
 
