@@ -4609,3 +4609,59 @@ async def test_progress_reflects_live_exercise_count(c):
     assert row["exercises_total"] == 2
     assert row["exercises_done"] == 1
     assert row["status"] == "in_progress"
+
+
+@pytest.mark.asyncio
+async def test_archived_prereq_does_not_lock_forever(c):
+    """An archived prerequisite can never be completed (its exercises 404),
+    so it permanently locked every dependent skill (bug #129). Archived
+    prereqs are now ignored by the unlock check."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Lock Cat"}, headers=hi)
+    ).json()["data"]["id"]
+    b = {"description": "d" * 10, "difficulty": "beginner", "category_id": cat}
+    s1 = (
+        await c.post(f"/api/v1/orgs/{oid}/skills", json={"name": "Prereq Skill", **b}, headers=hi)
+    ).json()["data"]["id"]
+    s2 = (
+        await c.post(f"/api/v1/orgs/{oid}/skills", json={"name": "Locked Skill", **b}, headers=hi)
+    ).json()["data"]["id"]
+    await c.put(
+        f"/api/v1/orgs/{oid}/skills/{s2}/prerequisites", json={"prerequisite_ids": [s1]}, headers=hi
+    )
+    exb = {
+        "description": "d",
+        "type": "multiple_choice",
+        "config": {"correct": ["a"], "options": ["a"]},
+        "max_score": 10,
+    }
+    ex2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{s2}/exercises", json={"title": "Ex Two", **exb}, headers=hi
+        )
+    ).json()["data"]["id"]
+    for s in (s1, s2):
+        await c.post(f"/api/v1/orgs/{oid}/skills/{s}/publish", headers=hi)
+
+    # locked while prereq is live
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex2}/attempts",
+        json={"answer": {"selected": ["a"]}},
+        headers=hs,
+    )
+    assert r.status_code == 403
+
+    # archive the prereq → dependent skill unlocks
+    await c.delete(f"/api/v1/orgs/{oid}/skills/{s1}", headers=hi)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex2}/attempts",
+        json={"answer": {"selected": ["a"]}},
+        headers=hs,
+    )
+    assert r.status_code == 201

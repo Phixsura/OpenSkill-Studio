@@ -463,6 +463,9 @@ class SkillService:
 
     async def is_skill_unlocked(self, skill_id: str, user_id: str) -> bool:
         prerequisites = await self.get_skill_prerequisites(skill_id)
+        # An archived prerequisite can never be completed (its exercises 404),
+        # so counting it would lock the dependent skill forever.
+        prerequisites = [p for p in prerequisites if p.status != ContentStatus.ARCHIVED]
         if not prerequisites:
             return True
 
