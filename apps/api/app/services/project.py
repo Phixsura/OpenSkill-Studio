@@ -1485,13 +1485,19 @@ class ProjectService:
         log.info("comment_added", submission_id=submission_id, item_id=item_id, anchor=anchor.value)
         return comment
 
-    async def list_comments(self, submission_id: str) -> list[SubmissionComment]:
+    async def list_comments(self, submission_id: str) -> list[tuple[SubmissionComment, str | None]]:
+        """Comments with the author's display name — feedback is a two-way
+        conversation, so the thread must show who said what (a bare ULID
+        rendered as nothing in the UI)."""
+        from app.models.user import User as UserModel
+
         result = await self.db.execute(
-            select(SubmissionComment)
+            select(SubmissionComment, UserModel.display_name)
+            .join(UserModel, UserModel.id == SubmissionComment.author_id, isouter=True)
             .where(SubmissionComment.submission_id == submission_id)
             .order_by(SubmissionComment.created_at)
         )
-        return list(result.scalars().all())
+        return [(row[0], row[1]) for row in result.all()]
 
     async def get_comment(self, comment_id: str, org_id: str) -> SubmissionComment:
         comment = await self.db.get(SubmissionComment, comment_id)

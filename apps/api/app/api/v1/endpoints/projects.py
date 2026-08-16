@@ -1064,7 +1064,14 @@ async def list_comments(
     if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
         raise HTTPException(status_code=403, detail="Access denied")
     comments = await svc.list_comments(submission_id)
-    return DataResponse(data=[CommentResponse.model_validate(c) for c in comments])
+    return DataResponse(
+        data=[
+            CommentResponse(
+                **CommentResponse.model_validate(cm).model_dump() | {"author_name": name}
+            )
+            for cm, name in comments
+        ]
+    )
 
 
 @router.post(

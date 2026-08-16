@@ -883,6 +883,7 @@ class CommentResponse(BaseModel):
     submission_id: str
     item_id: str
     author_id: str
+    author_name: str | None = None
     parent_id: str | None
     text: str
     anchor_type: str

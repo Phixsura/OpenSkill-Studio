@@ -14,6 +14,7 @@ export interface ItemComment {
   id: string;
   item_id: string;
   author_id: string;
+  author_name: string | null;
   parent_id: string | null;
   text: string;
   anchor_type: "global" | "time" | "region";

@@ -4075,3 +4075,56 @@ async def test_deleted_user_tokens_invalid(c):
     assert r.status_code == 204
     r = await c.get("/api/v1/auth/me", headers=h2)
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_comments_include_author_name(c):
+    """Comments are a two-way conversation, but the API returned only
+    author_id (a bare ULID the UI never rendered) — threads were
+    anonymous-looking (bug #114). List now joins the display name."""
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Comment Author Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    # need an item to comment on — use a text deliverable inline item
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{p['id']}/deliverables",
+            json={"name": "Notes", "type": "text", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.put(
+        f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}",
+        json={"items": [{"deliverable_id": did, "type": "text", "content": "hello"}]},
+        headers=h,
+    )
+    items = (
+        await c.get(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}", headers=h)
+    ).json()["data"]["items"]
+    iid = items[0]["id"]
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/comments",
+        json={"item_id": iid, "text": "Looks good"},
+        headers=h,
+    )
+    assert r.status_code == 201
+    comments = (await c.get(f"/api/v1/orgs/{oid}/submissions/{sid}/comments", headers=h)).json()[
+        "data"
+    ]
+    assert comments[0]["author_name"] == u["display_name"]
