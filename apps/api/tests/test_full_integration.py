@@ -2134,7 +2134,12 @@ async def test_long_filename_and_asset_bounds(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Filename Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Filename Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -2146,7 +2151,9 @@ async def test_long_filename_and_asset_bounds(c):
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
 
     # 260-char filename → clamped, upload succeeds
     r = await c.post(
@@ -2204,18 +2211,31 @@ async def test_reorder_exercises_rejects_foreign_exercise(c):
     h, _ = await _auth(c)
 
     async def skill_with_exercise(oid):
-        cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+        cat = (
+            await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)
+        ).json()["data"]["id"]
         sk = (
             await c.post(
                 f"/api/v1/orgs/{oid}/skills",
-                json={"name": "Skill One", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+                json={
+                    "name": "Skill One",
+                    "description": "d" * 10,
+                    "difficulty": "beginner",
+                    "category_id": cat,
+                },
                 headers=h,
             )
         ).json()["data"]["id"]
         ex = (
             await c.post(
                 f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
-                json={"title": "Ex", "description": "d", "type": "text_answer", "config": {}, "max_score": 10},
+                json={
+                    "title": "Ex",
+                    "description": "d",
+                    "type": "text_answer",
+                    "config": {},
+                    "max_score": 10,
+                },
                 headers=h,
             )
         ).json()["data"]["id"]
@@ -2242,12 +2262,19 @@ async def test_portfolio_item_cannot_link_foreign_submission(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "PF Link Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "PF Link Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=hv,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hv)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hv)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hv)).json()[
+        "data"
+    ]["id"]
 
     ha, _ = await _auth(c)
     r = await c.post(
@@ -2265,9 +2292,13 @@ async def test_username_collision_and_format(c):
     import uuid as _uuid
 
     uname = f"taken{_uuid.uuid4().hex[:6]}"
-    assert (await c.put("/api/v1/portfolio/username", json={"username": uname}, headers=h1)).status_code == 200
+    assert (
+        await c.put("/api/v1/portfolio/username", json={"username": uname}, headers=h1)
+    ).status_code == 200
     # same name (case-insensitive) taken by another user → 409
-    assert (await c.put("/api/v1/portfolio/username", json={"username": uname.upper()}, headers=h2)).status_code == 409
+    assert (
+        await c.put("/api/v1/portfolio/username", json={"username": uname.upper()}, headers=h2)
+    ).status_code == 409
     # reserved / malformed → 422
     for bad in ("admin", "ab", "has space", "x" * 50):
         r = await c.put("/api/v1/portfolio/username", json={"username": bad}, headers=h2)
@@ -2280,18 +2311,27 @@ async def test_expert_difficulty_and_bad_filters(c):
     accepted; bad difficulty/status filter query params must 422, not 500."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()[
+        "data"
+    ]["id"]
 
     # expert skill accepted
     r = await c.post(
         f"/api/v1/orgs/{oid}/skills",
-        json={"name": "Expert Skill", "description": "d" * 10, "difficulty": "expert", "category_id": cat},
+        json={
+            "name": "Expert Skill",
+            "description": "d" * 10,
+            "difficulty": "expert",
+            "category_id": cat,
+        },
         headers=h,
     )
     assert r.status_code == 201
 
     # bad filters → 422, not 500
-    assert (await c.get(f"/api/v1/orgs/{oid}/skills?difficulty=bogus", headers=h)).status_code == 422
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/skills?difficulty=bogus", headers=h)
+    ).status_code == 422
     assert (await c.get(f"/api/v1/orgs/{oid}/skills?status=bogus", headers=h)).status_code == 422
     assert (await c.get(f"/api/v1/orgs/{oid}/projects?status=bogus", headers=h)).status_code == 422
 
@@ -2303,12 +2343,19 @@ async def test_review_score_breakdown_bounded(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "SB Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "SB Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
@@ -2325,15 +2372,31 @@ async def test_id_list_and_settings_bounds(c):
     oid = await _org(c, h)
     r = await c.post(
         f"/api/v1/orgs/{oid}/projects",
-        json={"title": "IL Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}], "skill_ids": ["x"] * 300},
+        json={
+            "title": "IL Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+            "skill_ids": ["x"] * 300,
+        },
         headers=h,
     )
     assert r.status_code == 422
-    r = await c.put(f"/api/v1/orgs/{oid}/settings", json={"settings": {"blob": "z" * 25000}}, headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/settings", json={"settings": {"blob": "z" * 25000}}, headers=h
+    )
     assert r.status_code == 422
     r = await c.post(
         f"/api/v1/orgs/{oid}/project-templates",
-        json={"name": "T", "description": "d", "instructions": "i", "difficulty": "intermediate", "rubric": [{"criterion": "Q", "max_score": 100}], "deliverables": [], "skill_names": ["x"] * 300},
+        json={
+            "name": "T",
+            "description": "d",
+            "instructions": "i",
+            "difficulty": "intermediate",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+            "deliverables": [],
+            "skill_names": ["x"] * 300,
+        },
         headers=h,
     )
     assert r.status_code == 422
@@ -2371,8 +2434,12 @@ async def test_list_filters_reject_bad_enum(c):
     (eval tasks status/type, member role)."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?status=bogus", headers=h)).status_code == 422
-    assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?eval_type=bogus", headers=h)).status_code == 422
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?status=bogus", headers=h)
+    ).status_code == 422
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?eval_type=bogus", headers=h)
+    ).status_code == 422
     assert (await c.get(f"/api/v1/orgs/{oid}/members?role=bogus", headers=h)).status_code == 422
 
 
@@ -2403,12 +2470,19 @@ async def test_malformed_path_ids_no_500(c):
 async def test_auth_edge_inputs_no_500(c):
     """Malformed auth inputs must validate (4xx), never 500."""
     for em in ("notanemail", "a@", "@b.com", "", "spaces in@x.com"):
-        r = await c.post("/api/v1/auth/register", json={"email": em, "password": "TestPass123!", "display_name": "Edge"})
+        r = await c.post(
+            "/api/v1/auth/register",
+            json={"email": em, "password": "TestPass123!", "display_name": "Edge"},
+        )
         assert r.status_code < 500, f"register {em!r} -> {r.status_code}"
     for body in ({"email": "x", "password": "y"}, {"password": "y"}, {"email": "a@b.com"}):
         r = await c.post("/api/v1/auth/login", json=body)
         assert r.status_code < 500, f"login {body} -> {r.status_code}"
-    assert (await c.post("/api/v1/auth/reset-password", json={"token": "garbage", "new_password": "NewPass123!"})).status_code < 500
+    assert (
+        await c.post(
+            "/api/v1/auth/reset-password", json={"token": "garbage", "new_password": "NewPass123!"}
+        )
+    ).status_code < 500
     assert (await c.get("/api/v1/auth/verify-email?token=garbage")).status_code < 500
 
 
@@ -2421,20 +2495,40 @@ async def test_revision_clears_stale_final_score(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Rework Project", "description": "d", "instructions": "i", "max_score": 100, "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Rework Project",
+                "description": "d",
+                "instructions": "i",
+                "max_score": 100,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
 
-    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "approved", "score": 80}, headers=h)
-    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "approved", "score": 80},
+        headers=h,
+    )
+    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
+        "data"
+    ]
     assert d["final_score"] == 80
 
-    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "revision_requested", "feedback": "redo"}, headers=h)
-    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "revision_requested", "feedback": "redo"},
+        headers=h,
+    )
+    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
+        "data"
+    ]
     assert d["status"] == "revision_requested"
     assert d["final_score"] is None
 
@@ -2449,7 +2543,13 @@ async def test_review_lifecycle_queue_and_history(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Lifecycle Project", "description": "d", "instructions": "i", "max_score": 100, "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Lifecycle Project",
+                "description": "d",
+                "instructions": "i",
+                "max_score": 100,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -2459,21 +2559,33 @@ async def test_review_lifecycle_queue_and_history(c):
         r = await c.get(f"/api/v1/orgs/{oid}/reviews/pending", headers=h)
         return r.json()["meta"]["total"]
 
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
     assert await pending_count() == 0  # draft not pending
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert await pending_count() == 1
 
     # revision → resubmit → back in queue
-    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "revision_requested", "feedback": "redo"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "revision_requested", "feedback": "redo"},
+        headers=h,
+    )
     assert await pending_count() == 0
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert await pending_count() == 1
 
     # approve → out of queue, 2 review records, latest first
-    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "approved", "score": 90}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "approved", "score": 90},
+        headers=h,
+    )
     assert await pending_count() == 0
-    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
+        "data"
+    ]
     assert d["status"] == "approved" and d["final_score"] == 90
     assert len(d["reviews"]) == 2
     assert d["reviews"][0]["status"] == "approved"
@@ -2486,14 +2598,25 @@ async def test_rejected_submission_is_terminal(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Reject Terminal Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Reject Terminal Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
-    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "rejected", "score": 10}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "rejected", "score": 10},
+        headers=h,
+    )
     # a rejected submission cannot be resubmitted
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert r.status_code == 422
@@ -2508,7 +2631,12 @@ async def test_data_isolation_and_role_gating(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Isolation Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Isolation Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=ho,
         )
     ).json()["data"]["id"]
@@ -2516,20 +2644,28 @@ async def test_data_isolation_and_role_gating(c):
 
     async def join_student():
         hs, _ = await _auth(c)
-        link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+        link = await c.post(
+            f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho
+        )
         await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
         return hs
 
     ha = await join_student()
     hb = await join_student()
-    sa = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=ha)).json()["data"]["id"]
-    sb = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hb)).json()["data"]["id"]
+    sa = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=ha)).json()[
+        "data"
+    ]["id"]
+    sb = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hb)).json()[
+        "data"
+    ]["id"]
 
     # A sees only own in list, and 403 on B's detail
     r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=ha)
     ids = [x["id"] for x in r.json()["data"]]
     assert sa in ids and sb not in ids
-    assert (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sb}", headers=ha)).status_code == 403
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sb}", headers=ha)
+    ).status_code == 403
 
     # instructor-only queues 403 for students
     assert (await c.get(f"/api/v1/orgs/{oid}/reviews/pending", headers=ha)).status_code == 403
@@ -2541,8 +2677,12 @@ async def test_data_isolation_and_role_gating(c):
 async def test_public_page_hides_private_items(c):
     h, _ = await _auth(c)
     await c.put("/api/v1/portfolio/profile", json={"visibility": "public"}, headers=h)
-    await c.post("/api/v1/portfolio/items", json={"title": "Secret Work", "visibility": "private"}, headers=h)
-    await c.post("/api/v1/portfolio/items", json={"title": "Public Work", "visibility": "public"}, headers=h)
+    await c.post(
+        "/api/v1/portfolio/items", json={"title": "Secret Work", "visibility": "private"}, headers=h
+    )
+    await c.post(
+        "/api/v1/portfolio/items", json={"title": "Public Work", "visibility": "public"}, headers=h
+    )
     uname = (await c.get("/api/v1/portfolio/profile", headers=h)).json()["data"]["username"]
     titles = [i["title"] for i in (await c.get(f"/api/v1/u/{uname}/items")).json()["data"]]
     assert "Secret Work" not in titles
@@ -2558,7 +2698,12 @@ async def test_peer_round_phase_guards_and_assessment_ownership(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Peer Guard Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Peer Guard Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=ho,
         )
     ).json()["data"]["id"]
@@ -2566,9 +2711,13 @@ async def test_peer_round_phase_guards_and_assessment_ownership(c):
 
     async def join_and_submit():
         hs, _ = await _auth(c)
-        link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+        link = await c.post(
+            f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho
+        )
         await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
-        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()["data"]["id"]
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()[
+            "data"
+        ]["id"]
         await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
         return hs
 
@@ -2585,15 +2734,27 @@ async def test_peer_round_phase_guards_and_assessment_ownership(c):
     ).json()["data"]["id"]
 
     # close-before-start → 422
-    assert (await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/close", headers=ho)).status_code == 422
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/close", headers=ho)
+    ).status_code == 422
     # start, then double-start → 422
-    assert (await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)).status_code == 200
-    assert (await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)).status_code == 422
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
+    ).status_code == 200
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
+    ).status_code == 422
 
     # a learner cannot submit another learner's assessment
-    my = (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=s0)).json()["data"]
+    my = (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=s0)
+    ).json()["data"]
     aid = my[0]["id"]
-    assert (await c.post(f"/api/v1/orgs/{oid}/peer-assessments/{aid}/submit", json={"score": 50}, headers=s1)).status_code == 403
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/peer-assessments/{aid}/submit", json={"score": 50}, headers=s1
+        )
+    ).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -2607,7 +2768,12 @@ async def test_deliverable_type_mismatch_rejected(c):
         pid = (
             await c.post(
                 f"/api/v1/orgs/{oid}/projects",
-                json={"title": "Mismatch Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+                json={
+                    "title": "Mismatch Project",
+                    "description": "d",
+                    "instructions": "i",
+                    "rubric": [{"criterion": "Q", "max_score": 100}],
+                },
                 headers=h,
             )
         ).json()["data"]["id"]
@@ -2619,12 +2785,18 @@ async def test_deliverable_type_mismatch_rejected(c):
             )
         ).json()["data"]["id"]
         await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-        sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+        sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+            "data"
+        ]["id"]
         return did, sid
 
     did, sid = await setup("image")
     # prompt on an image deliverable → 422
-    r = await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/prompt-items", json={"deliverable_id": did, "prompt": "hi"}, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/prompt-items",
+        json={"deliverable_id": did, "prompt": "hi"},
+        headers=h,
+    )
     assert r.status_code == 422
     # audio bytes on an image deliverable → 422
     r = await c.post(
@@ -2642,11 +2814,18 @@ async def test_progress_categories_populated(c):
     while the API declared it and the progress UI rendered it)."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Programming"}, headers=h)).json()["data"]["id"]
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Programming"}, headers=h)
+    ).json()["data"]["id"]
     for name in ("Python", "Rust"):
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
-            json={"name": name, "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            json={
+                "name": name,
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
             headers=h,
         )
     d = (await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)).json()
@@ -2664,23 +2843,38 @@ async def test_single_skill_progress_includes_name(c):
     because SkillProgress has no skill_name column)."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()[
+        "data"
+    ]["id"]
     sk = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
-            json={"name": "Python Mastery", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            json={
+                "name": "Python Mastery",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     ex = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
-            json={"title": "Ex", "description": "d", "type": "text_answer", "config": {}, "max_score": 10},
+            json={
+                "title": "Ex",
+                "description": "d",
+                "type": "text_answer",
+                "config": {},
+                "max_score": 10,
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
-    await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=h
+    )
     d = (await c.get(f"/api/v1/orgs/{oid}/progress/me/skills/{sk}", headers=h)).json()["data"]
     assert d is not None
     assert d["skill_name"] == "Python Mastery"
@@ -2692,25 +2886,46 @@ async def test_skill_progress_best_score_computed(c):
     NULL). It should now be the sum of the user's best attempt per exercise."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()[
+        "data"
+    ]["id"]
     sk = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
-            json={"name": "Best Score Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            json={
+                "name": "Best Score Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     ex = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
-            json={"title": "MCQ", "description": "d", "type": "multiple_choice", "config": {"correct": ["a"], "options": []}, "max_score": 10},
+            json={
+                "title": "MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"correct": ["a"], "options": []},
+                "max_score": 10,
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
     # wrong (0), then correct (10) → best_score 10
-    await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"selected": ["b"]}}, headers=h)
-    await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"selected": ["a"]}}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": ["b"]}},
+        headers=h,
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": ["a"]}},
+        headers=h,
+    )
     d = (await c.get(f"/api/v1/orgs/{oid}/progress/me/skills/{sk}", headers=h)).json()["data"]
     assert d["best_score"] == 10
 
@@ -2724,7 +2939,12 @@ async def test_peer_results_gated_until_closed_for_students(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Peer Results Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Peer Results Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=ho,
         )
     ).json()["data"]["id"]
@@ -2733,9 +2953,13 @@ async def test_peer_results_gated_until_closed_for_students(c):
     studs = []
     for _ in range(3):
         hs, _ = await _auth(c)
-        link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+        link = await c.post(
+            f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho
+        )
         await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
-        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()["data"]["id"]
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()[
+            "data"
+        ]["id"]
         await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
         studs.append(hs)
 
@@ -2748,16 +2972,28 @@ async def test_peer_results_gated_until_closed_for_students(c):
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
     for hs in studs:
-        my = (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=hs)).json()["data"]
+        my = (
+            await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=hs)
+        ).json()["data"]
         for a in my:
-            await c.post(f"/api/v1/orgs/{oid}/peer-assessments/{a['id']}/submit", json={"score": 70}, headers=hs)
+            await c.post(
+                f"/api/v1/orgs/{oid}/peer-assessments/{a['id']}/submit",
+                json={"score": 70},
+                headers=hs,
+            )
 
     # mid-assessment: student 403, instructor 200
-    assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=studs[0])).status_code == 403
-    assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=ho)).status_code == 200
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=studs[0])
+    ).status_code == 403
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=ho)
+    ).status_code == 200
     # after close: student 200
     await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/close", headers=ho)
-    assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=studs[0])).status_code == 200
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=studs[0])
+    ).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -2770,7 +3006,12 @@ async def test_peer_anonymity_and_round_list_scoping(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Anon Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Anon Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=ho,
         )
     ).json()["data"]["id"]
@@ -2779,9 +3020,13 @@ async def test_peer_anonymity_and_round_list_scoping(c):
     studs = []
     for _ in range(2):
         hs, _ = await _auth(c)
-        link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+        link = await c.post(
+            f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho
+        )
         await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
-        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()["data"]["id"]
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()[
+            "data"
+        ]["id"]
         await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
         studs.append(hs)
 
@@ -2795,9 +3040,13 @@ async def test_peer_anonymity_and_round_list_scoping(c):
     await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
 
     # student blocked from all-assessments (reveals reviewer_id)
-    assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/assessments", headers=studs[0])).status_code == 403
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/assessments", headers=studs[0])
+    ).status_code == 403
     # my-assessments never carries reviewer_id
-    my = (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=studs[0])).json()["data"]
+    my = (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=studs[0])
+    ).json()["data"]
     assert all("reviewer_id" not in a for a in my)
 
     # listing rounds of a cross-org project returns nothing
@@ -2805,11 +3054,20 @@ async def test_peer_anonymity_and_round_list_scoping(c):
     pid2 = (
         await c.post(
             f"/api/v1/orgs/{oid2}/projects",
-            json={"title": "Other Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Other Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=ho,
         )
     ).json()["data"]["id"]
-    await c.post(f"/api/v1/orgs/{oid2}/peer-review-rounds", json={"project_id": pid2, "name": "R-B"}, headers=ho)
+    await c.post(
+        f"/api/v1/orgs/{oid2}/peer-review-rounds",
+        json={"project_id": pid2, "name": "R-B"},
+        headers=ho,
+    )
     r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid2}/peer-review-rounds", headers=ho)
     assert len(r.json()["data"]) == 0
 
@@ -2823,16 +3081,27 @@ async def test_auto_evaluate_on_submit(c):
 
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"enabled": True, "auto_evaluate": True}, headers=h)
+    await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={"enabled": True, "auto_evaluate": True},
+        headers=h,
+    )
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "AutoEval Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "AutoEval Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
 
     class _Resp:
         content = '{"scores":[{"criterion":"Q","score":80,"max_score":100,"feedback":"ok"}],"overall_feedback":"g","strengths":[],"improvements":[]}'
@@ -2854,16 +3123,25 @@ async def test_auto_evaluate_on_submit(c):
     pid2 = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "NoAutoEval Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "NoAutoEval Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/publish", headers=h)
-    sid2 = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).json()["data"]["id"]
+    sid2 = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions/{sid2}/submit", headers=h)
     assert r.status_code == 200
     # no task for pid2's submission
-    all_tasks = (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?per_page=100", headers=h)).json()["data"]
+    all_tasks = (
+        await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?per_page=100", headers=h)
+    ).json()["data"]
     assert all(t["submission_id"] != sid2 for t in all_tasks)
 
 
@@ -2882,30 +3160,59 @@ async def test_late_penalty_and_max_submissions(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Late Project", "description": "d", "instructions": "i", "max_score": 100, "late_penalty_pct": 20, "deadline": past, "late_deadline": future, "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Late Project",
+                "description": "d",
+                "instructions": "i",
+                "max_score": 100,
+                "late_penalty_pct": 20,
+                "deadline": past,
+                "late_deadline": future,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert r.json()["data"]["is_late"] is True
-    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "approved", "score": 100}, headers=h)
-    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "approved", "score": 100},
+        headers=h,
+    )
+    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
+        "data"
+    ]
     assert d["final_score"] == 80  # 100 - 20%
 
     # max_submissions cap
     pid2 = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Cap Project", "description": "d", "instructions": "i", "max_submissions": 2, "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Cap Project",
+                "description": "d",
+                "instructions": "i",
+                "max_submissions": 2,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/publish", headers=h)
-    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 201
-    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 201
-    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 422
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)
+    ).status_code == 201
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)
+    ).status_code == 201
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)
+    ).status_code == 422
 
 
 @pytest.mark.asyncio
@@ -2914,33 +3221,64 @@ async def test_grading_queue_routing_and_scoping(c):
     enters it and leaves once graded; grading a bogus/cross-org attempt 404s."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()[
+        "data"
+    ]["id"]
     sk = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
-            json={"name": "Grading Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            json={
+                "name": "Grading Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     mcq = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
-            json={"title": "MCQ", "description": "d", "type": "multiple_choice", "config": {"correct": ["a"], "options": []}, "max_score": 10},
+            json={
+                "title": "MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"correct": ["a"], "options": []},
+                "max_score": 10,
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     txt = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
-            json={"title": "Text", "description": "d", "type": "text_answer", "config": {}, "max_score": 10},
+            json={
+                "title": "Text",
+                "description": "d",
+                "type": "text_answer",
+                "config": {},
+                "max_score": 10,
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
 
-    mcq_att = (await c.post(f"/api/v1/orgs/{oid}/exercises/{mcq}/attempts", json={"answer": {"selected": ["a"]}}, headers=h)).json()["data"]
+    mcq_att = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/exercises/{mcq}/attempts",
+            json={"answer": {"selected": ["a"]}},
+            headers=h,
+        )
+    ).json()["data"]
     assert mcq_att["graded_by"] == "auto"
-    txt_att = (await c.post(f"/api/v1/orgs/{oid}/exercises/{txt}/attempts", json={"answer": {"text": "ans"}}, headers=h)).json()["data"]
+    txt_att = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/exercises/{txt}/attempts",
+            json={"answer": {"text": "ans"}},
+            headers=h,
+        )
+    ).json()["data"]
     assert txt_att["graded_by"] is None
 
     pend = (await c.get(f"/api/v1/orgs/{oid}/grading/pending", headers=h)).json()["data"]
@@ -2949,12 +3287,22 @@ async def test_grading_queue_routing_and_scoping(c):
     assert txt_att["id"] in ids  # awaiting manual grade
 
     # grade the text answer → leaves the queue
-    assert (await c.post(f"/api/v1/orgs/{oid}/grading/attempts/{txt_att['id']}", json={"score": 8}, headers=h)).status_code == 200
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/grading/attempts/{txt_att['id']}", json={"score": 8}, headers=h
+        )
+    ).status_code == 200
     pend = (await c.get(f"/api/v1/orgs/{oid}/grading/pending", headers=h)).json()["data"]
     assert txt_att["id"] not in {a["id"] for a in pend}
 
     # bogus attempt id → 404
-    assert (await c.post(f"/api/v1/orgs/{oid}/grading/attempts/01BOGUSBOGUSBOGUSBOGUSBOGU", json={"score": 5}, headers=h)).status_code == 404
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/grading/attempts/01BOGUSBOGUSBOGUSBOGUSBOGU",
+            json={"score": 5},
+            headers=h,
+        )
+    ).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -2965,7 +3313,9 @@ async def test_join_archived_org_rejected(c):
     h2, u2 = await _auth(c)
     oid = await _org(c, h1)
 
-    link = (await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=h1)).json()["data"]
+    link = (
+        await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=h1)
+    ).json()["data"]
 
     # archive the org
     assert (await c.delete(f"/api/v1/orgs/{oid}", headers=h1)).status_code == 204
@@ -2985,9 +3335,13 @@ async def test_org_logo_url_scheme_restricted(c):
     oid = await _org(c, h)
     r = await c.put(f"/api/v1/orgs/{oid}", json={"logo_url": "javascript:alert(1)"}, headers=h)
     assert r.status_code == 422
-    r = await c.put(f"/api/v1/orgs/{oid}", json={"logo_url": "data:text/html,<script>1</script>"}, headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}", json={"logo_url": "data:text/html,<script>1</script>"}, headers=h
+    )
     assert r.status_code == 422
-    r = await c.put(f"/api/v1/orgs/{oid}", json={"logo_url": "https://cdn.example.com/logo.png"}, headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}", json={"logo_url": "https://cdn.example.com/logo.png"}, headers=h
+    )
     assert r.status_code == 200
     assert r.json()["data"]["logo_url"] == "https://cdn.example.com/logo.png"
 
@@ -3001,15 +3355,25 @@ async def test_avatar_and_portfolio_update_url_schemes(c):
 
     r = await c.put("/api/v1/auth/me", json={"avatar_url": "javascript:alert(1)"}, headers=h)
     assert r.status_code == 422
-    r = await c.put("/api/v1/auth/me", json={"avatar_url": "https://cdn.example.com/a.png"}, headers=h)
+    r = await c.put(
+        "/api/v1/auth/me", json={"avatar_url": "https://cdn.example.com/a.png"}, headers=h
+    )
     assert r.status_code == 200
 
-    iid = (await c.post("/api/v1/portfolio/items", json={"title": "URL Item"}, headers=h)).json()["data"]["id"]
-    r = await c.put(f"/api/v1/portfolio/items/{iid}", json={"external_url": "javascript:alert(1)"}, headers=h)
+    iid = (await c.post("/api/v1/portfolio/items", json={"title": "URL Item"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    r = await c.put(
+        f"/api/v1/portfolio/items/{iid}", json={"external_url": "javascript:alert(1)"}, headers=h
+    )
     assert r.status_code == 422
-    r = await c.put(f"/api/v1/portfolio/items/{iid}", json={"cover_image_url": "data:text/html,<x>"}, headers=h)
+    r = await c.put(
+        f"/api/v1/portfolio/items/{iid}", json={"cover_image_url": "data:text/html,<x>"}, headers=h
+    )
     assert r.status_code == 422
-    r = await c.put(f"/api/v1/portfolio/items/{iid}", json={"external_url": "https://example.com/w"}, headers=h)
+    r = await c.put(
+        f"/api/v1/portfolio/items/{iid}", json={"external_url": "https://example.com/w"}, headers=h
+    )
     assert r.status_code == 200
 
 
@@ -3019,14 +3383,20 @@ async def test_private_profile_hides_item_detail(c):
     it was leaking items even though profile + list were hidden (bug #99)."""
     h, _ = await _auth(c)
     un = f"user{uuid.uuid4().hex[:8]}"
-    assert (await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)).status_code == 200
-    item = (await c.post("/api/v1/portfolio/items", json={"title": "Secret Work"}, headers=h)).json()["data"]
+    assert (
+        await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)
+    ).status_code == 200
+    item = (
+        await c.post("/api/v1/portfolio/items", json={"title": "Secret Work"}, headers=h)
+    ).json()["data"]
 
     # public profile → item visible
     assert (await c.get(f"/api/v1/u/{un}/items/{item['slug']}")).status_code == 200
 
     # private profile → everything hidden, including item detail
-    assert (await c.put("/api/v1/portfolio/profile", json={"visibility": "private"}, headers=h)).status_code == 200
+    assert (
+        await c.put("/api/v1/portfolio/profile", json={"visibility": "private"}, headers=h)
+    ).status_code == 200
     assert (await c.get(f"/api/v1/u/{un}")).status_code == 404
     assert (await c.get(f"/api/v1/u/{un}/items/{item['slug']}")).status_code == 404
 
@@ -3039,7 +3409,9 @@ async def test_overview_excludes_removed_org_work(c):
     hs, us = await _auth(c)
     oid = await _org(c, hi)
     await _org(c, hs)  # student keeps one active org so the early-return doesn't mask the bug
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
 
     p = (
         await c.post(
@@ -3054,7 +3426,9 @@ async def test_overview_excludes_removed_org_work(c):
         )
     ).json()["data"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=hi)
-    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=hs)).status_code == 201
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=hs)
+    ).status_code == 201
 
     d = (await c.get("/api/v1/me/overview", headers=hs)).json()["data"]
     assert len(d["drafts"]) == 1

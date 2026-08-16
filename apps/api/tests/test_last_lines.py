@@ -410,7 +410,9 @@ async def test_portfolio_upload_cover_endpoint(c):
 
     with patch("app.core.storage.get_s3_client", return_value=fake_s3()):
         # Real JPEG magic (SOI + APP0) so the magic-byte sniffer accepts it
-        files = {"file": ("cover.jpg", io.BytesIO(b"\xff\xd8\xff\xe0" + b"\x00" * 50), "image/jpeg")}
+        files = {
+            "file": ("cover.jpg", io.BytesIO(b"\xff\xd8\xff\xe0" + b"\x00" * 50), "image/jpeg")
+        }
         r = await c.post("/api/v1/portfolio/upload-cover", headers=h, files=files)
         assert r.status_code in (200, 201)
 
