@@ -1,3 +1,4 @@
+import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +36,7 @@ from app.schemas.project import (
 from app.services.project import ProjectService
 
 router = APIRouter(tags=["Projects & Submissions"])
+log = structlog.get_logger()
 
 
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
@@ -564,6 +566,22 @@ async def submit_draft(
         raise HTTPException(status_code=404, detail="Submission not found in this project")
     sub = await svc.submit_draft(submission_id, user.id)
     await db.commit()
+
+    # Auto-evaluate on submission when the org has enabled it — otherwise the
+    # "Auto-evaluate on submission" setting is a no-op. Best-effort: never let
+    # an eval failure (budget, LLM error) block the submission itself.
+    from app.services.evaluation import EvaluationService
+
+    eval_svc = EvaluationService(db)
+    settings_ = await eval_svc.get_eval_settings(org_id)
+    if settings_.get("enabled") and settings_.get("auto_evaluate"):
+        try:
+            await eval_svc.trigger_evaluation(org_id, submission_id, "submission_review")
+            await db.commit()
+        except Exception:  # noqa: BLE001 — auto-eval is best-effort
+            await db.rollback()
+            log.warning("auto_evaluation_failed", submission_id=submission_id)
+
     return DataResponse(data=SubmissionResponse.model_validate(sub))
 
 

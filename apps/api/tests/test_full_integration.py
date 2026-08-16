@@ -2812,3 +2812,56 @@ async def test_peer_anonymity_and_round_list_scoping(c):
     await c.post(f"/api/v1/orgs/{oid2}/peer-review-rounds", json={"project_id": pid2, "name": "R-B"}, headers=ho)
     r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid2}/peer-review-rounds", headers=ho)
     assert len(r.json()["data"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_evaluate_on_submit(c):
+    """The 'Auto-evaluate on submission' setting must actually trigger an eval
+    task on submit (it was a dead toggle — never wired). When disabled, no
+    task is created; submit still succeeds regardless of eval outcome."""
+    from unittest.mock import AsyncMock, patch
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"enabled": True, "auto_evaluate": True}, headers=h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "AutoEval Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+
+    class _Resp:
+        content = '{"scores":[{"criterion":"Q","score":80,"max_score":100,"feedback":"ok"}],"overall_feedback":"g","strengths":[],"improvements":[]}'
+        input_tokens = 10
+        output_tokens = 20
+        provider = "anthropic"
+        model = "claude-sonnet-5"
+
+    fake = AsyncMock()
+    fake.complete = AsyncMock(return_value=_Resp())
+    with patch("app.services.evaluation.create_llm_client", return_value=fake):
+        r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    assert r.status_code == 200
+    tasks = (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks", headers=h)).json()
+    assert tasks["meta"]["total"] >= 1
+
+    # auto_evaluate off → no task
+    await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"auto_evaluate": False}, headers=h)
+    pid2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "NoAutoEval Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/publish", headers=h)
+    sid2 = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions/{sid2}/submit", headers=h)
+    assert r.status_code == 200
+    # no task for pid2's submission
+    all_tasks = (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?per_page=100", headers=h)).json()["data"]
+    assert all(t["submission_id"] != sid2 for t in all_tasks)
