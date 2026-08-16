@@ -146,6 +146,10 @@ class SkillService:
         if slug is None:
             slug = self._generate_slug(name)
 
+        # Category must exist and belong to this org — otherwise the FK
+        # violation is misread as a slug collision below and 500s on retry.
+        await self._require_org_category(org_id, category_id)
+
         try:
             diff = DifficultyLevel(difficulty)
         except ValueError:
@@ -238,6 +242,8 @@ class SkillService:
 
     async def update_skill(self, skill_id: str, **fields) -> Skill:
         skill = await self.get_skill(skill_id)
+        if fields.get("category_id") is not None:
+            await self._require_org_category(skill.org_id, fields["category_id"])
         for k, v in fields.items():
             if v is not None and hasattr(skill, k):
                 if k == "difficulty":
@@ -245,6 +251,12 @@ class SkillService:
                 setattr(skill, k, v)
         await self.db.flush()
         return skill
+
+    async def _require_org_category(self, org_id: str, category_id: str) -> SkillCategory:
+        cat = await self.db.get(SkillCategory, category_id)
+        if cat is None or cat.org_id != org_id or cat.status == ContentStatus.ARCHIVED:
+            raise AppError("CATEGORY_NOT_FOUND", "Category not found", 404)
+        return cat
 
     async def delete_skill(self, skill_id: str) -> None:
         skill = await self.get_skill(skill_id)

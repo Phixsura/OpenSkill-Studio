@@ -3495,3 +3495,37 @@ async def test_peer_score_capped_at_project_max(c):
         f"/api/v1/orgs/{oid}/peer-assessments/{aid}/submit", json={"score": 88}, headers=studs[0]
     )
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_skill_category_validated_on_create_and_update(c):
+    """create_skill/update_skill must validate category_id exists in this
+    org — a bogus ID hit the FK, was misread as a slug collision, retried,
+    and 500ed; a cross-org ID silently linked foreign data (bug #102)."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    o2 = await _org(c, h2)
+    cat2 = (
+        await c.post(f"/api/v1/orgs/{o2}/categories", json={"name": "Foreign Cat"}, headers=h2)
+    ).json()["data"]["id"]
+
+    body = {"name": "Cat Val Skill", "description": "d" * 10, "difficulty": "beginner"}
+    r = await c.post(
+        f"/api/v1/orgs/{o1}/skills",
+        json={**body, "category_id": "01BOGUSBOGUSBOGUSBOGUSBOGU"},
+        headers=h1,
+    )
+    assert r.status_code == 404
+    r = await c.post(f"/api/v1/orgs/{o1}/skills", json={**body, "category_id": cat2}, headers=h1)
+    assert r.status_code == 404
+
+    # valid create, then invalid category on update
+    cat1 = (
+        await c.post(f"/api/v1/orgs/{o1}/categories", json={"name": "Own Cat"}, headers=h1)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(f"/api/v1/orgs/{o1}/skills", json={**body, "category_id": cat1}, headers=h1)
+    ).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{o1}/skills/{sk}", json={"category_id": cat2}, headers=h1)
+    assert r.status_code == 404
