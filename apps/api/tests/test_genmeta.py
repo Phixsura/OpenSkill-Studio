@@ -274,3 +274,25 @@ def test_truncated_chunk_no_crash():
     png = sig + ihdr + bad + _chunk(b"IDAT", zlib.compress(b"\x01\x02\x03")) + _chunk(b"IEND", b"")
     result = extract_generation_metadata(png, "image/png")
     assert result is None or isinstance(result, dict)
+
+
+def test_hostile_numerics_clamped():
+    """inf/nan/unbounded ints from hostile metadata serialize as
+    Infinity/NaN — invalid JSON that crashes the frontend's JSON.parse
+    (bug #135). Non-finite floats and >64-bit ints are dropped."""
+    import json
+
+    from app.core.genmeta import parse_a1111_infotext, parse_comfyui_prompt
+
+    r = parse_a1111_infotext("a cat\nSteps: 30, CFG scale: inf, Seed: 99999999999999999999999")
+    assert r["steps"] == 30
+    assert "cfg_scale" not in r and "seed" not in r
+    assert "Infinity" not in json.dumps(r) and "NaN" not in json.dumps(r)
+
+    hostile = (
+        '{"1": {"class_type": "KSampler", "inputs": '
+        '{"cfg": Infinity, "seed": 99999999999999999999999, "steps": 20}}}'
+    )
+    r2 = parse_comfyui_prompt(hostile)
+    assert r2["steps"] == 20
+    assert "cfg_scale" not in r2 and "seed" not in r2
