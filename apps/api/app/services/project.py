@@ -852,6 +852,9 @@ class ProjectService:
             sub.final_score = self._calculate_final_score(score or 0, sub.is_late, project)
         elif review_status == ReviewStatus.REVISION_REQUESTED:
             sub.status = SubmissionStatus.REVISION_REQUESTED
+            # Clear any score from a prior approval — the work is being redone,
+            # so a stale final_score must not linger on the reopened submission.
+            sub.final_score = None
         elif review_status == ReviewStatus.REJECTED:
             sub.status = SubmissionStatus.REJECTED
             sub.final_score = score

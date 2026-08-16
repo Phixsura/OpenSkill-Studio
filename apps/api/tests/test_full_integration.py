@@ -2410,3 +2410,30 @@ async def test_auth_edge_inputs_no_500(c):
         assert r.status_code < 500, f"login {body} -> {r.status_code}"
     assert (await c.post("/api/v1/auth/reset-password", json={"token": "garbage", "new_password": "NewPass123!"})).status_code < 500
     assert (await c.get("/api/v1/auth/verify-email?token=garbage")).status_code < 500
+
+
+@pytest.mark.asyncio
+async def test_revision_clears_stale_final_score(c):
+    """Approving a submission sets final_score; sending it back for revision
+    must clear it (the work is being redone), not leave the old score."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Rework Project", "description": "d", "instructions": "i", "max_score": 100, "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+
+    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "approved", "score": 80}, headers=h)
+    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    assert d["final_score"] == 80
+
+    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "revision_requested", "feedback": "redo"}, headers=h)
+    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    assert d["status"] == "revision_requested"
+    assert d["final_score"] is None
