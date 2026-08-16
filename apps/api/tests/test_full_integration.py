@@ -2195,3 +2195,40 @@ async def test_cover_upload_rejects_spoofed_content(c):
         headers=h,
     )
     assert r.status_code in (200, 201)
+
+
+@pytest.mark.asyncio
+async def test_reorder_exercises_rejects_foreign_exercise(c):
+    """exercises/reorder must verify each id belongs to the skill — otherwise
+    a caller could reorder another skill's / org's exercises by id."""
+    h, _ = await _auth(c)
+
+    async def skill_with_exercise(oid):
+        cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+        sk = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/skills",
+                json={"name": "Skill One", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+                headers=h,
+            )
+        ).json()["data"]["id"]
+        ex = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+                json={"title": "Ex", "description": "d", "type": "text_answer", "config": {}, "max_score": 10},
+                headers=h,
+            )
+        ).json()["data"]["id"]
+        return sk, ex
+
+    oa = await _org(c, h)
+    sk_a, _ = await skill_with_exercise(oa)
+    ob = await _org(c, h)
+    _, ex_b = await skill_with_exercise(ob)
+
+    r = await c.put(
+        f"/api/v1/orgs/{oa}/skills/{sk_a}/exercises/reorder",
+        json={"items": [{"id": ex_b, "sort_order": 99}]},
+        headers=h,
+    )
+    assert r.status_code == 404

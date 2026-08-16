@@ -542,7 +542,12 @@ async def reorder_exercises(
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
+    # Every exercise id must belong to THIS skill — otherwise a caller could
+    # reorder (tamper with) another skill's / org's exercises by id.
     for item in body.items:
+        ex = await svc.get_exercise(item.id)
+        if ex.skill_id != skill_id:
+            raise HTTPException(status_code=404, detail="Exercise not in this skill")
         await svc.update_exercise(item.id, sort_order=item.sort_order)
     await db.commit()
     return {"message": "Exercises reordered"}
