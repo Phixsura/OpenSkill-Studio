@@ -2758,3 +2758,57 @@ async def test_peer_results_gated_until_closed_for_students(c):
     # after close: student 200
     await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/close", headers=ho)
     assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=studs[0])).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_peer_anonymity_and_round_list_scoping(c):
+    """Students can't hit the instructor-only all-assessments (reviewer
+    identities), my-assessments never exposes reviewer_id, and listing rounds
+    for a project doesn't return another org's rounds."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Anon Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+
+    studs = []
+    for _ in range(2):
+        hs, _ = await _auth(c)
+        link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+        await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
+        studs.append(hs)
+
+    rid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/peer-review-rounds",
+            json={"project_id": pid, "name": "R1", "num_reviews": 1, "anonymous": True},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
+
+    # student blocked from all-assessments (reveals reviewer_id)
+    assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/assessments", headers=studs[0])).status_code == 403
+    # my-assessments never carries reviewer_id
+    my = (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=studs[0])).json()["data"]
+    assert all("reviewer_id" not in a for a in my)
+
+    # listing rounds of a cross-org project returns nothing
+    oid2 = await _org(c, ho)
+    pid2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid2}/projects",
+            json={"title": "Other Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid2}/peer-review-rounds", json={"project_id": pid2, "name": "R-B"}, headers=ho)
+    r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid2}/peer-review-rounds", headers=ho)
+    assert len(r.json()["data"]) == 0
