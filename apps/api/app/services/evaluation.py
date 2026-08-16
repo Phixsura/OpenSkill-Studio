@@ -503,7 +503,15 @@ Please evaluate the submission against the rubric above."""
             if rubric_item is None:
                 continue
             max_s = rubric_item.get("max_score", 0)
-            clamped = max(0, min(score_item.get("score", 0), max_s))
+            if not isinstance(max_s, (int, float)) or isinstance(max_s, bool):
+                max_s = 0
+            # The LLM's score is untrusted — a hallucinated string/null/list
+            # would raise TypeError in min() and fail the whole (paid) eval.
+            # Treat any non-numeric value as 0 rather than crashing.
+            raw_score = score_item.get("score", 0)
+            if not isinstance(raw_score, (int, float)) or isinstance(raw_score, bool):
+                raw_score = 0
+            clamped = max(0, min(raw_score, max_s))
             scores.append(
                 {
                     "criterion": score_item.get("criterion", "Unknown"),
