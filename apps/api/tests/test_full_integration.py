@@ -4387,3 +4387,30 @@ async def test_int_fields_reject_int32_overflow(c):
     ).json()["data"]["id"]
     r = await c.put(f"/api/v1/orgs/{oid}/categories/{cat}", json={"sort_order": big}, headers=h)
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_project_description_instructions_bounded(c):
+    """Project/template description and instructions were unbounded Text —
+    a 5MB description was accepted and echoed on every list page (bug #121)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    base = {
+        "title": "Bound Proj",
+        "instructions": "i",
+        "rubric": [{"criterion": "Q", "max_score": 100}],
+    }
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects", json={**base, "description": "X" * 20_000}, headers=h
+    )
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={**base, "description": "d", "instructions": "X" * 60_000},
+        headers=h,
+    )
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects", json={**base, "description": "fine"}, headers=h
+    )
+    assert r.status_code == 201

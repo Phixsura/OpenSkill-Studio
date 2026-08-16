@@ -150,6 +150,20 @@ class CreateProjectRequest(BaseModel):
             raise ValueError("late_deadline must be on or after deadline")
         return self
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("description must be 10,000 characters or less")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 50000:
+            raise ValueError("instructions must be 50,000 characters or less")
+        return v
+
 
 class UpdateProjectRequest(BaseModel):
     title: str | None = None
@@ -223,6 +237,20 @@ class UpdateProjectRequest(BaseModel):
             raise ValueError("late_deadline must be on or after deadline")
         return self
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("description must be 10,000 characters or less")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 50000:
+            raise ValueError("instructions must be 50,000 characters or less")
+        return v
+
 
 class ProjectResponse(BaseModel):
     id: str
@@ -288,6 +316,13 @@ class CreateDeliverableRequest(BaseModel):
     def validate_sort_order(cls, v):
         if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
             raise ValueError("sort_order must be between 0 and 100000")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 2000:
+            raise ValueError("description must be 2,000 characters or less")
         return v
 
 
@@ -611,6 +646,20 @@ class CreateTemplateRequest(BaseModel):
             raise ValueError("max_score must be between 0 and 10000")
         return v
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("description must be 10,000 characters or less")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 50000:
+            raise ValueError("instructions must be 50,000 characters or less")
+        return v
+
 
 class UpdateTemplateRequest(BaseModel):
     name: str | None = None
@@ -674,6 +723,20 @@ class UpdateTemplateRequest(BaseModel):
     def validate_suggested_minutes(cls, v):
         if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
             raise ValueError("suggested_minutes must be between 0 and 100000")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("description must be 10,000 characters or less")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 50000:
+            raise ValueError("instructions must be 50,000 characters or less")
         return v
 
 
