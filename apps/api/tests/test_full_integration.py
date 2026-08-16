@@ -2363,3 +2363,14 @@ async def test_from_template_instantiation_and_bad_ids(c):
             headers=h,
         )
         assert r.status_code == 404, f"{bad} -> {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_list_filters_reject_bad_enum(c):
+    """Bad enum values in list-filter query params → 422, never 500
+    (eval tasks status/type, member role)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?status=bogus", headers=h)).status_code == 422
+    assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?eval_type=bogus", headers=h)).status_code == 422
+    assert (await c.get(f"/api/v1/orgs/{oid}/members?role=bogus", headers=h)).status_code == 422

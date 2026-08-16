@@ -243,9 +243,15 @@ class EvaluationService:
     ) -> tuple[list[EvaluationTask], int]:
         base = select(EvaluationTask).where(EvaluationTask.org_id == org_id)
         if status:
-            base = base.where(EvaluationTask.status == EvalStatus(status))
+            try:
+                base = base.where(EvaluationTask.status == EvalStatus(status))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid status: {status}", 422) from exc
         if eval_type:
-            base = base.where(EvaluationTask.type == EvalType(eval_type))
+            try:
+                base = base.where(EvaluationTask.type == EvalType(eval_type))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid type: {eval_type}", 422) from exc
 
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()

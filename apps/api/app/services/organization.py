@@ -270,7 +270,12 @@ class OrgService:
             OrgMember.org_id == org_id, OrgMember.status == MemberStatus.ACTIVE
         )
         if role:
-            base = base.where(OrgMember.role == OrgRole(role))
+            try:
+                base = base.where(OrgMember.role == OrgRole(role))
+            except ValueError as exc:
+                from app.exceptions import AppError
+
+                raise AppError("INVALID_FILTER", f"Invalid role: {role}", 422) from exc
 
         total_result = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_result.scalar_one()
