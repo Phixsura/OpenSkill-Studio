@@ -212,9 +212,17 @@ async def upload_cover_image(
             status_code=422, detail=f"File type must be one of: {', '.join(sorted(allowed_types))}"
         )
 
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:  # 10 MB limit for covers
-        raise HTTPException(status_code=413, detail="Cover image must be under 10MB")
+    # Read in chunks, aborting past the limit — `await file.read()` would
+    # buffer an arbitrarily large body in memory before the size check runs.
+    limit = 10 * 1024 * 1024  # 10 MB limit for covers
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="Cover image must be under 10MB")
+        chunks.append(chunk)
+    content = b"".join(chunks)
 
     # Never trust the declared type — sniff the magic bytes so an HTML/script
     # payload can't be stored as image/* and served from the public bucket.

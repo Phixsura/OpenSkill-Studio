@@ -4775,3 +4775,26 @@ async def test_org_settings_hidden_from_non_admins(c):
     assert (await c.get(f"/api/v1/orgs/{oid}", headers=hs)).json()["data"]["settings"] == {}
     owner_settings = (await c.get(f"/api/v1/orgs/{oid}", headers=ho)).json()["data"]["settings"]
     assert owner_settings["ai_evaluation"]["monthly_budget_usd"] == 500
+
+
+@pytest.mark.asyncio
+async def test_cover_upload_rejects_oversize_streaming(c):
+    """upload-cover buffered the whole body before the size check —
+    a huge upload was fully read into memory first (bug #133). Now reads
+    in chunks and 413s as soon as the limit is crossed; a valid small
+    cover still works."""
+    h, _ = await _auth(c)
+    big = b"\xff\xd8\xff\xe0" + b"\x00" * (11 * 1024 * 1024)
+    r = await c.post(
+        "/api/v1/portfolio/upload-cover",
+        files={"file": ("big.jpg", big, "image/jpeg")},
+        headers=h,
+    )
+    assert r.status_code == 413
+    small = b"\xff\xd8\xff\xe0" + b"\x00" * 1024
+    r = await c.post(
+        "/api/v1/portfolio/upload-cover",
+        files={"file": ("ok.jpg", small, "image/jpeg")},
+        headers=h,
+    )
+    assert r.status_code == 200
