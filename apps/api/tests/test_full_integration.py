@@ -4426,3 +4426,18 @@ async def test_profile_theme_bounded(c):
     r = await c.put("/api/v1/portfolio/profile", json={"theme": "dark"}, headers=h)
     assert r.status_code == 200
     assert r.json()["data"]["theme"] == "dark"
+
+
+@pytest.mark.asyncio
+async def test_category_rename_bounded_to_column(c):
+    """UpdateCategoryRequest allowed 200-char names but the column is
+    String(100) — renames between 101-200 chars 500ed (bug #123)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Rename Cat"}, headers=h)
+    ).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid}/categories/{cat}", json={"name": "X" * 150}, headers=h)
+    assert r.status_code == 422
+    r = await c.put(f"/api/v1/orgs/{oid}/categories/{cat}", json={"name": "Fine Name"}, headers=h)
+    assert r.status_code == 200

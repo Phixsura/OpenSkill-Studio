@@ -50,8 +50,9 @@ class UpdateCategoryRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 200:
-            raise ValueError("Name must not exceed 200 characters")
+        # Column is String(100) — the old 200 cap let renames 500 on write.
+        if v is not None and len(v) > 100:
+            raise ValueError("Name must not exceed 100 characters")
         return v
 
     @field_validator("description")
