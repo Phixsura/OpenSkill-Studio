@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, field_validator
 
@@ -17,6 +17,15 @@ class CreateRoundRequest(BaseModel):
         v = v.strip()
         if len(v) < 2 or len(v) > 200:
             raise ValueError("Name must be 2-200 characters")
+        return v
+
+    @field_validator("deadline")
+    @classmethod
+    def normalize_tz(cls, v: datetime | None) -> datetime | None:
+        # Naive datetimes are treated as UTC — mixing naive/aware 500s on
+        # every later comparison.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
         return v
 
     @field_validator("num_reviews")

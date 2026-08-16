@@ -1,8 +1,17 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, field_validator, model_validator
 
 # ── Project ───────────────────────────────────────────────
+
+
+def _ensure_utc(v: datetime | None) -> datetime | None:
+    """Treat a naive datetime as UTC. Mixing naive and aware values makes
+    every later comparison raise 'can't compare offset-naive and
+    offset-aware datetimes' (a 500)."""
+    if v is not None and v.tzinfo is None:
+        return v.replace(tzinfo=UTC)
+    return v
 
 
 VALID_PROJECT_TYPES = {"general", "ai_visual"}
@@ -138,6 +147,11 @@ class CreateProjectRequest(BaseModel):
     def validate_skill_ids(cls, v):
         return _validate_id_list(v, "skill_ids")
 
+    @field_validator("deadline", "late_deadline")
+    @classmethod
+    def normalize_tz(cls, v: datetime | None) -> datetime | None:
+        return _ensure_utc(v)
+
     @model_validator(mode="after")
     def validate_deadline_ordering(self):
         # A late_deadline before the deadline makes the "late" window negative,
@@ -224,6 +238,11 @@ class UpdateProjectRequest(BaseModel):
         if v is not None and isinstance(v, int) and (v < 0 or v > 1000):
             raise ValueError("max_submissions must be between 0 and 1000")
         return v
+
+    @field_validator("deadline", "late_deadline")
+    @classmethod
+    def normalize_tz(cls, v: datetime | None) -> datetime | None:
+        return _ensure_utc(v)
 
     @model_validator(mode="after")
     def validate_deadline_ordering(self):
@@ -493,6 +512,11 @@ class GrantExtensionRequest(BaseModel):
     user_id: str
     new_deadline: datetime
     reason: str | None = None
+
+    @field_validator("new_deadline")
+    @classmethod
+    def normalize_tz(cls, v: datetime) -> datetime:
+        return _ensure_utc(v)
 
     @field_validator("reason")
     @classmethod

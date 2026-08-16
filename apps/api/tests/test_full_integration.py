@@ -4816,3 +4816,41 @@ async def test_member_emails_hidden_from_students(c):
     assert all(r["user"]["display_name"] for r in rows)
     rows = (await c.get(f"/api/v1/orgs/{oid}/members", headers=ho)).json()["data"]
     assert any("@" in r["user"]["email"] for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_naive_datetime_deadlines_normalized(c):
+    """A naive deadline mixed with an aware late_deadline raised
+    \"can't compare offset-naive and offset-aware datetimes\" — a 500 in
+    the ordering validator, and the same class lurked in extension/round
+    deadline comparisons (bug #136). Naive datetimes are now treated as
+    UTC everywhere."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Mixed TZ Proj",
+            "description": "d",
+            "instructions": "i",
+            "deadline": "2030-01-01T12:00:00",  # naive
+            "late_deadline": "2030-01-02T12:00:00Z",  # aware
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    assert r.status_code == 201
+    # inverted order still rejected (with mixed tz styles)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Inverted TZ Proj",
+            "description": "d",
+            "instructions": "i",
+            "deadline": "2030-01-02T12:00:00Z",
+            "late_deadline": "2030-01-01T12:00:00",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
+    assert r.status_code == 422
