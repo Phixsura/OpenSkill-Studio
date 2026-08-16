@@ -530,6 +530,15 @@ async def update_submission(
         content = item_data.get("content")
         if content is not None and (not isinstance(content, str) or len(content) > max_content):
             raise HTTPException(status_code=422, detail="Item content too large or invalid")
+        # A link item's content is rendered as a clickable href — restrict to
+        # http(s) so a stored javascript:/data: URL can't become an XSS vector.
+        if item_type == ItemType.LINK and content:
+            import re as _re
+
+            if not _re.match(r"^https?://", content.strip(), _re.IGNORECASE):
+                raise HTTPException(
+                    status_code=422, detail="Link must start with http:// or https://"
+                )
         # Inline items are single-value per deliverable: editing replaces the
         # existing row rather than piling up stale duplicates (which would
         # confuse the required-deliverable check and reviewers).

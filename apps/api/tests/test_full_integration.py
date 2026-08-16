@@ -4128,3 +4128,52 @@ async def test_comments_include_author_name(c):
         "data"
     ]
     assert comments[0]["author_name"] == u["display_name"]
+
+
+@pytest.mark.asyncio
+async def test_link_item_scheme_restricted(c):
+    """A link deliverable's content is rendered as a clickable href —
+    javascript:/data: schemes must be rejected like every other URL field
+    (bug #115)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Link Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{p['id']}/deliverables",
+            json={"name": "Demo Link", "type": "link", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}",
+        json={"items": [{"deliverable_id": did, "type": "link", "content": "javascript:alert(1)"}]},
+        headers=h,
+    )
+    assert r.status_code == 422
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}",
+        json={
+            "items": [
+                {"deliverable_id": did, "type": "link", "content": "https://demo.example.com"}
+            ]
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
