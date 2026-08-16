@@ -2337,3 +2337,29 @@ async def test_id_list_and_settings_bounds(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_from_template_instantiation_and_bad_ids(c):
+    """Builtin template instantiates with deliverables deep-copied; unknown
+    template ids (builtin- prefix or real) 404."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/from-template",
+        json={"template_id": "builtin-ai-product-ad", "title": "My Ad"},
+        headers=h,
+    )
+    assert r.status_code == 201
+    pid = r.json()["data"]["id"]
+    dl = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/deliverables", headers=h)).json()["data"]
+    assert len(dl) == 8
+
+    for bad in ("builtin-nonexistent", "01BOGUSBOGUSBOGUSBOGUSBOGU"):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/projects/from-template",
+            json={"template_id": bad, "title": "Valid Title"},
+            headers=h,
+        )
+        assert r.status_code == 404, f"{bad} -> {r.status_code}"
