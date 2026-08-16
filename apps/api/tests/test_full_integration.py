@@ -1887,3 +1887,38 @@ async def test_blank_item_does_not_satisfy_required(c):
     )
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_inline_item_edit_replaces_not_accumulates(c):
+    """Re-PUTting a text/markdown/link deliverable replaces the existing row
+    instead of piling up untracked duplicate items."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Inline Edit Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Text D", "type": "text", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+
+    for txt in ("first", "second", "third"):
+        await c.put(
+            f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}",
+            json={"items": [{"deliverable_id": did, "type": "text", "content": txt}]},
+            headers=h,
+        )
+    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    text_items = [i for i in det["items"] if i["deliverable_id"] == did]
+    assert len(text_items) == 1
+    assert text_items[0]["content"] == "third"

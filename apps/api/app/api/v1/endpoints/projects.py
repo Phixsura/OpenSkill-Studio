@@ -490,6 +490,8 @@ async def update_submission(
     if sub.status.value not in ("draft", "revision_requested"):
         raise HTTPException(status_code=422, detail="This submission can no longer be edited")
 
+    from sqlalchemy import select as _select
+
     from app.models.project import ItemType, SubmissionItem
 
     # File and prompt items have dedicated endpoints with their own
@@ -517,13 +519,28 @@ async def update_submission(
         content = item_data.get("content")
         if content is not None and (not isinstance(content, str) or len(content) > max_content):
             raise HTTPException(status_code=422, detail="Item content too large or invalid")
-        item = SubmissionItem(
-            submission_id=submission_id,
-            deliverable_id=deliverable_id,
-            type=item_type,
-            content=content,
+        # Inline items are single-value per deliverable: editing replaces the
+        # existing row rather than piling up stale duplicates (which would
+        # confuse the required-deliverable check and reviewers).
+        existing = await db.execute(
+            _select(SubmissionItem).where(
+                SubmissionItem.submission_id == submission_id,
+                SubmissionItem.deliverable_id == deliverable_id,
+                SubmissionItem.type == item_type,
+            )
         )
-        db.add(item)
+        row = existing.scalars().first()
+        if row is not None:
+            row.content = content
+        else:
+            db.add(
+                SubmissionItem(
+                    submission_id=submission_id,
+                    deliverable_id=deliverable_id,
+                    type=item_type,
+                    content=content,
+                )
+            )
     await db.commit()
     await db.refresh(sub)
     return DataResponse(data=SubmissionResponse.model_validate(sub))
