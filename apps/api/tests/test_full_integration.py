@@ -4248,3 +4248,51 @@ async def test_mcq_requires_correct_config(c):
         f"/api/v1/orgs/{oid}/exercises/{ex}", json={"config": {"options": ["a", "b"]}}, headers=h
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_attempt_answer_bounded(c):
+    """SubmitAttemptRequest.answer had no size bound — unbounded JSONB
+    storage abuse, same class as settings/config (bug #118)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "AB Cat"}, headers=h)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "AB Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Text",
+                "description": "d",
+                "type": "text_answer",
+                "config": {},
+                "max_score": 10,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"text": "X" * 200_000}},
+        headers=h,
+    )
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "fine"}}, headers=h
+    )
+    assert r.status_code == 201

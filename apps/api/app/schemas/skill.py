@@ -339,6 +339,15 @@ class ExerciseResponse(BaseModel):
 class SubmitAttemptRequest(BaseModel):
     answer: dict
 
+    @field_validator("answer")
+    @classmethod
+    def validate_answer(cls, v: dict) -> dict:
+        # Bound the answer JSON — same unbounded-JSONB-storage class as
+        # settings/config. 100KB covers any legitimate text/code answer.
+        if len(str(v)) > 100_000:
+            raise ValueError("answer is too large")
+        return v
+
 
 class AttemptResponse(BaseModel):
     id: str
