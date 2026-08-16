@@ -402,6 +402,10 @@ class OrgService:
         if user is None or user.email.lower() != invite.email.lower():
             raise InviteTokenInvalidError("Invitation is not addressed to this account")
 
+        # Org must still exist and be active — accepting into an archived org
+        # would create a ghost membership invisible everywhere else.
+        await self.get_org(invite.org_id)
+
         invite.status = InviteStatus.ACCEPTED
         invite.accepted_at = datetime.now(UTC)
 
@@ -477,6 +481,12 @@ class OrgService:
             raise InviteLinkInvalidError("Invite link has expired")
         if link.max_uses and link.use_count >= link.max_uses:
             raise InviteLinkInvalidError("Invite link has reached maximum uses")
+
+        # Org must still be active — a link from an archived org would create
+        # a ghost membership in an org no endpoint will ever surface.
+        org = await self.db.get(Organization, link.org_id)
+        if org is None or org.status == OrgStatus.ARCHIVED:
+            raise InviteLinkInvalidError("Invite link not found or inactive")
 
         member = await self.add_member(org_id=link.org_id, user_id=user_id, role=link.role)
         link.use_count += 1

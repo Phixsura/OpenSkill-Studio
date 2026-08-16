@@ -2955,3 +2955,23 @@ async def test_grading_queue_routing_and_scoping(c):
 
     # bogus attempt id → 404
     assert (await c.post(f"/api/v1/orgs/{oid}/grading/attempts/01BOGUSBOGUSBOGUSBOGUSBOGU", json={"score": 5}, headers=h)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_join_archived_org_rejected(c):
+    """Invite links and email invites must stop working once the org is
+    archived — otherwise joins create ghost memberships (bug #95)."""
+    h1, _ = await _auth(c)
+    h2, u2 = await _auth(c)
+    oid = await _org(c, h1)
+
+    link = (await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=h1)).json()["data"]
+
+    # archive the org
+    assert (await c.delete(f"/api/v1/orgs/{oid}", headers=h1)).status_code == 204
+
+    # join by code → rejected, no ghost membership
+    r = await c.post("/api/v1/invites/join", json={"code": link["code"]}, headers=h2)
+    assert r.status_code == 422
+    orgs = (await c.get("/api/v1/orgs", headers=h2)).json()["data"]
+    assert all(o["id"] != oid for o in orgs)
