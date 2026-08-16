@@ -3605,3 +3605,56 @@ async def test_eval_budget_enforced_on_retry_and_first_run(c):
         headers=h,
     )
     assert r.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_regrant_extension_updates_instead_of_500(c):
+    """Granting a second extension to the same student hit the
+    (project, user) unique constraint and 500ed — re-granting must update
+    the existing extension (bug #105)."""
+    from datetime import UTC, datetime, timedelta
+
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    future = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+    later = (datetime.now(UTC) + timedelta(days=14)).isoformat()
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Regrant Proj",
+                "description": "d",
+                "instructions": "i",
+                "deadline": past,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=hi)
+
+    r1 = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{p['id']}/extensions",
+        json={"user_id": us["id"], "new_deadline": future},
+        headers=hi,
+    )
+    assert r1.status_code == 201
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{p['id']}/extensions",
+        json={"user_id": us["id"], "new_deadline": later},
+        headers=hi,
+    )
+    assert r2.status_code == 201  # updated, not 500
+
+    # extension still works: student submits past the deadline as on_time
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=hs)).json()[
+        "data"
+    ]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}/submit", headers=hs)
+    assert r.status_code == 200
+    assert r.json()["data"]["is_late"] is False

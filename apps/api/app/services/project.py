@@ -934,6 +934,28 @@ class ProjectService:
         if member.scalar_one_or_none() is None:
             raise AppError("USER_NOT_FOUND", "User is not a member of this organization", 404)
 
+        # One extension row per (project, user) — re-granting updates the
+        # deadline instead of hitting the unique constraint with a 500.
+        existing_result = await self.db.execute(
+            select(SubmissionExtension).where(
+                SubmissionExtension.project_id == project_id,
+                SubmissionExtension.user_id == user_id,
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing is not None:
+            existing.extended_deadline = new_deadline
+            existing.reason = reason
+            existing.granted_by = granted_by
+            await self.db.flush()
+            log.info(
+                "extension_updated",
+                project_id=project_id,
+                user_id=user_id,
+                deadline=new_deadline.isoformat(),
+            )
+            return existing
+
         ext = SubmissionExtension(
             project_id=project_id,
             user_id=user_id,
