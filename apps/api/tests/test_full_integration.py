@@ -5020,3 +5020,64 @@ async def test_draft_projects_hidden_from_students(c):
         x["title"] for x in (await c.get(f"/api/v1/orgs/{oid}/projects", headers=hs)).json()["data"]
     ]
     assert "Draft Secret" in titles
+
+
+@pytest.mark.asyncio
+async def test_draft_skills_and_templates_hidden_from_students(c):
+    """Same publish-visibility gap as #139, in the skills domain: draft
+    skills were fully visible to students (list + detail + learning_content
+    + tree), and project templates (an instructor authoring tool) were
+    readable by students (bug #140)."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=hi)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Draft Skill",
+                "description": "secret prep " * 3,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+
+    # draft skill invisible to student
+    assert (await c.get(f"/api/v1/orgs/{oid}/skills/{sk}", headers=hs)).status_code == 404
+    assert (await c.get(f"/api/v1/orgs/{oid}/skills/{sk}/tree", headers=hs)).status_code == 404
+    names = [
+        x["name"] for x in (await c.get(f"/api/v1/orgs/{oid}/skills", headers=hs)).json()["data"]
+    ]
+    assert "Draft Skill" not in names
+    # instructor sees it
+    assert (await c.get(f"/api/v1/orgs/{oid}/skills/{sk}", headers=hi)).status_code == 200
+
+    # templates are instructor-only
+    t = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/project-templates",
+            json={
+                "name": "Blueprint",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+                "deliverables": [],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    assert (await c.get(f"/api/v1/orgs/{oid}/project-templates", headers=hs)).status_code == 403
+    assert (await c.get(f"/api/v1/orgs/{oid}/project-templates/{t}", headers=hs)).status_code == 403
+    assert (await c.get(f"/api/v1/orgs/{oid}/project-templates", headers=hi)).status_code == 200
+
+    # publish → student sees the skill
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=hi)
+    assert (await c.get(f"/api/v1/orgs/{oid}/skills/{sk}", headers=hs)).status_code == 200

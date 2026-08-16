@@ -193,6 +193,8 @@ class SkillService:
         q: str | None = None,
         page: int = 1,
         per_page: int = 20,
+        *,
+        published_only: bool = False,
     ) -> tuple[list[Skill], int]:
         base = select(Skill).where(Skill.org_id == org_id)
 
@@ -204,7 +206,11 @@ class SkillService:
                 base = base.where(Skill.difficulty == DifficultyLevel(difficulty))
             except ValueError as exc:
                 raise AppError("INVALID_FILTER", f"Invalid difficulty: {difficulty}", 422) from exc
-        if status:
+        if published_only:
+            # Students only see published skills — a draft skill an instructor
+            # is still authoring must not appear in listings.
+            base = base.where(Skill.status == ContentStatus.PUBLISHED)
+        elif status:
             try:
                 base = base.where(Skill.status == ContentStatus(status))
             except ValueError as exc:

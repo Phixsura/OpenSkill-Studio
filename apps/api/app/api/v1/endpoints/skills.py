@@ -154,10 +154,11 @@ async def list_skills(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
+    published_only = member.role not in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     skills, total = await svc.list_skills(
-        org_id, category, difficulty, status, tag, q, page, per_page
+        org_id, category, difficulty, status, tag, q, page, per_page, published_only=published_only
     )
     return ListResponse(
         data=[SkillResponse.model_validate(s) for s in skills],
@@ -200,10 +201,18 @@ async def get_skill(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
+    # Draft skills are instructor-only until published (same as projects).
+    from app.models.skill import ContentStatus
+
+    if (
+        member.role not in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+        and skill.status != ContentStatus.PUBLISHED
+    ):
+        raise HTTPException(status_code=404, detail="Skill not found")
     prereqs = await svc.get_skill_prerequisites(skill_id)
     resp = SkillDetailResponse(
         **SkillResponse.model_validate(skill).model_dump(),
@@ -579,10 +588,17 @@ async def get_skill_tree(
     db: AsyncSession = Depends(get_db),
 ):
     """Get the skill's prerequisite tree (nodes + edges for visualization)."""
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
+    from app.models.skill import ContentStatus
+
+    if (
+        member.role not in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+        and skill.status != ContentStatus.PUBLISHED
+    ):
+        raise HTTPException(status_code=404, detail="Skill not found")
     prereqs = await svc.get_skill_prerequisites(skill_id)
     return {
         "skill": SkillResponse.model_validate(skill),

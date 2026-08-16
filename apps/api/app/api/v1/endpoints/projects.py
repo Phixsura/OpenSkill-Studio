@@ -838,7 +838,10 @@ async def list_templates(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    # Templates are an instructor authoring tool (blueprints for creating
+    # projects) — students have no reason to browse them, and create/update/
+    # delete/instantiate are all instructor-only. Reads were the gap.
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     builtins, org_templates = await svc.list_templates(org_id)
     return DataResponse(
@@ -888,7 +891,7 @@ async def get_template(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     template = await svc.get_template(template_id, org_id)
     return DataResponse(data=_template_response(template))
