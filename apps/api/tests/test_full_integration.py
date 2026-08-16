@@ -2437,3 +2437,63 @@ async def test_revision_clears_stale_final_score(c):
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
     assert d["status"] == "revision_requested"
     assert d["final_score"] is None
+
+
+@pytest.mark.asyncio
+async def test_review_lifecycle_queue_and_history(c):
+    """Full review lifecycle: pending queue reflects only SUBMITTED work,
+    rejected is terminal, review records accumulate as history, and a
+    resubmitted revision re-enters the queue."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Lifecycle Project", "description": "d", "instructions": "i", "max_score": 100, "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+
+    async def pending_count():
+        r = await c.get(f"/api/v1/orgs/{oid}/reviews/pending", headers=h)
+        return r.json()["meta"]["total"]
+
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    assert await pending_count() == 0  # draft not pending
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    assert await pending_count() == 1
+
+    # revision → resubmit → back in queue
+    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "revision_requested", "feedback": "redo"}, headers=h)
+    assert await pending_count() == 0
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    assert await pending_count() == 1
+
+    # approve → out of queue, 2 review records, latest first
+    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "approved", "score": 90}, headers=h)
+    assert await pending_count() == 0
+    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    assert d["status"] == "approved" and d["final_score"] == 90
+    assert len(d["reviews"]) == 2
+    assert d["reviews"][0]["status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_rejected_submission_is_terminal(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Reject Terminal Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "rejected", "score": 10}, headers=h)
+    # a rejected submission cannot be resubmitted
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    assert r.status_code == 422
