@@ -192,8 +192,10 @@ class PortfolioService:
     async def get_public_item(self, username: str, slug: str) -> PortfolioItem | None:
         result = await self.db.execute(select(UserProfile).where(UserProfile.username == username))
         profile = result.scalar_one_or_none()
-        if profile is None:
-            return None  # pragma: no cover
+        # A private profile hides everything — item detail must not leak what
+        # the profile page and item list already refuse to show.
+        if profile is None or profile.visibility != ProfileVisibility.PUBLIC:
+            return None
 
         item_result = await self.db.execute(
             select(PortfolioItem).where(
@@ -265,7 +267,15 @@ class PortfolioService:
             published_at=datetime.now(UTC),
         )
         self.db.add(item)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            # Slug collides with the user's existing item (same title) — the
+            # (user_id, slug) unique index would 500. Append a random suffix.
+            await self.db.rollback()
+            item.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
+            self.db.add(item)
+            await self.db.flush()
         return item
 
     async def list_items(self, user_id: str) -> list[PortfolioItem]:

@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, field_validator
@@ -21,8 +22,16 @@ class CreateOrgRequest(BaseModel):
     @field_validator("slug")
     @classmethod
     def validate_slug(cls, v):
-        if v is not None and isinstance(v, str) and len(v) > 200:
-            raise ValueError("slug must not exceed 200 characters")
+        # Column is String(100).
+        if v is not None and isinstance(v, str) and len(v) > 100:
+            raise ValueError("slug must not exceed 100 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
         return v
 
 
@@ -41,8 +50,14 @@ class UpdateOrgRequest(BaseModel):
     @field_validator("logo_url")
     @classmethod
     def validate_logo_url(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
+        if v is None:
+            return v
+        if len(v) > 500:
             raise ValueError("Logo Url must not exceed 500 characters")
+        # Rendered as <img src> in the UI — restrict to http(s) so a stored
+        # javascript:/data: URL can't become an XSS vector.
+        if v and not re.match(r"^https?://", v, re.IGNORECASE):
+            raise ValueError("Logo URL must start with http:// or https://")
         return v
 
     @field_validator("name")
@@ -166,3 +181,11 @@ class UpdateMemberRoleRequest(BaseModel):
 
 class UpdateOrgSettingsRequest(BaseModel):
     settings: dict
+
+    @field_validator("settings")
+    @classmethod
+    def validate_settings(cls, v: dict) -> dict:
+        # Bound the settings JSON blob so it can't be used for unbounded storage.
+        if len(str(v)) > 20000:
+            raise ValueError("settings object is too large")
+        return v

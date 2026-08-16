@@ -50,16 +50,62 @@ class UpdateProfileRequest(BaseModel):
     @field_validator("website_url")
     @classmethod
     def validate_website_url(cls, v: str | None) -> str | None:
-        if v is not None and not re.match(r"^https?://", v, re.IGNORECASE):
-            raise ValueError("URL must start with http:// or https://")
+        if v is not None and v != "":
+            if len(v) > 500:
+                raise ValueError("URL must be 500 characters or less")
+            if not re.match(r"^https?://", v, re.IGNORECASE):
+                raise ValueError("URL must start with http:// or https://")
+        return v
+
+    @field_validator("headline")
+    @classmethod
+    def validate_headline(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Headline must be 200 characters or less")
+        return v
+
+    @field_validator("theme")
+    @classmethod
+    def validate_theme(cls, v: str | None) -> str | None:
+        # String(20) column — anything longer 500s on write.
+        if v is not None and len(v) > 20:
+            raise ValueError("Theme must be 20 characters or less")
+        return v
+
+    @field_validator("bio")
+    @classmethod
+    def validate_bio(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 5000:
+            raise ValueError("Bio must be 5,000 characters or less")
+        return v
+
+    @field_validator("location")
+    @classmethod
+    def validate_location(cls, v: str | None) -> str | None:
+        # Column is String(100).
+        if v is not None and len(v) > 100:
+            raise ValueError("Location must be 100 characters or less")
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str | None) -> str | None:
+        if v is not None and v not in {"public", "private"}:
+            raise ValueError("visibility must be one of: public, private")
         return v
 
     @field_validator("social_links")
     @classmethod
     def validate_social_links(cls, v: dict | None) -> dict | None:
         if v is not None:
+            if len(v) > 20:
+                raise ValueError("At most 20 social links")
             for key, url in v.items():
-                if not isinstance(url, str) or not re.match(r"^https?://", url, re.IGNORECASE):
+                if not isinstance(key, str) or len(key) > 50:
+                    raise ValueError("Social link keys must be strings of 50 chars or less")
+                if not isinstance(url, str) or len(url) > 500:
+                    raise ValueError(f"Social link '{key}' must be a URL of 500 chars or less")
+                if not re.match(r"^https?://", url, re.IGNORECASE):
                     raise ValueError(f"Social link '{key}' must be a valid http/https URL")
         return v
 
@@ -125,7 +171,13 @@ class CreatePortfolioItemRequest(BaseModel):
     @classmethod
     def validate_tags(cls, v: list[str] | None) -> list[str] | None:
         if v is not None:
-            return [t.strip() for t in v if t.strip()]
+            cleaned = [t.strip() for t in v if isinstance(t, str) and t.strip()]
+            if len(cleaned) > 30:
+                raise ValueError("At most 30 tags")
+            for t in cleaned:
+                if len(t) > 50:
+                    raise ValueError("Each tag must be 50 characters or less")
+            return cleaned
         return v
 
     @field_validator("title")
@@ -134,6 +186,30 @@ class CreatePortfolioItemRequest(BaseModel):
         v = v.strip()
         if len(v) < 2 or len(v) > 200:
             raise ValueError("Title must be 2-200 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("external_url", "cover_image_url")
+    @classmethod
+    def validate_urls(cls, v: str | None) -> str | None:
+        if v is not None and v != "":
+            if len(v) > 500:
+                raise ValueError("URL must be 500 characters or less")
+            if not re.match(r"^https?://", v, re.IGNORECASE):
+                raise ValueError("URL must start with http:// or https://")
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str) -> str:
+        if v not in {"public", "unlisted", "private"}:
+            raise ValueError("visibility must be one of: public, unlisted, private")
         return v
 
 
@@ -161,25 +237,35 @@ class UpdatePortfolioItemRequest(BaseModel):
             raise ValueError("Description must not exceed 2000 characters")
         return v
 
-    @field_validator("cover_image_url")
+    @field_validator("external_url", "cover_image_url")
     @classmethod
-    def validate_cover_image_url(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
-            raise ValueError("Cover Image Url must not exceed 500 characters")
-        return v
-
-    @field_validator("external_url")
-    @classmethod
-    def validate_external_url(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
-            raise ValueError("External Url must not exceed 500 characters")
+    def validate_urls(cls, v: str | None) -> str | None:
+        # Same rules as create — update must not be a scheme-validation bypass.
+        if v is not None and v != "":
+            if len(v) > 500:
+                raise ValueError("URL must be 500 characters or less")
+            if not re.match(r"^https?://", v, re.IGNORECASE):
+                raise ValueError("URL must start with http:// or https://")
         return v
 
     @field_validator("tags")
     @classmethod
     def validate_tags(cls, v: list[str] | None) -> list[str] | None:
         if v is not None:
-            return [t.strip() for t in v if t.strip()]
+            cleaned = [t.strip() for t in v if isinstance(t, str) and t.strip()]
+            if len(cleaned) > 30:
+                raise ValueError("At most 30 tags")
+            for t in cleaned:
+                if len(t) > 50:
+                    raise ValueError("Each tag must be 50 characters or less")
+            return cleaned
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str | None) -> str | None:
+        if v is not None and v not in {"public", "unlisted", "private"}:
+            raise ValueError("visibility must be one of: public, unlisted, private")
         return v
 
 
@@ -220,3 +306,17 @@ class SkillBadgeResponse(BaseModel):
 
 class ToggleBadgeRequest(BaseModel):
     show_on_profile: bool
+
+
+class ReorderItemsRequest(BaseModel):
+    item_ids: list[str]
+
+    @field_validator("item_ids")
+    @classmethod
+    def validate_item_ids(cls, v: list) -> list:
+        if len(v) > 500:
+            raise ValueError("Too many items to reorder")
+        for iid in v:
+            if not isinstance(iid, str):
+                raise ValueError("item_ids must be a list of strings")
+        return v

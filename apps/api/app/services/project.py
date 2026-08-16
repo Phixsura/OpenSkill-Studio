@@ -43,6 +43,24 @@ from app.models.skill import ContentStatus, DifficultyLevel
 log = structlog.get_logger()
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+# Below the DB column width (255) AND small enough that the S3 key's final
+# path segment ("{ULID}_{name}", ~27 char prefix) stays under the 255-byte
+# object-name limit MinIO enforces per path component.
+MAX_FILENAME_LEN = 200
+
+
+def _clamp_filename(name: str) -> str:
+    """Clamp a client-supplied filename, preserving the extension, so a very
+    long name doesn't raise a DataError 500 on insert or an invalid-object-name
+    error from object storage."""
+    if len(name) <= MAX_FILENAME_LEN:
+        return name
+    dot = name.rfind(".")
+    if dot > 0 and len(name) - dot <= 20:  # keep a short extension
+        ext = name[dot:]
+        return name[: MAX_FILENAME_LEN - len(ext)] + ext
+    return name[:MAX_FILENAME_LEN]
+
 
 PROJECT_TYPES = {"general", "ai_visual"}
 
@@ -332,10 +350,19 @@ class ProjectService:
         status: str | None = None,
         page: int = 1,
         per_page: int = 20,
+        *,
+        published_only: bool = False,
     ) -> tuple[list[Project], int]:
         base = select(Project).where(Project.org_id == org_id)
-        if status:
-            base = base.where(Project.status == ContentStatus(status))
+        if published_only:
+            # Students must not see draft projects an instructor is still
+            # authoring (their instructions, deadlines, and reference assets).
+            base = base.where(Project.status == ContentStatus.PUBLISHED)
+        elif status:
+            try:
+                base = base.where(Project.status == ContentStatus(status))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid status: {status}", 422) from exc
         else:
             base = base.where(Project.status != ContentStatus.ARCHIVED)
 
@@ -363,6 +390,15 @@ class ProjectService:
                 if k == "difficulty":
                     v = DifficultyLevel(v)
                 setattr(project, k, v)
+        # Validate the ordering on the COMBINED (post-update) values — a partial
+        # update that changes only one of deadline/late_deadline can otherwise
+        # leave a late_deadline earlier than the deadline (negative late window).
+        if (
+            project.deadline is not None
+            and project.late_deadline is not None
+            and project.late_deadline < project.deadline
+        ):
+            raise InvalidStateError("late_deadline must be on or after deadline")
         await self.db.flush()
         return project
 
@@ -471,11 +507,21 @@ class ProjectService:
         if project.max_submissions > 0 and count >= project.max_submissions:
             raise MaxSubmissionsReachedError(project.max_submissions)
 
+        # Version = max existing + 1, not count + 1 — deleting a draft would
+        # otherwise reuse a version number that already exists.
+        max_ver_r = await self.db.execute(
+            select(func.max(Submission.version)).where(
+                Submission.project_id == project_id,
+                Submission.user_id == user_id,
+            )
+        )
+        next_version = (max_ver_r.scalar_one() or 0) + 1
+
         submission = Submission(
             org_id=org_id,
             project_id=project_id,
             user_id=user_id,
-            version=count + 1,
+            version=next_version,
             status=SubmissionStatus.DRAFT,
         )
         self.db.add(submission)
@@ -494,7 +540,10 @@ class ProjectService:
         user_id: str | None = None,
         page: int = 1,
         per_page: int = 20,
-    ) -> tuple[list[Submission], int]:
+    ) -> tuple[list[tuple[Submission, str]], int]:
+        """List submissions with author display names as (submission, name) tuples."""
+        from app.models.user import User as UserModel
+
         base = select(Submission).where(Submission.project_id == project_id)
         if user_id:
             base = base.where(Submission.user_id == user_id)
@@ -503,18 +552,28 @@ class ProjectService:
         total = total_r.scalar_one()
 
         offset = (page - 1) * per_page
-        result = await self.db.execute(
-            base.order_by(Submission.version.desc()).offset(offset).limit(per_page)
+        joined = (
+            select(Submission, UserModel.display_name)
+            .join(UserModel, UserModel.id == Submission.user_id)
+            .where(Submission.project_id == project_id)
         )
-        return list(result.scalars().all()), total
+        if user_id:
+            joined = joined.where(Submission.user_id == user_id)
+        result = await self.db.execute(
+            joined.order_by(Submission.created_at.desc()).offset(offset).limit(per_page)
+        )
+        return [(sub, name) for sub, name in result.all()], total
 
     async def submit_draft(self, submission_id: str, user_id: str) -> Submission:
         sub = await self.get_submission(submission_id)
 
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
-        if sub.status != SubmissionStatus.DRAFT:
-            raise InvalidStateError("Only drafts can be submitted")
+        # A draft OR a revision-requested submission can be (re)submitted.
+        if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
+            raise InvalidStateError(
+                "Only drafts or revision-requested submissions can be submitted"
+            )
 
         # Check required deliverables
         await self._validate_required_deliverables(sub)
@@ -541,6 +600,26 @@ class ProjectService:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
         if sub.status != SubmissionStatus.DRAFT:
             raise InvalidStateError("Only drafts can be deleted")
+
+        # Best-effort S3 cleanup of every file item — the DB rows cascade on
+        # delete, but the S3 objects would otherwise be orphaned forever.
+        keys_result = await self.db.execute(
+            select(SubmissionItem.file_key).where(
+                SubmissionItem.submission_id == submission_id,
+                SubmissionItem.file_key.is_not(None),
+            )
+        )
+        file_keys = [k for k in keys_result.scalars() if k]
+        if file_keys:
+            from app.core.storage import get_s3_client
+
+            try:
+                async for client in get_s3_client():
+                    for key in file_keys:
+                        await client.delete_object(Bucket=settings.s3_bucket, Key=key)
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                log.warning("submission_s3_cleanup_failed", submission_id=submission_id)
+
         await self.db.delete(sub)
         await self.db.flush()
 
@@ -578,13 +657,15 @@ class ProjectService:
                 raise FileTooLargeError(limit // (1024 * 1024))
 
     async def _next_item_version(self, submission_id: str, deliverable_id: str) -> int:
+        # max(version)+1, NOT count+1 — after deleting a middle version, count+1
+        # would collide with an existing version number.
         result = await self.db.execute(
-            select(func.count(SubmissionItem.id)).where(
+            select(func.max(SubmissionItem.version)).where(
                 SubmissionItem.submission_id == submission_id,
                 SubmissionItem.deliverable_id == deliverable_id,
             )
         )
-        return result.scalar_one() + 1
+        return (result.scalar_one() or 0) + 1
 
     async def upload_file(
         self,
@@ -599,8 +680,12 @@ class ProjectService:
         sub = await self.get_submission(submission_id)
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
-        if sub.status != SubmissionStatus.DRAFT:
-            raise InvalidStateError("Can only upload to drafts")
+        if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
+            raise InvalidStateError("Can only upload while the submission is editable")
+
+        # Cap filename to the DB column width (255) — a longer name from the
+        # client would otherwise raise a DataError 500 on insert.
+        file_name = _clamp_filename(file_name)
 
         # Deliverable must exist and belong to this submission's project
         deliverable = await self.get_deliverable(deliverable_id)
@@ -614,12 +699,21 @@ class ProjectService:
 
         # max_files caps total stored items for this deliverable. Single-slot
         # deliverables (max_files=1) are exempt so "replace with new version"
-        # keeps working; multi-slot ones can free space via delete_file.
+        # keeps working; multi-slot ones can free space via delete_file. Count
+        # actual stored files (not the version counter, which only grows) so
+        # deleting frees a slot.
         config = deliverable.config or {}
         max_files = config.get("max_files")
+        if isinstance(max_files, int) and max_files > 1:
+            count_result = await self.db.execute(
+                select(func.count(SubmissionItem.id)).where(
+                    SubmissionItem.submission_id == submission_id,
+                    SubmissionItem.deliverable_id == deliverable_id,
+                )
+            )
+            if count_result.scalar_one() >= max_files:
+                raise MaxFilesReachedError(max_files)
         version = await self._next_item_version(submission_id, deliverable_id)
-        if isinstance(max_files, int) and max_files > 1 and version > max_files:
-            raise MaxFilesReachedError(max_files)
 
         # Clean filename
         safe_name = re.sub(r"[^\w.\-]", "_", file_name)
@@ -677,9 +771,14 @@ class ProjectService:
         )
         return item
 
-    async def get_download_url(self, file_id: str) -> str:
+    async def get_download_url(self, file_id: str, submission_id: str | None = None) -> str:
         item = await self.db.get(SubmissionItem, file_id)
         if item is None or not item.file_key:
+            raise AppError("FILE_NOT_FOUND", "File not found", 404)
+        # The file must belong to the submission the caller was authorized for —
+        # otherwise a user can pass their own submission path + another user's
+        # file_id and receive a presigned URL for a file they can't access (IDOR).
+        if submission_id is not None and item.submission_id != submission_id:
             raise AppError("FILE_NOT_FOUND", "File not found", 404)
 
         from app.core.storage import get_s3_client
@@ -708,8 +807,8 @@ class ProjectService:
         sub = await self.get_submission(item.submission_id)
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
-        if sub.status != SubmissionStatus.DRAFT:
-            raise InvalidStateError("Can only delete files from drafts")
+        if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
+            raise InvalidStateError("Can only delete files while the submission is editable")
 
         # Best-effort S3 cleanup — don't leave orphaned objects behind
         if item.file_key:
@@ -738,6 +837,18 @@ class ProjectService:
         sub = await self.get_submission(submission_id)
         project = await self.get_project(sub.project_id)
 
+        # Only submitted work can be reviewed — a draft hasn't been handed in
+        if sub.status in (SubmissionStatus.DRAFT,):
+            raise InvalidStateError("Cannot review a draft submission")
+
+        # Score cannot exceed this project's configured maximum
+        if score is not None and score > project.max_score:
+            raise AppError(
+                "SCORE_EXCEEDS_MAX",
+                f"Score {score} exceeds project maximum of {project.max_score}",
+                422,
+            )
+
         review_status = ReviewStatus(status)
 
         review = SubmissionReview(
@@ -757,6 +868,9 @@ class ProjectService:
             sub.final_score = self._calculate_final_score(score or 0, sub.is_late, project)
         elif review_status == ReviewStatus.REVISION_REQUESTED:
             sub.status = SubmissionStatus.REVISION_REQUESTED
+            # Clear any score from a prior approval — the work is being redone,
+            # so a stale final_score must not linger on the reopened submission.
+            sub.final_score = None
         elif review_status == ReviewStatus.REJECTED:
             sub.status = SubmissionStatus.REJECTED
             sub.final_score = score
@@ -779,7 +893,14 @@ class ProjectService:
         org_id: str,
         page: int = 1,
         per_page: int = 20,
-    ) -> tuple[list[Submission], int]:
+    ) -> tuple[list[tuple[Submission, str, str, str]], int]:
+        """Pending submissions enriched with author display name and project title.
+
+        Returns (submission, author_name, project_title, project_id) tuples so
+        the review dashboard can show WHO submitted WHAT — not bare ULIDs.
+        """
+        from app.models.user import User as UserModel
+
         base = select(Submission).where(
             Submission.org_id == org_id,
             Submission.status == SubmissionStatus.SUBMITTED,
@@ -789,9 +910,19 @@ class ProjectService:
 
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(Submission.submitted_at).offset(offset).limit(per_page)
+            select(Submission, UserModel.display_name, Project.title)
+            .join(UserModel, UserModel.id == Submission.user_id)
+            .join(Project, Project.id == Submission.project_id)
+            .where(
+                Submission.org_id == org_id,
+                Submission.status == SubmissionStatus.SUBMITTED,
+            )
+            .order_by(Submission.submitted_at)
+            .offset(offset)
+            .limit(per_page)
         )
-        return list(result.scalars().all()), total
+        rows = [(sub, name, title, sub.project_id) for sub, name, title in result.all()]
+        return rows, total
 
     # ── Extensions ──
 
@@ -804,6 +935,42 @@ class ProjectService:
         granted_by: str,
     ) -> SubmissionExtension:
         project = await self.get_project(project_id)
+
+        # The recipient must be an active member of the project's org — otherwise
+        # a bogus id 500s on the FK and a real outsider gets a phantom extension.
+        from app.models.organization import MemberStatus, OrgMember
+
+        member = await self.db.execute(
+            select(OrgMember.id).where(
+                OrgMember.org_id == project.org_id,
+                OrgMember.user_id == user_id,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
+        )
+        if member.scalar_one_or_none() is None:
+            raise AppError("USER_NOT_FOUND", "User is not a member of this organization", 404)
+
+        # One extension row per (project, user) — re-granting updates the
+        # deadline instead of hitting the unique constraint with a 500.
+        existing_result = await self.db.execute(
+            select(SubmissionExtension).where(
+                SubmissionExtension.project_id == project_id,
+                SubmissionExtension.user_id == user_id,
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing is not None:
+            existing.extended_deadline = new_deadline
+            existing.reason = reason
+            existing.granted_by = granted_by
+            await self.db.flush()
+            log.info(
+                "extension_updated",
+                project_id=project_id,
+                user_id=user_id,
+                deadline=new_deadline.isoformat(),
+            )
+            return existing
 
         ext = SubmissionExtension(
             project_id=project_id,
@@ -865,13 +1032,21 @@ class ProjectService:
             return
 
         result = await self.db.execute(
-            select(SubmissionItem.deliverable_id)
-            .where(SubmissionItem.submission_id == submission.id)
-            .distinct()
+            select(SubmissionItem).where(SubmissionItem.submission_id == submission.id)
         )
-        submitted_ids = set(result.scalars().all())
+        # A deliverable is only satisfied by a MEANINGFUL item: a file/prompt
+        # row, or a text/link/markdown item with non-blank content. An empty
+        # or whitespace-only text item must not count.
+        satisfied_ids: set[str] = set()
+        for item in result.scalars():
+            if (
+                item.type in (ItemType.FILE, ItemType.PROMPT)
+                or item.content
+                and item.content.strip()
+            ):
+                satisfied_ids.add(item.deliverable_id)
 
-        missing = required_ids - submitted_ids
+        missing = required_ids - satisfied_ids
         if missing:
             raise MissingDeliverablesError()
 
@@ -885,12 +1060,27 @@ class ProjectService:
         return result.scalar_one()
 
     async def _set_project_skills(self, project_id: str, skill_ids: list[str]) -> None:
+        # Every skill must exist AND belong to the project's org (bogus IDs
+        # 500 on the FK; cross-org links would leak another org's skills).
+        if skill_ids:
+            from app.models.skill import Skill
+
+            project = await self.get_project(project_id)
+            found = await self.db.execute(
+                select(Skill.id).where(Skill.id.in_(skill_ids), Skill.org_id == project.org_id)
+            )
+            valid = set(found.scalars())
+            if set(skill_ids) - valid:
+                raise AppError("SKILL_NOT_FOUND", "Skill not found in this organization", 404)
+
         existing = await self.db.execute(
             select(ProjectSkill).where(ProjectSkill.project_id == project_id)
         )
         for ps in existing.scalars():
             await self.db.delete(ps)
-        for sid in skill_ids:
+        await self.db.flush()
+        # De-dup: a repeated skill_id would violate the composite PK with a 500.
+        for sid in dict.fromkeys(skill_ids):
             self.db.add(ProjectSkill(project_id=project_id, skill_id=sid))
         await self.db.flush()
 
@@ -1024,7 +1214,26 @@ class ProjectService:
                 "max_score": template.max_score,
                 "rubric": template.rubric,
                 "deliverables": template.deliverables,
+                "skill_names": template.skill_names,
             }
+
+        # Resolve the template's skill_names to this org's skills (by exact
+        # name) — they were stored on the template but silently dropped at
+        # instantiation, so template-created projects never linked skills.
+        from app.models.skill import Skill
+
+        skill_ids: list[str] = []
+        for skill_name in src.get("skill_names") or []:
+            skill_r = await self.db.execute(
+                select(Skill.id).where(
+                    Skill.org_id == org_id,
+                    Skill.name == skill_name,
+                    Skill.status != ContentStatus.ARCHIVED,
+                )
+            )
+            sid = skill_r.scalars().first()
+            if sid:
+                skill_ids.append(sid)
 
         project = await self.create_project(
             org_id=org_id,
@@ -1039,7 +1248,7 @@ class ProjectService:
             late_deadline=None,
             late_penalty_pct=0,
             max_submissions=0,
-            skill_ids=None,
+            skill_ids=skill_ids or None,
             created_by=created_by,
             project_type=src.get("project_type", "general"),
         )
@@ -1088,6 +1297,7 @@ class ProjectService:
         if not content_matches_mime(file_content[:16], content_type):
             raise ContentTypeMismatchError()
 
+        file_name = _clamp_filename(file_name)
         safe_name = re.sub(r"[^\w.\-]", "_", file_name)
         file_key = f"orgs/{org_id}/projects/{project_id}/assets/{ULID()}_{safe_name}"
 
@@ -1176,8 +1386,8 @@ class ProjectService:
         sub = await self.get_submission(submission_id)
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
-        if sub.status != SubmissionStatus.DRAFT:
-            raise InvalidStateError("Can only add prompts to drafts")
+        if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
+            raise InvalidStateError("Can only add prompts while the submission is editable")
 
         deliverable = await self.get_deliverable(deliverable_id)
         if deliverable.project_id != sub.project_id:
@@ -1185,8 +1395,29 @@ class ProjectService:
         if deliverable.type != DeliverableType.PROMPT:
             raise AppError("INVALID_TYPE", "Deliverable is not a prompt deliverable", 422)
 
-        version = await self._next_item_version(submission_id, deliverable_id)
+        # A prompt deliverable holds one prompt: editing replaces the existing
+        # row rather than piling up stale duplicates (which inflate the version
+        # counter and corrupt exports/audit even though the UI shows the latest).
+        existing = await self.db.execute(
+            select(SubmissionItem).where(
+                SubmissionItem.submission_id == submission_id,
+                SubmissionItem.deliverable_id == deliverable_id,
+                SubmissionItem.type == ItemType.PROMPT,
+            )
+        )
+        item = existing.scalars().first()
+        if item is not None:
+            item.content = json.dumps(prompt_data, ensure_ascii=False)
+            item.uploaded_by = user_id
+            await self.db.flush()
+            log.info(
+                "prompt_item_replaced",
+                submission_id=submission_id,
+                deliverable_id=deliverable_id,
+            )
+            return item
 
+        version = await self._next_item_version(submission_id, deliverable_id)
         item = SubmissionItem(
             submission_id=submission_id,
             deliverable_id=deliverable_id,
@@ -1270,13 +1501,19 @@ class ProjectService:
         log.info("comment_added", submission_id=submission_id, item_id=item_id, anchor=anchor.value)
         return comment
 
-    async def list_comments(self, submission_id: str) -> list[SubmissionComment]:
+    async def list_comments(self, submission_id: str) -> list[tuple[SubmissionComment, str | None]]:
+        """Comments with the author's display name — feedback is a two-way
+        conversation, so the thread must show who said what (a bare ULID
+        rendered as nothing in the UI)."""
+        from app.models.user import User as UserModel
+
         result = await self.db.execute(
-            select(SubmissionComment)
+            select(SubmissionComment, UserModel.display_name)
+            .join(UserModel, UserModel.id == SubmissionComment.author_id, isouter=True)
             .where(SubmissionComment.submission_id == submission_id)
             .order_by(SubmissionComment.created_at)
         )
-        return list(result.scalars().all())
+        return [(row[0], row[1]) for row in result.all()]
 
     async def get_comment(self, comment_id: str, org_id: str) -> SubmissionComment:
         comment = await self.db.get(SubmissionComment, comment_id)

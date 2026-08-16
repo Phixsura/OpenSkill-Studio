@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 # ── Category ──────────────────────────────────────────────
 
@@ -22,8 +22,23 @@ class CreateCategoryRequest(BaseModel):
     @field_validator("slug")
     @classmethod
     def validate_slug(cls, v):
-        if v is not None and isinstance(v, str) and len(v) > 200:
-            raise ValueError("slug must not exceed 200 characters")
+        if v is not None and isinstance(v, str) and len(v) > 100:
+            raise ValueError("slug must not exceed 100 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 2000:
+            raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("icon")
+    @classmethod
+    def validate_icon(cls, v: str | None) -> str | None:
+        # Column is String(50).
+        if v is not None and len(v) > 50:
+            raise ValueError("Icon must not exceed 50 characters")
         return v
 
 
@@ -36,8 +51,9 @@ class UpdateCategoryRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 200:
-            raise ValueError("Name must not exceed 200 characters")
+        # Column is String(100) — the old 200 cap let renames 500 on write.
+        if v is not None and len(v) > 100:
+            raise ValueError("Name must not exceed 100 characters")
         return v
 
     @field_validator("description")
@@ -52,6 +68,13 @@ class UpdateCategoryRequest(BaseModel):
     def validate_icon(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 50:
             raise ValueError("Icon must not exceed 50 characters")
+        return v
+
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
+            raise ValueError("sort_order must be between 0 and 100000")
         return v
 
 
@@ -92,7 +115,7 @@ class CreateSkillRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str) -> str:
-        allowed = {"beginner", "intermediate", "advanced"}
+        allowed = {"beginner", "intermediate", "advanced", "expert"}
         if v not in allowed:
             raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -147,7 +170,7 @@ class UpdateSkillRequest(BaseModel):
     @classmethod
     def validate_difficulty(cls, v: str | None) -> str | None:
         if v is not None:
-            allowed = {"beginner", "intermediate", "advanced"}
+            allowed = {"beginner", "intermediate", "advanced", "expert"}
             if v not in allowed:
                 raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -248,6 +271,33 @@ class CreateExerciseRequest(BaseModel):
             raise ValueError("Title must be 2-200 characters")
         return v
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        if len(v) > 5000:
+            raise ValueError("Description must be 5,000 characters or less")
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: dict) -> dict:
+        # Bound the config JSON so an MCQ options/correct blob can't be used
+        # for unbounded storage abuse.
+        if len(str(v)) > 20000:
+            raise ValueError("config is too large")
+        return v
+
+    @model_validator(mode="after")
+    def validate_mcq_has_correct(self):
+        # An MCQ without a non-empty `correct` list auto-grades every blank
+        # answer as full marks ([] == [] in the grader) — completing skills
+        # and minting badges for nothing.
+        if self.type == "multiple_choice":
+            correct = self.config.get("correct")
+            if correct is None or correct == [] or correct == "":
+                raise ValueError("multiple_choice config must include a non-empty 'correct'")
+        return self
+
 
 class UpdateExerciseRequest(BaseModel):
     title: str | None = None
@@ -276,6 +326,14 @@ class UpdateExerciseRequest(BaseModel):
             raise ValueError("max_score must be between 0 and 10000")
         return v
 
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: dict | None) -> dict | None:
+        # Same bound as create — update must not bypass it.
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("config is too large")
+        return v
+
 
 class ExerciseResponse(BaseModel):
     id: str
@@ -298,6 +356,15 @@ class ExerciseResponse(BaseModel):
 class SubmitAttemptRequest(BaseModel):
     answer: dict
 
+    @field_validator("answer")
+    @classmethod
+    def validate_answer(cls, v: dict) -> dict:
+        # Bound the answer JSON — same unbounded-JSONB-storage class as
+        # settings/config. 100KB covers any legitimate text/code answer.
+        if len(str(v)) > 100_000:
+            raise ValueError("answer is too large")
+        return v
+
 
 class AttemptResponse(BaseModel):
     id: str
@@ -317,6 +384,20 @@ class AttemptResponse(BaseModel):
 class GradeAttemptRequest(BaseModel):
     score: int
     feedback: str | None = None
+
+    @field_validator("score")
+    @classmethod
+    def validate_score(cls, v: int) -> int:
+        if v < 0 or v > 10000:
+            raise ValueError("Score must be between 0 and 10,000")
+        return v
+
+    @field_validator("feedback")
+    @classmethod
+    def validate_feedback(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10000:
+            raise ValueError("Feedback must be 10,000 characters or less")
+        return v
 
 
 # ── Progress ──────────────────────────────────────────────
@@ -352,6 +433,20 @@ class ReorderItem(BaseModel):
     id: str
     sort_order: int
 
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v: int) -> int:
+        if v < 0 or v > 100000:
+            raise ValueError("sort_order must be between 0 and 100000")
+        return v
+
 
 class ReorderRequest(BaseModel):
     items: list[ReorderItem]
+
+    @field_validator("items")
+    @classmethod
+    def validate_items(cls, v: list) -> list:
+        if len(v) > 1000:
+            raise ValueError("Too many items to reorder (max 1000)")
+        return v

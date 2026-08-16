@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
-from app.models.organization import OrgRole
+from app.models.organization import ROLE_HIERARCHY, OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.organization import (
@@ -43,15 +43,23 @@ def _link_response(link, base_url: str = "http://localhost:3000") -> InviteLinkR
     )
 
 
-async def _member_response(member, db: AsyncSession) -> OrgMemberResponse:
+async def _member_response(
+    member, db: AsyncSession, *, include_email: bool = True
+) -> OrgMemberResponse:
     user = await db.get(User, member.user_id)
+    if user:
+        user_resp = OrgMemberUserResponse.model_validate(user)
+        # Students don't need classmates' email addresses — exposing them to
+        # every member makes the roster an email-harvesting endpoint.
+        if not include_email:
+            user_resp.email = ""
+    else:
+        user_resp = OrgMemberUserResponse(
+            id=member.user_id, email="", display_name="Unknown", avatar_url=None
+        )
     return OrgMemberResponse(
         id=member.id,
-        user=OrgMemberUserResponse.model_validate(user)
-        if user
-        else OrgMemberUserResponse(
-            id=member.user_id, email="", display_name="Unknown", avatar_url=None
-        ),
+        user=user_resp,
         role=member.role.value,
         status=member.status.value,
         joined_at=member.joined_at,
@@ -124,6 +132,10 @@ async def get_org(
     org = await service.get_org(org_id)
     count = await service.get_member_count(org_id)
 
+    # Settings hold admin configuration (AI budget, eval config) — students
+    # and instructors don't need them and must not see the org's spend caps.
+    show_settings = member.role in (OrgRole.OWNER, OrgRole.ADMIN)
+
     resp = OrgDetailResponse(
         id=org.id,
         name=org.name,
@@ -131,7 +143,7 @@ async def get_org(
         description=org.description,
         logo_url=org.logo_url,
         status=org.status.value,
-        settings=org.settings or {},
+        settings=(org.settings or {}) if show_settings else {},
         created_by=org.created_by,
         role=member.role.value,
         member_count=count,
@@ -220,11 +232,12 @@ async def list_members(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    actor = await require_org_member(org_id, user, db)
     service = OrgService(db)
     members, total = await service.get_members(org_id, page, per_page, role)
 
-    items = [await _member_response(m, db) for m in members]
+    can_see_emails = actor.role in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    items = [await _member_response(m, db, include_email=can_see_emails) for m in members]
     return ListResponse(
         data=items,
         meta=PaginationMeta(
@@ -278,11 +291,18 @@ async def invite_members(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    actor = await require_org_member(
+        org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR
+    )
     try:
         role = OrgRole(body.role)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
+
+    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+        raise HTTPException(
+            status_code=403, detail="Cannot invite a member at a role higher than your own"
+        )
 
     service = OrgService(db)
     result = await service.invite_members(org_id, body.emails, role, user.id)
@@ -342,15 +362,23 @@ async def add_member_directly(
     db: AsyncSession = Depends(get_db),
 ):
     """Directly add an existing user to the org (admin+)."""
-    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    actor = await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     user_id = body.get("user_id")
     role_str = body.get("role", "student")
-    if not user_id:
-        raise HTTPException(status_code=422, detail="user_id is required")
+    if not user_id or not isinstance(user_id, str):
+        raise HTTPException(status_code=422, detail="user_id is required and must be a string")
+    if not isinstance(role_str, str):
+        raise HTTPException(status_code=422, detail="role must be a string")
     try:
         role = OrgRole(role_str)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {role_str}") from exc
+
+    # Cannot add a member at a role higher than your own (admin adding an owner)
+    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+        raise HTTPException(
+            status_code=403, detail="Cannot add a member at a role higher than your own"
+        )
 
     service = OrgService(db)
     member = await service.add_member(org_id, user_id, role, invited_by=user.id)
@@ -373,11 +401,20 @@ async def create_invite_link(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    actor = await require_org_member(
+        org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR
+    )
     try:
         role = OrgRole(body.role)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
+
+    # An inviter cannot mint a link that grants a role at or above their own —
+    # otherwise an instructor could create an admin/owner link and escalate.
+    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+        raise HTTPException(
+            status_code=403, detail="Cannot create an invite for a role higher than your own"
+        )
 
     service = OrgService(db)
     link = await service.create_invite_link(
@@ -411,6 +448,8 @@ async def toggle_invite_link(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     is_active = body.get("is_active", True)
+    if not isinstance(is_active, bool):
+        raise HTTPException(status_code=422, detail="is_active must be a boolean")
     service = OrgService(db)
     link = await service.toggle_invite_link(org_id, link_id, is_active)
     await db.commit()

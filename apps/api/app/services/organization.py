@@ -183,6 +183,11 @@ class OrgService:
     async def add_member(
         self, org_id: str, user_id: str, role: OrgRole, invited_by: str | None = None
     ) -> OrgMember:
+        # User must exist (bogus IDs otherwise 500 on the FK insert)
+        user_check = await self.db.execute(select(User.id).where(User.id == user_id))
+        if user_check.scalar_one_or_none() is None:
+            raise AppError("USER_NOT_FOUND", "User not found", 404)
+
         # Check existing
         stmt = select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
         result = await self.db.execute(stmt)
@@ -265,7 +270,12 @@ class OrgService:
             OrgMember.org_id == org_id, OrgMember.status == MemberStatus.ACTIVE
         )
         if role:
-            base = base.where(OrgMember.role == OrgRole(role))
+            try:
+                base = base.where(OrgMember.role == OrgRole(role))
+            except ValueError as exc:
+                from app.exceptions import AppError
+
+                raise AppError("INVALID_FILTER", f"Invalid role: {role}", 422) from exc
 
         total_result = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_result.scalar_one()
@@ -392,6 +402,10 @@ class OrgService:
         if user is None or user.email.lower() != invite.email.lower():
             raise InviteTokenInvalidError("Invitation is not addressed to this account")
 
+        # Org must still exist and be active — accepting into an archived org
+        # would create a ghost membership invisible everywhere else.
+        await self.get_org(invite.org_id)
+
         invite.status = InviteStatus.ACCEPTED
         invite.accepted_at = datetime.now(UTC)
 
@@ -468,6 +482,12 @@ class OrgService:
         if link.max_uses and link.use_count >= link.max_uses:
             raise InviteLinkInvalidError("Invite link has reached maximum uses")
 
+        # Org must still be active — a link from an archived org would create
+        # a ghost membership in an org no endpoint will ever surface.
+        org = await self.db.get(Organization, link.org_id)
+        if org is None or org.status == OrgStatus.ARCHIVED:
+            raise InviteLinkInvalidError("Invite link not found or inactive")
+
         member = await self.add_member(org_id=link.org_id, user_id=user_id, role=link.role)
         link.use_count += 1
         await self.db.flush()
@@ -477,8 +497,9 @@ class OrgService:
 
     async def update_settings(self, org_id: str, settings: dict) -> Organization:
         org = await self.get_org(org_id)
-        current = org.settings or {}
-        current.update(settings)
+        # New dict so SQLAlchemy detects the change — mutating org.settings in
+        # place leaves the reference identical and the update is not persisted.
+        current = {**(org.settings or {}), **settings}
         org.settings = current
         await self.db.flush()
         return org

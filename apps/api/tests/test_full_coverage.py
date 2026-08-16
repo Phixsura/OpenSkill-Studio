@@ -652,8 +652,10 @@ async def test_projects_full_flow(c):
     r19 = await c.get(f"/api/v1/orgs/{oid}/reviews/pending", headers=h)
     assert r19.status_code == 200
 
-    # Extension
-    _, user2 = await _reg(c)
+    # Extension — recipient must be an org member
+    h2b, user2 = await _reg(c)
+    rlink = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=h)
+    await c.post("/api/v1/invites/join", json={"code": rlink.json()["data"]["code"]}, headers=h2b)
     r20 = await c.post(
         f"/api/v1/orgs/{oid}/projects/{pid}/extensions",
         json={

@@ -87,6 +87,20 @@ class EvaluationService:
         eval_type: str,
     ) -> EvaluationTask:
         """Create an evaluation task and execute inline (Phase 1)."""
+        # The submission must exist AND belong to this org — otherwise a bogus
+        # id 500s on the FK and a cross-org id would run an eval (and charge
+        # budget) against another org's submission.
+        submission = await self.db.get(Submission, submission_id)
+        if submission is None or submission.org_id != org_id:
+            raise AppError("SUBMISSION_NOT_FOUND", "Submission not found", 404)
+
+        # AI evaluation must be switched on for the org — the enabled flag
+        # was stored but never checked, so a disabled org could still run
+        # (and pay for) evaluations.
+        eval_settings = await self.get_eval_settings(org_id)
+        if not eval_settings.get("enabled"):
+            raise EvalNotEnabledError()
+
         # Check budget
         if not await self.check_budget(org_id):
             raise BudgetExceededError()
@@ -137,8 +151,10 @@ class EvaluationService:
             # Build prompt
             user_prompt = self._build_user_prompt(project, items)
 
-            # Call LLM
-            llm = create_llm_client()
+            # Call LLM with the org's configured model (default_model setting
+            # was stored but never used — always fell through to the global).
+            org_settings = await self.get_eval_settings(task.org_id)
+            llm = create_llm_client(org_settings.get("default_model"))
             response = await llm.complete(
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=user_prompt,
@@ -150,8 +166,10 @@ class EvaluationService:
             total_score = result.get("total_score", 0)
             max_score = result.get("max_score", 0)
 
-            # Determine review status
-            threshold = DEFAULT_PASS_THRESHOLD
+            # Determine review status — honor the org's configured threshold
+            # (the settings API accepts pass_threshold; using only the module
+            # default made that setting a no-op).
+            threshold = org_settings.get("pass_threshold", DEFAULT_PASS_THRESHOLD)
             review_status = (
                 ReviewStatus.APPROVED
                 if max_score > 0 and total_score / max_score >= threshold
@@ -236,9 +254,15 @@ class EvaluationService:
     ) -> tuple[list[EvaluationTask], int]:
         base = select(EvaluationTask).where(EvaluationTask.org_id == org_id)
         if status:
-            base = base.where(EvaluationTask.status == EvalStatus(status))
+            try:
+                base = base.where(EvaluationTask.status == EvalStatus(status))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid status: {status}", 422) from exc
         if eval_type:
-            base = base.where(EvaluationTask.type == EvalType(eval_type))
+            try:
+                base = base.where(EvaluationTask.type == EvalType(eval_type))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid type: {eval_type}", 422) from exc
 
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
@@ -259,6 +283,13 @@ class EvaluationService:
         task = await self.get_task(task_id)
         if task.status != EvalStatus.FAILED:
             raise AppError("INVALID_STATE", "Only failed tasks can be retried", 422)
+        # Retry spends LLM budget just like a fresh trigger — enforce the
+        # same enabled + monthly-cap gates.
+        eval_settings = await self.get_eval_settings(task.org_id)
+        if not eval_settings.get("enabled"):
+            raise EvalNotEnabledError()
+        if not await self.check_budget(task.org_id):
+            raise BudgetExceededError()
         task.status = EvalStatus.PENDING
         task.error = None
         await self.db.flush()
@@ -313,7 +344,9 @@ class EvaluationService:
             "total_cost_usd": spent,
             "month": current_month.isoformat(),
             "budget_usd": budget,
-            "budget_remaining": (budget - spent) if budget else None,
+            # `budget` of 0 is a real (zero) budget, not "unlimited" — only None
+            # means unlimited. `if budget` would wrongly treat 0 as unlimited.
+            "budget_remaining": (budget - spent) if budget is not None else None,
         }
 
     async def check_budget(self, org_id: str) -> bool:
@@ -337,10 +370,11 @@ class EvaluationService:
             )
         )
         usage = result.scalar_one_or_none()
-        if usage is None:
-            return True
-
-        return float(usage.total_cost_usd) < budget
+        # No usage row means $0 spent — still subject to the budget. Returning
+        # True unconditionally here let a 0-budget org run its first eval of
+        # every month.
+        spent = float(usage.total_cost_usd) if usage is not None else 0.0
+        return spent < budget
 
     # ── Settings ──
 
@@ -367,8 +401,11 @@ class EvaluationService:
         if org is None:
             raise AppError("ORG_NOT_FOUND", "Organization not found", 404)
 
-        current = org.settings or {}
-        eval_cfg = current.get("ai_evaluation", {})
+        # Rebuild the dict tree so SQLAlchemy's change detection fires — mutating
+        # a nested dict in place leaves the top-level reference unchanged, so a
+        # plain JSONB column is NOT marked dirty and the update is silently lost.
+        current = dict(org.settings or {})
+        eval_cfg = dict(current.get("ai_evaluation", {}))
         for k, v in updates.items():
             if v is not None:
                 eval_cfg[k] = v
@@ -466,7 +503,15 @@ Please evaluate the submission against the rubric above."""
             if rubric_item is None:
                 continue
             max_s = rubric_item.get("max_score", 0)
-            clamped = max(0, min(score_item.get("score", 0), max_s))
+            if not isinstance(max_s, (int, float)) or isinstance(max_s, bool):
+                max_s = 0
+            # The LLM's score is untrusted — a hallucinated string/null/list
+            # would raise TypeError in min() and fail the whole (paid) eval.
+            # Treat any non-numeric value as 0 rather than crashing.
+            raw_score = score_item.get("score", 0)
+            if not isinstance(raw_score, (int, float)) or isinstance(raw_score, bool):
+                raw_score = 0
+            clamped = max(0, min(raw_score, max_s))
             scores.append(
                 {
                     "criterion": score_item.get("criterion", "Unknown"),

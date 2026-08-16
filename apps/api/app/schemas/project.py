@@ -1,8 +1,17 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 # ── Project ───────────────────────────────────────────────
+
+
+def _ensure_utc(v: datetime | None) -> datetime | None:
+    """Treat a naive datetime as UTC. Mixing naive and aware values makes
+    every later comparison raise 'can't compare offset-naive and
+    offset-aware datetimes' (a 500)."""
+    if v is not None and v.tzinfo is None:
+        return v.replace(tzinfo=UTC)
+    return v
 
 
 VALID_PROJECT_TYPES = {"general", "ai_visual"}
@@ -18,6 +27,31 @@ VALID_DELIVERABLE_TYPES = {
     "reference",
     "final_output",
 }
+
+
+def _validate_deliverable_config(v: dict | None) -> dict | None:
+    """Validate a deliverable's config shape so bad values can't corrupt
+    upload enforcement (a negative max_file_size_mb or a non-list
+    accepted_formats silently disables the limit / narrowing)."""
+    if v is None:
+        return v
+    if not isinstance(v, dict):
+        raise ValueError("config must be an object")
+    mf = v.get("max_files")
+    if mf is not None and (not isinstance(mf, int) or isinstance(mf, bool) or mf < 1 or mf > 100):
+        raise ValueError("config.max_files must be an integer between 1 and 100")
+    ms = v.get("max_file_size_mb")
+    if ms is not None and (
+        not isinstance(ms, (int, float)) or isinstance(ms, bool) or ms <= 0 or ms > 500
+    ):
+        raise ValueError("config.max_file_size_mb must be a number between 1 and 500")
+    af = v.get("accepted_formats")
+    if af is not None:
+        if not isinstance(af, list) or not all(isinstance(x, str) for x in af):
+            raise ValueError("config.accepted_formats must be a list of MIME strings")
+        if len(af) > 50:
+            raise ValueError("config.accepted_formats has too many entries")
+    return v
 
 
 class CreateProjectRequest(BaseModel):
@@ -108,6 +142,42 @@ class CreateProjectRequest(BaseModel):
             raise ValueError("max_submissions must be between 0 and 1000")
         return v
 
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, v):
+        return _validate_id_list(v, "skill_ids")
+
+    @field_validator("deadline", "late_deadline")
+    @classmethod
+    def normalize_tz(cls, v: datetime | None) -> datetime | None:
+        return _ensure_utc(v)
+
+    @model_validator(mode="after")
+    def validate_deadline_ordering(self):
+        # A late_deadline before the deadline makes the "late" window negative,
+        # so on-time submissions get judged "closed". Reject the inconsistency.
+        if (
+            self.deadline is not None
+            and self.late_deadline is not None
+            and self.late_deadline < self.deadline
+        ):
+            raise ValueError("late_deadline must be on or after deadline")
+        return self
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("description must be 10,000 characters or less")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 50000:
+            raise ValueError("instructions must be 50,000 characters or less")
+        return v
+
 
 class UpdateProjectRequest(BaseModel):
     title: str | None = None
@@ -169,6 +239,37 @@ class UpdateProjectRequest(BaseModel):
             raise ValueError("max_submissions must be between 0 and 1000")
         return v
 
+    @field_validator("deadline", "late_deadline")
+    @classmethod
+    def normalize_tz(cls, v: datetime | None) -> datetime | None:
+        return _ensure_utc(v)
+
+    @model_validator(mode="after")
+    def validate_deadline_ordering(self):
+        # Only enforce when BOTH are supplied in this partial update; if only one
+        # is sent, the service-side combination should be validated there.
+        if (
+            self.deadline is not None
+            and self.late_deadline is not None
+            and self.late_deadline < self.deadline
+        ):
+            raise ValueError("late_deadline must be on or after deadline")
+        return self
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("description must be 10,000 characters or less")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 50000:
+            raise ValueError("instructions must be 50,000 characters or less")
+        return v
+
 
 class ProjectResponse(BaseModel):
     id: str
@@ -217,6 +318,32 @@ class CreateDeliverableRequest(BaseModel):
             raise ValueError("Name must be 2-200 characters")
         return v
 
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        if v not in VALID_DELIVERABLE_TYPES:
+            raise ValueError(f"Invalid deliverable type: {v}")
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: dict) -> dict:
+        return _validate_deliverable_config(v)
+
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
+            raise ValueError("sort_order must be between 0 and 100000")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 2000:
+            raise ValueError("description must be 2,000 characters or less")
+        return v
+
 
 class UpdateDeliverableRequest(BaseModel):
     name: str | None = None
@@ -237,6 +364,18 @@ class UpdateDeliverableRequest(BaseModel):
     def validate_description(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 2000:
             raise ValueError("Description must not exceed 2000 characters")
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: dict | None) -> dict | None:
+        return _validate_deliverable_config(v)
+
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
+            raise ValueError("sort_order must be between 0 and 100000")
         return v
 
 
@@ -268,6 +407,19 @@ class SubmissionResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SubmissionWithAuthorResponse(SubmissionResponse):
+    """Submission list row with the author's display name."""
+
+    author_name: str
+
+
+class PendingReviewResponse(SubmissionResponse):
+    """Pending-review row enriched with author + project context."""
+
+    author_name: str
+    project_title: str
 
 
 class SubmissionItemResponse(BaseModel):
@@ -348,11 +500,30 @@ class CreateReviewRequest(BaseModel):
             raise ValueError("score must be between 0 and 10000")
         return v
 
+    @field_validator("score_breakdown")
+    @classmethod
+    def validate_score_breakdown(cls, v):
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("score_breakdown is too large")
+        return v
+
 
 class GrantExtensionRequest(BaseModel):
     user_id: str
     new_deadline: datetime
     reason: str | None = None
+
+    @field_validator("new_deadline")
+    @classmethod
+    def normalize_tz(cls, v: datetime) -> datetime:
+        return _ensure_utc(v)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 1000:
+            raise ValueError("Reason must be 1,000 characters or less")
+        return v
 
 
 class ExtensionResponse(BaseModel):
@@ -398,9 +569,19 @@ def _validate_template_deliverables(v: list) -> list:
         dtype = d.get("type")
         if dtype not in VALID_DELIVERABLE_TYPES:
             raise ValueError(f"Invalid deliverable type: {dtype}")
-        config = d.get("config", {})
-        if config is not None and not isinstance(config, dict):
-            raise ValueError("Deliverable config must be an object")
+        _validate_deliverable_config(d.get("config", {}))
+    return v
+
+
+def _validate_id_list(v: list | None, label: str, max_len: int = 200) -> list | None:
+    """Bound a list of string ids/names so it can't be an unbounded blob."""
+    if v is None:
+        return v
+    if len(v) > 200:
+        raise ValueError(f"At most 200 {label}")
+    for x in v:
+        if not isinstance(x, str) or len(x) > max_len:
+            raise ValueError(f"Each {label} entry must be a string of {max_len} chars or less")
     return v
 
 
@@ -477,6 +658,32 @@ class CreateTemplateRequest(BaseModel):
             raise ValueError("suggested_minutes must be between 0 and 99999")
         return v
 
+    @field_validator("skill_names")
+    @classmethod
+    def validate_skill_names(cls, v):
+        return _validate_id_list(v, "skill_names")
+
+    @field_validator("max_score")
+    @classmethod
+    def validate_max_score(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 10000):
+            raise ValueError("max_score must be between 0 and 10000")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("description must be 10,000 characters or less")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 50000:
+            raise ValueError("instructions must be 50,000 characters or less")
+        return v
+
 
 class UpdateTemplateRequest(BaseModel):
     name: str | None = None
@@ -488,6 +695,17 @@ class UpdateTemplateRequest(BaseModel):
     rubric: list[dict] | None = None
     deliverables: list[dict] | None = None
     skill_names: list[str] | None = None
+
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str | None) -> str | None:
+        # Same whitelist as UpdateProjectRequest — the service converts to
+        # DifficultyLevel directly, so an unknown value would 500.
+        if v is not None:
+            allowed = {"beginner", "intermediate", "advanced"}
+            if v not in allowed:
+                raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
+        return v
 
     @field_validator("name")
     @classmethod
@@ -510,6 +728,39 @@ class UpdateTemplateRequest(BaseModel):
     def validate_rubric(cls, v: list | None) -> list | None:
         if v is not None:
             return _validate_rubric_items(v)
+        return v
+
+    @field_validator("skill_names")
+    @classmethod
+    def validate_skill_names(cls, v):
+        return _validate_id_list(v, "skill_names")
+
+    @field_validator("max_score")
+    @classmethod
+    def validate_max_score(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 10000):
+            raise ValueError("max_score must be between 0 and 10000")
+        return v
+
+    @field_validator("suggested_minutes")
+    @classmethod
+    def validate_suggested_minutes(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
+            raise ValueError("suggested_minutes must be between 0 and 100000")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 10000:
+            raise ValueError("description must be 10,000 characters or less")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, v):
+        if v is not None and isinstance(v, str) and len(v) > 50000:
+            raise ValueError("instructions must be 50,000 characters or less")
         return v
 
 
@@ -754,6 +1005,7 @@ class CommentResponse(BaseModel):
     submission_id: str
     item_id: str
     author_id: str
+    author_name: str | None = None
     parent_id: str | None
     text: str
     anchor_type: str

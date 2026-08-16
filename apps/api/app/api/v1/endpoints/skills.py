@@ -34,6 +34,29 @@ def _verify_org(resource, org_id: str, label: str = "Resource") -> None:
         raise HTTPException(status_code=404, detail=f"{label} not found")
 
 
+_INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+# Grading keys students must never see in exercise config — `correct` is the
+# MCQ answer key, `explanation` is the post-answer rationale.
+_ANSWER_KEYS = ("correct", "explanation")
+
+
+def _exercise_response(ex, member) -> ExerciseResponse:
+    """Serialize an exercise, stripping answer keys for students."""
+    resp = ExerciseResponse.model_validate(ex)
+    if member.role not in _INSTRUCTOR_ROLES:
+        resp.config = {k: v for k, v in resp.config.items() if k not in _ANSWER_KEYS}
+    return resp
+
+
+def _require_skill_visible(skill, member) -> None:
+    """A draft skill's content — including its exercises — is instructor-only
+    until published. Mirrors the project/skill read gates (#139/#140)."""
+    from app.models.skill import ContentStatus
+
+    if member.role not in _INSTRUCTOR_ROLES and skill.status != ContentStatus.PUBLISHED:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+
 # ── Categories ───────────────────────────────────────────
 
 
@@ -140,10 +163,11 @@ async def list_skills(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
+    published_only = member.role not in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     skills, total = await svc.list_skills(
-        org_id, category, difficulty, status, tag, q, page, per_page
+        org_id, category, difficulty, status, tag, q, page, per_page, published_only=published_only
     )
     return ListResponse(
         data=[SkillResponse.model_validate(s) for s in skills],
@@ -186,10 +210,18 @@ async def get_skill(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
+    # Draft skills are instructor-only until published (same as projects).
+    from app.models.skill import ContentStatus
+
+    if (
+        member.role not in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+        and skill.status != ContentStatus.PUBLISHED
+    ):
+        raise HTTPException(status_code=404, detail="Skill not found")
     prereqs = await svc.get_skill_prerequisites(skill_id)
     resp = SkillDetailResponse(
         **SkillResponse.model_validate(skill).model_dump(),
@@ -278,6 +310,10 @@ async def set_prerequisites(
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
     prerequisite_ids = body.get("prerequisite_ids", [])
+    if not isinstance(prerequisite_ids, list) or not all(
+        isinstance(p, str) for p in prerequisite_ids
+    ):
+        raise HTTPException(status_code=422, detail="prerequisite_ids must be a list of strings")
     await svc.set_prerequisites(skill_id, prerequisite_ids)
     await db.commit()
     return {"message": "Prerequisites updated"}
@@ -296,12 +332,13 @@ async def list_exercises(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
+    _require_skill_visible(skill, member)
     exercises = await svc.list_exercises(skill_id)
-    return DataResponse(data=[ExerciseResponse.model_validate(e) for e in exercises])
+    return DataResponse(data=[_exercise_response(e, member) for e in exercises])
 
 
 @router.get("/orgs/{org_id}/exercises/{exercise_id}", response_model=DataResponse[ExerciseResponse])
@@ -311,16 +348,16 @@ async def get_exercise(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     ex = await svc.get_exercise(exercise_id)
     if ex.org_id != org_id:
-        from fastapi import HTTPException  # pragma: no cover
-
-        raise HTTPException(
-            status_code=404, detail="Exercise not found in this organization"
-        )  # pragma: no cover
-    return DataResponse(data=ExerciseResponse.model_validate(ex))
+        raise HTTPException(status_code=404, detail="Exercise not found in this organization")
+    # An exercise inherits its skill's draft visibility — otherwise a student
+    # reads a draft skill's questions via the standalone exercise endpoint.
+    skill = await svc.get_skill(ex.skill_id)
+    _require_skill_visible(skill, member)
+    return DataResponse(data=_exercise_response(ex, member))
 
 
 @router.post(
@@ -404,10 +441,19 @@ async def submit_attempt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     ex = await svc.get_exercise(exercise_id)
     _verify_org(ex, org_id, "Exercise")
+    # Students may only attempt exercises of a PUBLISHED skill; instructors can
+    # attempt a draft skill's exercises to test them before publishing.
+    from app.models.skill import ContentStatus
+
+    instructor_roles = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    if member.role not in instructor_roles:
+        skill = await svc.get_skill(ex.skill_id)
+        if skill.status != ContentStatus.PUBLISHED:
+            raise HTTPException(status_code=422, detail="Skill is not published")
     attempt = await svc.submit_attempt(org_id, exercise_id, user.id, body.answer)
     await db.commit()
     return DataResponse(data=AttemptResponse.model_validate(attempt))
@@ -461,6 +507,10 @@ async def get_my_skill_progress(
     if progress is None:
         return DataResponse(data=None)
     resp = SkillProgressResponse.model_validate(progress)
+    # SkillProgress has no skill_name column — populate it so the field isn't
+    # returned as an empty string.
+    skill = await svc.get_skill(skill_id)
+    resp.skill_name = skill.name
     return DataResponse(data=resp)
 
 
@@ -529,7 +579,12 @@ async def reorder_exercises(
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
+    # Every exercise id must belong to THIS skill — otherwise a caller could
+    # reorder (tamper with) another skill's / org's exercises by id.
     for item in body.items:
+        ex = await svc.get_exercise(item.id)
+        if ex.skill_id != skill_id:
+            raise HTTPException(status_code=404, detail="Exercise not in this skill")
         await svc.update_exercise(item.id, sort_order=item.sort_order)
     await db.commit()
     return {"message": "Exercises reordered"}
@@ -543,10 +598,17 @@ async def get_skill_tree(
     db: AsyncSession = Depends(get_db),
 ):
     """Get the skill's prerequisite tree (nodes + edges for visualization)."""
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
+    from app.models.skill import ContentStatus
+
+    if (
+        member.role not in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+        and skill.status != ContentStatus.PUBLISHED
+    ):
+        raise HTTPException(status_code=404, detail="Skill not found")
     prereqs = await svc.get_skill_prerequisites(skill_id)
     return {
         "skill": SkillResponse.model_validate(skill),
@@ -567,13 +629,25 @@ async def list_my_skill_progress(
     result = []
     for skill in skills:
         progress = await svc.get_skill_progress(skill.id, user.id)
+        # The stored snapshot goes stale when exercises are added/archived
+        # after the student's last attempt — a skill could show completed 1/1
+        # while it actually has 2 exercises. Use the live exercise count and
+        # derive the display status from it.
+        live_total = len(await svc.list_exercises(skill.id))
+        done = progress.exercises_done if progress else 0
+        if done == 0:
+            status = "not_started"
+        elif live_total > 0 and done >= live_total:
+            status = "completed"
+        else:
+            status = "in_progress"
         result.append(
             {
                 "skill_id": skill.id,
                 "skill_name": skill.name,
-                "status": progress.status.value if progress else "not_started",
-                "exercises_total": progress.exercises_total if progress else 0,
-                "exercises_done": progress.exercises_done if progress else 0,
+                "status": status,
+                "exercises_total": live_total,
+                "exercises_done": done,
             }
         )
     return DataResponse(data=result)

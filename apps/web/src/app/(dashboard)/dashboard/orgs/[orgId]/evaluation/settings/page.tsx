@@ -51,10 +51,16 @@ export default function EvalSettingsPage() {
         method: "PUT",
         body: JSON.stringify({
           enabled,
-          monthly_budget_usd: budget ? parseFloat(budget) : null,
+          // Empty/invalid numeric inputs must not silently become NaN→null
+          monthly_budget_usd:
+            budget.trim() && !Number.isNaN(parseFloat(budget)) ? parseFloat(budget) : null,
           default_model: model,
           auto_evaluate: autoEval,
-          pass_threshold: parseFloat(threshold),
+          // Only send a threshold when it's a valid number, so a blank field
+          // doesn't wipe the stored value
+          ...(threshold.trim() && !Number.isNaN(parseFloat(threshold))
+            ? { pass_threshold: parseFloat(threshold) }
+            : {}),
         }),
       }),
     onSuccess: () => {

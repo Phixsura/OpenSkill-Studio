@@ -470,7 +470,14 @@ async def test_eval_budget_exceeded():
     from app.services.evaluation import BudgetExceededError, EvaluationService
 
     db = _mock_db()
+    # trigger_evaluation now validates the submission belongs to the org before
+    # checking budget — return a matching submission so we reach the budget path.
+    submission = MagicMock()
+    submission.org_id = "org1"
+    db.get = AsyncMock(return_value=submission)
     svc = EvaluationService(db)
+    # enabled gate now runs before the budget check
+    svc.get_eval_settings = AsyncMock(return_value={"enabled": True})
     svc.check_budget = AsyncMock(return_value=False)
 
     with pytest.raises(BudgetExceededError):
@@ -591,3 +598,25 @@ async def test_portfolio_profile_not_found():
     svc = PortfolioService(db)
     result = await svc.get_public_profile("nonexistent")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_eval_parse_tolerates_hostile_score_types():
+    """A hallucinated LLM score (string/null/list) raised TypeError in
+    min() and failed the whole paid evaluation (bug #138). Non-numeric
+    scores now degrade to 0 instead of crashing."""
+    from app.services.evaluation import EvaluationService
+
+    svc = EvaluationService.__new__(EvaluationService)
+    rubric = [{"criterion": "Quality", "max_score": 100}]
+    for bad in (
+        '{"scores":[{"criterion":"Quality","score":"high"}]}',
+        '{"scores":[{"criterion":"Quality","score":null}]}',
+        '{"scores":[{"criterion":"Quality","score":[1,2]}]}',
+    ):
+        r = svc._parse_evaluation_response(bad, rubric)
+        assert r["total_score"] == 0
+        assert r["scores"][0]["score"] == 0
+    # a valid score still works and clamps to max
+    r = svc._parse_evaluation_response('{"scores":[{"criterion":"Quality","score":150}]}', rubric)
+    assert r["scores"][0]["score"] == 100

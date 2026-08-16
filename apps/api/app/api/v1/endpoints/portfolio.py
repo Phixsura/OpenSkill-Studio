@@ -9,6 +9,7 @@ from app.schemas.portfolio import (
     PortfolioItemResponse,
     ProfileResponse,
     PublicProfileResponse,
+    ReorderItemsRequest,
     SkillBadgeResponse,
     ToggleBadgeRequest,
     UpdatePortfolioItemRequest,
@@ -23,6 +24,15 @@ router = APIRouter(tags=["Portfolio"])
 # ── Public (no auth) ─────────────────────────────────────
 
 
+def _public_item(item) -> PortfolioItemResponse:
+    """Serialize for the public page — honor the show_score privacy toggle
+    by masking the score when it's off."""
+    resp = PortfolioItemResponse.model_validate(item)
+    if not resp.show_score:
+        resp.score = None
+    return resp
+
+
 @router.get("/u/{username}", response_model=PublicProfileResponse)
 async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
     svc = PortfolioService(db)
@@ -31,9 +41,7 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Profile not found")
 
     # Convert featured items to response format
-    profile["featured_items"] = [
-        PortfolioItemResponse.model_validate(i) for i in profile["featured_items"]
-    ]
+    profile["featured_items"] = [_public_item(i) for i in profile["featured_items"]]
     return profile
 
 
@@ -41,7 +49,7 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
 async def get_public_items(username: str, db: AsyncSession = Depends(get_db)):
     svc = PortfolioService(db)
     items = await svc.get_public_items(username)
-    return DataResponse(data=[PortfolioItemResponse.model_validate(i) for i in items])
+    return DataResponse(data=[_public_item(i) for i in items])
 
 
 @router.get("/u/{username}/items/{slug}", response_model=DataResponse[PortfolioItemResponse])
@@ -50,7 +58,7 @@ async def get_public_item(username: str, slug: str, db: AsyncSession = Depends(g
     item = await svc.get_public_item(username, slug)
     if item is None:
         raise HTTPException(status_code=404, detail="Item not found")
-    return DataResponse(data=PortfolioItemResponse.model_validate(item))
+    return DataResponse(data=_public_item(item))
 
 
 # ── Profile Management ───────────────────────────────────
@@ -143,12 +151,12 @@ async def get_my_item(
 
 @router.put("/portfolio/items/reorder", status_code=200)
 async def reorder_my_items(
-    body: dict,
+    body: ReorderItemsRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     svc = PortfolioService(db)
-    item_ids = body.get("item_ids", [])
+    item_ids = body.item_ids
     for i, iid in enumerate(item_ids):
         item = await svc.get_item(iid)
         if item.user_id == user.id:
@@ -193,6 +201,7 @@ async def upload_cover_image(
     from ulid import ULID
 
     from app.config import settings
+    from app.core.media import content_matches_mime
     from app.core.storage import get_s3_client
 
     # Validate content type
@@ -203,11 +212,32 @@ async def upload_cover_image(
             status_code=422, detail=f"File type must be one of: {', '.join(sorted(allowed_types))}"
         )
 
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:  # 10 MB limit for covers
-        raise HTTPException(status_code=413, detail="Cover image must be under 10MB")
+    # Read in chunks, aborting past the limit — `await file.read()` would
+    # buffer an arbitrarily large body in memory before the size check runs.
+    limit = 10 * 1024 * 1024  # 10 MB limit for covers
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="Cover image must be under 10MB")
+        chunks.append(chunk)
+    content = b"".join(chunks)
 
-    safe_name = re.sub(r"[^\w.\-]", "_", file.filename or "cover.jpg")
+    # Never trust the declared type — sniff the magic bytes so an HTML/script
+    # payload can't be stored as image/* and served from the public bucket.
+    if not content_matches_mime(content[:16], file.content_type):
+        raise HTTPException(
+            status_code=422, detail="File content does not match the declared image type"
+        )
+
+    # Clamp filename (DB/S3 object-name limits) preserving a short extension
+    raw_name = file.filename or "cover.jpg"
+    if len(raw_name) > 200:
+        dot = raw_name.rfind(".")
+        ext = raw_name[dot:] if dot > 0 and len(raw_name) - dot <= 20 else ""
+        raw_name = raw_name[: 200 - len(ext)] + ext
+    safe_name = re.sub(r"[^\w.\-]", "_", raw_name)
     file_key = f"users/{user.id}/covers/{ULID()}_{safe_name}"
 
     async for client in get_s3_client():

@@ -93,12 +93,16 @@ class OpenAIClient(LLMClient):
         )
 
 
-def create_llm_client() -> LLMClient:
-    """Factory: create LLM client from settings."""
+def create_llm_client(model: str | None = None) -> LLMClient:
+    """Factory: create LLM client from settings.
+
+    `model` overrides the global default (per-org default_model setting).
+    """
+    resolved = model or settings.llm_model
     if settings.llm_provider == "anthropic":
-        return AnthropicClient(settings.anthropic_api_key, settings.llm_model)
+        return AnthropicClient(settings.anthropic_api_key, resolved)
     elif settings.llm_provider == "openai":
-        return OpenAIClient(settings.openai_api_key, settings.llm_model)
+        return OpenAIClient(settings.openai_api_key, resolved)
     raise ValueError(f"Unknown LLM provider: {settings.llm_provider}")
 
 

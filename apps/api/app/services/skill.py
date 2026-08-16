@@ -146,6 +146,10 @@ class SkillService:
         if slug is None:
             slug = self._generate_slug(name)
 
+        # Category must exist and belong to this org — otherwise the FK
+        # violation is misread as a slug collision below and 500s on retry.
+        await self._require_org_category(org_id, category_id)
+
         try:
             diff = DifficultyLevel(difficulty)
         except ValueError:
@@ -189,15 +193,28 @@ class SkillService:
         q: str | None = None,
         page: int = 1,
         per_page: int = 20,
+        *,
+        published_only: bool = False,
     ) -> tuple[list[Skill], int]:
         base = select(Skill).where(Skill.org_id == org_id)
 
         if category_id:
             base = base.where(Skill.category_id == category_id)
         if difficulty:
-            base = base.where(Skill.difficulty == DifficultyLevel(difficulty))
-        if status:
-            base = base.where(Skill.status == ContentStatus(status))
+            # Bad query-string values must not 500 on the enum coercion.
+            try:
+                base = base.where(Skill.difficulty == DifficultyLevel(difficulty))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid difficulty: {difficulty}", 422) from exc
+        if published_only:
+            # Students only see published skills — a draft skill an instructor
+            # is still authoring must not appear in listings.
+            base = base.where(Skill.status == ContentStatus.PUBLISHED)
+        elif status:
+            try:
+                base = base.where(Skill.status == ContentStatus(status))
+            except ValueError as exc:
+                raise AppError("INVALID_FILTER", f"Invalid status: {status}", 422) from exc
         else:
             # By default, exclude archived skills
             base = base.where(Skill.status != ContentStatus.ARCHIVED)
@@ -231,6 +248,8 @@ class SkillService:
 
     async def update_skill(self, skill_id: str, **fields) -> Skill:
         skill = await self.get_skill(skill_id)
+        if fields.get("category_id") is not None:
+            await self._require_org_category(skill.org_id, fields["category_id"])
         for k, v in fields.items():
             if v is not None and hasattr(skill, k):
                 if k == "difficulty":
@@ -238,6 +257,12 @@ class SkillService:
                 setattr(skill, k, v)
         await self.db.flush()
         return skill
+
+    async def _require_org_category(self, org_id: str, category_id: str) -> SkillCategory:
+        cat = await self.db.get(SkillCategory, category_id)
+        if cat is None or cat.org_id != org_id or cat.status == ContentStatus.ARCHIVED:
+            raise AppError("CATEGORY_NOT_FOUND", "Category not found", 404)
+        return cat
 
     async def delete_skill(self, skill_id: str) -> None:
         skill = await self.get_skill(skill_id)
@@ -315,6 +340,19 @@ class SkillService:
 
     async def update_exercise(self, exercise_id: str, **fields) -> Exercise:
         ex = await self.get_exercise(exercise_id)
+        # Replacing an MCQ's config with one lacking a non-empty `correct`
+        # would make every blank answer auto-grade as full marks.
+        new_config = fields.get("config")
+        if (
+            new_config is not None
+            and ex.type == ExerciseType.MULTIPLE_CHOICE
+            and not new_config.get("correct")
+        ):
+            raise AppError(
+                "INVALID_CONFIG",
+                "multiple_choice config must include a non-empty 'correct'",
+                422,
+            )
         for k, v in fields.items():
             if v is not None and hasattr(ex, k):
                 setattr(ex, k, v)
@@ -348,13 +386,25 @@ class SkillService:
             answer=answer,
         )
 
-        # Auto-grade MCQ
+        # Auto-grade MCQ. config.correct and answer.selected are untrusted:
+        # coerce both to lists of strings so a malformed value can't 500 the
+        # grader (sorted() on an int / mixed types raises TypeError).
         if exercise.type == ExerciseType.MULTIPLE_CHOICE:
-            correct = exercise.config.get("correct", [])
-            user_answer = answer.get("selected") or []
-            if isinstance(user_answer, str):
+            raw_correct = exercise.config.get("correct", [])
+            if isinstance(raw_correct, (str, int, float)):
+                raw_correct = [raw_correct]
+            elif not isinstance(raw_correct, list):
+                raw_correct = []
+            correct = sorted(str(x) for x in raw_correct)
+
+            user_answer = answer.get("selected")
+            if isinstance(user_answer, (str, int, float)):
                 user_answer = [user_answer]
-            is_correct = sorted(user_answer) == sorted(correct)
+            elif not isinstance(user_answer, list):
+                user_answer = []
+            user_answer = sorted(str(x) for x in user_answer)
+
+            is_correct = user_answer == correct
             attempt.score = exercise.max_score if is_correct else 0
             attempt.is_correct = is_correct
             attempt.graded_by = GradingMethod.AUTO
@@ -419,6 +469,9 @@ class SkillService:
 
     async def is_skill_unlocked(self, skill_id: str, user_id: str) -> bool:
         prerequisites = await self.get_skill_prerequisites(skill_id)
+        # An archived prerequisite can never be completed (its exercises 404),
+        # so counting it would lock the dependent skill forever.
+        prerequisites = [p for p in prerequisites if p.status != ContentStatus.ARCHIVED]
         if not prerequisites:
             return True
 
@@ -474,6 +527,49 @@ class SkillService:
 
         pct = round((completed / skills_total * 100) if skills_total > 0 else 0, 1)
 
+        # Per-category breakdown: total skills and this user's completed skills
+        # per category. Was always [] — the API declared the field but never
+        # populated it, so the progress UI's category view had no data.
+        cat_rows = await self.db.execute(
+            select(SkillCategory.id, SkillCategory.name)
+            .where(
+                SkillCategory.org_id == org_id,
+                SkillCategory.status != ContentStatus.ARCHIVED,
+            )
+            .order_by(SkillCategory.sort_order, SkillCategory.name)
+        )
+        categories = []
+        for cat_id, cat_name in cat_rows.all():
+            total_r = await self.db.execute(
+                select(func.count(Skill.id)).where(
+                    Skill.category_id == cat_id,
+                    Skill.status != ContentStatus.ARCHIVED,
+                )
+            )
+            cat_total = total_r.scalar_one()
+            done_r = await self.db.execute(
+                select(func.count(SkillProgress.id))
+                .join(Skill, Skill.id == SkillProgress.skill_id)
+                .where(
+                    Skill.category_id == cat_id,
+                    Skill.status != ContentStatus.ARCHIVED,
+                    SkillProgress.user_id == user_id,
+                    SkillProgress.status == ProgressStatus.COMPLETED,
+                )
+            )
+            cat_done = done_r.scalar_one()
+            categories.append(
+                {
+                    "id": cat_id,
+                    "name": cat_name,
+                    "skills_total": cat_total,
+                    "skills_completed": cat_done,
+                    "completion_percentage": round(
+                        (cat_done / cat_total * 100) if cat_total > 0 else 0, 1
+                    ),
+                }
+            )
+
         return {
             "skills_total": skills_total,
             "skills_completed": completed,
@@ -481,7 +577,7 @@ class SkillService:
             "exercises_total": exercises_total,
             "exercises_completed": exercises_done,
             "completion_percentage": pct,
-            "categories": [],
+            "categories": categories,
         }
 
     async def get_skill_progress(self, skill_id: str, user_id: str) -> SkillProgress | None:
@@ -495,8 +591,25 @@ class SkillService:
     # ── Helpers ──
 
     async def _set_prerequisites(self, skill_id: str, prerequisite_ids: list[str]) -> None:
+        # Every prerequisite must exist AND live in the same org as the skill
+        # (otherwise bogus IDs 500 on the FK and cross-org links leak data).
+        if prerequisite_ids:
+            skill = await self.get_skill(skill_id)
+            found = await self.db.execute(
+                select(Skill.id).where(Skill.id.in_(prerequisite_ids), Skill.org_id == skill.org_id)
+            )
+            valid = {row for row in found.scalars()}
+            missing = set(prerequisite_ids) - valid
+            if missing:
+                raise SkillNotFoundError()
+
+        # De-duplicate while preserving order — a repeated id would otherwise
+        # violate the (skill_id, prerequisite_id) primary key with a 500.
+        seen: set[str] = set()
+        unique_ids = [pid for pid in prerequisite_ids if not (pid in seen or seen.add(pid))]
+
         # Cycle detection via BFS
-        await self._detect_cycle(skill_id, prerequisite_ids)
+        await self._detect_cycle(skill_id, unique_ids)
 
         # Remove existing prerequisites
         existing = await self.db.execute(
@@ -504,9 +617,12 @@ class SkillService:
         )
         for p in existing.scalars():
             await self.db.delete(p)
+        # Flush the deletes before re-inserting so a replaced-with-same set
+        # doesn't collide on the primary key within one transaction.
+        await self.db.flush()
 
         # Add new
-        for pid in prerequisite_ids:
+        for pid in unique_ids:
             self.db.add(SkillPrerequisite(skill_id=skill_id, prerequisite_id=pid))
         await self.db.flush()
 
@@ -537,21 +653,29 @@ class SkillService:
         exercises = await self.list_exercises(skill_id)
         total = len(exercises)
 
-        # Count exercises with at least one graded attempt (score not null)
-        # For MCQ: is_correct=True means correct. For text: any graded attempt counts.
+        # An exercise counts as "done" only when the learner has PASSED it —
+        # a graded attempt with is_correct=True. A wrong MCQ (score=0,
+        # is_correct=False) is graded but not passed; counting it as done
+        # marked skills 100% complete on wrong answers and unlocked the next
+        # skill. A pass threshold of 60% of max_score defines "correct" for
+        # manually-graded exercises (see grade_attempt).
         done = 0
+        best_score: int | None = None
         for ex in exercises:
             result = await self.db.execute(
-                select(ExerciseAttempt)
-                .where(
+                select(ExerciseAttempt).where(
                     ExerciseAttempt.exercise_id == ex.id,
                     ExerciseAttempt.user_id == user_id,
-                    ExerciseAttempt.score.is_not(None),
                 )
-                .limit(1)
             )
-            if result.scalar_one_or_none():
+            attempts = list(result.scalars())
+            if any(a.is_correct for a in attempts):
                 done += 1
+            # Best score = sum over exercises of the user's best graded attempt.
+            # (best_score was declared + returned by the API but never written.)
+            ex_scores = [a.score for a in attempts if a.score is not None]
+            if ex_scores:
+                best_score = (best_score or 0) + max(ex_scores)
 
         # Upsert progress
         result = await self.db.execute(
@@ -571,6 +695,7 @@ class SkillService:
 
         progress.exercises_total = total
         progress.exercises_done = done
+        progress.best_score = best_score
 
         if done == 0:
             progress.status = ProgressStatus.NOT_STARTED
@@ -583,6 +708,50 @@ class SkillService:
             if progress.started_at is None:
                 progress.started_at = datetime.now(UTC)
 
+        await self.db.flush()
+        await self._sync_skill_badge(skill_id, user_id, org_id, progress)
+
+    async def _sync_skill_badge(
+        self, skill_id: str, user_id: str, org_id: str, progress: SkillProgress
+    ) -> None:
+        """Keep the portfolio SkillBadge in step with progress (ADR-007:
+        badges appear automatically as skills are worked on/completed).
+        Without this sync no badge row was ever created — the whole badge
+        feature returned empty lists."""
+        from app.models.portfolio import SkillBadge
+
+        skill = await self.db.get(Skill, skill_id)
+        if skill is None:  # pragma: no cover
+            return
+        category = await self.db.get(SkillCategory, skill.category_id)
+
+        pct = 0
+        if progress.exercises_total:
+            pct = int(progress.exercises_done * 100 / progress.exercises_total)
+
+        result = await self.db.execute(
+            select(SkillBadge).where(
+                SkillBadge.user_id == user_id,
+                SkillBadge.skill_id == skill_id,
+                SkillBadge.org_id == org_id,
+            )
+        )
+        badge = result.scalar_one_or_none()
+        if badge is None:
+            badge = SkillBadge(
+                user_id=user_id,
+                skill_id=skill_id,
+                org_id=org_id,
+                skill_name=skill.name,
+                category_name=category.name if category else "",
+                completion_pct=pct,
+            )
+            self.db.add(badge)
+        else:
+            badge.skill_name = skill.name
+            badge.category_name = category.name if category else ""
+            badge.completion_pct = pct
+        badge.completed_at = progress.completed_at
         await self.db.flush()
 
     @staticmethod

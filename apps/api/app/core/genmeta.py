@@ -14,6 +14,7 @@ Pure stdlib — no new dependencies.
 """
 
 import json
+import math
 import re
 import struct
 import zlib
@@ -187,9 +188,18 @@ def parse_a1111_infotext(text: str) -> dict | None:
                 if key in _A1111_KEYS and val:
                     name, coerce = _A1111_KEYS[key]
                     try:
-                        result[name] = coerce(val) if coerce is not str else val[:200]
+                        parsed = coerce(val) if coerce is not str else val[:200]
                     except (ValueError, TypeError):
                         continue
+                    # Hostile numerics survive coercion but break the pipeline:
+                    # float('inf')/nan serialize as Infinity/NaN (invalid JSON
+                    # that crashes the frontend's JSON.parse), and unbounded
+                    # ints overflow downstream consumers. Clamp to sane ranges.
+                    if coerce is float and not math.isfinite(parsed):
+                        continue
+                    if coerce is int and not -(2**63) < parsed < 2**63:
+                        continue
+                    result[name] = parsed
 
         # A bare prompt with no settings line and no negative prompt is just
         # arbitrary text — not evidence of A1111 provenance.
@@ -240,9 +250,16 @@ def parse_comfyui_prompt(text: str) -> dict | None:
                     v = inputs.get(src)
                     if isinstance(v, (int, float, str)) and dst not in result:
                         try:
-                            result[dst] = coerce(v) if coerce is not str else str(v)[:200]
+                            parsed = coerce(v) if coerce is not str else str(v)[:200]
                         except (ValueError, TypeError):
                             continue
+                        # json.loads accepts Infinity/NaN literals, which
+                        # re-serialize as invalid JSON — clamp like A1111.
+                        if coerce is float and not math.isfinite(parsed):
+                            continue
+                        if coerce is int and not -(2**63) < parsed < 2**63:
+                            continue
+                        result[dst] = parsed
 
             elif "CLIPTextEncode" in str(ctype):
                 t = inputs.get("text")

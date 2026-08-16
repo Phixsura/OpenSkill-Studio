@@ -1,3 +1,4 @@
+import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,7 @@ from app.schemas.project import (
     ExtensionResponse,
     FileResponse,
     GrantExtensionRequest,
+    PendingReviewResponse,
     ProjectDetailResponse,
     ProjectResponse,
     PromptItemRequest,
@@ -25,6 +27,7 @@ from app.schemas.project import (
     SubmissionDetailResponse,
     SubmissionItemResponse,
     SubmissionResponse,
+    SubmissionWithAuthorResponse,
     TemplateResponse,
     UpdateDeliverableRequest,
     UpdateProjectRequest,
@@ -33,6 +36,7 @@ from app.schemas.project import (
 from app.services.project import ProjectService
 
 router = APIRouter(tags=["Projects & Submissions"])
+log = structlog.get_logger()
 
 
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
@@ -43,6 +47,17 @@ async def _verify_project_org(svc: ProjectService, project_id: str, org_id: str)
     project = await svc.get_project(project_id)
     if project.org_id != org_id:
         raise HTTPException(status_code=404, detail="Project not found in this organization")
+    return project
+
+
+async def _verify_project_visible(svc: ProjectService, project_id: str, org_id: str, member):
+    """Like _verify_project_org, but a draft project is invisible (404) to
+    non-instructors — its content must not leak before publication."""
+    from app.models.skill import ContentStatus
+
+    project = await _verify_project_org(svc, project_id, org_id)
+    if member.role not in INSTRUCTOR_ROLES and project.status != ContentStatus.PUBLISHED:
+        raise HTTPException(status_code=404, detail="Project not found")
     return project
 
 
@@ -85,9 +100,13 @@ async def list_projects(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    projects, total = await svc.list_projects(org_id, status, page, per_page)
+    # Students only see published projects; instructors see drafts too.
+    published_only = member.role not in INSTRUCTOR_ROLES
+    projects, total = await svc.list_projects(
+        org_id, status, page, per_page, published_only=published_only
+    )
     return ListResponse(
         data=[ProjectResponse.model_validate(p) for p in projects],
         meta=PaginationMeta(
@@ -137,9 +156,11 @@ async def get_project(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    project = await _verify_project_org(svc, project_id, org_id)
+    # A draft project is only visible to instructors — a student with the id
+    # must not read its instructions/deadline/rubric before it's published.
+    project = await _verify_project_visible(svc, project_id, org_id, member)
     deliverables = await svc.list_deliverables(project_id)
     skill_ids = await svc.get_project_skill_ids(project_id)
 
@@ -228,7 +249,10 @@ async def set_project_skills(
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
-    await svc.set_project_skills(project_id, body.get("skill_ids", []))
+    skill_ids = body.get("skill_ids", [])
+    if not isinstance(skill_ids, list) or not all(isinstance(s, str) for s in skill_ids):
+        raise HTTPException(status_code=422, detail="skill_ids must be a list of strings")
+    await svc.set_project_skills(project_id, skill_ids)
     await db.commit()
     return {"message": "Project skills updated"}
 
@@ -268,8 +292,9 @@ async def list_deliverables(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    await _verify_project_visible(svc, project_id, org_id, member)
     deliverables = await svc.list_deliverables(project_id)
     return DataResponse(data=[DeliverableResponse.model_validate(d) for d in deliverables])
 
@@ -288,6 +313,7 @@ async def create_deliverable(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
     d = await svc.create_deliverable(
         project_id,
         body.name,
@@ -315,6 +341,7 @@ async def update_deliverable(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
     d = await svc.get_deliverable(deliverable_id)
     if d.project_id != project_id:
         raise HTTPException(status_code=404, detail="Deliverable not found")
@@ -335,6 +362,7 @@ async def delete_deliverable(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
     d = await svc.get_deliverable(deliverable_id)
     if d.project_id != project_id:
         raise HTTPException(status_code=404, detail="Deliverable not found")
@@ -347,7 +375,7 @@ async def delete_deliverable(
 
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/submissions",
-    response_model=ListResponse[SubmissionResponse],
+    response_model=ListResponse[SubmissionWithAuthorResponse],
 )
 async def list_submissions(
     org_id: str,
@@ -359,11 +387,20 @@ async def list_submissions(
 ):
     member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    # Project must belong to this org — otherwise a member of org A could list
+    # submissions of org B's project by embedding B's project_id in A's path.
+    await _verify_project_org(svc, project_id, org_id)
     # Instructor sees all, student sees own
     uid = None if member.role in INSTRUCTOR_ROLES else user.id
-    submissions, total = await svc.list_submissions(project_id, uid, page, per_page)
+    rows, total = await svc.list_submissions(project_id, uid, page, per_page)
     return ListResponse(
-        data=[SubmissionResponse.model_validate(s) for s in submissions],
+        data=[
+            SubmissionWithAuthorResponse(
+                **SubmissionResponse.model_validate(sub).model_dump(),
+                author_name=author_name,
+            )
+            for sub, author_name in rows
+        ],
         meta=PaginationMeta(
             total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
         ),
@@ -381,9 +418,15 @@ async def create_submission(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await _verify_project_org(svc, project_id, org_id)
+    project = await _verify_project_org(svc, project_id, org_id)
+    # Students may only submit to a published project; instructors can submit
+    # to a draft to test the flow before publishing.
+    from app.models.skill import ContentStatus
+
+    if project.status != ContentStatus.PUBLISHED and member.role not in INSTRUCTOR_ROLES:
+        raise HTTPException(status_code=422, detail="Project is not open for submissions")
     sub = await svc.create_submission(org_id, project_id, user.id)
     await db.commit()
     return DataResponse(data=SubmissionResponse.model_validate(sub))
@@ -405,19 +448,25 @@ async def get_submission(
     sub = await _verify_submission_org(svc, submission_id, org_id)
 
     # Owner, instructor+, or an allocated peer reviewer can view
+    mask_author = False
     if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
         from sqlalchemy import select as _select
 
-        from app.models.project import PeerAssessment
+        from app.models.project import PeerAssessment, PeerReviewRound
 
         pr = await db.execute(
-            _select(PeerAssessment.id).where(
+            _select(PeerReviewRound.anonymous)
+            .join(PeerAssessment, PeerAssessment.round_id == PeerReviewRound.id)
+            .where(
                 PeerAssessment.submission_id == submission_id,
                 PeerAssessment.reviewer_id == user.id,
             )
         )
-        if pr.scalar_one_or_none() is None:
+        row = pr.first()
+        if row is None:
             raise HTTPException(status_code=403, detail="Access denied")
+        # Anonymous round: the reviewer must not learn whose work this is.
+        mask_author = bool(row[0])
 
     # Load items and reviews
     from sqlalchemy import select
@@ -433,8 +482,11 @@ async def get_submission(
         .order_by(SubmissionReview.created_at.desc())
     )
 
+    base = SubmissionResponse.model_validate(sub).model_dump()
+    if mask_author:
+        base["user_id"] = ""
     resp = SubmissionDetailResponse(
-        **SubmissionResponse.model_validate(sub).model_dump(),
+        **base,
         items=[SubmissionItemResponse.model_validate(i) for i in items_r.scalars()],
         reviews=[ReviewResponse.model_validate(r) for r in reviews_r.scalars()],
     )
@@ -453,25 +505,79 @@ async def update_submission(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a draft submission (e.g. add text/link items)."""
+    """Update a draft submission (e.g. add text/markdown/link items)."""
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    sub = await svc.get_submission(submission_id)
+    sub = await _verify_submission_org(svc, submission_id, org_id)
+    if sub.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Submission not found in this project")
     if sub.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your submission")
-    if sub.status.value != "draft":
-        raise HTTPException(status_code=422, detail="Only drafts can be updated")
-    # Allow adding text/link items via body
+    # A submission is editable while it's a draft OR after an instructor sent
+    # it back for revision — otherwise the revision loop is a dead end.
+    if sub.status.value not in ("draft", "revision_requested"):
+        raise HTTPException(status_code=422, detail="This submission can no longer be edited")
+
+    from sqlalchemy import select as _select
+
     from app.models.project import ItemType, SubmissionItem
 
+    # File and prompt items have dedicated endpoints with their own
+    # validation (upload / prompt-items) — only inline content types here.
+    allowed_types = {ItemType.TEXT, ItemType.MARKDOWN, ItemType.LINK}
+    max_content = 100_000  # 100KB of text is beyond any legitimate inline item
+
+    # Validate every deliverable belongs to THIS project before writing rows
+    project_deliverables = {d.id for d in await svc.list_deliverables(project_id)}
+
     for item_data in body.get("items", []):
-        item = SubmissionItem(
-            submission_id=submission_id,
-            deliverable_id=item_data.get("deliverable_id"),
-            type=ItemType(item_data.get("type", "text")),
-            content=item_data.get("content"),
+        raw_type = item_data.get("type", "text")
+        try:
+            item_type = ItemType(raw_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid item type: {raw_type}") from exc
+        if item_type not in allowed_types:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Item type '{raw_type}' must be created via its dedicated endpoint",
+            )
+        deliverable_id = item_data.get("deliverable_id")
+        if not deliverable_id or deliverable_id not in project_deliverables:
+            raise HTTPException(status_code=422, detail="Unknown deliverable for this project")
+        content = item_data.get("content")
+        if content is not None and (not isinstance(content, str) or len(content) > max_content):
+            raise HTTPException(status_code=422, detail="Item content too large or invalid")
+        # A link item's content is rendered as a clickable href — restrict to
+        # http(s) so a stored javascript:/data: URL can't become an XSS vector.
+        if item_type == ItemType.LINK and content:
+            import re as _re
+
+            if not _re.match(r"^https?://", content.strip(), _re.IGNORECASE):
+                raise HTTPException(
+                    status_code=422, detail="Link must start with http:// or https://"
+                )
+        # Inline items are single-value per deliverable: editing replaces the
+        # existing row rather than piling up stale duplicates (which would
+        # confuse the required-deliverable check and reviewers).
+        existing = await db.execute(
+            _select(SubmissionItem).where(
+                SubmissionItem.submission_id == submission_id,
+                SubmissionItem.deliverable_id == deliverable_id,
+                SubmissionItem.type == item_type,
+            )
         )
-        db.add(item)
+        row = existing.scalars().first()
+        if row is not None:
+            row.content = content
+        else:
+            db.add(
+                SubmissionItem(
+                    submission_id=submission_id,
+                    deliverable_id=deliverable_id,
+                    type=item_type,
+                    content=content,
+                )
+            )
     await db.commit()
     await db.refresh(sub)
     return DataResponse(data=SubmissionResponse.model_validate(sub))
@@ -490,8 +596,27 @@ async def submit_draft(
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    sub = await _verify_submission_org(svc, submission_id, org_id)
+    if sub.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Submission not found in this project")
     sub = await svc.submit_draft(submission_id, user.id)
     await db.commit()
+
+    # Auto-evaluate on submission when the org has enabled it — otherwise the
+    # "Auto-evaluate on submission" setting is a no-op. Best-effort: never let
+    # an eval failure (budget, LLM error) block the submission itself.
+    from app.services.evaluation import EvaluationService
+
+    eval_svc = EvaluationService(db)
+    settings_ = await eval_svc.get_eval_settings(org_id)
+    if settings_.get("enabled") and settings_.get("auto_evaluate"):
+        try:
+            await eval_svc.trigger_evaluation(org_id, submission_id, "submission_review")
+            await db.commit()
+        except Exception:  # noqa: BLE001 — auto-eval is best-effort
+            await db.rollback()
+            log.warning("auto_evaluation_failed", submission_id=submission_id)
+
     return DataResponse(data=SubmissionResponse.model_validate(sub))
 
 
@@ -505,6 +630,9 @@ async def delete_submission(
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    sub = await _verify_submission_org(svc, submission_id, org_id)
+    if sub.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Submission not found in this project")
     await svc.delete_submission(submission_id, user.id)
     await db.commit()
 
@@ -527,6 +655,10 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
+    # Version note is a short annotation, not a document — unbounded Text
+    # would be another storage-abuse vector.
+    if note is not None and len(note) > 2000:
+        raise HTTPException(status_code=422, detail="Note must be 2,000 characters or less")
     svc = ProjectService(db)
     await _verify_submission_org(svc, submission_id, org_id)
     content = await _read_limited(file)
@@ -568,7 +700,7 @@ async def download_file(
         )
         if pr.scalar_one_or_none() is None:
             raise HTTPException(status_code=403, detail="Access denied")
-    url = await svc.get_download_url(file_id)
+    url = await svc.get_download_url(file_id, submission_id=submission_id)
     return {"download_url": url}
 
 
@@ -638,7 +770,7 @@ async def create_review(
 # ── Review Dashboard ─────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[SubmissionResponse])
+@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[PendingReviewResponse])
 async def pending_reviews(
     org_id: str,
     page: int = Query(default=1, ge=1),
@@ -648,9 +780,16 @@ async def pending_reviews(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
-    submissions, total = await svc.get_pending_reviews(org_id, page, per_page)
+    rows, total = await svc.get_pending_reviews(org_id, page, per_page)
     return ListResponse(
-        data=[SubmissionResponse.model_validate(s) for s in submissions],
+        data=[
+            PendingReviewResponse(
+                **SubmissionResponse.model_validate(sub).model_dump(),
+                author_name=author_name,
+                project_title=project_title,
+            )
+            for sub, author_name, project_title, _pid in rows
+        ],
         meta=PaginationMeta(
             total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
         ),
@@ -699,7 +838,10 @@ async def list_templates(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    # Templates are an instructor authoring tool (blueprints for creating
+    # projects) — students have no reason to browse them, and create/update/
+    # delete/instantiate are all instructor-only. Reads were the gap.
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     builtins, org_templates = await svc.list_templates(org_id)
     return DataResponse(
@@ -749,7 +891,7 @@ async def get_template(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     template = await svc.get_template(template_id, org_id)
     return DataResponse(data=_template_response(template))
@@ -817,9 +959,9 @@ async def list_assets(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await _verify_project_org(svc, project_id, org_id)
+    await _verify_project_visible(svc, project_id, org_id, member)
     assets = await svc.list_assets(project_id)
     return DataResponse(data=[AssetResponse.model_validate(a) for a in assets])
 
@@ -839,6 +981,12 @@ async def upload_asset(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    # name/description arrive as form fields (no Pydantic schema) — bound them.
+    name = name.strip()
+    if len(name) < 1 or len(name) > 200:
+        raise HTTPException(status_code=422, detail="Asset name must be 1-200 characters")
+    if description is not None and len(description) > 2000:
+        raise HTTPException(status_code=422, detail="Asset description must be 2000 chars or less")
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
     content = await _read_limited(file)
@@ -949,7 +1097,14 @@ async def list_comments(
     if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
         raise HTTPException(status_code=403, detail="Access denied")
     comments = await svc.list_comments(submission_id)
-    return DataResponse(data=[CommentResponse.model_validate(c) for c in comments])
+    return DataResponse(
+        data=[
+            CommentResponse(
+                **CommentResponse.model_validate(cm).model_dump() | {"author_name": name}
+            )
+            for cm, name in comments
+        ]
+    )
 
 
 @router.post(

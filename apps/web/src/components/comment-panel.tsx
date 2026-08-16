@@ -130,6 +130,7 @@ export function CommentPanel({
         </span>
       </div>
       <div className="mt-1 flex items-center gap-3 text-xs text-[hsl(var(--muted-foreground))]">
+        {c.author_name && <span className="font-medium">{c.author_name}</span>}
         <span>{new Date(c.created_at).toLocaleString()}</span>
         {canComment && !isReply && (
           <button
