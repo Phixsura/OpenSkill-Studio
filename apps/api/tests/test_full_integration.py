@@ -2547,3 +2547,90 @@ async def test_public_page_hides_private_items(c):
     titles = [i["title"] for i in (await c.get(f"/api/v1/u/{uname}/items")).json()["data"]]
     assert "Secret Work" not in titles
     assert "Public Work" in titles
+
+
+@pytest.mark.asyncio
+async def test_peer_round_phase_guards_and_assessment_ownership(c):
+    """Peer round can't be double-started or closed-before-started, and a
+    learner cannot submit another learner's assessment."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Peer Guard Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+
+    async def join_and_submit():
+        hs, _ = await _auth(c)
+        link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+        await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
+        return hs
+
+    s0 = await join_and_submit()
+    s1 = await join_and_submit()
+    await join_and_submit()
+
+    rid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/peer-review-rounds",
+            json={"project_id": pid, "name": "R1", "num_reviews": 1},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+
+    # close-before-start → 422
+    assert (await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/close", headers=ho)).status_code == 422
+    # start, then double-start → 422
+    assert (await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)).status_code == 200
+    assert (await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)).status_code == 422
+
+    # a learner cannot submit another learner's assessment
+    my = (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=s0)).json()["data"]
+    aid = my[0]["id"]
+    assert (await c.post(f"/api/v1/orgs/{oid}/peer-assessments/{aid}/submit", json={"score": 50}, headers=s1)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_deliverable_type_mismatch_rejected(c):
+    """A prompt on an image deliverable, or a wrong-media file on an image
+    deliverable, is rejected; text deliverables accept inline content."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    async def setup(dtype):
+        pid = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/projects",
+                json={"title": "Mismatch Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+                headers=h,
+            )
+        ).json()["data"]["id"]
+        did = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+                json={"name": "Deliverable", "type": dtype, "required": False},
+                headers=h,
+            )
+        ).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+        sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+        return did, sid
+
+    did, sid = await setup("image")
+    # prompt on an image deliverable → 422
+    r = await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/prompt-items", json={"deliverable_id": did, "prompt": "hi"}, headers=h)
+    assert r.status_code == 422
+    # audio bytes on an image deliverable → 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/files",
+        files={"file": ("a.mp3", b"ID3\x03\x00\x00\x00" + b"\x00" * 20, "audio/mpeg")},
+        data={"deliverable_id": did},
+        headers=h,
+    )
+    assert r.status_code == 422
