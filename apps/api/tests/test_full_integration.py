@@ -2374,3 +2374,39 @@ async def test_list_filters_reject_bad_enum(c):
     assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?status=bogus", headers=h)).status_code == 422
     assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?eval_type=bogus", headers=h)).status_code == 422
     assert (await c.get(f"/api/v1/orgs/{oid}/members?role=bogus", headers=h)).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_malformed_path_ids_no_500(c):
+    """Malformed resource ids in the URL path must 4xx, never 500 (no unguarded
+    db.get / enum coercion / path-traversal blowups)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    bad = "!!!not-a-ulid!!!"
+    probes = [
+        ("GET", f"/api/v1/orgs/{oid}/projects/{bad}"),
+        ("GET", f"/api/v1/orgs/{oid}/skills/{bad}"),
+        ("GET", f"/api/v1/orgs/{oid}/exercises/{bad}"),
+        ("GET", f"/api/v1/orgs/{oid}/project-templates/{bad}"),
+        ("GET", f"/api/v1/orgs/{oid}/evaluation/tasks/{bad}"),
+        ("GET", f"/api/v1/orgs/{oid}/projects/{bad}/submissions"),
+        ("GET", f"/api/v1/orgs/{oid}/submissions/{bad}/comments"),
+        ("DELETE", f"/api/v1/portfolio/items/{bad}"),
+        ("GET", f"/api/v1/u/{bad}"),
+    ]
+    for method, path in probes:
+        r = await c.request(method, path, headers=h)
+        assert r.status_code < 500, f"{method} {path} -> {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_auth_edge_inputs_no_500(c):
+    """Malformed auth inputs must validate (4xx), never 500."""
+    for em in ("notanemail", "a@", "@b.com", "", "spaces in@x.com"):
+        r = await c.post("/api/v1/auth/register", json={"email": em, "password": "TestPass123!", "display_name": "Edge"})
+        assert r.status_code < 500, f"register {em!r} -> {r.status_code}"
+    for body in ({"email": "x", "password": "y"}, {"password": "y"}, {"email": "a@b.com"}):
+        r = await c.post("/api/v1/auth/login", json=body)
+        assert r.status_code < 500, f"login {body} -> {r.status_code}"
+    assert (await c.post("/api/v1/auth/reset-password", json={"token": "garbage", "new_password": "NewPass123!"})).status_code < 500
+    assert (await c.get("/api/v1/auth/verify-email?token=garbage")).status_code < 500
