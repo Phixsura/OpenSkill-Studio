@@ -4455,3 +4455,18 @@ async def test_profile_update_rejects_blank_display_name(c):
     r = await c.put("/api/v1/auth/me", json={"display_name": "  Valid Name  "}, headers=h)
     assert r.status_code == 200
     assert r.json()["data"]["display_name"] == "Valid Name"  # trimmed
+
+
+@pytest.mark.asyncio
+async def test_slug_caps_match_columns(c):
+    """Org and category slugs are String(100) columns, but the schemas
+    allowed 200 chars — an explicit 101-200 char slug 500ed on insert
+    (bug #125)."""
+    h, _ = await _auth(c)
+    r = await c.post("/api/v1/orgs", json={"name": "Slug Bound Org", "slug": "s" * 150}, headers=h)
+    assert r.status_code == 422
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/categories", json={"name": "Slug Cat", "slug": "s" * 150}, headers=h
+    )
+    assert r.status_code == 422

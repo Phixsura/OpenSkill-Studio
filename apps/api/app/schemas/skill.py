@@ -22,8 +22,8 @@ class CreateCategoryRequest(BaseModel):
     @field_validator("slug")
     @classmethod
     def validate_slug(cls, v):
-        if v is not None and isinstance(v, str) and len(v) > 200:
-            raise ValueError("slug must not exceed 200 characters")
+        if v is not None and isinstance(v, str) and len(v) > 100:
+            raise ValueError("slug must not exceed 100 characters")
         return v
 
     @field_validator("description")
