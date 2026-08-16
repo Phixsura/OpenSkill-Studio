@@ -435,6 +435,8 @@ async def toggle_invite_link(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     is_active = body.get("is_active", True)
+    if not isinstance(is_active, bool):
+        raise HTTPException(status_code=422, detail="is_active must be a boolean")
     service = OrgService(db)
     link = await service.toggle_invite_link(org_id, link_id, is_active)
     await db.commit()

@@ -4177,3 +4177,23 @@ async def test_link_item_scheme_restricted(c):
         headers=h,
     )
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_toggle_invite_link_type_validated(c):
+    """A non-boolean is_active hit SQLAlchemy's strict bool coercion and
+    500ed (bug #116). Now 422s; real booleans still work."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    link = (
+        await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=h)
+    ).json()["data"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/invite-links/{link['id']}", json={"is_active": "banana"}, headers=h
+    )
+    assert r.status_code == 422
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/invite-links/{link['id']}", json={"is_active": False}, headers=h
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["is_active"] is False
