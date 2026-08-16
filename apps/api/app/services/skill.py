@@ -493,6 +493,49 @@ class SkillService:
 
         pct = round((completed / skills_total * 100) if skills_total > 0 else 0, 1)
 
+        # Per-category breakdown: total skills and this user's completed skills
+        # per category. Was always [] — the API declared the field but never
+        # populated it, so the progress UI's category view had no data.
+        cat_rows = await self.db.execute(
+            select(SkillCategory.id, SkillCategory.name)
+            .where(
+                SkillCategory.org_id == org_id,
+                SkillCategory.status != ContentStatus.ARCHIVED,
+            )
+            .order_by(SkillCategory.sort_order, SkillCategory.name)
+        )
+        categories = []
+        for cat_id, cat_name in cat_rows.all():
+            total_r = await self.db.execute(
+                select(func.count(Skill.id)).where(
+                    Skill.category_id == cat_id,
+                    Skill.status != ContentStatus.ARCHIVED,
+                )
+            )
+            cat_total = total_r.scalar_one()
+            done_r = await self.db.execute(
+                select(func.count(SkillProgress.id))
+                .join(Skill, Skill.id == SkillProgress.skill_id)
+                .where(
+                    Skill.category_id == cat_id,
+                    Skill.status != ContentStatus.ARCHIVED,
+                    SkillProgress.user_id == user_id,
+                    SkillProgress.status == ProgressStatus.COMPLETED,
+                )
+            )
+            cat_done = done_r.scalar_one()
+            categories.append(
+                {
+                    "id": cat_id,
+                    "name": cat_name,
+                    "skills_total": cat_total,
+                    "skills_completed": cat_done,
+                    "completion_percentage": round(
+                        (cat_done / cat_total * 100) if cat_total > 0 else 0, 1
+                    ),
+                }
+            )
+
         return {
             "skills_total": skills_total,
             "skills_completed": completed,
@@ -500,7 +543,7 @@ class SkillService:
             "exercises_total": exercises_total,
             "exercises_completed": exercises_done,
             "completion_percentage": pct,
-            "categories": [],
+            "categories": categories,
         }
 
     async def get_skill_progress(self, skill_id: str, user_id: str) -> SkillProgress | None:

@@ -2634,3 +2634,25 @@ async def test_deliverable_type_mismatch_rejected(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_progress_categories_populated(c):
+    """get_user_progress must return the per-category breakdown (was always []
+    while the API declared it and the progress UI rendered it)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Programming"}, headers=h)).json()["data"]["id"]
+    for name in ("Python", "Rust"):
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={"name": name, "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            headers=h,
+        )
+    d = (await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)).json()
+    assert len(d["categories"]) == 1
+    entry = d["categories"][0]
+    assert entry["name"] == "Programming"
+    assert entry["skills_total"] == 2
+    assert entry["skills_completed"] == 0
+    assert entry["completion_percentage"] == 0.0
