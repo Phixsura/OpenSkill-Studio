@@ -603,13 +603,25 @@ async def list_my_skill_progress(
     result = []
     for skill in skills:
         progress = await svc.get_skill_progress(skill.id, user.id)
+        # The stored snapshot goes stale when exercises are added/archived
+        # after the student's last attempt — a skill could show completed 1/1
+        # while it actually has 2 exercises. Use the live exercise count and
+        # derive the display status from it.
+        live_total = len(await svc.list_exercises(skill.id))
+        done = progress.exercises_done if progress else 0
+        if done == 0:
+            status = "not_started"
+        elif live_total > 0 and done >= live_total:
+            status = "completed"
+        else:
+            status = "in_progress"
         result.append(
             {
                 "skill_id": skill.id,
                 "skill_name": skill.name,
-                "status": progress.status.value if progress else "not_started",
-                "exercises_total": progress.exercises_total if progress else 0,
-                "exercises_done": progress.exercises_done if progress else 0,
+                "status": status,
+                "exercises_total": live_total,
+                "exercises_done": done,
             }
         )
     return DataResponse(data=result)

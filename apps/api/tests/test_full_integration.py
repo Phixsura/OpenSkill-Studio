@@ -4553,3 +4553,59 @@ async def test_mcq_answer_key_hidden_from_students(c):
         headers=hs,
     )
     assert r.json()["data"]["is_correct"] is True
+
+
+@pytest.mark.asyncio
+async def test_progress_reflects_live_exercise_count(c):
+    """Progress snapshots go stale when an exercise is added after a
+    student completed the skill — the list showed completed 1/1 while the
+    skill really had 2 exercises (bug #128). The list now uses the live
+    count and derives status from it."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Live Cat"}, headers=h)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Live Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    body = {
+        "description": "d",
+        "type": "multiple_choice",
+        "config": {"correct": ["a"], "options": ["a"]},
+        "max_score": 10,
+    }
+    ex1 = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={**body, "title": "MCQ One"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex1}/attempts",
+        json={"answer": {"selected": ["a"]}},
+        headers=h,
+    )
+
+    row = (await c.get(f"/api/v1/orgs/{oid}/progress/me/skills", headers=h)).json()["data"][0]
+    assert row["status"] == "completed" and row["exercises_total"] == 1
+
+    # instructor adds a second exercise after completion
+    await c.post(
+        f"/api/v1/orgs/{oid}/skills/{sk}/exercises", json={**body, "title": "MCQ Two"}, headers=h
+    )
+    row = (await c.get(f"/api/v1/orgs/{oid}/progress/me/skills", headers=h)).json()["data"][0]
+    assert row["exercises_total"] == 2
+    assert row["exercises_done"] == 1
+    assert row["status"] == "in_progress"
