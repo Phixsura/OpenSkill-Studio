@@ -561,6 +561,26 @@ class ProjectService:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
         if sub.status != SubmissionStatus.DRAFT:
             raise InvalidStateError("Only drafts can be deleted")
+
+        # Best-effort S3 cleanup of every file item — the DB rows cascade on
+        # delete, but the S3 objects would otherwise be orphaned forever.
+        keys_result = await self.db.execute(
+            select(SubmissionItem.file_key).where(
+                SubmissionItem.submission_id == submission_id,
+                SubmissionItem.file_key.is_not(None),
+            )
+        )
+        file_keys = [k for k in keys_result.scalars() if k]
+        if file_keys:
+            from app.core.storage import get_s3_client
+
+            try:
+                async for client in get_s3_client():
+                    for key in file_keys:
+                        await client.delete_object(Bucket=settings.s3_bucket, Key=key)
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                log.warning("submission_s3_cleanup_failed", submission_id=submission_id)
+
         await self.db.delete(sub)
         await self.db.flush()
 
@@ -1283,8 +1303,29 @@ class ProjectService:
         if deliverable.type != DeliverableType.PROMPT:
             raise AppError("INVALID_TYPE", "Deliverable is not a prompt deliverable", 422)
 
-        version = await self._next_item_version(submission_id, deliverable_id)
+        # A prompt deliverable holds one prompt: editing replaces the existing
+        # row rather than piling up stale duplicates (which inflate the version
+        # counter and corrupt exports/audit even though the UI shows the latest).
+        existing = await self.db.execute(
+            select(SubmissionItem).where(
+                SubmissionItem.submission_id == submission_id,
+                SubmissionItem.deliverable_id == deliverable_id,
+                SubmissionItem.type == ItemType.PROMPT,
+            )
+        )
+        item = existing.scalars().first()
+        if item is not None:
+            item.content = json.dumps(prompt_data, ensure_ascii=False)
+            item.uploaded_by = user_id
+            await self.db.flush()
+            log.info(
+                "prompt_item_replaced",
+                submission_id=submission_id,
+                deliverable_id=deliverable_id,
+            )
+            return item
 
+        version = await self._next_item_version(submission_id, deliverable_id)
         item = SubmissionItem(
             submission_id=submission_id,
             deliverable_id=deliverable_id,

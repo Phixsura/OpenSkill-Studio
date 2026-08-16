@@ -489,9 +489,20 @@ async def test_prompt_item_stored_and_versioned(db):
     assert parsed["prompt"] == data["prompt"]
     assert parsed["parameters"]["aspect_ratio"] == "9:16"
 
-    # Second prompt → v2
+    # Editing the prompt replaces the single row in place (no duplicate rows).
     item2 = await svc.add_prompt_item(sub.id, d.id, {**data, "prompt": "Refined"}, user.id)
-    assert item2.version == 2
+    assert item2.id == item.id
+    assert json.loads(item2.content)["prompt"] == "Refined"
+    from sqlalchemy import func, select
+
+    from app.models.project import SubmissionItem
+
+    count = await db.execute(
+        select(func.count(SubmissionItem.id)).where(
+            SubmissionItem.submission_id == sub.id, SubmissionItem.deliverable_id == d.id
+        )
+    )
+    assert count.scalar_one() == 1
 
 
 @pytest.mark.asyncio

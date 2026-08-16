@@ -1922,3 +1922,71 @@ async def test_inline_item_edit_replaces_not_accumulates(c):
     text_items = [i for i in det["items"] if i["deliverable_id"] == did]
     assert len(text_items) == 1
     assert text_items[0]["content"] == "third"
+
+
+@pytest.mark.asyncio
+async def test_prompt_item_edit_replaces(c):
+    """Re-submitting a prompt deliverable replaces the row instead of piling
+    up duplicates that inflate the version counter."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Prompt Edit Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Prompt D", "type": "prompt", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    for pr in ("one", "two", "three"):
+        await c.post(
+            f"/api/v1/orgs/{oid}/submissions/{sid}/prompt-items",
+            json={"deliverable_id": did, "prompt": pr},
+            headers=h,
+        )
+    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    items = [i for i in det["items"] if i["deliverable_id"] == did]
+    assert len(items) == 1
+    import json as _json
+
+    assert _json.loads(items[0]["content"])["prompt"] == "three"
+
+
+@pytest.mark.asyncio
+async def test_delete_submission_with_file_succeeds(c):
+    """Deleting a draft submission that has an uploaded file succeeds (S3
+    objects are cleaned up best-effort, DB rows cascade)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Del File Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Img", "type": "image", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/files",
+        files={"file": ("a.png", _mini_png(), "image/png")},
+        data={"deliverable_id": did},
+        headers=h,
+    )
+    r = await c.delete(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)
+    assert r.status_code == 204
