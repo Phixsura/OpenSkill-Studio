@@ -68,6 +68,13 @@ class UpdateCategoryRequest(BaseModel):
             raise ValueError("Icon must not exceed 50 characters")
         return v
 
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
+            raise ValueError("sort_order must be between 0 and 100000")
+        return v
+
 
 class CategoryResponse(BaseModel):
     id: str

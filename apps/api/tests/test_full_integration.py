@@ -4338,3 +4338,52 @@ async def test_exercise_update_config_bounded(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_int_fields_reject_int32_overflow(c):
+    """Unbounded int request fields (deliverable/category sort_order,
+    template max_score/suggested_minutes) hit asyncpg's int32 range check
+    and 500ed (bug #120). All now 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Overflow Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    big = 2**40
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{p['id']}/deliverables",
+        json={"name": "Big Sort", "type": "text", "sort_order": big},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/project-templates",
+        json={
+            "name": "Big Tmpl",
+            "description": "d",
+            "instructions": "i",
+            "max_score": big,
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+            "deliverables": [],
+        },
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Sort Cat"}, headers=h)
+    ).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid}/categories/{cat}", json={"sort_order": big}, headers=h)
+    assert r.status_code == 422

@@ -283,6 +283,13 @@ class CreateDeliverableRequest(BaseModel):
     def validate_config(cls, v: dict) -> dict:
         return _validate_deliverable_config(v)
 
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
+            raise ValueError("sort_order must be between 0 and 100000")
+        return v
+
 
 class UpdateDeliverableRequest(BaseModel):
     name: str | None = None
@@ -309,6 +316,13 @@ class UpdateDeliverableRequest(BaseModel):
     @classmethod
     def validate_config(cls, v: dict | None) -> dict | None:
         return _validate_deliverable_config(v)
+
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
+            raise ValueError("sort_order must be between 0 and 100000")
+        return v
 
 
 class DeliverableResponse(BaseModel):
@@ -590,6 +604,13 @@ class CreateTemplateRequest(BaseModel):
     def validate_skill_names(cls, v):
         return _validate_id_list(v, "skill_names")
 
+    @field_validator("max_score")
+    @classmethod
+    def validate_max_score(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 10000):
+            raise ValueError("max_score must be between 0 and 10000")
+        return v
+
 
 class UpdateTemplateRequest(BaseModel):
     name: str | None = None
@@ -640,6 +661,20 @@ class UpdateTemplateRequest(BaseModel):
     @classmethod
     def validate_skill_names(cls, v):
         return _validate_id_list(v, "skill_names")
+
+    @field_validator("max_score")
+    @classmethod
+    def validate_max_score(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 10000):
+            raise ValueError("max_score must be between 0 and 10000")
+        return v
+
+    @field_validator("suggested_minutes")
+    @classmethod
+    def validate_suggested_minutes(cls, v):
+        if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
+            raise ValueError("suggested_minutes must be between 0 and 100000")
+        return v
 
 
 class TemplateResponse(BaseModel):
