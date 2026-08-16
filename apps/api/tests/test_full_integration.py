@@ -4414,3 +4414,15 @@ async def test_project_description_instructions_bounded(c):
         f"/api/v1/orgs/{oid}/projects", json={**base, "description": "fine"}, headers=h
     )
     assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_profile_theme_bounded(c):
+    """theme is a String(20) column but had no validator — a longer value
+    hit StringDataRightTruncation and 500ed (bug #122)."""
+    h, _ = await _auth(c)
+    r = await c.put("/api/v1/portfolio/profile", json={"theme": "X" * 100}, headers=h)
+    assert r.status_code == 422
+    r = await c.put("/api/v1/portfolio/profile", json={"theme": "dark"}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["theme"] == "dark"

@@ -64,6 +64,14 @@ class UpdateProfileRequest(BaseModel):
             raise ValueError("Headline must be 200 characters or less")
         return v
 
+    @field_validator("theme")
+    @classmethod
+    def validate_theme(cls, v: str | None) -> str | None:
+        # String(20) column — anything longer 500s on write.
+        if v is not None and len(v) > 20:
+            raise ValueError("Theme must be 20 characters or less")
+        return v
+
     @field_validator("bio")
     @classmethod
     def validate_bio(cls, v: str | None) -> str | None:
