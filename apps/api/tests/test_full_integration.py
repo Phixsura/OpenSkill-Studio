@@ -2684,3 +2684,32 @@ async def test_single_skill_progress_includes_name(c):
     d = (await c.get(f"/api/v1/orgs/{oid}/progress/me/skills/{sk}", headers=h)).json()["data"]
     assert d is not None
     assert d["skill_name"] == "Python Mastery"
+
+
+@pytest.mark.asyncio
+async def test_skill_progress_best_score_computed(c):
+    """best_score column was declared + returned but never written (always
+    NULL). It should now be the sum of the user's best attempt per exercise."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={"name": "Best Score Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={"title": "MCQ", "description": "d", "type": "multiple_choice", "config": {"correct": ["a"], "options": []}, "max_score": 10},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
+    # wrong (0), then correct (10) → best_score 10
+    await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"selected": ["b"]}}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"selected": ["a"]}}, headers=h)
+    d = (await c.get(f"/api/v1/orgs/{oid}/progress/me/skills/{sk}", headers=h)).json()["data"]
+    assert d["best_score"] == 10

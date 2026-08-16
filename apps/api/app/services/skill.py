@@ -626,18 +626,22 @@ class SkillService:
         # skill. A pass threshold of 60% of max_score defines "correct" for
         # manually-graded exercises (see grade_attempt).
         done = 0
+        best_score: int | None = None
         for ex in exercises:
             result = await self.db.execute(
-                select(ExerciseAttempt)
-                .where(
+                select(ExerciseAttempt).where(
                     ExerciseAttempt.exercise_id == ex.id,
                     ExerciseAttempt.user_id == user_id,
-                    ExerciseAttempt.is_correct.is_(True),
                 )
-                .limit(1)
             )
-            if result.scalar_one_or_none():
+            attempts = list(result.scalars())
+            if any(a.is_correct for a in attempts):
                 done += 1
+            # Best score = sum over exercises of the user's best graded attempt.
+            # (best_score was declared + returned by the API but never written.)
+            ex_scores = [a.score for a in attempts if a.score is not None]
+            if ex_scores:
+                best_score = (best_score or 0) + max(ex_scores)
 
         # Upsert progress
         result = await self.db.execute(
@@ -657,6 +661,7 @@ class SkillService:
 
         progress.exercises_total = total
         progress.exercises_done = done
+        progress.best_score = best_score
 
         if done == 0:
             progress.status = ProgressStatus.NOT_STARTED
