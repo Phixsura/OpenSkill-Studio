@@ -194,6 +194,7 @@ async def upload_cover_image(
     from ulid import ULID
 
     from app.config import settings
+    from app.core.media import content_matches_mime
     from app.core.storage import get_s3_client
 
     # Validate content type
@@ -208,7 +209,20 @@ async def upload_cover_image(
     if len(content) > 10 * 1024 * 1024:  # 10 MB limit for covers
         raise HTTPException(status_code=413, detail="Cover image must be under 10MB")
 
-    safe_name = re.sub(r"[^\w.\-]", "_", file.filename or "cover.jpg")
+    # Never trust the declared type — sniff the magic bytes so an HTML/script
+    # payload can't be stored as image/* and served from the public bucket.
+    if not content_matches_mime(content[:16], file.content_type):
+        raise HTTPException(
+            status_code=422, detail="File content does not match the declared image type"
+        )
+
+    # Clamp filename (DB/S3 object-name limits) preserving a short extension
+    raw_name = file.filename or "cover.jpg"
+    if len(raw_name) > 200:
+        dot = raw_name.rfind(".")
+        ext = raw_name[dot:] if dot > 0 and len(raw_name) - dot <= 20 else ""
+        raw_name = raw_name[: 200 - len(ext)] + ext
+    safe_name = re.sub(r"[^\w.\-]", "_", raw_name)
     file_key = f"users/{user.id}/covers/{ULID()}_{safe_name}"
 
     async for client in get_s3_client():

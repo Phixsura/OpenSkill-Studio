@@ -2175,3 +2175,23 @@ async def test_long_filename_and_asset_bounds(c):
         headers=h,
     )
     assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_cover_upload_rejects_spoofed_content(c):
+    """A non-image payload declared as image/* must be rejected — cover urls
+    are served straight from the public bucket (stored-XSS vector)."""
+    h, _ = await _auth(c)
+    r = await c.post(
+        "/api/v1/portfolio/upload-cover",
+        files={"file": ("evil.png", b"<html><script>alert(1)</script></html>", "image/png")},
+        headers=h,
+    )
+    assert r.status_code == 422
+    # a real PNG is accepted, even with a very long filename
+    r = await c.post(
+        "/api/v1/portfolio/upload-cover",
+        files={"file": ("C" * 260 + ".png", _mini_png(), "image/png")},
+        headers=h,
+    )
+    assert r.status_code in (200, 201)
