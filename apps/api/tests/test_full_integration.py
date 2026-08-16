@@ -2865,3 +2865,44 @@ async def test_auto_evaluate_on_submit(c):
     # no task for pid2's submission
     all_tasks = (await c.get(f"/api/v1/orgs/{oid}/evaluation/tasks?per_page=100", headers=h)).json()["data"]
     assert all(t["submission_id"] != sid2 for t in all_tasks)
+
+
+@pytest.mark.asyncio
+async def test_late_penalty_and_max_submissions(c):
+    """Late submissions get the configured penalty applied to final_score, and
+    max_submissions caps the number of drafts a learner can create."""
+    from datetime import UTC, datetime, timedelta
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # late-penalty project (deadline passed, late window open, 20% penalty)
+    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    future = (datetime.now(UTC) + timedelta(days=2)).isoformat()
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Late Project", "description": "d", "instructions": "i", "max_score": 100, "late_penalty_pct": 20, "deadline": past, "late_deadline": future, "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    assert r.json()["data"]["is_late"] is True
+    await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/reviews", json={"status": "approved", "score": 100}, headers=h)
+    d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    assert d["final_score"] == 80  # 100 - 20%
+
+    # max_submissions cap
+    pid2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Cap Project", "description": "d", "instructions": "i", "max_submissions": 2, "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/publish", headers=h)
+    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 201
+    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 201
+    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid2}/submissions", headers=h)).status_code == 422
