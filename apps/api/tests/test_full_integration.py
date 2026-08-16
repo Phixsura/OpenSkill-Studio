@@ -4854,3 +4854,62 @@ async def test_naive_datetime_deadlines_normalized(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_upload_note_bounded(c):
+    """The upload version note was an unbounded Form field into a Text
+    column — storage abuse (bug #137). Now capped at 2,000 chars."""
+    import struct
+    import zlib
+
+    def _png():
+        sig = b"\x89PNG\r\n\x1a\n"
+
+        def chunk(t, d):
+            crc = zlib.crc32(t + d) & 0xFFFFFFFF
+            return struct.pack(">I", len(d)) + t + d + struct.pack(">I", crc)
+
+        ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+        idat = zlib.compress(b"\x00\xff\x00\x00")
+        return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Note Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{p['id']}/deliverables",
+            json={"name": "Img Del", "type": "image", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/files",
+        files={"file": ("f.png", _png(), "image/png")},
+        data={"deliverable_id": did, "note": "X" * 5000},
+        headers=h,
+    )
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/files",
+        files={"file": ("f.png", _png(), "image/png")},
+        data={"deliverable_id": did, "note": "v2 with better lighting"},
+        headers=h,
+    )
+    assert r.status_code == 201

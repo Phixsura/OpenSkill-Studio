@@ -638,6 +638,10 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
+    # Version note is a short annotation, not a document — unbounded Text
+    # would be another storage-abuse vector.
+    if note is not None and len(note) > 2000:
+        raise HTTPException(status_code=422, detail="Note must be 2,000 characters or less")
     svc = ProjectService(db)
     await _verify_submission_org(svc, submission_id, org_id)
     content = await _read_limited(file)
