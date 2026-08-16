@@ -317,6 +317,14 @@ class UpdateExerciseRequest(BaseModel):
             raise ValueError("max_score must be between 0 and 10000")
         return v
 
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: dict | None) -> dict | None:
+        # Same bound as create — update must not bypass it.
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("config is too large")
+        return v
+
 
 class ExerciseResponse(BaseModel):
     id: str

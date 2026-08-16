@@ -4296,3 +4296,45 @@ async def test_attempt_answer_bounded(c):
         f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "fine"}}, headers=h
     )
     assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_exercise_update_config_bounded(c):
+    """UpdateExerciseRequest.config lacked the 20KB bound that create
+    enforces — update was a storage-abuse bypass (bug #119)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "CB Cat"}, headers=h)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "CB Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "TB",
+                "description": "d",
+                "type": "text_answer",
+                "config": {},
+                "max_score": 10,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/exercises/{ex}",
+        json={"config": {"blob": "X" * 50_000}},
+        headers=h,
+    )
+    assert r.status_code == 422
