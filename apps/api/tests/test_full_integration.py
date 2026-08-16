@@ -3436,3 +3436,62 @@ async def test_overview_excludes_removed_org_work(c):
     assert (await c.delete(f"/api/v1/orgs/{oid}/members/{us['id']}", headers=hi)).status_code == 204
     d = (await c.get("/api/v1/me/overview", headers=hs)).json()["data"]
     assert d["drafts"] == []
+
+
+@pytest.mark.asyncio
+async def test_peer_score_capped_at_project_max(c):
+    """Peer assessments must respect project.max_score like instructor
+    reviews do — a 10000 score on a max-100 project poisoned the round
+    average (bug #101)."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Peer Cap Project",
+                "description": "d",
+                "instructions": "i",
+                "max_score": 100,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+
+    studs = []
+    for _ in range(2):
+        hs, _ = await _auth(c)
+        link = await c.post(
+            f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho
+        )
+        await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()[
+            "data"
+        ]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
+        studs.append(hs)
+
+    rid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/peer-review-rounds",
+            json={"project_id": pid, "name": "R1", "num_reviews": 1},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
+
+    my = (
+        await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=studs[0])
+    ).json()["data"]
+    aid = my[0]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/peer-assessments/{aid}/submit", json={"score": 10000}, headers=studs[0]
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "SCORE_EXCEEDS_MAX"
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/peer-assessments/{aid}/submit", json={"score": 88}, headers=studs[0]
+    )
+    assert r.status_code == 200

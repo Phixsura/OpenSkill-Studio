@@ -274,6 +274,16 @@ class PeerReviewService:
         if rnd.phase != PeerReviewPhase.ASSESSMENT:
             raise AppError("INVALID_PHASE", "Round is not accepting assessments", 422)
 
+        # Same cap the instructor review enforces — a peer score above the
+        # project max would poison the round average.
+        project = await self.db.get(Project, rnd.project_id)
+        if project is not None and score > project.max_score:
+            raise AppError(
+                "SCORE_EXCEEDS_MAX",
+                f"Score {score} exceeds project maximum of {project.max_score}",
+                422,
+            )
+
         assessment.score = score
         assessment.score_breakdown = score_breakdown
         assessment.feedback = feedback
