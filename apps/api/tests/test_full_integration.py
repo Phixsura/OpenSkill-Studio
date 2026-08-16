@@ -2497,3 +2497,53 @@ async def test_rejected_submission_is_terminal(c):
     # a rejected submission cannot be resubmitted
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_data_isolation_and_role_gating(c):
+    """Students cannot see other students' submissions, instructor-only
+    queues, or another user's private portfolio items."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Isolation Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+
+    async def join_student():
+        hs, _ = await _auth(c)
+        link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+        await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+        return hs
+
+    ha = await join_student()
+    hb = await join_student()
+    sa = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=ha)).json()["data"]["id"]
+    sb = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hb)).json()["data"]["id"]
+
+    # A sees only own in list, and 403 on B's detail
+    r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=ha)
+    ids = [x["id"] for x in r.json()["data"]]
+    assert sa in ids and sb not in ids
+    assert (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sb}", headers=ha)).status_code == 403
+
+    # instructor-only queues 403 for students
+    assert (await c.get(f"/api/v1/orgs/{oid}/reviews/pending", headers=ha)).status_code == 403
+    assert (await c.get(f"/api/v1/orgs/{oid}/grading/pending", headers=ha)).status_code == 403
+    assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/usage", headers=ha)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_public_page_hides_private_items(c):
+    h, _ = await _auth(c)
+    await c.put("/api/v1/portfolio/profile", json={"visibility": "public"}, headers=h)
+    await c.post("/api/v1/portfolio/items", json={"title": "Secret Work", "visibility": "private"}, headers=h)
+    await c.post("/api/v1/portfolio/items", json={"title": "Public Work", "visibility": "public"}, headers=h)
+    uname = (await c.get("/api/v1/portfolio/profile", headers=h)).json()["data"]["username"]
+    titles = [i["title"] for i in (await c.get(f"/api/v1/u/{uname}/items")).json()["data"]]
+    assert "Secret Work" not in titles
+    assert "Public Work" in titles
