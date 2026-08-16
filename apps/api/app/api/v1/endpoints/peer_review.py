@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -171,7 +171,15 @@ async def round_results(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = PeerReviewService(db)
+    rnd = await svc.get_round(round_id, org_id)
+    # Students may only see aggregate results after the round is CLOSED —
+    # exposing everyone's peer scores mid-assessment lets a reviewer anchor
+    # on the crowd and undermines the review. Instructors can see anytime.
+    from app.models.project import PeerReviewPhase
+
+    if member.role not in INSTRUCTOR_ROLES and rnd.phase != PeerReviewPhase.CLOSED:
+        raise HTTPException(status_code=403, detail="Results are available once the round closes")
     results = await svc.round_results(round_id, org_id)
     return DataResponse(data=[RoundResultEntry(**r) for r in results])

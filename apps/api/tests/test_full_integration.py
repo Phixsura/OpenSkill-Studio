@@ -2713,3 +2713,48 @@ async def test_skill_progress_best_score_computed(c):
     await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"selected": ["a"]}}, headers=h)
     d = (await c.get(f"/api/v1/orgs/{oid}/progress/me/skills/{sk}", headers=h)).json()["data"]
     assert d["best_score"] == 10
+
+
+@pytest.mark.asyncio
+async def test_peer_results_gated_until_closed_for_students(c):
+    """Students can only see aggregate peer results after the round CLOSES;
+    instructors can see anytime (avoids anchoring reviewers on the crowd)."""
+    ho, _ = await _auth(c)
+    oid = await _org(c, ho)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Peer Results Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ho)
+
+    studs = []
+    for _ in range(3):
+        hs, _ = await _auth(c)
+        link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
+        await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
+        s = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{s}/submit", headers=hs)
+        studs.append(hs)
+
+    rid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/peer-review-rounds",
+            json={"project_id": pid, "name": "R1", "num_reviews": 1},
+            headers=ho,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/start", headers=ho)
+    for hs in studs:
+        my = (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/my-assessments", headers=hs)).json()["data"]
+        for a in my:
+            await c.post(f"/api/v1/orgs/{oid}/peer-assessments/{a['id']}/submit", json={"score": 70}, headers=hs)
+
+    # mid-assessment: student 403, instructor 200
+    assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=studs[0])).status_code == 403
+    assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=ho)).status_code == 200
+    # after close: student 200
+    await c.post(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/close", headers=ho)
+    assert (await c.get(f"/api/v1/orgs/{oid}/peer-review-rounds/{rid}/results", headers=studs[0])).status_code == 200
