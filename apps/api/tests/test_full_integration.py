@@ -4009,3 +4009,48 @@ async def test_template_update_bogus_difficulty_422(c):
     )
     assert r.status_code == 200
     assert r.json()["data"]["difficulty"] == "advanced"
+
+
+@pytest.mark.asyncio
+async def test_template_skill_names_linked_on_instantiation(c):
+    """Templates store skill_names, but from-template instantiation dropped
+    them — projects created from templates never linked any skills
+    (bug #113). Names matching org skills now link; unknown names skip."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "FT Cat"}, headers=h)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Prompt Engineering",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    t = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/project-templates",
+            json={
+                "name": "FT Tmpl",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+                "deliverables": [],
+                "skill_names": ["Prompt Engineering", "Nonexistent Skill"],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/from-template", json={"template_id": t["id"]}, headers=h
+        )
+    ).json()["data"]["id"]
+    detail = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}", headers=h)).json()["data"]
+    assert detail["skill_ids"] == [sk]

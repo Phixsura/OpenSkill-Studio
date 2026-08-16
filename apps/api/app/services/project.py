@@ -1198,7 +1198,26 @@ class ProjectService:
                 "max_score": template.max_score,
                 "rubric": template.rubric,
                 "deliverables": template.deliverables,
+                "skill_names": template.skill_names,
             }
+
+        # Resolve the template's skill_names to this org's skills (by exact
+        # name) — they were stored on the template but silently dropped at
+        # instantiation, so template-created projects never linked skills.
+        from app.models.skill import Skill
+
+        skill_ids: list[str] = []
+        for skill_name in src.get("skill_names") or []:
+            skill_r = await self.db.execute(
+                select(Skill.id).where(
+                    Skill.org_id == org_id,
+                    Skill.name == skill_name,
+                    Skill.status != ContentStatus.ARCHIVED,
+                )
+            )
+            sid = skill_r.scalars().first()
+            if sid:
+                skill_ids.append(sid)
 
         project = await self.create_project(
             org_id=org_id,
@@ -1213,7 +1232,7 @@ class ProjectService:
             late_deadline=None,
             late_penalty_pct=0,
             max_submissions=0,
-            skill_ids=None,
+            skill_ids=skill_ids or None,
             created_by=created_by,
             project_type=src.get("project_type", "general"),
         )
