@@ -2294,3 +2294,25 @@ async def test_expert_difficulty_and_bad_filters(c):
     assert (await c.get(f"/api/v1/orgs/{oid}/skills?difficulty=bogus", headers=h)).status_code == 422
     assert (await c.get(f"/api/v1/orgs/{oid}/skills?status=bogus", headers=h)).status_code == 422
     assert (await c.get(f"/api/v1/orgs/{oid}/projects?status=bogus", headers=h)).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_review_score_breakdown_bounded(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "SB Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
+        json={"status": "approved", "score": 90, "score_breakdown": {"blob": "z" * 25000}},
+        headers=h,
+    )
+    assert r.status_code == 422

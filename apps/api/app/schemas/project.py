@@ -427,6 +427,13 @@ class CreateReviewRequest(BaseModel):
             raise ValueError("score must be between 0 and 10000")
         return v
 
+    @field_validator("score_breakdown")
+    @classmethod
+    def validate_score_breakdown(cls, v):
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("score_breakdown is too large")
+        return v
+
 
 class GrantExtensionRequest(BaseModel):
     user_id: str
