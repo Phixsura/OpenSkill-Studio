@@ -3883,3 +3883,51 @@ async def test_pass_threshold_setting_honored(c):
         "data"
     ]
     assert sub["status"] == "revision_requested"  # 0.7 < 0.9 threshold
+
+
+@pytest.mark.asyncio
+async def test_default_model_setting_passed_to_llm(c):
+    """default_model was stored by the settings API but create_llm_client
+    always used the global settings model — the per-org choice was a no-op
+    (bug #110)."""
+    from unittest.mock import patch
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={"enabled": True, "default_model": "claude-haiku-4-5"},
+        headers=h,
+    )
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Model Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+
+    seen = {}
+
+    def _capture(model=None):
+        seen["model"] = model
+        raise RuntimeError("stop here")  # fail the eval — we only care about the arg
+
+    with patch("app.services.evaluation.create_llm_client", side_effect=_capture):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/evaluation/trigger",
+            json={"submission_id": sid, "type": "submission_review"},
+            headers=h,
+        )
+    assert r.json()["data"]["status"] == "failed"
+    assert seen["model"] == "claude-haiku-4-5"

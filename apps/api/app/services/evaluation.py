@@ -144,8 +144,10 @@ class EvaluationService:
             # Build prompt
             user_prompt = self._build_user_prompt(project, items)
 
-            # Call LLM
-            llm = create_llm_client()
+            # Call LLM with the org's configured model (default_model setting
+            # was stored but never used — always fell through to the global).
+            org_settings = await self.get_eval_settings(task.org_id)
+            llm = create_llm_client(org_settings.get("default_model"))
             response = await llm.complete(
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=user_prompt,
@@ -160,8 +162,7 @@ class EvaluationService:
             # Determine review status — honor the org's configured threshold
             # (the settings API accepts pass_threshold; using only the module
             # default made that setting a no-op).
-            eval_settings = await self.get_eval_settings(task.org_id)
-            threshold = eval_settings.get("pass_threshold", DEFAULT_PASS_THRESHOLD)
+            threshold = org_settings.get("pass_threshold", DEFAULT_PASS_THRESHOLD)
             review_status = (
                 ReviewStatus.APPROVED
                 if max_score > 0 and total_score / max_score >= threshold
