@@ -1459,7 +1459,12 @@ async def test_upload_sniffer_edge_cases(c):
     oid = await _org(c, h)
     rp = await c.post(
         f"/api/v1/orgs/{oid}/projects",
-        json={"title": "Sniff Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+        json={
+            "title": "Sniff Project",
+            "description": "d",
+            "instructions": "i",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
         headers=h,
     )
     pid = rp.json()["data"]["id"]
@@ -1471,7 +1476,9 @@ async def test_upload_sniffer_edge_cases(c):
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
 
     cases = [
         ("empty.png", b"", "image/png"),
@@ -1498,7 +1505,12 @@ async def test_deliverable_config_and_type_validation(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Cfg Val Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Cfg Val Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1528,7 +1540,12 @@ async def test_deliverable_config_and_type_validation(c):
     # valid config
     r = await c.post(
         f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
-        json={"name": "Good D", "type": "image", "config": {"max_files": 5, "max_file_size_mb": 25, "accepted_formats": ["image/png"]}, "required": False},
+        json={
+            "name": "Good D",
+            "type": "image",
+            "config": {"max_files": 5, "max_file_size_mb": 25, "accepted_formats": ["image/png"]},
+            "required": False,
+        },
         headers=h,
     )
     assert r.status_code == 201
@@ -1551,17 +1568,30 @@ async def test_unbounded_text_fields_now_bounded(c):
     assert r.status_code == 422
 
     # exercise config blob
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat2"}, headers=h)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat2"}, headers=h)).json()[
+        "data"
+    ]["id"]
     sk = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
-            json={"name": "Skill EX", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            json={
+                "name": "Skill EX",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     r = await c.post(
         f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
-        json={"title": "Ex", "description": "d", "type": "text_answer", "config": {"blob": "z" * 25000}, "max_score": 10},
+        json={
+            "title": "Ex",
+            "description": "d",
+            "type": "text_answer",
+            "config": {"blob": "z" * 25000},
+            "max_score": 10,
+        },
         headers=h,
     )
     assert r.status_code == 422
@@ -1573,13 +1603,20 @@ async def test_duplicate_prerequisites_and_project_skills(c):
     composite primary key — they should be de-duplicated."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=h)).json()[
+        "data"
+    ]["id"]
 
     async def mk_skill(name):
         return (
             await c.post(
                 f"/api/v1/orgs/{oid}/skills",
-                json={"name": name, "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+                json={
+                    "name": name,
+                    "description": "d" * 10,
+                    "difficulty": "beginner",
+                    "category_id": cat,
+                },
                 headers=h,
             )
         ).json()["data"]["id"]
@@ -1588,22 +1625,35 @@ async def test_duplicate_prerequisites_and_project_skills(c):
     b = await mk_skill("Skill B Dup")
 
     # duplicate prerequisite ids
-    r = await c.put(f"/api/v1/orgs/{oid}/skills/{a}/prerequisites", json={"prerequisite_ids": [b, b, b]}, headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/skills/{a}/prerequisites",
+        json={"prerequisite_ids": [b, b, b]},
+        headers=h,
+    )
     assert r.status_code == 200
 
     # self-prerequisite → cycle 422
-    r = await c.put(f"/api/v1/orgs/{oid}/skills/{a}/prerequisites", json={"prerequisite_ids": [a]}, headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/skills/{a}/prerequisites", json={"prerequisite_ids": [a]}, headers=h
+    )
     assert r.status_code == 422
 
     # duplicate project-skill ids
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Dup Skill Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Dup Skill Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
-    r = await c.put(f"/api/v1/orgs/{oid}/projects/{pid}/skills", json={"skill_ids": [a, a, b]}, headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/skills", json={"skill_ids": [a, a, b]}, headers=h
+    )
     assert r.status_code == 200
 
 
@@ -1616,7 +1666,12 @@ async def test_student_cannot_submit_to_unpublished_project(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Draft Only Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Draft Only Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=ho,
         )
     ).json()["data"]["id"]
@@ -1645,13 +1700,22 @@ async def test_extension_reason_bounded(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Ext Reason Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Ext Reason Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
     r = await c.post(
         f"/api/v1/orgs/{oid}/projects/{pid}/extensions",
-        json={"user_id": "01BOGUSBOGUSBOGUSBOGUSBOGU", "new_deadline": "2030-01-01T00:00:00Z", "reason": "x" * 2000},
+        json={
+            "user_id": "01BOGUSBOGUSBOGUSBOGUSBOGU",
+            "new_deadline": "2030-01-01T00:00:00Z",
+            "reason": "x" * 2000,
+        },
         headers=h,
     )
     assert r.status_code == 422
@@ -1663,36 +1727,55 @@ async def test_student_cannot_attempt_unpublished_skill(c):
     may (to test), and the student can once it's published."""
     ho, _ = await _auth(c)
     oid = await _org(c, ho)
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=ho)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Cat"}, headers=ho)).json()[
+        "data"
+    ]["id"]
     sk = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
-            json={"name": "Publish Gate Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat},
+            json={
+                "name": "Publish Gate Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
             headers=ho,
         )
     ).json()["data"]["id"]
     ex = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
-            json={"title": "Ex", "description": "d", "type": "text_answer", "config": {}, "max_score": 10},
+            json={
+                "title": "Ex",
+                "description": "d",
+                "type": "text_answer",
+                "config": {},
+                "max_score": 10,
+            },
             headers=ho,
         )
     ).json()["data"]["id"]
 
     # instructor can attempt the draft skill's exercise
-    r = await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=ho)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=ho
+    )
     assert r.status_code == 201
 
     # student cannot, while draft
     hs, _ = await _auth(c)
     link = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "student"}, headers=ho)
     await c.post("/api/v1/invites/join", json={"code": link.json()["data"]["code"]}, headers=hs)
-    r = await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=hs)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=hs
+    )
     assert r.status_code == 422
 
     # published → student can
     await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=ho)
-    r = await c.post(f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=hs)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts", json={"answer": {"text": "hi"}}, headers=hs
+    )
     assert r.status_code == 201
 
 
@@ -1705,7 +1788,12 @@ async def test_revision_requested_edit_and_resubmit(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Revision Loop Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Revision Loop Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1717,7 +1805,9 @@ async def test_revision_requested_edit_and_resubmit(c):
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
 
     # instructor requests revision
@@ -1798,7 +1888,9 @@ def _mini_png(color: int = 1) -> bytes:
         return struct.pack(">I", len(d)) + t + d + struct.pack(">I", crc)
 
     ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-    return sig + ch(b"IHDR", ihdr) + ch(b"IDAT", zlib.compress(bytes((color,) * 3))) + ch(b"IEND", b"")
+    return (
+        sig + ch(b"IHDR", ihdr) + ch(b"IDAT", zlib.compress(bytes((color,) * 3))) + ch(b"IEND", b"")
+    )
 
 
 @pytest.mark.asyncio
@@ -1811,7 +1903,12 @@ async def test_version_numbers_unique_after_delete(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Version Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Version Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1823,7 +1920,9 @@ async def test_version_numbers_unique_after_delete(c):
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
 
     async def up(color):
         return await c.post(
@@ -1842,7 +1941,9 @@ async def test_version_numbers_unique_after_delete(c):
     await c.delete(f"/api/v1/orgs/{oid}/submissions/{sid}/files/{f1}", headers=h)
     r3 = await up(40)
     assert r3.status_code == 201
-    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
+        "data"
+    ]
     versions = [i["version"] for i in det["items"] if i["deliverable_id"] == did]
     assert len(versions) == len(set(versions)), f"duplicate versions: {versions}"
 
@@ -1856,7 +1957,12 @@ async def test_blank_item_does_not_satisfy_required(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Required Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Required Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1868,7 +1974,9 @@ async def test_blank_item_does_not_satisfy_required(c):
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
 
     # whitespace-only content → does NOT satisfy the required deliverable
     await c.put(
@@ -1898,7 +2006,12 @@ async def test_inline_item_edit_replaces_not_accumulates(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Inline Edit Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Inline Edit Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1910,7 +2023,9 @@ async def test_inline_item_edit_replaces_not_accumulates(c):
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
 
     for txt in ("first", "second", "third"):
         await c.put(
@@ -1918,7 +2033,9 @@ async def test_inline_item_edit_replaces_not_accumulates(c):
             json={"items": [{"deliverable_id": did, "type": "text", "content": txt}]},
             headers=h,
         )
-    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
+        "data"
+    ]
     text_items = [i for i in det["items"] if i["deliverable_id"] == did]
     assert len(text_items) == 1
     assert text_items[0]["content"] == "third"
@@ -1933,7 +2050,12 @@ async def test_prompt_item_edit_replaces(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Prompt Edit Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Prompt Edit Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1945,14 +2067,18 @@ async def test_prompt_item_edit_replaces(c):
         )
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
     for pr in ("one", "two", "three"):
         await c.post(
             f"/api/v1/orgs/{oid}/submissions/{sid}/prompt-items",
             json={"deliverable_id": did, "prompt": pr},
             headers=h,
         )
-    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
+    det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
+        "data"
+    ]
     items = [i for i in det["items"] if i["deliverable_id"] == did]
     assert len(items) == 1
     import json as _json
@@ -1969,7 +2095,46 @@ async def test_delete_submission_with_file_succeeds(c):
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/projects",
-            json={"title": "Del File Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            json={
+                "title": "Del File Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Img", "type": "image", "required": False},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/files",
+        files={"file": ("a.png", _mini_png(), "image/png")},
+        data={"deliverable_id": did},
+        headers=h,
+    )
+    r = await c.delete(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)
+    assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_long_filename_and_asset_bounds(c):
+    """A >200-char filename must be clamped (no DataError/invalid-object-name
+    500), and asset name/description form fields are bounded."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Filename Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1982,11 +2147,31 @@ async def test_delete_submission_with_file_succeeds(c):
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
     sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
-    await c.post(
+
+    # 260-char filename → clamped, upload succeeds
+    r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/files",
-        files={"file": ("a.png", _mini_png(), "image/png")},
+        files={"file": ("A" * 260 + ".png", _mini_png(), "image/png")},
         data={"deliverable_id": did},
         headers=h,
     )
-    r = await c.delete(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)
-    assert r.status_code == 204
+    assert r.status_code == 201
+    assert len(r.json()["data"]["file_name"]) <= 200
+
+    # asset with a huge name → 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/assets",
+        files={"file": ("ref.png", _mini_png(), "image/png")},
+        data={"name": "N" * 300},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # asset with a long filename but valid name → clamped, 201
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/assets",
+        files={"file": ("B" * 260 + ".png", _mini_png(), "image/png")},
+        data={"name": "Ref"},
+        headers=h,
+    )
+    assert r.status_code == 201

@@ -43,6 +43,24 @@ from app.models.skill import ContentStatus, DifficultyLevel
 log = structlog.get_logger()
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+# Below the DB column width (255) AND small enough that the S3 key's final
+# path segment ("{ULID}_{name}", ~27 char prefix) stays under the 255-byte
+# object-name limit MinIO enforces per path component.
+MAX_FILENAME_LEN = 200
+
+
+def _clamp_filename(name: str) -> str:
+    """Clamp a client-supplied filename, preserving the extension, so a very
+    long name doesn't raise a DataError 500 on insert or an invalid-object-name
+    error from object storage."""
+    if len(name) <= MAX_FILENAME_LEN:
+        return name
+    dot = name.rfind(".")
+    if dot > 0 and len(name) - dot <= 20:  # keep a short extension
+        ext = name[dot:]
+        return name[: MAX_FILENAME_LEN - len(ext)] + ext
+    return name[:MAX_FILENAME_LEN]
+
 
 PROJECT_TYPES = {"general", "ai_visual"}
 
@@ -534,7 +552,9 @@ class ProjectService:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
         # A draft OR a revision-requested submission can be (re)submitted.
         if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
-            raise InvalidStateError("Only drafts or revision-requested submissions can be submitted")
+            raise InvalidStateError(
+                "Only drafts or revision-requested submissions can be submitted"
+            )
 
         # Check required deliverables
         await self._validate_required_deliverables(sub)
@@ -643,6 +663,10 @@ class ProjectService:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
         if sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.REVISION_REQUESTED):
             raise InvalidStateError("Can only upload while the submission is editable")
+
+        # Cap filename to the DB column width (255) — a longer name from the
+        # client would otherwise raise a DataError 500 on insert.
+        file_name = _clamp_filename(file_name)
 
         # Deliverable must exist and belong to this submission's project
         deliverable = await self.get_deliverable(deliverable_id)
@@ -971,7 +995,11 @@ class ProjectService:
         # or whitespace-only text item must not count.
         satisfied_ids: set[str] = set()
         for item in result.scalars():
-            if item.type in (ItemType.FILE, ItemType.PROMPT) or item.content and item.content.strip():
+            if (
+                item.type in (ItemType.FILE, ItemType.PROMPT)
+                or item.content
+                and item.content.strip()
+            ):
                 satisfied_ids.add(item.deliverable_id)
 
         missing = required_ids - satisfied_ids
@@ -1206,6 +1234,7 @@ class ProjectService:
         if not content_matches_mime(file_content[:16], content_type):
             raise ContentTypeMismatchError()
 
+        file_name = _clamp_filename(file_name)
         safe_name = re.sub(r"[^\w.\-]", "_", file_name)
         file_key = f"orgs/{org_id}/projects/{project_id}/assets/{ULID()}_{safe_name}"
 

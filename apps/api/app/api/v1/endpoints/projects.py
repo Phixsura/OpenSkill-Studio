@@ -921,6 +921,12 @@ async def upload_asset(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    # name/description arrive as form fields (no Pydantic schema) — bound them.
+    name = name.strip()
+    if len(name) < 1 or len(name) > 200:
+        raise HTTPException(status_code=422, detail="Asset name must be 1-200 characters")
+    if description is not None and len(description) > 2000:
+        raise HTTPException(status_code=422, detail="Asset description must be 2000 chars or less")
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
     content = await _read_limited(file)
