@@ -4197,3 +4197,54 @@ async def test_toggle_invite_link_type_validated(c):
     )
     assert r.status_code == 200
     assert r.json()["data"]["is_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_mcq_requires_correct_config(c):
+    """An MCQ with no non-empty `correct` auto-graded every blank answer as
+    full marks ([] == [] in the grader) — free skill completion and badges
+    (bug #117). Create and update both reject it now."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "MCQ Cat"}, headers=h)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "MCQ Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    body = {"title": "MCQ", "description": "d", "type": "multiple_choice", "max_score": 10}
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+        json={**body, "config": {"options": ["a"]}},
+        headers=h,
+    )
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+        json={**body, "config": {"correct": [], "options": ["a"]}},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # valid create, then try to strip correct via update
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={**body, "config": {"correct": ["a"], "options": ["a", "b"]}},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/exercises/{ex}", json={"config": {"options": ["a", "b"]}}, headers=h
+    )
+    assert r.status_code == 422

@@ -334,6 +334,19 @@ class SkillService:
 
     async def update_exercise(self, exercise_id: str, **fields) -> Exercise:
         ex = await self.get_exercise(exercise_id)
+        # Replacing an MCQ's config with one lacking a non-empty `correct`
+        # would make every blank answer auto-grade as full marks.
+        new_config = fields.get("config")
+        if (
+            new_config is not None
+            and ex.type == ExerciseType.MULTIPLE_CHOICE
+            and not new_config.get("correct")
+        ):
+            raise AppError(
+                "INVALID_CONFIG",
+                "multiple_choice config must include a non-empty 'correct'",
+                422,
+            )
         for k, v in fields.items():
             if v is not None and hasattr(ex, k):
                 setattr(ex, k, v)

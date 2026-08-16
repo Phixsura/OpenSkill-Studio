@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 # ── Category ──────────────────────────────────────────────
 
@@ -277,6 +277,17 @@ class CreateExerciseRequest(BaseModel):
         if len(str(v)) > 20000:
             raise ValueError("config is too large")
         return v
+
+    @model_validator(mode="after")
+    def validate_mcq_has_correct(self):
+        # An MCQ without a non-empty `correct` list auto-grades every blank
+        # answer as full marks ([] == [] in the grader) — completing skills
+        # and minting badges for nothing.
+        if self.type == "multiple_choice":
+            correct = self.config.get("correct")
+            if correct is None or correct == [] or correct == "":
+                raise ValueError("multiple_choice config must include a non-empty 'correct'")
+        return self
 
 
 class UpdateExerciseRequest(BaseModel):
