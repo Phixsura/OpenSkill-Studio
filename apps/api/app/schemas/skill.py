@@ -396,6 +396,20 @@ class ReorderItem(BaseModel):
     id: str
     sort_order: int
 
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v: int) -> int:
+        if v < 0 or v > 100000:
+            raise ValueError("sort_order must be between 0 and 100000")
+        return v
+
 
 class ReorderRequest(BaseModel):
     items: list[ReorderItem]
+
+    @field_validator("items")
+    @classmethod
+    def validate_items(cls, v: list) -> list:
+        if len(v) > 1000:
+            raise ValueError("Too many items to reorder (max 1000)")
+        return v
