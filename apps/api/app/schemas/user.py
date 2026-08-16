@@ -30,7 +30,14 @@ class UpdateProfileRequest(BaseModel):
     @field_validator("display_name")
     @classmethod
     def validate_display_name(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 100:
+        if v is None:
+            return v
+        # Same rules as registration — update must not allow a blank name
+        # (it renders empty in member lists and comment threads).
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Display name must be at least 2 characters")
+        if len(v) > 100:
             raise ValueError("Display Name must not exceed 100 characters")
         return v
 

@@ -4441,3 +4441,17 @@ async def test_category_rename_bounded_to_column(c):
     assert r.status_code == 422
     r = await c.put(f"/api/v1/orgs/{oid}/categories/{cat}", json={"name": "Fine Name"}, headers=h)
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_profile_update_rejects_blank_display_name(c):
+    """Registration requires a 2+ char display name, but PUT /auth/me
+    accepted '' and '   ' — blank names then rendered empty in member
+    lists and comment threads (bug #124)."""
+    h, _ = await _auth(c)
+    for bad in ("", "   ", "x"):
+        r = await c.put("/api/v1/auth/me", json={"display_name": bad}, headers=h)
+        assert r.status_code == 422, bad
+    r = await c.put("/api/v1/auth/me", json={"display_name": "  Valid Name  "}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["display_name"] == "Valid Name"  # trimmed
