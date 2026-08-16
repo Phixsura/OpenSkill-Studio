@@ -3529,3 +3529,79 @@ async def test_skill_category_validated_on_create_and_update(c):
     ).json()["data"]["id"]
     r = await c.put(f"/api/v1/orgs/{o1}/skills/{sk}", json={"category_id": cat2}, headers=h1)
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_eval_budget_enforced_on_retry_and_first_run(c):
+    """retry_task skipped the budget check entirely (bug #103), and
+    check_budget returned True when no usage row existed yet — letting a
+    0-budget org run its first eval of every month (bug #104)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={"enabled": True, "monthly_budget_usd": 100},
+        headers=h,
+    )
+    p = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Budget Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/evaluation/trigger",
+        json={"submission_id": sid, "type": "submission_review"},
+        headers=h,
+    )
+    assert r.status_code == 201
+    tid = r.json()["data"]["id"]
+    assert r.json()["data"]["status"] == "failed"  # no LLM key in test env
+
+    # budget exhausted → retry must be blocked
+    await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation", json={"monthly_budget_usd": 0}, headers=h
+    )
+    r = await c.post(f"/api/v1/orgs/{oid}/evaluation/tasks/{tid}/retry", headers=h)
+    assert r.status_code == 429
+    assert r.json()["error"]["code"] == "BUDGET_EXCEEDED"
+
+    # fresh org with 0 budget and no usage row → first trigger also blocked
+    oid2 = await _org(c, h)
+    await c.put(
+        f"/api/v1/orgs/{oid2}/settings/evaluation",
+        json={"enabled": True, "monthly_budget_usd": 0},
+        headers=h,
+    )
+    p2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid2}/projects",
+            json={
+                "title": "Zero Budget Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]
+    await c.post(f"/api/v1/orgs/{oid2}/projects/{p2['id']}/publish", headers=h)
+    sid2 = (await c.post(f"/api/v1/orgs/{oid2}/projects/{p2['id']}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid2}/evaluation/trigger",
+        json={"submission_id": sid2, "type": "submission_review"},
+        headers=h,
+    )
+    assert r.status_code == 429

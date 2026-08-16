@@ -272,6 +272,10 @@ class EvaluationService:
         task = await self.get_task(task_id)
         if task.status != EvalStatus.FAILED:
             raise AppError("INVALID_STATE", "Only failed tasks can be retried", 422)
+        # Retry spends LLM budget just like a fresh trigger — enforce the
+        # same monthly cap so retries can't run past an exhausted budget.
+        if not await self.check_budget(task.org_id):
+            raise BudgetExceededError()
         task.status = EvalStatus.PENDING
         task.error = None
         await self.db.flush()
@@ -352,10 +356,11 @@ class EvaluationService:
             )
         )
         usage = result.scalar_one_or_none()
-        if usage is None:
-            return True
-
-        return float(usage.total_cost_usd) < budget
+        # No usage row means $0 spent — still subject to the budget. Returning
+        # True unconditionally here let a 0-budget org run its first eval of
+        # every month.
+        spent = float(usage.total_cost_usd) if usage is not None else 0.0
+        return spent < budget
 
     # ── Settings ──
 
