@@ -3979,3 +3979,33 @@ async def test_eval_disabled_blocks_trigger_and_retry(c):
     r = await c.post(f"/api/v1/orgs/{oid}/evaluation/tasks/{tid}/retry", headers=h)
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "EVAL_NOT_ENABLED"
+
+
+@pytest.mark.asyncio
+async def test_template_update_bogus_difficulty_422(c):
+    """UpdateTemplateRequest had no difficulty whitelist while the service
+    converts to DifficultyLevel directly — a bogus value 500ed (bug #112)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    tid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/project-templates",
+            json={
+                "name": "Diff Tmpl",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+                "deliverables": [],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/project-templates/{tid}", json={"difficulty": "IMPOSSIBLE"}, headers=h
+    )
+    assert r.status_code == 422
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/project-templates/{tid}", json={"difficulty": "advanced"}, headers=h
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["difficulty"] == "advanced"
