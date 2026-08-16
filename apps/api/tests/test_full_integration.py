@@ -3658,3 +3658,65 @@ async def test_regrant_extension_updates_instead_of_500(c):
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}/submit", headers=hs)
     assert r.status_code == 200
     assert r.json()["data"]["is_late"] is False
+
+
+@pytest.mark.asyncio
+async def test_skill_badges_sync_from_progress(c):
+    """ADR-007: badges appear automatically as skills are completed. No code
+    path ever created a SkillBadge row, so /portfolio/badges and the public
+    profile skills section were permanently empty (bug #106)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Badge Cat"}, headers=h)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Badge Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"correct": ["a"], "options": []},
+                "max_score": 10,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
+
+    assert (await c.get("/api/v1/portfolio/badges", headers=h)).json()["data"] == []
+    await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": ["a"]}},
+        headers=h,
+    )
+
+    badges = (await c.get("/api/v1/portfolio/badges", headers=h)).json()["data"]
+    assert len(badges) == 1
+    assert badges[0]["skill_name"] == "Badge Skill"
+    assert badges[0]["completion_pct"] == 100
+    assert badges[0]["completed"] is True
+
+    # badge shows on public profile, and hiding removes it
+    un = f"user{uuid.uuid4().hex[:8]}"
+    await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)
+    skills = (await c.get(f"/api/v1/u/{un}")).json()["skills"]
+    assert any(s["name"] == "Badge Skill" for s in skills)
+    await c.put(
+        f"/api/v1/portfolio/badges/{badges[0]['id']}", json={"show_on_profile": False}, headers=h
+    )
+    skills = (await c.get(f"/api/v1/u/{un}")).json()["skills"]
+    assert not any(s["name"] == "Badge Skill" for s in skills)

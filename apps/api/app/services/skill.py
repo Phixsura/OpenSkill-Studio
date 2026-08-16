@@ -687,6 +687,50 @@ class SkillService:
                 progress.started_at = datetime.now(UTC)
 
         await self.db.flush()
+        await self._sync_skill_badge(skill_id, user_id, org_id, progress)
+
+    async def _sync_skill_badge(
+        self, skill_id: str, user_id: str, org_id: str, progress: SkillProgress
+    ) -> None:
+        """Keep the portfolio SkillBadge in step with progress (ADR-007:
+        badges appear automatically as skills are worked on/completed).
+        Without this sync no badge row was ever created — the whole badge
+        feature returned empty lists."""
+        from app.models.portfolio import SkillBadge
+
+        skill = await self.db.get(Skill, skill_id)
+        if skill is None:  # pragma: no cover
+            return
+        category = await self.db.get(SkillCategory, skill.category_id)
+
+        pct = 0
+        if progress.exercises_total:
+            pct = int(progress.exercises_done * 100 / progress.exercises_total)
+
+        result = await self.db.execute(
+            select(SkillBadge).where(
+                SkillBadge.user_id == user_id,
+                SkillBadge.skill_id == skill_id,
+                SkillBadge.org_id == org_id,
+            )
+        )
+        badge = result.scalar_one_or_none()
+        if badge is None:
+            badge = SkillBadge(
+                user_id=user_id,
+                skill_id=skill_id,
+                org_id=org_id,
+                skill_name=skill.name,
+                category_name=category.name if category else "",
+                completion_pct=pct,
+            )
+            self.db.add(badge)
+        else:
+            badge.skill_name = skill.name
+            badge.category_name = category.name if category else ""
+            badge.completion_pct = pct
+        badge.completed_at = progress.completed_at
+        await self.db.flush()
 
     @staticmethod
     def _generate_slug(name: str) -> str:
