@@ -4489,3 +4489,67 @@ async def test_location_and_icon_caps_match_columns(c):
         f"/api/v1/orgs/{oid}/categories", json={"name": "Icon Cat", "icon": "sparkles"}, headers=h
     )
     assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_mcq_answer_key_hidden_from_students(c):
+    """ExerciseResponse returned config verbatim — students could read
+    config.correct (the MCQ answer key) and config.explanation straight
+    off GET/LIST exercise (bug #127). Instructors still see both; grading
+    still works via the stored config."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Key Cat"}, headers=hi)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Key Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Secret MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"correct": ["b"], "options": ["a", "b"], "explanation": "b is right"},
+                "max_score": 10,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=hi)
+
+    # student: answer key stripped, options kept
+    cfg = (await c.get(f"/api/v1/orgs/{oid}/exercises/{ex}", headers=hs)).json()["data"]["config"]
+    assert "correct" not in cfg and "explanation" not in cfg
+    assert cfg["options"] == ["a", "b"]
+    cfg = (await c.get(f"/api/v1/orgs/{oid}/skills/{sk}/exercises", headers=hs)).json()["data"][0][
+        "config"
+    ]
+    assert "correct" not in cfg
+
+    # instructor: full config
+    cfg = (await c.get(f"/api/v1/orgs/{oid}/exercises/{ex}", headers=hi)).json()["data"]["config"]
+    assert cfg["correct"] == ["b"]
+
+    # grading still works
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": ["b"]}},
+        headers=hs,
+    )
+    assert r.json()["data"]["is_correct"] is True

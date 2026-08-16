@@ -34,6 +34,20 @@ def _verify_org(resource, org_id: str, label: str = "Resource") -> None:
         raise HTTPException(status_code=404, detail=f"{label} not found")
 
 
+_INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+# Grading keys students must never see in exercise config — `correct` is the
+# MCQ answer key, `explanation` is the post-answer rationale.
+_ANSWER_KEYS = ("correct", "explanation")
+
+
+def _exercise_response(ex, member) -> ExerciseResponse:
+    """Serialize an exercise, stripping answer keys for students."""
+    resp = ExerciseResponse.model_validate(ex)
+    if member.role not in _INSTRUCTOR_ROLES:
+        resp.config = {k: v for k, v in resp.config.items() if k not in _ANSWER_KEYS}
+    return resp
+
+
 # ── Categories ───────────────────────────────────────────
 
 
@@ -300,12 +314,12 @@ async def list_exercises(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
     exercises = await svc.list_exercises(skill_id)
-    return DataResponse(data=[ExerciseResponse.model_validate(e) for e in exercises])
+    return DataResponse(data=[_exercise_response(e, member) for e in exercises])
 
 
 @router.get("/orgs/{org_id}/exercises/{exercise_id}", response_model=DataResponse[ExerciseResponse])
@@ -315,7 +329,7 @@ async def get_exercise(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = SkillService(db)
     ex = await svc.get_exercise(exercise_id)
     if ex.org_id != org_id:
@@ -324,7 +338,7 @@ async def get_exercise(
         raise HTTPException(
             status_code=404, detail="Exercise not found in this organization"
         )  # pragma: no cover
-    return DataResponse(data=ExerciseResponse.model_validate(ex))
+    return DataResponse(data=_exercise_response(ex, member))
 
 
 @router.post(
