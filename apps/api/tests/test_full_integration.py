@@ -3931,3 +3931,51 @@ async def test_default_model_setting_passed_to_llm(c):
         )
     assert r.json()["data"]["status"] == "failed"
     assert seen["model"] == "claude-haiku-4-5"
+
+
+@pytest.mark.asyncio
+async def test_eval_disabled_blocks_trigger_and_retry(c):
+    """EvalNotEnabledError existed but was never raised — an org with
+    enabled=False (the default) could still trigger paid evaluations
+    (bug #111)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Disabled Eval Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()[
+        "data"
+    ]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/evaluation/trigger",
+        json={"submission_id": sid, "type": "submission_review"},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "EVAL_NOT_ENABLED"
+
+    # enable → trigger (fails on missing key, fine) → disable → retry blocked
+    await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"enabled": True}, headers=h)
+    tid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/evaluation/trigger",
+            json={"submission_id": sid, "type": "submission_review"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"enabled": False}, headers=h)
+    r = await c.post(f"/api/v1/orgs/{oid}/evaluation/tasks/{tid}/retry", headers=h)
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "EVAL_NOT_ENABLED"

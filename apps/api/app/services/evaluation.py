@@ -94,6 +94,13 @@ class EvaluationService:
         if submission is None or submission.org_id != org_id:
             raise AppError("SUBMISSION_NOT_FOUND", "Submission not found", 404)
 
+        # AI evaluation must be switched on for the org — the enabled flag
+        # was stored but never checked, so a disabled org could still run
+        # (and pay for) evaluations.
+        eval_settings = await self.get_eval_settings(org_id)
+        if not eval_settings.get("enabled"):
+            raise EvalNotEnabledError()
+
         # Check budget
         if not await self.check_budget(org_id):
             raise BudgetExceededError()
@@ -277,7 +284,10 @@ class EvaluationService:
         if task.status != EvalStatus.FAILED:
             raise AppError("INVALID_STATE", "Only failed tasks can be retried", 422)
         # Retry spends LLM budget just like a fresh trigger — enforce the
-        # same monthly cap so retries can't run past an exhausted budget.
+        # same enabled + monthly-cap gates.
+        eval_settings = await self.get_eval_settings(task.org_id)
+        if not eval_settings.get("enabled"):
+            raise EvalNotEnabledError()
         if not await self.check_budget(task.org_id):
             raise BudgetExceededError()
         task.status = EvalStatus.PENDING

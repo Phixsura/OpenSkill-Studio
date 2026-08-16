@@ -476,6 +476,8 @@ async def test_eval_budget_exceeded():
     submission.org_id = "org1"
     db.get = AsyncMock(return_value=submission)
     svc = EvaluationService(db)
+    # enabled gate now runs before the budget check
+    svc.get_eval_settings = AsyncMock(return_value={"enabled": True})
     svc.check_budget = AsyncMock(return_value=False)
 
     with pytest.raises(BudgetExceededError):
