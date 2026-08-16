@@ -1845,3 +1845,45 @@ async def test_version_numbers_unique_after_delete(c):
     det = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()["data"]
     versions = [i["version"] for i in det["items"] if i["deliverable_id"] == did]
     assert len(versions) == len(set(versions)), f"duplicate versions: {versions}"
+
+
+@pytest.mark.asyncio
+async def test_blank_item_does_not_satisfy_required(c):
+    """A required deliverable must not be satisfied by an empty/whitespace-only
+    text item — only meaningful content (or a file/prompt) counts."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={"title": "Required Project", "description": "d", "instructions": "i", "rubric": [{"criterion": "Q", "max_score": 100}]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/deliverables",
+            json={"name": "Text D", "type": "text", "required": True},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)).json()["data"]["id"]
+
+    # whitespace-only content → does NOT satisfy the required deliverable
+    await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}",
+        json={"items": [{"deliverable_id": did, "type": "text", "content": "   "}]},
+        headers=h,
+    )
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    assert r.status_code == 422
+
+    # real content → satisfies it
+    await c.put(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}",
+        json={"items": [{"deliverable_id": did, "type": "text", "content": "my real answer"}]},
+        headers=h,
+    )
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    assert r.status_code == 200

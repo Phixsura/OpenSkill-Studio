@@ -944,13 +944,17 @@ class ProjectService:
             return
 
         result = await self.db.execute(
-            select(SubmissionItem.deliverable_id)
-            .where(SubmissionItem.submission_id == submission.id)
-            .distinct()
+            select(SubmissionItem).where(SubmissionItem.submission_id == submission.id)
         )
-        submitted_ids = set(result.scalars().all())
+        # A deliverable is only satisfied by a MEANINGFUL item: a file/prompt
+        # row, or a text/link/markdown item with non-blank content. An empty
+        # or whitespace-only text item must not count.
+        satisfied_ids: set[str] = set()
+        for item in result.scalars():
+            if item.type in (ItemType.FILE, ItemType.PROMPT) or item.content and item.content.strip():
+                satisfied_ids.add(item.deliverable_id)
 
-        missing = required_ids - submitted_ids
+        missing = required_ids - satisfied_ids
         if missing:
             raise MissingDeliverablesError()
 
