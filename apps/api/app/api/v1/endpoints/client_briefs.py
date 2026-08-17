@@ -199,6 +199,13 @@ async def list_applications(
 ):
     """Instructor: list all applications for a brief."""
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+
+    # Verify the brief belongs to this org
+    svc = ClientBriefService(db)
+    brief = await svc.get_brief(brief_id)
+    if brief.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Brief not found")
+
     from sqlalchemy import select
 
     from app.models.client_brief import BriefApplication
@@ -239,6 +246,13 @@ async def review_application(
 ):
     """Instructor: accept or reject an application."""
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+
+    # Verify the brief belongs to this org (cross-org IDOR prevention)
+    svc = ClientBriefService(db)
+    brief = await svc.get_brief(brief_id)
+    if brief.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Brief not found")
+
     from datetime import UTC, datetime
 
     from app.models.client_brief import ApplicationStatus, BriefApplication

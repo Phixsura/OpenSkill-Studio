@@ -345,3 +345,70 @@ async def test_student_cannot_assign_creators(c):
         f"/api/v1/orgs/{oid}/projects/{pid}/creators", json={"user_id": us["id"]}, headers=hs
     )
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_cross_org_application_review_rejected(c):
+    """Instructor in org B cannot review applications on org A's brief."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    hs, us = await _auth(c)
+    o1 = await _org(c, h1)
+    o2 = await _org(c, h2)
+    await c.post(
+        f"/api/v1/orgs/{o1}/members", json={"user_id": us["id"], "role": "student"}, headers=h1
+    )
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{o1}/briefs",
+            json={
+                "title": "Secret Brief X",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "o" * 10,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    # Student applies
+    app_r = await c.post(f"/api/v1/orgs/{o1}/briefs/{bid}/apply", json={}, headers=hs)
+    app_id = app_r.json()["data"]["id"]
+    # Org B instructor tries to list/review
+    r = await c.get(f"/api/v1/orgs/{o2}/briefs/{bid}/applications", headers=h2)
+    assert r.status_code == 404  # brief not in org2
+    r = await c.put(
+        f"/api/v1/orgs/{o2}/briefs/{bid}/applications/{app_id}",
+        json={"status": "accepted"},
+        headers=h2,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cross_org_creator_endpoints_rejected(c):
+    """Instructor in org B cannot list/assign/unassign creators on org A's project."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    o2 = await _org(c, h2)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{o1}/projects",
+            json={
+                "title": "Org1 Proj",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    # Org B instructor tries via org B path
+    r = await c.get(f"/api/v1/orgs/{o2}/projects/{pid}/creators", headers=h2)
+    assert r.status_code == 404
+    r = await c.post(
+        f"/api/v1/orgs/{o2}/projects/{pid}/creators", json={"user_id": "bogus"}, headers=h2
+    )
+    assert r.status_code == 404
+    r = await c.delete(f"/api/v1/orgs/{o2}/projects/{pid}/creators/bogus", headers=h2)
+    assert r.status_code == 404
