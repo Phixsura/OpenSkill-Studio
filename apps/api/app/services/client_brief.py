@@ -97,6 +97,7 @@ class ClientBriefService:
             if v is not None and hasattr(brief, k):
                 setattr(brief, k, v)
         await self.db.flush()
+        await self.db.refresh(brief)
         return brief
 
     async def delete_brief(self, brief_id: str) -> None:

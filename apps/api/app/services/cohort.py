@@ -126,6 +126,7 @@ class CohortService:
             if v is not None and hasattr(cohort, k):
                 setattr(cohort, k, v)
         await self.db.flush()
+        await self.db.refresh(cohort)
         return cohort
 
     async def delete_cohort(self, cohort_id: str) -> None:
