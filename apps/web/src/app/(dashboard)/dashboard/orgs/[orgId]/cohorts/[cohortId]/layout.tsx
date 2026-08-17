@@ -16,6 +16,7 @@ export default function CohortLayout({ children }: { children: React.ReactNode }
     { href: `${base}/members`, label: "Members" },
     { href: `${base}/skills`, label: "Skills" },
     { href: `${base}/projects`, label: "Projects" },
+    { href: `${base}/progress`, label: "Progress" },
     { href: `${base}/my-dashboard`, label: "My Dashboard" },
   ];
 

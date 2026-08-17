@@ -27,17 +27,30 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   expert: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
 };
 
+interface CohortItem {
+  id: string;
+  name: string;
+}
+
 export default function SkillsListPage() {
   const { orgId } = useParams<{ orgId: string }>();
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState("");
+  const [cohortFilter, setCohortFilter] = useState("");
+
+  const { data: cohortsData } = useQuery({
+    queryKey: ["my-cohorts-skills", orgId],
+    queryFn: () =>
+      apiWithAuth<{ data: CohortItem[] }>(`/orgs/${orgId}/my-cohorts`),
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["skills", orgId, search, difficulty],
+    queryKey: ["skills", orgId, search, difficulty, cohortFilter],
     queryFn: () => {
       const params = new URLSearchParams();
       if (search) params.set("q", search);
       if (difficulty) params.set("difficulty", difficulty);
+      if (cohortFilter) params.set("cohort_id", cohortFilter);
       const qs = params.toString();
       return apiWithAuth<{ data: SkillItem[]; meta: { total: number } }>(
         `/orgs/${orgId}/skills${qs ? `?${qs}` : ""}`,
@@ -46,6 +59,7 @@ export default function SkillsListPage() {
   });
 
   const skills = data?.data ?? [];
+  const cohorts = cohortsData?.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -79,6 +93,20 @@ export default function SkillsListPage() {
           <option value="advanced">Advanced</option>
           <option value="expert">Expert</option>
         </select>
+        {cohorts.length > 0 && (
+          <select
+            value={cohortFilter}
+            onChange={(e) => setCohortFilter(e.target.value)}
+            className="rounded-md border bg-transparent px-3 py-2 text-sm"
+          >
+            <option value="">All cohorts</option>
+            {cohorts.map((co) => (
+              <option key={co.id} value={co.id}>
+                {co.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
