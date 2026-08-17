@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -18,18 +19,33 @@ interface ProjectItem {
   status: string;
 }
 
+interface CohortItem {
+  id: string;
+  name: string;
+}
+
 export default function ProjectsListPage() {
   const { orgId } = useParams<{ orgId: string }>();
+  const [cohortFilter, setCohortFilter] = useState<string>("");
+
+  const { data: cohortsData } = useQuery({
+    queryKey: ["my-cohorts", orgId],
+    queryFn: () =>
+      apiWithAuth<{ data: CohortItem[] }>(`/orgs/${orgId}/my-cohorts`),
+  });
+
+  const cohortParam = cohortFilter ? `?cohort_id=${cohortFilter}` : "";
 
   const { data, isLoading } = useQuery({
-    queryKey: ["projects", orgId],
+    queryKey: ["projects", orgId, cohortFilter],
     queryFn: () =>
       apiWithAuth<{ data: ProjectItem[]; meta: { total: number } }>(
-        `/orgs/${orgId}/projects`,
+        `/orgs/${orgId}/projects${cohortParam}`,
       ),
   });
 
   const projects = data?.data ?? [];
+  const cohorts = cohortsData?.data ?? [];
 
   const formatDeadline = (d: string | null) => {
     if (!d) return "No deadline";
@@ -56,6 +72,25 @@ export default function ProjectsListPage() {
           <Button size="sm">New Project</Button>
         </Link>
       </div>
+
+      {/* Cohort filter */}
+      {cohorts.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-[hsl(var(--muted-foreground))]">Filter by cohort:</label>
+          <select
+            value={cohortFilter}
+            onChange={(e) => setCohortFilter(e.target.value)}
+            className="rounded border px-2 py-1 text-sm"
+          >
+            <option value="">All projects</option>
+            {cohorts.map((co) => (
+              <option key={co.id} value={co.id}>
+                {co.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
 
