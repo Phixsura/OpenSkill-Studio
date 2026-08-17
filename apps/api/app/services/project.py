@@ -1026,8 +1026,38 @@ class ProjectService:
     # ── Timing ──
 
     async def get_submission_timing(self, project: Project, user_id: str) -> str:
-        """Return 'on_time', 'late', or 'closed'."""
-        if project.deadline is None:
+        """Return 'on_time', 'late', or 'closed'.
+
+        Deadline precedence:
+        1. Personal extension (SubmissionExtension)
+        2. Cohort override (CohortProjectAssignment.deadline_override)
+        3. Project default (project.deadline)
+        """
+        # Resolve effective deadlines — cohort overrides take precedence
+        # over project defaults.
+        effective_deadline = project.deadline
+        effective_late_deadline = project.late_deadline
+
+        from app.models.cohort import CohortMember, CohortProjectAssignment
+
+        # Find if the user is in a cohort that overrides this project's deadlines
+        cohort_override_r = await self.db.execute(
+            select(CohortProjectAssignment)
+            .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
+            .where(
+                CohortProjectAssignment.project_id == project.id,
+                CohortMember.user_id == user_id,
+            )
+            .limit(1)
+        )
+        cohort_assignment = cohort_override_r.scalar_one_or_none()
+        if cohort_assignment:
+            if cohort_assignment.deadline_override is not None:
+                effective_deadline = cohort_assignment.deadline_override
+            if cohort_assignment.late_deadline_override is not None:
+                effective_late_deadline = cohort_assignment.late_deadline_override
+
+        if effective_deadline is None:
             return "on_time"  # No deadline set
 
         now = datetime.now(UTC)
@@ -1042,13 +1072,13 @@ class ProjectService:
         ext = ext_result.scalar_one_or_none()
 
         # On time: before deadline or before personal extension
-        if now <= project.deadline:
+        if now <= effective_deadline:
             return "on_time"
         if ext and now <= ext.extended_deadline:
             return "on_time"
 
         # Late: between deadline and late_deadline
-        if project.late_deadline and now <= project.late_deadline:
+        if effective_late_deadline and now <= effective_late_deadline:
             return "late"
 
         # Closed: past all deadlines

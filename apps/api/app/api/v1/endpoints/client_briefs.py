@@ -133,3 +133,133 @@ async def convert_brief_to_project(
     )
     await db.commit()
     return DataResponse(data=ProjectResponse.model_validate(project))
+
+
+# ── Applications ─────────────────────────────────────────
+
+
+@router.post(
+    "/orgs/{org_id}/briefs/{brief_id}/apply",
+    response_model=DataResponse[dict],
+    status_code=201,
+)
+async def apply_to_brief(
+    org_id: str,
+    brief_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Learner applies to work on a commercial project (application mode)."""
+    await require_org_member(org_id, user, db)
+    from app.models.client_brief import BriefApplication
+
+    svc = ClientBriefService(db)
+    brief = await svc.get_brief(brief_id)
+    if brief.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Brief not found")
+
+    note = body.get("note", "")
+    if isinstance(note, str) and len(note) > 2000:
+        raise HTTPException(status_code=422, detail="Note must be 2,000 chars or less")
+
+    from sqlalchemy.exc import IntegrityError
+
+    app_obj = BriefApplication(
+        brief_id=brief_id,
+        user_id=user.id,
+        note=note or None,
+    )
+    db.add(app_obj)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Already applied") from None
+    await db.commit()
+    return DataResponse(
+        data={
+            "id": app_obj.id,
+            "brief_id": brief_id,
+            "status": app_obj.status.value,
+            "applied_at": app_obj.applied_at.isoformat(),
+        }
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/briefs/{brief_id}/applications",
+    response_model=DataResponse[list[dict]],
+)
+async def list_applications(
+    org_id: str,
+    brief_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Instructor: list all applications for a brief."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    from sqlalchemy import select
+
+    from app.models.client_brief import BriefApplication
+    from app.models.user import User as UserModel
+
+    result = await db.execute(
+        select(BriefApplication, UserModel.display_name)
+        .join(UserModel, UserModel.id == BriefApplication.user_id, isouter=True)
+        .where(BriefApplication.brief_id == brief_id)
+        .order_by(BriefApplication.applied_at)
+    )
+    return DataResponse(
+        data=[
+            {
+                "id": app.id,
+                "user_id": app.user_id,
+                "user_name": name,
+                "status": app.status.value,
+                "note": app.note,
+                "applied_at": app.applied_at.isoformat(),
+            }
+            for app, name in result.all()
+        ]
+    )
+
+
+@router.put(
+    "/orgs/{org_id}/briefs/{brief_id}/applications/{application_id}",
+    response_model=DataResponse[dict],
+)
+async def review_application(
+    org_id: str,
+    brief_id: str,
+    application_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Instructor: accept or reject an application."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    from datetime import UTC, datetime
+
+    from app.models.client_brief import ApplicationStatus, BriefApplication
+
+    app_obj = await db.get(BriefApplication, application_id)
+    if app_obj is None or app_obj.brief_id != brief_id:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    status = body.get("status")
+    if status not in ("accepted", "rejected"):
+        raise HTTPException(status_code=422, detail="Status must be 'accepted' or 'rejected'")
+
+    app_obj.status = ApplicationStatus(status)
+    app_obj.reviewed_at = datetime.now(UTC)
+    app_obj.reviewed_by = user.id
+    await db.commit()
+    return DataResponse(
+        data={
+            "id": app_obj.id,
+            "user_id": app_obj.user_id,
+            "status": app_obj.status.value,
+            "reviewed_at": app_obj.reviewed_at.isoformat(),
+        }
+    )
