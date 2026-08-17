@@ -224,6 +224,20 @@ class OrgService:
                 raise InsufficientOrgPermissionError()
 
         member.status = MemberStatus.ARCHIVED
+
+        # Cascade: remove from all cohorts in this org — a removed org member
+        # must not retain cohort access (cohort_members FK is on users.id, not
+        # org_members.id, so the DB cascade doesn't handle this).
+        from app.models.cohort import Cohort, CohortMember
+
+        cohort_memberships = await self.db.execute(
+            select(CohortMember)
+            .join(Cohort, Cohort.id == CohortMember.cohort_id)
+            .where(Cohort.org_id == org_id, CohortMember.user_id == user_id)
+        )
+        for cm in cohort_memberships.scalars():
+            await self.db.delete(cm)
+
         await self.db.flush()
         log.info("org_member_removed", org_id=org_id, user_id=user_id, by=removed_by)
 

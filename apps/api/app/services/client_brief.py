@@ -130,6 +130,10 @@ class ClientBriefService:
         brief = await self.get_brief(brief_id)
         if brief.org_id != org_id:
             raise BriefNotFoundError()
+        # Only draft briefs can be converted — a second convert on an already-
+        # active brief would create duplicate projects and crash on lazy-load.
+        if brief.status != BriefStatus.DRAFT:
+            raise AppError("INVALID_STATE", "Only draft briefs can be converted", 422)
 
         project_svc = ProjectService(self.db)
         project = await project_svc.create_project(

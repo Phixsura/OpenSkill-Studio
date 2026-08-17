@@ -557,3 +557,65 @@ async def test_non_cohort_student_cannot_submit_to_restricted_project(c):
     # Student tries to submit directly
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_double_convert_brief_rejected(c):
+    """Converting an already-converted (active) brief must be rejected,
+    not crash with MissingGreenlet."""
+    hi, _ = await _auth(c)
+    oid = await _org(c, hi)
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Double Conv",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "o" * 10,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    r1 = await c.post(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/convert",
+        json={"rubric": [{"criterion": "Q", "max_score": 100}]},
+        headers=hi,
+    )
+    assert r1.status_code == 201
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/convert",
+        json={"rubric": [{"criterion": "Q", "max_score": 100}]},
+        headers=hi,
+    )
+    assert r2.status_code == 422
+    assert r2.json()["error"]["code"] == "INVALID_STATE"
+
+
+@pytest.mark.asyncio
+async def test_org_member_removal_cascades_to_cohort(c):
+    """Removing a user from the org must also remove them from all cohorts
+    in that org — otherwise they retain cohort access as a ghost member."""
+    hi, _ = await _auth(c)
+    _, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Cascade"}, headers=hi)
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=hi
+    )
+
+    # Verify in cohort
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/members", headers=hi)
+    assert any(m["user_id"] == us["id"] for m in r.json()["data"])
+
+    # Remove from org
+    await c.delete(f"/api/v1/orgs/{oid}/members/{us['id']}", headers=hi)
+
+    # Should no longer be in cohort
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/members", headers=hi)
+    assert not any(m["user_id"] == us["id"] for m in r.json()["data"])
