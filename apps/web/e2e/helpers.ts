@@ -121,10 +121,19 @@ export async function activateCohort(
 
 /** Login via the browser UI and store auth state. */
 export async function loginInBrowser(page: Page, email: string, password: string): Promise<void> {
+  // Clear previous auth state (Zustand persists in localStorage)
+  await page.context().clearCookies();
   await page.goto("/login");
-  await page.fill('input[type="email"]', email);
-  await page.fill('input[type="password"]', password);
-  await page.click('button[type="submit"]');
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => {
+    try { localStorage.clear(); } catch {}
+    try { sessionStorage.clear(); } catch {}
+  });
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: /sign|log/i }).first().click();
   // Wait for redirect to dashboard
   await page.waitForURL("**/dashboard**", { timeout: 10_000 });
 }
