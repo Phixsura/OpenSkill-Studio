@@ -54,10 +54,8 @@ test.describe("Cohort Members Page", () => {
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
     await page.waitForLoadState("networkidle");
 
-    // Role badges are rendered with capitalize CSS
-    const rows = page.locator("table tbody tr");
-    const count = await rows.count();
-    expect(count).toBeGreaterThanOrEqual(2);
+    // Wait for table to populate, then check role badges
+    await expect(page.locator("table tbody tr")).toHaveCount(2, { timeout: 10_000 });
   });
 
   test("add member form is visible with inputs", async ({ page }) => {
