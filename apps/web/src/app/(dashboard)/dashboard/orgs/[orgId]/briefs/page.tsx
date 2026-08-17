@@ -34,7 +34,7 @@ export default function BriefsPage() {
   const [projectType, setProjectType] = useState("product_visualization");
   const [objective, setObjective] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["briefs", orgId],
     queryFn: () =>
       apiWithAuth<{ data: ClientBrief[]; meta: { total: number } }>(
@@ -60,6 +60,7 @@ export default function BriefsPage() {
       setClientName("");
       setObjective("");
     },
+    onError: (err: Error) => alert(err.message || "Failed to create brief"),
   });
 
   return (
@@ -118,13 +119,17 @@ export default function BriefsPage() {
         </div>
       )}
 
+      {isError && (
+        <p className="mb-4 text-sm text-red-600">Failed to load briefs. Please try again.</p>
+      )}
+
       {isLoading ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading briefs...</p>
-      ) : !data?.data.length ? (
+      ) : !isError && !data?.data.length ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
           No client briefs yet. Create one to start a commercial production project.
         </p>
-      ) : (
+      ) : data?.data.length ? (
         <div className="space-y-3">
           {data.data.map((brief) => (
             <Link
@@ -146,7 +151,7 @@ export default function BriefsPage() {
             </Link>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

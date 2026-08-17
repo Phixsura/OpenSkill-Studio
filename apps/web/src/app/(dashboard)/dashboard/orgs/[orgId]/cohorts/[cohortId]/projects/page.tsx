@@ -32,7 +32,11 @@ export default function CohortProjectsPage() {
   const [deadline, setDeadline] = useState("");
   const [maxSubs, setMaxSubs] = useState("");
 
-  const { data: assigned } = useQuery({
+  const {
+    data: assigned,
+    isLoading: assignedLoading,
+    isError: assignedError,
+  } = useQuery({
     queryKey: ["cohort-projects", cohortId],
     queryFn: () =>
       apiWithAuth<{ data: ProjectAssignment[] }>(
@@ -66,6 +70,7 @@ export default function CohortProjectsPage() {
       setDeadline("");
       setMaxSubs("");
     },
+    onError: (err: Error) => alert(err.message || "Failed to assign project"),
   });
 
   const unassignMutation = useMutation({
@@ -76,14 +81,22 @@ export default function CohortProjectsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohort-projects", cohortId] });
     },
+    onError: (err: Error) => alert(err.message || "Failed to remove project"),
   });
 
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold">Assigned Projects</h1>
 
+      {assignedLoading && (
+        <p className="mb-4 text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
+      )}
+      {assignedError && (
+        <p className="mb-4 text-sm text-red-600">Failed to load projects. Please try again.</p>
+      )}
+
       {/* Currently assigned */}
-      {assigned?.data.length ? (
+      {!assignedLoading && !assignedError && assigned?.data.length ? (
         <div className="mb-8 space-y-3">
           {assigned.data.map((a) => (
             <div key={a.id} className="rounded border p-3">

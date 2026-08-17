@@ -39,13 +39,13 @@ interface CohortDetail {
 export default function CohortDetailPage() {
   const { orgId, cohortId } = useParams<{ orgId: string; cohortId: string }>();
 
-  const { data: cohort } = useQuery({
+  const { data: cohort, isError: cohortError } = useQuery({
     queryKey: ["cohort", cohortId],
     queryFn: () =>
       apiWithAuth<{ data: CohortDetail }>(`/orgs/${orgId}/cohorts/${cohortId}`),
   });
 
-  const { data: progress, isLoading } = useQuery({
+  const { data: progress, isLoading, isError: progressError } = useQuery({
     queryKey: ["cohort-progress", cohortId],
     queryFn: () =>
       apiWithAuth<{ data: CohortProgress }>(
@@ -55,6 +55,10 @@ export default function CohortDetailPage() {
 
   const c = cohort?.data;
   const p = progress?.data;
+
+  if (cohortError) {
+    return <p className="text-sm text-red-600">Failed to load cohort. It may not exist or you don&apos;t have access.</p>;
+  }
 
   return (
     <div>
@@ -112,7 +116,9 @@ export default function CohortDetailPage() {
       </div>
 
       {/* Project progress table */}
-      {isLoading ? (
+      {progressError ? (
+        <p className="text-sm text-red-600">Failed to load progress data.</p>
+      ) : isLoading ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading progress...</p>
       ) : p?.projects.length ? (
         <div>

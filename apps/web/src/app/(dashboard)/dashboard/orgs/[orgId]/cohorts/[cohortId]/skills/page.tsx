@@ -24,7 +24,11 @@ export default function CohortSkillsPage() {
   const { orgId, cohortId } = useParams<{ orgId: string; cohortId: string }>();
   const queryClient = useQueryClient();
 
-  const { data: assigned } = useQuery({
+  const {
+    data: assigned,
+    isLoading: assignedLoading,
+    isError: assignedError,
+  } = useQuery({
     queryKey: ["cohort-skills", cohortId],
     queryFn: () =>
       apiWithAuth<{ data: SkillAssignment[] }>(
@@ -50,6 +54,7 @@ export default function CohortSkillsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohort-skills", cohortId] });
     },
+    onError: (err: Error) => alert(err.message || "Failed to assign skill"),
   });
 
   const unassignMutation = useMutation({
@@ -60,14 +65,22 @@ export default function CohortSkillsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohort-skills", cohortId] });
     },
+    onError: (err: Error) => alert(err.message || "Failed to remove skill"),
   });
 
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold">Assigned Skills</h1>
 
+      {assignedLoading && (
+        <p className="mb-4 text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
+      )}
+      {assignedError && (
+        <p className="mb-4 text-sm text-red-600">Failed to load skills. Please try again.</p>
+      )}
+
       {/* Currently assigned */}
-      {assigned?.data.length ? (
+      {!assignedLoading && !assignedError && assigned?.data.length ? (
         <div className="mb-8 space-y-2">
           {assigned.data.map((a) => (
             <div

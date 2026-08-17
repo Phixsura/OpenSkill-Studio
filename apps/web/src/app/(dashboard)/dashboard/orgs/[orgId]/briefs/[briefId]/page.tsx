@@ -34,7 +34,7 @@ export default function BriefDetailPage() {
   const [rubricMaxScore, setRubricMaxScore] = useState("100");
   const [deadline, setDeadline] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["brief", briefId],
     queryFn: () =>
       apiWithAuth<{ data: ClientBrief }>(`/orgs/${orgId}/briefs/${briefId}`),
@@ -61,12 +61,16 @@ export default function BriefDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["brief", briefId] });
       router.push(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
     },
+    onError: (err: Error) => alert(err.message || "Failed to convert brief"),
   });
 
   const brief = data?.data;
 
   if (isLoading) {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading brief...</p>;
+  }
+  if (isError) {
+    return <p className="text-sm text-red-600">Failed to load brief. It may not exist or you don&apos;t have access.</p>;
   }
   if (!brief) {
     return <p>Brief not found</p>;

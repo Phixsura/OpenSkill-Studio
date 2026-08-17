@@ -35,7 +35,7 @@ export default function CohortsPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["cohorts", orgId],
     queryFn: () =>
       apiWithAuth<{ data: Cohort[]; meta: { total: number } }>(
@@ -55,6 +55,7 @@ export default function CohortsPage() {
       setName("");
       setDescription("");
     },
+    onError: (err: Error) => alert(err.message || "Failed to create cohort"),
   });
 
   return (
@@ -93,13 +94,17 @@ export default function CohortsPage() {
         </div>
       )}
 
+      {isError && (
+        <p className="mb-4 text-sm text-red-600">Failed to load cohorts. Please try again.</p>
+      )}
+
       {isLoading ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading cohorts...</p>
-      ) : !data?.data.length ? (
+      ) : !isError && !data?.data.length ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
           No cohorts yet. Create one to start organizing your training programs.
         </p>
-      ) : (
+      ) : data?.data.length ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.data.map((cohort) => (
             <Link
@@ -129,7 +134,7 @@ export default function CohortsPage() {
             </Link>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

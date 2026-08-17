@@ -22,7 +22,7 @@ export default function CohortMembersPage() {
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState("learner");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["cohort-members", cohortId],
     queryFn: () =>
       apiWithAuth<{ data: CohortMember[]; meta: { total: number } }>(
@@ -40,6 +40,7 @@ export default function CohortMembersPage() {
       queryClient.invalidateQueries({ queryKey: ["cohort-members", cohortId] });
       setUserId("");
     },
+    onError: (err: Error) => alert(err.message || "Failed to add member"),
   });
 
   const removeMutation = useMutation({
@@ -50,6 +51,7 @@ export default function CohortMembersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohort-members", cohortId] });
     },
+    onError: (err: Error) => alert(err.message || "Failed to remove member"),
   });
 
   return (
@@ -81,11 +83,15 @@ export default function CohortMembersPage() {
         </Button>
       </div>
 
+      {isError && (
+        <p className="mb-4 text-sm text-red-600">Failed to load members. Please try again.</p>
+      )}
+
       {isLoading ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
-      ) : !data?.data.length ? (
+      ) : !isError && !data?.data.length ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">No members enrolled yet.</p>
-      ) : (
+      ) : data?.data.length ? (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-[hsl(var(--muted-foreground))]">
@@ -120,7 +126,7 @@ export default function CohortMembersPage() {
             ))}
           </tbody>
         </table>
-      )}
+      ) : null}
     </div>
   );
 }
