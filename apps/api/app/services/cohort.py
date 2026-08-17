@@ -387,6 +387,27 @@ class CohortService:
         skill_assignments = await self.list_assigned_skills(cohort_id)
         total_skills = len(skill_assignments)
 
+        # Skill progress aggregation: avg completion across cohort learners
+        avg_skill_completion = 0.0
+        if total_skills > 0 and total_learners > 0:
+            skill_ids = [a.skill_id for a, _ in skill_assignments]
+            learner_ids_for_skills = select(CohortMember.user_id).where(
+                CohortMember.cohort_id == cohort_id,
+                CohortMember.role == CohortRole.LEARNER,
+            )
+            from app.models.skill import ProgressStatus, SkillProgress
+
+            completed_r = await self.db.execute(
+                select(func.count(SkillProgress.id)).where(
+                    SkillProgress.skill_id.in_(skill_ids),
+                    SkillProgress.user_id.in_(learner_ids_for_skills),
+                    SkillProgress.status == ProgressStatus.COMPLETED,
+                )
+            )
+            completed_count = completed_r.scalar_one()
+            # avg = completed / (total_skills * total_learners)
+            avg_skill_completion = round(completed_count * 100 / (total_skills * total_learners), 1)
+
         # Per-project submission stats
         project_assignments = await self.list_assigned_projects(cohort_id)
         projects_progress = []
@@ -458,11 +479,33 @@ class CohortService:
                 }
             )
 
+        # Activity indicators: learners with no submission activity in 7+ days
+        from datetime import timedelta
+
+        from app.models.project import Submission as Sub
+
+        inactive_threshold = now - timedelta(days=7)
+        learner_ids_q = select(CohortMember.user_id).where(
+            CohortMember.cohort_id == cohort_id,
+            CohortMember.role == CohortRole.LEARNER,
+        )
+        active_recently_r = await self.db.execute(
+            select(func.count(func.distinct(Sub.user_id))).where(
+                Sub.user_id.in_(learner_ids_q),
+                Sub.org_id == cohort.org_id,
+                Sub.updated_at >= inactive_threshold,
+            )
+        )
+        active_recently = active_recently_r.scalar_one()
+        inactive_learners = max(0, total_learners - active_recently)
+
         return {
             "total_learners": total_learners,
             "total_skills_assigned": total_skills,
+            "avg_skill_completion_pct": avg_skill_completion,
             "projects": projects_progress,
             "overdue_submissions": total_overdue,
+            "inactive_learners_7d": inactive_learners,
         }
 
     async def get_learner_drill_down(self, cohort_id: str, user_id: str, org_id: str) -> dict:

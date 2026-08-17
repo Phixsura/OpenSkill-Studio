@@ -536,8 +536,26 @@ class ProjectService:
         project = await self.get_project(project_id)
         count = await self._count_user_submissions(project_id, user_id)
 
-        if project.max_submissions > 0 and count >= project.max_submissions:
-            raise MaxSubmissionsReachedError(project.max_submissions)
+        # Cohort override takes precedence over project default
+        effective_max = project.max_submissions
+        from app.models.cohort import CohortMember, CohortProjectAssignment
+
+        cohort_override_r = await self.db.execute(
+            select(CohortProjectAssignment.max_submissions_override)
+            .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
+            .where(
+                CohortProjectAssignment.project_id == project_id,
+                CohortMember.user_id == user_id,
+                CohortProjectAssignment.max_submissions_override.is_not(None),
+            )
+            .limit(1)
+        )
+        override = cohort_override_r.scalar_one_or_none()
+        if override is not None:
+            effective_max = override
+
+        if effective_max > 0 and count >= effective_max:
+            raise MaxSubmissionsReachedError(effective_max)
 
         # Version = max existing + 1, not count + 1 — deleting a draft would
         # otherwise reuse a version number that already exists.

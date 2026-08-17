@@ -415,3 +415,37 @@ async def my_cohort_dashboard(
     svc = CohortService(db)
     data = await svc.get_learner_dashboard(cohort_id, user.id, org_id)
     return DataResponse(data=data)
+
+
+# ── Learner: My Cohorts ──────────────────────────────────
+
+
+@router.get("/orgs/{org_id}/my-cohorts", response_model=DataResponse[list[CohortResponse]])
+async def my_cohorts(
+    org_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List cohorts the current user belongs to within this org."""
+    await require_org_member(org_id, user, db)
+    from sqlalchemy import select as _sel
+
+    from app.models.cohort import Cohort, CohortMember, CohortStatus
+
+    result = await db.execute(
+        _sel(Cohort)
+        .join(CohortMember, CohortMember.cohort_id == Cohort.id)
+        .where(
+            Cohort.org_id == org_id,
+            CohortMember.user_id == user.id,
+            Cohort.status != CohortStatus.ARCHIVED,
+        )
+        .order_by(Cohort.created_at.desc())
+    )
+    cohorts = list(result.scalars().all())
+    svc = CohortService(db)
+    items = []
+    for co in cohorts:
+        count = await svc.get_member_count(co.id)
+        items.append(_cohort_response(co, count))
+    return DataResponse(data=items)
