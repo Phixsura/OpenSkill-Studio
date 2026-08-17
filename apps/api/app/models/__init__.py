@@ -47,6 +47,7 @@ from app.models.project import (  # noqa: F401
     PeerReviewRound,
     Project,
     ProjectAsset,
+    ProjectCreatorAssignment,
     ProjectDeliverable,
     ProjectSkill,
     ProjectTemplate,

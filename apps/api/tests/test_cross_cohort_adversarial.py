@@ -254,3 +254,94 @@ async def test_student_cannot_convert_brief(c):
         headers=hs,
     )
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_individual_creator_assignment_visibility(c):
+    """A commercial project assigned to a specific creator is visible to that
+    creator but not to other students."""
+    hi, _ = await _auth(c)
+    h_alice, u_alice = await _auth(c)
+    h_bob, u_bob = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": u_alice["id"], "role": "student"},
+        headers=hi,
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u_bob["id"], "role": "student"}, headers=hi
+    )
+
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Alice Only Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hi)
+
+    # Assign to Alice individually
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/creators",
+        json={"user_id": u_alice["id"]},
+        headers=hi,
+    )
+    assert r.status_code == 201
+
+    # Alice sees it
+    alice_titles = {
+        p["title"]
+        for p in (await c.get(f"/api/v1/orgs/{oid}/projects", headers=h_alice)).json()["data"]
+    }
+    assert "Alice Only Project" in alice_titles
+
+    # Bob does not
+    bob_titles = {
+        p["title"]
+        for p in (await c.get(f"/api/v1/orgs/{oid}/projects", headers=h_bob)).json()["data"]
+    }
+    assert "Alice Only Project" not in bob_titles
+
+    # Instructor lists creators
+    r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/creators", headers=hi)
+    assert len(r.json()["data"]) == 1
+    assert r.json()["data"][0]["user_name"] == "Adv"
+
+    # Remove assignment → project becomes org-wide (visible to all)
+    await c.delete(f"/api/v1/orgs/{oid}/projects/{pid}/creators/{u_alice['id']}", headers=hi)
+    r = await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/creators", headers=hi)
+    assert len(r.json()["data"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_assign_creators(c):
+    """Students cannot assign creators to projects."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "RBAC Test",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/creators", json={"user_id": us["id"]}, headers=hs
+    )
+    assert r.status_code == 403

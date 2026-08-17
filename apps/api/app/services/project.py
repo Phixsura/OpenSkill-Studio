@@ -375,8 +375,13 @@ class ProjectService:
         elif published_only and user_id:
             from app.models.cohort import CohortMember, CohortProjectAssignment
 
-            # Projects with no cohort assignment = org-wide
-            org_wide = ~Project.id.in_(select(CohortProjectAssignment.project_id))
+            # Projects with no cohort assignment AND no individual assignment = org-wide
+            from app.models.project import ProjectCreatorAssignment
+
+            has_any_assignment = Project.id.in_(
+                select(CohortProjectAssignment.project_id)
+            ) | Project.id.in_(select(ProjectCreatorAssignment.project_id))
+            org_wide = ~has_any_assignment
             # Projects assigned to a cohort the student belongs to
             my_cohort_ids = select(CohortMember.cohort_id).where(CohortMember.user_id == user_id)
             in_my_cohorts = Project.id.in_(
@@ -384,7 +389,13 @@ class ProjectService:
                     CohortProjectAssignment.cohort_id.in_(my_cohort_ids)
                 )
             )
-            base = base.where(org_wide | in_my_cohorts)
+            # Projects individually assigned to this user
+            assigned_to_me = Project.id.in_(
+                select(ProjectCreatorAssignment.project_id).where(
+                    ProjectCreatorAssignment.user_id == user_id
+                )
+            )
+            base = base.where(org_wide | in_my_cohorts | assigned_to_me)
 
         if published_only:
             # Students must not see draft projects an instructor is still
