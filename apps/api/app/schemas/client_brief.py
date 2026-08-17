@@ -50,6 +50,9 @@ class CreateClientBriefRequest(BaseModel):
     @field_validator("objective")
     @classmethod
     def validate_objective(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 10:
+            raise ValueError("Objective must be at least 10 characters")
         if len(v) > 10000:
             raise ValueError("Objective must be 10,000 characters or less")
         return v
