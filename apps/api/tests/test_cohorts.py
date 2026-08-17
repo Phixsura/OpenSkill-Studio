@@ -109,7 +109,7 @@ async def test_cross_org_cohort_hidden(c):
     h1, _ = await _auth(c)
     h2, _ = await _auth(c)
     o1 = await _org(c, h1)
-    o2 = await _org(c, h2)
+    await _org(c, h2)
     cid = (
         await c.post(f"/api/v1/orgs/{o1}/cohorts", json={"name": "Org1 Cohort"}, headers=h1)
     ).json()["data"]["id"]

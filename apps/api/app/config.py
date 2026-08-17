@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # Evaluation
     eval_max_concurrent: int = 10
     eval_timeout_seconds: int = 120
+    eval_max_video_frames: int = 8
+    eval_max_video_duration: int = 600  # seconds
+    eval_max_image_size: int = 20 * 1024 * 1024  # 20 MB
     eval_max_retries: int = 3
 
     # Frontend

@@ -131,7 +131,7 @@ async def test_cross_org_brief_hidden(c):
     h1, _ = await _auth(c)
     h2, _ = await _auth(c)
     o1 = await _org(c, h1)
-    o2 = await _org(c, h2)
+    await _org(c, h2)
     bid = (await c.post(f"/api/v1/orgs/{o1}/briefs", json=_brief_body(), headers=h1)).json()[
         "data"
     ]["id"]
@@ -207,12 +207,12 @@ async def test_convert_cross_org_rejected(c):
     h1, _ = await _auth(c)
     h2, _ = await _auth(c)
     o1 = await _org(c, h1)
-    o2 = await _org(c, h2)
+    await _org(c, h2)
     bid = (await c.post(f"/api/v1/orgs/{o1}/briefs", json=_brief_body(), headers=h1)).json()[
         "data"
     ]["id"]
     r = await c.post(
-        f"/api/v1/orgs/{o2}/briefs/{bid}/convert",
+        f"/api/v1/orgs/{await _org(c, h2)}/briefs/{bid}/convert",
         json={"rubric": [{"criterion": "Q", "max_score": 100}]},
         headers=h2,
     )
