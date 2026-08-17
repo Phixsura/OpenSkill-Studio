@@ -363,3 +363,55 @@ async def list_assigned_projects(
             for a, title in assignments
         ]
     )
+
+
+# ── Dashboard / Progress ─────────────────────────────────
+
+
+@router.get("/orgs/{org_id}/cohorts/{cohort_id}/progress", response_model=DataResponse[dict])
+async def cohort_progress(
+    org_id: str,
+    cohort_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Instructor dashboard: aggregate progress metrics for a cohort."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = CohortService(db)
+    data = await svc.get_cohort_progress(cohort_id, org_id)
+    return DataResponse(data=data)
+
+
+@router.get(
+    "/orgs/{org_id}/cohorts/{cohort_id}/progress/{user_id}",
+    response_model=DataResponse[dict],
+)
+async def learner_drill_down(
+    org_id: str,
+    cohort_id: str,
+    user_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Instructor view: a specific learner's progress within a cohort."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = CohortService(db)
+    data = await svc.get_learner_drill_down(cohort_id, user_id, org_id)
+    return DataResponse(data=data)
+
+
+@router.get(
+    "/orgs/{org_id}/cohorts/{cohort_id}/my-dashboard",
+    response_model=DataResponse[dict],
+)
+async def my_cohort_dashboard(
+    org_id: str,
+    cohort_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Learner's own view within a cohort: assigned skills, projects, deadlines."""
+    await require_org_member(org_id, user, db)
+    svc = CohortService(db)
+    data = await svc.get_learner_dashboard(cohort_id, user.id, org_id)
+    return DataResponse(data=data)

@@ -95,6 +95,7 @@ async def _read_limited(file: UploadFile, limit: int = 50 * 1024 * 1024) -> byte
 async def list_projects(
     org_id: str,
     status: str | None = None,
+    cohort_id: str | None = None,
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -105,7 +106,13 @@ async def list_projects(
     # Students only see published projects; instructors see drafts too.
     published_only = member.role not in INSTRUCTOR_ROLES
     projects, total = await svc.list_projects(
-        org_id, status, page, per_page, published_only=published_only
+        org_id,
+        status,
+        page,
+        per_page,
+        published_only=published_only,
+        cohort_id=cohort_id,
+        user_id=user.id if published_only else None,
     )
     return ListResponse(
         data=[ProjectResponse.model_validate(p) for p in projects],

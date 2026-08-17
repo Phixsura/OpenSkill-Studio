@@ -363,6 +363,217 @@ class CohortService:
         )
         return [(row[0], row[1]) for row in result.all()]
 
+    # ── Progress / Dashboard ──
+
+    async def get_cohort_progress(self, cohort_id: str, org_id: str) -> dict:
+        """Aggregate progress metrics for a cohort dashboard."""
+        cohort = await self.get_cohort(cohort_id)
+        if cohort.org_id != org_id:
+            raise CohortNotFoundError()
+
+        from app.models.project import Project, Submission
+
+        # Learner count
+        learner_count_r = await self.db.execute(
+            select(func.count(CohortMember.id)).where(
+                CohortMember.cohort_id == cohort_id,
+                CohortMember.role == CohortRole.LEARNER,
+            )
+        )
+        total_learners = learner_count_r.scalar_one()
+
+        # Assigned skills + avg completion
+
+        skill_assignments = await self.list_assigned_skills(cohort_id)
+        total_skills = len(skill_assignments)
+
+        # Per-project submission stats
+        project_assignments = await self.list_assigned_projects(cohort_id)
+        projects_progress = []
+        total_overdue = 0
+
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC)
+
+        for assignment, title in project_assignments:
+            # Effective deadline
+            deadline = assignment.deadline_override
+            if deadline is None:
+                project = await self.db.get(Project, assignment.project_id)
+                deadline = project.deadline if project else None
+
+            # Count submissions from cohort learners
+            learner_ids_q = select(CohortMember.user_id).where(
+                CohortMember.cohort_id == cohort_id,
+                CohortMember.role == CohortRole.LEARNER,
+            )
+            sub_counts = await self.db.execute(
+                select(Submission.status, func.count(Submission.id))
+                .where(
+                    Submission.project_id == assignment.project_id,
+                    Submission.user_id.in_(learner_ids_q),
+                )
+                .group_by(Submission.status)
+            )
+            status_map = {row[0].value: row[1] for row in sub_counts.all()}
+
+            submitted = status_map.get("submitted", 0)
+            approved = status_map.get("approved", 0)
+            draft = status_map.get("draft", 0)
+            revision = status_map.get("revision_requested", 0)
+
+            # Learners with no submission at all
+            has_submission_q = (
+                select(Submission.user_id)
+                .where(
+                    Submission.project_id == assignment.project_id,
+                    Submission.user_id.in_(learner_ids_q),
+                )
+                .distinct()
+            )
+            has_sub_r = await self.db.execute(
+                select(func.count()).select_from(has_submission_q.subquery())
+            )
+            with_submission = has_sub_r.scalar_one()
+            not_started = max(0, total_learners - with_submission)
+
+            overdue = 0
+            if deadline and now > deadline:
+                overdue = not_started + draft + revision
+
+            total_overdue += overdue
+
+            projects_progress.append(
+                {
+                    "project_id": assignment.project_id,
+                    "title": title,
+                    "submitted": submitted,
+                    "approved": approved,
+                    "revision_requested": revision,
+                    "not_started": not_started,
+                    "overdue": overdue,
+                    "total_assignees": total_learners,
+                    "deadline": deadline.isoformat() if deadline else None,
+                }
+            )
+
+        return {
+            "total_learners": total_learners,
+            "total_skills_assigned": total_skills,
+            "projects": projects_progress,
+            "overdue_submissions": total_overdue,
+        }
+
+    async def get_learner_drill_down(self, cohort_id: str, user_id: str, org_id: str) -> dict:
+        """Per-learner progress within a cohort."""
+        cohort = await self.get_cohort(cohort_id)
+        if cohort.org_id != org_id:
+            raise CohortNotFoundError()
+
+        from app.models.project import Project, Submission
+        from app.models.skill import SkillProgress
+        from app.models.user import User
+
+        user = await self.db.get(User, user_id)
+
+        # Skills assigned to this cohort + learner's progress
+        skill_assignments = await self.list_assigned_skills(cohort_id)
+        skills_data = []
+        for assignment, skill_name in skill_assignments:
+            progress_r = await self.db.execute(
+                select(SkillProgress).where(
+                    SkillProgress.skill_id == assignment.skill_id,
+                    SkillProgress.user_id == user_id,
+                )
+            )
+            progress = progress_r.scalar_one_or_none()
+            skills_data.append(
+                {
+                    "skill_id": assignment.skill_id,
+                    "name": skill_name,
+                    "status": progress.status.value if progress else "not_started",
+                    "exercises_done": progress.exercises_done if progress else 0,
+                    "exercises_total": progress.exercises_total if progress else 0,
+                }
+            )
+
+        # Projects assigned to this cohort + learner's latest submission
+        project_assignments = await self.list_assigned_projects(cohort_id)
+        projects_data = []
+        for assignment, title in project_assignments:
+            sub_r = await self.db.execute(
+                select(Submission)
+                .where(
+                    Submission.project_id == assignment.project_id,
+                    Submission.user_id == user_id,
+                )
+                .order_by(Submission.version.desc())
+                .limit(1)
+            )
+            sub = sub_r.scalar_one_or_none()
+
+            deadline = assignment.deadline_override
+            if deadline is None:
+                proj = await self.db.get(Project, assignment.project_id)
+                deadline = proj.deadline if proj else None
+
+            from datetime import UTC, datetime
+
+            is_overdue = bool(
+                deadline
+                and datetime.now(UTC) > deadline
+                and (sub is None or sub.status.value in ("draft", "revision_requested"))
+            )
+
+            projects_data.append(
+                {
+                    "project_id": assignment.project_id,
+                    "title": title,
+                    "submission_status": sub.status.value if sub else "not_started",
+                    "score": sub.final_score if sub else None,
+                    "submitted_at": sub.submitted_at.isoformat()
+                    if sub and sub.submitted_at
+                    else None,
+                    "is_overdue": is_overdue,
+                }
+            )
+
+        # Last activity
+        last_sub_r = await self.db.execute(
+            select(func.max(Submission.updated_at)).where(
+                Submission.user_id == user_id,
+                Submission.org_id == org_id,
+            )
+        )
+        last_active = last_sub_r.scalar_one()
+
+        return {
+            "user_id": user_id,
+            "user_name": user.display_name if user else None,
+            "skills": skills_data,
+            "projects": projects_data,
+            "last_active_at": last_active.isoformat() if last_active else None,
+        }
+
+    async def get_learner_dashboard(self, cohort_id: str, user_id: str, org_id: str) -> dict:
+        """Learner's own view within a cohort."""
+        cohort = await self.get_cohort(cohort_id)
+        if cohort.org_id != org_id:
+            raise CohortNotFoundError()
+
+        from app.schemas.cohort import CohortResponse
+
+        drill = await self.get_learner_drill_down(cohort_id, user_id, org_id)
+        count = await self.get_member_count(cohort_id)
+
+        return {
+            "cohort": CohortResponse.model_validate(cohort).model_dump() | {"member_count": count},
+            "assigned_skills": drill["skills"],
+            "assigned_projects": drill["projects"],
+            "last_active_at": drill["last_active_at"],
+        }
+
     # ── Helpers ──
 
     @staticmethod

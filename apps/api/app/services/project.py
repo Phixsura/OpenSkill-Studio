@@ -352,8 +352,40 @@ class ProjectService:
         per_page: int = 20,
         *,
         published_only: bool = False,
+        cohort_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[list[Project], int]:
         base = select(Project).where(Project.org_id == org_id)
+
+        # ── Cohort visibility ──
+        # When a cohort_id is given, show only projects assigned to that cohort.
+        # When a student (user_id set, published_only=True) has no cohort filter,
+        # show org-wide projects (not assigned to any cohort) PLUS projects
+        # assigned to any cohort the student belongs to.
+        if cohort_id:
+            from app.models.cohort import CohortProjectAssignment
+
+            base = base.where(
+                Project.id.in_(
+                    select(CohortProjectAssignment.project_id).where(
+                        CohortProjectAssignment.cohort_id == cohort_id
+                    )
+                )
+            )
+        elif published_only and user_id:
+            from app.models.cohort import CohortMember, CohortProjectAssignment
+
+            # Projects with no cohort assignment = org-wide
+            org_wide = ~Project.id.in_(select(CohortProjectAssignment.project_id))
+            # Projects assigned to a cohort the student belongs to
+            my_cohort_ids = select(CohortMember.cohort_id).where(CohortMember.user_id == user_id)
+            in_my_cohorts = Project.id.in_(
+                select(CohortProjectAssignment.project_id).where(
+                    CohortProjectAssignment.cohort_id.in_(my_cohort_ids)
+                )
+            )
+            base = base.where(org_wide | in_my_cohorts)
+
         if published_only:
             # Students must not see draft projects an instructor is still
             # authoring (their instructions, deadlines, and reference assets).
