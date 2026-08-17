@@ -423,3 +423,148 @@ async def test_cohort_status_filter(c):
     r = await c.get(f"/api/v1/orgs/{oid}/cohorts?status=active", headers=h)
     assert r.json()["meta"]["total"] == 1
     assert r.json()["data"][0]["name"] == "Active One"
+
+
+# ── Edge cases ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_cohort_name_reslugs(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Original Name"}, headers=h)
+    ).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"name": "New Name"}, headers=h)
+    assert r.status_code == 200
+    assert "new-name" in r.json()["data"]["slug"]
+
+
+@pytest.mark.asyncio
+async def test_update_cohort_invalid_status(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Bad Status"}, headers=h)
+    ).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "BOGUS"}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_archived_cohort_404(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "To Archive"}, headers=h)
+    ).json()["data"]["id"]
+    await c.delete(f"/api/v1/orgs/{oid}/cohorts/{cid}", headers=h)
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}", headers=h)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_instructor_to_cohort(c):
+    h, _ = await _auth(c)
+    h2, u2 = await _auth(c)
+    oid = await _org(c, h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "instructor"}, headers=h
+    )
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Inst Cohort"}, headers=h)
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members",
+        json={"user_id": u2["id"], "role": "instructor"},
+        headers=h,
+    )
+    assert r.status_code == 201
+    assert r.json()["data"]["role"] == "instructor"
+
+
+@pytest.mark.asyncio
+async def test_list_members_role_filter(c):
+    h, _ = await _auth(c)
+    h2, u2 = await _auth(c)
+    h3, u3 = await _auth(c)
+    oid = await _org(c, h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u3["id"], "role": "instructor"}, headers=h
+    )
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Filter Test"}, headers=h)
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members",
+        json={"user_id": u2["id"], "role": "learner"},
+        headers=h,
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members",
+        json={"user_id": u3["id"], "role": "instructor"},
+        headers=h,
+    )
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/members?role=learner", headers=h)
+    assert r.json()["meta"]["total"] == 1
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/members?role=instructor", headers=h)
+    assert r.json()["meta"]["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_unassign_nonexistent_skill_404(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Unassign Test"}, headers=h)
+    ).json()["data"]["id"]
+    r = await c.delete(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/skills/01BOGUSBOGUSBOGUSBOGUSBOGU", headers=h
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_unassign_nonexistent_project_404(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Unassign Proj"}, headers=h)
+    ).json()["data"]["id"]
+    r = await c.delete(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/projects/01BOGUSBOGUSBOGUSBOGUSBOGU", headers=h
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_project_assignment_duplicate_409(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Dup Proj"}, headers=h)
+    ).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Dup Proj",
+                "description": "d" * 10,
+                "instructions": "i" * 10,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=h
+        )
+    ).status_code == 201
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=h
+    )
+    assert r.status_code == 409

@@ -412,3 +412,62 @@ async def test_cross_org_creator_endpoints_rejected(c):
     assert r.status_code == 404
     r = await c.delete(f"/api/v1/orgs/{o2}/projects/{pid}/creators/bogus", headers=h2)
     assert r.status_code == 404
+
+
+# ── Creator assignment edge cases ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_assign_non_org_member_creator_404(c):
+    """Cannot assign a creator who is not an org member."""
+    hi, _ = await _auth(c)
+    _, u2 = await _auth(c)
+    oid = await _org(c, hi)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Creator Test",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/creators", json={"user_id": u2["id"]}, headers=hi
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_duplicate_creator_assignment_409(c):
+    """Duplicate creator assignment returns 409."""
+    hi, _ = await _auth(c)
+    _, u2 = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=hi
+    )
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Dup Creator",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/creators", json={"user_id": u2["id"]}, headers=hi
+        )
+    ).status_code == 201
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/creators", json={"user_id": u2["id"]}, headers=hi
+    )
+    assert r.status_code == 409

@@ -254,3 +254,87 @@ async def test_brief_status_filter(c):
     await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(title="Draft Brief"), headers=h)
     r = await c.get(f"/api/v1/orgs/{oid}/briefs?status=active", headers=h)
     assert r.json()["meta"]["total"] == 1
+
+
+# ── Edge cases ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_brief_title_reslugs(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs", json=_brief_body(title="Original Brief"), headers=h
+        )
+    ).json()["data"]["id"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}", json={"title": "New Brief Title"}, headers=h
+    )
+    assert r.status_code == 200
+    assert "new-brief-title" in r.json()["data"]["slug"]
+
+
+@pytest.mark.asyncio
+async def test_convert_empty_deliverable_specs(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs", json=_brief_body(deliverable_specs=[]), headers=h
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/convert",
+        json={"rubric": [{"criterion": "Q", "max_score": 100}]},
+        headers=h,
+    )
+    assert r.status_code == 201
+    pid = r.json()["data"]["id"]
+    detail = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}", headers=h)).json()["data"]
+    assert len(detail["deliverables"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_brief_field_bounds(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(title="X" * 400), headers=h)
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs", json=_brief_body(client_name="C" * 300), headers=h
+    )
+    assert r.status_code == 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs", json=_brief_body(objective="O" * 20000), headers=h
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_brief_with_all_fields(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs",
+        json=_brief_body(
+            client_industry="Tech",
+            client_website="https://example.com",
+            brand_guidelines="Use blue palette",
+            target_audience="Designers",
+            tone_and_style="Modern",
+            constraints="No red",
+            budget_range="$1000-$5000",
+            timeline="2 weeks",
+            deliverable_specs=[{"name": "Logo", "type": "image"}],
+            references=[{"url": "https://example.com/ref"}],
+            evaluation_criteria=[{"criterion": "Brand fit", "weight": 0.5}],
+        ),
+        headers=h,
+    )
+    assert r.status_code == 201
+    d = r.json()["data"]
+    assert d["client_industry"] == "Tech"
+    assert d["budget_range"] == "$1000-$5000"
+    assert len(d["deliverable_specs"]) == 1
+    assert len(d["evaluation_criteria"]) == 1

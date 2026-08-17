@@ -362,3 +362,150 @@ async def test_invalid_eval_type_still_rejected():
 
     with pytest.raises(ValidationError):
         TriggerEvaluationRequest(submission_id="test123", type="bogus_type")
+
+
+# ── Additional edge cases ────────────────────────────────
+
+
+def test_openai_multiple_blocks_translation():
+    """Multiple text + image blocks all translate correctly."""
+    blocks = [
+        {"type": "text", "text": "First"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "aaa"}},
+        {"type": "text", "text": "Second"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "bbb"}},
+    ]
+    result = _to_openai_content(blocks)
+    assert len(result) == 4
+    assert result[0] == {"type": "text", "text": "First"}
+    assert result[1]["type"] == "image_url"
+    assert "image/jpeg" in result[1]["image_url"]["url"]
+    assert result[3]["type"] == "image_url"
+    assert "image/png" in result[3]["image_url"]["url"]
+
+
+@pytest.mark.asyncio
+async def test_multiple_images_in_submission():
+    """IMAGE_REVIEW with multiple images includes all as content blocks."""
+    from app.services.evaluation import EvaluationService
+
+    db = AsyncMock()
+    db.flush = AsyncMock()
+    svc = EvaluationService(db)
+
+    project = MagicMock()
+    project.title = "Multi Image"
+    project.description = "d"
+    project.rubric = [{"criterion": "Q", "max_score": 100}]
+    project.client_brief_id = None
+
+    items = []
+    for i in range(3):
+        item = MagicMock()
+        item.file_key = f"uploads/img{i}.png"
+        item.mime_type = "image/png"
+        item.file_name = f"img{i}.png"
+        item.file_size = 1000
+        item.content = None
+        item.note = None
+        items.append(item)
+
+    task = MagicMock()
+    task.type = "image_review"
+    task.config = {}
+
+    with patch(
+        "app.core.media_eval.fetch_image_as_base64",
+        return_value=("b64data", "image/png"),
+    ):
+        blocks = await svc._build_multimodal_prompt(project, items, task)
+
+    image_blocks = [b for b in blocks if b.get("type") == "image"]
+    assert len(image_blocks) == 3
+    assert len(task.config["images_evaluated"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_video_sampling_metadata_stored():
+    """VIDEO_REVIEW stores frame sampling metadata in task.config."""
+    from app.services.evaluation import EvaluationService
+
+    db = AsyncMock()
+    db.flush = AsyncMock()
+    svc = EvaluationService(db)
+
+    project = MagicMock()
+    project.title = "Video Meta"
+    project.description = "d"
+    project.rubric = [{"criterion": "Q", "max_score": 100}]
+    project.client_brief_id = None
+
+    item = MagicMock()
+    item.file_key = "uploads/v.mp4"
+    item.mime_type = "video/mp4"
+    item.file_name = "v.mp4"
+    item.content = None
+
+    task = MagicMock()
+    task.type = "video_review"
+    task.config = {}
+
+    meta = {
+        "strategy": "uniform",
+        "num_frames_requested": 4,
+        "num_frames_extracted": 4,
+        "video_duration_s": 20.0,
+        "frame_timestamps": [4.0, 8.0, 12.0, 16.0],
+        "video_size_bytes": 5000,
+    }
+    frames = [("b64", "image/jpeg", t) for t in [4.0, 8.0, 12.0, 16.0]]
+
+    with patch(
+        "app.core.video_eval.fetch_video_and_sample",
+        return_value=(frames, meta),
+    ):
+        await svc._build_multimodal_prompt(project, [item], task)
+
+    assert task.config["video_sampling"]["strategy"] == "uniform"
+    assert task.config["video_sampling"]["num_frames_extracted"] == 4
+    assert len(task.config["video_sampling"]["frame_timestamps"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_commercial_eval_without_brief_graceful():
+    """COMMERCIAL_SUBMISSION_REVIEW works even if the brief was deleted."""
+    from app.services.evaluation import EvaluationService
+
+    db = AsyncMock()
+    db.flush = AsyncMock()
+    db.get = AsyncMock(return_value=None)  # brief deleted
+    svc = EvaluationService(db)
+
+    project = MagicMock()
+    project.title = "No Brief"
+    project.description = "d"
+    project.rubric = [{"criterion": "Q", "max_score": 100}]
+    project.client_brief_id = "deleted_brief_id"
+
+    item = MagicMock()
+    item.file_key = "uploads/x.png"
+    item.mime_type = "image/png"
+    item.file_name = "x.png"
+    item.file_size = 500
+    item.content = None
+    item.note = None
+
+    task = MagicMock()
+    task.type = "commercial_submission_review"
+    task.config = {}
+
+    with patch(
+        "app.core.media_eval.fetch_image_as_base64",
+        return_value=("b64", "image/png"),
+    ):
+        blocks = await svc._build_multimodal_prompt(project, [item], task)
+
+    # Should not crash, brief context is just absent
+    text = " ".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    assert "No Brief" in text  # project title still present
+    assert "Client Brief" not in text  # no brief section

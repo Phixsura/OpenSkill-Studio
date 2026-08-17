@@ -292,3 +292,247 @@ async def test_empty_cohort_progress(c):
     assert r.status_code == 200
     assert r.json()["data"]["total_learners"] == 0
     assert r.json()["data"]["projects"] == []
+
+
+# ── Visibility edge cases ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_skill_visibility_with_cohort_filter(c):
+    """cohort_id query param filters skills to a specific cohort."""
+    hi, _ = await _auth(c)
+    oid = await _org(c, hi)
+    hs, us = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "Vis Cat"}, headers=hi)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Cohort Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=hi)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Skill Vis"}, headers=hi)
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/skills", json={"skill_id": sk}, headers=hi)
+    r = await c.get(f"/api/v1/orgs/{oid}/skills?cohort_id={cid}", headers=hi)
+    assert r.json()["meta"]["total"] == 1
+    assert r.json()["data"][0]["name"] == "Cohort Skill"
+
+
+@pytest.mark.asyncio
+async def test_student_in_two_cohorts_sees_both(c):
+    """A student in cohort A and cohort B sees both cohorts' projects."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+
+    projects = []
+    for name in ("Cohort A", "Cohort B"):
+        cid = (await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": name}, headers=hi)).json()[
+            "data"
+        ]["id"]
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=hi
+        )
+        pid = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/projects",
+                json={
+                    "title": f"{name} Project",
+                    "description": "d",
+                    "instructions": "i",
+                    "rubric": [{"criterion": "Q", "max_score": 100}],
+                },
+                headers=hi,
+            )
+        ).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hi)
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=hi
+        )
+        projects.append(f"{name} Project")
+
+    r = await c.get(f"/api/v1/orgs/{oid}/projects", headers=hs)
+    titles = {p["title"] for p in r.json()["data"]}
+    for title in projects:
+        assert title in titles
+
+
+@pytest.mark.asyncio
+async def test_max_submissions_override_enforced(c):
+    """Cohort max_submissions_override takes precedence over project default."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+
+    # Project allows unlimited (0)
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Max Test",
+                "description": "d",
+                "instructions": "i",
+                "max_submissions": 0,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hi)
+
+    # Cohort restricts to 1
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Max Override"}, headers=hi)
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=hi
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/projects",
+        json={"project_id": pid, "max_submissions_override": 1},
+        headers=hi,
+    )
+
+    # First submission OK
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)
+    ).status_code == 201
+    # Second blocked by override
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)
+    assert r.status_code == 422
+    assert "Maximum" in r.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_progress_with_overdue_detection(c):
+    """Dashboard correctly detects overdue submissions."""
+    from datetime import UTC, datetime, timedelta
+
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Overdue Proj",
+                "description": "d",
+                "instructions": "i",
+                "deadline": past,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hi)
+
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Overdue Cohort"}, headers=hi)
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=hi
+    )
+    await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=hi)
+
+    progress = (await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/progress", headers=hi)).json()[
+        "data"
+    ]
+    assert progress["overdue_submissions"] >= 1
+    assert progress["projects"][0]["overdue"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_drill_down_mixed_statuses(c):
+    """Learner drill-down shows correct status for each project."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Mixed Status"}, headers=hi)
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=hi
+    )
+
+    # Two projects: one submitted, one not started
+    for title in ("Submitted Proj", "NotStarted Proj"):
+        pid = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/projects",
+                json={
+                    "title": title,
+                    "description": "d",
+                    "instructions": "i",
+                    "rubric": [{"criterion": "Q", "max_score": 100}],
+                },
+                headers=hi,
+            )
+        ).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hi)
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=hi
+        )
+        if title == "Submitted Proj":
+            sid = (
+                await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)
+            ).json()["data"]["id"]
+            await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=hs)
+
+    drill = (
+        await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/progress/{us['id']}", headers=hi)
+    ).json()["data"]
+    statuses = {p["title"]: p["submission_status"] for p in drill["projects"]}
+    assert statuses["Submitted Proj"] == "submitted"
+    assert statuses["NotStarted Proj"] == "not_started"
+
+
+@pytest.mark.asyncio
+async def test_inactive_learners_count(c):
+    """Dashboard reports inactive learners (no activity in 7+ days)."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Inactive Test"}, headers=hi)
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=hi
+    )
+
+    # No submissions = inactive
+    progress = (await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/progress", headers=hi)).json()[
+        "data"
+    ]
+    assert progress["inactive_learners_7d"] == 1
