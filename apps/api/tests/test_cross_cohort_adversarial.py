@@ -471,3 +471,89 @@ async def test_duplicate_creator_assignment_409(c):
         f"/api/v1/orgs/{oid}/projects/{pid}/creators", json={"user_id": u2["id"]}, headers=hi
     )
     assert r.status_code == 409
+
+
+# ── Bug fixes: frozen cohorts + submission gate ──────────
+
+
+@pytest.mark.asyncio
+async def test_completed_cohort_blocks_new_members(c):
+    """Completed cohort must not accept new enrollments."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    cid = (await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Frozen"}, headers=hi)).json()[
+        "data"
+    ]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=hi)
+    await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "completed"}, headers=hi)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=hi
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "COHORT_FROZEN"
+
+
+@pytest.mark.asyncio
+async def test_completed_cohort_blocks_skill_assignment(c):
+    """Completed cohort must not accept new skill assignments."""
+    hi, _ = await _auth(c)
+    oid = await _org(c, hi)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Frozen Skills"}, headers=hi)
+    ).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=hi)
+    await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "completed"}, headers=hi)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "FC"}, headers=hi)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Frozen Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/skills", json={"skill_id": sk}, headers=hi)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_non_cohort_student_cannot_submit_to_restricted_project(c):
+    """A student not in the cohort cannot submit to a cohort-assigned project
+    even if they know the project ID — the submission endpoint must gate."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
+    cid = (await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Gated"}, headers=hi)).json()[
+        "data"
+    ]["id"]
+    # DON'T add student to cohort
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Gated Project",
+                "description": "d",
+                "instructions": "i",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=hi)
+    await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=hi)
+    # Student tries to submit directly
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)
+    assert r.status_code == 404

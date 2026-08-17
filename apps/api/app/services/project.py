@@ -26,6 +26,7 @@ from app.models.project import (
     ItemType,
     Project,
     ProjectAsset,
+    ProjectCreatorAssignment,
     ProjectDeliverable,
     ProjectSkill,
     ProjectTemplate,
@@ -545,11 +546,62 @@ class ProjectService:
         user_id: str,
     ) -> Submission:
         project = await self.get_project(project_id)
+
+        # ── Cohort visibility gate ──
+        # If this project is assigned to specific cohorts or individual creators,
+        # the submitting user must be in at least one of them. Without this check
+        # a student who guesses the project ID can submit even though the project
+        # doesn't appear in their listing.
+        from app.models.cohort import CohortMember, CohortProjectAssignment
+
+        has_cohort_assignment = await self.db.execute(
+            select(CohortProjectAssignment.id)
+            .where(CohortProjectAssignment.project_id == project_id)
+            .limit(1)
+        )
+        has_creator_assignment = await self.db.execute(
+            select(ProjectCreatorAssignment.id)
+            .where(ProjectCreatorAssignment.project_id == project_id)
+            .limit(1)
+        )
+        is_restricted = (
+            has_cohort_assignment.scalar_one_or_none() is not None
+            or has_creator_assignment.scalar_one_or_none() is not None
+        )
+        if is_restricted:
+            # Check if user is in a cohort that has this project assigned
+            in_cohort = await self.db.execute(
+                select(CohortProjectAssignment.id)
+                .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
+                .where(
+                    CohortProjectAssignment.project_id == project_id,
+                    CohortMember.user_id == user_id,
+                )
+                .limit(1)
+            )
+            # Check if user is individually assigned
+            individually_assigned = await self.db.execute(
+                select(ProjectCreatorAssignment.id)
+                .where(
+                    ProjectCreatorAssignment.project_id == project_id,
+                    ProjectCreatorAssignment.user_id == user_id,
+                )
+                .limit(1)
+            )
+            if (
+                in_cohort.scalar_one_or_none() is None
+                and individually_assigned.scalar_one_or_none() is None
+            ):
+                raise AppError(
+                    "PROJECT_NOT_FOUND",
+                    "Project not found",
+                    404,
+                )
+
         count = await self._count_user_submissions(project_id, user_id)
 
         # Cohort override takes precedence over project default
         effective_max = project.max_submissions
-        from app.models.cohort import CohortMember, CohortProjectAssignment
 
         cohort_override_r = await self.db.execute(
             select(CohortProjectAssignment.max_submissions_override)

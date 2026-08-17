@@ -144,6 +144,9 @@ class CohortService:
         cohort = await self.get_cohort(cohort_id)
         if cohort.org_id != org_id:
             raise CohortNotFoundError()
+        # Completed/archived cohorts are frozen — no new enrollments
+        if cohort.status in (CohortStatus.COMPLETED, CohortStatus.ARCHIVED):
+            raise AppError("COHORT_FROZEN", "Cannot add members to a completed cohort", 422)
 
         # User must be an active org member
         org_member = await self.db.execute(
@@ -243,6 +246,8 @@ class CohortService:
         cohort = await self.get_cohort(cohort_id)
         if cohort.org_id != org_id:
             raise CohortNotFoundError()
+        if cohort.status in (CohortStatus.COMPLETED, CohortStatus.ARCHIVED):
+            raise AppError("COHORT_FROZEN", "Cannot modify a completed cohort", 422)
 
         # Skill must exist in same org and be non-archived
         skill = await self.db.get(Skill, skill_id)
@@ -306,6 +311,8 @@ class CohortService:
         cohort = await self.get_cohort(cohort_id)
         if cohort.org_id != org_id:
             raise CohortNotFoundError()
+        if cohort.status in (CohortStatus.COMPLETED, CohortStatus.ARCHIVED):
+            raise AppError("COHORT_FROZEN", "Cannot modify a completed cohort", 422)
 
         project = await self.db.get(Project, project_id)
         if project is None or project.org_id != org_id:
