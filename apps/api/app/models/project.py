@@ -99,6 +99,13 @@ class Project(Base):
         default=ContentStatus.DRAFT,
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Optional links to cohort/brief — NULL means org-wide (backward-compatible).
+    client_brief_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("client_briefs.id", ondelete="SET NULL"), nullable=True
+    )
+    cohort_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("cohorts.id", ondelete="SET NULL"), nullable=True
+    )
     created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -3,6 +3,8 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     admin,
     auth,
+    client_briefs,
+    cohorts,
     evaluation,
     health,
     organizations,
@@ -23,4 +25,6 @@ api_v1_router.include_router(projects.router)
 api_v1_router.include_router(peer_review.router)
 api_v1_router.include_router(overview.router)
 api_v1_router.include_router(evaluation.router)
+api_v1_router.include_router(cohorts.router)
+api_v1_router.include_router(client_briefs.router)
 api_v1_router.include_router(portfolio.router)
