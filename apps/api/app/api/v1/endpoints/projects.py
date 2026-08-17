@@ -1261,6 +1261,8 @@ async def unassign_creator(
 ):
     """Remove an individual creator assignment."""
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
 
     from sqlalchemy import select
 
@@ -1291,6 +1293,9 @@ async def list_creators(
 ):
     """List individual creators assigned to a project."""
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
+
     from sqlalchemy import select
 
     from app.models.project import ProjectCreatorAssignment
