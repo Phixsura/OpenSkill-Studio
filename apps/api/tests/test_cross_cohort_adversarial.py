@@ -194,10 +194,10 @@ async def test_deleted_cohort_member_loses_dashboard_access(c):
     # Remove from cohort
     await c.delete(f"/api/v1/orgs/{oid}/cohorts/{cid}/members/{us['id']}", headers=hi)
 
-    # Dashboard still works (they're still an org member, just not in the cohort)
-    # but should show empty data (no assignments)
+    # Removed member should be denied access to cohort dashboard
     r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/my-dashboard", headers=hs)
-    assert r.status_code == 200
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "NOT_COHORT_MEMBER"
 
 
 @pytest.mark.asyncio
@@ -619,3 +619,145 @@ async def test_org_member_removal_cascades_to_cohort(c):
     # Should no longer be in cohort
     r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/members", headers=hi)
     assert not any(m["user_id"] == us["id"] for m in r.json()["data"])
+
+
+# ── Data consistency: archived items filtered from cohort assignments ──
+
+
+@pytest.mark.asyncio
+async def test_deleted_project_excluded_from_cohort_assignments(c):
+    """Archiving a project should hide it from cohort project list."""
+    hi, _ = await _auth(c)
+    oid = await _org(c, hi)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "FilterProj"}, headers=hi)
+    ).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Archivable",
+                "description": "d" * 10,
+                "instructions": "i" * 10,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/projects",
+        json={"project_id": pid},
+        headers=hi,
+    )
+    # Delete (archive) the project
+    await c.delete(f"/api/v1/orgs/{oid}/projects/{pid}", headers=hi)
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", headers=hi)
+    assert r.status_code == 200
+    assert not any(a["project_id"] == pid for a in r.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_deleted_skill_excluded_from_cohort_assignments(c):
+    """Archiving a skill should hide it from cohort skill list."""
+    hi, _ = await _auth(c)
+    oid = await _org(c, hi)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "FilterSkill"}, headers=hi)
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "FC"}, headers=hi)
+    ).json()["data"]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "Archivable Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/skills",
+        json={"skill_id": sk},
+        headers=hi,
+    )
+    await c.delete(f"/api/v1/orgs/{oid}/skills/{sk}", headers=hi)
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/skills", headers=hi)
+    assert r.status_code == 200
+    assert not any(a["skill_id"] == sk for a in r.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_convert_brief_rejects_cross_org_cohort(c):
+    """Converting a brief with a cohort from another org must fail."""
+    hi, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid = await _org(c, hi)
+    oid2 = await _org(c, h2)
+    foreign_cid = (
+        await c.post(
+            f"/api/v1/orgs/{oid2}/cohorts", json={"name": "Foreign"}, headers=h2
+        )
+    ).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Cross Cohort",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "o" * 10,
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/convert",
+        json={
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+            "cohort_id": foreign_cid,
+        },
+        headers=hi,
+    )
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "INVALID_COHORT"
+
+
+@pytest.mark.asyncio
+async def test_my_dashboard_requires_cohort_membership(c):
+    """Non-cohort-member cannot view my-dashboard."""
+    hi, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": us["id"], "role": "student"},
+        headers=hi,
+    )
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Dashboard"}, headers=hi)
+    ).json()["data"]["id"]
+
+    # Student is org member but NOT in this cohort
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/my-dashboard", headers=hs)
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "NOT_COHORT_MEMBER"
+
+
+@pytest.mark.asyncio
+async def test_drill_down_rejects_non_member_user(c):
+    """Drill-down for a user not in the cohort returns 404."""
+    hi, _ = await _auth(c)
+    oid = await _org(c, hi)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "DrillDown"}, headers=hi)
+    ).json()["data"]["id"]
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/progress/01NONEXISTENT00000000000000",
+        headers=hi,
+    )
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_COHORT_MEMBER"

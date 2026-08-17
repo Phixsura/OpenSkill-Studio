@@ -135,6 +135,18 @@ class ClientBriefService:
         if brief.status != BriefStatus.DRAFT:
             raise AppError("INVALID_STATE", "Only draft briefs can be converted", 422)
 
+        # Validate cohort belongs to the same org
+        if cohort_id:
+            from app.models.cohort import Cohort
+
+            cohort = await self.db.get(Cohort, cohort_id)
+            if cohort is None or cohort.org_id != org_id:
+                raise AppError(
+                    "INVALID_COHORT",
+                    "Cohort not found in this organization",
+                    404,
+                )
+
         project_svc = ProjectService(self.db)
         project = await project_svc.create_project(
             org_id=org_id,

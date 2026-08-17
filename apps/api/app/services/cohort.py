@@ -286,11 +286,14 @@ class CohortService:
         await self.db.flush()
 
     async def list_assigned_skills(self, cohort_id: str) -> list[tuple[CohortSkillAssignment, str]]:
-        """List assigned skills with names."""
+        """List assigned skills with names (excludes archived skills)."""
         result = await self.db.execute(
             select(CohortSkillAssignment, Skill.name)
             .join(Skill, Skill.id == CohortSkillAssignment.skill_id)
-            .where(CohortSkillAssignment.cohort_id == cohort_id)
+            .where(
+                CohortSkillAssignment.cohort_id == cohort_id,
+                Skill.status != ContentStatus.ARCHIVED,
+            )
             .order_by(Skill.name)
         )
         return [(row[0], row[1]) for row in result.all()]
@@ -361,11 +364,14 @@ class CohortService:
     async def list_assigned_projects(
         self, cohort_id: str
     ) -> list[tuple[CohortProjectAssignment, str]]:
-        """List assigned projects with titles."""
+        """List assigned projects with titles (excludes archived projects)."""
         result = await self.db.execute(
             select(CohortProjectAssignment, Project.title)
             .join(Project, Project.id == CohortProjectAssignment.project_id)
-            .where(CohortProjectAssignment.cohort_id == cohort_id)
+            .where(
+                CohortProjectAssignment.cohort_id == cohort_id,
+                Project.status != ContentStatus.ARCHIVED,
+            )
             .order_by(CohortProjectAssignment.assigned_at)
         )
         return [(row[0], row[1]) for row in result.all()]
@@ -525,6 +531,16 @@ class CohortService:
         from app.models.skill import SkillProgress
         from app.models.user import User
 
+        # Verify user is a member of this cohort
+        member_r = await self.db.execute(
+            select(CohortMember).where(
+                CohortMember.cohort_id == cohort_id,
+                CohortMember.user_id == user_id,
+            )
+        )
+        if member_r.scalar_one_or_none() is None:
+            raise AppError("NOT_COHORT_MEMBER", "User is not a member of this cohort", 404)
+
         user = await self.db.get(User, user_id)
 
         # Skills assigned to this cohort + learner's progress
@@ -611,6 +627,16 @@ class CohortService:
         cohort = await self.get_cohort(cohort_id)
         if cohort.org_id != org_id:
             raise CohortNotFoundError()
+
+        # Verify user is a member of this cohort
+        member_r = await self.db.execute(
+            select(CohortMember).where(
+                CohortMember.cohort_id == cohort_id,
+                CohortMember.user_id == user_id,
+            )
+        )
+        if member_r.scalar_one_or_none() is None:
+            raise AppError("NOT_COHORT_MEMBER", "You are not a member of this cohort", 403)
 
         from app.schemas.cohort import CohortResponse
 

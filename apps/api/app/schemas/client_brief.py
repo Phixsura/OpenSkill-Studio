@@ -128,8 +128,10 @@ class UpdateClientBriefRequest(BaseModel):
     @field_validator("client_name")
     @classmethod
     def validate_client_name(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 200:
-            raise ValueError("Client name must be 200 characters or less")
+        if v is not None:
+            v = v.strip()
+            if len(v) < 1 or len(v) > 200:
+                raise ValueError("Client name must be 1-200 characters")
         return v
 
     @field_validator("status")
@@ -144,8 +146,12 @@ class UpdateClientBriefRequest(BaseModel):
     @field_validator("objective")
     @classmethod
     def validate_objective(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 10000:
-            raise ValueError("Objective must be 10,000 characters or less")
+        if v is not None:
+            v = v.strip()
+            if len(v) < 10:
+                raise ValueError("Objective must be at least 10 characters")
+            if len(v) > 10000:
+                raise ValueError("Objective must be 10,000 characters or less")
         return v
 
     @field_validator("deliverable_specs", "references", "evaluation_criteria")
