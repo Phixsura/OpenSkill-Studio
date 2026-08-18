@@ -1,7 +1,6 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { apiWithAuth } from "@/lib/api";
