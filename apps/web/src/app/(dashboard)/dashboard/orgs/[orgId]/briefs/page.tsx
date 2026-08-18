@@ -33,6 +33,11 @@ export default function BriefsPage() {
   const [clientName, setClientName] = useState("");
   const [projectType, setProjectType] = useState("product_visualization");
   const [objective, setObjective] = useState("");
+  const [targetAudience, setTargetAudience] = useState("");
+  const [toneAndStyle, setToneAndStyle] = useState("");
+  const [budgetRange, setBudgetRange] = useState("");
+  const [timeline, setTimeline] = useState("");
+  const [constraints, setConstraints] = useState("");
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["briefs", orgId],
@@ -51,6 +56,11 @@ export default function BriefsPage() {
           client_name: clientName,
           project_type: projectType,
           objective,
+          target_audience: targetAudience || undefined,
+          tone_and_style: toneAndStyle || undefined,
+          budget_range: budgetRange || undefined,
+          timeline: timeline || undefined,
+          constraints: constraints || undefined,
         }),
       }),
     onSuccess: () => {
@@ -59,6 +69,11 @@ export default function BriefsPage() {
       setTitle("");
       setClientName("");
       setObjective("");
+      setTargetAudience("");
+      setToneAndStyle("");
+      setBudgetRange("");
+      setTimeline("");
+      setConstraints("");
     },
     onError: (err: Error) => alert(err.message || "Failed to create brief"),
   });
@@ -107,6 +122,43 @@ export default function BriefsPage() {
               className="w-full rounded border px-3 py-2 text-sm"
               rows={3}
             />
+            <textarea
+              placeholder="Target audience (optional)"
+              value={targetAudience}
+              onChange={(e) => setTargetAudience(e.target.value)}
+              className="w-full rounded border px-3 py-2 text-sm"
+              rows={2}
+            />
+            <input
+              type="text"
+              placeholder="Tone & style (optional)"
+              value={toneAndStyle}
+              onChange={(e) => setToneAndStyle(e.target.value)}
+              className="w-full rounded border px-3 py-2 text-sm"
+            />
+            <textarea
+              placeholder="Constraints (optional)"
+              value={constraints}
+              onChange={(e) => setConstraints(e.target.value)}
+              className="w-full rounded border px-3 py-2 text-sm"
+              rows={2}
+            />
+            <div className="flex gap-3">
+              <input
+                type="text"
+                placeholder="Budget range (optional)"
+                value={budgetRange}
+                onChange={(e) => setBudgetRange(e.target.value)}
+                className="flex-1 rounded border px-3 py-2 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Timeline (optional)"
+                value={timeline}
+                onChange={(e) => setTimeline(e.target.value)}
+                className="flex-1 rounded border px-3 py-2 text-sm"
+              />
+            </div>
             <Button
               onClick={() => createMutation.mutate()}
               disabled={

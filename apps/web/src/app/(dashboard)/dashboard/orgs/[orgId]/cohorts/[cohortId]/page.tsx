@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { apiWithAuth } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface ProjectProgress {
   project_id: string;
@@ -34,10 +36,33 @@ interface CohortDetail {
   member_count: number;
   starts_at: string | null;
   ends_at: string | null;
+  max_learners: number | null;
 }
+
+const STATUS_COLORS: Record<string, string> = {
+  draft: "bg-yellow-100 text-yellow-800",
+  active: "bg-green-100 text-green-800",
+  completed: "bg-blue-100 text-blue-800",
+  archived: "bg-gray-100 text-gray-800",
+};
+
+const NEXT_STATUS: Record<string, { label: string; target: string }> = {
+  draft: { label: "Activate Cohort", target: "active" },
+  active: { label: "Complete Cohort", target: "completed" },
+  completed: { label: "Archive Cohort", target: "archived" },
+};
 
 export default function CohortDetailPage() {
   const { orgId, cohortId } = useParams<{ orgId: string; cohortId: string }>();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  const [showEdit, setShowEdit] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editStartsAt, setEditStartsAt] = useState("");
+  const [editEndsAt, setEditEndsAt] = useState("");
+  const [editMaxLearners, setEditMaxLearners] = useState("");
 
   const { data: cohort, isError: cohortError } = useQuery({
     queryKey: ["cohort", cohortId],
@@ -53,23 +78,212 @@ export default function CohortDetailPage() {
       ),
   });
 
+  const statusMutation = useMutation({
+    mutationFn: (newStatus: string) =>
+      apiWithAuth(`/orgs/${orgId}/cohorts/${cohortId}`, {
+        method: "PUT",
+        body: JSON.stringify({ status: newStatus }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cohort", cohortId] });
+      queryClient.invalidateQueries({ queryKey: ["cohort-progress", cohortId] });
+      queryClient.invalidateQueries({ queryKey: ["cohorts", orgId] });
+    },
+    onError: (err: Error) => alert(err.message || "Failed to update status"),
+  });
+
+  const editMutation = useMutation({
+    mutationFn: (fields: Record<string, unknown>) =>
+      apiWithAuth(`/orgs/${orgId}/cohorts/${cohortId}`, {
+        method: "PUT",
+        body: JSON.stringify(fields),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cohort", cohortId] });
+      queryClient.invalidateQueries({ queryKey: ["cohorts", orgId] });
+      setShowEdit(false);
+    },
+    onError: (err: Error) => alert(err.message || "Failed to update cohort"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/orgs/${orgId}/cohorts/${cohortId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cohorts", orgId] });
+      router.push(`/dashboard/orgs/${orgId}/cohorts`);
+    },
+    onError: (err: Error) => alert(err.message || "Failed to delete cohort"),
+  });
+
   const c = cohort?.data;
   const p = progress?.data;
 
   if (cohortError) {
-    return <p className="text-sm text-red-600">Failed to load cohort. It may not exist or you don&apos;t have access.</p>;
+    return (
+      <p className="text-sm text-red-600">
+        Failed to load cohort. It may not exist or you don&apos;t have access.
+      </p>
+    );
   }
+
+  const nextAction = c ? NEXT_STATUS[c.status] : null;
+
+  const startEditing = () => {
+    if (!c) return;
+    setEditName(c.name);
+    setEditDescription(c.description || "");
+    setEditStartsAt(c.starts_at ? c.starts_at.slice(0, 16) : "");
+    setEditEndsAt(c.ends_at ? c.ends_at.slice(0, 16) : "");
+    setEditMaxLearners(c.max_learners?.toString() || "");
+    setShowEdit(true);
+  };
+
+  const handleStatusChange = (target: string) => {
+    if (target !== "active") {
+      if (!confirm("Are you sure? This action cannot be undone.")) return;
+    }
+    statusMutation.mutate(target);
+  };
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">{c?.name || "Cohort"}</h1>
-        {c?.description && (
-          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-            {c.description}
-          </p>
-        )}
+      {/* Header with status + actions */}
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">{c?.name || "Cohort"}</h1>
+            {c && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs capitalize ${STATUS_COLORS[c.status] || ""}`}
+              >
+                {c.status}
+              </span>
+            )}
+          </div>
+          {c?.description && (
+            <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+              {c.description}
+            </p>
+          )}
+          {c && (c.starts_at || c.ends_at) && (
+            <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">
+              {c.starts_at && `Starts ${new Date(c.starts_at).toLocaleDateString()}`}
+              {c.starts_at && c.ends_at && " · "}
+              {c.ends_at && `Ends ${new Date(c.ends_at).toLocaleDateString()}`}
+              {c.max_learners && ` · Max ${c.max_learners} learners`}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {nextAction && (
+            <Button
+              size="sm"
+              onClick={() => handleStatusChange(nextAction.target)}
+              disabled={statusMutation.isPending}
+            >
+              {statusMutation.isPending ? "Updating..." : nextAction.label}
+            </Button>
+          )}
+          {c && (
+            <Button variant="outline" size="sm" onClick={startEditing}>
+              Edit
+            </Button>
+          )}
+          {c?.status === "draft" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-red-600 hover:bg-red-50"
+              onClick={() => {
+                if (confirm("Delete this cohort? This cannot be undone.")) {
+                  deleteMutation.mutate();
+                }
+              }}
+            >
+              Delete
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Edit form */}
+      {showEdit && (
+        <div className="mb-6 space-y-3 rounded-lg border p-4">
+          <h2 className="text-lg font-semibold">Edit Cohort</h2>
+          <input
+            type="text"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="Cohort name"
+            className="w-full rounded border px-3 py-2 text-sm"
+          />
+          <textarea
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+            placeholder="Description"
+            rows={2}
+            className="w-full rounded border px-3 py-2 text-sm"
+          />
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-xs text-[hsl(var(--muted-foreground))]">
+                Start date
+              </label>
+              <input
+                type="datetime-local"
+                value={editStartsAt}
+                onChange={(e) => setEditStartsAt(e.target.value)}
+                className="w-full rounded border px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="mb-1 block text-xs text-[hsl(var(--muted-foreground))]">
+                End date
+              </label>
+              <input
+                type="datetime-local"
+                value={editEndsAt}
+                onChange={(e) => setEditEndsAt(e.target.value)}
+                className="w-full rounded border px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="w-32">
+              <label className="mb-1 block text-xs text-[hsl(var(--muted-foreground))]">
+                Max learners
+              </label>
+              <input
+                type="number"
+                value={editMaxLearners}
+                onChange={(e) => setEditMaxLearners(e.target.value)}
+                min={1}
+                className="w-full rounded border px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={() =>
+                editMutation.mutate({
+                  name: editName,
+                  description: editDescription || undefined,
+                  starts_at: editStartsAt || undefined,
+                  ends_at: editEndsAt || undefined,
+                  max_learners: editMaxLearners
+                    ? parseInt(editMaxLearners, 10)
+                    : undefined,
+                })
+              }
+              disabled={editMutation.isPending}
+            >
+              {editMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+            <Button variant="outline" onClick={() => setShowEdit(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Quick stats */}
       <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -79,7 +293,9 @@ export default function CohortDetailPage() {
         </div>
         <div className="rounded-lg border p-4 text-center">
           <div className="text-2xl font-bold">{p?.total_skills_assigned ?? "—"}</div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))]">Skills Assigned</div>
+          <div className="text-xs text-[hsl(var(--muted-foreground))]">
+            Skills Assigned
+          </div>
         </div>
         <div className="rounded-lg border p-4 text-center">
           <div className="text-2xl font-bold">{p?.projects.length ?? "—"}</div>
@@ -119,7 +335,9 @@ export default function CohortDetailPage() {
       {progressError ? (
         <p className="text-sm text-red-600">Failed to load progress data.</p>
       ) : isLoading ? (
-        <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading progress...</p>
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">
+          Loading progress...
+        </p>
       ) : p?.projects.length ? (
         <div>
           <h2 className="mb-3 text-lg font-semibold">Project Progress</h2>

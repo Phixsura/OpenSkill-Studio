@@ -34,6 +34,9 @@ export default function CohortsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [startsAt, setStartsAt] = useState("");
+  const [endsAt, setEndsAt] = useState("");
+  const [maxLearners, setMaxLearners] = useState("");
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["cohorts", orgId],
@@ -47,13 +50,22 @@ export default function CohortsPage() {
     mutationFn: () =>
       apiWithAuth(`/orgs/${orgId}/cohorts`, {
         method: "POST",
-        body: JSON.stringify({ name, description: description || undefined }),
+        body: JSON.stringify({
+          name,
+          description: description || undefined,
+          starts_at: startsAt || undefined,
+          ends_at: endsAt || undefined,
+          max_learners: maxLearners ? parseInt(maxLearners, 10) : undefined,
+        }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohorts", orgId] });
       setShowCreate(false);
       setName("");
       setDescription("");
+      setStartsAt("");
+      setEndsAt("");
+      setMaxLearners("");
     },
     onError: (err: Error) => alert(err.message || "Failed to create cohort"),
   });
@@ -84,6 +96,43 @@ export default function CohortsPage() {
               className="w-full rounded border px-3 py-2 text-sm"
               rows={2}
             />
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="mb-1 block text-xs text-[hsl(var(--muted-foreground))]">
+                  Start date
+                </label>
+                <input
+                  type="datetime-local"
+                  value={startsAt}
+                  onChange={(e) => setStartsAt(e.target.value)}
+                  className="w-full rounded border px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="mb-1 block text-xs text-[hsl(var(--muted-foreground))]">
+                  End date
+                </label>
+                <input
+                  type="datetime-local"
+                  value={endsAt}
+                  onChange={(e) => setEndsAt(e.target.value)}
+                  className="w-full rounded border px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="w-32">
+                <label className="mb-1 block text-xs text-[hsl(var(--muted-foreground))]">
+                  Max learners
+                </label>
+                <input
+                  type="number"
+                  value={maxLearners}
+                  onChange={(e) => setMaxLearners(e.target.value)}
+                  placeholder="∞"
+                  min={1}
+                  className="w-full rounded border px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
             <Button
               onClick={() => createMutation.mutate()}
               disabled={!name.trim() || createMutation.isPending}
