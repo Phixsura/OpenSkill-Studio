@@ -57,6 +57,47 @@ async def list_briefs(
     )
 
 
+@router.get(
+    "/orgs/{org_id}/briefs/open",
+    response_model=DataResponse[list[dict]],
+)
+async def list_open_briefs(
+    org_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List briefs that are open for applications (commercial project pool)."""
+    await require_org_member(org_id, user, db)
+
+    from sqlalchemy import select as sel
+
+    from app.models.client_brief import BriefStatus, ClientBrief
+
+    result = await db.execute(
+        sel(ClientBrief)
+        .where(
+            ClientBrief.org_id == org_id,
+            ClientBrief.status.in_([BriefStatus.OPEN, BriefStatus.ACTIVE]),
+        )
+        .order_by(ClientBrief.created_at.desc())
+    )
+    briefs = result.scalars().all()
+    return DataResponse(
+        data=[
+            {
+                "id": b.id,
+                "title": b.title,
+                "client_name": b.client_name,
+                "project_type": b.project_type,
+                "objective": b.objective,
+                "status": b.status.value,
+                "created_at": b.created_at.isoformat(),
+            }
+            for b in briefs
+        ]
+    )
+
+
 @router.get("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse])
 async def get_brief(
     org_id: str,
@@ -321,42 +362,5 @@ async def withdraw_application(
     )
 
 
-@router.get(
-    "/orgs/{org_id}/briefs/open",
-    response_model=DataResponse[list[dict]],
-)
-async def list_open_briefs(
-    org_id: str,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """List briefs that are open for applications (commercial project pool)."""
-    await require_org_member(org_id, user, db)
 
-    from sqlalchemy import select
-
-    from app.models.client_brief import BriefStatus, ClientBrief
-
-    result = await db.execute(
-        select(ClientBrief)
-        .where(
-            ClientBrief.org_id == org_id,
-            ClientBrief.status.in_([BriefStatus.OPEN, BriefStatus.ACTIVE]),
-        )
-        .order_by(ClientBrief.created_at.desc())
-    )
-    briefs = result.scalars().all()
-    return DataResponse(
-        data=[
-            {
-                "id": b.id,
-                "title": b.title,
-                "client_name": b.client_name,
-                "project_type": b.project_type,
-                "objective": b.objective,
-                "status": b.status.value,
-                "created_at": b.created_at.isoformat(),
-            }
-            for b in briefs
-        ]
-    )
+# list_open_briefs is defined above get_brief to avoid route conflict with /briefs/{brief_id}
