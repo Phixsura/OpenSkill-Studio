@@ -374,8 +374,8 @@ export default function BriefDetailPage() {
         </div>
       </div>
 
-      {/* Apply to Brief — for students */}
-      {brief.status !== "archived" && (
+      {/* Apply to Brief — only for open/active briefs */}
+      {(brief.status === "open" || brief.status === "active") && (
         <div className="mb-8">
           {myApplication ? (
             <div className="rounded-lg border p-4">
