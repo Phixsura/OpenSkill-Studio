@@ -460,25 +460,48 @@ class CohortService:
                 project = await self.db.get(Project, assignment.project_id)
                 deadline = project.deadline if project else None
 
-            # Count submissions from cohort learners
+            # Count DISTINCT learners per submission status (not submission count).
+            # A student with 3 submissions all "submitted" should count as 1 submitted learner.
             learner_ids_q = select(CohortMember.user_id).where(
                 CohortMember.cohort_id == cohort_id,
                 CohortMember.role == CohortRole.LEARNER,
             )
-            sub_counts = await self.db.execute(
-                select(Submission.status, func.count(Submission.id))
+
+            # For each status, count distinct users whose LATEST submission has that status
+            # Simpler approach: group by user, take their best status (approved > submitted > revision > draft)
+            from sqlalchemy import case
+
+            user_best_status = (
+                select(
+                    Submission.user_id,
+                    func.max(
+                        case(
+                            (Submission.status == "approved", 4),
+                            (Submission.status == "submitted", 3),
+                            (Submission.status == "revision_requested", 2),
+                            (Submission.status == "draft", 1),
+                            else_=0,
+                        )
+                    ).label("best"),
+                )
                 .where(
                     Submission.project_id == assignment.project_id,
                     Submission.user_id.in_(learner_ids_q),
                 )
-                .group_by(Submission.status)
+                .group_by(Submission.user_id)
+                .subquery()
             )
-            status_map = {row[0].value: row[1] for row in sub_counts.all()}
 
-            submitted = status_map.get("submitted", 0)
-            approved = status_map.get("approved", 0)
-            draft = status_map.get("draft", 0)
-            revision = status_map.get("revision_requested", 0)
+            status_counts_r = await self.db.execute(
+                select(user_best_status.c.best, func.count())
+                .group_by(user_best_status.c.best)
+            )
+            best_map = {int(row[0]): row[1] for row in status_counts_r.all()}
+
+            submitted = best_map.get(3, 0)
+            approved = best_map.get(4, 0)
+            draft = best_map.get(1, 0)
+            revision = best_map.get(2, 0)
 
             # Learners with no submission at all
             has_submission_q = (
