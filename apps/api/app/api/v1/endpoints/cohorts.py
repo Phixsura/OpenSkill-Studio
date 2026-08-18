@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.exceptions import AppError
 from app.models.cohort import CohortRole
 from app.models.organization import OrgRole
 from app.models.user import User
@@ -171,15 +172,25 @@ async def bulk_enroll(
     svc = CohortService(db)
     enrolled = 0
     skipped = 0
+    errors: list[str] = []
     role = CohortRole(body.role)
     for uid in body.user_ids:
         try:
             await svc.add_member(cohort_id, uid, role, org_id)
             enrolled += 1
-        except Exception:  # noqa: BLE001 — skip duplicates/errors
+        except AppError as e:
+            skipped += 1
+            if e.code == "COHORT_FULL":
+                errors.append(f"Cohort is full (max {e.message})")
+                break  # No point trying more
+            # ALREADY_MEMBER, USER_NOT_FOUND, COHORT_FROZEN — continue
+        except Exception:  # noqa: BLE001 — unexpected errors
             skipped += 1
     await db.commit()
-    return DataResponse(data={"enrolled": enrolled, "skipped": skipped})
+    result: dict = {"enrolled": enrolled, "skipped": skipped}
+    if errors:
+        result["errors"] = errors
+    return DataResponse(data=result)
 
 
 @router.delete("/orgs/{org_id}/cohorts/{cohort_id}/members/{user_id}", status_code=204)
