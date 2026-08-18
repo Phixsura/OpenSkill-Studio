@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { apiWithAuth } from "@/lib/api";
@@ -53,7 +54,7 @@ export default function CohortSkillsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohort-skills", cohortId] });
     },
-    onError: (err: Error) => alert(err.message || "Failed to assign skill"),
+    onError: (err: Error) => toast.error(err.message || "Failed to assign skill"),
   });
 
   const unassignMutation = useMutation({
@@ -64,7 +65,7 @@ export default function CohortSkillsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohort-skills", cohortId] });
     },
-    onError: (err: Error) => alert(err.message || "Failed to remove skill"),
+    onError: (err: Error) => toast.error(err.message || "Failed to remove skill"),
   });
 
   return (

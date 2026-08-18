@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { toast } from "sonner";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
@@ -67,7 +68,7 @@ export default function CohortsPage() {
       setEndsAt("");
       setMaxLearners("");
     },
-    onError: (err: Error) => alert(err.message || "Failed to create cohort"),
+    onError: (err: Error) => toast.error(err.message || "Failed to create cohort"),
   });
 
   return (

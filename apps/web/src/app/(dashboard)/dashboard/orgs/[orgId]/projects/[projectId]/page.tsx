@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { toast } from "sonner";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -137,7 +138,7 @@ export default function ProjectDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["project-creators", projectId] });
       setCreatorUserId("");
     },
-    onError: (err: Error) => alert(err.message || "Failed to assign creator"),
+    onError: (err: Error) => toast.error(err.message || "Failed to assign creator"),
   });
 
   const removeCreatorMutation = useMutation({
@@ -148,7 +149,7 @@ export default function ProjectDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-creators", projectId] });
     },
-    onError: (err: Error) => alert(err.message || "Failed to remove creator"),
+    onError: (err: Error) => toast.error(err.message || "Failed to remove creator"),
   });
 
   const project = projectData?.data;

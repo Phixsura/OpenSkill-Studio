@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { toast } from "sonner";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -70,7 +71,7 @@ export default function CohortProjectsPage() {
       setDeadline("");
       setMaxSubs("");
     },
-    onError: (err: Error) => alert(err.message || "Failed to assign project"),
+    onError: (err: Error) => toast.error(err.message || "Failed to assign project"),
   });
 
   const unassignMutation = useMutation({
@@ -81,7 +82,7 @@ export default function CohortProjectsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohort-projects", cohortId] });
     },
-    onError: (err: Error) => alert(err.message || "Failed to remove project"),
+    onError: (err: Error) => toast.error(err.message || "Failed to remove project"),
   });
 
   return (

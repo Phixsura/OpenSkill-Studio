@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { toast } from "sonner";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -61,7 +62,7 @@ export default function CohortMembersPage() {
       queryClient.invalidateQueries({ queryKey: ["cohort-members", cohortId] });
       setUserId("");
     },
-    onError: (err: Error) => alert(err.message || "Failed to add member"),
+    onError: (err: Error) => toast.error(err.message || "Failed to add member"),
   });
 
   const removeMutation = useMutation({
@@ -72,7 +73,7 @@ export default function CohortMembersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohort-members", cohortId] });
     },
-    onError: (err: Error) => alert(err.message || "Failed to remove member"),
+    onError: (err: Error) => toast.error(err.message || "Failed to remove member"),
   });
 
   return (

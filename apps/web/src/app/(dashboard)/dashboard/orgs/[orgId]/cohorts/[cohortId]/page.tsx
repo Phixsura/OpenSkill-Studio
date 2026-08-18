@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { toast } from "sonner";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -89,7 +90,7 @@ export default function CohortDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["cohort-progress", cohortId] });
       queryClient.invalidateQueries({ queryKey: ["cohorts", orgId] });
     },
-    onError: (err: Error) => alert(err.message || "Failed to update status"),
+    onError: (err: Error) => toast.error(err.message || "Failed to update status"),
   });
 
   const editMutation = useMutation({
@@ -103,7 +104,7 @@ export default function CohortDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["cohorts", orgId] });
       setShowEdit(false);
     },
-    onError: (err: Error) => alert(err.message || "Failed to update cohort"),
+    onError: (err: Error) => toast.error(err.message || "Failed to update cohort"),
   });
 
   const deleteMutation = useMutation({
@@ -113,7 +114,7 @@ export default function CohortDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["cohorts", orgId] });
       router.push(`/dashboard/orgs/${orgId}/cohorts`);
     },
-    onError: (err: Error) => alert(err.message || "Failed to delete cohort"),
+    onError: (err: Error) => toast.error(err.message || "Failed to delete cohort"),
   });
 
   const c = cohort?.data;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -99,7 +100,7 @@ export default function BriefDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["brief", briefId] });
       router.push(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
     },
-    onError: (err: Error) => alert(err.message || "Failed to convert brief"),
+    onError: (err: Error) => toast.error(err.message || "Failed to convert brief"),
   });
 
   const applyMutation = useMutation({
@@ -114,9 +115,9 @@ export default function BriefDetailPage() {
     },
     onError: (err: Error) => {
       if (err instanceof ApiError && err.status === 409) {
-        alert("You have already applied to this brief.");
+        toast.error("You have already applied to this brief.");
       } else {
-        alert(err.message || "Failed to apply");
+        toast.error(err.message || "Failed to apply");
       }
     },
   });
@@ -133,7 +134,7 @@ export default function BriefDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["brief-applications", briefId] });
     },
-    onError: (err: Error) => alert(err.message || "Failed to review application"),
+    onError: (err: Error) => toast.error(err.message || "Failed to review application"),
   });
 
   const editMutation = useMutation({
@@ -146,7 +147,7 @@ export default function BriefDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["brief", briefId] });
       setShowEdit(false);
     },
-    onError: (err: Error) => alert(err.message || "Failed to update brief"),
+    onError: (err: Error) => toast.error(err.message || "Failed to update brief"),
   });
 
   const deleteMutation = useMutation({
@@ -156,7 +157,7 @@ export default function BriefDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["briefs", orgId] });
       router.push(`/dashboard/orgs/${orgId}/briefs`);
     },
-    onError: (err: Error) => alert(err.message || "Failed to delete brief"),
+    onError: (err: Error) => toast.error(err.message || "Failed to delete brief"),
   });
 
   const brief = data?.data;

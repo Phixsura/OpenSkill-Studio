@@ -21,6 +21,7 @@
     "react-markdown": "^9",
     "rehype-highlight": "^7",
     "remark-gfm": "^4",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^2",
     "zustand": "^5"
   },
