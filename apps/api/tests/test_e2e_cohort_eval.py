@@ -286,6 +286,9 @@ async def test_application_workflow(c):
         )
     ).json()["data"]["id"]
 
+    # Set brief to open so learner can apply
+    await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=hi)
+
     # Learner applies
     r = await c.post(
         f"/api/v1/orgs/{oid}/briefs/{bid}/apply",

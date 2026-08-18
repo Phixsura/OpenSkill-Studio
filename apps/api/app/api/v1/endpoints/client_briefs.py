@@ -200,6 +200,14 @@ async def apply_to_brief(
     if brief.org_id != org_id:
         raise HTTPException(status_code=404, detail="Brief not found")
 
+    from app.models.client_brief import BriefStatus
+
+    if brief.status not in (BriefStatus.OPEN, BriefStatus.ACTIVE):
+        raise HTTPException(
+            status_code=422,
+            detail="Applications are only accepted for open briefs",
+        )
+
     note = body.get("note", "")
     if isinstance(note, str) and len(note) > 2000:
         raise HTTPException(status_code=422, detail="Note must be 2,000 chars or less")

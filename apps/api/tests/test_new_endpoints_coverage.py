@@ -116,6 +116,7 @@ async def test_withdraw_application(c):
         "title": "Withdraw Brief", "client_name": "C", "project_type": "p",
         "objective": "A brief for testing withdrawal",
     }, headers=hi)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=hi)
 
     # Apply
     await c.post(f"/api/v1/orgs/{oid}/briefs/{bid}/apply", json={"note": "hi"}, headers=hs)
@@ -155,6 +156,7 @@ async def test_withdraw_accepted_application_rejected(c):
         "title": "Accepted Brief", "client_name": "C", "project_type": "p",
         "objective": "A brief where application was accepted",
     }, headers=hi)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=hi)
 
     app_r = await c.post(f"/api/v1/orgs/{oid}/briefs/{bid}/apply", json={"note": "hi"}, headers=hs)
     app_id = app_r.json()["data"]["id"]

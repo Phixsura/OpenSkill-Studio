@@ -110,9 +110,11 @@ class CohortService:
         )
         return list(result.scalars().all()), total
 
-    async def get_cohort(self, cohort_id: str) -> Cohort:
+    async def get_cohort(self, cohort_id: str, *, include_archived: bool = False) -> Cohort:
         cohort = await self.db.get(Cohort, cohort_id)
-        if cohort is None or cohort.status == CohortStatus.ARCHIVED:
+        if cohort is None:
+            raise CohortNotFoundError()
+        if cohort.status == CohortStatus.ARCHIVED and not include_archived:
             raise CohortNotFoundError()
         return cohort
 
@@ -401,7 +403,7 @@ class CohortService:
 
     async def get_cohort_progress(self, cohort_id: str, org_id: str) -> dict:
         """Aggregate progress metrics for a cohort dashboard."""
-        cohort = await self.get_cohort(cohort_id)
+        cohort = await self.get_cohort(cohort_id, include_archived=True)
         if cohort.org_id != org_id:
             raise CohortNotFoundError()
 
@@ -544,7 +546,7 @@ class CohortService:
 
     async def get_learner_drill_down(self, cohort_id: str, user_id: str, org_id: str) -> dict:
         """Per-learner progress within a cohort."""
-        cohort = await self.get_cohort(cohort_id)
+        cohort = await self.get_cohort(cohort_id, include_archived=True)
         if cohort.org_id != org_id:
             raise CohortNotFoundError()
 
@@ -645,7 +647,7 @@ class CohortService:
 
     async def get_learner_dashboard(self, cohort_id: str, user_id: str, org_id: str) -> dict:
         """Learner's own view within a cohort."""
-        cohort = await self.get_cohort(cohort_id)
+        cohort = await self.get_cohort(cohort_id, include_archived=True)
         if cohort.org_id != org_id:
             raise CohortNotFoundError()
 

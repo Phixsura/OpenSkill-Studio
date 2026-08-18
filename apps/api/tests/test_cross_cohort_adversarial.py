@@ -370,6 +370,8 @@ async def test_cross_org_application_review_rejected(c):
             headers=h1,
         )
     ).json()["data"]["id"]
+    # Set to open so student can apply
+    await c.put(f"/api/v1/orgs/{o1}/briefs/{bid}", json={"status": "open"}, headers=h1)
     # Student applies
     app_r = await c.post(f"/api/v1/orgs/{o1}/briefs/{bid}/apply", json={}, headers=hs)
     app_id = app_r.json()["data"]["id"]
