@@ -55,11 +55,23 @@ def rate_limit(limit: int, window: int):
 
         allowed, remaining = await check_rate_limit(key, limit, window)
 
+        # Set rate limit headers for transparency (RFC 6585 / draft-ietf-httpapi-ratelimit-headers)
+        request.state.rate_limit_headers = {
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": str(remaining if allowed else 0),
+            "X-RateLimit-Reset": str(window),
+        }
+
         if not allowed:
             raise HTTPException(
                 status_code=429,
                 detail="Too many requests",
-                headers={"Retry-After": str(window)},
+                headers={
+                    "Retry-After": str(window),
+                    "X-RateLimit-Limit": str(limit),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(window),
+                },
             )
 
         return remaining
