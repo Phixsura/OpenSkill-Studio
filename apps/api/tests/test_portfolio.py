@@ -9,10 +9,12 @@ from app.schemas.portfolio import RESERVED_USERNAMES, USERNAME_PATTERN
 
 
 def test_public_profile_endpoint_exists():
-    """Public profile endpoint is registered and doesn't require auth."""
-    from app.main import app
+    """Public portfolio endpoints are registered."""
+    from app.api.v1.endpoints.portfolio import router
 
-    assert any("/u/{username}" in str(r) for r in app.routes)
+    paths = [r.path for r in router.routes]
+    # /u/{username} is a Next.js page; the API has /u/{username}/items
+    assert any("/u/{username}" in p for p in paths)
 
 
 def test_portfolio_router_has_public_endpoints():
