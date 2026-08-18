@@ -696,10 +696,84 @@ class CohortService:
         drill = await self.get_learner_drill_down(cohort_id, user_id, org_id)
         count = await self.get_member_count(cohort_id)
 
+        # Work needing revision — submissions with status=revision_requested
+        from app.models.project import Submission, SubmissionStatus
+
+        revision_r = await self.db.execute(
+            select(Submission.id, Submission.project_id, Submission.updated_at)
+            .where(
+                Submission.user_id == user_id,
+                Submission.org_id == org_id,
+                Submission.status == SubmissionStatus.REVISION_REQUESTED,
+            )
+            .order_by(Submission.updated_at.desc())
+            .limit(10)
+        )
+        needs_revision = [
+            {"submission_id": row[0], "project_id": row[1], "updated_at": row[2].isoformat()}
+            for row in revision_r.all()
+        ]
+
+        # Pending peer reviews assigned to this user
+        from app.models.project import PeerAssessment
+
+        peer_r = await self.db.execute(
+            select(
+                PeerAssessment.id,
+                PeerAssessment.submission_id,
+                PeerAssessment.created_at,
+            )
+            .where(
+                PeerAssessment.reviewer_id == user_id,
+                PeerAssessment.status == "pending",
+            )
+            .order_by(PeerAssessment.created_at)
+            .limit(10)
+        )
+        pending_peer_reviews = [
+            {"assessment_id": row[0], "submission_id": row[1], "assigned_at": row[2].isoformat()}
+            for row in peer_r.all()
+        ]
+
+        # Recent feedback — reviews on this user's submissions
+        from app.models.project import SubmissionReview
+
+        feedback_r = await self.db.execute(
+            select(
+                SubmissionReview.id,
+                SubmissionReview.submission_id,
+                SubmissionReview.score,
+                SubmissionReview.feedback,
+                SubmissionReview.created_at,
+                SubmissionReview.reviewer_type,
+            )
+            .join(Submission, Submission.id == SubmissionReview.submission_id)
+            .where(
+                Submission.user_id == user_id,
+                Submission.org_id == org_id,
+            )
+            .order_by(SubmissionReview.created_at.desc())
+            .limit(5)
+        )
+        recent_feedback = [
+            {
+                "review_id": row[0],
+                "submission_id": row[1],
+                "score": row[2],
+                "feedback": (row[3] or "")[:200],  # Truncate for dashboard
+                "created_at": row[4].isoformat(),
+                "reviewer_type": row[5].value if row[5] else "unknown",
+            }
+            for row in feedback_r.all()
+        ]
+
         return {
             "cohort": CohortResponse.model_validate(cohort).model_dump() | {"member_count": count},
             "assigned_skills": drill["skills"],
             "assigned_projects": drill["projects"],
+            "needs_revision": needs_revision,
+            "pending_peer_reviews": pending_peer_reviews,
+            "recent_feedback": recent_feedback,
             "last_active_at": drill["last_active_at"],
         }
 

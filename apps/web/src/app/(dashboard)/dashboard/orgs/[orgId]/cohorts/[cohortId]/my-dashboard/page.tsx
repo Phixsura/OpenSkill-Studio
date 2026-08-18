@@ -23,6 +23,27 @@ interface ProjectProgress {
   is_overdue: boolean;
 }
 
+interface RevisionItem {
+  submission_id: string;
+  project_id: string;
+  updated_at: string;
+}
+
+interface PeerReviewItem {
+  assessment_id: string;
+  submission_id: string;
+  assigned_at: string;
+}
+
+interface FeedbackItem {
+  review_id: string;
+  submission_id: string;
+  score: number | null;
+  feedback: string;
+  created_at: string;
+  reviewer_type: string;
+}
+
 interface LearnerDashboard {
   cohort: {
     id: string;
@@ -33,6 +54,9 @@ interface LearnerDashboard {
   };
   assigned_skills: SkillProgress[];
   assigned_projects: ProjectProgress[];
+  needs_revision: RevisionItem[];
+  pending_peer_reviews: PeerReviewItem[];
+  recent_feedback: FeedbackItem[];
   last_active_at: string | null;
 }
 
@@ -165,6 +189,76 @@ export default function MyDashboardPage() {
                   {p.score !== null ? `${p.score} pts` : "—"}
                 </div>
               </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Work Needing Revision */}
+      {d.needs_revision.length > 0 && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-lg font-semibold text-amber-600">⚠ Work Needing Revision</h2>
+          <div className="space-y-2">
+            {d.needs_revision.map((r) => (
+              <Link
+                key={r.submission_id}
+                href={`/dashboard/orgs/${orgId}/projects/${r.project_id}`}
+                className="flex items-center justify-between rounded border border-amber-200 bg-amber-50 px-4 py-3 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950 dark:hover:bg-amber-900"
+              >
+                <span className="text-sm font-medium">Revision requested</span>
+                <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                  {new Date(r.updated_at).toLocaleDateString()}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Pending Peer Reviews */}
+      {d.pending_peer_reviews.length > 0 && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-lg font-semibold">📝 Pending Peer Reviews</h2>
+          <div className="space-y-2">
+            {d.pending_peer_reviews.map((pr) => (
+              <div
+                key={pr.assessment_id}
+                className="flex items-center justify-between rounded border px-4 py-3"
+              >
+                <span className="text-sm">Peer review assigned</span>
+                <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                  {new Date(pr.assigned_at).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Recent Feedback */}
+      {d.recent_feedback.length > 0 && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-lg font-semibold">💬 Recent Feedback</h2>
+          <div className="space-y-2">
+            {d.recent_feedback.map((fb) => (
+              <div key={fb.review_id} className="rounded border px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 capitalize">
+                    {fb.reviewer_type === "ai" ? "🤖 AI Review" : "👤 Instructor"}
+                  </span>
+                  {fb.score !== null && (
+                    <span className="text-sm font-medium">{fb.score} pts</span>
+                  )}
+                  <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                    {new Date(fb.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                {fb.feedback && (
+                  <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+                    {fb.feedback}
+                  </p>
+                )}
+              </div>
             ))}
           </div>
         </section>
