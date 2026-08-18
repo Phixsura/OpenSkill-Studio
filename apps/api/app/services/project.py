@@ -1121,7 +1121,9 @@ class ProjectService:
 
         from app.models.cohort import CohortMember, CohortProjectAssignment
 
-        # Find if the user is in a cohort that overrides this project's deadlines
+        # Find ALL cohort assignments for this user+project.
+        # A student in 2 cohorts with different deadline overrides
+        # should get the most generous (latest) deadline.
         cohort_override_r = await self.db.execute(
             select(CohortProjectAssignment)
             .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
@@ -1129,14 +1131,17 @@ class ProjectService:
                 CohortProjectAssignment.project_id == project.id,
                 CohortMember.user_id == user_id,
             )
-            .limit(1)
         )
-        cohort_assignment = cohort_override_r.scalar_one_or_none()
-        if cohort_assignment:
-            if cohort_assignment.deadline_override is not None:
-                effective_deadline = cohort_assignment.deadline_override
-            if cohort_assignment.late_deadline_override is not None:
-                effective_late_deadline = cohort_assignment.late_deadline_override
+        cohort_assignments = cohort_override_r.scalars().all()
+        for ca in cohort_assignments:
+            if ca.deadline_override is not None and (
+                effective_deadline is None or ca.deadline_override > effective_deadline
+            ):
+                effective_deadline = ca.deadline_override
+            if ca.late_deadline_override is not None and (
+                effective_late_deadline is None or ca.late_deadline_override > effective_late_deadline
+            ):
+                effective_late_deadline = ca.late_deadline_override
 
         if effective_deadline is None:
             return "on_time"  # No deadline set
