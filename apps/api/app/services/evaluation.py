@@ -575,6 +575,9 @@ Please evaluate the submission against the rubric above."""
 
         blocks: list[dict] = []
 
+        if not items:
+            return [{"type": "text", "text": "No submission items to evaluate."}]
+
         # ── Project context ──
         rubric_text = self._format_rubric(project.rubric)
         context = f"## Project: {project.title}\n{project.description}\n\n## Rubric\n{rubric_text}"
@@ -603,9 +606,18 @@ Please evaluate the submission against the rubric above."""
         # ── Submission content ──
         images_meta: list[dict] = []
 
+        max_images = 10  # Cap to avoid exceeding LLM message size limits
+
         if task.type in (EvalType.IMAGE_REVIEW, EvalType.COMMERCIAL_SUBMISSION_REVIEW):
+            image_count = 0
             for item in items:
                 if item.file_key and is_image_mime(item.mime_type):
+                    if image_count >= max_images:
+                        blocks.append(
+                            {"type": "text", "text": f"[{len(items) - image_count} additional images omitted]"}
+                        )
+                        break
+                    image_count += 1
                     try:
                         b64, media_type = await fetch_image_as_base64(item.file_key)
                         blocks.append(build_image_block(b64, media_type))
