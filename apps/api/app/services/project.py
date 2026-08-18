@@ -603,15 +603,16 @@ class ProjectService:
         # Cohort override takes precedence over project default
         effective_max = project.max_submissions
 
+        # Find the most generous max_submissions_override across ALL cohorts
+        # the student belongs to (same rationale as deadline: benefit of most generous).
         cohort_override_r = await self.db.execute(
-            select(CohortProjectAssignment.max_submissions_override)
+            select(func.max(CohortProjectAssignment.max_submissions_override))
             .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
             .where(
                 CohortProjectAssignment.project_id == project_id,
                 CohortMember.user_id == user_id,
                 CohortProjectAssignment.max_submissions_override.is_not(None),
             )
-            .limit(1)
         )
         override = cohort_override_r.scalar_one_or_none()
         if override is not None:
