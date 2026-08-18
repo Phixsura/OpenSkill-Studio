@@ -410,3 +410,80 @@ async def test_student_cannot_assign_skills(c):
 
     r = await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/skills", json={"skill_id": sk}, headers=hs)
     assert r.status_code == 403
+
+
+# ═══════════════ Status Transition Guards ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_cohort_status_cannot_go_backwards(c):
+    """Cohort status transitions: only forward (draft→active→completed→archived)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "Trans"}, headers=h)
+    ).json()["data"]["id"]
+
+    # draft → active: OK
+    r = await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=h)
+    assert r.status_code == 200
+
+    # active → draft: BLOCKED
+    r = await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "draft"}, headers=h)
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "INVALID_TRANSITION"
+
+    # active → completed: OK
+    r = await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "completed"}, headers=h)
+    assert r.status_code == 200
+
+    # completed → active: BLOCKED
+    r = await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=h)
+    assert r.status_code == 422
+
+    # completed → archived: OK
+    r = await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "archived"}, headers=h)
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_assign_unpublished_project_to_cohort_rejected(c):
+    """Draft (unpublished) projects cannot be assigned to cohorts."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cid = (
+        await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "PubGuard"}, headers=h)
+    ).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=h)
+
+    # Create draft project (NOT published)
+    dp = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Unpub",
+                "description": "d" * 10,
+                "instructions": "i" * 10,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    # Assign draft → rejected
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/projects",
+        json={"project_id": dp},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "PROJECT_NOT_PUBLISHED"
+
+    # Publish then assign → OK
+    await c.post(f"/api/v1/orgs/{oid}/projects/{dp}/publish", headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cid}/projects",
+        json={"project_id": dp},
+        headers=h,
+    )
+    assert r.status_code == 201

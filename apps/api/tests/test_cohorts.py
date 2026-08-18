@@ -335,6 +335,7 @@ async def test_assign_project_with_overrides(c):
             headers=h,
         )
     ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
     r = await c.post(
         f"/api/v1/orgs/{oid}/cohorts/{cid}/projects",
         json={
@@ -559,6 +560,7 @@ async def test_project_assignment_duplicate_409(c):
             headers=h,
         )
     ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
     assert (
         await c.post(
             f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=h

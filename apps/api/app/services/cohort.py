@@ -116,10 +116,25 @@ class CohortService:
             raise CohortNotFoundError()
         return cohort
 
+    # Valid status transitions: draft→active, active→completed, completed→archived
+    _VALID_TRANSITIONS: dict[CohortStatus, set[CohortStatus]] = {
+        CohortStatus.DRAFT: {CohortStatus.ACTIVE},
+        CohortStatus.ACTIVE: {CohortStatus.COMPLETED},
+        CohortStatus.COMPLETED: {CohortStatus.ARCHIVED},
+    }
+
     async def update_cohort(self, cohort_id: str, **fields) -> Cohort:
         cohort = await self.get_cohort(cohort_id)
         if fields.get("status"):
-            cohort.status = CohortStatus(fields.pop("status"))
+            new_status = CohortStatus(fields.pop("status"))
+            allowed = self._VALID_TRANSITIONS.get(cohort.status, set())
+            if new_status != cohort.status and new_status not in allowed:
+                raise AppError(
+                    "INVALID_TRANSITION",
+                    f"Cannot transition from {cohort.status.value} to {new_status.value}",
+                    422,
+                )
+            cohort.status = new_status
         if fields.get("name"):
             cohort.slug = self._generate_slug(fields["name"])
         for k, v in fields.items():
@@ -320,6 +335,12 @@ class CohortService:
         project = await self.db.get(Project, project_id)
         if project is None or project.org_id != org_id:
             raise AppError("PROJECT_NOT_FOUND", "Project not found in this organization", 404)
+        if project.status != ContentStatus.PUBLISHED:
+            raise AppError(
+                "PROJECT_NOT_PUBLISHED",
+                "Only published projects can be assigned to a cohort",
+                422,
+            )
 
         try:
             mode = ParticipationMode(participation_mode)
