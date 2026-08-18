@@ -16,6 +16,13 @@ interface CohortMember {
   user_email: string | null;
 }
 
+interface OrgMember {
+  user_id: string;
+  display_name: string;
+  email: string;
+  role: string;
+}
+
 export default function CohortMembersPage() {
   const { orgId, cohortId } = useParams<{ orgId: string; cohortId: string }>();
   const queryClient = useQueryClient();
@@ -29,6 +36,17 @@ export default function CohortMembersPage() {
         `/orgs/${orgId}/cohorts/${cohortId}/members`,
       ),
   });
+
+  const { data: orgMembers } = useQuery({
+    queryKey: ["org-members", orgId],
+    queryFn: () =>
+      apiWithAuth<{ data: OrgMember[] }>(`/orgs/${orgId}/members`),
+  });
+
+  const cohortMemberIds = new Set(data?.data.map((m) => m.user_id) || []);
+  const availableMembers = (orgMembers?.data || []).filter(
+    (m) => !cohortMemberIds.has(m.user_id),
+  );
 
   const addMutation = useMutation({
     mutationFn: () =>
@@ -60,13 +78,18 @@ export default function CohortMembersPage() {
 
       {/* Add member form */}
       <div className="mb-6 flex gap-2">
-        <input
-          type="text"
-          placeholder="User ID"
+        <select
           value={userId}
           onChange={(e) => setUserId(e.target.value)}
           className="flex-1 rounded border px-3 py-2 text-sm"
-        />
+        >
+          <option value="">Select an org member...</option>
+          {availableMembers.map((m) => (
+            <option key={m.user_id} value={m.user_id}>
+              {m.display_name} ({m.email})
+            </option>
+          ))}
+        </select>
         <select
           value={role}
           onChange={(e) => setRole(e.target.value)}

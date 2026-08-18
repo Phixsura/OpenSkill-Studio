@@ -230,8 +230,20 @@ export default function SubmissionDetailPage() {
           {(sub.reviews ?? []).map((r) => (
             <div key={r.id} className="rounded-lg border p-4">
               <div className="flex items-center justify-between text-sm">
-                <span>
-                  {r.reviewer_type === "ai" ? "🤖 AI Review" : "👨‍🏫 Instructor Review"}
+                <span className="flex items-center gap-2">
+                  {r.reviewer_type === "ai" ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                      🤖 AI Review
+                    </span>
+                  ) : r.reviewer_type === "peer" ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                      👥 Peer Review
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                      👨‍🏫 Instructor Review
+                    </span>
+                  )}
                 </span>
                 <span className="capitalize font-medium">{r.status.replace("_", " ")}</span>
               </div>
