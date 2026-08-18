@@ -23,6 +23,19 @@ class AppError(Exception):
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    def _error_body(code: str, message: str, request: Request, details: list | None = None) -> dict:
+        """Stripe-style error response with request_id for debugging."""
+        body: dict = {
+            "error": {
+                "code": code,
+                "message": message,
+                "request_id": getattr(request.state, "request_id", None),
+            }
+        }
+        if details:
+            body["error"]["details"] = details
+        return body
+
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError):
         log.warning(
@@ -33,20 +46,14 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         return JSONResponse(
             status_code=exc.status_code,
-            content={
-                "error": {
-                    "code": exc.code,
-                    "message": exc.message,
-                    "details": exc.details,
-                }
-            },
+            content=_error_body(exc.code, exc.message, request, exc.details),
         )
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error_handler(request: Request, exc: StarletteHTTPException):
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": {"code": "HTTP_ERROR", "message": exc.detail}},
+            content=_error_body("HTTP_ERROR", exc.detail or "Request error", request),
         )
 
     @app.exception_handler(ValueError)
@@ -56,14 +63,8 @@ def register_exception_handlers(app: FastAPI) -> None:
         if "null" in msg.lower() or "overflow" in msg.lower() or "out of range" in msg.lower():
             return JSONResponse(
                 status_code=422,
-                content={
-                    "error": {
-                        "code": "INVALID_VALUE",
-                        "message": "Request contains invalid characters or values",
-                    }
-                },
+                content=_error_body("INVALID_VALUE", "Request contains invalid characters or values", request),
             )
-        # Re-raise others to the generic handler
         raise exc
 
     @app.exception_handler(Exception)
@@ -76,10 +77,5 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         return JSONResponse(
             status_code=500,
-            content={
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An unexpected error occurred",
-                }
-            },
+            content=_error_body("INTERNAL_ERROR", "An unexpected error occurred", request),
         )

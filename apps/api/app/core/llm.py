@@ -1,9 +1,19 @@
-"""LLM client abstraction — dual-provider (Anthropic + OpenAI), multimodal."""
+"""LLM client abstraction — dual-provider (Anthropic + OpenAI), multimodal.
 
+Includes retry with exponential backoff for transient errors (429, 500, timeouts).
+"""
+
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 1.0  # seconds
 
 
 @dataclass
@@ -52,21 +62,31 @@ class AnthropicClient(LLMClient):
         max_tokens: int = 4096,
         temperature: float = 0.1,
     ) -> LLMResponse:
-        # Anthropic accepts both str and list[ContentBlock] natively
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        return LLMResponse(
-            content=response.content[0].text,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            model=self.model,
-            provider="anthropic",
-        )
+        # Retry with exponential backoff for transient errors
+        last_exc: Exception | None = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                return LLMResponse(
+                    content=response.content[0].text,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    model=self.model,
+                    provider="anthropic",
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
+                    await asyncio.sleep(delay)
+        raise last_exc  # type: ignore[misc]
 
 
 class OpenAIClient(LLMClient):
@@ -85,26 +105,35 @@ class OpenAIClient(LLMClient):
         max_tokens: int = 4096,
         temperature: float = 0.1,
     ) -> LLMResponse:
-        # OpenAI needs Anthropic-style blocks translated
         content = _to_openai_content(user_prompt) if isinstance(user_prompt, list) else user_prompt
 
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": content},
-            ],
-        )
-        choice = response.choices[0]
-        return LLMResponse(
-            content=choice.message.content or "",
-            input_tokens=response.usage.prompt_tokens if response.usage else 0,
-            output_tokens=response.usage.completion_tokens if response.usage else 0,
-            model=self.model,
-            provider="openai",
-        )
+        last_exc: Exception | None = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": content},
+                    ],
+                )
+                choice = response.choices[0]
+                return LLMResponse(
+                    content=choice.message.content or "",
+                    input_tokens=response.usage.prompt_tokens if response.usage else 0,
+                    output_tokens=response.usage.completion_tokens if response.usage else 0,
+                    model=self.model,
+                    provider="openai",
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
+                    await asyncio.sleep(delay)
+        raise last_exc  # type: ignore[misc]
 
 
 def _to_openai_content(blocks: list) -> list:
