@@ -138,7 +138,7 @@ class UpdateClientBriefRequest(BaseModel):
     @classmethod
     def validate_status(cls, v: str | None) -> str | None:
         if v is not None:
-            valid = {"draft", "active", "completed", "archived"}
+            valid = {"draft", "open", "assigned", "in_production", "review", "active", "completed", "cancelled", "archived"}
             if v not in valid:
                 raise ValueError(f"Status must be one of: {', '.join(sorted(valid))}")
         return v

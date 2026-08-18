@@ -262,8 +262,8 @@ async def review_application(
         raise HTTPException(status_code=404, detail="Application not found")
 
     status = body.get("status")
-    if status not in ("accepted", "rejected"):
-        raise HTTPException(status_code=422, detail="Status must be 'accepted' or 'rejected'")
+    if status not in ("accepted", "rejected", "withdrawn"):
+        raise HTTPException(status_code=422, detail="Status must be 'accepted', 'rejected', or 'withdrawn'")
 
     app_obj.status = ApplicationStatus(status)
     app_obj.reviewed_at = datetime.now(UTC)
@@ -276,4 +276,87 @@ async def review_application(
             "status": app_obj.status.value,
             "reviewed_at": app_obj.reviewed_at.isoformat(),
         }
+    )
+
+
+@router.post(
+    "/orgs/{org_id}/briefs/{brief_id}/withdraw",
+    response_model=DataResponse[dict],
+)
+async def withdraw_application(
+    org_id: str,
+    brief_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Learner withdraws their own application."""
+    await require_org_member(org_id, user, db)
+
+    from sqlalchemy import select
+
+    from app.models.client_brief import ApplicationStatus, BriefApplication
+
+    result = await db.execute(
+        select(BriefApplication).where(
+            BriefApplication.brief_id == brief_id,
+            BriefApplication.user_id == user.id,
+        )
+    )
+    app_obj = result.scalar_one_or_none()
+    if app_obj is None:
+        raise HTTPException(status_code=404, detail="No application found")
+    if app_obj.status != ApplicationStatus.PENDING:
+        raise HTTPException(
+            status_code=422,
+            detail="Can only withdraw pending applications",
+        )
+
+    app_obj.status = ApplicationStatus.WITHDRAWN
+    await db.commit()
+    return DataResponse(
+        data={
+            "id": app_obj.id,
+            "status": app_obj.status.value,
+        }
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/briefs/open",
+    response_model=DataResponse[list[dict]],
+)
+async def list_open_briefs(
+    org_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List briefs that are open for applications (commercial project pool)."""
+    await require_org_member(org_id, user, db)
+
+    from sqlalchemy import select
+
+    from app.models.client_brief import BriefStatus, ClientBrief
+
+    result = await db.execute(
+        select(ClientBrief)
+        .where(
+            ClientBrief.org_id == org_id,
+            ClientBrief.status.in_([BriefStatus.OPEN, BriefStatus.ACTIVE]),
+        )
+        .order_by(ClientBrief.created_at.desc())
+    )
+    briefs = result.scalars().all()
+    return DataResponse(
+        data=[
+            {
+                "id": b.id,
+                "title": b.title,
+                "client_name": b.client_name,
+                "project_type": b.project_type,
+                "objective": b.objective,
+                "status": b.status.value,
+                "created_at": b.created_at.isoformat(),
+            }
+            for b in briefs
+        ]
     )

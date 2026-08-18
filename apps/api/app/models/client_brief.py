@@ -14,8 +14,13 @@ from app.models.base import Base, ulid_pk
 
 class BriefStatus(str, enum.Enum):
     DRAFT = "draft"
-    ACTIVE = "active"
+    OPEN = "open"  # published internally, accepting applications
+    ASSIGNED = "assigned"  # assigned to cohort/creators
+    IN_PRODUCTION = "in_production"  # work underway
+    REVIEW = "review"  # deliverables under review
+    ACTIVE = "active"  # legacy alias (mapped from convert)
     COMPLETED = "completed"
+    CANCELLED = "cancelled"
     ARCHIVED = "archived"
 
 

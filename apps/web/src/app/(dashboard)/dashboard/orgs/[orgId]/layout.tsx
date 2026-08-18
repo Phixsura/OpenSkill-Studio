@@ -17,6 +17,7 @@ export default function OrgLayout({ children }: { children: React.ReactNode }) {
     { href: `${base}/projects`, label: "Projects" },
     { href: `${base}/cohorts`, label: "Cohorts" },
     { href: `${base}/briefs`, label: "Briefs" },
+    { href: `${base}/opportunities`, label: "Opportunities" },
     { href: `${base}/progress`, label: "Progress" },
     { href: `${base}/members`, label: "Members" },
     { href: `${base}/evaluation`, label: "AI Evaluation" },
