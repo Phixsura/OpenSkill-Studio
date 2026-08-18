@@ -47,6 +47,12 @@ const STATUS_COLORS: Record<string, string> = {
   rejected: "text-red-600",
 };
 
+interface CohortSummary {
+  id: string;
+  name: string;
+  status: string;
+}
+
 export default function MyDashboardPage() {
   const { orgId, cohortId } = useParams<{ orgId: string; cohortId: string }>();
 
@@ -58,7 +64,15 @@ export default function MyDashboardPage() {
       ),
   });
 
+  // Fetch all cohorts the learner belongs to (for switching)
+  const { data: myCohorts } = useQuery({
+    queryKey: ["my-cohorts", orgId],
+    queryFn: () =>
+      apiWithAuth<{ data: CohortSummary[] }>(`/orgs/${orgId}/my-cohorts`),
+  });
+
   const d = data?.data;
+  const otherCohorts = myCohorts?.data.filter((c) => c.id !== cohortId) ?? [];
 
   if (isLoading) {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
@@ -70,7 +84,27 @@ export default function MyDashboardPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold">{d.cohort.name}</h1>
+      <div className="mb-1 flex items-center gap-3">
+        <h1 className="text-2xl font-bold">{d.cohort.name}</h1>
+        {otherCohorts.length > 0 && (
+          <select
+            className="rounded border px-2 py-1 text-sm"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) {
+                window.location.href = `/dashboard/orgs/${orgId}/cohorts/${e.target.value}/my-dashboard`;
+              }
+            }}
+          >
+            <option value="">Switch cohort...</option>
+            {otherCohorts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
       {d.cohort.description && (
         <p className="mb-6 text-sm text-[hsl(var(--muted-foreground))]">
           {d.cohort.description}
@@ -141,6 +175,20 @@ export default function MyDashboardPage() {
           No skills or projects assigned to this cohort yet.
         </p>
       )}
+
+      {/* Commercial opportunities link */}
+      <section className="mt-8 rounded-lg border border-dashed p-4">
+        <h2 className="mb-1 text-lg font-semibold">🚀 Commercial Opportunities</h2>
+        <p className="mb-3 text-sm text-[hsl(var(--muted-foreground))]">
+          Browse open commercial projects you can apply to work on.
+        </p>
+        <Link
+          href={`/dashboard/orgs/${orgId}/opportunities`}
+          className="inline-block rounded bg-[hsl(var(--primary))] px-4 py-2 text-sm text-[hsl(var(--primary-foreground))] hover:opacity-90"
+        >
+          Browse Opportunities →
+        </Link>
+      </section>
     </div>
   );
 }

@@ -14,8 +14,32 @@ interface CohortMember {
   joined_at: string;
 }
 
+interface CohortProgress {
+  total_learners: number;
+  total_skills_assigned: number;
+  avg_skill_completion_pct: number;
+  overdue_submissions: number;
+  inactive_learners_7d: number;
+  projects: Array<{
+    project_id: string;
+    title: string;
+    submitted: number;
+    approved: number;
+    not_started: number;
+    overdue: number;
+  }>;
+}
+
 export default function CohortProgressPage() {
   const { orgId, cohortId } = useParams<{ orgId: string; cohortId: string }>();
+
+  const { data: progressData } = useQuery({
+    queryKey: ["cohort-progress-stats", cohortId],
+    queryFn: () =>
+      apiWithAuth<{ data: CohortProgress }>(
+        `/orgs/${orgId}/cohorts/${cohortId}/progress`,
+      ),
+  });
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["cohort-members-progress", cohortId],
@@ -25,16 +49,40 @@ export default function CohortProgressPage() {
       ),
   });
 
+  const stats = progressData?.data;
   const learners = data?.data ?? [];
 
   return (
     <div>
       <h1 className="mb-4 text-2xl font-bold">Learner Progress</h1>
-      <p className="mb-6 text-sm text-[hsl(var(--muted-foreground))]">
+
+      {/* Aggregate stats */}
+      {stats && (
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-lg border p-3 text-center">
+            <div className="text-xl font-bold">{stats.total_learners}</div>
+            <div className="text-xs text-[hsl(var(--muted-foreground))]">Learners</div>
+          </div>
+          <div className="rounded-lg border p-3 text-center">
+            <div className="text-xl font-bold">{stats.avg_skill_completion_pct}%</div>
+            <div className="text-xs text-[hsl(var(--muted-foreground))]">Skill Completion</div>
+          </div>
+          <div className="rounded-lg border p-3 text-center">
+            <div className="text-xl font-bold text-red-600">{stats.overdue_submissions}</div>
+            <div className="text-xs text-[hsl(var(--muted-foreground))]">Overdue</div>
+          </div>
+          <div className="rounded-lg border p-3 text-center">
+            <div className="text-xl font-bold text-amber-600">{stats.inactive_learners_7d}</div>
+            <div className="text-xs text-[hsl(var(--muted-foreground))]">Inactive (7d)</div>
+          </div>
+        </div>
+      )}
+
+      <p className="mb-4 text-sm text-[hsl(var(--muted-foreground))]">
         Click a learner to see their detailed skill and project progress.
       </p>
 
-      {isError && <p className="mb-4 text-sm text-red-600">Failed to load learner progress. Please try again.</p>}
+      {isError && <p className="mb-4 text-sm text-red-600">Failed to load learner list.</p>}
 
       {isLoading ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
