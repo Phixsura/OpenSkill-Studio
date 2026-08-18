@@ -61,9 +61,10 @@ test("cohort member add form → member appears in table", async ({ page }) => {
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(1000);
 
-  // Fill User ID
-  const userIdInput = page.locator('input[placeholder="User ID"]');
-  await userIdInput.fill(student.userId);
+  // Select student from org members dropdown
+  const memberSelect = page.locator("select").first();
+  await memberSelect.waitFor({ timeout: 10_000 });
+  await memberSelect.selectOption({ value: student.userId });
 
   // Click Add
   await page.getByRole("button", { name: "Add" }).click();

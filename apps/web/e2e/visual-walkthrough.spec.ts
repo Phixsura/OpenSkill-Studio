@@ -188,7 +188,8 @@ test.describe("Admin walks through all pages", () => {
     // Should show role badge in table (CSS capitalize shows "Learner")
     await expect(page.locator("table span", { hasText: /learner/i }).first()).toBeVisible({ timeout: 5_000 });
     // Should show add form
-    await expect(page.locator('input[placeholder="User ID"]')).toBeVisible();
+    // Member add uses org members dropdown
+    await expect(page.locator("select").first()).toBeVisible();
   });
 
   test("04 — cohort skills page", async ({ page }) => {

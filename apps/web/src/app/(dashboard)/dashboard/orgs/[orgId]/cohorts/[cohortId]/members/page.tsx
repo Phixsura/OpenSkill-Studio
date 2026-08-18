@@ -17,9 +17,12 @@ interface CohortMember {
 }
 
 interface OrgMember {
-  user_id: string;
-  display_name: string;
-  email: string;
+  id: string;
+  user: {
+    id: string;
+    display_name: string;
+    email: string;
+  };
   role: string;
 }
 
@@ -45,7 +48,7 @@ export default function CohortMembersPage() {
 
   const cohortMemberIds = new Set(data?.data.map((m) => m.user_id) || []);
   const availableMembers = (orgMembers?.data || []).filter(
-    (m) => !cohortMemberIds.has(m.user_id),
+    (m) => !cohortMemberIds.has(m.user.id),
   );
 
   const addMutation = useMutation({
@@ -85,8 +88,8 @@ export default function CohortMembersPage() {
         >
           <option value="">Select an org member...</option>
           {availableMembers.map((m) => (
-            <option key={m.user_id} value={m.user_id}>
-              {m.display_name} ({m.email})
+            <option key={m.user.id} value={m.user.id}>
+              {m.user.display_name} ({m.user.email})
             </option>
           ))}
         </select>

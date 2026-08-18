@@ -172,8 +172,10 @@ test("complete instructor + student journey via browser", async ({ page }) => {
       body: JSON.stringify({ status: "active" }),
     });
 
-    // Add student
-    await page.locator('input[placeholder="User ID"]').fill(studentId);
+    // Add student from org members dropdown
+    const memberSelect = page.locator("select").first();
+    await memberSelect.waitFor({ timeout: 10_000 });
+    await memberSelect.selectOption({ value: studentId });
     await page.getByRole("button", { name: "Add" }).click();
     await page.waitForTimeout(2000);
 

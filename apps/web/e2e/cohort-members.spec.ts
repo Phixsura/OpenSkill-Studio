@@ -63,8 +63,8 @@ test.describe("Cohort Members Page", () => {
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
     await page.waitForLoadState("networkidle");
 
-    await expect(page.locator('input[placeholder="User ID"]')).toBeVisible();
-    await expect(page.locator("select")).toBeVisible(); // role selector
+    // Member add uses org members dropdown (not raw User ID input)
+    await expect(page.locator("select").first()).toBeVisible();
     await expect(page.locator("button:has-text('Add')")).toBeVisible();
   });
 
