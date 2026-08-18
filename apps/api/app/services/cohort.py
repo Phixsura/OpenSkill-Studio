@@ -142,6 +142,13 @@ class CohortService:
         for k, v in fields.items():
             if v is not None and hasattr(cohort, k):
                 setattr(cohort, k, v)
+        # Validate date ordering after all fields applied
+        if cohort.starts_at and cohort.ends_at and cohort.ends_at < cohort.starts_at:
+            raise AppError(
+                "INVALID_DATES",
+                "End date must be on or after start date",
+                422,
+            )
         await self.db.flush()
         await self.db.refresh(cohort)
         return cohort

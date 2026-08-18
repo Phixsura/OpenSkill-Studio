@@ -97,6 +97,12 @@ class UpdateCohortRequest(BaseModel):
             return v.replace(tzinfo=UTC)
         return v
 
+    @model_validator(mode="after")
+    def validate_date_ordering(self):
+        if self.starts_at and self.ends_at and self.ends_at < self.starts_at:
+            raise ValueError("ends_at must be on or after starts_at")
+        return self
+
 
 class CohortResponse(BaseModel):
     id: str
