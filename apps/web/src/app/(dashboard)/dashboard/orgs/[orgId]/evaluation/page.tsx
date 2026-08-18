@@ -37,7 +37,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function EvaluationPage() {
   const { orgId } = useParams<{ orgId: string }>();
 
-  const { data: tasksData } = useQuery({
+  const { data: tasksData, isLoading, isError } = useQuery({
     queryKey: ["eval-tasks", orgId],
     queryFn: () =>
       apiWithAuth<{ data: EvalTask[]; meta: { total: number } }>(
@@ -52,8 +52,11 @@ export default function EvaluationPage() {
 
   const tasks = tasksData?.data ?? [];
 
+  if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+
   return (
     <div className="space-y-6">
+      {isError && <p className="mb-4 text-sm text-red-600">Failed to load evaluation tasks. Please try again.</p>}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">AI Evaluation</h1>

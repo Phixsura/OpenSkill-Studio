@@ -36,7 +36,7 @@ export default function NewProjectPage() {
 
   const submitting = useRef(false);
 
-  const { data: templatesData } = useQuery({
+  const { data: templatesData, isError: templatesError } = useQuery({
     queryKey: ["project-templates", orgId],
     queryFn: () =>
       apiWithAuth<{ data: Template[] }>(`/orgs/${orgId}/project-templates`),
@@ -122,6 +122,12 @@ export default function NewProjectPage() {
           Create a project assignment for your organization.
         </p>
       </div>
+
+      {templatesError && (
+        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+          Failed to load templates.
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">

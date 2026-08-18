@@ -49,7 +49,7 @@ export default function LearnerDrillDownPage() {
     userId: string;
   }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["drill-down", cohortId, userId],
     queryFn: () =>
       apiWithAuth<{ data: DrillDown }>(
@@ -61,6 +61,9 @@ export default function LearnerDrillDownPage() {
 
   if (isLoading) {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  }
+  if (isError) {
+    return <p className="text-sm text-red-600">Failed to load learner progress. They may not be a member of this cohort.</p>;
   }
   if (!d) return <p>Learner not found</p>;
 

@@ -8,7 +8,7 @@ import { apiWithAuth } from "@/lib/api";
 import { type OrgInfo } from "@/stores/org";
 
 export default function OrgsListPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["my-orgs"],
     queryFn: () => apiWithAuth<{ data: OrgInfo[] }>("/orgs"),
   });
@@ -29,6 +29,7 @@ export default function OrgsListPage() {
         </Link>
       </div>
 
+      {isError && <p className="mb-4 text-sm text-red-600">Failed to load organizations. Please try again.</p>}
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
 
       {!isLoading && orgs.length === 0 && (

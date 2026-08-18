@@ -50,7 +50,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function MyDashboardPage() {
   const { orgId, cohortId } = useParams<{ orgId: string; cohortId: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["my-cohort-dashboard", cohortId],
     queryFn: () =>
       apiWithAuth<{ data: LearnerDashboard }>(
@@ -62,6 +62,9 @@ export default function MyDashboardPage() {
 
   if (isLoading) {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  }
+  if (isError) {
+    return <p className="text-sm text-red-600">Failed to load dashboard. You may not be a member of this cohort.</p>;
   }
   if (!d) return null;
 

@@ -21,7 +21,7 @@ interface PendingSub {
 export default function ReviewDashboardPage() {
   const { orgId } = useParams<{ orgId: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["pending-reviews", orgId],
     queryFn: () =>
       apiWithAuth<{ data: PendingSub[]; meta: { total: number } }>(
@@ -41,6 +41,7 @@ export default function ReviewDashboardPage() {
         </p>
       </div>
 
+      {isError && <p className="mb-4 text-sm text-red-600">Failed to load reviews. Please try again.</p>}
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
 
       {!isLoading && submissions.length === 0 && (

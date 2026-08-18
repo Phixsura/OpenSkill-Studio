@@ -20,7 +20,7 @@ export default function OrgSettingsPage() {
   const { orgId } = useParams<{ orgId: string }>();
   const queryClient = useQueryClient();
 
-  const { data } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["org", orgId],
     queryFn: () => apiWithAuth<{ data: OrgDetail }>(`/orgs/${orgId}`),
   });
@@ -60,6 +60,9 @@ export default function OrgSettingsPage() {
       setSaving(false);
     }
   };
+
+  if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isError) return <p className="text-sm text-red-600">Failed to load settings. Please try again.</p>;
 
   return (
     <div className="space-y-6">

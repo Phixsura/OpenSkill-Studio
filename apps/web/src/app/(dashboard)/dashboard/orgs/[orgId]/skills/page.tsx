@@ -44,7 +44,7 @@ export default function SkillsListPage() {
       apiWithAuth<{ data: CohortItem[] }>(`/orgs/${orgId}/my-cohorts`),
   });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["skills", orgId, search, difficulty, cohortFilter],
     queryFn: () => {
       const params = new URLSearchParams();
@@ -63,6 +63,7 @@ export default function SkillsListPage() {
 
   return (
     <div className="space-y-6">
+      {isError && <p className="mb-4 text-sm text-red-600">Failed to load skills. Please try again.</p>}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Skills</h1>

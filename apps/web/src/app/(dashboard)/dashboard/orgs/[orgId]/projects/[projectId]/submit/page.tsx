@@ -75,7 +75,7 @@ export default function SubmitPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const { data: projectData } = useQuery({
+  const { data: projectData, isLoading: projectLoading, isError: projectError } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () =>
       apiWithAuth<{ data: { title: string; project_type: string; deliverables: Deliverable[] } }>(
@@ -245,6 +245,9 @@ export default function SubmitPage() {
     }));
     setSavedPrompts((s) => ({ ...s, [promptDeliverable.id]: false }));
   };
+
+  if (projectLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading project...</p>;
+  if (projectError) return <p className="text-sm text-red-600">Failed to load project. Please try again.</p>;
 
   if (!submissionId) {
     const requiredCount = deliverables.filter((d) => d.required).length;

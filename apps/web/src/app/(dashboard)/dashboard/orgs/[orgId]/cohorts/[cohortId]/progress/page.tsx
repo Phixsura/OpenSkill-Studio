@@ -17,7 +17,7 @@ interface CohortMember {
 export default function CohortProgressPage() {
   const { orgId, cohortId } = useParams<{ orgId: string; cohortId: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["cohort-members-progress", cohortId],
     queryFn: () =>
       apiWithAuth<{ data: CohortMember[]; meta: { total: number } }>(
@@ -33,6 +33,8 @@ export default function CohortProgressPage() {
       <p className="mb-6 text-sm text-[hsl(var(--muted-foreground))]">
         Click a learner to see their detailed skill and project progress.
       </p>
+
+      {isError && <p className="mb-4 text-sm text-red-600">Failed to load learner progress. Please try again.</p>}
 
       {isLoading ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>

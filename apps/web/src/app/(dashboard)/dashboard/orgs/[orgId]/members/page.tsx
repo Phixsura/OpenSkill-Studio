@@ -30,7 +30,7 @@ export default function MembersPage() {
   const [inviteRole, setInviteRole] = useState("student");
   const [inviteLink, setInviteLink] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["org-members", orgId],
     queryFn: () =>
       apiWithAuth<{ data: OrgMember[]; meta: { total: number } }>(
@@ -59,6 +59,7 @@ export default function MembersPage() {
 
   return (
     <div className="space-y-6">
+      {isError && <p className="mb-4 text-sm text-red-600">Failed to load members. Please try again.</p>}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Members</h1>
