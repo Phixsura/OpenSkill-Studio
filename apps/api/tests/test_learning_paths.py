@@ -267,3 +267,275 @@ async def test_cross_org_path_access(c):
     pid = (await c.post(f"/api/v1/orgs/{oid1}/paths", json={"name": "Private"}, headers=h1)).json()["data"]["id"]
     r = await c.get(f"/api/v1/orgs/{oid2}/paths/{pid}", headers=h2)
     assert r.status_code == 404
+
+
+# ═══════════════ Validation Errors ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_add_skill_item_missing_skill_id(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "MissingSkill"}, headers=h)).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill",
+    }, headers=h)
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "MISSING_SKILL_ID"
+
+
+@pytest.mark.asyncio
+async def test_add_project_item_missing_project_id(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "MissingProj"}, headers=h)).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "project",
+    }, headers=h)
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "MISSING_PROJECT_ID"
+
+
+@pytest.mark.asyncio
+async def test_add_section_item_missing_title(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "MissingSec"}, headers=h)).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "section",
+    }, headers=h)
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "MISSING_TITLE"
+
+
+@pytest.mark.asyncio
+async def test_add_cross_org_project_item(c):
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/paths", json={"name": "XOrgProj"}, headers=h1)).json()["data"]["id"]
+    proj_id = await _project(c, h2, oid2)
+    r = await c.post(f"/api/v1/orgs/{oid1}/paths/{pid}/items", json={
+        "item_type": "project", "project_id": proj_id,
+    }, headers=h1)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "PROJECT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_remove_item_not_found(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "RemoveNF"}, headers=h)).json()["data"]["id"]
+    fake_id = "01JFAKE00000000000000FAKE"
+    r = await c.delete(f"/api/v1/orgs/{oid}/paths/{pid}/items/{fake_id}", headers=h)
+    assert r.status_code == 404
+
+
+# ═══════════════ Unassign ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_unassign_from_cohort(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Unassign"}, headers=h)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"status": "published"}, headers=h)
+    cid = (await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "UnCohort"}, headers=h)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/paths", json={"path_id": pid}, headers=h)
+
+    r = await c.delete(f"/api/v1/orgs/{oid}/cohorts/{cid}/paths/{pid}", headers=h)
+    assert r.status_code == 204
+
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/paths", headers=h)
+    assert r.status_code == 200
+    assert len(r.json()["data"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_unassign_not_assigned(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "NotAssigned"}, headers=h)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"status": "published"}, headers=h)
+    cid = (await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "NACohort"}, headers=h)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=h)
+
+    r = await c.delete(f"/api/v1/orgs/{oid}/cohorts/{cid}/paths/{pid}", headers=h)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_ASSIGNED"
+
+
+@pytest.mark.asyncio
+async def test_assign_already_assigned(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Dup"}, headers=h)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"status": "published"}, headers=h)
+    cid = (await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "DupCohort"}, headers=h)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/paths", json={"path_id": pid}, headers=h)
+
+    r = await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/paths", json={"path_id": pid}, headers=h)
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "ALREADY_ASSIGNED"
+
+
+@pytest.mark.asyncio
+async def test_assign_cross_org_cohort_idor(c):
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/paths", json={"name": "IDORPath"}, headers=h1)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid1}/paths/{pid}", json={"status": "published"}, headers=h1)
+    cid = (await c.post(f"/api/v1/orgs/{oid2}/cohorts", json={"name": "IDORCohort"}, headers=h2)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid2}/cohorts/{cid}", json={"status": "active"}, headers=h2)
+
+    r = await c.post(f"/api/v1/orgs/{oid1}/cohorts/{cid}/paths", json={"path_id": pid}, headers=h1)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "COHORT_NOT_FOUND"
+
+
+# ═══════════════ Progress Edge Cases ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_path_progress_empty_path(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Empty"}, headers=h)).json()["data"]["id"]
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["pct"] == 100
+    assert data["total_required"] == 0
+
+
+@pytest.mark.asyncio
+async def test_path_progress_section_only(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "SecOnly"}, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "section", "section_title": "Intro",
+    }, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "section", "section_title": "Advanced",
+    }, headers=h)
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["pct"] == 100
+
+
+@pytest.mark.asyncio
+async def test_path_progress_locked_item(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Locked"}, headers=h)).json()["data"]["id"]
+    s1 = await _skill(c, h, oid, "Lock1")
+    s2 = await _skill(c, h, oid, "Lock2")
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": s1, "sort_order": 0,
+    }, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": s2, "sort_order": 1,
+    }, headers=h)
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r.status_code == 200
+    items = r.json()["data"]["items"]
+    assert items[0]["status"] == "available"
+    assert items[1]["status"] == "locked"
+
+
+@pytest.mark.asyncio
+async def test_path_progress_immediate_unlock(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Immediate"}, headers=h)).json()["data"]["id"]
+    s1 = await _skill(c, h, oid, "Imm1")
+    s2 = await _skill(c, h, oid, "Imm2")
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": s1, "sort_order": 0,
+    }, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": s2, "sort_order": 1, "unlock_rule": "immediate",
+    }, headers=h)
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r.status_code == 200
+    items = r.json()["data"]["items"]
+    assert items[1]["status"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_path_progress_optional_not_counted(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Optional"}, headers=h)).json()["data"]["id"]
+    s1 = await _skill(c, h, oid, "Req1")
+    s2 = await _skill(c, h, oid, "Opt1")
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": s1, "sort_order": 0, "required": True,
+    }, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": s2, "sort_order": 1, "required": False,
+    }, headers=h)
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["total_required"] == 1
+
+
+# ═══════════════ IDOR + RBAC ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_cross_org_path_update_idor(c):
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/paths", json={"name": "Private"}, headers=h1)).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid2}/paths/{pid}", json={"name": "Hacked"}, headers=h2)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cross_org_path_delete_idor(c):
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/paths", json={"name": "Private"}, headers=h1)).json()["data"]["id"]
+    r = await c.delete(f"/api/v1/orgs/{oid2}/paths/{pid}", headers=h2)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cross_org_path_add_item(c):
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/paths", json={"name": "Private"}, headers=h1)).json()["data"]["id"]
+    sid = await _skill(c, h2, oid2)
+    r = await c.post(f"/api/v1/orgs/{oid2}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": sid,
+    }, headers=h2)
+    assert r.status_code in (403, 404)
+
+
+@pytest.mark.asyncio
+async def test_cross_org_path_remove_item(c):
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/paths", json={"name": "Private"}, headers=h1)).json()["data"]["id"]
+    sid = await _skill(c, h1, oid1)
+    item = (await c.post(f"/api/v1/orgs/{oid1}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": sid,
+    }, headers=h1)).json()["data"]
+    r = await c.delete(f"/api/v1/orgs/{oid2}/paths/{pid}/items/{item['id']}", headers=h2)
+    assert r.status_code in (403, 404)

@@ -321,3 +321,154 @@ async def test_cross_org_installation_access(c):
     # Other org can't see this installation
     r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}", headers=h2)
     assert r.status_code == 404
+
+
+# ═══════════════ Registry Filters & Pagination ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_registry_filter_by_scenario(c):
+    """Search with ?scenario=ecommerce finds pack tagged with that scenario."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
+        "name": "Scenario Pack",
+        "visibility": "public",
+        "scenario_tags": ["ecommerce"],
+    }, headers=h)).json()["data"]["id"]
+
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"SC-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
+        "name": f"SC-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
+        "difficulty": "beginner", "category_id": cat,
+    }, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+
+    r = await c.get("/api/v1/registry/packs?scenario=ecommerce")
+    assert r.status_code == 200
+    assert any(p["id"] == pid for p in r.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_registry_filter_by_tool(c):
+    """Search with ?tool=comfyui finds pack tagged with that tool."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
+        "name": "Tool Pack",
+        "visibility": "public",
+        "tool_tags": ["comfyui"],
+    }, headers=h)).json()["data"]["id"]
+
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"TL-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
+        "name": f"TL-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
+        "difficulty": "beginner", "category_id": cat,
+    }, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+
+    r = await c.get("/api/v1/registry/packs?tool=comfyui")
+    assert r.status_code == 200
+    assert any(p["id"] == pid for p in r.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_registry_filter_by_difficulty(c):
+    """Search with ?difficulty=beginner finds pack with that difficulty."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
+        "name": "Difficulty Pack",
+        "visibility": "public",
+        "difficulty": "beginner",
+    }, headers=h)).json()["data"]["id"]
+
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"DF-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
+        "name": f"DF-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
+        "difficulty": "beginner", "category_id": cat,
+    }, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+
+    r = await c.get("/api/v1/registry/packs?difficulty=beginner")
+    assert r.status_code == 200
+    assert any(p["id"] == pid for p in r.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_registry_sort_popular(c):
+    """sort=most_installed puts pack with more installs first."""
+    h1, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    less_pid = await _pack_with_release(c, h1, oid1, f"Less-{uuid.uuid4().hex[:6]}", "public")
+    more_pid = await _pack_with_release(c, h1, oid1, f"More-{uuid.uuid4().hex[:6]}", "public")
+
+    # Install the "more" pack multiple times from different orgs
+    for _ in range(3):
+        hx, _ = await _auth(c)
+        ox = await _org(c, hx)
+        await c.post(f"/api/v1/orgs/{ox}/installations", json={"pack_id": more_pid}, headers=hx)
+
+    # Install the "less" pack once
+    hy, _ = await _auth(c)
+    oy = await _org(c, hy)
+    await c.post(f"/api/v1/orgs/{oy}/installations", json={"pack_id": less_pid}, headers=hy)
+
+    r = await c.get("/api/v1/registry/packs?sort=most_installed&per_page=100")
+    assert r.status_code == 200
+    ids = [p["id"] for p in r.json()["data"]]
+    if more_pid in ids and less_pid in ids:
+        assert ids.index(more_pid) < ids.index(less_pid)
+
+
+@pytest.mark.asyncio
+async def test_registry_pagination(c):
+    """page+per_page returns correct number of results and meta.total."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for i in range(3):
+        await _pack_with_release(c, h, oid, f"Page-{uuid.uuid4().hex[:6]}-{i}", "public")
+
+    r = await c.get("/api/v1/registry/packs?page=1&per_page=2")
+    assert r.status_code == 200
+    assert len(r.json()["data"]) == 2
+    assert r.json()["meta"]["total"] >= 3
+    assert r.json()["meta"]["has_more"] is True
+
+
+@pytest.mark.asyncio
+async def test_registry_unlisted_not_in_search(c):
+    """Unlisted packs do not appear in registry search results."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, f"Unlisted-{uuid.uuid4().hex[:6]}", "unlisted")
+
+    r = await c.get("/api/v1/registry/packs?search=Unlisted")
+    assert r.status_code == 200
+    assert not any(p["id"] == pid for p in r.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_registry_unlisted_accessible_by_id(c):
+    """Unlisted pack is accessible via direct GET by ID."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, "Unlisted Direct", "unlisted")
+
+    r = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r.status_code == 200
+    assert r.json()["data"]["id"] == pid
+
+
+@pytest.mark.asyncio
+async def test_registry_private_pack_detail_rejected(c):
+    """Private pack is not accessible via the public registry detail endpoint."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, "Private Detail", "private")
+
+    r = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r.status_code == 404
