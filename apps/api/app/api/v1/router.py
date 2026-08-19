@@ -7,11 +7,13 @@ from app.api.v1.endpoints import (
     cohorts,
     evaluation,
     health,
+    installations,
     organizations,
     overview,
     peer_review,
     portfolio,
     projects,
+    registry,
     skill_packs,
     skills,
 )
@@ -30,3 +32,5 @@ api_v1_router.include_router(cohorts.router)
 api_v1_router.include_router(client_briefs.router)
 api_v1_router.include_router(portfolio.router)
 api_v1_router.include_router(skill_packs.router)
+api_v1_router.include_router(registry.router)
+api_v1_router.include_router(installations.router)

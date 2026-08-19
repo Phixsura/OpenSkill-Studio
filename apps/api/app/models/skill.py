@@ -79,6 +79,12 @@ class SkillCategory(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    # Pack origin tracking (set when installed from a pack)
+    origin_pack_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    origin_release_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    origin_component_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    locally_modified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     skills: Mapped[list["Skill"]] = relationship(
         back_populates="category", cascade="all, delete-orphan"
     )
@@ -120,6 +126,12 @@ class Skill(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    # Pack origin tracking
+    origin_pack_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    origin_release_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    origin_component_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    locally_modified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     category: Mapped["SkillCategory"] = relationship(back_populates="skills")
     exercises: Mapped[list["Exercise"]] = relationship(
@@ -167,6 +179,12 @@ class Exercise(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    # Pack origin tracking
+    origin_pack_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    origin_release_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    origin_component_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    locally_modified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     skill: Mapped["Skill"] = relationship(back_populates="exercises")
     attempts: Mapped[list["ExerciseAttempt"]] = relationship(
