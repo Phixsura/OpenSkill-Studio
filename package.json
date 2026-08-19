@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "husky": "^9",
-    "lint-staged": "^15",
+    "lint-staged": "^17",
     "openapi-typescript": "^7",
     "playwright": "^1.62.1",
     "turbo": "^2"
