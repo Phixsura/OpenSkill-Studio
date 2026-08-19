@@ -161,7 +161,7 @@ async def list_cohort_paths(
 ):
     await require_org_member(org_id, user, db)
     svc = LearningPathService(db)
-    assignments = await svc.list_cohort_paths(cohort_id)
+    assignments = await svc.list_cohort_paths(cohort_id, org_id)
     return DataResponse(data=[
         {"cohort_id": cohort_id, "path_id": a.path_id, "path_name": name, "assigned_at": a.assigned_at.isoformat()}
         for a, name in assignments

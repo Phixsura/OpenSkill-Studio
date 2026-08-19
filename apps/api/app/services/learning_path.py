@@ -153,9 +153,18 @@ class LearningPathService:
 
     # ── Cohort Assignment ──
 
+    async def _verify_cohort_org(self, cohort_id: str, org_id: str) -> None:
+        """Verify the cohort belongs to the same org (prevents cross-tenant IDOR)."""
+        from app.models.cohort import Cohort
+
+        cohort = await self.db.get(Cohort, cohort_id)
+        if cohort is None or cohort.org_id != org_id:
+            raise AppError("COHORT_NOT_FOUND", "Cohort not found in this organization", 404)
+
     async def assign_to_cohort(
         self, path_id: str, cohort_id: str, org_id: str, assigned_by: str
     ) -> None:
+        await self._verify_cohort_org(cohort_id, org_id)
         path = await self.get_path(path_id, org_id)
         if path.status != ContentStatus.PUBLISHED:
             raise AppError("PATH_NOT_PUBLISHED", "Only published paths can be assigned", 422)
@@ -173,6 +182,7 @@ class LearningPathService:
             raise AppError("ALREADY_ASSIGNED", "Path already assigned to this cohort", 409) from None
 
     async def unassign_from_cohort(self, path_id: str, cohort_id: str, org_id: str) -> None:
+        await self._verify_cohort_org(cohort_id, org_id)
         await self.get_path(path_id, org_id)
         result = await self.db.execute(
             select(CohortLearningPathAssignment).where(
@@ -186,7 +196,8 @@ class LearningPathService:
         await self.db.delete(assignment)
         await self.db.flush()
 
-    async def list_cohort_paths(self, cohort_id: str) -> list[tuple[CohortLearningPathAssignment, str]]:
+    async def list_cohort_paths(self, cohort_id: str, org_id: str) -> list[tuple[CohortLearningPathAssignment, str]]:
+        await self._verify_cohort_org(cohort_id, org_id)
         result = await self.db.execute(
             select(CohortLearningPathAssignment, LearningPath.name)
             .join(LearningPath, LearningPath.id == CohortLearningPathAssignment.path_id)
