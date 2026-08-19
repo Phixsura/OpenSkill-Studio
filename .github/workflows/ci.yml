@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: cd apps/api && uv sync --extra dev
       - run: cd apps/api && uv run ruff check .
       - run: cd apps/api && uv run ruff format --check .
@@ -70,7 +70,7 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: cd apps/api && uv sync --extra dev
       - run: >
           cd apps/api && APP_ENV=test PYTHONPATH=.
