@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     peer_review,
     portfolio,
     projects,
+    skill_packs,
     skills,
 )
 
@@ -28,3 +29,4 @@ api_v1_router.include_router(evaluation.router)
 api_v1_router.include_router(cohorts.router)
 api_v1_router.include_router(client_briefs.router)
 api_v1_router.include_router(portfolio.router)
+api_v1_router.include_router(skill_packs.router)
