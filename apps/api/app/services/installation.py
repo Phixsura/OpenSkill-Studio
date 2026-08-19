@@ -300,6 +300,8 @@ class InstallationService:
 
     async def compute_diff(self, install_id: str, org_id: str, target_version: str) -> dict:
         inst = await self.get_installation(install_id, org_id)
+        if inst.status == InstallStatus.FORKED:
+            raise AppError("INSTALL_FORKED", "Cannot diff a forked installation", 422)
         if inst.release_id is None:
             raise AppError("NO_RELEASE", "Installation has no release reference", 422)
 
