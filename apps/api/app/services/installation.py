@@ -25,9 +25,15 @@ from app.models.skill_pack import (
 log = structlog.get_logger()
 
 
-def _parse_semver(version: str) -> tuple[int, ...]:
-    """Parse 'X.Y.Z' into a comparable tuple."""
-    return tuple(int(x) for x in version.split("."))
+def _parse_semver(version: str) -> tuple[int, int, int, str]:
+    """Parse 'X.Y.Z' or 'X.Y.Z-prerelease' into a comparable tuple.
+
+    Pre-release versions sort BEFORE the release (1.0.0-alpha < 1.0.0).
+    """
+    base, _, prerelease = version.partition("-")
+    parts = base.split(".")
+    pre_key = prerelease if prerelease else "~"  # '~' > all ASCII letters
+    return (int(parts[0]), int(parts[1]), int(parts[2]), pre_key)
 
 
 # ── Errors ────────────────────────────────────────────────
@@ -410,6 +416,197 @@ class InstallationService:
         await self.db.flush()
 
         log.info("pack_forked", install_id=install_id, org_id=org_id)
+        return inst
+
+    # ── Upgrade ──
+
+    async def upgrade(
+        self,
+        install_id: str,
+        org_id: str,
+        target_version: str,
+        installed_by: str,
+    ) -> SkillPackInstallation:
+        """Upgrade an installation to a newer version."""
+        inst = await self.get_installation(install_id, org_id)
+        if inst.status == InstallStatus.FORKED:
+            raise AppError("INSTALL_FORKED", "Cannot upgrade a forked installation", 422)
+        if inst.pack_id is None:
+            raise AppError("NO_SOURCE", "Installation source pack is unavailable", 422)
+
+        # Get target release
+        release_r = await self.db.execute(
+            select(SkillPackRelease).where(
+                SkillPackRelease.pack_id == inst.pack_id,
+                SkillPackRelease.version == target_version,
+            )
+        )
+        release = release_r.scalar_one_or_none()
+        if release is None:
+            raise AppError("RELEASE_NOT_FOUND", f"Version {target_version} not found", 404)
+
+        # Get current release manifest
+        if inst.release_id is None:
+            raise AppError("NO_RELEASE", "Installation has no release reference", 422)
+        current_release = await self.db.get(SkillPackRelease, inst.release_id)
+        if current_release is None:
+            raise AppError("NO_RELEASE", "Current release not found", 422)
+
+        old_m = current_release.manifest
+        new_m = release.manifest
+
+        old_skills = {s["logical_id"]: s for s in old_m.get("skills", [])}
+        new_skills = {s["logical_id"]: s for s in new_m.get("skills", [])}
+        old_tmpls = {t["logical_id"]: t for t in old_m.get("project_templates", [])}
+        new_tmpls = {t["logical_id"]: t for t in new_m.get("project_templates", [])}
+
+        pack_id = inst.pack_id
+
+        # ---- Handle ADDED skills ----
+        for lid in set(new_skills) - set(old_skills):
+            skill_def = new_skills[lid]
+            import secrets as _secrets
+
+            skill = Skill(
+                org_id=org_id,
+                name=skill_def["name"],
+                slug=f"{skill_def.get('slug', skill_def['name'].lower().replace(' ', '-')[:200])[:190]}-{_secrets.token_hex(3)}",
+                description=skill_def.get("description", ""),
+                learning_content=skill_def.get("learning_content"),
+                difficulty=skill_def.get("difficulty", "beginner"),
+                estimated_minutes=skill_def.get("estimated_minutes"),
+                tags=skill_def.get("tags", []),
+                sort_order=skill_def.get("sort_order", 0),
+                status=ContentStatus.PUBLISHED,
+                origin_pack_id=pack_id,
+                origin_release_id=release.id,
+                origin_component_id=lid,
+                created_by=installed_by,
+            )
+            self.db.add(skill)
+            await self.db.flush()
+
+            for ex_def in skill_def.get("exercises", []):
+                exercise = Exercise(
+                    org_id=org_id,
+                    skill_id=skill.id,
+                    title=ex_def["title"],
+                    description=ex_def.get("description", ""),
+                    type=ExerciseType(ex_def.get("type", "text_answer")),
+                    config=ex_def.get("config", {}),
+                    max_score=ex_def.get("max_score", 100),
+                    sort_order=ex_def.get("sort_order", 0),
+                    status=ContentStatus.PUBLISHED,
+                    origin_pack_id=pack_id,
+                    origin_release_id=release.id,
+                    origin_component_id=ex_def.get("logical_id", ""),
+                    created_by=installed_by,
+                )
+                self.db.add(exercise)
+
+        # ---- Handle CHANGED skills (update in place if not locally modified) ----
+        for lid in set(old_skills) & set(new_skills):
+            if old_skills[lid] != new_skills[lid]:
+                result = await self.db.execute(
+                    select(Skill).where(
+                        Skill.origin_component_id == lid,
+                        Skill.origin_pack_id == pack_id,
+                        Skill.org_id == org_id,
+                        Skill.status != ContentStatus.ARCHIVED,
+                    )
+                )
+                existing = result.scalar_one_or_none()
+                if existing and not existing.locally_modified:
+                    skill_def = new_skills[lid]
+                    existing.name = skill_def["name"]
+                    existing.description = skill_def.get("description", "")
+                    existing.learning_content = skill_def.get("learning_content")
+                    existing.difficulty = skill_def.get("difficulty", "beginner")
+                    existing.estimated_minutes = skill_def.get("estimated_minutes")
+                    existing.tags = skill_def.get("tags", [])
+                    existing.origin_release_id = release.id
+
+        # ---- Handle REMOVED skills (archive, preserve learner data) ----
+        for lid in set(old_skills) - set(new_skills):
+            result = await self.db.execute(
+                select(Skill).where(
+                    Skill.origin_component_id == lid,
+                    Skill.origin_pack_id == pack_id,
+                    Skill.org_id == org_id,
+                    Skill.status != ContentStatus.ARCHIVED,
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                existing.status = ContentStatus.ARCHIVED
+
+        # ---- Handle ADDED templates ----
+        for lid in set(new_tmpls) - set(old_tmpls):
+            tmpl_def = new_tmpls[lid]
+            tmpl = ProjectTemplate(
+                org_id=org_id,
+                name=tmpl_def["name"],
+                description=tmpl_def.get("description", ""),
+                instructions=tmpl_def.get("instructions", ""),
+                project_type=tmpl_def.get("project_type", "general"),
+                difficulty=tmpl_def.get("difficulty", "intermediate"),
+                suggested_minutes=tmpl_def.get("suggested_minutes"),
+                max_score=tmpl_def.get("max_score", 100),
+                rubric=tmpl_def.get("rubric", [{"criterion": "Overall", "max_score": 100}]),
+                deliverables=tmpl_def.get("deliverables", []),
+                skill_names=tmpl_def.get("skill_names", []),
+                origin_pack_id=pack_id,
+                origin_release_id=release.id,
+                origin_component_id=lid,
+                created_by=installed_by,
+            )
+            self.db.add(tmpl)
+
+        # ---- Handle CHANGED templates ----
+        for lid in set(old_tmpls) & set(new_tmpls):
+            if old_tmpls[lid] != new_tmpls[lid]:
+                result = await self.db.execute(
+                    select(ProjectTemplate).where(
+                        ProjectTemplate.origin_component_id == lid,
+                        ProjectTemplate.origin_pack_id == pack_id,
+                        ProjectTemplate.org_id == org_id,
+                        ProjectTemplate.status != ContentStatus.ARCHIVED,
+                    )
+                )
+                existing = result.scalar_one_or_none()
+                if existing and not existing.locally_modified:
+                    tmpl_def = new_tmpls[lid]
+                    existing.name = tmpl_def["name"]
+                    existing.description = tmpl_def.get("description", "")
+                    existing.instructions = tmpl_def.get("instructions", "")
+                    existing.origin_release_id = release.id
+
+        # ---- Handle REMOVED templates (archive) ----
+        for lid in set(old_tmpls) - set(new_tmpls):
+            result = await self.db.execute(
+                select(ProjectTemplate).where(
+                    ProjectTemplate.origin_component_id == lid,
+                    ProjectTemplate.origin_pack_id == pack_id,
+                    ProjectTemplate.org_id == org_id,
+                    ProjectTemplate.status != ContentStatus.ARCHIVED,
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                existing.status = ContentStatus.ARCHIVED
+
+        # Update installation record
+        inst.release_id = release.id
+        inst.installed_version = target_version
+        await self.db.flush()
+
+        log.info(
+            "pack_upgraded",
+            install_id=install_id,
+            org_id=org_id,
+            from_version=current_release.version,
+            to_version=target_version,
+        )
         return inst
 
     # ── Remove ──

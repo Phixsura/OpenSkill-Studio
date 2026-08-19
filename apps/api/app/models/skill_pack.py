@@ -138,7 +138,7 @@ class SkillPackRelease(Base):
     pack_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False
     )
-    version: Mapped[str] = mapped_column(String(20), nullable=False)
+    version: Mapped[str] = mapped_column(String(50), nullable=False)
     manifest: Mapped[dict] = mapped_column(JSONB, nullable=False)
     changelog: Mapped[str | None] = mapped_column(Text)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -169,7 +169,7 @@ class SkillPackInstallation(Base):
     release_id: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("skill_pack_releases.id", ondelete="SET NULL")
     )
-    installed_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    installed_version: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[InstallStatus] = mapped_column(
         Enum(InstallStatus, name="install_status", create_constraint=True),
         default=InstallStatus.ACTIVE,

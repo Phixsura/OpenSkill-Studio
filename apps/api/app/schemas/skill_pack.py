@@ -154,8 +154,8 @@ class PublishReleaseRequest(BaseModel):
     @classmethod
     def validate_version(cls, v: str) -> str:
         v = v.strip()
-        if len(v) > 20:
-            raise ValueError("Version must be 20 characters or less")
+        if len(v) > 50:
+            raise ValueError("Version must be 50 characters or less")
         return v
 
 

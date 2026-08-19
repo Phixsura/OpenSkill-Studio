@@ -23,6 +23,10 @@ class InstallRequest(BaseModel):
     version: str | None = None  # None = latest
 
 
+class UpgradeRequest(BaseModel):
+    version: str
+
+
 class InstallResponse(BaseModel):
     id: str
     org_id: str
@@ -114,6 +118,25 @@ async def get_diff(
     svc = InstallationService(db)
     diff = await svc.compute_diff(install_id, org_id, version)
     return DataResponse(data=diff)
+
+
+@router.post(
+    "/orgs/{org_id}/installations/{install_id}/upgrade",
+    response_model=DataResponse[InstallResponse],
+    dependencies=[Depends(rate_limit(5, 60))],
+)
+async def upgrade_installation(
+    org_id: str,
+    install_id: str,
+    body: UpgradeRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = InstallationService(db)
+    inst = await svc.upgrade(install_id, org_id, body.version, user.id)
+    await db.commit()
+    return DataResponse(data=InstallResponse.model_validate(inst))
 
 
 @router.post(

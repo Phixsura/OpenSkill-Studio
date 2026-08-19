@@ -35,9 +35,19 @@ MAX_TEMPLATES_PER_PACK = 50
 MAX_MANIFEST_BYTES = 10_000_000  # 10 MB
 
 
-def _parse_semver(version: str) -> tuple[int, ...]:
-    """Parse 'X.Y.Z' into a comparable tuple."""
-    return tuple(int(x) for x in version.split("."))
+def _parse_semver(version: str) -> tuple[int, int, int, str]:
+    """Parse 'X.Y.Z' or 'X.Y.Z-prerelease' into a comparable tuple.
+
+    Pre-release versions sort BEFORE the release (1.0.0-alpha < 1.0.0)
+    by using the pre-release string directly. An empty string sorts
+    after any pre-release label because '' > any non-empty string is
+    False — so we use a high-sorting sentinel for the release.
+    """
+    base, _, prerelease = version.partition("-")
+    parts = base.split(".")
+    # Sentinel: release (no prerelease) sorts AFTER all pre-release strings
+    pre_key = prerelease if prerelease else "~"  # '~' > all ASCII letters
+    return (int(parts[0]), int(parts[1]), int(parts[2]), pre_key)
 
 
 # ── Errors ────────────────────────────────────────────────
@@ -229,7 +239,7 @@ class SkillPackService:
         pack = await self.get_pack(pack_id, org_id)
 
         # Validate semver
-        if not re.match(r"^\d+\.\d+\.\d+$", version):
+        if not re.match(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$", version):
             raise AppError("INVALID_VERSION", "Version must be semver format (e.g. 1.0.0)", 422)
 
         # Check duplicate version
@@ -439,6 +449,10 @@ class SkillPackService:
         except IntegrityError:
             await self.db.rollback()
             raise AppError("DUPLICATE_VERSION", f"Version {version} already exists", 409) from None
+
+        # Invalidate registry cache after new release
+        from app.core.cache import cache_delete_pattern
+        await cache_delete_pattern("registry:*")
 
         log.info(
             "pack_released",
