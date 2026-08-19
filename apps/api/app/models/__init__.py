@@ -73,6 +73,16 @@ from app.models.skill import (  # noqa: F401
     SkillPrerequisite,
     SkillProgress,
 )
+from app.models.skill_pack import (  # noqa: F401
+    InstallStatus,
+    PackStatus,
+    PackVisibility,
+    SkillPack,
+    SkillPackInstallation,
+    SkillPackRelease,
+    SkillPackSkill,
+    SkillPackTemplate,
+)
 from app.models.user import (  # noqa: F401
     EmailVerificationToken,
     OAuthAccount,
