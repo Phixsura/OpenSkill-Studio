@@ -74,7 +74,7 @@ export default function PathDetailPage() {
   const { data: skillsData } = useQuery({
     queryKey: ["org-skills-options", orgId],
     queryFn: () =>
-      apiWithAuth<{ data: SkillOption[] }>(`/orgs/${orgId}/skills?per_page=200`),
+      apiWithAuth<{ data: SkillOption[] }>(`/orgs/${orgId}/skills?per_page=100`),
   });
 
   const { data: projectsData } = useQuery({
