@@ -101,6 +101,11 @@ Architecture decisions are documented in [`docs/design/`](docs/design/):
 - [ADR-005: Projects & Submissions](docs/design/005-projects-and-submissions.md)
 - [ADR-006: AI Evaluation Pipeline](docs/design/006-ai-evaluation-pipeline.md)
 - [ADR-007: Portfolio & Public Page](docs/design/007-portfolio-and-public-page.md)
+- [ADR-009: Skill Pack Registry](docs/design/009-skill-pack-registry.md)
+
+## Skill Pack Registry
+
+OpenSkill Studio includes a Skill Pack Registry for packaging, versioning, and distributing curated training content across organizations. Curriculum designers can publish packs containing categories, skills, exercises, and project templates, then share them publicly or privately. Organizations can browse the registry, install packs with a single click, and optionally fork installed content for independent customization. See [ADR-009](docs/design/009-skill-pack-registry.md) for the full design.
 
 ## Contributing
 

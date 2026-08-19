@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.core.rate_limit import rate_limit
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.skill_pack import ReleaseResponse, SkillPackResponse
 from app.services.registry import RegistryService
@@ -11,7 +12,7 @@ from app.services.registry import RegistryService
 router = APIRouter(tags=["Registry"])
 
 
-@router.get("/registry/packs", response_model=ListResponse[SkillPackResponse])
+@router.get("/registry/packs", response_model=ListResponse[SkillPackResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def search_registry(
     search: str | None = None,
     scenario: str | None = None,
@@ -31,7 +32,7 @@ async def search_registry(
     )
 
 
-@router.get("/registry/packs/{pack_id}", response_model=DataResponse[SkillPackResponse])
+@router.get("/registry/packs/{pack_id}", response_model=DataResponse[SkillPackResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def get_registry_pack(pack_id: str, db: AsyncSession = Depends(get_db)):
     """Get a public/unlisted pack detail."""
     svc = RegistryService(db)
@@ -39,7 +40,7 @@ async def get_registry_pack(pack_id: str, db: AsyncSession = Depends(get_db)):
     return DataResponse(data=SkillPackResponse.model_validate(pack))
 
 
-@router.get("/registry/packs/{pack_id}/releases", response_model=DataResponse[list[ReleaseResponse]])
+@router.get("/registry/packs/{pack_id}/releases", response_model=DataResponse[list[ReleaseResponse]], dependencies=[Depends(rate_limit(30, 60))])
 async def get_registry_releases(pack_id: str, db: AsyncSession = Depends(get_db)):
     """List releases for a public pack."""
     svc = RegistryService(db)

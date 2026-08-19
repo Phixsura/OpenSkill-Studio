@@ -1,7 +1,7 @@
 """Public pack registry — search, filter, browse published packs."""
 
 import structlog
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -13,6 +13,11 @@ from app.models.skill_pack import (
 )
 
 log = structlog.get_logger()
+
+
+def _parse_semver(version: str) -> tuple[int, ...]:
+    """Parse 'X.Y.Z' into a comparable tuple."""
+    return tuple(int(x) for x in version.split("."))
 
 
 class RegistryService:
@@ -42,6 +47,9 @@ class RegistryService:
                     SkillPack.name.ilike(term),
                     SkillPack.summary.ilike(term),
                     SkillPack.description.ilike(term),
+                    cast(SkillPack.scenario_tags, String).ilike(term),
+                    cast(SkillPack.tool_tags, String).ilike(term),
+                    cast(SkillPack.capability_tags, String).ilike(term),
                 )
             )
 
@@ -55,10 +63,12 @@ class RegistryService:
             base = base.where(SkillPack.difficulty == difficulty)
 
         # Sort
-        if sort == "most_installed":
+        if sort in ("most_installed", "popular"):
             base = base.order_by(SkillPack.install_count.desc())
         elif sort == "recently_updated":
             base = base.order_by(SkillPack.updated_at.desc())
+        elif sort == "name":
+            base = base.order_by(SkillPack.name.asc())
         else:  # newest
             base = base.order_by(SkillPack.created_at.desc())
 
@@ -83,8 +93,8 @@ class RegistryService:
         """List releases for a public pack."""
         await self.get_public_pack(pack_id)  # verify accessible
         result = await self.db.execute(
-            select(SkillPackRelease)
-            .where(SkillPackRelease.pack_id == pack_id)
-            .order_by(SkillPackRelease.released_at.desc())
+            select(SkillPackRelease).where(SkillPackRelease.pack_id == pack_id)
         )
-        return list(result.scalars().all())
+        releases = list(result.scalars().all())
+        releases.sort(key=lambda r: _parse_semver(r.version), reverse=True)
+        return releases

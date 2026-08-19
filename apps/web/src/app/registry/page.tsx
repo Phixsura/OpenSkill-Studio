@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -27,15 +27,21 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 };
 
 export default function RegistryPage() {
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [difficulty, setDifficulty] = useState("");
   const [sort, setSort] = useState("newest");
 
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchInput), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["registry", search, difficulty, sort],
+    queryKey: ["registry", debouncedSearch, difficulty, sort],
     queryFn: () => {
       const params = new URLSearchParams();
-      if (search) params.set("search", search);
+      if (debouncedSearch) params.set("search", debouncedSearch);
       if (difficulty) params.set("difficulty", difficulty);
       params.set("sort", sort);
       return api<{ data: RegistryPack[]; meta: { total: number } }>(
@@ -64,11 +70,14 @@ export default function RegistryPage() {
       <div className="mb-6 flex flex-wrap gap-3">
         <Input
           placeholder="Search packs..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search skill packs"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="max-w-xs"
         />
+        <label className="sr-only" htmlFor="difficulty-filter">Difficulty</label>
         <select
+          id="difficulty-filter"
           value={difficulty}
           onChange={(e) => setDifficulty(e.target.value)}
           className="rounded-md border bg-transparent px-3 py-2 text-sm"
@@ -79,7 +88,9 @@ export default function RegistryPage() {
           <option value="advanced">Advanced</option>
           <option value="expert">Expert</option>
         </select>
+        <label className="sr-only" htmlFor="sort-select">Sort</label>
         <select
+          id="sort-select"
           value={sort}
           onChange={(e) => setSort(e.target.value)}
           className="rounded-md border bg-transparent px-3 py-2 text-sm"
@@ -100,11 +111,12 @@ export default function RegistryPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" role="list">
         {packs.map((pack) => (
           <Link
             key={pack.id}
             href={`/registry/${pack.id}`}
+            aria-label={pack.name}
             className="group rounded-lg border p-5 transition-shadow hover:shadow-md"
           >
             <div className="flex items-start justify-between">

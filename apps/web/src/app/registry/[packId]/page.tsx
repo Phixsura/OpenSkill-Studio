@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -46,6 +47,13 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 export default function RegistryPackDetailPage() {
   const { packId } = useParams<{ packId: string }>();
 
+  const [isAuthed, setIsAuthed] = useState(false);
+  useEffect(() => {
+    import("@/stores/auth").then((m) =>
+      setIsAuthed(m.useAuthStore.getState().isAuthenticated),
+    );
+  }, []);
+
   const { data: packData, isLoading, isError } = useQuery({
     queryKey: ["registry-pack", packId],
     queryFn: () =>
@@ -75,7 +83,7 @@ export default function RegistryPackDetailPage() {
         <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           Pack not found or failed to load.
         </div>
-        <Link href="/registry" className="mt-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline">
+        <Link href="/registry" aria-label="Back to registry" className="mt-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline">
           ← Back to Registry
         </Link>
       </div>
@@ -84,7 +92,7 @@ export default function RegistryPackDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
-      <Link href="/registry" className="mb-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline">
+      <Link href="/registry" aria-label="Back to registry" className="mb-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline">
         ← Back to Registry
       </Link>
 
@@ -115,8 +123,12 @@ export default function RegistryPackDetailPage() {
             {pack.summary}
           </p>
         )}
-        <Link href="/login">
-          <Button className="mt-4">Install in your organization →</Button>
+        <Link href={isAuthed ? "/dashboard" : "/login"}>
+          <Button className="mt-4" aria-label={`Install ${pack.name}`}>
+            {isAuthed
+              ? "Install in your organization →"
+              : "Sign in to install →"}
+          </Button>
         </Link>
       </div>
 
@@ -156,7 +168,7 @@ export default function RegistryPackDetailPage() {
                 No releases yet.
               </p>
             )}
-            <div className="mt-2 space-y-3">
+            <div className="mt-2 space-y-3" role="list">
               {releases.map((rel) => (
                 <div key={rel.id} className="rounded-lg border p-4">
                   <div className="flex items-center justify-between">

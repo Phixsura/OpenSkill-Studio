@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse
@@ -17,7 +18,7 @@ router = APIRouter(tags=["Pack Import/Export"])
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
-@router.get("/orgs/{org_id}/packs/{pack_id}/releases/{version}/export")
+@router.get("/orgs/{org_id}/packs/{pack_id}/releases/{version}/export", dependencies=[Depends(rate_limit(10, 60))])
 async def export_release(
     org_id: str,
     pack_id: str,
@@ -48,6 +49,7 @@ async def export_release(
     "/orgs/{org_id}/packs/import",
     response_model=DataResponse[dict],
     status_code=201,
+    dependencies=[Depends(rate_limit(3, 60))],
 )
 async def import_pack(
     org_id: str,

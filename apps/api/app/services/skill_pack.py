@@ -35,6 +35,11 @@ MAX_TEMPLATES_PER_PACK = 50
 MAX_MANIFEST_BYTES = 10_000_000  # 10 MB
 
 
+def _parse_semver(version: str) -> tuple[int, ...]:
+    """Parse 'X.Y.Z' into a comparable tuple."""
+    return tuple(int(x) for x in version.split("."))
+
+
 # ── Errors ────────────────────────────────────────────────
 
 
@@ -276,21 +281,51 @@ class SkillPackService:
         if self._has_cycle(intra_prereqs, pack_skill_set):
             raise AppError("PREREQUISITE_CYCLE", "Prerequisite graph contains a cycle", 422)
 
+        # Batch load all skills
+        skills_r = await self.db.execute(
+            select(Skill).where(Skill.id.in_(skill_ids))
+        )
+        skills_by_id = {s.id: s for s in skills_r.scalars().all()}
+
+        # Batch load categories
+        cat_ids = {s.category_id for s in skills_by_id.values() if s.category_id}
+        if cat_ids:
+            cats_r = await self.db.execute(
+                select(SkillCategory).where(SkillCategory.id.in_(cat_ids))
+            )
+            cats_by_id: dict[str, SkillCategory] = {c.id: c for c in cats_r.scalars().all()}
+        else:
+            cats_by_id = {}
+
+        # Batch load exercises grouped by skill
+        exercises_r = await self.db.execute(
+            select(Exercise)
+            .where(Exercise.skill_id.in_(skill_ids), Exercise.status != ContentStatus.ARCHIVED)
+            .order_by(Exercise.sort_order)
+        )
+        exercises_by_skill: dict[str, list] = defaultdict(list)
+        for ex in exercises_r.scalars().all():
+            exercises_by_skill[ex.skill_id].append(ex)
+
+        # Batch load templates
+        tmpl_ids = [tid for tid, _ in tmpl_entries]
+        if tmpl_ids:
+            tmpls_r = await self.db.execute(
+                select(ProjectTemplate).where(ProjectTemplate.id.in_(tmpl_ids))
+            )
+            tmpls_by_id: dict[str, ProjectTemplate] = {t.id: t for t in tmpls_r.scalars().all()}
+        else:
+            tmpls_by_id = {}
+
         for sid, sort in skill_entries:
-            skill = await self.db.get(Skill, sid)
+            skill = skills_by_id.get(sid)
             if skill is None or skill.status == ContentStatus.ARCHIVED:
                 raise AppError("COMPONENT_ARCHIVED", f"Skill '{sid}' is archived or missing", 422)
 
-            # Load exercises
-            ex_r = await self.db.execute(
-                select(Exercise)
-                .where(Exercise.skill_id == sid, Exercise.status != ContentStatus.ARCHIVED)
-                .order_by(Exercise.sort_order)
-            )
-            exercises = ex_r.scalars().all()
+            exercises = exercises_by_skill.get(sid, [])
 
             # Category
-            category = await self.db.get(SkillCategory, skill.category_id)
+            category = cats_by_id.get(skill.category_id) if skill.category_id else None
             if category and category.slug not in categories_map:
                 categories_map[category.slug] = {
                     "logical_id": category.slug,
@@ -303,7 +338,7 @@ class SkillPackService:
             skill_prereq_slugs = []
             for s_id, p_id in all_prereqs:
                 if s_id == skill.id and p_id in pack_skill_set:
-                    prereq_skill = await self.db.get(Skill, p_id)
+                    prereq_skill = skills_by_id.get(p_id)
                     if prereq_skill:
                         skill_prereq_slugs.append(prereq_skill.slug)
 
@@ -335,7 +370,7 @@ class SkillPackService:
 
         templates_manifest: list[dict] = []
         for tid, sort in tmpl_entries:
-            tmpl = await self.db.get(ProjectTemplate, tid)
+            tmpl = tmpls_by_id.get(tid)
             if tmpl is None or tmpl.status == ContentStatus.ARCHIVED:
                 raise AppError("COMPONENT_ARCHIVED", f"Template '{tid}' is archived or missing", 422)
             templates_manifest.append({
@@ -416,11 +451,11 @@ class SkillPackService:
 
     async def list_releases(self, pack_id: str) -> list[SkillPackRelease]:
         result = await self.db.execute(
-            select(SkillPackRelease)
-            .where(SkillPackRelease.pack_id == pack_id)
-            .order_by(SkillPackRelease.released_at.desc())
+            select(SkillPackRelease).where(SkillPackRelease.pack_id == pack_id)
         )
-        return list(result.scalars().all())
+        releases = list(result.scalars().all())
+        releases.sort(key=lambda r: _parse_semver(r.version), reverse=True)
+        return releases
 
     async def get_release(self, pack_id: str, version: str) -> SkillPackRelease:
         result = await self.db.execute(

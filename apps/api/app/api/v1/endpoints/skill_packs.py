@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -33,6 +34,7 @@ INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     "/orgs/{org_id}/packs",
     response_model=DataResponse[SkillPackResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_pack(
     org_id: str,
@@ -50,6 +52,7 @@ async def create_pack(
 @router.get(
     "/orgs/{org_id}/packs",
     response_model=ListResponse[SkillPackResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_packs(
     org_id: str,
@@ -73,6 +76,7 @@ async def list_packs(
 @router.get(
     "/orgs/{org_id}/packs/{pack_id}",
     response_model=DataResponse[SkillPackResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def get_pack(
     org_id: str,
@@ -89,6 +93,7 @@ async def get_pack(
 @router.put(
     "/orgs/{org_id}/packs/{pack_id}",
     response_model=DataResponse[SkillPackResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def update_pack(
     org_id: str,
@@ -104,7 +109,7 @@ async def update_pack(
     return DataResponse(data=SkillPackResponse.model_validate(pack))
 
 
-@router.delete("/orgs/{org_id}/packs/{pack_id}", status_code=204)
+@router.delete("/orgs/{org_id}/packs/{pack_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
 async def delete_pack(
     org_id: str,
     pack_id: str,
@@ -124,6 +129,7 @@ async def delete_pack(
     "/orgs/{org_id}/packs/{pack_id}/skills",
     response_model=DataResponse[PackSkillResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def add_skill_to_pack(
     org_id: str,
@@ -141,7 +147,7 @@ async def add_skill_to_pack(
     )
 
 
-@router.delete("/orgs/{org_id}/packs/{pack_id}/skills/{skill_id}", status_code=204)
+@router.delete("/orgs/{org_id}/packs/{pack_id}/skills/{skill_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
 async def remove_skill_from_pack(
     org_id: str,
     pack_id: str,
@@ -158,6 +164,7 @@ async def remove_skill_from_pack(
 @router.get(
     "/orgs/{org_id}/packs/{pack_id}/skills",
     response_model=DataResponse[list[PackSkillResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_pack_skills(
     org_id: str,
@@ -184,6 +191,7 @@ async def list_pack_skills(
     "/orgs/{org_id}/packs/{pack_id}/templates",
     response_model=DataResponse[PackTemplateResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def add_template_to_pack(
     org_id: str,
@@ -203,7 +211,7 @@ async def add_template_to_pack(
     )
 
 
-@router.delete("/orgs/{org_id}/packs/{pack_id}/templates/{template_id}", status_code=204)
+@router.delete("/orgs/{org_id}/packs/{pack_id}/templates/{template_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
 async def remove_template_from_pack(
     org_id: str,
     pack_id: str,
@@ -220,6 +228,7 @@ async def remove_template_from_pack(
 @router.get(
     "/orgs/{org_id}/packs/{pack_id}/templates",
     response_model=DataResponse[list[PackTemplateResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_pack_templates(
     org_id: str,
@@ -249,6 +258,7 @@ async def list_pack_templates(
     "/orgs/{org_id}/packs/{pack_id}/releases",
     response_model=DataResponse[ReleaseResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(5, 60))],
 )
 async def publish_release(
     org_id: str,
@@ -269,6 +279,7 @@ async def publish_release(
 @router.get(
     "/orgs/{org_id}/packs/{pack_id}/releases",
     response_model=DataResponse[list[ReleaseResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_releases(
     org_id: str,
@@ -286,6 +297,7 @@ async def list_releases(
 @router.get(
     "/orgs/{org_id}/packs/{pack_id}/releases/{version}",
     response_model=DataResponse[ReleaseDetailResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def get_release(
     org_id: str,

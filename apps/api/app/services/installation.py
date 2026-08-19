@@ -25,6 +25,11 @@ from app.models.skill_pack import (
 log = structlog.get_logger()
 
 
+def _parse_semver(version: str) -> tuple[int, ...]:
+    """Parse 'X.Y.Z' into a comparable tuple."""
+    return tuple(int(x) for x in version.split("."))
+
+
 # ── Errors ────────────────────────────────────────────────
 
 
@@ -69,12 +74,10 @@ class InstallationService:
             release = release_r.scalar_one_or_none()
         else:
             release_r = await self.db.execute(
-                select(SkillPackRelease)
-                .where(SkillPackRelease.pack_id == pack_id)
-                .order_by(SkillPackRelease.released_at.desc())
-                .limit(1)
+                select(SkillPackRelease).where(SkillPackRelease.pack_id == pack_id)
             )
-            release = release_r.scalar_one_or_none()
+            all_releases = list(release_r.scalars().all())
+            release = max(all_releases, key=lambda r: _parse_semver(r.version)) if all_releases else None
 
         if release is None:
             raise AppError("RELEASE_NOT_FOUND", "No release found for this pack", 404)
@@ -279,14 +282,12 @@ class InstallationService:
         if inst.status == InstallStatus.FORKED:
             return {"update_available": False, "reason": "forked"}
 
-        # Find latest release
-        latest_r = await self.db.execute(
-            select(SkillPackRelease)
-            .where(SkillPackRelease.pack_id == inst.pack_id)
-            .order_by(SkillPackRelease.released_at.desc())
-            .limit(1)
+        # Find latest release by semver
+        all_r = await self.db.execute(
+            select(SkillPackRelease).where(SkillPackRelease.pack_id == inst.pack_id)
         )
-        latest = latest_r.scalar_one_or_none()
+        all_releases = list(all_r.scalars().all())
+        latest = max(all_releases, key=lambda r: _parse_semver(r.version)) if all_releases else None
         if latest is None or latest.version == inst.installed_version:
             return {"update_available": False, "installed_version": inst.installed_version}
 

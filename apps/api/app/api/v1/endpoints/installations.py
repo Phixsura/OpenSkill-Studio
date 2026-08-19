@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -42,6 +43,7 @@ class InstallResponse(BaseModel):
     "/orgs/{org_id}/installations",
     response_model=DataResponse[InstallResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(5, 60))],
 )
 async def install_pack(
     org_id: str,
@@ -59,6 +61,7 @@ async def install_pack(
 @router.get(
     "/orgs/{org_id}/installations",
     response_model=ListResponse[InstallResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_installations(
     org_id: str,
@@ -79,6 +82,7 @@ async def list_installations(
 @router.get(
     "/orgs/{org_id}/installations/{install_id}",
     response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def get_installation(
     org_id: str,
@@ -97,6 +101,7 @@ async def get_installation(
 @router.get(
     "/orgs/{org_id}/installations/{install_id}/diff",
     response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def get_diff(
     org_id: str,
@@ -114,6 +119,7 @@ async def get_diff(
 @router.post(
     "/orgs/{org_id}/installations/{install_id}/fork",
     response_model=DataResponse[InstallResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def fork_installation(
     org_id: str,
@@ -128,7 +134,7 @@ async def fork_installation(
     return DataResponse(data=InstallResponse.model_validate(inst))
 
 
-@router.delete("/orgs/{org_id}/installations/{install_id}", status_code=204)
+@router.delete("/orgs/{org_id}/installations/{install_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def remove_installation(
     org_id: str,
     install_id: str,
