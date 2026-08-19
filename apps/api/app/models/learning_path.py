@@ -81,10 +81,10 @@ class LearningPathItem(Base):
         Enum(PathItemType, name="path_item_type", create_constraint=True), nullable=False
     )
     skill_id: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("skills.id", ondelete="SET NULL")
+        String(26), ForeignKey("skills.id", ondelete="CASCADE")
     )
     project_id: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("projects.id", ondelete="SET NULL")
+        String(26), ForeignKey("projects.id", ondelete="CASCADE")
     )
     section_title: Mapped[str | None] = mapped_column(String(200))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

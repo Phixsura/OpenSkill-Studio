@@ -9,8 +9,8 @@ import { apiWithAuth } from "@/lib/api";
 interface Install {
   id: string;
   org_id: string;
-  pack_id: string;
-  release_id: string;
+  pack_id: string | null;
+  release_id: string | null;
   installed_version: string;
   status: string;
   installed_by: string;
@@ -81,9 +81,11 @@ export default function InstallationsListPage() {
                       href={`/dashboard/orgs/${orgId}/installations/${install.id}`}
                       className="font-medium hover:text-[hsl(var(--primary))]"
                     >
-                      {install.pack_id.length > 12
-                        ? `${install.pack_id.slice(0, 12)}...`
-                        : install.pack_id}
+                      {install.pack_id
+                        ? install.pack_id.length > 12
+                          ? `${install.pack_id.slice(0, 12)}...`
+                          : install.pack_id
+                        : "—"}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-[hsl(var(--muted-foreground))]">

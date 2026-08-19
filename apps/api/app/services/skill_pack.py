@@ -72,14 +72,10 @@ class SkillPackService:
             created_by=created_by,
             **fields,
         )
+        # Always add random suffix to slug to avoid IntegrityError + rollback issues
+        pack.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
         self.db.add(pack)
-        try:
-            await self.db.flush()
-        except IntegrityError:
-            await self.db.rollback()
-            pack.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
-            self.db.add(pack)
-            await self.db.flush()
+        await self.db.flush()
 
         log.info("pack_created", pack_id=pack.id, org_id=org_id)
         return pack

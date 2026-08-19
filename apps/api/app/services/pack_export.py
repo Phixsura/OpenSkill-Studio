@@ -25,7 +25,6 @@ class PackExportService:
           openskill-pack.json  — the release manifest
         Assets are NOT included in this phase (text-only export).
         """
-        release = await self.db.get(SkillPackRelease, None)
         # Look up by pack_id + version
         from sqlalchemy import select
 

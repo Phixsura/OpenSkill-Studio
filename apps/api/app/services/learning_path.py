@@ -37,14 +37,10 @@ class LearningPathService:
         slug = self._generate_slug(name)
 
         path = LearningPath(org_id=org_id, slug=slug, created_by=created_by, **fields)
+        # Always add random suffix to slug to avoid IntegrityError + rollback issues
+        path.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
         self.db.add(path)
-        try:
-            await self.db.flush()
-        except IntegrityError:
-            await self.db.rollback()
-            path.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
-            self.db.add(path)
-            await self.db.flush()
+        await self.db.flush()
 
         log.info("path_created", path_id=path.id, org_id=org_id)
         return path

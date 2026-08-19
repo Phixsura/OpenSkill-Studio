@@ -187,7 +187,7 @@ export default function RegistryPackDetailPage() {
             <div className="rounded-lg border p-4">
               <h3 className="text-sm font-medium">Estimated time</h3>
               <p className="mt-1 text-lg font-semibold">
-                {Math.round(pack.estimated_minutes / 60)}h {pack.estimated_minutes % 60}m
+                {Math.floor(pack.estimated_minutes / 60)}h {pack.estimated_minutes % 60}m
               </p>
             </div>
           )}

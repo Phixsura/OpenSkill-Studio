@@ -122,7 +122,7 @@ export default function PackDetailPage() {
   const { data: orgSkillsData } = useQuery({
     queryKey: ["skills", orgId],
     queryFn: () =>
-      apiWithAuth<{ data: Skill[] }>(`/orgs/${orgId}/skills`),
+      apiWithAuth<{ data: Skill[] }>(`/orgs/${orgId}/skills?per_page=200`),
   });
 
   const { data: orgTemplatesData } = useQuery({

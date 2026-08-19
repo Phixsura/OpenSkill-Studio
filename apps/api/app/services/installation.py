@@ -87,8 +87,22 @@ class InstallationService:
                 SkillPackInstallation.status != InstallStatus.REMOVED,
             )
         )
-        if existing.scalar_one_or_none():
+        existing_install = existing.scalar_one_or_none()
+        if existing_install:
             raise AppError("ALREADY_INSTALLED", "Pack already installed in this organization", 409)
+
+        # Remove any old REMOVED installation row to avoid unique constraint violation
+        old_removed_r = await self.db.execute(
+            select(SkillPackInstallation).where(
+                SkillPackInstallation.org_id == org_id,
+                SkillPackInstallation.pack_id == pack_id,
+                SkillPackInstallation.status == InstallStatus.REMOVED,
+            )
+        )
+        old_removed = old_removed_r.scalar_one_or_none()
+        if old_removed:
+            await self.db.delete(old_removed)
+            await self.db.flush()
 
         manifest = release.manifest
         release_id = release.id
@@ -213,8 +227,13 @@ class InstallationService:
         )
         self.db.add(install)
 
-        # Increment install count
-        pack.install_count = (pack.install_count or 0) + 1
+        # Atomic install count increment (avoid lost-update race)
+        from sqlalchemy import update
+        await self.db.execute(
+            update(SkillPack)
+            .where(SkillPack.id == pack_id)
+            .values(install_count=SkillPack.install_count + 1)
+        )
 
         await self.db.flush()
 

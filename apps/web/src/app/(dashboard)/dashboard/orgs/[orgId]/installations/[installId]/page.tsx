@@ -11,8 +11,8 @@ import { apiWithAuth, ApiError } from "@/lib/api";
 interface InstallDetail {
   id: string;
   org_id: string;
-  pack_id: string;
-  release_id: string;
+  pack_id: string | null;
+  release_id: string | null;
   installed_version: string;
   status: string;
   installed_by: string;

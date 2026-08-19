@@ -81,7 +81,7 @@ async def test_create_pack(c):
     assert r.status_code == 201
     d = r.json()["data"]
     assert d["name"] == "AI Product Photography"
-    assert d["slug"] == "ai-product-photography"
+    assert d["slug"].startswith("ai-product-photography")
     assert d["status"] == "draft"
     assert d["visibility"] == "private"
     assert d["install_count"] == 0
