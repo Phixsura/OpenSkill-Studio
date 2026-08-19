@@ -73,7 +73,7 @@ async def update_path(
     updates = body.model_dump(exclude_none=True)
     # Convert status string to ContentStatus
     if "status" in updates:
-        updates["status"] = ContentStatus(updates["status"].upper())
+        updates["status"] = ContentStatus(updates["status"].lower())
     path = await svc.update_path(path_id, org_id, **updates)
     await db.commit()
     return DataResponse(data=LearningPathResponse.model_validate(path))

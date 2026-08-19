@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     learning_paths,
     organizations,
     overview,
+    pack_io,
     peer_review,
     portfolio,
     projects,
@@ -36,3 +37,4 @@ api_v1_router.include_router(skill_packs.router)
 api_v1_router.include_router(registry.router)
 api_v1_router.include_router(installations.router)
 api_v1_router.include_router(learning_paths.router)
+api_v1_router.include_router(pack_io.router)

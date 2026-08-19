@@ -1,0 +1,185 @@
+"""Pack import — validate and import a zip bundle into an organization."""
+
+import hashlib
+import io
+import json
+import zipfile
+
+import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.exceptions import AppError
+from app.models.skill_pack import PackStatus, PackVisibility, SkillPack, SkillPackRelease
+from app.services.skill_pack import SkillPackService
+
+log = structlog.get_logger()
+
+MAX_ARCHIVE_SIZE = 100 * 1024 * 1024  # 100 MB
+MAX_DECOMPRESSED_SIZE = 1024 * 1024 * 1024  # 1 GB
+MAX_FILE_COUNT = 500
+FORBIDDEN_PATTERNS = ("..", "\\", "/etc/", "/dev/", "/proc/")
+SUPPORTED_SCHEMA_VERSIONS = {"1"}
+
+
+class PackImportService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def import_pack(
+        self, org_id: str, file_bytes: bytes, imported_by: str
+    ) -> tuple[SkillPack, SkillPackRelease]:
+        """Import a pack from a zip archive.
+
+        Returns (pack, release) created in the target org.
+        The pack is created as draft/private.
+        """
+        # 1. Size check
+        if len(file_bytes) > MAX_ARCHIVE_SIZE:
+            raise AppError(
+                "ARCHIVE_TOO_LARGE",
+                f"Archive exceeds {MAX_ARCHIVE_SIZE // (1024 * 1024)}MB limit",
+                413,
+            )
+
+        # 2. Open zip
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(file_bytes), "r")
+        except zipfile.BadZipFile:
+            raise AppError("INVALID_ARCHIVE", "File is not a valid zip archive", 422) from None
+
+        # 3. File count check
+        entries = zf.namelist()
+        if len(entries) > MAX_FILE_COUNT:
+            raise AppError("TOO_MANY_FILES", f"Archive contains more than {MAX_FILE_COUNT} files", 422)
+
+        # 4. Path traversal check
+        for entry in entries:
+            if any(p in entry for p in FORBIDDEN_PATTERNS):
+                raise AppError("MALICIOUS_ARCHIVE", f"Forbidden path pattern in: {entry}", 422)
+            if entry.startswith("/"):
+                raise AppError("MALICIOUS_ARCHIVE", f"Absolute path detected: {entry}", 422)
+
+        # 5. Decompression size check
+        total_size = sum(info.file_size for info in zf.infolist())
+        if total_size > MAX_DECOMPRESSED_SIZE:
+            raise AppError(
+                "DECOMPRESSION_BOMB",
+                f"Decompressed size exceeds {MAX_DECOMPRESSED_SIZE // (1024 * 1024)}MB limit",
+                422,
+            )
+
+        # 6. Find and parse manifest
+        if "openskill-pack.json" not in entries:
+            raise AppError("INVALID_MANIFEST", "Archive must contain manifest file openskill-pack.json", 422)
+
+        try:
+            manifest_bytes = zf.read("openskill-pack.json")
+            manifest = json.loads(manifest_bytes)
+        except (json.JSONDecodeError, KeyError) as exc:
+            raise AppError("INVALID_MANIFEST", f"Cannot parse manifest: {exc}", 422) from exc
+
+        # 7. Validate schema version
+        schema_version = manifest.get("schema_version")
+        if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+            raise AppError(
+                "UNSUPPORTED_SCHEMA",
+                f"Schema version '{schema_version}' is not supported. Supported: {SUPPORTED_SCHEMA_VERSIONS}",
+                422,
+            )
+
+        # 8. Validate structure
+        pack_meta = manifest.get("pack", {})
+        skills = manifest.get("skills", [])
+        templates = manifest.get("project_templates", [])
+
+        if not pack_meta.get("name"):
+            raise AppError("INVALID_MANIFEST", "Manifest pack.name is required", 422)
+
+        # 9. Check logical_id uniqueness
+        all_logical_ids: list[str] = []
+        for s in skills:
+            lid = s.get("logical_id")
+            if not lid:
+                raise AppError("INVALID_MANIFEST", "Every skill must have a logical_id", 422)
+            all_logical_ids.append(lid)
+        for t in templates:
+            lid = t.get("logical_id")
+            if not lid:
+                raise AppError("INVALID_MANIFEST", "Every template must have a logical_id", 422)
+            all_logical_ids.append(lid)
+
+        if len(all_logical_ids) != len(set(all_logical_ids)):
+            raise AppError("DUPLICATE_LOGICAL_ID", "Duplicate logical_id found in manifest", 422)
+
+        # 10. Validate prerequisite references
+        skill_lids = {s["logical_id"] for s in skills}
+        for s in skills:
+            for prereq in s.get("prerequisites", []):
+                if prereq not in skill_lids:
+                    raise AppError(
+                        "INVALID_PREREQUISITE",
+                        f"Prerequisite '{prereq}' not found in manifest skills",
+                        422,
+                    )
+
+        # 11. Strip runtime fields (safety)
+        runtime_keys = {"user_id", "submission_id", "attempt_id", "review_id", "progress_id"}
+        for s in skills:
+            for key in runtime_keys:
+                s.pop(key, None)
+            for ex in s.get("exercises", []):
+                for key in runtime_keys:
+                    ex.pop(key, None)
+
+        zf.close()
+
+        # 12. Create pack + release
+
+        svc = SkillPackService(self.db)
+        pack_name = pack_meta["name"]
+        version = manifest.get("version", "1.0.0")
+
+        pack = await svc.create_pack(
+            org_id=org_id,
+            created_by=imported_by,
+            name=pack_name,
+            description=pack_meta.get("summary", ""),
+            summary=pack_meta.get("summary"),
+            visibility=PackVisibility.PRIVATE.value,
+            difficulty=pack_meta.get("metadata", {}).get("difficulty"),
+            estimated_minutes=pack_meta.get("metadata", {}).get("estimated_minutes"),
+            learning_outcomes=pack_meta.get("metadata", {}).get("learning_outcomes", []),
+            scenario_tags=pack_meta.get("metadata", {}).get("scenario_tags", []),
+            tool_tags=pack_meta.get("metadata", {}).get("tool_tags", []),
+            capability_tags=pack_meta.get("metadata", {}).get("capability_tags", []),
+            provenance=pack_meta.get("provenance", {}),
+        )
+
+        # Create release directly from the manifest
+        canonical = json.dumps(manifest, sort_keys=True, ensure_ascii=True)
+        checksum = hashlib.sha256(canonical.encode()).hexdigest()
+
+        release = SkillPackRelease(
+            pack_id=pack.id,
+            version=version,
+            manifest=manifest,
+            changelog="Imported from archive",
+            checksum=checksum,
+            component_count=len(skills) + len(templates),
+            released_by=imported_by,
+        )
+        self.db.add(release)
+        pack.status = PackStatus.PUBLISHED
+        await self.db.flush()
+        await self.db.refresh(pack)
+        await self.db.refresh(release)
+
+        log.info(
+            "pack_imported",
+            org_id=org_id,
+            pack_id=pack.id,
+            version=version,
+            skills=len(skills),
+            templates=len(templates),
+        )
+        return pack, release

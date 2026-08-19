@@ -2,7 +2,6 @@
 
 import structlog
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -92,6 +91,8 @@ class InstallationService:
             raise AppError("ALREADY_INSTALLED", "Pack already installed in this organization", 409)
 
         manifest = release.manifest
+        release_id = release.id
+        release_version = release.version
 
         # Create categories
         cat_id_map: dict[str, str] = {}  # logical_id -> new ULID
@@ -103,21 +104,15 @@ class InstallationService:
                 sort_order=cat_def.get("sort_order", 0),
                 status=ContentStatus.PUBLISHED,
                 origin_pack_id=pack_id,
-                origin_release_id=release.id,
+                origin_release_id=release_id,
                 origin_component_id=cat_def["logical_id"],
                 created_by=installed_by,
             )
+            # Always add random suffix to prevent slug conflicts with existing org content
+            import secrets as _cat_secrets
+            cat.slug = f"{cat.slug[:90]}-{_cat_secrets.token_hex(3)}"
             self.db.add(cat)
-            try:
-                await self.db.flush()
-            except IntegrityError:
-                await self.db.rollback()
-                # Slug conflict — append random suffix
-                import secrets
-
-                cat.slug = f"{cat.slug[:90]}-{secrets.token_hex(3)}"
-                self.db.add(cat)
-                await self.db.flush()
+            await self.db.flush()
             cat_id_map[cat_def["logical_id"]] = cat.id
 
         # Create skills + exercises
@@ -145,18 +140,14 @@ class InstallationService:
                 sort_order=skill_def.get("sort_order", 0),
                 status=ContentStatus.PUBLISHED,
                 origin_pack_id=pack_id,
-                origin_release_id=release.id,
+                origin_release_id=release_id,
                 origin_component_id=skill_def["logical_id"],
                 created_by=installed_by,
             )
+            # Always add random suffix to prevent slug conflicts with existing org content
+            skill.slug = f"{skill.slug[:190]}-{_secrets.token_hex(3)}"
             self.db.add(skill)
-            try:
-                await self.db.flush()
-            except IntegrityError:
-                await self.db.rollback()
-                skill.slug = f"{skill.slug[:190]}-{_secrets.token_hex(3)}"
-                self.db.add(skill)
-                await self.db.flush()
+            await self.db.flush()
             skill_id_map[skill_def["logical_id"]] = skill.id
 
             # Create exercises
@@ -172,7 +163,7 @@ class InstallationService:
                     sort_order=ex_def.get("sort_order", 0),
                     status=ContentStatus.PUBLISHED,
                     origin_pack_id=pack_id,
-                    origin_release_id=release.id,
+                    origin_release_id=release_id,
                     origin_component_id=ex_def.get("logical_id", ""),
                     created_by=installed_by,
                 )
@@ -205,7 +196,7 @@ class InstallationService:
                 deliverables=tmpl_def.get("deliverables", []),
                 skill_names=tmpl_def.get("skill_names", []),
                 origin_pack_id=pack_id,
-                origin_release_id=release.id,
+                origin_release_id=release_id,
                 origin_component_id=tmpl_def.get("logical_id", ""),
                 created_by=installed_by,
             )
@@ -215,8 +206,8 @@ class InstallationService:
         install = SkillPackInstallation(
             org_id=org_id,
             pack_id=pack_id,
-            release_id=release.id,
-            installed_version=release.version,
+            release_id=release_id,
+            installed_version=release_version,
             status=InstallStatus.ACTIVE,
             installed_by=installed_by,
         )
@@ -231,7 +222,7 @@ class InstallationService:
             "pack_installed",
             org_id=org_id,
             pack_id=pack_id,
-            version=release.version,
+            version=release_version,
             skills=len(skill_id_map),
         )
         return install

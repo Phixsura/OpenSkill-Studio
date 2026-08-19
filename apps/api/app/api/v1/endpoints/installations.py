@@ -89,11 +89,9 @@ async def get_installation(
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = InstallationService(db)
     inst = await svc.get_installation(install_id, org_id)
+    inst_data = InstallResponse.model_validate(inst).model_dump()
     update = await svc.check_update(install_id, org_id)
-    return DataResponse(data={
-        **InstallResponse.model_validate(inst).model_dump(),
-        **update,
-    })
+    return DataResponse(data={**inst_data, **update})
 
 
 @router.get(

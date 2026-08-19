@@ -102,7 +102,7 @@ class LearningPathService:
     ) -> LearningPathItem:
         await self.get_path(path_id, org_id)
 
-        ptype = PathItemType(item_type.upper())
+        ptype = PathItemType(item_type.lower())
 
         # Validate references
         if ptype == PathItemType.SKILL:
