@@ -16,9 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Enums
-    # Enums are created implicitly by sa.Enum in Column definitions below
-    # (Alembic/SQLAlchemy handles CREATE TYPE IF NOT EXISTS for referenced enums)
+    # Enums are created by SQLAlchemy model metadata when Alembic loads.
+    # The sa.Enum columns below use create_type=False to avoid duplicate creation.
 
     # skill_packs
     op.create_table(
@@ -29,8 +28,8 @@ def upgrade() -> None:
         sa.Column("slug", sa.String(200), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("summary", sa.String(500), nullable=True),
-        sa.Column("status", sa.Enum("draft", "published", "archived", name="pack_status", create_constraint=False), nullable=False, server_default="draft"),
-        sa.Column("visibility", sa.Enum("private", "unlisted", "public", name="pack_visibility", create_constraint=False), nullable=False, server_default="private"),
+        sa.Column("status", sa.Enum("DRAFT", "PUBLISHED", "ARCHIVED", name="pack_status", create_constraint=False, create_type=False), nullable=False, server_default="DRAFT"),
+        sa.Column("visibility", sa.Enum("PRIVATE", "UNLISTED", "PUBLIC", name="pack_visibility", create_constraint=False, create_type=False), nullable=False, server_default="PRIVATE"),
         sa.Column("language", sa.String(10), nullable=False, server_default="en"),
         sa.Column("cover_image_key", sa.String(500), nullable=True),
         sa.Column("learning_outcomes", JSONB(), nullable=False, server_default="[]"),
@@ -90,7 +89,7 @@ def upgrade() -> None:
         sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="SET NULL"), nullable=True),
         sa.Column("release_id", sa.String(26), sa.ForeignKey("skill_pack_releases.id", ondelete="SET NULL"), nullable=True),
         sa.Column("installed_version", sa.String(20), nullable=False),
-        sa.Column("status", sa.Enum("active", "forked", "removed", name="install_status", create_constraint=False), nullable=False, server_default="active"),
+        sa.Column("status", sa.Enum("ACTIVE", "FORKED", "REMOVED", name="install_status", create_constraint=False, create_type=False), nullable=False, server_default="ACTIVE"),
         sa.Column("installed_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("installed_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
