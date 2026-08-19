@@ -20,6 +20,12 @@ from app.models.evaluation import (  # noqa: F401
     EvaluationTask,
     EvalUsageMonthly,
 )
+from app.models.learning_path import (  # noqa: F401
+    CohortLearningPathAssignment,
+    LearningPath,
+    LearningPathItem,
+    PathItemType,
+)
 from app.models.organization import (  # noqa: F401
     InviteStatus,
     MemberStatus,

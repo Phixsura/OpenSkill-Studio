@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     evaluation,
     health,
     installations,
+    learning_paths,
     organizations,
     overview,
     peer_review,
@@ -34,3 +35,4 @@ api_v1_router.include_router(portfolio.router)
 api_v1_router.include_router(skill_packs.router)
 api_v1_router.include_router(registry.router)
 api_v1_router.include_router(installations.router)
+api_v1_router.include_router(learning_paths.router)
