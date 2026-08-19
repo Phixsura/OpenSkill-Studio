@@ -541,3 +541,99 @@ async def test_export_cross_org(c):
     # Org2 tries to export from org1's namespace
     r = await c.get(f"/api/v1/orgs/{oid1}/packs/{pid}/releases/1.0.0/export", headers=h2)
     assert r.status_code in (403, 404)
+
+
+# ═══════════════ Import Security — /etc/ and /dev/ paths ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_import_malicious_etc_path(c):
+    """Zip entry containing '/etc/' triggers MALICIOUS_ARCHIVE."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("openskill-pack.json", json.dumps(VALID_MANIFEST))
+        zf.writestr("assets/etc/shadow", "malicious")
+    buf.seek(0)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("evil.zip", buf.getvalue(), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert "MALICIOUS" in r.json()["error"]["code"]
+
+
+@pytest.mark.asyncio
+async def test_import_malicious_dev_path(c):
+    """Zip entry containing '/dev/' triggers MALICIOUS_ARCHIVE."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("openskill-pack.json", json.dumps(VALID_MANIFEST))
+        zf.writestr("assets/dev/null", "malicious")
+    buf.seek(0)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("evil.zip", buf.getvalue(), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert "MALICIOUS" in r.json()["error"]["code"]
+
+
+# ═══════════════ Import Validation — missing logical_id ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_import_skill_missing_logical_id(c):
+    """Skill without logical_id triggers INVALID_MANIFEST."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    manifest = {
+        **VALID_MANIFEST,
+        "skills": [{
+            "name": "No LID Skill",
+            "category_logical_id": "cat-1",
+            "description": "test",
+            "difficulty": "beginner",
+            "sort_order": 0,
+            "exercises": [],
+            "prerequisites": [],
+        }],
+    }
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("bad.zip", _make_zip(manifest), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+
+@pytest.mark.asyncio
+async def test_import_template_missing_logical_id(c):
+    """Template without logical_id triggers INVALID_MANIFEST."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    manifest = {
+        **VALID_MANIFEST,
+        "project_templates": [{
+            "name": "No LID Template",
+            "description": "test",
+            "instructions": "do it",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+            "sort_order": 0,
+        }],
+    }
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("bad.zip", _make_zip(manifest), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"

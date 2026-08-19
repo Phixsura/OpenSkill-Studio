@@ -539,3 +539,88 @@ async def test_cross_org_path_remove_item(c):
     }, headers=h1)).json()["data"]
     r = await c.delete(f"/api/v1/orgs/{oid2}/paths/{pid}/items/{item['id']}", headers=h2)
     assert r.status_code in (403, 404)
+
+
+# ═══════════════ Item wrong path ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_remove_item_wrong_path(c):
+    """Deleting an item from path A via path B returns 404."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    path_a = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "PathA"}, headers=h)).json()["data"]["id"]
+    path_b = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "PathB"}, headers=h)).json()["data"]["id"]
+    sid = await _skill(c, h, oid)
+    item = (await c.post(f"/api/v1/orgs/{oid}/paths/{path_a}/items", json={
+        "item_type": "skill", "skill_id": sid,
+    }, headers=h)).json()["data"]
+
+    r = await c.delete(f"/api/v1/orgs/{oid}/paths/{path_b}/items/{item['id']}", headers=h)
+    assert r.status_code == 404
+
+
+# ═══════════════ Cohort IDOR ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_unassign_cross_org_cohort_idor(c):
+    """Unassigning with a cross-org cohort returns 404."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/paths", json={"name": "UnIDOR"}, headers=h1)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid1}/paths/{pid}", json={"status": "published"}, headers=h1)
+
+    cid = (await c.post(f"/api/v1/orgs/{oid2}/cohorts", json={"name": "XOrgCohort"}, headers=h2)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid2}/cohorts/{cid}", json={"status": "active"}, headers=h2)
+
+    r = await c.delete(f"/api/v1/orgs/{oid1}/cohorts/{cid}/paths/{pid}", headers=h1)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "COHORT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_list_cohort_paths_cross_org_idor(c):
+    """Listing paths with a cross-org cohort returns 404."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+
+    cid = (await c.post(f"/api/v1/orgs/{oid2}/cohorts", json={"name": "XListCohort"}, headers=h2)).json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid2}/cohorts/{cid}", json={"status": "active"}, headers=h2)
+
+    r = await c.get(f"/api/v1/orgs/{oid1}/cohorts/{cid}/paths", headers=h1)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "COHORT_NOT_FOUND"
+
+
+# ═══════════════ Student RBAC ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_create_path(c):
+    """Student role cannot create a learning path."""
+    h, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, h)
+    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
+
+    r = await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Sneaky Path"}, headers=hs)
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_update_path(c):
+    """Student role cannot update a learning path."""
+    h, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, h)
+    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "StuUpd Path"}, headers=h)).json()["data"]["id"]
+
+    r = await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"name": "Nope"}, headers=hs)
+    assert r.status_code == 403

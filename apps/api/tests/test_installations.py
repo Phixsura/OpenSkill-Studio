@@ -472,3 +472,395 @@ async def test_registry_private_pack_detail_rejected(c):
 
     r = await c.get(f"/api/v1/registry/packs/{pid}")
     assert r.status_code == 404
+
+
+# ═══════════════ Compute Diff ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_added_skill(c):
+    """Diff detects a skill added in the new release."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "DiffAdd Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    # Add a second skill to source pack and publish v2
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "DiffAddCat"}, headers=h1)).json()["data"]["id"]
+    sid2 = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
+        "name": "Added Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
+    }, headers=h1)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid2}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
+
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
+    assert r.status_code == 200
+    diff = r.json()["data"]
+    assert len(diff["added"]) >= 1
+    assert any(a["type"] == "skill" for a in diff["added"])
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_removed_skill(c):
+    """Diff detects a skill removed in the new release."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+
+    # Create pack with TWO skills so removing one still allows publishing
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "DiffRm Pack", "visibility": "public"}, headers=h1)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "DiffRmCat"}, headers=h1)).json()["data"]["id"]
+    sid_a = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
+        "name": "Keep Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
+    }, headers=h1)).json()["data"]["id"]
+    sid_b = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
+        "name": "Remove Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
+    }, headers=h1)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid_a}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid_b}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    # Remove one skill and publish v2
+    await c.delete(f"/api/v1/orgs/{oid1}/packs/{pid}/skills/{sid_b}", headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
+
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
+    assert r.status_code == 200
+    diff = r.json()["data"]
+    assert len(diff["removed"]) >= 1
+    assert any(a["type"] == "skill" for a in diff["removed"])
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_changed_skill(c):
+    """Diff detects a skill changed between releases."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "DiffChg Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    # Edit the skill's description and publish v2
+    pack_skills_r = await c.get(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", headers=h1)
+    original_sid = pack_skills_r.json()["data"][0]["skill_id"]
+    await c.put(f"/api/v1/orgs/{oid1}/skills/{original_sid}", json={"description": "x" * 20}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
+
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
+    assert r.status_code == 200
+    diff = r.json()["data"]
+    assert len(diff["changed"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_conflict_locally_modified(c):
+    """Diff reports conflict when a skill is locally modified in the target org."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill import Skill as SkillModel
+
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "DiffConflict Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    # Mark the installed skill as locally_modified directly in DB
+    from sqlalchemy import select, update
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(SkillModel).where(
+                SkillModel.origin_pack_id == pid,
+                SkillModel.org_id == oid2,
+            )
+        )
+        installed_skill = result.scalar_one()
+        await session.execute(
+            update(SkillModel)
+            .where(SkillModel.id == installed_skill.id)
+            .values(locally_modified=True)
+        )
+        await session.commit()
+
+    # Modify source skill and publish v2
+    pack_skills_r = await c.get(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", headers=h1)
+    original_sid = pack_skills_r.json()["data"][0]["skill_id"]
+    await c.put(f"/api/v1/orgs/{oid1}/skills/{original_sid}", json={"description": "y" * 20}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
+
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
+    assert r.status_code == 200
+    diff = r.json()["data"]
+    assert len(diff["conflicts"]) >= 1
+    assert diff["conflicts"][0]["reason"] == "locally_modified"
+
+
+# ═══════════════ Install Edge Cases ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_reinstall_after_removal(c):
+    """After removing an installation, re-installing the same pack succeeds."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "Reinstall Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+    await c.delete(f"/api/v1/orgs/{oid2}/installations/{iid}", headers=h2)
+
+    r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_install_specific_version(c):
+    """Install a specific older version when a newer one exists."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "VerPick Pack")
+
+    # Publish v2
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "VP"}, headers=h1)).json()["data"]["id"]
+    sid2 = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
+        "name": "VP Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
+    }, headers=h1)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid2}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
+
+    r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=h2)
+    assert r.status_code == 201
+    assert r.json()["data"]["installed_version"] == "1.0.0"
+
+
+@pytest.mark.asyncio
+async def test_install_pack_not_found(c):
+    """Installing a pack with a fake ID returns 404."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(f"/api/v1/orgs/{oid}/installations", json={"pack_id": "01JFAKE00000000000000FAKE"}, headers=h)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_install_no_release(c):
+    """Installing a pack with no releases returns 404."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
+        "name": "NoRelease Pack", "visibility": "public",
+    }, headers=h1)).json()["data"]["id"]
+
+    r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_install_creates_exercises(c):
+    """Installing a pack with exercises creates exercises in the target org."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+
+    # Create pack with a skill that has an exercise
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "ExPack", "visibility": "public"}, headers=h1)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "ExCat"}, headers=h1)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
+        "name": "Ex Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
+    }, headers=h1)).json()["data"]["id"]
+    # Create an exercise for this skill
+    await c.post(f"/api/v1/orgs/{oid1}/skills/{sid}/exercises", json={
+        "title": "Test Exercise", "description": "Do this", "type": "text_answer",
+        "config": {}, "max_score": 100,
+    }, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
+
+    await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+
+    # Verify exercises exist in target org's skills
+    skills_r = await c.get(f"/api/v1/orgs/{oid2}/skills", headers=h2)
+    target_sid = skills_r.json()["data"][0]["id"]
+    ex_r = await c.get(f"/api/v1/orgs/{oid2}/skills/{target_sid}/exercises", headers=h2)
+    assert ex_r.status_code == 200
+    assert len(ex_r.json()["data"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_install_creates_project_templates(c):
+    """Installing a pack with templates creates project templates in target org."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+
+    # Create pack with skill + template
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "TmplPack", "visibility": "public"}, headers=h1)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "TmplCat"}, headers=h1)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
+        "name": "Tmpl Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
+    }, headers=h1)).json()["data"]["id"]
+    tid = (await c.post(f"/api/v1/orgs/{oid1}/project-templates", json={
+        "name": "Installed Template", "description": "Template desc",
+        "instructions": "Do the thing",
+        "rubric": [{"criterion": "Quality", "max_score": 100}],
+    }, headers=h1)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
+
+    await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+
+    # Verify project templates exist in target org
+    tmpl_r = await c.get(f"/api/v1/orgs/{oid2}/project-templates", headers=h2)
+    assert tmpl_r.status_code == 200
+    assert len(tmpl_r.json()["data"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_install_unlisted_pack_succeeds(c):
+    """Unlisted pack from another org can be installed (via direct ID)."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "Unlisted Install", "unlisted")
+
+    r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    assert r.status_code == 201
+
+
+# ═══════════════ Cross-org IDOR ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_cross_org_fork_idor(c):
+    """User cannot fork another org's installation."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "ForkIDOR Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid1}/installations", json={"pack_id": pid}, headers=h1)
+    iid = inst_r.json()["data"]["id"]
+
+    r = await c.post(f"/api/v1/orgs/{oid2}/installations/{iid}/fork", headers=h2)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cross_org_remove_idor(c):
+    """User cannot remove another org's installation."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "RmIDOR Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid1}/installations", json={"pack_id": pid}, headers=h1)
+    iid = inst_r.json()["data"]["id"]
+
+    r = await c.delete(f"/api/v1/orgs/{oid2}/installations/{iid}", headers=h2)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cross_org_list_idor(c):
+    """Listing installations for another org returns empty (not the other org's data)."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "ListIDOR Pack")
+
+    await c.post(f"/api/v1/orgs/{oid1}/installations", json={"pack_id": pid}, headers=h1)
+
+    # h2 lists org2's installations — should NOT contain org1's data
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations", headers=h2)
+    assert r.status_code == 200
+    assert r.json()["meta"]["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_fork_already_forked(c):
+    """Forking an already-forked installation returns 422."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "DoubleFork Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    await c.post(f"/api/v1/orgs/{oid2}/installations/{iid}/fork", headers=h2)
+    r = await c.post(f"/api/v1/orgs/{oid2}/installations/{iid}/fork", headers=h2)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_install(c):
+    """Student role cannot install a pack."""
+    h, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, h)
+    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
+
+    h_pub, _ = await _auth(c)
+    oid_pub = await _org(c, h_pub)
+    pid = await _pack_with_release(c, h_pub, oid_pub, "Student Install Pack")
+
+    r = await c.post(f"/api/v1/orgs/{oid}/installations", json={"pack_id": pid}, headers=hs)
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_check_update_source_unavailable(c):
+    """When pack_id is None on an installation, check_update returns source_unavailable."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPackInstallation as InstModel
+
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "Src Unavail Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    # Null out pack_id directly in DB to simulate source unavailable
+    from sqlalchemy import update
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(InstModel)
+            .where(InstModel.id == iid)
+            .values(pack_id=None)
+        )
+        await session.commit()
+
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}", headers=h2)
+    assert r.status_code == 200
+    assert r.json()["data"]["update_available"] is False
+    assert r.json()["data"]["reason"] == "source_unavailable"
