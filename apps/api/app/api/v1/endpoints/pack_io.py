@@ -34,10 +34,13 @@ async def export_release(
 
     svc = PackExportService(db)
     zip_bytes, filename = await svc.export_release(pack_id, version)
+    # Sanitize filename for Content-Disposition header
+    import re
+    safe_filename = re.sub(r'[^\w\-.]', '_', filename)
     return Response(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
     )
 
 
