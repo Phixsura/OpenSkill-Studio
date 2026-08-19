@@ -10,7 +10,15 @@ class TriggerEvaluationRequest(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        valid = {"exercise_text", "exercise_code", "submission_review"}
+        valid = {
+            "exercise_text",
+            "exercise_code",
+            "submission_review",
+            "image_review",
+            "video_review",
+            "prompt_review",
+            "commercial_submission_review",
+        }
         if v not in valid:
             raise ValueError(f"Type must be one of: {', '.join(valid)}")
         return v

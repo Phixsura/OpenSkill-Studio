@@ -158,6 +158,7 @@ async def list_skills(
     status: str | None = None,
     tag: str | None = None,
     q: str | None = None,
+    cohort_id: str | None = None,
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -167,7 +168,17 @@ async def list_skills(
     svc = SkillService(db)
     published_only = member.role not in (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     skills, total = await svc.list_skills(
-        org_id, category, difficulty, status, tag, q, page, per_page, published_only=published_only
+        org_id,
+        category,
+        difficulty,
+        status,
+        tag,
+        q,
+        page,
+        per_page,
+        published_only=published_only,
+        cohort_id=cohort_id,
+        user_id=user.id if published_only else None,
     )
     return ListResponse(
         data=[SkillResponse.model_validate(s) for s in skills],

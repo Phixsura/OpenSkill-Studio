@@ -1,4 +1,19 @@
 from app.models.base import Base  # noqa: F401
+from app.models.client_brief import (  # noqa: F401
+    ApplicationStatus,
+    BriefApplication,
+    BriefStatus,
+    ClientBrief,
+)
+from app.models.cohort import (  # noqa: F401
+    Cohort,
+    CohortMember,
+    CohortProjectAssignment,
+    CohortRole,
+    CohortSkillAssignment,
+    CohortStatus,
+    ParticipationMode,
+)
 from app.models.evaluation import (  # noqa: F401
     EvalStatus,
     EvalType,
@@ -32,6 +47,7 @@ from app.models.project import (  # noqa: F401
     PeerReviewRound,
     Project,
     ProjectAsset,
+    ProjectCreatorAssignment,
     ProjectDeliverable,
     ProjectSkill,
     ProjectTemplate,

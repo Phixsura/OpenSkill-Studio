@@ -286,6 +286,8 @@ class ProjectResponse(BaseModel):
     status: str
     published_at: datetime | None
     created_at: datetime
+    cohort_id: str | None = None
+    client_brief_id: str | None = None
 
     model_config = {"from_attributes": True}
 

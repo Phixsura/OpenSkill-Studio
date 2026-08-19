@@ -129,6 +129,12 @@ class AuthService:
         user = stmt_result.scalar_one_or_none()
 
         if user is None or not user.has_password:
+            # Constant-time: run a dummy bcrypt verify to prevent timing-based
+            # user enumeration.  The hash below is a valid bcrypt hash of "dummy".
+            verify_password(
+                password,
+                "$2b$12$LJ3m4ys3Lg2PuxMYNKMsXu3kPBJFHGEPbJDRegqBr0fSE5JOGrFVe",
+            )
             raise InvalidCredentialsError()
 
         if not verify_password(password, user.password_hash):  # type: ignore[arg-type]

@@ -68,3 +68,4 @@ All architecture decisions are documented in `docs/design/`:
 - ADR-005: Projects & submissions
 - ADR-006: AI evaluation pipeline
 - ADR-007: Portfolio & public page
+- ADR-008: Cohorts, client briefs & multimodal AI evaluation

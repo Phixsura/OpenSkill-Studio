@@ -95,6 +95,7 @@ async def _read_limited(file: UploadFile, limit: int = 50 * 1024 * 1024) -> byte
 async def list_projects(
     org_id: str,
     status: str | None = None,
+    cohort_id: str | None = None,
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -105,7 +106,13 @@ async def list_projects(
     # Students only see published projects; instructors see drafts too.
     published_only = member.role not in INSTRUCTOR_ROLES
     projects, total = await svc.list_projects(
-        org_id, status, page, per_page, published_only=published_only
+        org_id,
+        status,
+        page,
+        per_page,
+        published_only=published_only,
+        cohort_id=cohort_id,
+        user_id=user.id if published_only else None,
     )
     return ListResponse(
         data=[ProjectResponse.model_validate(p) for p in projects],
@@ -1174,3 +1181,139 @@ async def delete_comment(
     svc = ProjectService(db)
     await svc.delete_comment(comment_id, org_id, user.id)
     await db.commit()
+
+
+# ── Creator Assignment (individual) ──────────────────────
+
+
+@router.post(
+    "/orgs/{org_id}/projects/{project_id}/creators",
+    response_model=DataResponse[dict],
+    status_code=201,
+)
+async def assign_creator(
+    org_id: str,
+    project_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign a commercial project to an individual creator."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
+
+    user_id = body.get("user_id")
+    if not user_id or not isinstance(user_id, str):
+        raise HTTPException(status_code=422, detail="user_id is required")
+
+    # Verify user is an org member
+    from sqlalchemy import select as _sel
+
+    from app.models.organization import MemberStatus, OrgMember
+
+    mem_r = await db.execute(
+        _sel(OrgMember.id).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == user_id,
+            OrgMember.status == MemberStatus.ACTIVE,
+        )
+    )
+    if mem_r.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User is not a member of this organization")
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.project import ProjectCreatorAssignment
+
+    assignment = ProjectCreatorAssignment(
+        project_id=project_id,
+        user_id=user_id,
+        assigned_by=user.id,
+    )
+    db.add(assignment)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Creator already assigned") from None
+    await db.commit()
+    return DataResponse(
+        data={
+            "id": assignment.id,
+            "project_id": project_id,
+            "user_id": user_id,
+            "assigned_at": assignment.assigned_at.isoformat(),
+        }
+    )
+
+
+@router.delete(
+    "/orgs/{org_id}/projects/{project_id}/creators/{user_id}",
+    status_code=204,
+)
+async def unassign_creator(
+    org_id: str,
+    project_id: str,
+    user_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove an individual creator assignment."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
+
+    from sqlalchemy import select
+
+    from app.models.project import ProjectCreatorAssignment
+
+    result = await db.execute(
+        select(ProjectCreatorAssignment).where(
+            ProjectCreatorAssignment.project_id == project_id,
+            ProjectCreatorAssignment.user_id == user_id,
+        )
+    )
+    assignment = result.scalar_one_or_none()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Creator assignment not found")
+    await db.delete(assignment)
+    await db.commit()
+
+
+@router.get(
+    "/orgs/{org_id}/projects/{project_id}/creators",
+    response_model=DataResponse[list[dict]],
+)
+async def list_creators(
+    org_id: str,
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List individual creators assigned to a project."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = ProjectService(db)
+    await _verify_project_org(svc, project_id, org_id)
+
+    from sqlalchemy import select
+
+    from app.models.project import ProjectCreatorAssignment
+
+    result = await db.execute(
+        select(ProjectCreatorAssignment, User.display_name)
+        .join(User, User.id == ProjectCreatorAssignment.user_id, isouter=True)
+        .where(ProjectCreatorAssignment.project_id == project_id)
+        .order_by(ProjectCreatorAssignment.assigned_at)
+    )
+    return DataResponse(
+        data=[
+            {
+                "id": a.id,
+                "user_id": a.user_id,
+                "user_name": name,
+                "assigned_at": a.assigned_at.isoformat(),
+            }
+            for a, name in result.all()
+        ]
+    )

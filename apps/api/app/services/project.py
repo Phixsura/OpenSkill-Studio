@@ -26,6 +26,7 @@ from app.models.project import (
     ItemType,
     Project,
     ProjectAsset,
+    ProjectCreatorAssignment,
     ProjectDeliverable,
     ProjectSkill,
     ProjectTemplate,
@@ -352,8 +353,51 @@ class ProjectService:
         per_page: int = 20,
         *,
         published_only: bool = False,
+        cohort_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[list[Project], int]:
         base = select(Project).where(Project.org_id == org_id)
+
+        # ── Cohort visibility ──
+        # When a cohort_id is given, show only projects assigned to that cohort.
+        # When a student (user_id set, published_only=True) has no cohort filter,
+        # show org-wide projects (not assigned to any cohort) PLUS projects
+        # assigned to any cohort the student belongs to.
+        if cohort_id:
+            from app.models.cohort import CohortProjectAssignment
+
+            base = base.where(
+                Project.id.in_(
+                    select(CohortProjectAssignment.project_id).where(
+                        CohortProjectAssignment.cohort_id == cohort_id
+                    )
+                )
+            )
+        elif published_only and user_id:
+            from app.models.cohort import CohortMember, CohortProjectAssignment
+
+            # Projects with no cohort assignment AND no individual assignment = org-wide
+            from app.models.project import ProjectCreatorAssignment
+
+            has_any_assignment = Project.id.in_(
+                select(CohortProjectAssignment.project_id)
+            ) | Project.id.in_(select(ProjectCreatorAssignment.project_id))
+            org_wide = ~has_any_assignment
+            # Projects assigned to a cohort the student belongs to
+            my_cohort_ids = select(CohortMember.cohort_id).where(CohortMember.user_id == user_id)
+            in_my_cohorts = Project.id.in_(
+                select(CohortProjectAssignment.project_id).where(
+                    CohortProjectAssignment.cohort_id.in_(my_cohort_ids)
+                )
+            )
+            # Projects individually assigned to this user
+            assigned_to_me = Project.id.in_(
+                select(ProjectCreatorAssignment.project_id).where(
+                    ProjectCreatorAssignment.user_id == user_id
+                )
+            )
+            base = base.where(org_wide | in_my_cohorts | assigned_to_me)
+
         if published_only:
             # Students must not see draft projects an instructor is still
             # authoring (their instructions, deadlines, and reference assets).
@@ -502,10 +546,80 @@ class ProjectService:
         user_id: str,
     ) -> Submission:
         project = await self.get_project(project_id)
+
+        # ── Cohort visibility gate ──
+        # If this project is assigned to specific cohorts or individual creators,
+        # the submitting user must be in at least one of them. Without this check
+        # a student who guesses the project ID can submit even though the project
+        # doesn't appear in their listing.
+        from app.models.cohort import CohortMember, CohortProjectAssignment
+
+        has_cohort_assignment = await self.db.execute(
+            select(CohortProjectAssignment.id)
+            .where(CohortProjectAssignment.project_id == project_id)
+            .limit(1)
+        )
+        has_creator_assignment = await self.db.execute(
+            select(ProjectCreatorAssignment.id)
+            .where(ProjectCreatorAssignment.project_id == project_id)
+            .limit(1)
+        )
+        is_restricted = (
+            has_cohort_assignment.scalar_one_or_none() is not None
+            or has_creator_assignment.scalar_one_or_none() is not None
+        )
+        if is_restricted:
+            # Check if user is in a cohort that has this project assigned
+            in_cohort = await self.db.execute(
+                select(CohortProjectAssignment.id)
+                .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
+                .where(
+                    CohortProjectAssignment.project_id == project_id,
+                    CohortMember.user_id == user_id,
+                )
+                .limit(1)
+            )
+            # Check if user is individually assigned
+            individually_assigned = await self.db.execute(
+                select(ProjectCreatorAssignment.id)
+                .where(
+                    ProjectCreatorAssignment.project_id == project_id,
+                    ProjectCreatorAssignment.user_id == user_id,
+                )
+                .limit(1)
+            )
+            if (
+                in_cohort.scalar_one_or_none() is None
+                and individually_assigned.scalar_one_or_none() is None
+            ):
+                raise AppError(
+                    "PROJECT_NOT_FOUND",
+                    "Project not found",
+                    404,
+                )
+
         count = await self._count_user_submissions(project_id, user_id)
 
-        if project.max_submissions > 0 and count >= project.max_submissions:
-            raise MaxSubmissionsReachedError(project.max_submissions)
+        # Cohort override takes precedence over project default
+        effective_max = project.max_submissions
+
+        # Find the most generous max_submissions_override across ALL cohorts
+        # the student belongs to (same rationale as deadline: benefit of most generous).
+        cohort_override_r = await self.db.execute(
+            select(func.max(CohortProjectAssignment.max_submissions_override))
+            .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
+            .where(
+                CohortProjectAssignment.project_id == project_id,
+                CohortMember.user_id == user_id,
+                CohortProjectAssignment.max_submissions_override.is_not(None),
+            )
+        )
+        override = cohort_override_r.scalar_one_or_none()
+        if override is not None:
+            effective_max = override
+
+        if effective_max > 0 and count >= effective_max:
+            raise MaxSubmissionsReachedError(effective_max)
 
         # Version = max existing + 1, not count + 1 — deleting a draft would
         # otherwise reuse a version number that already exists.
@@ -994,8 +1108,43 @@ class ProjectService:
     # ── Timing ──
 
     async def get_submission_timing(self, project: Project, user_id: str) -> str:
-        """Return 'on_time', 'late', or 'closed'."""
-        if project.deadline is None:
+        """Return 'on_time', 'late', or 'closed'.
+
+        Deadline precedence:
+        1. Personal extension (SubmissionExtension)
+        2. Cohort override (CohortProjectAssignment.deadline_override)
+        3. Project default (project.deadline)
+        """
+        # Resolve effective deadlines — cohort overrides take precedence
+        # over project defaults.
+        effective_deadline = project.deadline
+        effective_late_deadline = project.late_deadline
+
+        from app.models.cohort import CohortMember, CohortProjectAssignment
+
+        # Find ALL cohort assignments for this user+project.
+        # A student in 2 cohorts with different deadline overrides
+        # should get the most generous (latest) deadline.
+        cohort_override_r = await self.db.execute(
+            select(CohortProjectAssignment)
+            .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
+            .where(
+                CohortProjectAssignment.project_id == project.id,
+                CohortMember.user_id == user_id,
+            )
+        )
+        cohort_assignments = cohort_override_r.scalars().all()
+        for ca in cohort_assignments:
+            if ca.deadline_override is not None and (
+                effective_deadline is None or ca.deadline_override > effective_deadline
+            ):
+                effective_deadline = ca.deadline_override
+            if ca.late_deadline_override is not None and (
+                effective_late_deadline is None or ca.late_deadline_override > effective_late_deadline
+            ):
+                effective_late_deadline = ca.late_deadline_override
+
+        if effective_deadline is None:
             return "on_time"  # No deadline set
 
         now = datetime.now(UTC)
@@ -1010,13 +1159,13 @@ class ProjectService:
         ext = ext_result.scalar_one_or_none()
 
         # On time: before deadline or before personal extension
-        if now <= project.deadline:
+        if now <= effective_deadline:
             return "on_time"
         if ext and now <= ext.extended_deadline:
             return "on_time"
 
         # Late: between deadline and late_deadline
-        if project.late_deadline and now <= project.late_deadline:
+        if effective_late_deadline and now <= effective_late_deadline:
             return "late"
 
         # Closed: past all deadlines

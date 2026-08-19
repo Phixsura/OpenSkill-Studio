@@ -67,8 +67,16 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # Graceful shutdown — close DB pool and Redis connections
+    log = structlog.get_logger()
+    log.info("shutdown_start")
     await engine.dispose()
+    try:
+        r = redis_pool()
+        await r.aclose()
+    except Exception:
+        pass
+    log.info("shutdown_complete")
 
 
 app = FastAPI(

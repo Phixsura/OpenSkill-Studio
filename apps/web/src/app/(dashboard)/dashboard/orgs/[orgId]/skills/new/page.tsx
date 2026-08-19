@@ -18,7 +18,7 @@ export default function NewSkillPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const { data: catData } = useQuery({
+  const { data: catData, isError: catError } = useQuery({
     queryKey: ["categories", orgId],
     queryFn: () =>
       apiWithAuth<{ data: Category[] }>(`/orgs/${orgId}/categories`),
@@ -88,6 +88,12 @@ export default function NewSkillPage() {
           Create a new learning skill for your organization.
         </p>
       </div>
+
+      {catError && (
+        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+          Failed to load categories.
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">

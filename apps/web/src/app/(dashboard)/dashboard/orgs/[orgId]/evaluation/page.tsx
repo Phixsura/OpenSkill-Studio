@@ -37,7 +37,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function EvaluationPage() {
   const { orgId } = useParams<{ orgId: string }>();
 
-  const { data: tasksData } = useQuery({
+  const { data: tasksData, isLoading, isError } = useQuery({
     queryKey: ["eval-tasks", orgId],
     queryFn: () =>
       apiWithAuth<{ data: EvalTask[]; meta: { total: number } }>(
@@ -52,8 +52,11 @@ export default function EvaluationPage() {
 
   const tasks = tasksData?.data ?? [];
 
+  if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+
   return (
     <div className="space-y-6">
+      {isError && <p className="mb-4 text-sm text-red-600">Failed to load evaluation tasks. Please try again.</p>}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">AI Evaluation</h1>
@@ -105,7 +108,15 @@ export default function EvaluationPage() {
             {tasks.map((t) => (
               <tr key={t.id} className="border-t">
                 <td className="px-4 py-3 font-mono text-xs">{t.id.slice(0, 12)}...</td>
-                <td className="px-4 py-3 capitalize">{t.type.replace("_", " ")}</td>
+                <td className="px-4 py-3 capitalize">
+                  <span className="mr-1">
+                    {t.type.includes("image") ? "🖼️" :
+                     t.type.includes("video") ? "🎬" :
+                     t.type.includes("prompt") ? "✏️" :
+                     t.type.includes("commercial") ? "💼" : "📝"}
+                  </span>
+                  {t.type.replace(/_/g, " ")}
+                </td>
                 <td className={`px-4 py-3 capitalize font-medium ${STATUS_COLORS[t.status] ?? ""}`}>
                   {t.status}
                 </td>

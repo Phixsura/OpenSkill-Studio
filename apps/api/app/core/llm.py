@@ -1,9 +1,19 @@
-"""LLM client abstraction — dual-provider (Anthropic + OpenAI)."""
+"""LLM client abstraction — dual-provider (Anthropic + OpenAI), multimodal.
 
+Includes retry with exponential backoff for transient errors (429, 500, timeouts).
+"""
+
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 1.0  # seconds
 
 
 @dataclass
@@ -20,14 +30,24 @@ class LLMClient(ABC):
     async def complete(
         self,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: str | list,
         max_tokens: int = 4096,
         temperature: float = 0.1,
-    ) -> LLMResponse: ...
+    ) -> LLMResponse:
+        """Complete a prompt.
+
+        user_prompt accepts:
+        - str: plain text (backward-compatible)
+        - list: content blocks for multimodal input, e.g.:
+          [{"type": "text", "text": "..."}, {"type": "image", "source": {...}}]
+
+        The Anthropic block format is canonical; providers translate as needed.
+        """
+        ...
 
 
 class AnthropicClient(LLMClient):
-    """Claude API client."""
+    """Claude API client — supports text and vision (image content blocks)."""
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-5"):
         import anthropic
@@ -38,28 +58,39 @@ class AnthropicClient(LLMClient):
     async def complete(
         self,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: str | list,
         max_tokens: int = 4096,
         temperature: float = 0.1,
     ) -> LLMResponse:
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        return LLMResponse(
-            content=response.content[0].text,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            model=self.model,
-            provider="anthropic",
-        )
+        # Retry with exponential backoff for transient errors
+        last_exc: Exception | None = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                return LLMResponse(
+                    content=response.content[0].text,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    model=self.model,
+                    provider="anthropic",
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
+                    await asyncio.sleep(delay)
+        raise last_exc  # type: ignore[misc]
 
 
 class OpenAIClient(LLMClient):
-    """OpenAI API client."""
+    """OpenAI API client — supports text and vision (image_url content blocks)."""
 
     def __init__(self, api_key: str, model: str = "gpt-4o"):
         from openai import AsyncOpenAI
@@ -70,27 +101,61 @@ class OpenAIClient(LLMClient):
     async def complete(
         self,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: str | list,
         max_tokens: int = 4096,
         temperature: float = 0.1,
     ) -> LLMResponse:
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        choice = response.choices[0]
-        return LLMResponse(
-            content=choice.message.content or "",
-            input_tokens=response.usage.prompt_tokens if response.usage else 0,
-            output_tokens=response.usage.completion_tokens if response.usage else 0,
-            model=self.model,
-            provider="openai",
-        )
+        content = _to_openai_content(user_prompt) if isinstance(user_prompt, list) else user_prompt
+
+        last_exc: Exception | None = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": content},
+                    ],
+                )
+                choice = response.choices[0]
+                return LLMResponse(
+                    content=choice.message.content or "",
+                    input_tokens=response.usage.prompt_tokens if response.usage else 0,
+                    output_tokens=response.usage.completion_tokens if response.usage else 0,
+                    model=self.model,
+                    provider="openai",
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
+                    await asyncio.sleep(delay)
+        raise last_exc  # type: ignore[misc]
+
+
+def _to_openai_content(blocks: list) -> list:
+    """Convert Anthropic-style content blocks to OpenAI format.
+
+    Anthropic: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
+    OpenAI:    {"type": "image_url", "image_url": {"url": "data:...;base64,..."}}
+    """
+    result = []
+    for block in blocks:
+        if block.get("type") == "text":
+            result.append({"type": "text", "text": block["text"]})
+        elif block.get("type") == "image":
+            source = block.get("source", {})
+            data_url = (
+                f"data:{source.get('media_type', 'image/png')};base64,{source.get('data', '')}"
+            )
+            result.append({"type": "image_url", "image_url": {"url": data_url}})
+        else:
+            # Pass through unknown block types as text
+            result.append({"type": "text", "text": str(block)})
+    return result
 
 
 def create_llm_client(model: str | None = None) -> LLMClient:

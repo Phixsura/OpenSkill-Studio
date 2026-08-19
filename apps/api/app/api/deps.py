@@ -88,3 +88,28 @@ async def require_org_member(
     if roles and member.role not in roles:
         raise HTTPException(status_code=403, detail="Insufficient org permissions")
     return member
+
+
+async def require_cohort_member(
+    cohort_id: str,
+    user: User,
+    db: AsyncSession,
+    *roles,
+):
+    """Verify user is enrolled in the cohort, optionally with required roles."""
+    from sqlalchemy import select
+
+    from app.models.cohort import CohortMember
+
+    result = await db.execute(
+        select(CohortMember).where(
+            CohortMember.cohort_id == cohort_id,
+            CohortMember.user_id == user.id,
+        )
+    )
+    member = result.scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=403, detail="Not a member of this cohort")
+    if roles and member.role not in roles:
+        raise HTTPException(status_code=403, detail="Insufficient cohort permissions")
+    return member

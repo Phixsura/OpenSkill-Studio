@@ -20,7 +20,7 @@ export default function EvalSettingsPage() {
   const { orgId } = useParams<{ orgId: string }>();
   const queryClient = useQueryClient();
 
-  const { data: settings } = useQuery({
+  const { data: settings, isLoading, isError } = useQuery({
     queryKey: ["eval-settings", orgId],
     queryFn: () => apiWithAuth<EvalSettings>(`/orgs/${orgId}/settings/evaluation`),
   });
@@ -71,6 +71,9 @@ export default function EvalSettingsPage() {
       setMessage(err instanceof ApiError ? err.message : "Failed to save.");
     },
   });
+
+  if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (isError) return <p className="text-sm text-red-600">Failed to load evaluation settings. Please try again.</p>;
 
   return (
     <div className="space-y-6">

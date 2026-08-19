@@ -99,6 +99,13 @@ class Project(Base):
         default=ContentStatus.DRAFT,
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Optional links to cohort/brief — NULL means org-wide (backward-compatible).
+    client_brief_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("client_briefs.id", ondelete="SET NULL"), nullable=True
+    )
+    cohort_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("cohorts.id", ondelete="SET NULL"), nullable=True
+    )
     created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -454,3 +461,29 @@ class ProjectAsset(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectCreatorAssignment(Base):
+    """Direct assignment of a commercial project to an individual creator.
+
+    Complements CohortProjectAssignment: a project can be exposed to a
+    full cohort AND/OR to selected individual creators.
+    """
+
+    __tablename__ = "project_creator_assignments"
+    __table_args__ = (
+        Index("uq_project_creator", "project_id", "user_id", unique=True),
+        Index("ix_project_creators_user", "user_id"),
+    )
+
+    id: Mapped[str] = ulid_pk()
+    project_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    assigned_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

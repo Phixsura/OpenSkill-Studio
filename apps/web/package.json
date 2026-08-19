@@ -21,12 +21,14 @@
     "react-markdown": "^9",
     "rehype-highlight": "^7",
     "remark-gfm": "^4",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^2",
     "zustand": "^5"
   },
   "devDependencies": {
     "@openskill/eslint-config": "workspace:*",
     "@openskill/typescript-config": "workspace:*",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/typography": "^0.5.20",
     "@testing-library/react": "^16",

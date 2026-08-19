@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { toast } from "sonner";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -10,6 +12,12 @@ import { Button } from "@/components/ui/button";
 import { MediaPreview } from "@/components/media-preview";
 import { PeerReviewSection } from "@/components/peer-review-section";
 import { apiWithAuth } from "@/lib/api";
+
+interface CreatorAssignment {
+  user_id: string;
+  user_name: string | null;
+  assigned_at: string;
+}
 
 interface Deliverable {
   id: string;
@@ -55,6 +63,8 @@ interface SubmissionItem {
 
 export default function ProjectDetailPage() {
   const { orgId, projectId } = useParams<{ orgId: string; projectId: string }>();
+  const queryClient = useQueryClient();
+  const [creatorUserId, setCreatorUserId] = useState("");
 
   const { data: projectData, isLoading, isError } = useQuery({
     queryKey: ["project", projectId],
@@ -109,9 +119,43 @@ export default function ProjectDetailPage() {
       }>(`/orgs/${orgId}/projects/${projectId}/submissions/${latestSubId}`),
   });
 
+  const { data: creatorsData } = useQuery({
+    queryKey: ["project-creators", projectId],
+    enabled: isInstructor,
+    queryFn: () =>
+      apiWithAuth<{ data: CreatorAssignment[] }>(
+        `/orgs/${orgId}/projects/${projectId}/creators`,
+      ),
+  });
+
+  const assignCreatorMutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/orgs/${orgId}/projects/${projectId}/creators`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: creatorUserId }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-creators", projectId] });
+      setCreatorUserId("");
+    },
+    onError: (err: Error) => toast.error(err.message || "Failed to assign creator"),
+  });
+
+  const removeCreatorMutation = useMutation({
+    mutationFn: (userId: string) =>
+      apiWithAuth(`/orgs/${orgId}/projects/${projectId}/creators/${userId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-creators", projectId] });
+    },
+    onError: (err: Error) => toast.error(err.message || "Failed to remove creator"),
+  });
+
   const project = projectData?.data;
   const submissions = subsData?.data ?? [];
   const assets = assetsData?.data ?? [];
+  const creators = creatorsData?.data ?? [];
 
   // Latest item per deliverable (highest version) from my latest submission.
   const latestItemByDeliverable = new Map<
@@ -300,6 +344,57 @@ export default function ProjectDetailPage() {
             </table>
           </div>
         </div>
+
+        {/* Creator Assignments (instructor only) */}
+        {isInstructor && (
+          <div>
+            <h2 className="text-xl font-semibold">Creator Assignments</h2>
+            <div className="mt-3 space-y-2">
+              {creators.length === 0 && (
+                <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                  No creators assigned. Assign individual creators to this project.
+                </p>
+              )}
+              {creators.map((c) => (
+                <div
+                  key={c.user_id}
+                  className="flex items-center justify-between rounded border px-4 py-2"
+                >
+                  <div>
+                    <span className="text-sm font-medium">{c.user_name || c.user_id}</span>
+                    <span className="ml-2 text-xs text-[hsl(var(--muted-foreground))]">
+                      Assigned {new Date(c.assigned_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeCreatorMutation.mutate(c.user_id)}
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="User ID"
+                  value={creatorUserId}
+                  onChange={(e) => setCreatorUserId(e.target.value)}
+                  className="flex-1 rounded border px-3 py-2 text-sm"
+                />
+                <Button
+                  onClick={() => assignCreatorMutation.mutate()}
+                  disabled={!creatorUserId.trim() || assignCreatorMutation.isPending}
+                  variant="outline"
+                  size="sm"
+                >
+                  Assign
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Peer Review */}
         <PeerReviewSection

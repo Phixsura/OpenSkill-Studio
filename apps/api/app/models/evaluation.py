@@ -26,6 +26,10 @@ class EvalType(str, enum.Enum):
     EXERCISE_TEXT = "exercise_text"
     EXERCISE_CODE = "exercise_code"
     SUBMISSION_REVIEW = "submission_review"
+    IMAGE_REVIEW = "image_review"
+    VIDEO_REVIEW = "video_review"
+    PROMPT_REVIEW = "prompt_review"
+    COMMERCIAL_SUBMISSION_REVIEW = "commercial_submission_review"
 
 
 class EvalStatus(str, enum.Enum):

@@ -195,8 +195,33 @@ class SkillService:
         per_page: int = 20,
         *,
         published_only: bool = False,
+        cohort_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[list[Skill], int]:
         base = select(Skill).where(Skill.org_id == org_id)
+
+        # Cohort visibility: same logic as projects
+        if cohort_id:
+            from app.models.cohort import CohortSkillAssignment
+
+            base = base.where(
+                Skill.id.in_(
+                    select(CohortSkillAssignment.skill_id).where(
+                        CohortSkillAssignment.cohort_id == cohort_id
+                    )
+                )
+            )
+        elif published_only and user_id:
+            from app.models.cohort import CohortMember, CohortSkillAssignment
+
+            org_wide = ~Skill.id.in_(select(CohortSkillAssignment.skill_id))
+            my_cohort_ids = select(CohortMember.cohort_id).where(CohortMember.user_id == user_id)
+            in_my_cohorts = Skill.id.in_(
+                select(CohortSkillAssignment.skill_id).where(
+                    CohortSkillAssignment.cohort_id.in_(my_cohort_ids)
+                )
+            )
+            base = base.where(org_wide | in_my_cohorts)
 
         if category_id:
             base = base.where(Skill.category_id == category_id)
