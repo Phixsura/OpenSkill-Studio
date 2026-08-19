@@ -770,3 +770,249 @@ async def test_student_cannot_add_skill(c):
 
     r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=hs)
     assert r.status_code == 403
+
+
+# ═══════════════ Pack list filters + pagination ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_list_packs_filter_by_status_draft(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Create one draft pack (stays draft)
+    await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Draft Pack"}, headers=h)
+
+    # Create one published pack (add skill + release)
+    pid2 = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Published Pack"}, headers=h)).json()["data"]["id"]
+    sid = await _skill(c, h, oid, "Filter Skill")
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid2}/skills", json={"skill_id": sid}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid2}/releases", json={"version": "1.0.0"}, headers=h)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/packs", params={"status": "draft"}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["meta"]["total"] == 1
+    assert r.json()["data"][0]["status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_list_packs_filter_by_status_published(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Draft pack
+    await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Draft Only"}, headers=h)
+
+    # Published pack
+    pid2 = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Pub Only"}, headers=h)).json()["data"]["id"]
+    sid = await _skill(c, h, oid, "Pub Skill")
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid2}/skills", json={"skill_id": sid}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid2}/releases", json={"version": "1.0.0"}, headers=h)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/packs", params={"status": "published"}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["meta"]["total"] == 1
+    assert r.json()["data"][0]["status"] == "published"
+
+
+@pytest.mark.asyncio
+async def test_list_packs_excludes_archived(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Soon Archived"}, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Still Alive"}, headers=h)
+
+    # Archive the first pack
+    await c.delete(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/packs", headers=h)
+    assert r.status_code == 200
+    assert r.json()["meta"]["total"] == 1
+    assert r.json()["data"][0]["name"] == "Still Alive"
+
+
+@pytest.mark.asyncio
+async def test_list_packs_pagination(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Page A"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Page B"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Page C"}, headers=h)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/packs", params={"page": 2, "per_page": 2}, headers=h)
+    assert r.status_code == 200
+    assert len(r.json()["data"]) == 1
+    assert r.json()["meta"]["total"] == 3
+    assert r.json()["meta"]["page"] == 2
+
+
+# ═══════════════ Remove not-in-pack ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_remove_skill_not_in_pack(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "NoSkill"}, headers=h)).json()["data"]["id"]
+    sid = await _skill(c, h, oid, "Orphan Skill")
+
+    r = await c.delete(f"/api/v1/orgs/{oid}/packs/{pid}/skills/{sid}", headers=h)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_IN_PACK"
+
+
+@pytest.mark.asyncio
+async def test_remove_template_not_in_pack(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "NoTmpl"}, headers=h)).json()["data"]["id"]
+    tid = await _template(c, h, oid, "Orphan Template")
+
+    r = await c.delete(f"/api/v1/orgs/{oid}/packs/{pid}/templates/{tid}", headers=h)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_IN_PACK"
+
+
+# ═══════════════ Publish edge cases ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_publish_release_archived_template(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "ArchTmplPub"}, headers=h)).json()["data"]["id"]
+    tid = await _template(c, h, oid, "Doomed Template")
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/templates", json={"template_id": tid}, headers=h)
+
+    # Archive the template
+    await c.delete(f"/api/v1/orgs/{oid}/project-templates/{tid}", headers=h)
+
+    r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "COMPONENT_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_publish_release_manifest_exercise_content(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "ExPack"}, headers=h)).json()["data"]["id"]
+    sid = await _skill(c, h, oid, "Exercise Skill")
+
+    # Create an exercise on the skill
+    ex_r = await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/exercises", json={
+        "title": "Quiz 1", "description": "First quiz", "type": "multiple_choice",
+        "config": {"options": ["a", "b"], "correct": "a"}, "max_score": 50,
+    }, headers=h)
+    assert ex_r.status_code == 201
+
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/packs/{pid}/releases/1.0.0", headers=h)
+    assert r.status_code == 200
+    ex = r.json()["data"]["manifest"]["skills"][0]["exercises"][0]
+    assert ex["title"] == "Quiz 1"
+    assert ex["type"] == "multiple_choice"
+    assert ex["max_score"] == 50
+
+
+# ═══════════════ Schema validation ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_create_pack_name_too_short(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    r = await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "A"}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_pack_name_too_long(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    r = await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "A" * 201}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_pack_summary_too_long(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    r = await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Valid Name", "summary": "A" * 501}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_pack_invalid_visibility(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    r = await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Bad Vis", "visibility": "internal"}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_pack_invalid_difficulty(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    r = await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Bad Diff", "difficulty": "novice"}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_pack_invalid_visibility(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "UpdVis"}, headers=h)).json()["data"]["id"]
+
+    r = await c.put(f"/api/v1/orgs/{oid}/packs/{pid}", json={"visibility": "restricted"}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_publish_release_version_too_long(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid, _ = await _pack_with_skill(c, h, oid, "LongVer", "LongVerSk")
+
+    r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "A" * 21}, headers=h)
+    assert r.status_code == 422
+
+
+# ═══════════════ State transitions + cascade ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_archived_pack_cannot_be_reactivated(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Reactivate"}, headers=h)).json()["data"]["id"]
+
+    await c.delete(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)
+
+    r = await c.put(f"/api/v1/orgs/{oid}/packs/{pid}", json={"status": "draft"}, headers=h)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_skill_in_pack_still_listed(c):
+    """Archiving a skill excludes it from the pack skills listing."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid, sid = await _pack_with_skill(c, h, oid, "CascPack", "CascSkill")
+
+    # Archive the skill
+    await c.delete(f"/api/v1/orgs/{oid}/skills/{sid}", headers=h)
+
+    # list_pack_skills joins with Skill and filters out archived
+    r = await c.get(f"/api/v1/orgs/{oid}/packs/{pid}/skills", headers=h)
+    assert r.status_code == 200
+    assert len(r.json()["data"]) == 0

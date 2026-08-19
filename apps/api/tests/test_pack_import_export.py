@@ -637,3 +637,71 @@ async def test_import_template_missing_logical_id(c):
     )
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+
+# ═══════════════ /proc path ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_import_malicious_proc_path(c):
+    """Zip entry with '/proc/self/environ' triggers MALICIOUS_ARCHIVE."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("openskill-pack.json", json.dumps(VALID_MANIFEST))
+        info = zipfile.ZipInfo("/proc/self/environ")
+        info.filename = "/proc/self/environ"
+        zf.writestr(info, "malicious")
+    buf.seek(0)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("evil.zip", buf.getvalue(), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert "MALICIOUS" in r.json()["error"]["code"]
+
+
+# ═══════════════ Missing schema_version ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_import_missing_schema_version(c):
+    """Manifest without schema_version key → 422 UNSUPPORTED_SCHEMA."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    manifest = {
+        "pack": {
+            "name": "No Schema Version",
+            "summary": "Missing schema_version",
+        },
+    }
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("bad.zip", _make_zip(manifest), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert "SCHEMA" in r.json()["error"]["code"].upper()
+
+
+# ═══════════════ Student cannot import ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_import_student_cannot_import(c):
+    """Student role cannot import a pack → 403."""
+    h, _ = await _auth(c)
+    hs, us = await _auth(c)
+    oid = await _org(c, h)
+    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
+
+    zip_bytes = _make_zip(VALID_MANIFEST)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("test.zip", zip_bytes, "application/zip")},
+        headers=hs,
+    )
+    assert r.status_code == 403

@@ -98,7 +98,14 @@ class LearningPathService:
     ) -> LearningPathItem:
         await self.get_path(path_id, org_id)
 
-        ptype = PathItemType(item_type.lower())
+        try:
+            ptype = PathItemType(item_type.lower())
+        except ValueError as exc:
+            raise AppError(
+                "INVALID_ITEM_TYPE",
+                f"Invalid item_type '{item_type}'. Must be one of: skill, project, section",
+                422,
+            ) from exc
 
         # Validate references
         if ptype == PathItemType.SKILL:

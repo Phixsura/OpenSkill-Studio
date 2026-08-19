@@ -624,3 +624,137 @@ async def test_student_cannot_update_path(c):
 
     r = await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"name": "Nope"}, headers=hs)
     assert r.status_code == 403
+
+
+# ═══════════════ List excludes archived ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_list_paths_excludes_archived(c):
+    """Deleted (archived) paths must not appear in list results."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Archive Me"}, headers=h)).json()["data"]["id"]
+    await c.delete(f"/api/v1/orgs/{oid}/paths/{pid}", headers=h)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/paths", headers=h)
+    assert r.status_code == 200
+    ids = [p["id"] for p in r.json()["data"]]
+    assert pid not in ids
+
+
+# ═══════════════ Invalid item_type ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_add_item_invalid_type(c):
+    """item_type='quiz' is not a valid PathItemType → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "InvalidType"}, headers=h)).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "quiz",
+    }, headers=h)
+    assert r.status_code == 422
+
+
+# ═══════════════ Progress pct rounding ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_path_progress_pct_rounds(c):
+    """3 required skill items, 1 completed → pct=33."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "PctRound"}, headers=h)).json()["data"]["id"]
+
+    # Create 3 skills, each with an MCQ exercise, add all to path
+    exercise_ids = []
+    for i in range(3):
+        cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"PctCat-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
+        sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
+            "name": f"PctSkill{i}", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
+        }, headers=h)).json()["data"]["id"]
+        ex = (await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/exercises", json={
+            "title": f"MCQ-{i}", "description": "test", "type": "multiple_choice",
+            "config": {"choices": ["A", "B"], "correct": ["A"]}, "max_score": 100,
+        }, headers=h)).json()["data"]["id"]
+        exercise_ids.append(ex)
+        await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+            "item_type": "skill", "skill_id": sid, "sort_order": i, "required": True,
+        }, headers=h)
+
+    # Complete only the first skill by submitting correct MCQ answer
+    await c.post(f"/api/v1/orgs/{oid}/exercises/{exercise_ids[0]}/attempts", json={
+        "answer": {"selected": ["A"]},
+    }, headers=h)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["pct"] == 33
+
+
+# ═══════════════ Mixed sections and skills ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_path_progress_mixed_sections_skills(c):
+    """Path with section + 2 skill items — verify all types render correctly."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Mixed"}, headers=h)).json()["data"]["id"]
+
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "section", "section_title": "Module 1", "sort_order": 0,
+    }, headers=h)
+    s1 = await _skill(c, h, oid, "MixedSkill1")
+    s2 = await _skill(c, h, oid, "MixedSkill2")
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": s1, "sort_order": 1,
+    }, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/paths/{pid}/items", json={
+        "item_type": "skill", "skill_id": s2, "sort_order": 2,
+    }, headers=h)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r.status_code == 200
+    items = r.json()["data"]["items"]
+    assert len(items) == 3
+    assert items[0]["type"] == "section"
+    assert items[0]["title"] == "Module 1"
+    assert items[1]["type"] == "skill"
+    assert items[2]["type"] == "skill"
+
+
+# ═══════════════ Name validation ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_create_path_name_too_short(c):
+    """name='X' is below the 2-char minimum → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "X"}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_path_name_too_long(c):
+    """name='X'*201 exceeds 200-char maximum → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "X" * 201}, headers=h)
+    assert r.status_code == 422
+
+
+# ═══════════════ Invalid status ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_update_path_invalid_status(c):
+    """status='active' is not in {draft, published, archived} → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "StatTest"}, headers=h)).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"status": "active"}, headers=h)
+    assert r.status_code == 422

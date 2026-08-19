@@ -864,3 +864,252 @@ async def test_check_update_source_unavailable(c):
     assert r.status_code == 200
     assert r.json()["data"]["update_available"] is False
     assert r.json()["data"]["reason"] == "source_unavailable"
+
+
+# ═══════════════ Install Data Integrity ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_install_data_integrity_skill_fields(c):
+    """After install, installed skills match the source name/description/difficulty."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+
+    # Create pack with known skill attributes
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
+        "name": "Integrity Pack", "visibility": "public",
+    }, headers=h1)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "IntCat"}, headers=h1)).json()["data"]["id"]
+    skill_name = f"IntSkill-{uuid.uuid4().hex[:6]}"
+    skill_desc = "A very specific description for integrity test"
+    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
+        "name": skill_name, "description": skill_desc,
+        "difficulty": "intermediate", "category_id": cat,
+    }, headers=h1)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
+
+    # Install into target org
+    await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+
+    # Verify installed skills have matching fields
+    r = await c.get(f"/api/v1/orgs/{oid2}/skills", headers=h2)
+    assert r.status_code == 200
+    installed_skills = r.json()["data"]
+    assert len(installed_skills) >= 1
+    match = [s for s in installed_skills if s["name"] == skill_name]
+    assert len(match) == 1
+    assert match[0]["description"] == skill_desc
+    assert match[0]["difficulty"] == "intermediate"
+
+
+@pytest.mark.asyncio
+async def test_install_sets_origin_fields(c):
+    """After install, installed skill has origin_pack_id, origin_release_id, origin_component_id."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill import Skill as SkillModel
+
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "Origin Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    assert inst_r.status_code == 201
+
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(SkillModel).where(
+                SkillModel.org_id == oid2,
+                SkillModel.origin_pack_id == pid,
+            )
+        )
+        skills = result.scalars().all()
+    assert len(skills) >= 1
+    for s in skills:
+        assert s.origin_pack_id == pid
+        assert s.origin_release_id is not None
+        assert s.origin_component_id is not None
+
+
+@pytest.mark.asyncio
+async def test_install_own_pack(c):
+    """Org creates pack, publishes, installs into SAME org -> 201."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, "Self Install Pack")
+
+    r = await c.post(f"/api/v1/orgs/{oid}/installations", json={"pack_id": pid}, headers=h)
+    assert r.status_code == 201
+
+
+# ═══════════════ Compute Diff: Templates ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_added_template(c):
+    """Diff detects a template added in the new release."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "TmplDiffAdd Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    # Add a template and publish v2
+    tid = (await c.post(f"/api/v1/orgs/{oid1}/project-templates", json={
+        "name": "Added Template", "description": "Template desc",
+        "instructions": "Do it",
+        "rubric": [{"criterion": "Quality", "max_score": 100}],
+    }, headers=h1)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
+
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
+    assert r.status_code == 200
+    diff = r.json()["data"]
+    assert any(a["type"] == "template" for a in diff["added"])
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_removed_template(c):
+    """Diff detects a template removed in the new release."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+
+    # Create pack with skill + template, then publish v1
+    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
+        "name": "TmplDiffRm Pack", "visibility": "public",
+    }, headers=h1)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "TDRCat"}, headers=h1)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
+        "name": f"TDR-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
+        "difficulty": "beginner", "category_id": cat,
+    }, headers=h1)).json()["data"]["id"]
+    tid = (await c.post(f"/api/v1/orgs/{oid1}/project-templates", json={
+        "name": "Removable Template", "description": "Template desc",
+        "instructions": "Do it",
+        "rubric": [{"criterion": "Quality", "max_score": 100}],
+    }, headers=h1)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    # Remove template and publish v2
+    await c.delete(f"/api/v1/orgs/{oid1}/packs/{pid}/templates/{tid}", headers=h1)
+    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
+
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
+    assert r.status_code == 200
+    diff = r.json()["data"]
+    assert any(a["type"] == "template" for a in diff["removed"])
+
+
+# ═══════════════ Remove Behavior ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_remove_then_get_returns_404(c):
+    """After removing an installation, GET returns 404."""
+    h1, _ = await _auth(c)
+    h2, _ = await _auth(c)
+    oid1 = await _org(c, h1)
+    oid2 = await _org(c, h2)
+    pid = await _pack_with_release(c, h1, oid1, "Remove404 Pack")
+
+    inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    iid = inst_r.json()["data"]["id"]
+
+    await c.delete(f"/api/v1/orgs/{oid2}/installations/{iid}", headers=h2)
+
+    r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}", headers=h2)
+    assert r.status_code == 404
+
+
+# ═══════════════ Registry Extras ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_registry_sort_recently_updated(c):
+    """sort=recently_updated returns 200 and respects the sort."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await _pack_with_release(c, h, oid, f"RU-{uuid.uuid4().hex[:6]}", "public")
+
+    r = await c.get("/api/v1/registry/packs?sort=recently_updated")
+    assert r.status_code == 200
+    assert r.json()["meta"]["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_registry_search_no_results(c):
+    """Searching for nonsense returns total=0."""
+    r = await c.get(f"/api/v1/registry/packs?search=zzz_nonexistent_{uuid.uuid4().hex}")
+    assert r.status_code == 200
+    assert r.json()["meta"]["total"] == 0
+    assert r.json()["data"] == []
+
+
+@pytest.mark.asyncio
+async def test_registry_archived_pack_detail_rejected(c):
+    """Archived public pack returns 404 on registry detail."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, "Archived Detail Pack")
+
+    # Archive the pack (DELETE sets status=archived)
+    await c.delete(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)
+
+    r = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_registry_draft_pack_detail_rejected(c):
+    """Draft pack (no release) returns 404 on registry detail."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
+        "name": "Draft Detail Pack", "visibility": "public",
+    }, headers=h)).json()["data"]["id"]
+
+    r = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_registry_search_matches_summary(c):
+    """Search term appearing only in summary is found."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    unique_term = f"xyzzy{uuid.uuid4().hex[:8]}"
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
+        "name": "Summary Pack", "visibility": "public",
+        "summary": f"Pack about {unique_term}",
+    }, headers=h)).json()["data"]["id"]
+
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={
+        "name": f"SM-{uuid.uuid4().hex[:4]}",
+    }, headers=h)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
+        "name": f"SM-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
+        "difficulty": "beginner", "category_id": cat,
+    }, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+
+    r = await c.get(f"/api/v1/registry/packs?search={unique_term}")
+    assert r.status_code == 200
+    assert r.json()["meta"]["total"] >= 1
+    assert any(p["id"] == pid for p in r.json()["data"])
