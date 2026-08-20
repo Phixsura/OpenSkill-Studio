@@ -101,6 +101,7 @@ Architecture decisions are documented in [`docs/design/`](docs/design/):
 - [ADR-005: Projects & Submissions](docs/design/005-projects-and-submissions.md)
 - [ADR-006: AI Evaluation Pipeline](docs/design/006-ai-evaluation-pipeline.md)
 - [ADR-007: Portfolio & Public Page](docs/design/007-portfolio-and-public-page.md)
+- [ADR-008: Cohorts, Client Briefs & Multimodal AI Evaluation](docs/design/008-cohorts-briefs-multimodal.md)
 - [ADR-009: Skill Pack Registry](docs/design/009-skill-pack-registry.md)
 
 ## Skill Pack Registry
