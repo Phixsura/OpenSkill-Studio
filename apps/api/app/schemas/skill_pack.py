@@ -104,6 +104,10 @@ class SkillPackResponse(BaseModel):
     tool_tags: list
     capability_tags: list
     install_count: int
+    review_count: int = 0
+    average_rating: float | None = None
+    review_status: str | None = None
+    badges: list[str] = []
     provenance: dict
     created_by: str
     created_at: datetime

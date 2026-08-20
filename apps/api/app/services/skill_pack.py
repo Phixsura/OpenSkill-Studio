@@ -21,8 +21,10 @@ from app.models.skill import (
     SkillPrerequisite,
 )
 from app.models.skill_pack import (
+    InstallStatus,
     PackStatus,
     SkillPack,
+    SkillPackInstallation,
     SkillPackRelease,
     SkillPackSkill,
     SkillPackTemplate,
@@ -454,6 +456,39 @@ class SkillPackService:
         from app.core.cache import cache_delete_pattern
         await cache_delete_pattern("registry:*")
 
+        # Notify installing orgs' owners about the new version
+        try:
+            from app.models.organization import MemberStatus, OrgMember, OrgRole
+            from app.services.notification import NotificationService
+
+            install_r = await self.db.execute(
+                select(SkillPackInstallation.org_id).where(
+                    SkillPackInstallation.pack_id == pack_id,
+                    SkillPackInstallation.status == InstallStatus.ACTIVE,
+                )
+            )
+            org_ids = [row[0] for row in install_r.all()]
+            if org_ids:
+                owner_r = await self.db.execute(
+                    select(OrgMember.user_id, OrgMember.org_id).where(
+                        OrgMember.org_id.in_(org_ids),
+                        OrgMember.role == OrgRole.OWNER,
+                        OrgMember.status == MemberStatus.ACTIVE,
+                    )
+                )
+                notif_svc = NotificationService(self.db)
+                for user_id, org_id_val in owner_r.all():
+                    await notif_svc.create(
+                        user_id=user_id,
+                        notification_type="pack_update",
+                        title=f"New version {version} available for {pack.name}",
+                        body=changelog,
+                        org_id=org_id_val,
+                        data={"pack_id": pack_id, "version": version},
+                    )
+        except Exception:
+            log.warning("notify_pack_update_failed", pack_id=pack_id, version=version)
+
         log.info(
             "pack_released",
             pack_id=pack_id,
@@ -482,6 +517,36 @@ class SkillPackService:
         if release is None:
             raise ReleaseNotFoundError()
         return release
+
+    # ── Analytics ──
+
+    async def get_pack_analytics(self, pack_id: str, org_id: str) -> dict:
+        """Publisher analytics for a pack: installs, rating, installs by version."""
+        pack = await self.get_pack(pack_id, org_id)
+
+        # Installs grouped by installed_version
+        version_r = await self.db.execute(
+            select(
+                SkillPackInstallation.installed_version,
+                func.count().label("count"),
+            )
+            .where(
+                SkillPackInstallation.pack_id == pack_id,
+                SkillPackInstallation.status != InstallStatus.REMOVED,
+            )
+            .group_by(SkillPackInstallation.installed_version)
+        )
+        installs_by_version = [
+            {"version": row[0], "count": row[1]}
+            for row in version_r.all()
+        ]
+
+        return {
+            "install_count": pack.install_count,
+            "average_rating": pack.average_rating,
+            "review_count": pack.review_count,
+            "installs_by_version": installs_by_version,
+        }
 
     # ── Helpers ──
 

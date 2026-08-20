@@ -280,13 +280,70 @@ class LearningPathService:
             if is_required:
                 all_prev_done = all_prev_done and is_done
 
-        return {
+        pct = round(completed * 100 / total_required) if total_required > 0 else 100
+
+        # Issue certificate on 100% completion
+        certificate_number = None
+        if pct == 100:
+            certificate_number = await self._maybe_issue_certificate(
+                path_id, user_id, org_id, completed
+            )
+
+        result = {
             "path_id": path_id,
             "items": result_items,
             "completed": completed,
             "total_required": total_required,
-            "pct": round(completed * 100 / total_required) if total_required > 0 else 100,
+            "pct": pct,
         }
+        if certificate_number:
+            result["certificate_number"] = certificate_number
+        return result
+
+    # ── Certificates ──
+
+    async def _maybe_issue_certificate(
+        self, path_id: str, user_id: str, org_id: str, skills_completed: int
+    ) -> str | None:
+        """Issue a completion certificate if one doesn't already exist."""
+        import uuid
+
+        from app.models.certificate import Certificate
+        from app.models.organization import Organization
+        from app.models.user import User
+
+        existing_r = await self.db.execute(
+            select(Certificate).where(
+                Certificate.user_id == user_id,
+                Certificate.path_id == path_id,
+            )
+        )
+        existing = existing_r.scalar_one_or_none()
+        if existing:
+            return existing.certificate_number
+
+        path = await self.db.get(LearningPath, path_id)
+        user = await self.db.get(User, user_id)
+        org = await self.db.get(Organization, org_id)
+
+        cert_number = str(uuid.uuid4())
+        cert = Certificate(
+            user_id=user_id,
+            path_id=path_id,
+            org_id=org_id,
+            certificate_number=cert_number,
+            data={
+                "user_name": user.display_name if user else "Unknown",
+                "path_name": path.name if path else "Unknown",
+                "org_name": org.name if org else "Unknown",
+                "skills_completed": skills_completed,
+            },
+        )
+        self.db.add(cert)
+        await self.db.flush()
+
+        log.info("certificate_issued", cert_number=cert_number, user_id=user_id, path_id=path_id)
+        return cert_number
 
     # ── Helpers ──
 

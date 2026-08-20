@@ -1,13 +1,13 @@
 """Add GIN indexes for JSONB tag columns on skill_packs
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: c3d4e5f60718
 Revises: 10fbb2faf2d0
 Create Date: 2026-08-20
 """
 
 from alembic import op
 
-revision: str = "a1b2c3d4e5f6"
+revision: str = "c3d4e5f60718"
 down_revision: str | None = "10fbb2faf2d0"
 branch_labels = None
 depends_on = None

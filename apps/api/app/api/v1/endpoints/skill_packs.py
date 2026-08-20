@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
+from app.models.skill_pack import PackVisibility
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.skill_pack import (
@@ -292,6 +293,78 @@ async def list_releases(
     await svc.get_pack(pack_id, org_id)
     releases = await svc.list_releases(pack_id)
     return DataResponse(data=[ReleaseResponse.model_validate(r) for r in releases])
+
+
+@router.get(
+    "/orgs/{org_id}/packs/{pack_id}/analytics",
+    response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def get_pack_analytics(
+    org_id: str,
+    pack_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Publisher analytics: install count, rating, installs by version."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = SkillPackService(db)
+    analytics = await svc.get_pack_analytics(pack_id, org_id)
+    return DataResponse(data=analytics)
+
+
+# ── Approval Workflow ───────────────────────────────────
+
+
+@router.post(
+    "/orgs/{org_id}/packs/{pack_id}/approve",
+    response_model=DataResponse[SkillPackResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def approve_pack(
+    org_id: str,
+    pack_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve a pack for public visibility (owner/admin only)."""
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    svc = SkillPackService(db)
+    pack = await svc.get_pack(pack_id, org_id)
+    if pack.review_status != "pending":
+        from app.exceptions import AppError
+
+        raise AppError("NOT_PENDING", "Pack is not pending review", 422)
+    pack.review_status = "approved"
+    pack.visibility = PackVisibility.PUBLIC
+    await db.flush()
+    await db.commit()
+    return DataResponse(data=SkillPackResponse.model_validate(pack))
+
+
+@router.post(
+    "/orgs/{org_id}/packs/{pack_id}/reject",
+    response_model=DataResponse[SkillPackResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def reject_pack(
+    org_id: str,
+    pack_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reject a pack from public visibility (owner/admin only)."""
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    svc = SkillPackService(db)
+    pack = await svc.get_pack(pack_id, org_id)
+    if pack.review_status != "pending":
+        from app.exceptions import AppError
+
+        raise AppError("NOT_PENDING", "Pack is not pending review", 422)
+    pack.review_status = "rejected"
+    await db.flush()
+    await db.commit()
+    return DataResponse(data=SkillPackResponse.model_validate(pack))
 
 
 @router.get(

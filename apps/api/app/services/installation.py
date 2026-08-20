@@ -427,7 +427,7 @@ class InstallationService:
         target_version: str,
         installed_by: str,
     ) -> SkillPackInstallation:
-        """Upgrade an installation to a newer version."""
+        """Upgrade (or rollback) an installation to any version."""
         inst = await self.get_installation(install_id, org_id)
         if inst.status == InstallStatus.FORKED:
             raise AppError("INSTALL_FORKED", "Cannot upgrade a forked installation", 422)

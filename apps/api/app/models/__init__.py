@@ -1,4 +1,5 @@
 from app.models.base import Base  # noqa: F401
+from app.models.certificate import Certificate  # noqa: F401
 from app.models.client_brief import (  # noqa: F401
     ApplicationStatus,
     BriefApplication,
@@ -26,6 +27,7 @@ from app.models.learning_path import (  # noqa: F401
     LearningPathItem,
     PathItemType,
 )
+from app.models.notification import Notification  # noqa: F401
 from app.models.organization import (  # noqa: F401
     InviteStatus,
     MemberStatus,
@@ -36,6 +38,8 @@ from app.models.organization import (  # noqa: F401
     OrgRole,
     OrgStatus,
 )
+from app.models.pack_category import PackCategory, PackCategoryAssignment  # noqa: F401
+from app.models.pack_review import PackReview  # noqa: F401
 from app.models.portfolio import (  # noqa: F401
     ItemVisibility,
     PortfolioItem,

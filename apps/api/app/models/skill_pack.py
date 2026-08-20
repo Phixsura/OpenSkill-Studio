@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import (
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -80,6 +81,13 @@ class SkillPack(Base):
 
     # Counters
     install_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    average_rating: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+
+    # Publication approval workflow
+    review_status: Mapped[str | None] = mapped_column(  # pending/approved/rejected/none
+        String(20), nullable=True
+    )
 
     # Provenance (author, license, attribution)
     provenance: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")

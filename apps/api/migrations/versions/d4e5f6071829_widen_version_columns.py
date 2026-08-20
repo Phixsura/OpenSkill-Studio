@@ -1,7 +1,7 @@
 """widen_version_columns
 
-Revision ID: a1b2c3d4e5f6
-Revises: f34d9c53f007
+Revision ID: d4e5f6071829
+Revises: c3d4e5f60718
 Create Date: 2026-08-20 10:00:00.000000
 
 """
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "a1b2c3d4e5f6"
-down_revision: str | None = "f34d9c53f007"
+revision: str = "d4e5f6071829"
+down_revision: str | None = "c3d4e5f60718"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

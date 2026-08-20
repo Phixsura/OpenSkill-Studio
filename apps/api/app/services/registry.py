@@ -1,6 +1,7 @@
 """Public pack registry — search, filter, browse published packs."""
 
 import hashlib
+from datetime import UTC
 
 import structlog
 from sqlalchemy import String, cast, func, or_, select
@@ -39,6 +40,7 @@ class RegistryService:
         scenario: str | None = None,
         tool: str | None = None,
         difficulty: str | None = None,
+        category: str | None = None,
         sort: str = "newest",
         page: int = 1,
         per_page: int = 20,
@@ -50,7 +52,7 @@ class RegistryService:
         Results are cached in Redis for 5 minutes.
         """
         # ── Check cache ──
-        cache_key_src = f"{search}:{scenario}:{tool}:{difficulty}:{sort}:{page}:{per_page}"
+        cache_key_src = f"{search}:{scenario}:{tool}:{difficulty}:{category}:{sort}:{page}:{per_page}"
         cache_key = f"registry:search:{hashlib.md5(cache_key_src.encode()).hexdigest()}"
         cached = await cache_get(cache_key)
         if cached is not None:
@@ -69,6 +71,10 @@ class RegistryService:
         base = select(SkillPack).where(
             SkillPack.visibility == PackVisibility.PUBLIC,
             SkillPack.status == PackStatus.PUBLISHED,
+            or_(
+                SkillPack.review_status.is_(None),
+                SkillPack.review_status == "approved",
+            ),
         )
 
         if search:
@@ -110,6 +116,17 @@ class RegistryService:
         if difficulty:
             base = base.where(SkillPack.difficulty == difficulty)
 
+        if category:
+            from app.models.pack_category import PackCategory, PackCategoryAssignment
+
+            base = base.where(
+                SkillPack.id.in_(
+                    select(PackCategoryAssignment.pack_id).join(
+                        PackCategory, PackCategory.id == PackCategoryAssignment.category_id
+                    ).where(PackCategory.slug == category)
+                )
+            )
+
         # Sort
         if sort in ("most_installed", "popular"):
             base = base.order_by(SkillPack.install_count.desc())
@@ -128,6 +145,19 @@ class RegistryService:
 
         # ── Populate cache ──
         await cache_set(cache_key, {"ids": [p.id for p in packs], "total": total}, ttl=300)
+
+        # ── Compute badges ──
+        from datetime import datetime, timedelta
+
+        now = datetime.now(UTC)
+        thirty_days_ago = now - timedelta(days=30)
+        for pack in packs:
+            badges: list[str] = []
+            if pack.install_count >= 10:
+                badges.append("Popular")
+            if pack.created_at and pack.created_at >= thirty_days_ago:
+                badges.append("New")
+            pack.badges = badges  # type: ignore[attr-defined]
 
         return packs, total
 
@@ -151,3 +181,91 @@ class RegistryService:
         releases = list(result.scalars().all())
         releases.sort(key=lambda r: _parse_semver(r.version), reverse=True)
         return releases
+
+    async def list_categories(self) -> list[dict]:
+        """Return pack categories as a tree structure."""
+        from app.models.pack_category import PackCategory
+
+        result = await self.db.execute(
+            select(PackCategory).order_by(PackCategory.sort_order)
+        )
+        categories = list(result.scalars().all())
+
+        # Build tree: group children by parent_id
+        by_parent: dict[str | None, list[dict]] = {}
+        cat_dicts = {}
+        for cat in categories:
+            d = {
+                "id": cat.id,
+                "name": cat.name,
+                "slug": cat.slug,
+                "icon": cat.icon,
+                "sort_order": cat.sort_order,
+                "children": [],
+            }
+            cat_dicts[cat.id] = d
+            by_parent.setdefault(cat.parent_id, []).append(d)
+
+        # Attach children to parents
+        for cat in categories:
+            if cat.parent_id and cat.parent_id in cat_dicts:
+                cat_dicts[cat.parent_id]["children"].append(cat_dicts[cat.id])
+
+        # Return only root nodes (parent_id is None)
+        return by_parent.get(None, [])
+
+    async def get_pack_preview(self, pack_id: str) -> dict:
+        """Build a curriculum preview from the latest release manifest."""
+        await self.get_public_pack(pack_id)  # verify accessible
+
+        result = await self.db.execute(
+            select(SkillPackRelease)
+            .where(SkillPackRelease.pack_id == pack_id)
+            .order_by(SkillPackRelease.released_at.desc())
+            .limit(1)
+        )
+        release = result.scalar_one_or_none()
+        if release is None:
+            raise AppError("NO_RELEASES", "This pack has no releases yet", 404)
+
+        manifest = release.manifest or {}
+
+        # Extract skills
+        raw_skills = manifest.get("skills", [])
+        skills = []
+        total_exercises = 0
+        for s in raw_skills:
+            exercises = s.get("exercises", [])
+            total_exercises += len(exercises)
+            skills.append({
+                "name": s.get("name", ""),
+                "description": s.get("description"),
+                "difficulty": s.get("difficulty"),
+                "exercise_count": len(exercises),
+                "prerequisites": s.get("prerequisites", []),
+            })
+
+        # Extract templates
+        raw_templates = manifest.get("project_templates", [])
+        templates = []
+        for t in raw_templates:
+            rubric = t.get("rubric") or {}
+            criteria = rubric.get("criteria", [])
+            templates.append({
+                "name": t.get("name", ""),
+                "description": t.get("description"),
+                "rubric_criteria_count": len(criteria),
+            })
+
+        # Extract categories
+        raw_categories = manifest.get("categories", [])
+        categories = [{"name": c.get("name", "")} for c in raw_categories]
+
+        return {
+            "skills": skills,
+            "templates": templates,
+            "categories": categories,
+            "total_skills": len(skills),
+            "total_exercises": total_exercises,
+            "total_templates": len(templates),
+        }
