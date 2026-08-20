@@ -18,6 +18,10 @@ vi.mock("@/lib/api", () => ({
   ApiError: class extends Error {},
 }));
 
+vi.mock("@/stores/auth", () => ({
+  useAuthStore: { getState: () => ({ isAuthenticated: false }) },
+}));
+
 import RegistryPackDetailPage from "@/app/registry/[packId]/page";
 import { api } from "@/lib/api";
 
@@ -42,6 +46,8 @@ const PACK_DETAIL = {
     license_name: "MIT",
     source_url: "https://example.com",
   },
+  average_rating: 4.5,
+  review_count: 12,
 };
 
 const RELEASES = [
@@ -53,6 +59,23 @@ const RELEASES = [
     released_at: "2026-03-01T00:00:00Z",
   },
 ];
+
+const PREVIEW = {
+  skills: [{ name: "Skill 1", description: "d", difficulty: "beginner", exercise_count: 3, prerequisites: [] }],
+  templates: [{ name: "Template 1", description: "d", rubric_criteria_count: 2 }],
+  categories: [{ name: "Cat 1" }],
+  total_skills: 1,
+  total_exercises: 3,
+  total_templates: 1,
+};
+
+function mockAllApis(overrides?: { releases?: unknown[]; pack?: unknown }) {
+  return (path: string) => {
+    if (path.includes("/preview")) return Promise.resolve({ data: PREVIEW });
+    if (path.includes("/releases")) return Promise.resolve({ data: overrides?.releases ?? RELEASES });
+    return Promise.resolve({ data: overrides?.pack ?? PACK_DETAIL });
+  };
+}
 
 function createWrapper() {
   const qc = new QueryClient({
@@ -73,12 +96,7 @@ describe("RegistryPackDetailPage", () => {
   });
 
   it("renders pack details when loaded", async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path.includes("/releases")) {
-        return Promise.resolve({ data: RELEASES });
-      }
-      return Promise.resolve({ data: PACK_DETAIL });
-    });
+    mockApi.mockImplementation(mockAllApis() as any);
     render(<RegistryPackDetailPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("AI Prompt Engineering")).toBeDefined();
     expect(screen.getByText("by Alice")).toBeDefined();
@@ -88,38 +106,21 @@ describe("RegistryPackDetailPage", () => {
   });
 
   it("renders learning outcomes", async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path.includes("/releases")) {
-        return Promise.resolve({ data: [] });
-      }
-      return Promise.resolve({ data: PACK_DETAIL });
-    });
+    mockApi.mockImplementation(mockAllApis() as any);
     render(<RegistryPackDetailPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("Write effective prompts")).toBeDefined();
     expect(screen.getByText("Evaluate AI output")).toBeDefined();
   });
 
   it("renders description section", async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path.includes("/releases")) {
-        return Promise.resolve({ data: [] });
-      }
-      return Promise.resolve({ data: PACK_DETAIL });
-    });
+    mockApi.mockImplementation(mockAllApis() as any);
     render(<RegistryPackDetailPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("Description")).toBeDefined();
-    expect(
-      screen.getByText("A complete guide to prompt engineering."),
-    ).toBeDefined();
+    expect(screen.getByText("A complete guide to prompt engineering.")).toBeDefined();
   });
 
   it("renders releases list", async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path.includes("/releases")) {
-        return Promise.resolve({ data: RELEASES });
-      }
-      return Promise.resolve({ data: PACK_DETAIL });
-    });
+    mockApi.mockImplementation(mockAllApis() as any);
     render(<RegistryPackDetailPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("v1.0.0")).toBeDefined();
     expect(screen.getByText("5 components")).toBeDefined();
@@ -129,18 +130,11 @@ describe("RegistryPackDetailPage", () => {
   it("shows error state on failure", async () => {
     mockApi.mockRejectedValue(new Error("fail"));
     render(<RegistryPackDetailPage />, { wrapper: createWrapper() });
-    expect(
-      await screen.findByText(/Pack not found or failed to load/),
-    ).toBeDefined();
+    expect(await screen.findByText(/Pack not found or failed to load/)).toBeDefined();
   });
 
   it("renders sidebar tags", async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path.includes("/releases")) {
-        return Promise.resolve({ data: [] });
-      }
-      return Promise.resolve({ data: PACK_DETAIL });
-    });
+    mockApi.mockImplementation(mockAllApis() as any);
     render(<RegistryPackDetailPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("Scenarios")).toBeDefined();
     expect(screen.getByText("prompt-eng")).toBeDefined();
@@ -151,12 +145,7 @@ describe("RegistryPackDetailPage", () => {
   });
 
   it("renders license and estimated time", async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path.includes("/releases")) {
-        return Promise.resolve({ data: [] });
-      }
-      return Promise.resolve({ data: PACK_DETAIL });
-    });
+    mockApi.mockImplementation(mockAllApis() as any);
     render(<RegistryPackDetailPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("MIT")).toBeDefined();
     expect(screen.getByText("Estimated time")).toBeDefined();
