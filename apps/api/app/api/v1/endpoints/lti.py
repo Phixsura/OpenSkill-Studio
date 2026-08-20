@@ -23,7 +23,11 @@ async def get_lti_config(
 ):
     """Return LTI 1.3 configuration JSON for a pack (stub for LMS registration)."""
     pack = await db.get(SkillPack, pack_id)
-    if pack is None:
+    if (
+        pack is None
+        or pack.visibility != PackVisibility.PUBLIC
+        or pack.status != PackStatus.PUBLISHED
+    ):
         raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
     config = {

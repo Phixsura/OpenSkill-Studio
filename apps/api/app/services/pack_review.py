@@ -89,6 +89,7 @@ class PackReviewService:
         page: int = 1,
         per_page: int = 20,
     ) -> tuple[list[PackReview], int]:
+        await self._get_public_pack(pack_id)  # 404 for private/unpublished
         base = select(PackReview).where(PackReview.pack_id == pack_id)
 
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
