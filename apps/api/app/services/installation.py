@@ -462,13 +462,56 @@ class InstallationService:
 
         pack_id = inst.pack_id
 
+        # ---- Create categories needed by ADDED skills ----
+        old_cats = {c["logical_id"]: c for c in old_m.get("categories", [])}
+        new_cats = {c["logical_id"]: c for c in new_m.get("categories", [])}
+        cat_id_map: dict[str, str] = {}  # logical_id -> existing or new category ULID
+
+        # Map existing categories (already installed)
+        for cat_lid in new_cats:
+            if cat_lid in old_cats:
+                # Category was already installed — find its current id
+                existing_cat_r = await self.db.execute(
+                    select(SkillCategory.id).where(
+                        SkillCategory.origin_component_id == cat_lid,
+                        SkillCategory.origin_pack_id == pack_id,
+                        SkillCategory.org_id == org_id,
+                    )
+                )
+                existing_cat_id = existing_cat_r.scalar_one_or_none()
+                if existing_cat_id:
+                    cat_id_map[cat_lid] = existing_cat_id
+
+        # Create NEW categories
+        for cat_lid in set(new_cats) - set(old_cats):
+            import secrets as _cat_secrets
+            cat_def = new_cats[cat_lid]
+            cat = SkillCategory(
+                org_id=org_id,
+                name=cat_def["name"],
+                slug=f"{cat_def['slug'][:90]}-{_cat_secrets.token_hex(3)}",
+                sort_order=cat_def.get("sort_order", 0),
+                status=ContentStatus.PUBLISHED,
+                origin_pack_id=pack_id,
+                origin_release_id=release.id,
+                origin_component_id=cat_lid,
+                created_by=installed_by,
+            )
+            self.db.add(cat)
+            await self.db.flush()
+            cat_id_map[cat_lid] = cat.id
+
         # ---- Handle ADDED skills ----
         for lid in set(new_skills) - set(old_skills):
             skill_def = new_skills[lid]
             import secrets as _secrets
 
+            cat_logical = skill_def.get("category_logical_id")
+            category_id = cat_id_map.get(cat_logical) if cat_logical else None
+
             skill = Skill(
                 org_id=org_id,
+                category_id=category_id,
                 name=skill_def["name"],
                 slug=f"{skill_def.get('slug', skill_def['name'].lower().replace(' ', '-')[:200])[:190]}-{_secrets.token_hex(3)}",
                 description=skill_def.get("description", ""),

@@ -892,3 +892,262 @@ async def test_cohort_path_progress_non_instructor_denied(c):
         headers=h2,
     )
     assert r.status_code == 403
+
+
+# ═══════════════ #18: Direct + path assignments coexist (1 test) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_direct_and_path_assignments_coexist(c):
+    """Direct cohort skill assignments and learning-path assignments coexist."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Two distinct skills
+    s_direct = await _skill(c, h, oid, "Direct Assign Skill")
+    s_path = await _skill(c, h, oid, "Path Assign Skill")
+
+    # Create cohort and activate it
+    cr = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts",
+        json={"name": f"Coexist-{uuid.uuid4().hex[:6]}"},
+        headers=h,
+    )
+    assert cr.status_code == 201
+    cohort_id = cr.json()["data"]["id"]
+    ar = await c.put(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}",
+        json={"status": "active"},
+        headers=h,
+    )
+    assert ar.status_code == 200
+
+    # 1) Directly assign s_direct to the cohort
+    dr = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/skills",
+        json={"skill_id": s_direct},
+        headers=h,
+    )
+    assert dr.status_code == 201
+
+    # 2) Create a learning path with s_path, publish it, assign to same cohort
+    pr = await c.post(
+        f"/api/v1/orgs/{oid}/paths",
+        json={"name": "Coexist Path"},
+        headers=h,
+    )
+    assert pr.status_code == 201
+    path_id = pr.json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/paths/{path_id}/items",
+        json={"item_type": "skill", "skill_id": s_path, "sort_order": 0, "required": True},
+        headers=h,
+    )
+    await c.put(
+        f"/api/v1/orgs/{oid}/paths/{path_id}",
+        json={"status": "published"},
+        headers=h,
+    )
+    pra = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/paths",
+        json={"path_id": path_id},
+        headers=h,
+    )
+    assert pra.status_code == 201
+
+    # Verify: GET cohort skills returns the directly assigned skill
+    sr = await c.get(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/skills",
+        headers=h,
+    )
+    assert sr.status_code == 200
+    direct_skill_ids = [a["skill_id"] for a in sr.json()["data"]]
+    assert s_direct in direct_skill_ids
+
+    # Verify: GET cohort paths returns the assigned path
+    lpr = await c.get(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/paths",
+        headers=h,
+    )
+    assert lpr.status_code == 200
+    path_ids = [p["path_id"] for p in lpr.json()["data"]]
+    assert path_id in path_ids
+
+    # Both coexist: effective-skills should contain both
+    efr = await c.get(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/effective-skills",
+        headers=h,
+    )
+    assert efr.status_code == 200
+    effective = efr.json()["data"]
+    assert s_direct in effective
+    assert s_path in effective
+
+
+# ═══════════════ #29: Upgrade operation tests (2 tests) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_upgrade_clean(c):
+    """Install v1.0.0, publish v1.1.0 with a new skill, upgrade, verify version."""
+    h, u = await _auth(c)
+    oid_pub = await _org(c, h)  # publisher org
+    oid_con = await _org(c, h)  # consumer org (same user for simplicity)
+
+    # Create pack with one skill, publish 1.0.0
+    sid1 = await _skill(c, h, oid_pub, "Upgrade Skill A")
+    pack_r = await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs",
+        json={"name": f"UpgPack-{uuid.uuid4().hex[:6]}", "visibility": "public"},
+        headers=h,
+    )
+    assert pack_r.status_code == 201
+    pack_id = pack_r.json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs/{pack_id}/skills",
+        json={"skill_id": sid1},
+        headers=h,
+    )
+    rel1 = await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs/{pack_id}/releases",
+        json={"version": "1.0.0"},
+        headers=h,
+    )
+    assert rel1.status_code == 201
+
+    # Install in consumer org
+    inst_r = await c.post(
+        f"/api/v1/orgs/{oid_con}/installations",
+        json={"pack_id": pack_id},
+        headers=h,
+    )
+    assert inst_r.status_code == 201
+    install_id = inst_r.json()["data"]["id"]
+    assert inst_r.json()["data"]["installed_version"] == "1.0.0"
+
+    # Publish v1.1.0 with a NEW skill added to the pack
+    sid2 = await _skill(c, h, oid_pub, "Upgrade Skill B")
+    await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs/{pack_id}/skills",
+        json={"skill_id": sid2},
+        headers=h,
+    )
+    rel2 = await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs/{pack_id}/releases",
+        json={"version": "1.1.0"},
+        headers=h,
+    )
+    assert rel2.status_code == 201
+
+    # Upgrade
+    upg = await c.post(
+        f"/api/v1/orgs/{oid_con}/installations/{install_id}/upgrade",
+        json={"version": "1.1.0"},
+        headers=h,
+    )
+    assert upg.status_code == 200
+    assert upg.json()["data"]["installed_version"] == "1.1.0"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_locally_modified_skipped(c):
+    """Locally modified skills are NOT overwritten during upgrade."""
+    h, u = await _auth(c)
+    oid_pub = await _org(c, h)
+    oid_con = await _org(c, h)
+
+    # Create pack with one skill, publish 1.0.0
+    sid = await _skill(c, h, oid_pub, "LM Upgrade Skill")
+    pack_r = await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs",
+        json={"name": f"LMPack-{uuid.uuid4().hex[:6]}", "visibility": "public"},
+        headers=h,
+    )
+    assert pack_r.status_code == 201
+    pack_id = pack_r.json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs/{pack_id}/skills",
+        json={"skill_id": sid},
+        headers=h,
+    )
+    rel1 = await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs/{pack_id}/releases",
+        json={"version": "1.0.0"},
+        headers=h,
+    )
+    assert rel1.status_code == 201
+
+    # Install in consumer org
+    inst_r = await c.post(
+        f"/api/v1/orgs/{oid_con}/installations",
+        json={"pack_id": pack_id},
+        headers=h,
+    )
+    assert inst_r.status_code == 201
+    install_id = inst_r.json()["data"]["id"]
+
+    # Find the installed skill in consumer org (by origin_pack_id)
+    from sqlalchemy import select as _sel
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill import Skill
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            _sel(Skill).where(
+                Skill.org_id == oid_con,
+                Skill.origin_pack_id == pack_id,
+            )
+        )
+        installed_skill = result.scalar_one()
+        installed_skill_id = installed_skill.id
+
+    # Edit the installed skill via PUT to trigger locally_modified=True
+    edit_r = await c.put(
+        f"/api/v1/orgs/{oid_con}/skills/{installed_skill_id}",
+        json={"description": "MY LOCAL EDIT"},
+        headers=h,
+    )
+    assert edit_r.status_code == 200
+
+    # Verify locally_modified is set
+    from sqlalchemy import text
+
+    async with AsyncSessionLocal() as session:
+        row = await session.execute(
+            text("SELECT locally_modified FROM skills WHERE id = :id"),
+            {"id": installed_skill_id},
+        )
+        assert row.scalar_one() is True
+
+    # Publish v1.1.0 with the SAME skill but different description
+    # First update the source skill's description to differ from v1.0.0
+    await c.put(
+        f"/api/v1/orgs/{oid_pub}/skills/{sid}",
+        json={"description": "UPSTREAM CHANGE"},
+        headers=h,
+    )
+    rel2 = await c.post(
+        f"/api/v1/orgs/{oid_pub}/packs/{pack_id}/releases",
+        json={"version": "1.1.0"},
+        headers=h,
+    )
+    assert rel2.status_code == 201
+
+    # Upgrade
+    upg = await c.post(
+        f"/api/v1/orgs/{oid_con}/installations/{install_id}/upgrade",
+        json={"version": "1.1.0"},
+        headers=h,
+    )
+    assert upg.status_code == 200
+    assert upg.json()["data"]["installed_version"] == "1.1.0"
+
+    # Verify the locally modified skill was NOT overwritten
+    async with AsyncSessionLocal() as session:
+        row = await session.execute(
+            text("SELECT description FROM skills WHERE id = :id"),
+            {"id": installed_skill_id},
+        )
+        desc = row.scalar_one()
+        assert desc == "MY LOCAL EDIT", f"Expected 'MY LOCAL EDIT' but got '{desc}'"

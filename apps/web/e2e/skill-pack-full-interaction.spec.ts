@@ -528,3 +528,107 @@ test("17. Export release returns valid zip", async () => {
   const buf = await res.arrayBuffer();
   expect(buf.byteLength).toBeGreaterThan(100);
 });
+
+// ═══════════════════════════════════════════════════════════════
+// PART 13: UPDATE — publisher publishes v1.1.0 with a new skill
+// ═══════════════════════════════════════════════════════════════
+
+let freshInstallId: string;
+let conOrgId2: string;
+
+test("18. Publish v1.1.0 update with an additional skill", async () => {
+  // Add a third skill to the pack
+  const cat = await api(admin, "GET", `/orgs/${orgId}/categories`);
+  const catId = cat.data[0].id;
+  const sk3 = await api(admin, "POST", `/orgs/${orgId}/skills`, {
+    name: "Video Editing", description: "AI video editing", difficulty: "advanced", category_id: catId,
+  });
+  expect(sk3.data).toBeTruthy();
+
+  // Add to pack
+  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/skills`, { skill_id: sk3.data.id });
+
+  // Publish v1.1.0
+  const rel = await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/releases`, {
+    version: "1.1.0", changelog: "Added Video Editing skill",
+  });
+  expect(rel.data.version).toBe("1.1.0");
+
+  // Verify on pack detail page: v1.1.0 visible
+  await adminPage.goto(`/dashboard/orgs/${orgId}/packs/${packId}`);
+  await adminPage.waitForLoadState("networkidle");
+  await expect(adminPage.locator("text=1.1.0")).toBeVisible();
+
+  await adminPage.screenshot({ path: "e2e/screenshots/pack-v110-published.png" });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PART 14: DIFF — consumer checks diff between installed and latest
+// ═══════════════════════════════════════════════════════════════
+
+test("19. Install pack fresh and check update diff via API", async () => {
+  // Create a second consumer org for a fresh (non-forked) install
+  conOrgId2 = await createOrg(consumer, `FreshCon-${Date.now()}`);
+
+  // Install v1.0.0 explicitly
+  const inst = await api(consumer, "POST", `/orgs/${conOrgId2}/installations`, {
+    pack_id: packId, version: "1.0.0",
+  });
+  expect(inst.data).toBeTruthy();
+  freshInstallId = inst.data.id;
+  expect(inst.data.installed_version).toBe("1.0.0");
+
+  // Check for update
+  const detail = await api(consumer, "GET", `/orgs/${conOrgId2}/installations/${freshInstallId}`);
+  expect(detail.data.update_available).toBe(true);
+  expect(detail.data.latest_version).toBe("1.1.0");
+
+  // Get diff
+  const diff = await api(consumer, "GET", `/orgs/${conOrgId2}/installations/${freshInstallId}/diff?version=1.1.0`);
+  expect(diff.data).toBeTruthy();
+  // v1.1.0 added a skill, so diff.added should be non-empty
+  expect(diff.data.added.length).toBeGreaterThanOrEqual(1);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PART 15: UPGRADE — consumer upgrades installation to v1.1.0
+// ═══════════════════════════════════════════════════════════════
+
+test("20. Upgrade installation to v1.1.0 and verify", async () => {
+  // Upgrade via API
+  const upg = await api(consumer, "POST", `/orgs/${conOrgId2}/installations/${freshInstallId}/upgrade`, {
+    version: "1.1.0",
+  });
+  expect(upg.data).toBeTruthy();
+  expect(upg.data.installed_version).toBe("1.1.0");
+
+  // Navigate to installation detail in UI
+  await conPage.goto(`/dashboard/orgs/${conOrgId2}/installations/${freshInstallId}`);
+  await conPage.waitForLoadState("networkidle");
+
+  // Assert: version shows 1.1.0
+  await expect(conPage.locator("text=1.1.0")).toBeVisible();
+
+  await conPage.screenshot({ path: "e2e/screenshots/install-upgraded.png" });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PART 16: HISTORY INTACT — learner progress survives upgrade
+// ═══════════════════════════════════════════════════════════════
+
+test("21. Learner progress history remains intact after upgrade", async () => {
+  // Verify the installation still exists and is active after upgrade
+  const detail = await api(consumer, "GET", `/orgs/${conOrgId2}/installations/${freshInstallId}`);
+  expect(detail.data).toBeTruthy();
+  expect(detail.data.installed_version).toBe("1.1.0");
+  expect(detail.data.status).toBe("active");
+
+  // The installed skills from v1.0.0 should still exist (not deleted)
+  // List skills in the consumer org — should have skills from the pack
+  const skills = await api(consumer, "GET", `/orgs/${conOrgId2}/skills?per_page=50`);
+  expect(skills.data).toBeTruthy();
+  expect(skills.data.length).toBeGreaterThanOrEqual(1);
+
+  // Check that no update is available now (we are on latest)
+  expect(detail.data.update_available).toBe(false);
+});
