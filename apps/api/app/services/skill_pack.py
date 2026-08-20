@@ -23,6 +23,7 @@ from app.models.skill import (
 from app.models.skill_pack import (
     InstallStatus,
     PackStatus,
+    PackVisibility,
     SkillPack,
     SkillPackInstallation,
     SkillPackRelease,
@@ -227,6 +228,34 @@ class SkillPackService:
             .order_by(SkillPackTemplate.sort_order)
         )
         return [(row[0], row[1]) for row in result.all()]
+
+    # ── Approval Workflow ──
+
+    async def approve_pack(self, pack_id: str, org_id: str) -> SkillPack:
+        """Approve a pack for public visibility."""
+        pack = await self.get_pack(pack_id, org_id)
+        if pack.review_status != "pending":
+            raise AppError("NOT_PENDING", "Pack is not pending review", 422)
+        pack.review_status = "approved"
+        pack.visibility = PackVisibility.PUBLIC
+        await self.db.flush()
+        await self.db.refresh(pack)
+        log.info("pack_approved", pack_id=pack_id, org_id=org_id)
+        return pack
+
+    async def reject_pack(
+        self, pack_id: str, org_id: str, reason: str | None = None
+    ) -> SkillPack:
+        """Reject a pack from public visibility."""
+        pack = await self.get_pack(pack_id, org_id)
+        if pack.review_status != "pending":
+            raise AppError("NOT_PENDING", "Pack is not pending review", 422)
+        pack.review_status = "rejected"
+        pack.rejection_reason = reason
+        await self.db.flush()
+        await self.db.refresh(pack)
+        log.info("pack_rejected", pack_id=pack_id, org_id=org_id, reason=reason)
+        return pack
 
     # ── Releases ──
 

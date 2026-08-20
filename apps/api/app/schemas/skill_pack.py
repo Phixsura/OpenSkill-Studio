@@ -87,6 +87,17 @@ class UpdateSkillPackRequest(BaseModel):
         return v
 
 
+class RejectPackRequest(BaseModel):
+    reason: str | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 500:
+            raise ValueError("Reason must be 500 characters or less")
+        return v
+
+
 class SkillPackResponse(BaseModel):
     id: str
     owner_org_id: str
@@ -107,6 +118,7 @@ class SkillPackResponse(BaseModel):
     review_count: int = 0
     average_rating: float | None = None
     review_status: str | None = None
+    rejection_reason: str | None = None
     badges: list[str] = []
     provenance: dict
     created_by: str

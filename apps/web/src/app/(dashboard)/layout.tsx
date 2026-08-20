@@ -9,6 +9,7 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
+import { NotificationBell } from "@/components/notification-bell";
 
 export default function DashboardLayout({
   children,
@@ -107,9 +108,10 @@ export default function DashboardLayout({
             )}
           </svg>
         </button>
-        <Link href="/dashboard" className="text-lg font-bold">
+        <Link href="/dashboard" className="flex-1 text-lg font-bold">
           OpenSkill Studio
         </Link>
+        {mounted && isAuthenticated && <NotificationBell />}
       </div>
 
       {/* Mobile overlay */}
@@ -153,6 +155,10 @@ export default function DashboardLayout({
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        {/* Desktop header bar */}
+        <div className="hidden items-center justify-end border-b px-8 py-3 md:flex">
+          {mounted && isAuthenticated && <NotificationBell />}
+        </div>
         <div className="p-4 md:p-8">{children}</div>
       </main>
     </div>

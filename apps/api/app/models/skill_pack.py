@@ -88,6 +88,7 @@ class SkillPack(Base):
     review_status: Mapped[str | None] = mapped_column(  # pending/approved/rejected/none
         String(20), nullable=True
     )
+    rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Provenance (author, license, attribution)
     provenance: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")

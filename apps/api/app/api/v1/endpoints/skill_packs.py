@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
-from app.models.skill_pack import PackVisibility
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.skill_pack import (
@@ -16,6 +15,7 @@ from app.schemas.skill_pack import (
     PackSkillResponse,
     PackTemplateResponse,
     PublishReleaseRequest,
+    RejectPackRequest,
     ReleaseDetailResponse,
     ReleaseResponse,
     SkillPackResponse,
@@ -330,14 +330,7 @@ async def approve_pack(
     """Approve a pack for public visibility (owner/admin only)."""
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     svc = SkillPackService(db)
-    pack = await svc.get_pack(pack_id, org_id)
-    if pack.review_status != "pending":
-        from app.exceptions import AppError
-
-        raise AppError("NOT_PENDING", "Pack is not pending review", 422)
-    pack.review_status = "approved"
-    pack.visibility = PackVisibility.PUBLIC
-    await db.flush()
+    pack = await svc.approve_pack(pack_id, org_id)
     await db.commit()
     return DataResponse(data=SkillPackResponse.model_validate(pack))
 
@@ -350,19 +343,15 @@ async def approve_pack(
 async def reject_pack(
     org_id: str,
     pack_id: str,
+    body: RejectPackRequest | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Reject a pack from public visibility (owner/admin only)."""
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     svc = SkillPackService(db)
-    pack = await svc.get_pack(pack_id, org_id)
-    if pack.review_status != "pending":
-        from app.exceptions import AppError
-
-        raise AppError("NOT_PENDING", "Pack is not pending review", 422)
-    pack.review_status = "rejected"
-    await db.flush()
+    reason = body.reason if body else None
+    pack = await svc.reject_pack(pack_id, org_id, reason=reason)
     await db.commit()
     return DataResponse(data=SkillPackResponse.model_validate(pack))
 

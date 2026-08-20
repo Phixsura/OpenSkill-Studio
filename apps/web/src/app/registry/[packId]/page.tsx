@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import { api, apiWithAuth } from "@/lib/api";
 
 interface PackDetail {
   id: string;
@@ -66,6 +68,24 @@ interface PackPreview {
   total_templates: number;
 }
 
+interface PackReview {
+  id: string;
+  rating: number;
+  title: string;
+  body: string | null;
+  user_display_name: string;
+  created_at: string;
+}
+
+interface ReviewsResponse {
+  data: PackReview[];
+  meta: {
+    total: number;
+    average_rating: number | null;
+    rating_distribution: Record<string, number>;
+  };
+}
+
 const DIFFICULTY_COLORS: Record<string, string> = {
   beginner: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   intermediate: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
@@ -86,6 +106,190 @@ function StarRating({ rating }: { rating: number }) {
       ))}
       <span className="ml-1 text-sm font-medium">{rating.toFixed(1)}</span>
     </span>
+  );
+}
+
+function ClickableStarRating({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          onClick={() => onChange(star)}
+          className={`text-xl ${star <= value ? "text-yellow-500" : "text-gray-300 dark:text-gray-600"} hover:text-yellow-400 transition-colors`}
+          aria-label={`Rate ${star} star${star !== 1 ? "s" : ""}`}
+        >
+          ★
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () => void }) {
+  const [rating, setRating] = useState(5);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/registry/packs/${packId}/reviews`, {
+        method: "POST",
+        body: JSON.stringify({ rating, title, body: body || null }),
+      }),
+    onSuccess: () => {
+      toast.success("Review submitted!");
+      setRating(5);
+      setTitle("");
+      setBody("");
+      onSuccess();
+    },
+    onError: (err: Error) => toast.error(err.message || "Failed to submit review"),
+  });
+
+  return (
+    <div className="rounded-lg border p-4">
+      <h3 className="text-lg font-semibold">Write a Review</h3>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          mutation.mutate();
+        }}
+        className="mt-3 space-y-3"
+      >
+        <div>
+          <label className="mb-1 block text-sm font-medium">Rating</label>
+          <ClickableStarRating value={rating} onChange={setRating} />
+        </div>
+        <div>
+          <label htmlFor="review-title" className="mb-1 block text-sm font-medium">Title</label>
+          <Input
+            id="review-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Summarize your experience"
+            required
+          />
+        </div>
+        <div>
+          <label htmlFor="review-body" className="mb-1 block text-sm font-medium">Review (optional)</label>
+          <textarea
+            id="review-body"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Share more details about your experience..."
+            rows={4}
+            className="block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] placeholder:text-[hsl(var(--muted-foreground))]"
+          />
+        </div>
+        <Button type="submit" disabled={mutation.isPending || !title.trim()}>
+          {mutation.isPending ? "Submitting..." : "Submit Review"}
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+function ReviewsSection({ packId, isAuthed }: { packId: string; isAuthed: boolean }) {
+  const queryClient = useQueryClient();
+
+  const { data: reviewsData } = useQuery({
+    queryKey: ["registry-reviews", packId],
+    queryFn: () =>
+      api<ReviewsResponse>(`/registry/packs/${packId}/reviews`),
+  });
+
+  const reviews = reviewsData?.data ?? [];
+  const meta = reviewsData?.meta;
+  const avgRating = meta?.average_rating;
+  const totalReviews = meta?.total ?? 0;
+  const distribution = meta?.rating_distribution ?? {};
+
+  const handleReviewSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ["registry-reviews", packId] });
+    queryClient.invalidateQueries({ queryKey: ["registry-pack", packId] });
+  };
+
+  return (
+    <div>
+      <h2 className="text-xl font-semibold">Reviews</h2>
+
+      {/* Rating summary */}
+      {totalReviews > 0 && avgRating != null && (
+        <div className="mt-3 flex items-start gap-6 rounded-lg border p-4">
+          <div className="text-center">
+            <p className="text-4xl font-bold">{avgRating.toFixed(1)}</p>
+            <StarRating rating={avgRating} />
+            <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+              {totalReviews} {totalReviews === 1 ? "review" : "reviews"}
+            </p>
+          </div>
+          <div className="flex-1 space-y-1">
+            {[5, 4, 3, 2, 1].map((star) => {
+              const count = distribution[String(star)] ?? 0;
+              const pct = totalReviews > 0 ? (count / totalReviews) * 100 : 0;
+              return (
+                <div key={star} className="flex items-center gap-2 text-sm">
+                  <span className="w-8 text-right">{star} ★</span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-[hsl(var(--secondary))]">
+                    <div
+                      className="h-full rounded-full bg-yellow-500"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="w-8 text-[hsl(var(--muted-foreground))]">{count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {totalReviews === 0 && (
+        <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
+          No reviews yet. Be the first to review this pack!
+        </p>
+      )}
+
+      {/* Write review form (authenticated only) */}
+      {isAuthed && (
+        <div className="mt-4">
+          <WriteReviewForm packId={packId} onSuccess={handleReviewSuccess} />
+        </div>
+      )}
+
+      {/* Review list */}
+      {reviews.length > 0 && (
+        <div className="mt-4 space-y-3">
+          {reviews.map((review) => (
+            <div key={review.id} className="rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <StarRating rating={review.rating} />
+                  <span className="font-medium">{review.user_display_name}</span>
+                </div>
+                <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                  {new Date(review.created_at).toLocaleDateString()}
+                </span>
+              </div>
+              <p className="mt-1 font-medium">{review.title}</p>
+              {review.body && (
+                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+                  {review.body}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -332,6 +536,9 @@ export default function RegistryPackDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Reviews */}
+          <ReviewsSection packId={packId} isAuthed={isAuthed} />
         </div>
 
         {/* Sidebar */}
