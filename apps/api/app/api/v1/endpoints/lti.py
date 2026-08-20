@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
-from app.models.skill_pack import SkillPack
+from app.models.skill_pack import PackStatus, PackVisibility, SkillPack
 from app.schemas.base import DataResponse
 
 router = APIRouter(tags=["LTI"])
