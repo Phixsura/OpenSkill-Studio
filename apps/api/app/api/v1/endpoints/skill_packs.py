@@ -1,6 +1,9 @@
-"""Skill Pack endpoints — CRUD, contents, releases."""
+"""Skill Pack endpoints — CRUD, contents, releases, approval audit trail."""
+
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -330,7 +333,7 @@ async def approve_pack(
     """Approve a pack for public visibility (owner/admin only)."""
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     svc = SkillPackService(db)
-    pack = await svc.approve_pack(pack_id, org_id)
+    pack = await svc.approve_pack(pack_id, org_id, actor_id=user.id)
     await db.commit()
     return DataResponse(data=SkillPackResponse.model_validate(pack))
 
@@ -351,9 +354,40 @@ async def reject_pack(
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     svc = SkillPackService(db)
     reason = body.reason if body else None
-    pack = await svc.reject_pack(pack_id, org_id, reason=reason)
+    pack = await svc.reject_pack(pack_id, org_id, reason=reason, actor_id=user.id)
     await db.commit()
     return DataResponse(data=SkillPackResponse.model_validate(pack))
+
+
+class ApprovalEventResponse(BaseModel):
+    id: str
+    pack_id: str
+    action: str
+    actor_id: str
+    reason: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.get(
+    "/orgs/{org_id}/packs/{pack_id}/approval-history",
+    response_model=DataResponse[list[ApprovalEventResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def get_approval_history(
+    org_id: str,
+    pack_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the approval audit trail for a pack."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = SkillPackService(db)
+    events = await svc.list_approval_history(pack_id, org_id)
+    return DataResponse(
+        data=[ApprovalEventResponse.model_validate(e) for e in events]
+    )
 
 
 @router.get(

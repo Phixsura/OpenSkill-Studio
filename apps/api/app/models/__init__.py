@@ -27,7 +27,11 @@ from app.models.learning_path import (  # noqa: F401
     LearningPathItem,
     PathItemType,
 )
-from app.models.notification import Notification  # noqa: F401
+from app.models.notification import (  # noqa: F401
+    Notification,
+    PackApprovalEvent,
+    UserNotificationPreference,
+)
 from app.models.organization import (  # noqa: F401
     InviteStatus,
     MemberStatus,
@@ -39,7 +43,7 @@ from app.models.organization import (  # noqa: F401
     OrgStatus,
 )
 from app.models.pack_category import PackCategory, PackCategoryAssignment  # noqa: F401
-from app.models.pack_review import PackReview  # noqa: F401
+from app.models.pack_review import PackReview, ReviewHelpfulVote  # noqa: F401
 from app.models.portfolio import (  # noqa: F401
     ItemVisibility,
     PortfolioItem,

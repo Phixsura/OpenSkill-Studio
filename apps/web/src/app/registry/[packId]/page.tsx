@@ -41,11 +41,16 @@ interface Release {
   released_at: string;
 }
 
+interface PreviewExercise {
+  title: string;
+}
+
 interface PreviewSkill {
   name: string;
   description: string | null;
   difficulty: string | null;
   exercise_count: number;
+  exercises: PreviewExercise[];
   prerequisites: string[];
 }
 
@@ -293,6 +298,115 @@ function ReviewsSection({ packId, isAuthed }: { packId: string; isAuthed: boolea
   );
 }
 
+function CurriculumSection({ preview }: { preview: PackPreview }) {
+  const [expandedSkills, setExpandedSkills] = useState<Set<number>>(new Set());
+
+  const toggleSkill = (index: number) => {
+    setExpandedSkills((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
+  const expandAll = () => {
+    setExpandedSkills(new Set(preview.skills.map((_, i) => i)));
+  };
+
+  const collapseAll = () => {
+    setExpandedSkills(new Set());
+  };
+
+  if (preview.skills.length === 0) return null;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold">Curriculum</h2>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={expandAll}
+            className="text-xs text-[hsl(var(--primary))] hover:underline"
+          >
+            Expand all
+          </button>
+          <span className="text-xs text-[hsl(var(--muted-foreground))]">/</span>
+          <button
+            type="button"
+            onClick={collapseAll}
+            className="text-xs text-[hsl(var(--primary))] hover:underline"
+          >
+            Collapse all
+          </button>
+        </div>
+      </div>
+      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+        {preview.total_skills} {preview.total_skills === 1 ? "skill" : "skills"} &middot;{" "}
+        {preview.total_exercises} {preview.total_exercises === 1 ? "exercise" : "exercises"}
+      </p>
+      <div className="mt-3 space-y-2" role="list">
+        {preview.skills.map((skill, i) => {
+          const isExpanded = expandedSkills.has(i);
+          return (
+            <div key={i} className="rounded-lg border">
+              <button
+                type="button"
+                onClick={() => toggleSkill(i)}
+                className="flex w-full items-center justify-between p-3 text-left hover:bg-[hsl(var(--secondary)/0.5)] transition-colors"
+                aria-expanded={isExpanded}
+              >
+                <span className="font-medium">{skill.name}</span>
+                <div className="flex items-center gap-2">
+                  {skill.difficulty && (
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${DIFFICULTY_COLORS[skill.difficulty] ?? ""}`}>
+                      {skill.difficulty}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">
+                    {skill.exercise_count} {skill.exercise_count === 1 ? "exercise" : "exercises"}
+                  </span>
+                  <span className={`text-sm transition-transform ${isExpanded ? "rotate-180" : ""}`}>
+                    &#9662;
+                  </span>
+                </div>
+              </button>
+              {isExpanded && (
+                <div className="border-t px-3 pb-3 pt-2">
+                  {skill.description && (
+                    <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                      {skill.description}
+                    </p>
+                  )}
+                  {skill.prerequisites.length > 0 && (
+                    <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                      Requires: {skill.prerequisites.join(", ")}
+                    </p>
+                  )}
+                  {skill.exercises.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {skill.exercises.map((ex, j) => (
+                        <li key={j} className="flex items-start gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+                          <span className="mt-0.5 text-xs">&#9679;</span>
+                          {ex.title}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function RegistryPackDetailPage() {
   const { packId } = useParams<{ packId: string }>();
 
@@ -424,45 +538,8 @@ export default function RegistryPackDetailPage() {
             </div>
           )}
 
-          {/* Curriculum (Rich Preview) */}
-          {preview && preview.skills.length > 0 && (
-            <div>
-              <h2 className="text-xl font-semibold">Curriculum</h2>
-              <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-                {preview.total_skills} {preview.total_skills === 1 ? "skill" : "skills"} &middot;{" "}
-                {preview.total_exercises} {preview.total_exercises === 1 ? "exercise" : "exercises"}
-              </p>
-              <div className="mt-3 space-y-2" role="list">
-                {preview.skills.map((skill, i) => (
-                  <div key={i} className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{skill.name}</span>
-                      <div className="flex items-center gap-2">
-                        {skill.difficulty && (
-                          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${DIFFICULTY_COLORS[skill.difficulty] ?? ""}`}>
-                            {skill.difficulty}
-                          </span>
-                        )}
-                        <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">
-                          {skill.exercise_count} {skill.exercise_count === 1 ? "exercise" : "exercises"}
-                        </span>
-                      </div>
-                    </div>
-                    {skill.description && (
-                      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-                        {skill.description}
-                      </p>
-                    )}
-                    {skill.prerequisites.length > 0 && (
-                      <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-                        Requires: {skill.prerequisites.join(", ")}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Curriculum (Rich Preview with expand/collapse) */}
+          {preview && <CurriculumSection preview={preview} />}
 
           {/* Templates (Rich Preview) */}
           {preview && preview.templates.length > 0 && (

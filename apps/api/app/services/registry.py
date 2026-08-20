@@ -1,7 +1,7 @@
 """Public pack registry — search, filter, browse published packs."""
 
 import hashlib
-from datetime import UTC
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import String, cast, func, or_, select
@@ -17,6 +17,16 @@ from app.models.skill_pack import (
 )
 
 log = structlog.get_logger()
+
+
+def _compute_badges(pack: "SkillPack", now: datetime, thirty_days_ago: datetime) -> list[str]:
+    """Derive badge list from pack state. Pure function, no DB."""
+    badges: list[str] = []
+    if pack.install_count >= 10:
+        badges.append("Popular")
+    if pack.created_at and pack.created_at >= thirty_days_ago:
+        badges.append("New")
+    return badges
 
 
 def _parse_semver(version: str) -> tuple[int, int, int, str]:
@@ -146,18 +156,24 @@ class RegistryService:
         # ── Populate cache ──
         await cache_set(cache_key, {"ids": [p.id for p in packs], "total": total}, ttl=300)
 
-        # ── Compute badges ──
-        from datetime import datetime, timedelta
+        # ── Compute and persist badges ──
+        from datetime import timedelta
 
         now = datetime.now(UTC)
         thirty_days_ago = now - timedelta(days=30)
+        modified: list[SkillPack] = []
         for pack in packs:
-            badges: list[str] = []
-            if pack.install_count >= 10:
-                badges.append("Popular")
-            if pack.created_at and pack.created_at >= thirty_days_ago:
-                badges.append("New")
-            pack.badges = badges  # type: ignore[attr-defined]
+            badges = _compute_badges(pack, now, thirty_days_ago)
+            if badges != (pack.badges or []):
+                pack.badges = badges
+                modified.append(pack)
+        # Flush any badge updates without committing (caller controls commit)
+        if modified:
+            await self.db.flush()
+            # Refresh modified packs so server-side onupdate columns
+            # (e.g. updated_at) are eagerly loaded before Pydantic serialisation.
+            for pack in modified:
+                await self.db.refresh(pack)
 
         return packs, total
 
@@ -214,6 +230,20 @@ class RegistryService:
         # Return only root nodes (parent_id is None)
         return by_parent.get(None, [])
 
+    async def recompute_pack_badges(self, pack_id: str) -> None:
+        """Recompute and persist badges for a single pack."""
+        from datetime import timedelta
+
+        pack = await self.db.get(SkillPack, pack_id)
+        if pack is None:
+            return
+        now = datetime.now(UTC)
+        thirty_days_ago = now - timedelta(days=30)
+        badges = _compute_badges(pack, now, thirty_days_ago)
+        if badges != (pack.badges or []):
+            pack.badges = badges
+            await self.db.flush()
+
     async def get_pack_preview(self, pack_id: str) -> dict:
         """Build a curriculum preview from the latest release manifest."""
         await self.get_public_pack(pack_id)  # verify accessible
@@ -242,6 +272,7 @@ class RegistryService:
                 "description": s.get("description"),
                 "difficulty": s.get("difficulty"),
                 "exercise_count": len(exercises),
+                "exercises": [{"title": e.get("title", "")} for e in exercises],
                 "prerequisites": s.get("prerequisites", []),
             })
 

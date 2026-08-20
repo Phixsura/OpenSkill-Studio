@@ -61,11 +61,17 @@ interface Template {
   name: string;
 }
 
+interface DayCount {
+  date: string;
+  count: number;
+}
+
 interface PackAnalytics {
   install_count: number;
   average_rating: number | null;
   review_count: number;
   installs_by_version: { version: string; count: number }[];
+  installs_by_day: DayCount[];
 }
 
 /* ---------- Color maps ---------- */
@@ -617,9 +623,71 @@ export default function PackDetailPage() {
                 </table>
               </div>
             )}
+
+            {/* Installs by day — last 30 days bar chart */}
+            {analytics.installs_by_day && analytics.installs_by_day.length > 0 && (
+              <div className="rounded-lg border p-4">
+                <h3 className="text-sm font-semibold">Installs — Last 30 Days</h3>
+                <InstallsByDayChart data={analytics.installs_by_day} />
+              </div>
+            )}
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ---------- Installs by Day Bar Chart ---------- */
+
+function InstallsByDayChart({ data }: { data: DayCount[] }) {
+  const maxCount = Math.max(...data.map((d) => d.count), 1);
+  const firstDay = data[0];
+  const lastDay = data[data.length - 1];
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-end gap-[2px]" style={{ height: 120 }}>
+        {data.map((day) => {
+          const heightPct = (day.count / maxCount) * 100;
+          const barDate = new Date(day.date + "T00:00:00");
+          const label = `${barDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}: ${day.count}`;
+          return (
+            <div
+              key={day.date}
+              className="group relative flex-1"
+              style={{ height: "100%" }}
+            >
+              <div
+                className="absolute bottom-0 w-full rounded-t bg-blue-500 transition-colors group-hover:bg-blue-400"
+                style={{
+                  height: `${Math.max(heightPct, day.count > 0 ? 2 : 0)}%`,
+                  minHeight: day.count > 0 ? 2 : 0,
+                }}
+              />
+              <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded bg-[hsl(var(--popover))] px-2 py-1 text-xs text-[hsl(var(--popover-foreground))] shadow group-hover:block">
+                {label}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {firstDay && lastDay && (
+        <div className="mt-1 flex justify-between text-[10px] text-[hsl(var(--muted-foreground))]">
+          <span>
+            {new Date(firstDay.date + "T00:00:00").toLocaleDateString(
+              undefined,
+              { month: "short", day: "numeric" },
+            )}
+          </span>
+          <span>
+            {new Date(lastDay.date + "T00:00:00").toLocaleDateString(
+              undefined,
+              { month: "short", day: "numeric" },
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

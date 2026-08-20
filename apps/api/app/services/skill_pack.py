@@ -5,6 +5,7 @@ import json
 import re
 import secrets
 from collections import defaultdict, deque
+from datetime import date, timedelta
 
 import structlog
 from sqlalchemy import func, select
@@ -231,7 +232,7 @@ class SkillPackService:
 
     # ── Approval Workflow ──
 
-    async def approve_pack(self, pack_id: str, org_id: str) -> SkillPack:
+    async def approve_pack(self, pack_id: str, org_id: str, actor_id: str) -> SkillPack:
         """Approve a pack for public visibility."""
         pack = await self.get_pack(pack_id, org_id)
         if pack.review_status != "pending":
@@ -240,11 +241,13 @@ class SkillPackService:
         pack.visibility = PackVisibility.PUBLIC
         await self.db.flush()
         await self.db.refresh(pack)
+
+        await self._record_approval_event(pack_id, "approved", actor_id)
         log.info("pack_approved", pack_id=pack_id, org_id=org_id)
         return pack
 
     async def reject_pack(
-        self, pack_id: str, org_id: str, reason: str | None = None
+        self, pack_id: str, org_id: str, reason: str | None = None, actor_id: str | None = None
     ) -> SkillPack:
         """Reject a pack from public visibility."""
         pack = await self.get_pack(pack_id, org_id)
@@ -254,8 +257,52 @@ class SkillPackService:
         pack.rejection_reason = reason
         await self.db.flush()
         await self.db.refresh(pack)
+
+        if actor_id:
+            await self._record_approval_event(pack_id, "rejected", actor_id, reason)
         log.info("pack_rejected", pack_id=pack_id, org_id=org_id, reason=reason)
         return pack
+
+    async def submit_for_review(self, pack_id: str, org_id: str, actor_id: str) -> SkillPack:
+        """Submit a pack for approval review."""
+        pack = await self.get_pack(pack_id, org_id)
+        pack.review_status = "pending"
+        await self.db.flush()
+        await self.db.refresh(pack)
+
+        await self._record_approval_event(pack_id, "submitted", actor_id)
+        log.info("pack_submitted_for_review", pack_id=pack_id, org_id=org_id)
+        return pack
+
+    async def _record_approval_event(
+        self,
+        pack_id: str,
+        action: str,
+        actor_id: str,
+        reason: str | None = None,
+    ) -> None:
+        from app.models.notification import PackApprovalEvent
+
+        event = PackApprovalEvent(
+            pack_id=pack_id,
+            action=action,
+            actor_id=actor_id,
+            reason=reason,
+        )
+        self.db.add(event)
+        await self.db.flush()
+
+    async def list_approval_history(self, pack_id: str, org_id: str) -> list:
+        """Return chronological approval audit trail for a pack."""
+        from app.models.notification import PackApprovalEvent
+
+        await self.get_pack(pack_id, org_id)  # validates existence + ownership
+        result = await self.db.execute(
+            select(PackApprovalEvent)
+            .where(PackApprovalEvent.pack_id == pack_id)
+            .order_by(PackApprovalEvent.created_at.desc())
+        )
+        return list(result.scalars().all())
 
     # ── Releases ──
 
@@ -485,6 +532,10 @@ class SkillPackService:
         from app.core.cache import cache_delete_pattern
         await cache_delete_pattern("registry:*")
 
+        # Recompute and persist badges for this pack
+        from app.services.registry import RegistryService as _RegSvc
+        await _RegSvc(self.db).recompute_pack_badges(pack_id)
+
         # Notify installing orgs' owners about the new version
         try:
             from app.models.organization import MemberStatus, OrgMember, OrgRole
@@ -550,7 +601,7 @@ class SkillPackService:
     # ── Analytics ──
 
     async def get_pack_analytics(self, pack_id: str, org_id: str) -> dict:
-        """Publisher analytics for a pack: installs, rating, installs by version."""
+        """Publisher analytics for a pack: installs, rating, installs by version, installs by day."""
         pack = await self.get_pack(pack_id, org_id)
 
         # Installs grouped by installed_version
@@ -570,11 +621,39 @@ class SkillPackService:
             for row in version_r.all()
         ]
 
+        # Installs by day for the last 30 days
+        today = date.today()
+        thirty_days_ago = today - timedelta(days=29)
+
+        day_r = await self.db.execute(
+            select(
+                func.date(SkillPackInstallation.installed_at).label("day"),
+                func.count().label("count"),
+            )
+            .where(
+                SkillPackInstallation.pack_id == pack_id,
+                SkillPackInstallation.installed_at >= thirty_days_ago,
+            )
+            .group_by(func.date(SkillPackInstallation.installed_at))
+            .order_by(func.date(SkillPackInstallation.installed_at))
+        )
+        db_days: dict[date, int] = {row[0]: row[1] for row in day_r.all()}
+
+        # Fill missing days with 0
+        installs_by_day: list[dict] = []
+        for offset in range(30):
+            day = thirty_days_ago + timedelta(days=offset)
+            installs_by_day.append({
+                "date": day.isoformat(),
+                "count": db_days.get(day, 0),
+            })
+
         return {
             "install_count": pack.install_count,
             "average_rating": pack.average_rating,
             "review_count": pack.review_count,
             "installs_by_version": installs_by_version,
+            "installs_by_day": installs_by_day,
         }
 
     # ── Helpers ──

@@ -305,7 +305,11 @@ class LearningPathService:
     async def _maybe_issue_certificate(
         self, path_id: str, user_id: str, org_id: str, skills_completed: int
     ) -> str | None:
-        """Issue a completion certificate if one doesn't already exist."""
+        """Issue a completion certificate if one doesn't already exist.
+
+        Populates the certificate data JSONB with actual skill/project names
+        from the path items so the certificate endpoint returns meaningful info.
+        """
         import uuid
 
         from app.models.certificate import Certificate
@@ -326,6 +330,27 @@ class LearningPathService:
         user = await self.db.get(User, user_id)
         org = await self.db.get(Organization, org_id)
 
+        # Collect actual skill/project names from path items
+        items = await self.list_items(path_id)
+        skills_data: list[dict] = []
+        projects_data: list[dict] = []
+
+        for item in items:
+            if item.item_type == PathItemType.SKILL and item.skill_id:
+                skill = await self.db.get(Skill, item.skill_id)
+                if skill:
+                    skills_data.append({
+                        "skill_id": skill.id,
+                        "name": skill.name,
+                    })
+            elif item.item_type == PathItemType.PROJECT and item.project_id:
+                project = await self.db.get(Project, item.project_id)
+                if project:
+                    projects_data.append({
+                        "project_id": project.id,
+                        "name": project.title,
+                    })
+
         cert_number = str(uuid.uuid4())
         cert = Certificate(
             user_id=user_id,
@@ -337,6 +362,8 @@ class LearningPathService:
                 "path_name": path.name if path else "Unknown",
                 "org_name": org.name if org else "Unknown",
                 "skills_completed": skills_completed,
+                "skills": skills_data,
+                "projects": projects_data,
             },
         )
         self.db.add(cert)

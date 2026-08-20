@@ -84,6 +84,9 @@ class SkillPack(Base):
     review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     average_rating: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
 
+    # Computed badges persisted for fast lookup (e.g. ["Popular", "New"])
+    badges: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+
     # Publication approval workflow
     review_status: Mapped[str | None] = mapped_column(  # pending/approved/rejected/none
         String(20), nullable=True

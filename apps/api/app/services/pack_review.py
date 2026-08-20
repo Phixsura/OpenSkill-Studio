@@ -1,4 +1,7 @@
-"""Pack Review service — create, list, delete reviews and maintain aggregate stats."""
+"""Pack Review service — create, list, delete, update reviews and maintain aggregate stats."""
+
+from datetime import UTC, datetime
+from typing import Literal
 
 import structlog
 from sqlalchemy import func, select
@@ -6,10 +9,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
-from app.models.pack_review import PackReview
+from app.models.pack_review import PackReview, ReviewHelpfulVote
 from app.models.skill_pack import PackStatus, PackVisibility, SkillPack
 
 log = structlog.get_logger()
+
+SortOrder = Literal["newest", "oldest", "highest", "lowest"]
 
 
 class ReviewNotFoundError(AppError):
@@ -83,21 +88,66 @@ class PackReviewService:
         log.info("review_created", pack_id=pack_id, user_id=user_id, rating=rating)
         return review
 
+    async def update_review(
+        self,
+        review_id: str,
+        user_id: str,
+        rating: int | None = None,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> PackReview:
+        """Update an existing review. Owner only."""
+        review = await self.db.get(PackReview, review_id)
+        if review is None:
+            raise ReviewNotFoundError()
+        if review.user_id != user_id:
+            raise AppError("FORBIDDEN", "You can only edit your own reviews", 403)
+
+        if rating is not None:
+            review.rating = rating
+        if title is not None:
+            review.title = title
+        if body is not None:
+            review.body = body
+
+        await self.db.flush()
+
+        if rating is not None:
+            await self._recalculate_stats(review.pack_id)
+
+        log.info("review_updated", review_id=review_id, user_id=user_id)
+        return review
+
     async def list_reviews(
         self,
         pack_id: str,
         page: int = 1,
         per_page: int = 20,
+        sort: SortOrder = "newest",
+        rating: int | None = None,
     ) -> tuple[list[PackReview], int]:
         await self._get_public_pack(pack_id)  # 404 for private/unpublished
         base = select(PackReview).where(PackReview.pack_id == pack_id)
 
+        if rating is not None:
+            base = base.where(PackReview.rating == rating)
+
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
 
+        # Apply sort order
+        if sort == "oldest":
+            order_clause = PackReview.created_at.asc()
+        elif sort == "highest":
+            order_clause = PackReview.rating.desc()
+        elif sort == "lowest":
+            order_clause = PackReview.rating.asc()
+        else:  # "newest" (default)
+            order_clause = PackReview.created_at.desc()
+
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(PackReview.created_at.desc()).offset(offset).limit(per_page)
+            base.order_by(order_clause).offset(offset).limit(per_page)
         )
         return list(result.scalars().all()), total
 
@@ -114,6 +164,83 @@ class PackReviewService:
 
         await self._recalculate_stats(pack_id)
         log.info("review_deleted", review_id=review_id, pack_id=pack_id)
+
+    async def reply_to_review(
+        self,
+        review_id: str,
+        pack_id: str,
+        user_id: str,
+        reply_text: str,
+    ) -> PackReview:
+        """Add a publisher reply to a review. Only the pack creator can reply."""
+        pack = await self._get_public_pack(pack_id)
+        if pack.created_by != user_id:
+            raise AppError("FORBIDDEN", "Only the pack owner can reply to reviews", 403)
+
+        review = await self.db.get(PackReview, review_id)
+        if review is None:
+            raise ReviewNotFoundError()
+        if review.pack_id != pack_id:
+            raise AppError("REVIEW_NOT_FOUND", "Review not found for this pack", 404)
+
+        review.reply_text = reply_text
+        review.reply_at = datetime.now(UTC)
+        await self.db.flush()
+
+        log.info("review_reply_added", review_id=review_id, pack_id=pack_id)
+        return review
+
+    async def get_distribution(self, pack_id: str) -> dict:
+        """Return rating distribution for a pack."""
+        await self._get_public_pack(pack_id)
+
+        result = await self.db.execute(
+            select(
+                PackReview.rating,
+                func.count(PackReview.id),
+            )
+            .where(PackReview.pack_id == pack_id)
+            .group_by(PackReview.rating)
+        )
+        rows = result.all()
+
+        distribution = {i: 0 for i in range(1, 6)}
+        total = 0
+        rating_sum = 0
+        for rating_val, count in rows:
+            distribution[rating_val] = count
+            total += count
+            rating_sum += rating_val * count
+
+        average = round(rating_sum / total, 2) if total > 0 else None
+
+        return {
+            "average": average,
+            "total": total,
+            "distribution": distribution,
+        }
+
+    async def toggle_helpful(self, review_id: str, user_id: str) -> PackReview:
+        """Toggle a helpful vote on a review."""
+        review = await self.db.get(PackReview, review_id)
+        if review is None:
+            raise ReviewNotFoundError()
+
+        # Check if user already voted
+        existing = await self.db.get(ReviewHelpfulVote, (user_id, review_id))
+        if existing is not None:
+            # Remove vote
+            await self.db.delete(existing)
+            review.helpful_count = max(0, review.helpful_count - 1)
+        else:
+            # Add vote
+            vote = ReviewHelpfulVote(user_id=user_id, review_id=review_id)
+            self.db.add(vote)
+            review.helpful_count = review.helpful_count + 1
+
+        await self.db.flush()
+        log.info("review_helpful_toggled", review_id=review_id, user_id=user_id)
+        return review
 
     async def get_stats(self, pack_id: str) -> dict:
         result = await self.db.execute(
