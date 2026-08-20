@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 
@@ -19,6 +20,13 @@ interface RegistryPack {
   provenance: { author_name?: string };
 }
 
+interface PackCategory {
+  id: string;
+  name: string;
+  slug: string;
+  parent_id: string | null;
+}
+
 const DIFFICULTY_COLORS: Record<string, string> = {
   beginner: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   intermediate: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
@@ -30,23 +38,42 @@ export default function RegistryPage() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [difficulty, setDifficulty] = useState("");
+  const [category, setCategory] = useState("");
   const [sort, setSort] = useState("newest");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput), 300);
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, difficulty, category, sort]);
+
+  const { data: categoriesData } = useQuery({
+    queryKey: ["registry-categories"],
+    queryFn: () =>
+      api<{ data: PackCategory[] }>("/registry/categories"),
+  });
+
+  const categories = categoriesData?.data ?? [];
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["registry", debouncedSearch, difficulty, sort],
+    queryKey: ["registry", debouncedSearch, difficulty, category, sort, page],
     queryFn: () => {
       const params = new URLSearchParams();
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (difficulty) params.set("difficulty", difficulty);
+      if (category) params.set("category", category);
       params.set("sort", sort);
-      return api<{ data: RegistryPack[]; meta: { total: number } }>(
-        `/registry/packs?${params.toString()}`,
-      );
+      params.set("page", String(page));
+      params.set("per_page", "20");
+      return api<{
+        data: RegistryPack[];
+        meta: { total: number; has_more: boolean };
+      }>(`/registry/packs?${params.toString()}`);
     },
   });
 
@@ -87,6 +114,20 @@ export default function RegistryPage() {
           <option value="intermediate">Intermediate</option>
           <option value="advanced">Advanced</option>
           <option value="expert">Expert</option>
+        </select>
+        <label className="sr-only" htmlFor="category-filter">Category</label>
+        <select
+          id="category-filter"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="rounded-md border bg-transparent px-3 py-2 text-sm"
+        >
+          <option value="">All categories</option>
+          {categories.map((cat) => (
+            <option key={cat.id} value={cat.slug}>
+              {cat.name}
+            </option>
+          ))}
         </select>
         <label className="sr-only" htmlFor="sort-select">Sort</label>
         <select
@@ -156,10 +197,28 @@ export default function RegistryPage() {
         ))}
       </div>
 
-      {data?.meta && packs.length < data.meta.total && (
-        <p className="mt-6 text-center text-sm text-[hsl(var(--muted-foreground))]">
-          Showing {packs.length} of {data.meta.total} packs
-        </p>
+      {data?.meta && (
+        <div className="mt-6 flex items-center justify-center gap-4">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-[hsl(var(--muted-foreground))]">
+            Page {page}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!data.meta.has_more}
+          >
+            Next
+          </Button>
+        </div>
       )}
     </div>
   );

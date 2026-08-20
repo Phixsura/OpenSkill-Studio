@@ -61,6 +61,13 @@ interface Template {
   name: string;
 }
 
+interface PackAnalytics {
+  install_count: number;
+  average_rating: number | null;
+  review_count: number;
+  installs_by_version: { version: string; count: number }[];
+}
+
 /* ---------- Color maps ---------- */
 
 const STATUS_COLORS: Record<string, string> = {
@@ -131,12 +138,21 @@ export default function PackDetailPage() {
       apiWithAuth<{ data: Template[] }>(`/orgs/${orgId}/project-templates`),
   });
 
+  const { data: analyticsData } = useQuery({
+    queryKey: ["pack-analytics", orgId, packId],
+    queryFn: () =>
+      apiWithAuth<{ data: PackAnalytics }>(
+        `/orgs/${orgId}/packs/${packId}/analytics`,
+      ),
+  });
+
   const pack = packData?.data;
   const packSkills = skillsData?.data ?? [];
   const packTemplates = templatesData?.data ?? [];
   const releases = releasesData?.data ?? [];
   const orgSkills = orgSkillsData?.data ?? [];
   const orgTemplates = orgTemplatesData?.data ?? [];
+  const analytics = analyticsData?.data;
 
   /* ---- Mutations ---- */
 
@@ -537,6 +553,72 @@ export default function PackDetailPage() {
             </Button>
           </div>
         </div>
+      </div>
+
+      {/* ===== Section 4: Analytics ===== */}
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold">Analytics</h2>
+
+        {!analytics ? (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            Loading analytics...
+          </p>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="rounded-lg border p-4 text-center">
+                <p className="text-3xl font-bold">
+                  {analytics.install_count.toLocaleString()}
+                </p>
+                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+                  Total installs
+                </p>
+              </div>
+              <div className="rounded-lg border p-4 text-center">
+                <p className="text-3xl font-bold">
+                  {analytics.average_rating != null
+                    ? analytics.average_rating.toFixed(1)
+                    : "--"}
+                </p>
+                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+                  Average rating
+                </p>
+              </div>
+              <div className="rounded-lg border p-4 text-center">
+                <p className="text-3xl font-bold">
+                  {analytics.review_count.toLocaleString()}
+                </p>
+                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+                  Reviews
+                </p>
+              </div>
+            </div>
+
+            {analytics.installs_by_version.length > 0 && (
+              <div className="rounded-lg border p-4">
+                <h3 className="text-sm font-semibold">Installs by Version</h3>
+                <table className="mt-3 w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-[hsl(var(--muted-foreground))]">
+                      <th className="pb-2 font-medium">Version</th>
+                      <th className="pb-2 text-right font-medium">Installs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analytics.installs_by_version.map((row) => (
+                      <tr key={row.version} className="border-b last:border-0">
+                        <td className="py-2">{row.version}</td>
+                        <td className="py-2 text-right">
+                          {row.count.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
