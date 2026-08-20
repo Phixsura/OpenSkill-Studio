@@ -49,13 +49,7 @@ export function NotificationBell() {
 
   const markAllReadMutation = useMutation({
     mutationFn: () =>
-      Promise.all(
-        notifications
-          .filter((n) => !n.is_read)
-          .map((n) =>
-            apiWithAuth(`/notifications/${n.id}/read`, { method: "PUT" }),
-          ),
-      ),
+      apiWithAuth("/notifications/read-all", { method: "PUT" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
     },

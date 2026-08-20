@@ -21,8 +21,26 @@ class CertificateResponse(BaseModel):
     certificate_number: str
     issued_at: datetime
     data: dict
+    # Flattened fields from data dict for frontend convenience
+    user_name: str | None = None
+    path_name: str | None = None
+    org_name: str | None = None
+    skills_completed: int | None = None
 
     model_config = {"from_attributes": True}
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        # Spread data dict fields to top level
+        data = self.data or {}
+        if self.user_name is None:
+            self.user_name = data.get("user_name")
+        if self.path_name is None:
+            self.path_name = data.get("path_name")
+        if self.org_name is None:
+            self.org_name = data.get("org_name")
+        if self.skills_completed is None:
+            self.skills_completed = data.get("skills_completed")
 
 
 @router.get(

@@ -431,6 +431,109 @@ async def test_filter_by_category(c):
     assert pid in ids
 
 
+# ═══════════════ Review Endpoints (4 tests) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_update_review(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid, "Update Review Pack")
+    cr = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews",
+        json={"rating": 3},
+        headers=h,
+    )
+    rid = cr.json()["data"]["id"]
+
+    r = await c.put(
+        f"/api/v1/registry/packs/{pid}/reviews/{rid}",
+        json={"rating": 5, "title": "Updated title"},
+        headers=h,
+    )
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["rating"] == 5
+    assert d["title"] == "Updated title"
+
+
+@pytest.mark.asyncio
+async def test_reply_to_review(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid, "Reply Review Pack")
+
+    # Create a review as the same user (who is also the pack owner)
+    cr = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews",
+        json={"rating": 4, "title": "Good pack"},
+        headers=h,
+    )
+    rid = cr.json()["data"]["id"]
+
+    # A second user creates a review so the owner can reply to it
+    h2, _ = await _auth(c)
+    # The second user cannot review the pack (not an installer, but let's test
+    # the reply mechanism using the first user's own review for simplicity).
+    r = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews/{rid}/reply",
+        json={"reply_text": "Thanks for the feedback!"},
+        headers=h,
+    )
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["reply_text"] == "Thanks for the feedback!"
+    assert d["reply_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_toggle_helpful(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid, "Helpful Review Pack")
+    cr = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews",
+        json={"rating": 5, "title": "Excellent"},
+        headers=h,
+    )
+    rid = cr.json()["data"]["id"]
+
+    # Toggle helpful ON
+    r = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews/{rid}/helpful",
+        headers=h,
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["helpful_count"] == 1
+
+    # Toggle helpful OFF
+    r2 = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews/{rid}/helpful",
+        headers=h,
+    )
+    assert r2.status_code == 200
+    assert r2.json()["data"]["helpful_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_review_stats(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid, "Stats Review Pack")
+    await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews",
+        json={"rating": 4},
+        headers=h,
+    )
+
+    r = await c.get(f"/api/v1/registry/packs/{pid}/reviews/stats")
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["average"] == 4.0
+    assert d["total"] == 1
+    assert d["distribution"]["4"] == 1
+
+
 # ═══════════════ LTI (1 test) ═══════════════
 
 

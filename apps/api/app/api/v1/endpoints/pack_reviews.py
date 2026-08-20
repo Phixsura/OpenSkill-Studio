@@ -1,6 +1,7 @@
 """Pack Review endpoints — ratings and reviews for public skill packs."""
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -87,8 +88,24 @@ async def list_reviews(
     reviews, total = await svc.list_reviews(
         pack_id, page, per_page, sort=sort, rating=rating
     )
+
+    # Enrich reviews with user display names
+    user_ids = list({r.user_id for r in reviews})
+    display_names: dict[str, str] = {}
+    if user_ids:
+        result = await db.execute(
+            select(User.id, User.display_name).where(User.id.in_(user_ids))
+        )
+        display_names = {row[0]: row[1] for row in result.all()}
+
+    response_data = []
+    for r in reviews:
+        resp = ReviewResponse.model_validate(r)
+        resp.user_display_name = display_names.get(r.user_id)
+        response_data.append(resp)
+
     return ListResponse(
-        data=[ReviewResponse.model_validate(r) for r in reviews],
+        data=response_data,
         meta=PaginationMeta(
             total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
         ),

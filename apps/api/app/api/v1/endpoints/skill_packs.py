@@ -320,6 +320,25 @@ async def get_pack_analytics(
 
 
 @router.post(
+    "/orgs/{org_id}/packs/{pack_id}/submit-for-review",
+    response_model=DataResponse[SkillPackResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def submit_for_review(
+    org_id: str,
+    pack_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit a pack for approval review. Sets review_status to 'pending'."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = SkillPackService(db)
+    pack = await svc.submit_for_review(pack_id, org_id, actor_id=user.id)
+    await db.commit()
+    return DataResponse(data=SkillPackResponse.model_validate(pack))
+
+
+@router.post(
     "/orgs/{org_id}/packs/{pack_id}/approve",
     response_model=DataResponse[SkillPackResponse],
     dependencies=[Depends(rate_limit(10, 60))],

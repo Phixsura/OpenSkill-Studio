@@ -139,10 +139,14 @@ def upgrade() -> None:
         ["user_id", "path_id"],
     )
 
-    # ── ALTER skill_packs ADD review_status ──
+    # ── ALTER skill_packs ADD review_status + rejection_reason ──
     op.add_column(
         "skill_packs",
         sa.Column("review_status", sa.String(20), nullable=True),
+    )
+    op.add_column(
+        "skill_packs",
+        sa.Column("rejection_reason", sa.String(500), nullable=True),
     )
 
     # ── Seed default pack categories ──
@@ -171,6 +175,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_column("skill_packs", "rejection_reason")
     op.drop_column("skill_packs", "review_status")
     op.drop_index("ix_certificates_user_path", table_name="certificates")
     op.drop_index("uq_certificate_number", table_name="certificates")

@@ -108,6 +108,7 @@ class ReviewResponse(BaseModel):
     reply_text: str | None
     reply_at: datetime | None
     created_at: datetime
+    user_display_name: str | None = None
 
     model_config = {"from_attributes": True}
 

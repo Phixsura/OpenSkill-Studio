@@ -86,9 +86,14 @@ interface ReviewsResponse {
   data: PackReview[];
   meta: {
     total: number;
-    average_rating: number | null;
-    rating_distribution: Record<string, number>;
+    has_more: boolean;
   };
+}
+
+interface ReviewStatsData {
+  average: number | null;
+  total: number;
+  distribution: Record<string, number>;
 }
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -211,14 +216,21 @@ function ReviewsSection({ packId, isAuthed }: { packId: string; isAuthed: boolea
       api<ReviewsResponse>(`/registry/packs/${packId}/reviews`),
   });
 
+  const { data: statsData } = useQuery({
+    queryKey: ["registry-review-stats", packId],
+    queryFn: () =>
+      api<{ data: ReviewStatsData }>(`/registry/packs/${packId}/reviews/stats`),
+  });
+
   const reviews = reviewsData?.data ?? [];
-  const meta = reviewsData?.meta;
-  const avgRating = meta?.average_rating;
-  const totalReviews = meta?.total ?? 0;
-  const distribution = meta?.rating_distribution ?? {};
+  const stats = statsData?.data;
+  const avgRating = stats?.average ?? null;
+  const totalReviews = stats?.total ?? 0;
+  const distribution = stats?.distribution ?? {};
 
   const handleReviewSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ["registry-reviews", packId] });
+    queryClient.invalidateQueries({ queryKey: ["registry-review-stats", packId] });
     queryClient.invalidateQueries({ queryKey: ["registry-pack", packId] });
   };
 
