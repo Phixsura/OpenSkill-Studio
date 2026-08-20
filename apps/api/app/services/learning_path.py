@@ -372,6 +372,86 @@ class LearningPathService:
         log.info("certificate_issued", cert_number=cert_number, user_id=user_id, path_id=path_id)
         return cert_number
 
+    # ── Effective Skills (de-duplicated) ──
+
+    async def get_effective_skills(self, cohort_id: str, org_id: str) -> list[str]:
+        """Return de-duplicated skill IDs from direct assignments + learning path assignments.
+
+        A skill that is both directly assigned to a cohort AND part of a learning
+        path assigned to the same cohort should appear only once.
+        """
+        from app.models.cohort import CohortSkillAssignment
+
+        await self._verify_cohort_org(cohort_id, org_id)
+
+        # Get directly assigned skill IDs
+        direct_r = await self.db.execute(
+            select(CohortSkillAssignment.skill_id).where(
+                CohortSkillAssignment.cohort_id == cohort_id,
+            )
+        )
+        direct_ids = set(direct_r.scalars().all())
+
+        # Get skill IDs from learning path assignments
+        path_assignments_r = await self.db.execute(
+            select(CohortLearningPathAssignment.path_id).where(
+                CohortLearningPathAssignment.cohort_id == cohort_id,
+            )
+        )
+        path_ids = list(path_assignments_r.scalars().all())
+
+        path_skill_ids: set[str] = set()
+        for pid in path_ids:
+            items_r = await self.db.execute(
+                select(LearningPathItem.skill_id).where(
+                    LearningPathItem.path_id == pid,
+                    LearningPathItem.item_type == PathItemType.SKILL,
+                    LearningPathItem.skill_id.is_not(None),
+                )
+            )
+            path_skill_ids.update(items_r.scalars().all())
+
+        # Union and deduplicate
+        all_skills = direct_ids | path_skill_ids
+        return list(all_skills)
+
+    # ── Cohort Path Progress (instructor view) ──
+
+    async def get_cohort_path_progress(
+        self, path_id: str, cohort_id: str, org_id: str
+    ) -> list[dict]:
+        """Return per-learner progress on a path for all learners in a cohort.
+
+        Used by instructors to see how each learner is progressing through
+        a specific learning path assigned to the cohort.
+        """
+        from app.models.cohort import CohortMember, CohortRole
+
+        await self._verify_cohort_org(cohort_id, org_id)
+        await self.get_path(path_id, org_id)
+
+        # Get all learners in the cohort
+        learners_r = await self.db.execute(
+            select(CohortMember).where(
+                CohortMember.cohort_id == cohort_id,
+                CohortMember.role == CohortRole.LEARNER,
+            )
+        )
+        learners = list(learners_r.scalars().all())
+
+        # For each learner, compute their path progress
+        results: list[dict] = []
+        for member in learners:
+            progress = await self.get_path_progress(path_id, member.user_id, org_id)
+            results.append({
+                "user_id": member.user_id,
+                "completed": progress["completed"],
+                "total_required": progress["total_required"],
+                "pct": progress["pct"],
+            })
+
+        return results
+
     # ── Helpers ──
 
     @staticmethod

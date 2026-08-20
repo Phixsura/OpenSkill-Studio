@@ -1327,6 +1327,9 @@ class ProjectService:
                 if k == "difficulty":
                     v = DifficultyLevel(v)
                 setattr(template, k, v)
+        # Mark as locally modified if this template was installed from a pack
+        if template.origin_pack_id is not None:
+            template.locally_modified = True
         await self.db.flush()
         return template
 

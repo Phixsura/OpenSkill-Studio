@@ -544,3 +544,351 @@ async def test_lti_config_coming_soon(c):
     d = r.json()["data"]
     assert d["status"] == "coming_soon"
     assert d["pack_id"] == "some-pack-id"
+
+
+# ═══════════════ #13: locally_modified set on update (3 tests) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_locally_modified_set_on_skill_update(c):
+    """When a skill installed from a pack is updated, locally_modified must be True."""
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    sid = await _skill(c, h, oid, "Pack Skill LM")
+
+    # Simulate the skill having been installed from a pack by setting origin_pack_id
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(
+                "UPDATE skills SET origin_pack_id = 'fakePack00000000000000001' WHERE id = :id"
+            ),
+            {"id": sid},
+        )
+        await session.commit()
+
+    # Update the skill — should set locally_modified = True
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/skills/{sid}",
+        json={"description": "Updated description"},
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    # Verify locally_modified is now True
+    async with AsyncSessionLocal() as session:
+        row = await session.execute(
+            text("SELECT locally_modified FROM skills WHERE id = :id"),
+            {"id": sid},
+        )
+        assert row.scalar_one() is True
+
+
+@pytest.mark.asyncio
+async def test_locally_modified_not_set_without_pack(c):
+    """When a skill NOT from a pack is updated, locally_modified stays False."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    sid = await _skill(c, h, oid, "Non-Pack Skill LM")
+
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/skills/{sid}",
+        json={"description": "Updated"},
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        row = await session.execute(
+            text("SELECT locally_modified FROM skills WHERE id = :id"),
+            {"id": sid},
+        )
+        assert row.scalar_one() is False
+
+
+@pytest.mark.asyncio
+async def test_locally_modified_set_on_exercise_update(c):
+    """When an exercise installed from a pack is updated, locally_modified must be True."""
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    sid = await _skill(c, h, oid, "Ex Pack Skill")
+
+    # Create an exercise
+    er = await c.post(
+        f"/api/v1/orgs/{oid}/skills/{sid}/exercises",
+        json={
+            "title": "Ex1",
+            "description": "desc",
+            "type": "text_answer",
+            "config": {},
+            "max_score": 10,
+        },
+        headers=h,
+    )
+    assert er.status_code == 201
+    eid = er.json()["data"]["id"]
+
+    # Simulate pack origin
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(
+                "UPDATE exercises SET origin_pack_id = 'fakePack00000000000000001' WHERE id = :id"
+            ),
+            {"id": eid},
+        )
+        await session.commit()
+
+    # Update the exercise
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/exercises/{eid}",
+        json={"title": "Updated Ex1"},
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    # Verify
+    async with AsyncSessionLocal() as session:
+        row = await session.execute(
+            text("SELECT locally_modified FROM exercises WHERE id = :id"),
+            {"id": eid},
+        )
+        assert row.scalar_one() is True
+
+
+# ═══════════════ #19: Effective skills de-duplication (2 tests) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_effective_skills_deduplication(c):
+    """A skill directly assigned AND in a learning path should appear only once."""
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    sid = await _skill(c, h, oid, "Eff Dedup Skill")
+
+    # Create a cohort
+    cr = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts",
+        json={"name": f"Cohort-{uuid.uuid4().hex[:6]}"},
+        headers=h,
+    )
+    assert cr.status_code == 201
+    cohort_id = cr.json()["data"]["id"]
+
+    # Direct-assign the skill to the cohort
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/skills",
+        json={"skill_id": sid},
+        headers=h,
+    )
+    assert r.status_code == 201
+
+    # Create a learning path containing the same skill, publish it
+    pr = await c.post(
+        f"/api/v1/orgs/{oid}/paths",
+        json={"name": "Eff Path"},
+        headers=h,
+    )
+    assert pr.status_code == 201
+    path_id = pr.json()["data"]["id"]
+
+    await c.post(
+        f"/api/v1/orgs/{oid}/paths/{path_id}/items",
+        json={"item_type": "skill", "skill_id": sid, "sort_order": 0, "required": True},
+        headers=h,
+    )
+    # Publish the path
+    await c.put(
+        f"/api/v1/orgs/{oid}/paths/{path_id}",
+        json={"status": "published"},
+        headers=h,
+    )
+
+    # Assign the path to the cohort
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/paths",
+        json={"path_id": path_id},
+        headers=h,
+    )
+
+    # Fetch effective skills — the skill should appear only once
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/effective-skills",
+        headers=h,
+    )
+    assert r.status_code == 200
+    skill_ids = r.json()["data"]
+    assert sid in skill_ids
+    assert skill_ids.count(sid) == 1, "Duplicate skill detected in effective-skills"
+
+
+@pytest.mark.asyncio
+async def test_effective_skills_union(c):
+    """Effective skills should include both directly assigned and path skills."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    s1 = await _skill(c, h, oid, "Direct Only Skill")
+    s2 = await _skill(c, h, oid, "Path Only Skill")
+
+    # Create cohort
+    cr = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts",
+        json={"name": f"Union-{uuid.uuid4().hex[:6]}"},
+        headers=h,
+    )
+    cohort_id = cr.json()["data"]["id"]
+
+    # Direct-assign s1
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/skills",
+        json={"skill_id": s1},
+        headers=h,
+    )
+
+    # Path with s2, published
+    pr = await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Union Path"}, headers=h)
+    path_id = pr.json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/paths/{path_id}/items",
+        json={"item_type": "skill", "skill_id": s2, "sort_order": 0, "required": True},
+        headers=h,
+    )
+    await c.put(f"/api/v1/orgs/{oid}/paths/{path_id}", json={"status": "published"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/paths",
+        json={"path_id": path_id},
+        headers=h,
+    )
+
+    r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/effective-skills", headers=h)
+    assert r.status_code == 200
+    skill_ids = r.json()["data"]
+    assert s1 in skill_ids
+    assert s2 in skill_ids
+
+
+# ═══════════════ #21: Cohort path-level progress view (2 tests) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_cohort_path_progress_instructor_view(c):
+    """Instructor can view per-learner progress on a path within a cohort."""
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    sid = await _skill(c, h, oid, "Progress Skill")
+
+    # Create path + item
+    pr = await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Prog Path"}, headers=h)
+    path_id = pr.json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/paths/{path_id}/items",
+        json={"item_type": "skill", "skill_id": sid, "sort_order": 0, "required": True},
+        headers=h,
+    )
+    await c.put(f"/api/v1/orgs/{oid}/paths/{path_id}", json={"status": "published"}, headers=h)
+
+    # Create cohort, add a learner
+    cr = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts",
+        json={"name": f"ProgCohort-{uuid.uuid4().hex[:6]}"},
+        headers=h,
+    )
+    cohort_id = cr.json()["data"]["id"]
+
+    # Register a second user as learner
+    h2, u2 = await _auth(c)
+    # Add learner to org first
+    from app.core.database import AsyncSessionLocal
+    from app.models.organization import MemberStatus, OrgMember
+    from app.models.organization import OrgRole as OrgRoleModel
+
+    async with AsyncSessionLocal() as session:
+        member = OrgMember(
+            org_id=oid,
+            user_id=u2["id"],
+            role=OrgRoleModel.STUDENT,
+            status=MemberStatus.ACTIVE,
+        )
+        session.add(member)
+        await session.commit()
+
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/members",
+        json={"user_id": u2["id"], "role": "learner"},
+        headers=h,
+    )
+
+    # Assign path to cohort
+    await c.post(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/paths",
+        json={"path_id": path_id},
+        headers=h,
+    )
+
+    # Get cohort path progress as instructor
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/paths/{path_id}/progress",
+        headers=h,
+    )
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert isinstance(data, list)
+    # Should have at least the enrolled learner
+    user_ids = [d["user_id"] for d in data]
+    assert u2["id"] in user_ids
+    # Each entry should have progress fields
+    for entry in data:
+        assert "completed" in entry
+        assert "total_required" in entry
+        assert "pct" in entry
+
+
+@pytest.mark.asyncio
+async def test_cohort_path_progress_non_instructor_denied(c):
+    """Non-instructor members should not access cohort path progress."""
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+
+    # Create path + cohort as instructor
+    pr = await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Deny Path"}, headers=h)
+    path_id = pr.json()["data"]["id"]
+    await c.put(f"/api/v1/orgs/{oid}/paths/{path_id}", json={"status": "published"}, headers=h)
+
+    cr = await c.post(
+        f"/api/v1/orgs/{oid}/cohorts",
+        json={"name": f"DenyCohort-{uuid.uuid4().hex[:6]}"},
+        headers=h,
+    )
+    cohort_id = cr.json()["data"]["id"]
+
+    # Create a regular member (not instructor)
+    h2, u2 = await _auth(c)
+    from app.core.database import AsyncSessionLocal
+    from app.models.organization import MemberStatus, OrgMember
+    from app.models.organization import OrgRole as OrgRoleModel
+
+    async with AsyncSessionLocal() as session:
+        member = OrgMember(
+            org_id=oid,
+            user_id=u2["id"],
+            role=OrgRoleModel.STUDENT,
+            status=MemberStatus.ACTIVE,
+        )
+        session.add(member)
+        await session.commit()
+
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/cohorts/{cohort_id}/paths/{path_id}/progress",
+        headers=h2,
+    )
+    assert r.status_code == 403

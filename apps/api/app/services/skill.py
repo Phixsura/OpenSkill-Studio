@@ -119,6 +119,9 @@ class SkillService:
         for k, v in fields.items():
             if v is not None and hasattr(cat, k):
                 setattr(cat, k, v)
+        # Mark as locally modified if this category was installed from a pack
+        if cat.origin_pack_id is not None:
+            cat.locally_modified = True
         await self.db.flush()
         return cat
 
@@ -280,6 +283,9 @@ class SkillService:
                 if k == "difficulty":
                     v = DifficultyLevel(v)
                 setattr(skill, k, v)
+        # Mark as locally modified if this skill was installed from a pack
+        if skill.origin_pack_id is not None:
+            skill.locally_modified = True
         await self.db.flush()
         return skill
 
@@ -381,6 +387,9 @@ class SkillService:
         for k, v in fields.items():
             if v is not None and hasattr(ex, k):
                 setattr(ex, k, v)
+        # Mark as locally modified if this exercise was installed from a pack
+        if ex.origin_pack_id is not None:
+            ex.locally_modified = True
         await self.db.flush()
         return ex
 

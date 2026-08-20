@@ -182,3 +182,33 @@ async def my_path_progress(
     await svc.get_path(path_id, org_id)
     progress = await svc.get_path_progress(path_id, user.id, org_id)
     return DataResponse(data=progress)
+
+
+# ── Effective Skills ──
+
+
+@router.get("/orgs/{org_id}/cohorts/{cohort_id}/effective-skills", response_model=DataResponse[list[str]], dependencies=[Depends(rate_limit(20, 60))])
+async def effective_skills(
+    org_id: str, cohort_id: str,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Return de-duplicated skill IDs from direct assignments + learning path assignments."""
+    await require_org_member(org_id, user, db)
+    svc = LearningPathService(db)
+    skills = await svc.get_effective_skills(cohort_id, org_id)
+    return DataResponse(data=skills)
+
+
+# ── Cohort Path Progress (instructor view) ──
+
+
+@router.get("/orgs/{org_id}/cohorts/{cohort_id}/paths/{path_id}/progress", response_model=DataResponse[list[dict]], dependencies=[Depends(rate_limit(20, 60))])
+async def cohort_path_progress(
+    org_id: str, cohort_id: str, path_id: str,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Instructor view: per-learner progress on a specific learning path within a cohort."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = LearningPathService(db)
+    progress = await svc.get_cohort_path_progress(path_id, cohort_id, org_id)
+    return DataResponse(data=progress)
