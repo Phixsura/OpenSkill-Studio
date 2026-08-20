@@ -1,6 +1,7 @@
 """Client brief endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -18,6 +19,14 @@ from app.schemas.project import ProjectResponse
 from app.services.client_brief import ClientBriefService
 
 router = APIRouter(tags=["Client Briefs"])
+
+
+class ApplyToBriefRequest(BaseModel):
+    note: str | None = None
+
+
+class ReviewApplicationRequest(BaseModel):
+    status: str
 
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
@@ -192,7 +201,7 @@ async def convert_brief_to_project(
 async def apply_to_brief(
     org_id: str,
     brief_id: str,
-    body: dict,
+    body: ApplyToBriefRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -213,8 +222,8 @@ async def apply_to_brief(
             detail="Applications are only accepted for open briefs",
         )
 
-    note = body.get("note", "")
-    if isinstance(note, str) and len(note) > 2000:
+    note = body.note or ""
+    if len(note) > 2000:
         raise HTTPException(status_code=422, detail="Note must be 2,000 chars or less")
 
     from sqlalchemy.exc import IntegrityError
@@ -296,7 +305,7 @@ async def review_application(
     org_id: str,
     brief_id: str,
     application_id: str,
-    body: dict,
+    body: ReviewApplicationRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -317,11 +326,10 @@ async def review_application(
     if app_obj is None or app_obj.brief_id != brief_id:
         raise HTTPException(status_code=404, detail="Application not found")
 
-    status = body.get("status")
-    if status not in ("accepted", "rejected", "withdrawn"):
+    if body.status not in ("accepted", "rejected", "withdrawn"):
         raise HTTPException(status_code=422, detail="Status must be 'accepted', 'rejected', or 'withdrawn'")
 
-    app_obj.status = ApplicationStatus(status)
+    app_obj.status = ApplicationStatus(body.status)
     app_obj.reviewed_at = datetime.now(UTC)
     app_obj.reviewed_by = user.id
     await db.commit()

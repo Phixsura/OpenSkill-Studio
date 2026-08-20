@@ -1,5 +1,6 @@
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -41,6 +42,28 @@ log = structlog.get_logger()
 
 
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+
+
+class SetProjectSkillsRequest(BaseModel):
+    skill_ids: list[str] = []
+
+
+class SubmissionItemInput(BaseModel):
+    type: str = "text"
+    deliverable_id: str
+    content: str | None = None
+
+
+class UpdateSubmissionRequest(BaseModel):
+    items: list[SubmissionItemInput] = []
+
+
+class SetCommentCompletedRequest(BaseModel):
+    completed: bool = False
+
+
+class AssignCreatorRequest(BaseModel):
+    user_id: str
 
 
 async def _verify_project_org(svc: ProjectService, project_id: str, org_id: str):
@@ -254,17 +277,14 @@ async def unpublish_project(
 async def set_project_skills(
     org_id: str,
     project_id: str,
-    body: dict,
+    body: SetProjectSkillsRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
-    skill_ids = body.get("skill_ids", [])
-    if not isinstance(skill_ids, list) or not all(isinstance(s, str) for s in skill_ids):
-        raise HTTPException(status_code=422, detail="skill_ids must be a list of strings")
-    await svc.set_project_skills(project_id, skill_ids)
+    await svc.set_project_skills(project_id, body.skill_ids)
     await db.commit()
     return {"message": "Project skills updated"}
 
@@ -522,7 +542,7 @@ async def update_submission(
     org_id: str,
     project_id: str,
     submission_id: str,
-    body: dict,
+    body: UpdateSubmissionRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -551,8 +571,8 @@ async def update_submission(
     # Validate every deliverable belongs to THIS project before writing rows
     project_deliverables = {d.id for d in await svc.list_deliverables(project_id)}
 
-    for item_data in body.get("items", []):
-        raw_type = item_data.get("type", "text")
+    for item_data in body.items:
+        raw_type = item_data.type
         try:
             item_type = ItemType(raw_type)
         except ValueError as exc:
@@ -562,11 +582,11 @@ async def update_submission(
                 status_code=422,
                 detail=f"Item type '{raw_type}' must be created via its dedicated endpoint",
             )
-        deliverable_id = item_data.get("deliverable_id")
+        deliverable_id = item_data.deliverable_id
         if not deliverable_id or deliverable_id not in project_deliverables:
             raise HTTPException(status_code=422, detail="Unknown deliverable for this project")
-        content = item_data.get("content")
-        if content is not None and (not isinstance(content, str) or len(content) > max_content):
+        content = item_data.content
+        if content is not None and len(content) > max_content:
             raise HTTPException(status_code=422, detail="Item content too large or invalid")
         # A link item's content is rendered as a clickable href — restrict to
         # http(s) so a stored javascript:/data: URL can't become an XSS vector.
@@ -1183,7 +1203,7 @@ async def create_comment(
 async def set_comment_completed(
     org_id: str,
     comment_id: str,
-    body: dict,
+    body: SetCommentCompletedRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1193,7 +1213,7 @@ async def set_comment_completed(
     sub = await svc.get_submission(comment.submission_id)
     if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
         raise HTTPException(status_code=403, detail="Access denied")
-    comment = await svc.set_comment_completed(comment_id, org_id, bool(body.get("completed")))
+    comment = await svc.set_comment_completed(comment_id, org_id, body.completed)
     await db.commit()
     return DataResponse(data=CommentResponse.model_validate(comment))
 
@@ -1223,7 +1243,7 @@ async def delete_comment(
 async def assign_creator(
     org_id: str,
     project_id: str,
-    body: dict,
+    body: AssignCreatorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1231,10 +1251,6 @@ async def assign_creator(
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
-
-    user_id = body.get("user_id")
-    if not user_id or not isinstance(user_id, str):
-        raise HTTPException(status_code=422, detail="user_id is required")
 
     # Verify user is an org member
     from sqlalchemy import select as _sel
@@ -1244,7 +1260,7 @@ async def assign_creator(
     mem_r = await db.execute(
         _sel(OrgMember.id).where(
             OrgMember.org_id == org_id,
-            OrgMember.user_id == user_id,
+            OrgMember.user_id == body.user_id,
             OrgMember.status == MemberStatus.ACTIVE,
         )
     )
@@ -1257,7 +1273,7 @@ async def assign_creator(
 
     assignment = ProjectCreatorAssignment(
         project_id=project_id,
-        user_id=user_id,
+        user_id=body.user_id,
         assigned_by=user.id,
     )
     db.add(assignment)
@@ -1271,7 +1287,7 @@ async def assign_creator(
         data={
             "id": assignment.id,
             "project_id": project_id,
-            "user_id": user_id,
+            "user_id": body.user_id,
             "assigned_at": assignment.assigned_at.isoformat(),
         }
     )

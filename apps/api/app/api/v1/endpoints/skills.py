@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -27,6 +28,10 @@ from app.schemas.skill import (
 from app.services.skill import SkillService
 
 router = APIRouter(tags=["Skills & Exercises"])
+
+
+class SetPrerequisitesRequest(BaseModel):
+    prerequisite_ids: list[str] = []
 
 
 def _verify_org(resource, org_id: str, label: str = "Resource") -> None:
@@ -316,7 +321,7 @@ async def unpublish_skill(
 async def set_prerequisites(
     org_id: str,
     skill_id: str,
-    body: dict,
+    body: SetPrerequisitesRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -324,12 +329,7 @@ async def set_prerequisites(
     svc = SkillService(db)
     skill = await svc.get_skill(skill_id)
     _verify_org(skill, org_id, "Skill")
-    prerequisite_ids = body.get("prerequisite_ids", [])
-    if not isinstance(prerequisite_ids, list) or not all(
-        isinstance(p, str) for p in prerequisite_ids
-    ):
-        raise HTTPException(status_code=422, detail="prerequisite_ids must be a list of strings")
-    await svc.set_prerequisites(skill_id, prerequisite_ids)
+    await svc.set_prerequisites(skill_id, body.prerequisite_ids)
     await db.commit()
     return {"message": "Prerequisites updated"}
 
@@ -648,14 +648,40 @@ async def list_my_skill_progress(
     await require_org_member(org_id, user, db)
     svc = SkillService(db)
     skills, _total = await svc.list_skills(org_id, per_page=1000)
+
+    # Batch load progress and exercise counts to avoid N+1 queries
+    from sqlalchemy import func, select
+
+    from app.models.skill import ContentStatus, Exercise, SkillProgress
+
+    skill_ids = [s.id for s in skills]
+
+    progress_rows = await db.execute(
+        select(SkillProgress).where(
+            SkillProgress.skill_id.in_(skill_ids),
+            SkillProgress.user_id == user.id,
+        )
+    )
+    progress_map = {p.skill_id: p for p in progress_rows.scalars().all()}
+
+    exercise_counts = await db.execute(
+        select(Exercise.skill_id, func.count(Exercise.id))
+        .where(
+            Exercise.skill_id.in_(skill_ids),
+            Exercise.status != ContentStatus.ARCHIVED,
+        )
+        .group_by(Exercise.skill_id)
+    )
+    exercise_count_map = dict(exercise_counts.all())
+
     result = []
     for skill in skills:
-        progress = await svc.get_skill_progress(skill.id, user.id)
+        progress = progress_map.get(skill.id)
         # The stored snapshot goes stale when exercises are added/archived
         # after the student's last attempt — a skill could show completed 1/1
         # while it actually has 2 exercises. Use the live exercise count and
         # derive the display status from it.
-        live_total = len(await svc.list_exercises(skill.id))
+        live_total = exercise_count_map.get(skill.id, 0)
         done = progress.exercises_done if progress else 0
         if done == 0:
             status = "not_started"

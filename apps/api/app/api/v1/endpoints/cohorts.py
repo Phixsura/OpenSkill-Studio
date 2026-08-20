@@ -72,10 +72,21 @@ async def list_cohorts(
     await require_org_member(org_id, user, db)
     svc = CohortService(db)
     cohorts, total = await svc.list_cohorts(org_id, status, page, per_page)
-    items = []
-    for c in cohorts:
-        count = await svc.get_member_count(c.id)
-        items.append(_cohort_response(c, count))
+
+    # Batch load member counts to avoid N+1 queries
+    from sqlalchemy import func, select
+
+    from app.models.cohort import CohortMember
+
+    cohort_ids = [c.id for c in cohorts]
+    member_counts = await db.execute(
+        select(CohortMember.cohort_id, func.count(CohortMember.id))
+        .where(CohortMember.cohort_id.in_(cohort_ids))
+        .group_by(CohortMember.cohort_id)
+    )
+    count_map = dict(member_counts.all())
+
+    items = [_cohort_response(c, count_map.get(c.id, 0)) for c in cohorts]
     return ListResponse(
         data=items,
         meta=PaginationMeta(
@@ -464,9 +475,17 @@ async def my_cohorts(
         .order_by(Cohort.created_at.desc())
     )
     cohorts = list(result.scalars().all())
-    svc = CohortService(db)
-    items = []
-    for co in cohorts:
-        count = await svc.get_member_count(co.id)
-        items.append(_cohort_response(co, count))
+
+    # Batch load member counts to avoid N+1 queries
+    from sqlalchemy import func
+
+    cohort_ids = [co.id for co in cohorts]
+    member_counts = await db.execute(
+        _sel(CohortMember.cohort_id, func.count(CohortMember.id))
+        .where(CohortMember.cohort_id.in_(cohort_ids))
+        .group_by(CohortMember.cohort_id)
+    )
+    count_map = dict(member_counts.all())
+
+    items = [_cohort_response(co, count_map.get(co.id, 0)) for co in cohorts]
     return DataResponse(data=items)

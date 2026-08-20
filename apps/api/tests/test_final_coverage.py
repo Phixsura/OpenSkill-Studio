@@ -30,12 +30,9 @@ async def _user(db, role=UserRole.STUDENT):
 
 @pytest_asyncio.fixture
 async def db():
-    from app.core.database import engine
-
     async with AsyncSessionLocal() as session:
         yield session
         await session.rollback()
-    await engine.dispose()
 
 
 # ── main.py lifespan ─────────────────────────────────────
@@ -305,7 +302,6 @@ async def test_unhandled_exception_handler():
 
     from httpx import ASGITransport, AsyncClient
 
-    from app.core.database import engine
     from app.main import app
 
     @asynccontextmanager
@@ -319,5 +315,3 @@ async def test_unhandled_exception_handler():
         r = await c.get("/api/v1/nonexistent-path")
         assert r.status_code in (404, 405)
         assert "error" in r.json()
-
-    await engine.dispose()

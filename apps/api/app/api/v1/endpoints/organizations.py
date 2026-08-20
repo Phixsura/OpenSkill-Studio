@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -25,6 +26,15 @@ from app.schemas.organization import (
 from app.services.organization import OrgService
 
 router = APIRouter(tags=["Organizations"])
+
+
+class AddMemberRequest(BaseModel):
+    user_id: str
+    role: str = "student"
+
+
+class ToggleInviteLinkRequest(BaseModel):
+    is_active: bool = True
 
 
 # ── Helpers ───────────────────────────────────────────────
@@ -358,22 +368,16 @@ async def revoke_invite(
 @router.post("/orgs/{org_id}/members", dependencies=[Depends(rate_limit(10, 60))])
 async def add_member_directly(
     org_id: str,
-    body: dict,
+    body: AddMemberRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Directly add an existing user to the org (admin+)."""
     actor = await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
-    user_id = body.get("user_id")
-    role_str = body.get("role", "student")
-    if not user_id or not isinstance(user_id, str):
-        raise HTTPException(status_code=422, detail="user_id is required and must be a string")
-    if not isinstance(role_str, str):
-        raise HTTPException(status_code=422, detail="role must be a string")
     try:
-        role = OrgRole(role_str)
+        role = OrgRole(body.role)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid role: {role_str}") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
 
     # Cannot add a member at a role higher than your own (admin adding an owner)
     if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
@@ -382,7 +386,7 @@ async def add_member_directly(
         )
 
     service = OrgService(db)
-    member = await service.add_member(org_id, user_id, role, invited_by=user.id)
+    member = await service.add_member(org_id, body.user_id, role, invited_by=user.id)
     await db.commit()
     resp = await _member_response(member, db)
     return DataResponse(data=resp)
@@ -445,16 +449,13 @@ async def list_invite_links(
 async def toggle_invite_link(
     org_id: str,
     link_id: str,
-    body: dict,
+    body: ToggleInviteLinkRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
-    is_active = body.get("is_active", True)
-    if not isinstance(is_active, bool):
-        raise HTTPException(status_code=422, detail="is_active must be a boolean")
     service = OrgService(db)
-    link = await service.toggle_invite_link(org_id, link_id, is_active)
+    link = await service.toggle_invite_link(org_id, link_id, body.is_active)
     await db.commit()
     return DataResponse(data=_link_response(link))
 
