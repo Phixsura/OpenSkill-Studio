@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
+from app.core.rate_limit import rate_limit
 from app.models.pack_category import PackCategory, PackCategoryAssignment
 from app.models.user import User, UserRole, UserStatus
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 @router.get(
     "/users",
     response_model=ListResponse[AdminUserResponse],
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
+    dependencies=[Depends(require_role(UserRole.ADMIN)), Depends(rate_limit(10, 60))],
 )
 async def list_users(
     page: int = Query(default=1, ge=1),
@@ -50,7 +51,7 @@ async def list_users(
 @router.get(
     "/users/{user_id}",
     response_model=DataResponse[AdminUserResponse],
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
+    dependencies=[Depends(require_role(UserRole.ADMIN)), Depends(rate_limit(10, 60))],
 )
 async def get_user(user_id: str, db: AsyncSession = Depends(get_db)):
     user = await db.get(User, user_id)
@@ -62,6 +63,7 @@ async def get_user(user_id: str, db: AsyncSession = Depends(get_db)):
 @router.put(
     "/users/{user_id}/role",
     response_model=DataResponse[AdminUserResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def update_user_role(
     user_id: str,
@@ -110,6 +112,7 @@ async def update_user_role(
 @router.delete(
     "/users/{user_id}",
     status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def soft_delete_user(
     user_id: str,
@@ -145,6 +148,7 @@ async def soft_delete_user(
     "/pack-categories",
     response_model=DataResponse[CategoryResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_pack_category(
     body: CreateCategoryRequest,
@@ -180,6 +184,7 @@ async def create_pack_category(
 @router.put(
     "/pack-categories/{category_id}",
     response_model=DataResponse[CategoryResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def update_pack_category(
     category_id: str,
@@ -218,6 +223,7 @@ async def update_pack_category(
 @router.delete(
     "/pack-categories/{category_id}",
     status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def delete_pack_category(
     category_id: str,

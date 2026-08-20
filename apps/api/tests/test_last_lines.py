@@ -85,7 +85,8 @@ async def _admin_h(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"LL-{uuid.uuid4().hex[:6]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
 
@@ -110,7 +111,6 @@ async def test_lifespan_postgres_fail_production():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Lifespan may hang on engine connect", strict=False)
 async def test_lifespan_redis_fail_dev():
     """Cover lines 42-46: redis fail in dev warns."""
     from app.main import app, lifespan
@@ -164,7 +164,6 @@ async def test_deps_optional_auth_none(c):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Exception handler may not trigger cleanly in test", strict=False)
 async def test_unhandled_exception_triggers():
     """Cover lines 54-60: unhandled exception returns 500."""
     from fastapi import FastAPI

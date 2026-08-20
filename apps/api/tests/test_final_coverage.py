@@ -43,7 +43,6 @@ async def db():
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(15)
-@pytest.mark.xfail(reason="Engine may be disposed by prior tests", strict=False)
 async def test_lifespan_with_real_infra():
     """Cover the lifespan function (lines 22-66 of main.py)."""
     from sqlalchemy import text
@@ -66,7 +65,6 @@ async def test_lifespan_with_real_infra():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Engine may be disposed by prior tests", strict=False)
 async def test_auth_reset_password_full_flow(db):
     """Cover forgot → reset password success path."""
     from sqlalchemy import select

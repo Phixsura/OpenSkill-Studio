@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -22,7 +23,8 @@ INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
 @router.post(
-    "/orgs/{org_id}/briefs", response_model=DataResponse[ClientBriefResponse], status_code=201
+    "/orgs/{org_id}/briefs", response_model=DataResponse[ClientBriefResponse], status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def create_brief(
     org_id: str,
@@ -37,7 +39,7 @@ async def create_brief(
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.get("/orgs/{org_id}/briefs", response_model=ListResponse[ClientBriefResponse])
+@router.get("/orgs/{org_id}/briefs", response_model=ListResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def list_briefs(
     org_id: str,
     status: str | None = None,
@@ -60,6 +62,7 @@ async def list_briefs(
 @router.get(
     "/orgs/{org_id}/briefs/open",
     response_model=DataResponse[list[dict]],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def list_open_briefs(
     org_id: str,
@@ -98,7 +101,7 @@ async def list_open_briefs(
     )
 
 
-@router.get("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse])
+@router.get("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def get_brief(
     org_id: str,
     brief_id: str,
@@ -113,7 +116,7 @@ async def get_brief(
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.put("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse])
+@router.put("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def update_brief(
     org_id: str,
     brief_id: str,
@@ -131,7 +134,7 @@ async def update_brief(
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.delete("/orgs/{org_id}/briefs/{brief_id}", status_code=204)
+@router.delete("/orgs/{org_id}/briefs/{brief_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
 async def delete_brief(
     org_id: str,
     brief_id: str,
@@ -151,6 +154,7 @@ async def delete_brief(
     "/orgs/{org_id}/briefs/{brief_id}/convert",
     response_model=DataResponse[ProjectResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def convert_brief_to_project(
     org_id: str,
@@ -183,6 +187,7 @@ async def convert_brief_to_project(
     "/orgs/{org_id}/briefs/{brief_id}/apply",
     response_model=DataResponse[dict],
     status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def apply_to_brief(
     org_id: str,
@@ -239,6 +244,7 @@ async def apply_to_brief(
 @router.get(
     "/orgs/{org_id}/briefs/{brief_id}/applications",
     response_model=DataResponse[list[dict]],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def list_applications(
     org_id: str,
@@ -284,6 +290,7 @@ async def list_applications(
 @router.put(
     "/orgs/{org_id}/briefs/{brief_id}/applications/{application_id}",
     response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def review_application(
     org_id: str,
@@ -331,6 +338,7 @@ async def review_application(
 @router.post(
     "/orgs/{org_id}/briefs/{brief_id}/withdraw",
     response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def withdraw_application(
     org_id: str,

@@ -86,7 +86,9 @@ class AnthropicClient(LLMClient):
                     delay = RETRY_BASE_DELAY * (2**attempt)
                     logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
                     await asyncio.sleep(delay)
-        raise last_exc  # type: ignore[misc]
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Max retries exceeded with no exception")
 
 
 class OpenAIClient(LLMClient):
@@ -133,7 +135,9 @@ class OpenAIClient(LLMClient):
                     delay = RETRY_BASE_DELAY * (2**attempt)
                     logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
                     await asyncio.sleep(delay)
-        raise last_exc  # type: ignore[misc]
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Max retries exceeded with no exception")
 
 
 def _to_openai_content(blocks: list) -> list:

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.core.rate_limit import rate_limit
 from app.models.organization import MemberStatus, OrgMember, OrgRole
 from app.models.project import (
     PeerAssessment,
@@ -27,7 +28,7 @@ from app.schemas.base import DataResponse
 router = APIRouter(tags=["Overview"])
 
 
-@router.get("/me/overview")
+@router.get("/me/overview", dependencies=[Depends(rate_limit(30, 60))])
 async def my_overview(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
