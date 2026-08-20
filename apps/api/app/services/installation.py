@@ -2,6 +2,7 @@
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -244,7 +245,11 @@ class InstallationService:
             .values(install_count=SkillPack.install_count + 1)
         )
 
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise AppError("ALREADY_INSTALLED", "Pack already installed in this organization", 409) from None
 
         log.info(
             "pack_installed",

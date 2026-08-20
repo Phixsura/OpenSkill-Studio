@@ -84,7 +84,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/api/v1/docs" if settings.debug else None,
     redoc_url="/api/v1/redoc" if settings.debug else None,
-    openapi_url="/api/v1/openapi.json",
+    openapi_url="/api/v1/openapi.json" if settings.debug else None,
     lifespan=lifespan,
 )
 

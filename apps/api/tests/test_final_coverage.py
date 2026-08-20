@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 
-from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
 from app.models.user import User, UserRole, UserStatus
 
@@ -30,7 +29,8 @@ async def _user(db, role=UserRole.STUDENT):
 
 @pytest_asyncio.fixture
 async def db():
-    from app.core.database import AsyncSessionLocal as SessionLocal, engine
+    from app.core.database import AsyncSessionLocal as SessionLocal
+    from app.core.database import engine
 
     # Ensure engine pool is fresh (prior tests may have disposed it)
     async with SessionLocal() as session:

@@ -112,7 +112,7 @@ class AuthService:
 
         result = await self._create_token_pair(user, ip_address, device_info)
 
-        log.info("auth_register", user_id=user.id, email=user.email)
+        log.info("auth_register", user_id=user.id)
         return result
 
     # ── Login ──
@@ -138,7 +138,13 @@ class AuthService:
             raise InvalidCredentialsError()
 
         if not verify_password(password, user.password_hash):  # type: ignore[arg-type]
-            log.warning("auth_login_failed", email=email, reason="invalid_password")
+            import hashlib
+
+            log.warning(
+                "auth_login_failed",
+                email_hash=hashlib.sha256(email.encode()).hexdigest()[:12],
+                reason="invalid_password",
+            )
             raise InvalidCredentialsError()
 
         if user.status == UserStatus.SUSPENDED:

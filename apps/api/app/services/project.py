@@ -545,7 +545,14 @@ class ProjectService:
         project_id: str,
         user_id: str,
     ) -> Submission:
-        project = await self.get_project(project_id)
+        # Lock the project row to prevent concurrent submissions from
+        # bypassing the max_submissions check (SELECT ... FOR UPDATE).
+        result = await self.db.execute(
+            select(Project).where(Project.id == project_id).with_for_update()
+        )
+        project = result.scalar_one_or_none()
+        if project is None or project.status == ContentStatus.ARCHIVED:
+            raise ProjectNotFoundError()
 
         # ── Cohort visibility gate ──
         # If this project is assigned to specific cohorts or individual creators,
