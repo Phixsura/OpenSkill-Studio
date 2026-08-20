@@ -30,11 +30,14 @@ async def _user(db, role=UserRole.STUDENT):
 
 @pytest_asyncio.fixture
 async def db():
-    from app.core.database import engine
+    from app.core.database import AsyncSessionLocal as SessionLocal, engine
 
-    async with AsyncSessionLocal() as session:
-        yield session
-        await session.rollback()
+    # Ensure engine pool is fresh (prior tests may have disposed it)
+    async with SessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()
     await engine.dispose()
 
 
