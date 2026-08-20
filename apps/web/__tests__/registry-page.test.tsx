@@ -44,21 +44,26 @@ describe("RegistryPage", () => {
   });
 
   it("renders pack cards when loaded", async () => {
-    mockApi.mockResolvedValue({
-      data: [
-        {
-          id: "p1",
-          name: "AI Basics",
-          slug: "ai-basics",
-          summary: "Learn AI fundamentals",
-          difficulty: "beginner",
-          install_count: 42,
-          scenario_tags: ["prompt-eng"],
-          tool_tags: [],
-          provenance: { author_name: "Jane Doe" },
-        },
-      ],
-      meta: { total: 1 },
+    mockApi.mockImplementation((path: string) => {
+      if (typeof path === "string" && path.includes("/registry/categories")) {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.resolve({
+        data: [
+          {
+            id: "p1",
+            name: "AI Basics",
+            slug: "ai-basics",
+            summary: "Learn AI fundamentals",
+            difficulty: "beginner",
+            install_count: 42,
+            scenario_tags: ["prompt-eng"],
+            tool_tags: [],
+            provenance: { author_name: "Jane Doe" },
+          },
+        ],
+        meta: { total: 1 },
+      });
     });
     render(<RegistryPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("AI Basics")).toBeDefined();
@@ -69,7 +74,12 @@ describe("RegistryPage", () => {
   });
 
   it("shows error message on failure", async () => {
-    mockApi.mockRejectedValue(new Error("Server error"));
+    mockApi.mockImplementation((path: string) => {
+      if (typeof path === "string" && path.includes("/registry/categories")) {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.reject(new Error("Server error"));
+    });
     render(<RegistryPage />, { wrapper: createWrapper() });
     expect(
       await screen.findByText(/Failed to load packs/),
@@ -77,7 +87,12 @@ describe("RegistryPage", () => {
   });
 
   it("shows empty state when no packs match", async () => {
-    mockApi.mockResolvedValue({ data: [], meta: { total: 0 } });
+    mockApi.mockImplementation((path: string) => {
+      if (typeof path === "string" && path.includes("/registry/categories")) {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.resolve({ data: [], meta: { total: 0 } });
+    });
     render(<RegistryPage />, { wrapper: createWrapper() });
     expect(
       await screen.findByText(/No packs found matching your criteria/),
@@ -101,21 +116,26 @@ describe("RegistryPage", () => {
   });
 
   it("renders scenario tags on pack cards", async () => {
-    mockApi.mockResolvedValue({
-      data: [
-        {
-          id: "p2",
-          name: "Design Pack",
-          slug: "design",
-          summary: null,
-          difficulty: null,
-          install_count: 0,
-          scenario_tags: ["ux-design", "prototyping"],
-          tool_tags: [],
-          provenance: {},
-        },
-      ],
-      meta: { total: 1 },
+    mockApi.mockImplementation((path: string) => {
+      if (typeof path === "string" && path.includes("/registry/categories")) {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.resolve({
+        data: [
+          {
+            id: "p2",
+            name: "Design Pack",
+            slug: "design",
+            summary: null,
+            difficulty: null,
+            install_count: 0,
+            scenario_tags: ["ux-design", "prototyping"],
+            tool_tags: [],
+            provenance: {},
+          },
+        ],
+        meta: { total: 1 },
+      });
     });
     render(<RegistryPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("ux-design")).toBeDefined();

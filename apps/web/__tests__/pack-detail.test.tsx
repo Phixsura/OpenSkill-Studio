@@ -52,6 +52,16 @@ function setupPackMock() {
     if (typeof path === "string" && path === "/orgs/org-1/packs/pack-1") {
       return Promise.resolve({ data: PACK });
     }
+    if (typeof path === "string" && path.includes("/analytics")) {
+      return Promise.resolve({
+        data: {
+          install_count: 0,
+          average_rating: null,
+          review_count: 0,
+          installs_by_version: [],
+        },
+      });
+    }
     return Promise.resolve({ data: [] });
   });
 }
