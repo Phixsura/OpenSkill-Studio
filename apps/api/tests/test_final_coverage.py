@@ -30,9 +30,12 @@ async def _user(db, role=UserRole.STUDENT):
 
 @pytest_asyncio.fixture
 async def db():
+    from app.core.database import engine
+
     async with AsyncSessionLocal() as session:
         yield session
         await session.rollback()
+    await engine.dispose()
 
 
 # ── main.py lifespan ─────────────────────────────────────
