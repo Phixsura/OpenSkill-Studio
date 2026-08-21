@@ -67,9 +67,12 @@ class InstallationService:
         if pack is None:
             raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
-        # Status check: only PUBLISHED packs can be installed
+        # Status check: only PUBLISHED packs can be installed.
+        # Use PACK_NOT_FOUND (not PACK_NOT_AVAILABLE) to prevent information
+        # disclosure — different error codes would let attackers enumerate
+        # which pack IDs exist in draft/archived state across organizations.
         if pack.status != PackStatus.PUBLISHED:
-            raise AppError("PACK_NOT_AVAILABLE", "Pack is not available for installation", 404)
+            raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
         # Visibility check
         if pack.visibility == PackVisibility.PRIVATE and pack.owner_org_id != org_id:
