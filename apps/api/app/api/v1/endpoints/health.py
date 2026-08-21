@@ -3,18 +3,19 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.core.rate_limit import rate_limit
 from app.schemas.health import HealthResponse, ReadinessResponse
 
 router = APIRouter(tags=["Health"])
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health", response_model=HealthResponse, dependencies=[Depends(rate_limit(60, 60))])
 async def liveness():
     """Liveness: is the process alive (no dependency check)."""
     return HealthResponse(status="ok")
 
 
-@router.get("/health/ready", response_model=ReadinessResponse)
+@router.get("/health/ready", response_model=ReadinessResponse, dependencies=[Depends(rate_limit(10, 60))])
 async def readiness(db: AsyncSession = Depends(get_db)):
     """Readiness: can the service accept traffic (checks all dependencies)."""
     components: dict[str, str] = {}

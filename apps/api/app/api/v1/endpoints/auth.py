@@ -153,7 +153,7 @@ async def refresh(
 # ── Logout ────────────────────────────────────────────────
 
 
-@router.post("/logout", status_code=204)
+@router.post("/logout", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def logout(
     request: Request,
     response: Response,
@@ -172,12 +172,12 @@ async def logout(
 # ── Me ────────────────────────────────────────────────────
 
 
-@router.get("/me", response_model=DataResponse[UserResponse])
+@router.get("/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(60, 60))])
 async def get_me(user: User = Depends(get_current_user)):
     return DataResponse(data=UserResponse.model_validate(user))
 
 
-@router.put("/me", response_model=DataResponse[UserResponse])
+@router.put("/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def update_me(
     body: UpdateProfileRequest,
     user: User = Depends(get_current_user),
@@ -196,7 +196,7 @@ async def update_me(
 # ── Change password ───────────────────────────────────────
 
 
-@router.post("/change-password", status_code=204)
+@router.post("/change-password", status_code=204, dependencies=[Depends(rate_limit(5, 60))])
 async def change_password(
     body: ChangePasswordRequest,
     user: User = Depends(get_current_user),
@@ -282,7 +282,7 @@ async def resend_verification(
 # ── Sessions ──────────────────────────────────────────────
 
 
-@router.get("/sessions", response_model=DataResponse[list[SessionResponse]])
+@router.get("/sessions", response_model=DataResponse[list[SessionResponse]], dependencies=[Depends(rate_limit(20, 60))])
 async def list_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -292,7 +292,7 @@ async def list_sessions(
     return DataResponse(data=[SessionResponse.model_validate(t) for t in tokens])
 
 
-@router.delete("/sessions/{token_id}", status_code=204)
+@router.delete("/sessions/{token_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def revoke_session(
     token_id: str,
     user: User = Depends(get_current_user),
