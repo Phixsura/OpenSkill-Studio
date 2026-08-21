@@ -442,3 +442,134 @@ async def test_share_unpublished_pack(c):
     }, headers=h)
     # Should fail because pack is not published
     assert r.status_code in (404, 422)
+
+
+# ═══════════════ Round 15 — Missing Edge Case Tests (4 tests) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_install_count_decrement_on_remove(c):
+    """install_count should decrease when an installation is removed."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid, "CountPack")
+
+    # Check initial install_count
+    r = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r.status_code == 200
+    initial_count = r.json()["data"]["install_count"]
+
+    # Install the pack from a second org
+    h2, _ = await _auth(c)
+    oid2 = await _org(c, h2)
+    ir = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    assert ir.status_code == 201
+    install_id = ir.json()["data"]["id"]
+
+    # Verify install_count went up
+    r2 = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r2.json()["data"]["install_count"] == initial_count + 1
+
+    # Remove the installation
+    dr = await c.delete(f"/api/v1/orgs/{oid2}/installations/{install_id}", headers=h2)
+    assert dr.status_code == 204
+
+    # Verify install_count went back down
+    r3 = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r3.json()["data"]["install_count"] == initial_count
+
+
+@pytest.mark.asyncio
+async def test_submit_for_review_lifecycle(c):
+    """submit_for_review: happy path, already-pending (409), already-approved (422)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid, "ReviewLifecyclePack")
+
+    # Happy path: submit for review
+    r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    assert r.status_code == 200
+
+    # Already pending → 409
+    r2 = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    assert r2.status_code == 409
+    assert r2.json()["error"]["code"] == "ALREADY_PENDING"
+
+    # Set to approved via raw SQL
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("UPDATE skill_packs SET review_status = :s WHERE id = :id"),
+            {"s": "approved", "id": pid},
+        )
+        await session.commit()
+
+    # Already approved → 422
+    r3 = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    assert r3.status_code == 422
+    assert r3.json()["error"]["code"] == "ALREADY_APPROVED"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_nonexistent_version_returns_404(c):
+    """Upgrading to a version that doesn't exist should return 404."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid, "UpgNonExPack")
+
+    # Install
+    h2, _ = await _auth(c)
+    oid2 = await _org(c, h2)
+    ir = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    assert ir.status_code == 201
+    install_id = ir.json()["data"]["id"]
+
+    # Upgrade to non-existent version
+    r = await c.post(
+        f"/api/v1/orgs/{oid2}/installations/{install_id}/upgrade",
+        json={"version": "99.99.99"},
+        headers=h2,
+    )
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "RELEASE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_import_oversized_archive_rejected(c):
+    """Uploading a zip larger than MAX_ARCHIVE_SIZE should be rejected."""
+    import io
+    import zipfile
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Create a zip with enough data to exceed a small limit
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        # Write a manifest and a filler file to exceed 200 bytes
+        zf.writestr("manifest.json", '{"schema_version": "1.0"}')
+        zf.writestr("filler.txt", "x" * 500)
+    raw = buf.getvalue()
+
+    # Monkey-patch MAX_ARCHIVE_SIZE in the pack_io endpoint module where the
+    # name is imported and used. We patch both the endpoint and service copies.
+    import app.api.v1.endpoints.pack_io as pack_io_mod
+    import app.services.pack_import as pack_import_mod
+
+    orig_ep = pack_io_mod.MAX_ARCHIVE_SIZE
+    orig_svc = pack_import_mod.MAX_ARCHIVE_SIZE
+    try:
+        pack_io_mod.MAX_ARCHIVE_SIZE = 100
+        pack_import_mod.MAX_ARCHIVE_SIZE = 100
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/packs/import",
+            files={"file": ("test.zip", raw, "application/zip")},
+            headers=h,
+        )
+    finally:
+        pack_io_mod.MAX_ARCHIVE_SIZE = orig_ep
+        pack_import_mod.MAX_ARCHIVE_SIZE = orig_svc
+    assert r.status_code in (413, 422), f"Expected 413 or 422, got {r.status_code}: {r.text}"

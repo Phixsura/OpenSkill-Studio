@@ -362,19 +362,27 @@ class InstallationService:
         for lid in set(old_tmpls) - set(new_tmpls):
             diff["removed"].append({"type": "template", "logical_id": lid, "name": old_tmpls[lid]["name"]})
 
+        # Batch-load locally_modified flags for skills and templates (avoid N+1)
+        skill_mod_r = await self.db.execute(
+            select(Skill.origin_component_id, Skill.locally_modified).where(
+                Skill.origin_pack_id == inst.pack_id,
+                Skill.org_id == org_id,
+            )
+        )
+        skill_modified_map = {row[0]: row[1] for row in skill_mod_r.all()}
+
+        tmpl_mod_r = await self.db.execute(
+            select(ProjectTemplate.origin_component_id, ProjectTemplate.locally_modified).where(
+                ProjectTemplate.origin_pack_id == inst.pack_id,
+                ProjectTemplate.org_id == org_id,
+            )
+        )
+        tmpl_modified_map = {row[0]: row[1] for row in tmpl_mod_r.all()}
+
         # Changed
         for lid in set(old_skills) & set(new_skills):
             if old_skills[lid] != new_skills[lid]:
-                # Check if locally modified
-                local_r = await self.db.execute(
-                    select(Skill.locally_modified).where(
-                        Skill.origin_component_id == lid,
-                        Skill.origin_pack_id == inst.pack_id,
-                        Skill.org_id == org_id,
-                    )
-                )
-                local = local_r.scalar_one_or_none()
-                if local:
+                if skill_modified_map.get(lid):
                     diff["conflicts"].append({
                         "type": "skill", "logical_id": lid,
                         "name": new_skills[lid]["name"], "reason": "locally_modified",
@@ -387,15 +395,7 @@ class InstallationService:
 
         for lid in set(old_tmpls) & set(new_tmpls):
             if old_tmpls[lid] != new_tmpls[lid]:
-                local_r = await self.db.execute(
-                    select(ProjectTemplate.locally_modified).where(
-                        ProjectTemplate.origin_component_id == lid,
-                        ProjectTemplate.origin_pack_id == inst.pack_id,
-                        ProjectTemplate.org_id == org_id,
-                    )
-                )
-                local = local_r.scalar_one_or_none()
-                if local:
+                if tmpl_modified_map.get(lid):
                     diff["conflicts"].append({
                         "type": "template", "logical_id": lid,
                         "name": new_tmpls[lid]["name"], "reason": "locally_modified",
@@ -576,18 +576,29 @@ class InstallationService:
                 )
                 self.db.add(exercise)
 
+        # Batch-load all installed skills and templates for this pack (avoid N+1)
+        all_skills_r = await self.db.execute(
+            select(Skill).where(
+                Skill.origin_pack_id == pack_id,
+                Skill.org_id == org_id,
+                Skill.status != ContentStatus.ARCHIVED,
+            )
+        )
+        skills_by_component = {s.origin_component_id: s for s in all_skills_r.scalars().all()}
+
+        all_tmpls_r = await self.db.execute(
+            select(ProjectTemplate).where(
+                ProjectTemplate.origin_pack_id == pack_id,
+                ProjectTemplate.org_id == org_id,
+                ProjectTemplate.status != ContentStatus.ARCHIVED,
+            )
+        )
+        tmpls_by_component = {t.origin_component_id: t for t in all_tmpls_r.scalars().all()}
+
         # ---- Handle CHANGED skills (update in place if not locally modified) ----
         for lid in set(old_skills) & set(new_skills):
             if old_skills[lid] != new_skills[lid]:
-                result = await self.db.execute(
-                    select(Skill).where(
-                        Skill.origin_component_id == lid,
-                        Skill.origin_pack_id == pack_id,
-                        Skill.org_id == org_id,
-                        Skill.status != ContentStatus.ARCHIVED,
-                    )
-                )
-                existing = result.scalar_one_or_none()
+                existing = skills_by_component.get(lid)
                 if existing and not existing.locally_modified:
                     skill_def = new_skills[lid]
                     existing.name = skill_def["name"]
@@ -600,15 +611,7 @@ class InstallationService:
 
         # ---- Handle REMOVED skills (archive, preserve learner data) ----
         for lid in set(old_skills) - set(new_skills):
-            result = await self.db.execute(
-                select(Skill).where(
-                    Skill.origin_component_id == lid,
-                    Skill.origin_pack_id == pack_id,
-                    Skill.org_id == org_id,
-                    Skill.status != ContentStatus.ARCHIVED,
-                )
-            )
-            existing = result.scalar_one_or_none()
+            existing = skills_by_component.get(lid)
             if existing:
                 existing.status = ContentStatus.ARCHIVED
 
@@ -637,15 +640,7 @@ class InstallationService:
         # ---- Handle CHANGED templates ----
         for lid in set(old_tmpls) & set(new_tmpls):
             if old_tmpls[lid] != new_tmpls[lid]:
-                result = await self.db.execute(
-                    select(ProjectTemplate).where(
-                        ProjectTemplate.origin_component_id == lid,
-                        ProjectTemplate.origin_pack_id == pack_id,
-                        ProjectTemplate.org_id == org_id,
-                        ProjectTemplate.status != ContentStatus.ARCHIVED,
-                    )
-                )
-                existing = result.scalar_one_or_none()
+                existing = tmpls_by_component.get(lid)
                 if existing and not existing.locally_modified:
                     tmpl_def = new_tmpls[lid]
                     existing.name = tmpl_def["name"]
@@ -655,15 +650,7 @@ class InstallationService:
 
         # ---- Handle REMOVED templates (archive) ----
         for lid in set(old_tmpls) - set(new_tmpls):
-            result = await self.db.execute(
-                select(ProjectTemplate).where(
-                    ProjectTemplate.origin_component_id == lid,
-                    ProjectTemplate.origin_pack_id == pack_id,
-                    ProjectTemplate.org_id == org_id,
-                    ProjectTemplate.status != ContentStatus.ARCHIVED,
-                )
-            )
-            existing = result.scalar_one_or_none()
+            existing = tmpls_by_component.get(lid)
             if existing:
                 existing.status = ContentStatus.ARCHIVED
 

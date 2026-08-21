@@ -236,6 +236,38 @@ class LearningPathService:
             )
             cohort_assigned_at = member_r.scalar_one_or_none()
 
+        # Batch-load all referenced skills and projects (avoid N+1)
+        skill_ids = [i.skill_id for i in items if i.item_type == PathItemType.SKILL and i.skill_id]
+        project_ids = [i.project_id for i in items if i.item_type == PathItemType.PROJECT and i.project_id]
+
+        skills_map: dict[str, Skill] = {}
+        progress_map: dict[str, SkillProgress] = {}
+        projects_map: dict[str, Project] = {}
+        approved_projects: set[str] = set()
+
+        if skill_ids:
+            s_r = await self.db.execute(select(Skill).where(Skill.id.in_(skill_ids)))
+            skills_map = {s.id: s for s in s_r.scalars().all()}
+            p_r = await self.db.execute(
+                select(SkillProgress).where(
+                    SkillProgress.skill_id.in_(skill_ids),
+                    SkillProgress.user_id == user_id,
+                )
+            )
+            progress_map = {p.skill_id: p for p in p_r.scalars().all()}
+
+        if project_ids:
+            pr_r = await self.db.execute(select(Project).where(Project.id.in_(project_ids)))
+            projects_map = {p.id: p for p in pr_r.scalars().all()}
+            sub_r = await self.db.execute(
+                select(Submission.project_id).where(
+                    Submission.project_id.in_(project_ids),
+                    Submission.user_id == user_id,
+                    Submission.status == SubmissionStatus.APPROVED,
+                )
+            )
+            approved_projects = {row[0] for row in sub_r.all()}
+
         for item in items:
             if item.item_type == PathItemType.SECTION:
                 result_items.append({
@@ -252,28 +284,15 @@ class LearningPathService:
             name = ""
 
             if item.item_type == PathItemType.SKILL and item.skill_id:
-                skill = await self.db.get(Skill, item.skill_id)
+                skill = skills_map.get(item.skill_id)
                 name = skill.name if skill else "Unknown"
-                progress_r = await self.db.execute(
-                    select(SkillProgress).where(
-                        SkillProgress.skill_id == item.skill_id,
-                        SkillProgress.user_id == user_id,
-                    )
-                )
-                progress = progress_r.scalar_one_or_none()
+                progress = progress_map.get(item.skill_id)
                 is_done = progress is not None and progress.status == ProgressStatus.COMPLETED
 
             elif item.item_type == PathItemType.PROJECT and item.project_id:
-                project = await self.db.get(Project, item.project_id)
+                project = projects_map.get(item.project_id)
                 name = project.title if project else "Unknown"
-                sub_r = await self.db.execute(
-                    select(Submission).where(
-                        Submission.project_id == item.project_id,
-                        Submission.user_id == user_id,
-                        Submission.status == SubmissionStatus.APPROVED,
-                    ).limit(1)
-                )
-                is_done = sub_r.scalar_one_or_none() is not None
+                is_done = item.project_id in approved_projects
 
             # Unlock logic
             is_locked = False if item.unlock_rule == "immediate" else not all_prev_done
