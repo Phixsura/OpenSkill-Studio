@@ -198,19 +198,63 @@ class WebhookService:
         event_type: str,
         payload: dict,
     ) -> None:
-        """Send a single webhook delivery. Best-effort, errors are logged not raised."""
+        """Send a single webhook delivery. Best-effort, errors are logged not raised.
+
+        Uses resolve-once-connect-to-IP to eliminate DNS rebinding TOCTOU:
+        we resolve DNS ourselves, validate the IP, then connect httpx directly
+        to the validated IP using the Host header for TLS/virtual-hosting.
+        """
+        from urllib.parse import urlparse, urlunparse
+
         import httpx
 
-        # Re-validate URL at delivery time to prevent DNS rebinding attacks.
-        # An attacker could register a webhook with a public IP, then rebind
-        # the domain to an internal IP before delivery fires.
-        if _is_blocked_url(url):
+        # Resolve DNS ONCE, validate, then connect to the resolved IP directly.
+        # This eliminates the TOCTOU between DNS check and httpx's own resolution.
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return
+
+        try:
+            infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except (socket.gaierror, ValueError):
+            log.warning("webhook_dns_failed", webhook_id=webhook_id, url=url)
+            return
+
+        # Pick the first non-blocked resolved IP
+        resolved_ip = None
+        for _fam, _, _, _, sockaddr in infos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.version == 6 and ip.ipv4_mapped:
+                ip = ip.ipv4_mapped
+            blocked = False
+            for network in _BLOCKED_NETWORKS:
+                if ip in network:
+                    blocked = True
+                    break
+            if not blocked:
+                resolved_ip = str(ip)
+                break
+
+        if resolved_ip is None:
             log.warning(
-                "webhook_delivery_blocked_dns_rebind",
+                "webhook_delivery_blocked_all_ips",
                 webhook_id=webhook_id,
                 url=url,
             )
             return
+
+        # Rewrite URL to use resolved IP, set Host header for virtual hosting
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        ip_host = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+        resolved_url = urlunparse((
+            parsed.scheme,
+            f"{ip_host}:{port}",
+            parsed.path or "/",
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        ))
 
         body = json.dumps(
             {
@@ -226,12 +270,16 @@ class WebhookService:
         ).hexdigest()
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0,
+                verify=True,
+            ) as client:
                 await client.post(
-                    url,
+                    resolved_url,
                     content=body,
                     headers={
                         "Content-Type": "application/json",
+                        "Host": hostname,
                         "X-Webhook-Signature": signature,
                         "X-Webhook-Event": event_type,
                     },
