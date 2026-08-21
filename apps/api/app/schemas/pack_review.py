@@ -71,11 +71,16 @@ class UpdateReviewRequest(BaseModel):
 
     @model_validator(mode="after")
     def low_rating_requires_body(self) -> "UpdateReviewRequest":
-        """If rating is being set to 1 or 2, body must be at least 20 characters."""
+        """If rating is being set to 1-2 AND body is explicitly provided but too short, reject.
+
+        When body is None (not provided), the existing review body is preserved
+        by the service layer, so we allow the partial update through.
+        """
         if (
             self.rating is not None
             and self.rating <= 2
-            and (self.body is None or len(self.body) < 20)
+            and self.body is not None
+            and len(self.body) < 20
         ):
             raise ValueError(
                 "Reviews with a rating of 2 or below must include a body of at least 20 characters"

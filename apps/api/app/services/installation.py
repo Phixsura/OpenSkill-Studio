@@ -631,7 +631,7 @@ class InstallationService:
                         if ex_existing and not ex_existing.locally_modified:
                             ex_existing.title = ex_def.get("title", ex_existing.title)
                             ex_existing.description = ex_def.get("description", "")
-                            ex_existing.type = ex_def.get("type", "text")
+                            ex_existing.type = ExerciseType(ex_def.get("type", "text_answer"))
                             ex_existing.config = ex_def.get("config", {})
                             ex_existing.max_score = ex_def.get("max_score", 100)
                             ex_existing.sort_order = ex_def.get("sort_order", 0)
@@ -641,7 +641,7 @@ class InstallationService:
                                 skill_id=existing.id,
                                 title=ex_def.get("title", ""),
                                 description=ex_def.get("description", ""),
-                                type=ex_def.get("type", "text"),
+                                type=ExerciseType(ex_def.get("type", "text_answer")),
                                 config=ex_def.get("config", {}),
                                 max_score=ex_def.get("max_score", 100),
                                 sort_order=ex_def.get("sort_order", 0),

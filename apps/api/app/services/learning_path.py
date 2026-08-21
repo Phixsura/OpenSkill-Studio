@@ -440,12 +440,14 @@ class LearningPathService:
                 "projects": projects_data,
             },
         )
-        self.db.add(cert)
+        # Use a savepoint so IntegrityError on concurrent insert only rolls
+        # back the certificate INSERT, not the entire session transaction.
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(cert)
+                await self.db.flush()
         except IntegrityError:
             # Concurrent request already created the certificate — re-fetch it
-            await self.db.rollback()
             existing_r2 = await self.db.execute(
                 select(Certificate).where(
                     Certificate.user_id == user_id,
