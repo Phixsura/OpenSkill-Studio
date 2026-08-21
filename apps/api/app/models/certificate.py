@@ -19,7 +19,7 @@ class Certificate(Base):
     __tablename__ = "certificates"
     __table_args__ = (
         Index("uq_certificate_number", "certificate_number", unique=True),
-        Index("ix_certificates_user_path", "user_id", "path_id"),
+        Index("uq_certificates_user_path", "user_id", "path_id", unique=True),
     )
 
     id: Mapped[str] = ulid_pk()

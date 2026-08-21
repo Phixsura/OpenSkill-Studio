@@ -336,23 +336,12 @@ class LearningPathService:
 
         # Issue certificate on 100% completion
         certificate_number = None
-        is_new_certificate = False
         if pct == 100:
-            # Check if certificate already exists before issuing
-            from app.models.certificate import Certificate
-            existing_cert_r = await self.db.execute(
-                select(Certificate).where(
-                    Certificate.user_id == user_id,
-                    Certificate.path_id == path_id,
-                )
-            )
-            is_new_certificate = existing_cert_r.scalar_one_or_none() is None
-
-            certificate_number = await self._maybe_issue_certificate(
+            certificate_number, was_new = await self._maybe_issue_certificate(
                 path_id, user_id, org_id, completed
             )
             # Award gamification points ONLY when a NEW certificate was just issued
-            if is_new_certificate and certificate_number is not None:
+            if was_new and certificate_number is not None:
                 try:
                     from app.services.gamification import (
                         POINTS_PATH_COMPLETION,
@@ -386,8 +375,11 @@ class LearningPathService:
 
     async def _maybe_issue_certificate(
         self, path_id: str, user_id: str, org_id: str, skills_completed: int
-    ) -> str | None:
+    ) -> tuple[str | None, bool]:
         """Issue a completion certificate if one doesn't already exist.
+
+        Returns (certificate_number, was_created). was_created is True only
+        when a NEW certificate was just issued (not on subsequent calls).
 
         Populates the certificate data JSONB with actual skill/project names
         from the path items so the certificate endpoint returns meaningful info.
@@ -406,7 +398,7 @@ class LearningPathService:
         )
         existing = existing_r.scalar_one_or_none()
         if existing:
-            return existing.certificate_number
+            return existing.certificate_number, False
 
         path = await self.db.get(LearningPath, path_id)
         user = await self.db.get(User, user_id)
@@ -449,10 +441,22 @@ class LearningPathService:
             },
         )
         self.db.add(cert)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            # Concurrent request already created the certificate — re-fetch it
+            await self.db.rollback()
+            existing_r2 = await self.db.execute(
+                select(Certificate).where(
+                    Certificate.user_id == user_id,
+                    Certificate.path_id == path_id,
+                )
+            )
+            existing2 = existing_r2.scalar_one_or_none()
+            return (existing2.certificate_number if existing2 else None), False
 
         log.info("certificate_issued", cert_number=cert_number, user_id=user_id, path_id=path_id)
-        return cert_number
+        return cert_number, True
 
     # ── Effective Skills (de-duplicated) ──
 

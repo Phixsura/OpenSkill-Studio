@@ -609,6 +609,59 @@ class InstallationService:
                     existing.tags = skill_def.get("tags", [])
                     existing.origin_release_id = release.id
 
+                    # ---- Sync exercises for changed skill ----
+                    new_exercises = {
+                        e["logical_id"]: e for e in skill_def.get("exercises", [])
+                    }
+                    existing_ex_r = await self.db.execute(
+                        select(Exercise).where(
+                            Exercise.skill_id == existing.id,
+                            Exercise.status != ContentStatus.ARCHIVED,
+                        )
+                    )
+                    existing_exercises = list(existing_ex_r.scalars().all())
+                    ex_by_origin = {}
+                    for ex in existing_exercises:
+                        if ex.origin_component_id:
+                            ex_by_origin[ex.origin_component_id] = ex
+
+                    # Update existing / add new exercises
+                    for ex_lid, ex_def in new_exercises.items():
+                        ex_existing = ex_by_origin.get(ex_lid)
+                        if ex_existing and not ex_existing.locally_modified:
+                            ex_existing.title = ex_def.get("title", ex_existing.title)
+                            ex_existing.description = ex_def.get("description", "")
+                            ex_existing.type = ex_def.get("type", "text")
+                            ex_existing.config = ex_def.get("config", {})
+                            ex_existing.max_score = ex_def.get("max_score", 100)
+                            ex_existing.sort_order = ex_def.get("sort_order", 0)
+                        elif ex_existing is None:
+                            new_ex = Exercise(
+                                org_id=org_id,
+                                skill_id=existing.id,
+                                title=ex_def.get("title", ""),
+                                description=ex_def.get("description", ""),
+                                type=ex_def.get("type", "text"),
+                                config=ex_def.get("config", {}),
+                                max_score=ex_def.get("max_score", 100),
+                                sort_order=ex_def.get("sort_order", 0),
+                                status=ContentStatus.DRAFT,
+                                created_by=installed_by,
+                                origin_pack_id=pack_id,
+                                origin_component_id=ex_lid,
+                                origin_release_id=release.id,
+                            )
+                            self.db.add(new_ex)
+
+                    # Archive exercises removed in new version
+                    for ex in existing_exercises:
+                        if (
+                            ex.origin_component_id
+                            and ex.origin_component_id not in new_exercises
+                            and not ex.locally_modified
+                        ):
+                            ex.status = ContentStatus.ARCHIVED
+
         # ---- Handle REMOVED skills (archive, preserve learner data) ----
         for lid in set(old_skills) - set(new_skills):
             existing = skills_by_component.get(lid)

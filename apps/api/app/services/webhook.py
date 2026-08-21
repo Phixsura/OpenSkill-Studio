@@ -63,9 +63,12 @@ def _is_blocked_url(url: str) -> bool:
         for _family, _, _, _, sockaddr in infos:
             ip = ipaddress.ip_address(sockaddr[0])
             # Extract IPv4 from IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254)
-            # to prevent bypass via IPv4-mapped IPv6 addresses
             if ip.version == 6 and ip.ipv4_mapped:
                 ip = ip.ipv4_mapped
+            # Defense-in-depth: catch any unspecified (::, 0.0.0.0), loopback,
+            # link-local, or private address regardless of CIDR list gaps
+            if ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_private:
+                return True
             for network in _BLOCKED_NETWORKS:
                 if ip in network:
                     return True
@@ -227,6 +230,9 @@ class WebhookService:
             ip = ipaddress.ip_address(sockaddr[0])
             if ip.version == 6 and ip.ipv4_mapped:
                 ip = ip.ipv4_mapped
+            # Defense-in-depth: block unspecified/loopback/link-local/private
+            if ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_private:
+                continue
             blocked = False
             for network in _BLOCKED_NETWORKS:
                 if ip in network:
