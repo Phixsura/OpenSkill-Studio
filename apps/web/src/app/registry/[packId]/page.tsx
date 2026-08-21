@@ -199,6 +199,9 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
             className="block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] placeholder:text-[hsl(var(--muted-foreground))]"
           />
         </div>
+        {mutation.isError && (
+          <p className="text-sm text-red-600 mb-2">{(mutation.error as Error).message}</p>
+        )}
         <Button type="submit" disabled={mutation.isPending || !title.trim()}>
           {mutation.isPending ? "Submitting..." : "Submit Review"}
         </Button>
@@ -424,9 +427,26 @@ export default function RegistryPackDetailPage() {
 
   const [isAuthed, setIsAuthed] = useState(false);
   useEffect(() => {
-    import("@/stores/auth").then((m) =>
-      setIsAuthed(m.useAuthStore.getState().isAuthenticated),
-    );
+    // Check auth state. The apiWithAuth client (used by useQuery calls
+    // on this page) auto-refreshes the token on 401. We subscribe to
+    // the store so we pick up the state as soon as the refresh completes.
+    import("@/stores/auth").then((m) => {
+      // Check immediately
+      if (m.useAuthStore.getState().isAuthenticated) {
+        setIsAuthed(true);
+        return;
+      }
+      // Subscribe to store changes — the apiWithAuth auto-refresh
+      // will update the store when the refresh token cookie is valid.
+      const unsub = m.useAuthStore.subscribe((state) => {
+        if (state.isAuthenticated) {
+          setIsAuthed(true);
+          unsub();
+        }
+      });
+      // Cleanup on unmount
+      return () => unsub();
+    });
   }, []);
 
   const { data: packData, isLoading, isError } = useQuery({
