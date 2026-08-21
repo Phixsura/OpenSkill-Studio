@@ -251,7 +251,14 @@ class AuthService:
         user = stmt_result.scalar_one_or_none()
 
         if user is None:
-            return  # Silently succeed — don't reveal user existence
+            # Perform dummy work to equalize timing with the real path,
+            # preventing email enumeration via response latency.
+            import secrets as _secrets
+            from hashlib import sha256 as _sha256
+
+            _secrets.token_urlsafe(32)
+            _sha256(_secrets.token_urlsafe(32).encode()).hexdigest()
+            return
 
         # Invalidate any existing reset tokens
         existing = await self.db.execute(

@@ -168,6 +168,45 @@ class PackImportService:
                 for key in runtime_keys:
                     ex.pop(key, None)
 
+        # 11b. Validate field sizes (same limits as Pydantic API schemas)
+        max_learning_content = 100_000
+        max_config_size = 20_000
+        valid_exercise_types = {"multiple_choice", "text_answer", "code_submission", "file_upload"}
+
+        for s in skills:
+            lc = s.get("learning_content", "")
+            if lc and len(lc) > max_learning_content:
+                raise AppError(
+                    "CONTENT_TOO_LARGE",
+                    f"Skill '{s.get('logical_id')}' learning_content exceeds {max_learning_content} chars",
+                    422,
+                )
+            for ex in s.get("exercises", []):
+                ex_type = ex.get("type", "text_answer")
+                if ex_type not in valid_exercise_types:
+                    raise AppError(
+                        "INVALID_EXERCISE_TYPE",
+                        f"Exercise type '{ex_type}' is not valid. Allowed: {', '.join(sorted(valid_exercise_types))}",
+                        422,
+                    )
+                config = ex.get("config", {})
+                config_str = json.dumps(config) if config else ""
+                if len(config_str) > max_config_size:
+                    raise AppError(
+                        "CONFIG_TOO_LARGE",
+                        f"Exercise config in '{s.get('logical_id')}' exceeds {max_config_size} chars",
+                        422,
+                    )
+                # MCQ must have non-empty correct answer list
+                if ex_type == "multiple_choice":
+                    correct = config.get("correct", [])
+                    if not correct:
+                        raise AppError(
+                            "MCQ_NO_CORRECT_ANSWER",
+                            f"MCQ exercise in '{s.get('logical_id')}' must have non-empty correct answer list",
+                            422,
+                        )
+
         zf.close()
 
         # 12. Create pack + release
