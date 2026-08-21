@@ -353,7 +353,9 @@ class EvaluationService:
 
         except Exception as e:
             task.status = EvalStatus.FAILED
-            task.error = str(e)
+            # Sanitize error: don't expose internal details (connection strings,
+            # file paths, API keys) to the client. Log the full error server-side.
+            task.error = "Evaluation failed due to an internal error"
             task.completed_at = datetime.now(UTC)
             await self.db.flush()
             log.error("eval_failed", task_id=task.id, error=str(e))

@@ -74,10 +74,11 @@ async def test_create_review(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid)
+    hr, _ = await _auth(c)  # reviewer (different user)
 
     r = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={
         "rating": 5, "title": "Great pack!", "body": "Very useful.",
-    }, headers=h)
+    }, headers=hr)
     assert r.status_code == 201
     d = r.json()["data"]
     assert d["rating"] == 5
@@ -90,7 +91,8 @@ async def test_list_reviews(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid)
-    await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=h)
+    hr, _ = await _auth(c)  # reviewer
+    await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=hr)
 
     r = await c.get(f"/api/v1/registry/packs/{pid}/reviews")
     assert r.status_code == 200
@@ -102,10 +104,11 @@ async def test_delete_review(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid)
-    cr = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 3}, headers=h)
+    hr, _ = await _auth(c)  # reviewer
+    cr = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 3}, headers=hr)
     rid = cr.json()["data"]["id"]
 
-    r = await c.delete(f"/api/v1/registry/packs/{pid}/reviews/{rid}", headers=h)
+    r = await c.delete(f"/api/v1/registry/packs/{pid}/reviews/{rid}", headers=hr)
     assert r.status_code == 204
 
 
@@ -114,9 +117,10 @@ async def test_duplicate_review_rejected(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid)
-    await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 5}, headers=h)
+    hr, _ = await _auth(c)  # reviewer
+    await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 5}, headers=hr)
 
-    r = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 3}, headers=h)
+    r = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 3}, headers=hr)
     assert r.status_code == 409
 
 
@@ -125,7 +129,8 @@ async def test_review_updates_average(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid)
-    await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=h)
+    hr, _ = await _auth(c)  # reviewer
+    await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=hr)
 
     r = await c.get(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)
     d = r.json()["data"]
@@ -440,17 +445,18 @@ async def test_update_review(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid, "Update Review Pack")
+    hr, _ = await _auth(c)  # reviewer
     cr = await c.post(
         f"/api/v1/registry/packs/{pid}/reviews",
         json={"rating": 3},
-        headers=h,
+        headers=hr,
     )
     rid = cr.json()["data"]["id"]
 
     r = await c.put(
         f"/api/v1/registry/packs/{pid}/reviews/{rid}",
         json={"rating": 5, "title": "Updated title"},
-        headers=h,
+        headers=hr,
     )
     assert r.status_code == 200
     d = r.json()["data"]
@@ -464,18 +470,16 @@ async def test_reply_to_review(c):
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid, "Reply Review Pack")
 
-    # Create a review as the same user (who is also the pack owner)
+    # A different user creates the review (self-reviews are blocked)
+    h2, _ = await _auth(c)
     cr = await c.post(
         f"/api/v1/registry/packs/{pid}/reviews",
         json={"rating": 4, "title": "Good pack"},
-        headers=h,
+        headers=h2,
     )
     rid = cr.json()["data"]["id"]
 
-    # A second user creates a review so the owner can reply to it
-    h2, _ = await _auth(c)
-    # The second user cannot review the pack (not an installer, but let's test
-    # the reply mechanism using the first user's own review for simplicity).
+    # Pack owner replies to the review
     r = await c.post(
         f"/api/v1/registry/packs/{pid}/reviews/{rid}/reply",
         json={"reply_text": "Thanks for the feedback!"},
@@ -492,14 +496,15 @@ async def test_toggle_helpful(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid, "Helpful Review Pack")
+    hr, _ = await _auth(c)  # reviewer
     cr = await c.post(
         f"/api/v1/registry/packs/{pid}/reviews",
         json={"rating": 5, "title": "Excellent"},
-        headers=h,
+        headers=hr,
     )
     rid = cr.json()["data"]["id"]
 
-    # Toggle helpful ON
+    # Toggle helpful ON (pack owner votes on the review)
     r = await c.post(
         f"/api/v1/registry/packs/{pid}/reviews/{rid}/helpful",
         headers=h,
@@ -521,10 +526,11 @@ async def test_get_review_stats(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid, "Stats Review Pack")
+    hr, _ = await _auth(c)  # reviewer
     await c.post(
         f"/api/v1/registry/packs/{pid}/reviews",
         json={"rating": 4},
-        headers=h,
+        headers=hr,
     )
 
     r = await c.get(f"/api/v1/registry/packs/{pid}/reviews/stats")

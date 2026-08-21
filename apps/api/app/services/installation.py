@@ -17,6 +17,7 @@ from app.models.skill import (
 )
 from app.models.skill_pack import (
     InstallStatus,
+    PackStatus,
     PackVisibility,
     SkillPack,
     SkillPackInstallation,
@@ -65,6 +66,10 @@ class InstallationService:
         pack = await self.db.get(SkillPack, pack_id)
         if pack is None:
             raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
+
+        # Status check: only PUBLISHED packs can be installed
+        if pack.status != PackStatus.PUBLISHED:
+            raise AppError("PACK_NOT_AVAILABLE", "Pack is not available for installation", 404)
 
         # Visibility check
         if pack.visibility == PackVisibility.PRIVATE and pack.owner_org_id != org_id:

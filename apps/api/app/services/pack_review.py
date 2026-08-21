@@ -63,7 +63,11 @@ class PackReviewService:
         title: str | None = None,
         body: str | None = None,
     ) -> PackReview:
-        await self._get_public_pack(pack_id)
+        pack = await self._get_public_pack(pack_id)
+
+        # Prevent self-reviews
+        if pack.created_by == user_id:
+            raise AppError("SELF_REVIEW_FORBIDDEN", "You cannot review your own pack", 422)
 
         review = PackReview(
             pack_id=pack_id,

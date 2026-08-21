@@ -104,7 +104,9 @@ class RegistryService:
                 + func.coalesce(SkillPack.description, ""),
             )
             # ILIKE fallback for substring / random-token searches
-            term = f"%{search}%"
+            # Escape LIKE wildcards to prevent CPU-intensive pattern matching
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            term = f"%{escaped}%"
             ilike_cond = or_(
                 SkillPack.name.ilike(term),
                 SkillPack.summary.ilike(term),

@@ -36,9 +36,16 @@ async def check_rate_limit(key: str, limit: int, window_seconds: int) -> tuple[b
 
         return allowed, remaining
     except Exception:
-        # Redis unavailable — allow request (fail-open for dev/test)
-        log.debug("rate_limit_redis_unavailable", key=key)
-        return True, limit
+        import os
+
+        app_env = os.environ.get("APP_ENV", "")
+        if app_env in ("development", "test"):
+            # Fail-open in dev/test — allow request when Redis is unavailable
+            log.debug("rate_limit_redis_unavailable", key=key)
+            return True, limit
+        # Fail-closed in production — deny request when Redis is unavailable
+        log.warning("rate_limit_redis_unavailable_production", key=key)
+        return False, 0
 
 
 def rate_limit(limit: int, window: int):
