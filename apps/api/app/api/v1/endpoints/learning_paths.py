@@ -181,6 +181,8 @@ async def my_path_progress(
     svc = LearningPathService(db)
     await svc.get_path(path_id, org_id)
     progress = await svc.get_path_progress(path_id, user.id, org_id)
+    # Commit because get_path_progress may issue certificates and award points
+    await db.commit()
     return DataResponse(data=progress)
 
 

@@ -87,13 +87,14 @@ describe("InstallationsListPage", () => {
     ).toBeDefined();
   });
 
-  it("truncates long pack IDs", async () => {
+  it("shows pack_name when available", async () => {
     mockApiWithAuth.mockResolvedValue({
       data: [
         {
           id: "i1",
           org_id: "org-1",
           pack_id: "pack-abc123xyz456",
+          pack_name: "My Awesome Pack",
           release_id: "rel-1",
           installed_version: "1.0.0",
           status: "active",
@@ -104,6 +105,6 @@ describe("InstallationsListPage", () => {
       meta: { total: 1 },
     });
     render(<InstallationsListPage />, { wrapper: createWrapper() });
-    expect(await screen.findByText("pack-abc123x...")).toBeDefined();
+    expect(await screen.findByText("My Awesome Pack")).toBeDefined();
   });
 });

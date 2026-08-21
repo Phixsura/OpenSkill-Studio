@@ -485,6 +485,25 @@ class SkillPackService:
                 "sort_order": sort,
             })
 
+        # Validate logical_id uniqueness across all components
+        all_logical_ids: list[str] = []
+        for s in skills_manifest:
+            all_logical_ids.append(s["logical_id"])
+            for ex in s.get("exercises", []):
+                all_logical_ids.append(ex["logical_id"])
+        for t in templates_manifest:
+            all_logical_ids.append(t["logical_id"])
+
+        seen_ids: set[str] = set()
+        for lid in all_logical_ids:
+            if lid in seen_ids:
+                raise AppError(
+                    "DUPLICATE_LOGICAL_ID",
+                    f"Duplicate logical_id '{lid}' — rename components to have distinct slugs",
+                    422,
+                )
+            seen_ids.add(lid)
+
         manifest = {
             "schema_version": "1",
             "pack": {

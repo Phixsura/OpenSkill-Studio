@@ -197,6 +197,17 @@ class WebhookService:
         """Send a single webhook delivery. Best-effort, errors are logged not raised."""
         import httpx
 
+        # Re-validate URL at delivery time to prevent DNS rebinding attacks.
+        # An attacker could register a webhook with a public IP, then rebind
+        # the domain to an internal IP before delivery fires.
+        if _is_blocked_url(url):
+            log.warning(
+                "webhook_delivery_blocked_dns_rebind",
+                webhook_id=webhook_id,
+                url=url,
+            )
+            return
+
         body = json.dumps(
             {
                 "event": event_type,
