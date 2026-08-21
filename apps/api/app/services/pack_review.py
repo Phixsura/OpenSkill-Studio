@@ -231,14 +231,30 @@ class PackReviewService:
         if existing is not None:
             # Remove vote
             await self.db.delete(existing)
-            review.helpful_count = max(0, review.helpful_count - 1)
+            # Atomic decrement to prevent lost updates under concurrent votes
+            review.helpful_count = func.greatest(0, PackReview.helpful_count - 1)
         else:
-            # Add vote
+            # Add vote — handle concurrent double-click with IntegrityError
             vote = ReviewHelpfulVote(user_id=user_id, review_id=review_id)
             self.db.add(vote)
-            review.helpful_count = review.helpful_count + 1
+            try:
+                await self.db.flush()
+            except IntegrityError:
+                # Vote was already inserted by a concurrent request — treat as remove
+                await self.db.rollback()
+                existing2 = await self.db.get(ReviewHelpfulVote, (user_id, review_id))
+                if existing2:
+                    await self.db.delete(existing2)
+                    review = await self.db.get(PackReview, review_id)
+                    review.helpful_count = func.greatest(0, PackReview.helpful_count - 1)
+                    await self.db.flush()
+                log.info("review_helpful_toggled", review_id=review_id, user_id=user_id)
+                return review
+            # Atomic increment
+            review.helpful_count = PackReview.helpful_count + 1
 
         await self.db.flush()
+        await self.db.refresh(review)
         log.info("review_helpful_toggled", review_id=review_id, user_id=user_id)
         return review
 
