@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
@@ -63,11 +64,14 @@ class Settings(BaseSettings):
 
     @field_validator("jwt_secret")
     @classmethod
-    def validate_jwt_secret(cls, v: str) -> str:
-        import os
-
+    def validate_jwt_secret(cls, v: str, info: Any) -> str:
+        # Read app_env from the pydantic model field, not os.environ.
+        # pydantic-settings loads .env values into model fields but does NOT
+        # propagate them to os.environ, so os.environ.get("APP_ENV") can
+        # return None even when APP_ENV=production is set in .env.
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
         if (
-            os.environ.get("APP_ENV") not in ("development", "test", None)
+            app_env not in ("development", "test")
             and v == "dev-secret-change-me-in-production"
         ):
             raise ValueError("JWT_SECRET must be set to a unique value in production")

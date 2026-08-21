@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,22 +38,28 @@ class PackReviewService:
         return pack
 
     async def _recalculate_stats(self, pack_id: str) -> None:
-        """Recalculate average_rating and review_count on the SkillPack row."""
-        result = await self.db.execute(
-            select(
-                func.count(PackReview.id),
-                func.avg(PackReview.rating),
-            ).where(PackReview.pack_id == pack_id)
-        )
-        row = result.one()
-        count = row[0]
-        avg = float(round(row[1], 2)) if row[1] is not None else None
+        """Recalculate average_rating and review_count atomically.
 
-        pack = await self.db.get(SkillPack, pack_id)
-        if pack is not None:
-            pack.review_count = count
-            pack.average_rating = avg
-            await self.db.flush()
+        Uses correlated subqueries in a single UPDATE to prevent lost updates
+        under concurrent review mutations. When the UPDATE acquires the row
+        lock, the subqueries re-execute with a fresh READ COMMITTED snapshot.
+        """
+        count_sq = (
+            select(func.count(PackReview.id))
+            .where(PackReview.pack_id == pack_id)
+            .scalar_subquery()
+        )
+        avg_sq = (
+            select(func.avg(PackReview.rating))
+            .where(PackReview.pack_id == pack_id)
+            .scalar_subquery()
+        )
+        await self.db.execute(
+            update(SkillPack)
+            .where(SkillPack.id == pack_id)
+            .values(review_count=count_sq, average_rating=avg_sq)
+        )
+        await self.db.flush()
 
     async def create_review(
         self,

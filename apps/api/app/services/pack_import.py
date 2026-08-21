@@ -78,6 +78,16 @@ class PackImportService:
         except (json.JSONDecodeError, KeyError) as exc:
             raise AppError("INVALID_MANIFEST", f"Cannot parse manifest: {exc}", 422) from exc
 
+        # 6b. Manifest size limit (same as publish_release)
+        max_manifest = 10_000_000  # 10 MB
+        canonical = json.dumps(manifest, sort_keys=True, ensure_ascii=True)
+        if len(canonical.encode()) > max_manifest:
+            raise AppError(
+                "MANIFEST_TOO_LARGE",
+                f"Manifest exceeds {max_manifest // 1_000_000}MB limit",
+                422,
+            )
+
         # 7. Validate schema version
         schema_version = manifest.get("schema_version")
         if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
