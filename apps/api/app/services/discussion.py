@@ -59,6 +59,9 @@ class DiscussionService:
         per_page: int = 50,
     ) -> tuple[list[dict], int]:
         """Return threaded comments: paginated top-level with nested replies."""
+        # Verify pack is public/published (same check as create_comment)
+        await self._require_public_pack(pack_id)
+
         # Count top-level comments only
         count_q = select(func.count()).where(
             PackDiscussion.pack_id == pack_id,

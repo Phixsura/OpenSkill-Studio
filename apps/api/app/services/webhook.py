@@ -62,6 +62,10 @@ def _is_blocked_url(url: str) -> bool:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         for _family, _, _, _, sockaddr in infos:
             ip = ipaddress.ip_address(sockaddr[0])
+            # Extract IPv4 from IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254)
+            # to prevent bypass via IPv4-mapped IPv6 addresses
+            if ip.version == 6 and ip.ipv4_mapped:
+                ip = ip.ipv4_mapped
             for network in _BLOCKED_NETWORKS:
                 if ip in network:
                     return True
