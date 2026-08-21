@@ -248,6 +248,10 @@ class PackReviewService:
                     review = await self.db.get(PackReview, review_id)
                     review.helpful_count = func.greatest(0, PackReview.helpful_count - 1)
                     await self.db.flush()
+                # Refresh to materialize SQL expressions and avoid MissingGreenlet
+                review = await self.db.get(PackReview, review_id)
+                if review:
+                    await self.db.refresh(review)
                 log.info("review_helpful_toggled", review_id=review_id, user_id=user_id)
                 return review
             # Atomic increment
