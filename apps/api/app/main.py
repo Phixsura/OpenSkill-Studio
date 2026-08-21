@@ -13,7 +13,7 @@ from app.core.redis import redis_pool
 from app.exceptions import register_exception_handlers
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.request_id import RequestIDMiddleware
-from app.middleware.security import SecurityHeadersMiddleware
+from app.middleware.security import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 
 
 @asynccontextmanager
@@ -92,6 +92,9 @@ app = FastAPI(
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+# BodySizeLimitMiddleware is raw ASGI — wraps `receive` to enforce body
+# size limits on ALL requests including chunked transfer encoding.
+app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
