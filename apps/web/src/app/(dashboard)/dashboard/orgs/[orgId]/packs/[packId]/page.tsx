@@ -376,6 +376,7 @@ export default function PackDetailPage() {
                     className="text-red-600 hover:text-red-800"
                     onClick={() => removeSkillMutation.mutate(ps.skill_id)}
                     disabled={removeSkillMutation.isPending}
+                    aria-label={`Remove skill ${ps.skill_name}`}
                   >
                     &times;
                   </button>
@@ -388,6 +389,7 @@ export default function PackDetailPage() {
               value={addSkillId}
               onChange={(e) => setAddSkillId(e.target.value)}
               className="flex-1 rounded-md border bg-transparent px-3 py-2 text-sm"
+              aria-label="Select a skill to add"
             >
               <option value="">Select skill...</option>
               {orgSkills
@@ -439,6 +441,7 @@ export default function PackDetailPage() {
                       removeTemplateMutation.mutate(pt.template_id)
                     }
                     disabled={removeTemplateMutation.isPending}
+                    aria-label={`Remove template ${pt.template_name}`}
                   >
                     &times;
                   </button>
@@ -451,6 +454,7 @@ export default function PackDetailPage() {
               value={addTemplateId}
               onChange={(e) => setAddTemplateId(e.target.value)}
               className="flex-1 rounded-md border bg-transparent px-3 py-2 text-sm"
+              aria-label="Select a template to add"
             >
               <option value="">Select template...</option>
               {orgTemplates

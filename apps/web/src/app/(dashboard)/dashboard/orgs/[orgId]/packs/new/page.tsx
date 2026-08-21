@@ -180,6 +180,7 @@ export default function NewPackPage() {
           <Input
             id="minutes"
             type="number"
+            min="0"
             value={estimatedMinutes}
             onChange={(e) => setEstimatedMinutes(e.target.value)}
             placeholder="60"

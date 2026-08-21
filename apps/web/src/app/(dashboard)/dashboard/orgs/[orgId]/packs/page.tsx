@@ -80,7 +80,9 @@ export default function PackListPage() {
       </div>
 
       <div className="flex gap-3">
+        <label htmlFor="status-filter" className="sr-only">Filter by status</label>
         <select
+          id="status-filter"
           value={statusFilter}
           onChange={(e) => handleFilterChange(e.target.value)}
           className="rounded-md border bg-transparent px-3 py-2 text-sm"

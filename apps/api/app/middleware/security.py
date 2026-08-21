@@ -8,8 +8,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         # Request body size limiting (DoS protection)
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > MAX_BODY_SIZE:
-            return Response("Request body too large", status_code=413)
+        if content_length:
+            try:
+                if int(content_length) > MAX_BODY_SIZE:
+                    return Response("Request body too large", status_code=413)
+            except ValueError:
+                return Response("Invalid Content-Length header", status_code=400)
 
         response = await call_next(request)
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

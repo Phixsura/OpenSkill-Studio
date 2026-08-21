@@ -25,7 +25,7 @@ export default function CohortPathsPage() {
   const queryClient = useQueryClient();
   const [selectedPathId, setSelectedPathId] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["cohort-paths", orgId, cohortId],
     queryFn: () =>
       apiWithAuth<{ data: AssignedPath[] }>(
@@ -80,6 +80,9 @@ export default function CohortPathsPage() {
 
   return (
     <div className="space-y-6">
+      {isError && (
+        <p className="text-red-600">Failed to load paths. Please try again.</p>
+      )}
       <div>
         <h2 className="text-2xl font-bold">Learning Paths</h2>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
@@ -91,8 +94,9 @@ export default function CohortPathsPage() {
       {availablePaths.length > 0 && (
         <div className="flex items-end gap-3">
           <div className="flex-1">
-            <label className="block text-sm font-medium">Assign a path</label>
+            <label htmlFor="assign-path" className="block text-sm font-medium">Assign a path</label>
             <select
+              id="assign-path"
               value={selectedPathId}
               onChange={(e) => setSelectedPathId(e.target.value)}
               className="mt-1 w-full rounded-md border bg-transparent px-3 py-2 text-sm"

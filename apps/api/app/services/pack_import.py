@@ -122,6 +122,33 @@ class PackImportService:
                         422,
                     )
 
+        # 10b. Cycle detection using Kahn's algorithm (topological sort)
+        in_degree: dict[str, int] = {lid: 0 for lid in skill_lids}
+        adjacency: dict[str, list[str]] = {lid: [] for lid in skill_lids}
+        for s in skills:
+            lid = s["logical_id"]
+            for prereq in s.get("prerequisites", []):
+                # Edge: prereq -> lid (lid depends on prereq)
+                adjacency[prereq].append(lid)
+                in_degree[lid] += 1
+
+        queue = [lid for lid, deg in in_degree.items() if deg == 0]
+        visited_count = 0
+        while queue:
+            node = queue.pop()
+            visited_count += 1
+            for neighbor in adjacency[node]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+
+        if visited_count != len(skill_lids):
+            raise AppError(
+                "PREREQUISITE_CYCLE",
+                "Circular prerequisites detected in manifest",
+                422,
+            )
+
         # 11. Strip runtime fields (safety)
         runtime_keys = {"user_id", "submission_id", "attempt_id", "review_id", "progress_id"}
         for s in skills:

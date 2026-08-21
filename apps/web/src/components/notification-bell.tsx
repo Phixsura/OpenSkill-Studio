@@ -72,12 +72,22 @@ export function NotificationBell() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  // Close dropdown on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    if (open) document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open]);
+
   return (
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setOpen(!open)}
         className="relative rounded-md p-2 hover:bg-[hsl(var(--secondary))] transition-colors"
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+        aria-expanded={open}
       >
         <svg
           className="h-5 w-5"

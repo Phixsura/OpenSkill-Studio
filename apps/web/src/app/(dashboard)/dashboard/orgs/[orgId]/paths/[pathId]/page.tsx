@@ -316,8 +316,9 @@ export default function PathDetailPage() {
         <h3 className="font-medium">Add Item</h3>
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="block text-sm font-medium">Type</label>
+            <label htmlFor="add-item-type" className="block text-sm font-medium">Type</label>
             <select
+              id="add-item-type"
               value={addType}
               onChange={(e) =>
                 setAddType(e.target.value as "skill" | "project" | "section")
@@ -332,8 +333,9 @@ export default function PathDetailPage() {
 
           {addType === "skill" && (
             <div className="flex-1">
-              <label className="block text-sm font-medium">Skill</label>
+              <label htmlFor="add-item-skill" className="block text-sm font-medium">Skill</label>
               <select
+                id="add-item-skill"
                 value={addSkillId}
                 onChange={(e) => setAddSkillId(e.target.value)}
                 className="mt-1 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
@@ -350,8 +352,9 @@ export default function PathDetailPage() {
 
           {addType === "project" && (
             <div className="flex-1">
-              <label className="block text-sm font-medium">Project</label>
+              <label htmlFor="add-item-project" className="block text-sm font-medium">Project</label>
               <select
+                id="add-item-project"
                 value={addProjectId}
                 onChange={(e) => setAddProjectId(e.target.value)}
                 className="mt-1 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
@@ -368,8 +371,9 @@ export default function PathDetailPage() {
 
           {addType === "section" && (
             <div className="flex-1">
-              <label className="block text-sm font-medium">Section title</label>
+              <label htmlFor="add-item-section" className="block text-sm font-medium">Section title</label>
               <Input
+                id="add-item-section"
                 value={addSectionTitle}
                 onChange={(e) => setAddSectionTitle(e.target.value)}
                 placeholder="e.g. Week 1: Getting Started"
