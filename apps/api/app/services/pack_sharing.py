@@ -1,7 +1,7 @@
 """Cross-organization pack sharing service."""
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,10 +45,10 @@ class PackSharingService:
 
         # Check share limit
         existing_count_r = await self.db.execute(
-            select(PackShare).where(PackShare.pack_id == pack_id)
+            select(func.count()).where(PackShare.pack_id == pack_id)
         )
-        existing = list(existing_count_r.scalars().all())
-        if len(existing) >= MAX_SHARES_PER_PACK:
+        existing_count = existing_count_r.scalar_one()
+        if existing_count >= MAX_SHARES_PER_PACK:
             raise AppError(
                 "SHARE_LIMIT_REACHED",
                 f"Maximum {MAX_SHARES_PER_PACK} shares per pack",

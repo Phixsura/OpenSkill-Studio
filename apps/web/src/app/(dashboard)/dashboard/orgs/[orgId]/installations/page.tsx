@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -25,16 +26,20 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function InstallationsListPage() {
   const { orgId } = useParams<{ orgId: string }>();
+  const [page, setPage] = useState(1);
+  const perPage = 20;
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["installations", orgId],
+    queryKey: ["installations", orgId, page],
     queryFn: () =>
-      apiWithAuth<{ data: Install[]; meta: { total: number } }>(
-        `/orgs/${orgId}/installations`,
+      apiWithAuth<{ data: Install[]; meta: { total: number; has_more: boolean } }>(
+        `/orgs/${orgId}/installations?page=${page}&per_page=${perPage}`,
       ),
   });
 
   const installations = data?.data ?? [];
+  const total = data?.meta?.total ?? 0;
+  const hasMore = data?.meta?.has_more ?? false;
 
   return (
     <div className="space-y-6">
@@ -108,10 +113,28 @@ export default function InstallationsListPage() {
         </div>
       )}
 
-      {data?.meta && installations.length < data.meta.total && (
-        <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
-          Showing {installations.length} of {data.meta.total} installations
-        </p>
+      {total > 0 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            Showing {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} of {total}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded border px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!hasMore}
+              className="rounded border px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -687,3 +687,14 @@ class InstallationService:
         inst = await self.get_installation(install_id, org_id)
         inst.status = InstallStatus.REMOVED
         await self.db.flush()
+
+        # Decrement install_count atomically (floor at 0)
+        if inst.pack_id:
+            from sqlalchemy import update
+
+            await self.db.execute(
+                update(SkillPack)
+                .where(SkillPack.id == inst.pack_id)
+                .values(install_count=func.greatest(SkillPack.install_count - 1, 0))
+            )
+            await self.db.flush()

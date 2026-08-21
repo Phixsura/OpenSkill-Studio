@@ -10,7 +10,7 @@ import socket
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -90,13 +90,21 @@ class WebhookService:
                 422,
             )
 
-        # Limit webhooks per org
+        # Validate event types
+        for event in events:
+            if event not in VALID_EVENT_TYPES:
+                raise AppError(
+                    "INVALID_EVENT",
+                    f"Unknown event type: {event}. Valid: {', '.join(sorted(VALID_EVENT_TYPES))}",
+                    422,
+                )
+
+        # Limit webhooks per org (use SELECT COUNT for efficiency)
         count_r = await self.db.execute(
-            select(WebhookSubscription)
-            .where(WebhookSubscription.org_id == org_id)
+            select(func.count()).where(WebhookSubscription.org_id == org_id)
         )
-        existing = list(count_r.scalars().all())
-        if len(existing) >= MAX_WEBHOOKS_PER_ORG:
+        existing_count = count_r.scalar_one()
+        if existing_count >= MAX_WEBHOOKS_PER_ORG:
             raise AppError(
                 "WEBHOOK_LIMIT_REACHED",
                 f"Maximum {MAX_WEBHOOKS_PER_ORG} webhooks per organization",

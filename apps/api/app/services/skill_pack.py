@@ -131,11 +131,16 @@ class SkillPackService:
     async def update_pack(self, pack_id: str, org_id: str, **fields) -> SkillPack:
         pack = await self.get_pack(pack_id, org_id)
         if fields.get("name"):
-            pack.slug = self._generate_slug(fields["name"])
+            slug = self._generate_slug(fields["name"])
+            pack.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
         for k, v in fields.items():
             if v is not None and hasattr(pack, k):
                 setattr(pack, k, v)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise AppError("SLUG_CONFLICT", "A pack with this name already exists", 409) from None
         await self.db.refresh(pack)
         return pack
 
@@ -266,6 +271,10 @@ class SkillPackService:
     async def submit_for_review(self, pack_id: str, org_id: str, actor_id: str) -> SkillPack:
         """Submit a pack for approval review."""
         pack = await self.get_pack(pack_id, org_id)
+        if pack.review_status == "pending":
+            raise AppError("ALREADY_PENDING", "Pack is already pending review", 409)
+        if pack.review_status == "approved":
+            raise AppError("ALREADY_APPROVED", "Cannot re-submit an approved pack", 422)
         pack.review_status = "pending"
         await self.db.flush()
         await self.db.refresh(pack)

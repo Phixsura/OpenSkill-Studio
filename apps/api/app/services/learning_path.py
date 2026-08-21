@@ -69,7 +69,8 @@ class LearningPathService:
     async def update_path(self, path_id: str, org_id: str, **fields) -> LearningPath:
         path = await self.get_path(path_id, org_id)
         if fields.get("name"):
-            path.slug = self._generate_slug(fields["name"])
+            slug = self._generate_slug(fields["name"])
+            path.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
         for k, v in fields.items():
             if v is not None and hasattr(path, k):
                 setattr(path, k, v)

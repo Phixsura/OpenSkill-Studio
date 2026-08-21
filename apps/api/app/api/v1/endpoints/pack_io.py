@@ -1,17 +1,20 @@
 """Pack import/export endpoints."""
 
+import io
+
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
+from app.exceptions import AppError
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse
 from app.schemas.skill_pack import ReleaseResponse, SkillPackResponse
 from app.services.pack_export import PackExportService
-from app.services.pack_import import PackImportService
+from app.services.pack_import import MAX_ARCHIVE_SIZE, PackImportService
 
 router = APIRouter(tags=["Pack Import/Export"])
 
@@ -59,7 +62,22 @@ async def import_pack(
 ):
     """Import a pack from a zip archive."""
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
-    file_bytes = await file.read()
+
+    # Read upload in bounded chunks to prevent OOM from unbounded reads
+    buf = io.BytesIO()
+    chunk_size = 1024 * 1024  # 1 MB chunks
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        buf.write(chunk)
+        if buf.tell() > MAX_ARCHIVE_SIZE:
+            raise AppError(
+                "FILE_TOO_LARGE",
+                f"Upload exceeds {MAX_ARCHIVE_SIZE // (1024 * 1024)}MB limit",
+                413,
+            )
+    file_bytes = buf.getvalue()
     svc = PackImportService(db)
     pack, release = await svc.import_pack(org_id, file_bytes, user.id)
     await db.commit()

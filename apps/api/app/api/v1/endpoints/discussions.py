@@ -1,5 +1,7 @@
 """Pack discussion/comment endpoints — threaded conversations on packs."""
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,14 +34,16 @@ class CommentResponse(BaseModel):
     user_id: str
     parent_id: str | None
     body: str
-    created_at: str | None
-    updated_at: str | None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     replies: list["CommentResponse"] = []
+
+    model_config = {"from_attributes": True}
 
 
 @router.post(
     "/registry/packs/{pack_id}/discussions",
-    response_model=DataResponse[dict],
+    response_model=DataResponse[CommentResponse],
     status_code=201,
     dependencies=[Depends(rate_limit(10, 60))],
 )
@@ -52,20 +56,12 @@ async def create_comment(
     svc = DiscussionService(db)
     comment = await svc.create_comment(pack_id, user.id, body.body, body.parent_id)
     await db.commit()
-    return DataResponse(data={
-        "id": comment.id,
-        "pack_id": comment.pack_id,
-        "user_id": comment.user_id,
-        "parent_id": comment.parent_id,
-        "body": comment.body,
-        "created_at": comment.created_at.isoformat() if comment.created_at else None,
-        "updated_at": comment.updated_at.isoformat() if comment.updated_at else None,
-    })
+    return DataResponse(data=CommentResponse.model_validate(comment))
 
 
 @router.get(
     "/registry/packs/{pack_id}/discussions",
-    response_model=ListResponse[dict],
+    response_model=ListResponse[CommentResponse],
     dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_comments(

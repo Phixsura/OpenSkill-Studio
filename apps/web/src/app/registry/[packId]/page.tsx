@@ -78,7 +78,7 @@ interface PackReview {
   rating: number;
   title: string;
   body: string | null;
-  user_display_name: string;
+  user_display_name: string | null;
   created_at: string;
 }
 
@@ -290,7 +290,7 @@ function ReviewsSection({ packId, isAuthed }: { packId: string; isAuthed: boolea
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <StarRating rating={review.rating} />
-                  <span className="font-medium">{review.user_display_name}</span>
+                  <span className="font-medium">{review.user_display_name || "Anonymous"}</span>
                 </div>
                 <span className="text-xs text-[hsl(var(--muted-foreground))]">
                   {new Date(review.created_at).toLocaleDateString()}

@@ -26,7 +26,7 @@ export default function ReviewQueuePage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["packs", orgId],
     queryFn: () =>
-      apiWithAuth<{ data: Pack[] }>(`/orgs/${orgId}/packs`),
+      apiWithAuth<{ data: Pack[] }>(`/orgs/${orgId}/packs?per_page=100`),
   });
 
   const pendingPacks = (data?.data ?? []).filter(

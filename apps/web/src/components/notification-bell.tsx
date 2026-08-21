@@ -32,7 +32,7 @@ export function NotificationBell() {
   const { data } = useQuery({
     queryKey: ["notifications"],
     queryFn: () =>
-      apiWithAuth<{ data: Notification[] }>("/notifications"),
+      apiWithAuth<{ data: Notification[] }>("/notifications?per_page=50&include_read=false"),
     refetchInterval: 30_000,
   });
 

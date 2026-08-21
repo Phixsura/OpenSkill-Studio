@@ -34,20 +34,31 @@ const VISIBILITY_COLORS: Record<string, string> = {
 export default function PackListPage() {
   const { orgId } = useParams<{ orgId: string }>();
   const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const perPage = 20;
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["packs", orgId, statusFilter],
+    queryKey: ["packs", orgId, statusFilter, page],
     queryFn: () => {
       const params = new URLSearchParams();
       if (statusFilter) params.set("status", statusFilter);
-      const qs = params.toString();
-      return apiWithAuth<{ data: Pack[]; meta: { total: number } }>(
-        `/orgs/${orgId}/packs${qs ? `?${qs}` : ""}`,
+      params.set("page", String(page));
+      params.set("per_page", String(perPage));
+      return apiWithAuth<{ data: Pack[]; meta: { total: number; has_more: boolean } }>(
+        `/orgs/${orgId}/packs?${params.toString()}`,
       );
     },
   });
 
   const packs = data?.data ?? [];
+  const total = data?.meta?.total ?? 0;
+  const hasMore = data?.meta?.has_more ?? false;
+
+  // Reset page when filter changes
+  const handleFilterChange = (value: string) => {
+    setStatusFilter(value);
+    setPage(1);
+  };
 
   return (
     <div className="space-y-6">
@@ -71,7 +82,7 @@ export default function PackListPage() {
       <div className="flex gap-3">
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => handleFilterChange(e.target.value)}
           className="rounded-md border bg-transparent px-3 py-2 text-sm"
         >
           <option value="">All</option>
@@ -124,10 +135,28 @@ export default function PackListPage() {
         ))}
       </div>
 
-      {data?.meta && packs.length < data.meta.total && (
-        <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
-          Showing {packs.length} of {data.meta.total} packs
-        </p>
+      {total > 0 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            Showing {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} of {total}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded border px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!hasMore}
+              className="rounded border px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
