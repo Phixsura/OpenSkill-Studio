@@ -15,12 +15,14 @@ from app.models.cohort import (  # noqa: F401
     CohortStatus,
     ParticipationMode,
 )
+from app.models.discussion import PackDiscussion  # noqa: F401
 from app.models.evaluation import (  # noqa: F401
     EvalStatus,
     EvalType,
     EvaluationTask,
     EvalUsageMonthly,
 )
+from app.models.gamification import PointsLedger, UserPoints  # noqa: F401
 from app.models.learning_path import (  # noqa: F401
     CohortLearningPathAssignment,
     LearningPath,
@@ -44,6 +46,7 @@ from app.models.organization import (  # noqa: F401
 )
 from app.models.pack_category import PackCategory, PackCategoryAssignment  # noqa: F401
 from app.models.pack_review import PackReview, ReviewHelpfulVote  # noqa: F401
+from app.models.pack_share import PackShare  # noqa: F401
 from app.models.portfolio import (  # noqa: F401
     ItemVisibility,
     PortfolioItem,
@@ -106,3 +109,4 @@ from app.models.user import (  # noqa: F401
     UserRole,
     UserStatus,
 )
+from app.models.webhook import WebhookSubscription  # noqa: F401

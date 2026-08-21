@@ -569,6 +569,27 @@ class SkillPackService:
         except Exception:
             log.warning("notify_pack_update_failed", pack_id=pack_id, version=version)
 
+        # Compute and persist quality score
+        try:
+            from app.services.registry import RegistryService as _RegSvc2
+            reg_svc = _RegSvc2(self.db)
+            pack.quality_score = await reg_svc.compute_quality_score(pack)
+            await self.db.flush()
+        except Exception:
+            log.warning("quality_score_failed", pack_id=pack_id)
+
+        # Fire webhook event
+        try:
+            from app.services.webhook import WebhookService
+            webhook_svc = WebhookService(self.db)
+            await webhook_svc.trigger_event(
+                pack.owner_org_id,
+                "pack.published",
+                {"pack_id": pack_id, "version": version, "name": pack.name},
+            )
+        except Exception:
+            log.warning("webhook_trigger_failed", pack_id=pack_id, webhook_event="pack.published")
+
         log.info(
             "pack_released",
             pack_id=pack_id,

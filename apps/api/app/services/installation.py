@@ -251,6 +251,18 @@ class InstallationService:
             await self.db.rollback()
             raise AppError("ALREADY_INSTALLED", "Pack already installed in this organization", 409) from None
 
+        # Fire webhook event
+        try:
+            from app.services.webhook import WebhookService
+            webhook_svc = WebhookService(self.db)
+            await webhook_svc.trigger_event(
+                org_id,
+                "pack.installed",
+                {"pack_id": pack_id, "version": release_version, "org_id": org_id},
+            )
+        except Exception:
+            log.warning("webhook_trigger_failed", webhook_event="pack.installed")
+
         log.info(
             "pack_installed",
             org_id=org_id,
@@ -419,6 +431,18 @@ class InstallationService:
 
         inst.status = InstallStatus.FORKED
         await self.db.flush()
+
+        # Fire webhook event
+        try:
+            from app.services.webhook import WebhookService
+            webhook_svc = WebhookService(self.db)
+            await webhook_svc.trigger_event(
+                org_id,
+                "pack.forked",
+                {"install_id": install_id, "org_id": org_id, "pack_id": inst.pack_id},
+            )
+        except Exception:
+            log.warning("webhook_trigger_failed", webhook_event="pack.forked")
 
         log.info("pack_forked", install_id=install_id, org_id=org_id)
         return inst

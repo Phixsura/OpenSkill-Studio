@@ -165,6 +165,7 @@ class UpdateSkillRequest(BaseModel):
     difficulty: str | None = None
     estimated_minutes: int | None = None
     tags: list[str] | None = None
+    sandbox_url: str | None = None
 
     @field_validator("difficulty")
     @classmethod
@@ -226,6 +227,7 @@ class SkillResponse(BaseModel):
     sort_order: int
     status: str
     published_at: datetime | None
+    sandbox_url: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -304,6 +306,7 @@ class UpdateExerciseRequest(BaseModel):
     description: str | None = None
     config: dict | None = None
     max_score: int | None = None
+    sandbox_config: dict | None = None
 
     @field_validator("title")
     @classmethod
@@ -345,6 +348,7 @@ class ExerciseResponse(BaseModel):
     sort_order: int
     max_score: int
     status: str
+    sandbox_config: dict | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

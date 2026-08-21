@@ -731,6 +731,8 @@ class SkillService:
         progress.exercises_done = done
         progress.best_score = best_score
 
+        was_completed = progress.status == ProgressStatus.COMPLETED
+
         if done == 0:
             progress.status = ProgressStatus.NOT_STARTED
         elif done >= total and total > 0:
@@ -744,6 +746,20 @@ class SkillService:
 
         await self.db.flush()
         await self._sync_skill_badge(skill_id, user_id, org_id, progress)
+
+        # Award points on first completion
+        if not was_completed and progress.status == ProgressStatus.COMPLETED:
+            from app.services.gamification import POINTS_SKILL_COMPLETION, GamificationService
+
+            gam = GamificationService(self.db)
+            await gam.award_points(
+                user_id,
+                org_id,
+                POINTS_SKILL_COMPLETION,
+                "skill_completion",
+                reference_id=skill_id,
+                description=f"Completed skill {skill_id}",
+            )
 
     async def _sync_skill_badge(
         self, skill_id: str, user_id: str, org_id: str, progress: SkillProgress

@@ -213,12 +213,27 @@ class LearningPathService:
 
     # ── Progress ──
 
-    async def get_path_progress(self, path_id: str, user_id: str, org_id: str) -> dict:
+    async def get_path_progress(
+        self, path_id: str, user_id: str, org_id: str, cohort_id: str | None = None
+    ) -> dict:
         items = await self.list_items(path_id)
         result_items = []
         completed = 0
         total_required = 0
         all_prev_done = True
+
+        # Resolve cohort assignment date for drip schedule gating
+        cohort_assigned_at = None
+        if cohort_id:
+            from app.models.cohort import CohortMember
+
+            member_r = await self.db.execute(
+                select(CohortMember.joined_at).where(
+                    CohortMember.cohort_id == cohort_id,
+                    CohortMember.user_id == user_id,
+                )
+            )
+            cohort_assigned_at = member_r.scalar_one_or_none()
 
         for item in items:
             if item.item_type == PathItemType.SECTION:
@@ -262,10 +277,27 @@ class LearningPathService:
             # Unlock logic
             is_locked = False if item.unlock_rule == "immediate" else not all_prev_done
 
+            # Drip schedule gating
+            is_drip_scheduled = False
+            if item.drip_schedule and cohort_assigned_at:
+                from datetime import UTC, datetime, timedelta
+
+                available_after_days = item.drip_schedule.get("available_after_days", 0)
+                drip_available_at = cohort_assigned_at + timedelta(days=available_after_days)
+                if datetime.now(UTC) < drip_available_at:
+                    is_drip_scheduled = True
+
             if is_done and is_required:
                 completed += 1
 
-            status = "completed" if is_done else ("locked" if is_locked else "available")
+            if is_done:
+                status = "completed"
+            elif is_drip_scheduled:
+                status = "scheduled"
+            elif is_locked:
+                status = "locked"
+            else:
+                status = "available"
 
             result_items.append({
                 "type": item.item_type.value,
@@ -288,6 +320,19 @@ class LearningPathService:
             certificate_number = await self._maybe_issue_certificate(
                 path_id, user_id, org_id, completed
             )
+            # Award gamification points for path completion (first time only)
+            if certificate_number is not None:
+                from app.services.gamification import POINTS_PATH_COMPLETION, GamificationService
+
+                gam = GamificationService(self.db)
+                await gam.award_points(
+                    user_id,
+                    org_id,
+                    POINTS_PATH_COMPLETION,
+                    "path_completion",
+                    reference_id=path_id,
+                    description=f"Completed learning path {path_id}",
+                )
 
         result = {
             "path_id": path_id,

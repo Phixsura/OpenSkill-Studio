@@ -28,19 +28,27 @@ async def search_registry(
     tool: str | None = None,
     difficulty: str | None = None,
     category: str | None = None,
+    min_rating: float | None = Query(default=None, ge=0, le=5),
+    max_results: int | None = Query(default=None, ge=1, le=200),
     sort: str = "newest",
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    """Search public skill packs. No authentication required."""
+    """Search public skill packs with faceted filters. No authentication required.
+
+    Supports simultaneous filters: scenario, tool, difficulty, category, min_rating.
+    max_results caps the per-page count (default 50).
+    """
     svc = RegistryService(db)
     packs, total = await svc.search_packs(
-        search, scenario, tool, difficulty, category, sort, page, per_page
+        search, scenario, tool, difficulty, category, sort, page, per_page,
+        min_rating=min_rating, max_results=max_results,
     )
+    effective_per_page = min(per_page, max_results or 50)
     return ListResponse(
         data=[SkillPackResponse.model_validate(p) for p in packs],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=(page * per_page) < total),
+        meta=PaginationMeta(total=total, page=page, per_page=effective_per_page, has_more=(page * effective_per_page) < total),
     )
 
 
@@ -62,6 +70,18 @@ async def get_registry_preview(pack_id: str, db: AsyncSession = Depends(get_db))
     svc = RegistryService(db)
     preview = await svc.get_pack_preview(pack_id)
     return DataResponse(data=PackPreviewResponse(**preview))
+
+
+@router.get(
+    "/registry/packs/{pack_id}/installed-by",
+    response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def get_installed_by(pack_id: str, db: AsyncSession = Depends(get_db)):
+    """Get anonymized count of organizations using this pack."""
+    svc = RegistryService(db)
+    result = await svc.get_installed_by(pack_id)
+    return DataResponse(data=result)
 
 
 @router.get("/registry/packs/{pack_id}/releases", response_model=DataResponse[list[ReleaseResponse]], dependencies=[Depends(rate_limit(30, 60))])

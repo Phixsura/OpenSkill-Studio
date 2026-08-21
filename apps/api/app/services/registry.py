@@ -54,15 +54,21 @@ class RegistryService:
         sort: str = "newest",
         page: int = 1,
         per_page: int = 20,
+        min_rating: float | None = None,
+        max_results: int | None = None,
     ) -> tuple[list[SkillPack], int]:
         """Search public, published packs.
 
         Uses PostgreSQL full-text search (to_tsvector + websearch_to_tsquery)
         with an ILIKE fallback so substring and random-token searches still work.
         Results are cached in Redis for 5 minutes.
+
+        Supports simultaneous faceted filters: scenario, tool, difficulty,
+        category, min_rating. max_results caps the total returned (default 50).
         """
+        effective_per_page = min(per_page, max_results or 50)
         # ── Check cache ──
-        cache_key_src = f"{search}:{scenario}:{tool}:{difficulty}:{category}:{sort}:{page}:{per_page}"
+        cache_key_src = f"{search}:{scenario}:{tool}:{difficulty}:{category}:{sort}:{page}:{effective_per_page}:{min_rating}:{max_results}"
         cache_key = f"registry:search:{hashlib.md5(cache_key_src.encode()).hexdigest()}"
         cached = await cache_get(cache_key)
         if cached is not None:
@@ -137,6 +143,9 @@ class RegistryService:
                 )
             )
 
+        if min_rating is not None:
+            base = base.where(SkillPack.average_rating >= min_rating)
+
         # Sort
         if sort in ("most_installed", "popular"):
             base = base.order_by(SkillPack.install_count.desc())
@@ -149,8 +158,8 @@ class RegistryService:
 
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
-        offset = (page - 1) * per_page
-        result = await self.db.execute(base.offset(offset).limit(per_page))
+        offset = (page - 1) * effective_per_page
+        result = await self.db.execute(base.offset(offset).limit(effective_per_page))
         packs = list(result.scalars().all())
 
         # ── Populate cache ──
@@ -230,6 +239,67 @@ class RegistryService:
         # Return only root nodes (parent_id is None)
         return by_parent.get(None, [])
 
+    async def compute_quality_score(self, pack: "SkillPack") -> int:
+        """Score 0-100 based on content completeness signals."""
+        from app.models.skill_pack import SkillPackRelease
+
+        score = 0
+
+        # +10 has description
+        if pack.description and len(pack.description.strip()) > 0:
+            score += 10
+
+        # +10 has summary
+        if pack.summary and len(pack.summary.strip()) > 0:
+            score += 10
+
+        # +15 has learning outcomes
+        if pack.learning_outcomes and len(pack.learning_outcomes) > 0:
+            score += 15
+
+        # +15 has releases
+        release_r = await self.db.execute(
+            select(func.count()).where(SkillPackRelease.pack_id == pack.id)
+        )
+        release_count = release_r.scalar_one()
+        if release_count > 0:
+            score += 15
+
+        # +15 exercise_count > 0 (check via latest release manifest)
+        latest_r = await self.db.execute(
+            select(SkillPackRelease)
+            .where(SkillPackRelease.pack_id == pack.id)
+            .order_by(SkillPackRelease.released_at.desc())
+            .limit(1)
+        )
+        latest = latest_r.scalar_one_or_none()
+        if latest and latest.manifest:
+            total_exercises = sum(
+                len(s.get("exercises", []))
+                for s in latest.manifest.get("skills", [])
+            )
+            if total_exercises > 0:
+                score += 15
+
+            # +10 has rubric templates
+            templates = latest.manifest.get("project_templates", [])
+            has_rubric = any(
+                t.get("rubric") and len(t.get("rubric", [])) > 0
+                for t in templates
+            )
+            if has_rubric:
+                score += 10
+
+        # +10 has provenance
+        if pack.provenance and len(pack.provenance) > 0:
+            score += 10
+
+        # +15 review_count > 0
+        if pack.review_count and pack.review_count > 0:
+            score += 15
+
+        return score
+
     async def recompute_pack_badges(self, pack_id: str) -> None:
         """Recompute and persist badges for a single pack."""
         from datetime import timedelta
@@ -243,6 +313,25 @@ class RegistryService:
         if badges != (pack.badges or []):
             pack.badges = badges
             await self.db.flush()
+
+    async def get_installed_by(self, pack_id: str) -> dict:
+        """Return anonymized count of organizations that have installed this pack."""
+        from app.models.skill_pack import InstallStatus, SkillPackInstallation
+
+        await self.get_public_pack(pack_id)  # verify accessible
+
+        result = await self.db.execute(
+            select(func.count(SkillPackInstallation.org_id.distinct())).where(
+                SkillPackInstallation.pack_id == pack_id,
+                SkillPackInstallation.status != InstallStatus.REMOVED,
+            )
+        )
+        count = result.scalar_one()
+        return {
+            "pack_id": pack_id,
+            "organization_count": count,
+            "message": f"{count} organization{'s' if count != 1 else ''} use{'s' if count == 1 else ''} this pack",
+        }
 
     async def get_pack_preview(self, pack_id: str) -> dict:
         """Build a curriculum preview from the latest release manifest."""

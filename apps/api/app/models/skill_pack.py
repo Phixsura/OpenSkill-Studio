@@ -4,6 +4,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -84,6 +85,9 @@ class SkillPack(Base):
     review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     average_rating: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
 
+    # Automated quality score (0-100), computed on publish_release
+    quality_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Computed badges persisted for fast lookup (e.g. ["Popular", "New"])
     badges: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
 
@@ -92,6 +96,11 @@ class SkillPack(Base):
         String(20), nullable=True
     )
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Cross-org sharing: when True, pack can be shared to other orgs
+    sharing_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     # Provenance (author, license, attribution)
     provenance: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")

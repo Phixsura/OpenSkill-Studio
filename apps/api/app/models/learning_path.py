@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, ulid_pk
@@ -90,6 +91,7 @@ class LearningPathItem(Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     unlock_rule: Mapped[str] = mapped_column(String(30), nullable=False, default="previous_required")
+    drip_schedule: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 # ── Cohort Assignment ────────────────────────────────────

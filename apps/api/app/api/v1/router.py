@@ -6,7 +6,10 @@ from app.api.v1.endpoints import (
     certificates,
     client_briefs,
     cohorts,
+    discussions,
+    duplicate,
     evaluation,
+    gamification,
     health,
     installations,
     learning_paths,
@@ -16,12 +19,14 @@ from app.api.v1.endpoints import (
     overview,
     pack_io,
     pack_reviews,
+    pack_sharing,
     peer_review,
     portfolio,
     projects,
     registry,
     skill_packs,
     skills,
+    webhooks,
 )
 
 api_v1_router = APIRouter()
@@ -46,3 +51,8 @@ api_v1_router.include_router(pack_io.router)
 api_v1_router.include_router(notifications.router)
 api_v1_router.include_router(certificates.router)
 api_v1_router.include_router(lti.router)
+api_v1_router.include_router(webhooks.router)
+api_v1_router.include_router(discussions.router)
+api_v1_router.include_router(gamification.router)
+api_v1_router.include_router(duplicate.router)
+api_v1_router.include_router(pack_sharing.router)
