@@ -711,17 +711,20 @@ class ProjectService:
         await self.db.flush()
 
         # Award gamification points for project submission
-        from app.services.gamification import POINTS_PROJECT_SUBMISSION, GamificationService
+        try:
+            from app.services.gamification import POINTS_PROJECT_SUBMISSION, GamificationService
 
-        gam = GamificationService(self.db)
-        await gam.award_points(
-            user_id,
-            sub.org_id,
-            POINTS_PROJECT_SUBMISSION,
-            "project_submission",
-            reference_id=sub.id,
-            description=f"Submitted project {sub.project_id}",
-        )
+            gam = GamificationService(self.db)
+            await gam.award_points(
+                user_id,
+                sub.org_id,
+                POINTS_PROJECT_SUBMISSION,
+                "project_submission",
+                reference_id=sub.id,
+                description=f"Submitted project {sub.project_id}",
+            )
+        except Exception:
+            log.warning("gamification_award_failed", user_id=user_id, reason="project_submission")
 
         log.info(
             "submission_submitted", submission_id=sub.id, version=sub.version, is_late=sub.is_late
@@ -1013,17 +1016,20 @@ class ProjectService:
 
         # Award gamification points for posting a review
         if reviewer_id:
-            from app.services.gamification import POINTS_REVIEW_POSTED, GamificationService
+            try:
+                from app.services.gamification import POINTS_REVIEW_POSTED, GamificationService
 
-            gam = GamificationService(self.db)
-            await gam.award_points(
-                reviewer_id,
-                sub.org_id,
-                POINTS_REVIEW_POSTED,
-                "review_posted",
-                reference_id=review.id,
-                description=f"Reviewed submission {submission_id}",
-            )
+                gam = GamificationService(self.db)
+                await gam.award_points(
+                    reviewer_id,
+                    sub.org_id,
+                    POINTS_REVIEW_POSTED,
+                    "review_posted",
+                    reference_id=review.id,
+                    description=f"Reviewed submission {submission_id}",
+                )
+            except Exception:
+                log.warning("gamification_award_failed", user_id=reviewer_id, reason="review_posted")
 
         log.info("submission_reviewed", submission_id=sub.id, status=status, score=sub.final_score)
         return review

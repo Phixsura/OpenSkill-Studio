@@ -66,8 +66,44 @@ def upgrade() -> None:
     )
     op.create_index("ix_webhooks_org_active", "webhook_subscriptions", ["org_id", "active"])
 
+    # --- pack discussions table ---
+    op.create_table(
+        "pack_discussions",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("parent_id", sa.String(26), sa.ForeignKey("pack_discussions.id", ondelete="CASCADE"), nullable=True),
+        sa.Column("body", sa.Text(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    )
+    op.create_index("ix_discussions_pack_created", "pack_discussions", ["pack_id", "created_at"])
+    op.create_index("ix_discussions_parent", "pack_discussions", ["parent_id"])
+
+    # --- pack shares table ---
+    op.create_table(
+        "pack_shares",
+        sa.Column("id", sa.String(26), primary_key=True),
+        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("target_org_id", sa.String(26), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("shared_by", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("shared_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    )
+    op.create_index("uq_pack_share", "pack_shares", ["pack_id", "target_org_id"], unique=True)
+    op.create_index("ix_pack_shares_target", "pack_shares", ["target_org_id"])
+
+    # --- webhook updated_at column ---
+    op.add_column("webhook_subscriptions", sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()))
+
 
 def downgrade() -> None:
+    op.drop_column("webhook_subscriptions", "updated_at")
+    op.drop_index("ix_pack_shares_target", table_name="pack_shares")
+    op.drop_index("uq_pack_share", table_name="pack_shares")
+    op.drop_table("pack_shares")
+    op.drop_index("ix_discussions_parent", table_name="pack_discussions")
+    op.drop_index("ix_discussions_pack_created", table_name="pack_discussions")
+    op.drop_table("pack_discussions")
     op.drop_index("ix_webhooks_org_active", table_name="webhook_subscriptions")
     op.drop_table("webhook_subscriptions")
     op.drop_index("ix_points_ledger_user_org", table_name="points_ledger")

@@ -1,7 +1,7 @@
 """Gamification service — points, levels, leaderboard."""
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gamification import PointsLedger, UserPoints
@@ -66,11 +66,25 @@ class GamificationService:
                 level=_compute_level(points),
             )
             self.db.add(user_points)
+            await self.db.flush()
         else:
-            user_points.total_points += points
-            user_points.level = _compute_level(user_points.total_points)
-
-        await self.db.flush()
+            # Atomic SQL update to prevent race conditions on concurrent awards
+            new_total = user_points.total_points + points
+            new_level = _compute_level(new_total)
+            await self.db.execute(
+                update(UserPoints)
+                .where(
+                    UserPoints.user_id == user_id,
+                    UserPoints.org_id == org_id,
+                )
+                .values(
+                    total_points=UserPoints.total_points + points,
+                    level=new_level,
+                )
+            )
+            await self.db.flush()
+            # Refresh to get the updated values
+            await self.db.refresh(user_points)
         log.info(
             "points_awarded",
             user_id=user_id,

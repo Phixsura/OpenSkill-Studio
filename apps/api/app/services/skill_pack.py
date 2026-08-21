@@ -587,8 +587,8 @@ class SkillPackService:
                 "pack.published",
                 {"pack_id": pack_id, "version": version, "name": pack.name},
             )
-        except Exception:
-            log.warning("webhook_trigger_failed", pack_id=pack_id, webhook_event="pack.published")
+        except Exception as exc:
+            log.warning("webhook_trigger_failed", pack_id=pack_id, webhook_event="pack.published", error=str(exc))
 
         log.info(
             "pack_released",

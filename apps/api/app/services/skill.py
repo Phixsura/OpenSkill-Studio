@@ -749,17 +749,20 @@ class SkillService:
 
         # Award points on first completion
         if not was_completed and progress.status == ProgressStatus.COMPLETED:
-            from app.services.gamification import POINTS_SKILL_COMPLETION, GamificationService
+            try:
+                from app.services.gamification import POINTS_SKILL_COMPLETION, GamificationService
 
-            gam = GamificationService(self.db)
-            await gam.award_points(
-                user_id,
-                org_id,
-                POINTS_SKILL_COMPLETION,
-                "skill_completion",
-                reference_id=skill_id,
-                description=f"Completed skill {skill_id}",
-            )
+                gam = GamificationService(self.db)
+                await gam.award_points(
+                    user_id,
+                    org_id,
+                    POINTS_SKILL_COMPLETION,
+                    "skill_completion",
+                    reference_id=skill_id,
+                    description=f"Completed skill {skill_id}",
+                )
+            except Exception:
+                log.warning("gamification_award_failed", user_id=user_id, reason="skill_completion")
 
     async def _sync_skill_badge(
         self, skill_id: str, user_id: str, org_id: str, progress: SkillProgress

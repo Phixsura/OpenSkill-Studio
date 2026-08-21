@@ -322,17 +322,23 @@ class LearningPathService:
             )
             # Award gamification points for path completion (first time only)
             if certificate_number is not None:
-                from app.services.gamification import POINTS_PATH_COMPLETION, GamificationService
+                try:
+                    from app.services.gamification import (
+                        POINTS_PATH_COMPLETION,
+                        GamificationService,
+                    )
 
-                gam = GamificationService(self.db)
-                await gam.award_points(
-                    user_id,
-                    org_id,
-                    POINTS_PATH_COMPLETION,
-                    "path_completion",
-                    reference_id=path_id,
-                    description=f"Completed learning path {path_id}",
-                )
+                    gam = GamificationService(self.db)
+                    await gam.award_points(
+                        user_id,
+                        org_id,
+                        POINTS_PATH_COMPLETION,
+                        "path_completion",
+                        reference_id=path_id,
+                        description=f"Completed learning path {path_id}",
+                    )
+                except Exception:
+                    log.warning("gamification_award_failed", user_id=user_id, reason="path_completion")
 
         result = {
             "path_id": path_id,

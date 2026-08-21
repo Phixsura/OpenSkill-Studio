@@ -167,6 +167,17 @@ class UpdateSkillRequest(BaseModel):
     tags: list[str] | None = None
     sandbox_url: str | None = None
 
+    @field_validator("sandbox_url")
+    @classmethod
+    def validate_sandbox_url(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if not v.startswith("https://"):
+                raise ValueError("Sandbox URL must start with https://")
+            if len(v) > 500:
+                raise ValueError("Sandbox URL must be 500 characters or less")
+        return v
+
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str | None) -> str | None:

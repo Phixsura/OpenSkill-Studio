@@ -11,7 +11,7 @@ from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse
-from app.services.webhook import WebhookService
+from app.services.webhook import MAX_EVENTS_PER_WEBHOOK, VALID_EVENT_TYPES, WebhookService
 
 router = APIRouter(tags=["Webhooks"])
 
@@ -32,8 +32,23 @@ class CreateWebhookRequest(BaseModel):
             raise ValueError("URL must be 500 characters or less")
         return v
 
+    @field_validator("events")
+    @classmethod
+    def validate_events(cls, v: list[str]) -> list[str]:
+        if len(v) > MAX_EVENTS_PER_WEBHOOK:
+            raise ValueError(f"Maximum {MAX_EVENTS_PER_WEBHOOK} events per webhook")
+        for event in v:
+            if event not in VALID_EVENT_TYPES:
+                raise ValueError(
+                    f"Unknown event type: {event}. "
+                    f"Valid types: {', '.join(sorted(VALID_EVENT_TYPES))}"
+                )
+        return v
 
-class WebhookResponse(BaseModel):
+
+class WebhookCreatedResponse(BaseModel):
+    """Response for webhook creation — includes the secret (shown only once)."""
+
     id: str
     org_id: str
     url: str
@@ -45,9 +60,30 @@ class WebhookResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WebhookResponse(BaseModel):
+    """Response for webhook list/detail — secret is masked."""
+
+    id: str
+    org_id: str
+    url: str
+    events: list
+    secret: str  # will be masked
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+    @field_validator("secret")
+    @classmethod
+    def mask_secret(cls, v: str) -> str:
+        if len(v) > 8:
+            return v[:4] + "****" + v[-4:]
+        return "****"
+
+
 @router.post(
     "/orgs/{org_id}/webhooks",
-    response_model=DataResponse[WebhookResponse],
+    response_model=DataResponse[WebhookCreatedResponse],
     status_code=201,
     dependencies=[Depends(rate_limit(10, 60))],
 )
@@ -61,7 +97,7 @@ async def create_webhook(
     svc = WebhookService(db)
     sub = await svc.create(org_id, body.url, body.events)
     await db.commit()
-    return DataResponse(data=WebhookResponse.model_validate(sub))
+    return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
 
 
 @router.get(

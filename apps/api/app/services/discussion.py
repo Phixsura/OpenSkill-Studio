@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
 from app.models.discussion import PackDiscussion
+from app.models.skill_pack import PackStatus, PackVisibility, SkillPack
 
 log = structlog.get_logger()
 
@@ -14,6 +15,17 @@ class DiscussionService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _require_public_pack(self, pack_id: str) -> SkillPack:
+        """Verify the pack exists and is public/published before allowing comments."""
+        pack = await self.db.get(SkillPack, pack_id)
+        if pack is None:
+            raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
+        if pack.status != PackStatus.PUBLISHED:
+            raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
+        if pack.visibility == PackVisibility.PRIVATE:
+            raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
+        return pack
+
     async def create_comment(
         self,
         pack_id: str,
@@ -21,6 +33,9 @@ class DiscussionService:
         body: str,
         parent_id: str | None = None,
     ) -> PackDiscussion:
+        # Validate pack exists and is public
+        await self._require_public_pack(pack_id)
+
         if parent_id:
             parent = await self.db.get(PackDiscussion, parent_id)
             if parent is None or parent.pack_id != pack_id:
@@ -43,7 +58,7 @@ class DiscussionService:
         page: int = 1,
         per_page: int = 50,
     ) -> tuple[list[dict], int]:
-        """Return threaded comments: top-level with nested replies."""
+        """Return threaded comments: paginated top-level with nested replies."""
         # Count top-level comments only
         count_q = select(func.count()).where(
             PackDiscussion.pack_id == pack_id,
@@ -52,20 +67,40 @@ class DiscussionService:
         total_r = await self.db.execute(count_q)
         total = total_r.scalar_one()
 
-        # Get all comments for this pack (top-level + replies) in one query
-        result = await self.db.execute(
+        # Step 1: Get paginated top-level comments (SQL-level pagination)
+        offset = (page - 1) * per_page
+        top_q = (
             select(PackDiscussion)
-            .where(PackDiscussion.pack_id == pack_id)
+            .where(
+                PackDiscussion.pack_id == pack_id,
+                PackDiscussion.parent_id.is_(None),
+            )
+            .order_by(PackDiscussion.created_at.asc())
+            .offset(offset)
+            .limit(per_page)
+        )
+        top_result = await self.db.execute(top_q)
+        top_comments = list(top_result.scalars().all())
+
+        if not top_comments:
+            return [], total
+
+        # Step 2: Fetch replies only for the paginated top-level comment IDs
+        top_ids = [c.id for c in top_comments]
+        replies_q = (
+            select(PackDiscussion)
+            .where(
+                PackDiscussion.pack_id == pack_id,
+                PackDiscussion.parent_id.in_(top_ids),
+            )
             .order_by(PackDiscussion.created_at.asc())
         )
-        all_comments = list(result.scalars().all())
+        replies_result = await self.db.execute(replies_q)
+        replies = list(replies_result.scalars().all())
 
         # Build threaded structure
-        by_id: dict[str, dict] = {}
-        top_level: list[dict] = []
-
-        for c in all_comments:
-            entry = {
+        def _to_dict(c: PackDiscussion) -> dict:
+            return {
                 "id": c.id,
                 "pack_id": c.pack_id,
                 "user_id": c.user_id,
@@ -75,16 +110,21 @@ class DiscussionService:
                 "updated_at": c.updated_at.isoformat() if c.updated_at else None,
                 "replies": [],
             }
-            by_id[c.id] = entry
-            if c.parent_id is None:
-                top_level.append(entry)
-            elif c.parent_id in by_id:
-                by_id[c.parent_id]["replies"].append(entry)
 
-        # Paginate top-level comments
-        offset = (page - 1) * per_page
-        paginated = top_level[offset : offset + per_page]
-        return paginated, total
+        by_id: dict[str, dict] = {}
+        result_list: list[dict] = []
+
+        for c in top_comments:
+            entry = _to_dict(c)
+            by_id[c.id] = entry
+            result_list.append(entry)
+
+        for r in replies:
+            entry = _to_dict(r)
+            if r.parent_id in by_id:
+                by_id[r.parent_id]["replies"].append(entry)
+
+        return result_list, total
 
     async def delete_comment(
         self,

@@ -66,7 +66,7 @@ class RegistryService:
         Supports simultaneous faceted filters: scenario, tool, difficulty,
         category, min_rating. max_results caps the total returned (default 50).
         """
-        effective_per_page = min(per_page, max_results or 50)
+        effective_per_page = min(per_page, max_results) if max_results else per_page
         # ── Check cache ──
         cache_key_src = f"{search}:{scenario}:{tool}:{difficulty}:{category}:{sort}:{page}:{effective_per_page}:{min_rating}:{max_results}"
         cache_key = f"registry:search:{hashlib.md5(cache_key_src.encode()).hexdigest()}"
