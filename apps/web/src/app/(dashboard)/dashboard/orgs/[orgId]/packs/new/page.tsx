@@ -70,7 +70,7 @@ export default function NewPackPage() {
         },
       );
       queryClient.invalidateQueries({ queryKey: ["packs", orgId] });
-      router.push(`/dashboard/orgs/${orgId}/packs/${res.data.id}`);
+      router.replace(`/dashboard/orgs/${orgId}/packs/${res.data.id}`);
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Failed to create pack.",

@@ -757,6 +757,7 @@ async def delete_file(
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    await _verify_submission_org(svc, submission_id, org_id)
     await svc.delete_file(file_id, user.id)
     await db.commit()
 

@@ -225,8 +225,8 @@ class AuthService:
                 if token_record and not token_record.is_revoked:
                     token_record.revoked_at = datetime.now(UTC)
                     await self.db.flush()
-        except Exception:
-            pass  # Token invalid — still clear cookie on the caller side
+        except Exception as exc:
+            log.debug("logout_cleanup_failed", error=str(exc))
 
     # ── Change password ──
 

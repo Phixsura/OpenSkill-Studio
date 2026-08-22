@@ -69,7 +69,7 @@ export default function NewSkillPage() {
         },
       );
       queryClient.invalidateQueries({ queryKey: ["skills", orgId] });
-      router.push(`/dashboard/orgs/${orgId}/skills/${res.data.id}`);
+      router.replace(`/dashboard/orgs/${orgId}/skills/${res.data.id}`);
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Failed to create skill.",

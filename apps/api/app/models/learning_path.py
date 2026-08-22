@@ -52,7 +52,7 @@ class LearningPath(Base):
         default=ContentStatus.DRAFT,
     )
     estimated_minutes: Mapped[int | None] = mapped_column(Integer)
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -109,4 +109,4 @@ class CohortLearningPathAssignment(Base):
         String(26), ForeignKey("learning_paths.id", ondelete="CASCADE"), primary_key=True
     )
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    assigned_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    assigned_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)

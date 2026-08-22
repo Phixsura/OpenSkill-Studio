@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "sonner";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -93,6 +93,7 @@ const VISIBILITY_COLORS: Record<string, string> = {
 export default function PackDetailPage() {
   const { orgId, packId } = useParams<{ orgId: string; packId: string }>();
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   /* ---- Local state ---- */
   const [addSkillId, setAddSkillId] = useState("");
@@ -273,6 +274,7 @@ export default function PackDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["pack", orgId, packId] });
       queryClient.invalidateQueries({ queryKey: ["packs", orgId] });
       toast.success("Pack archived");
+      router.push(`/dashboard/orgs/${orgId}/packs`);
     },
     onError: (err: Error) =>
       toast.error(err.message || "Failed to archive pack"),

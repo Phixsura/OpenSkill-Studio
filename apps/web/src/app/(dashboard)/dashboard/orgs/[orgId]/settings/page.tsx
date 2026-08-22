@@ -29,7 +29,7 @@ export default function OrgSettingsPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [synced, setSynced] = useState(false);
 
   // Sync form when data first loads
@@ -53,9 +53,9 @@ export default function OrgSettingsPage() {
       });
       queryClient.invalidateQueries({ queryKey: ["org", orgId] });
       queryClient.invalidateQueries({ queryKey: ["my-orgs"] });
-      setMessage("Settings saved.");
+      setMessage({ type: "success", text: "Settings saved." });
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : "Failed to save.");
+      setMessage({ type: "error", text: err instanceof ApiError ? err.message : "Failed to save." });
     } finally {
       setSaving(false);
     }
@@ -100,10 +100,10 @@ export default function OrgSettingsPage() {
         </div>
 
         {message && (
-          <p className={`text-sm ${message.toLowerCase().includes("fail") ? "text-red-600" : "text-green-600"}`}>{message}</p>
+          <p className={`text-sm ${message.type === "error" ? "text-red-600" : "text-green-600"}`}>{message.text}</p>
         )}
 
-        <Button type="submit" disabled={saving}>
+        <Button type="submit" disabled={saving || !name.trim()}>
           {saving ? "Saving..." : "Save changes"}
         </Button>
       </form>

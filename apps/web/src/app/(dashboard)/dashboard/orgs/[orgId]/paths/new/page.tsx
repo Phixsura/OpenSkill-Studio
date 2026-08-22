@@ -42,7 +42,7 @@ export default function NewPathPage() {
         },
       );
       queryClient.invalidateQueries({ queryKey: ["paths", orgId] });
-      router.push(`/dashboard/orgs/${orgId}/paths/${res.data.id}`);
+      router.replace(`/dashboard/orgs/${orgId}/paths/${res.data.id}`);
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Failed to create learning path.",
