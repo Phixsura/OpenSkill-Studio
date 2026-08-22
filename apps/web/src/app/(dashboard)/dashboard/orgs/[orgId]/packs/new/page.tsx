@@ -104,6 +104,8 @@ export default function NewPackPage() {
           <Input
             id="name"
             required
+            minLength={2}
+            maxLength={200}
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="AI Prompt Engineering Essentials"
@@ -117,6 +119,7 @@ export default function NewPackPage() {
           </label>
           <Input
             id="summary"
+            maxLength={500}
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
             placeholder="A short summary of this pack"
@@ -133,6 +136,7 @@ export default function NewPackPage() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
+            maxLength={10000}
             className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
             placeholder="Detailed description of skills and outcomes covered..."
           />
@@ -181,6 +185,7 @@ export default function NewPackPage() {
             id="minutes"
             type="number"
             min="0"
+            max="9999"
             value={estimatedMinutes}
             onChange={(e) => setEstimatedMinutes(e.target.value)}
             placeholder="60"

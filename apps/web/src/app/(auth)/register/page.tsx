@@ -123,6 +123,8 @@ export default function RegisterPage() {
             id="displayName"
             type="text"
             required
+            minLength={2}
+            maxLength={100}
             autoComplete="name"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}

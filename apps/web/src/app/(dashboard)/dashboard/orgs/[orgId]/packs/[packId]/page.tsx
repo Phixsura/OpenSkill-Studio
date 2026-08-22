@@ -570,7 +570,14 @@ export default function PackDetailPage() {
               />
             </div>
             <Button
-              onClick={() => publishReleaseMutation.mutate()}
+              onClick={() => {
+                const semverRegex = /^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/;
+                if (!semverRegex.test(releaseVersion.trim())) {
+                  toast.error("Version must be in semver format (e.g. 1.0.0)");
+                  return;
+                }
+                publishReleaseMutation.mutate();
+              }}
               disabled={
                 !releaseVersion.trim() || publishReleaseMutation.isPending
               }

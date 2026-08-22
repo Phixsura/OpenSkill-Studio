@@ -590,6 +590,36 @@ class InstallationService:
                 )
                 self.db.add(exercise)
 
+        # Flush so new skill IDs are available for prerequisite creation
+        await self.db.flush()
+
+        # ---- Create prerequisites for ADDED skills ----
+        # Build a unified skill_id_map: logical_id -> actual skill ULID
+        # Includes both newly created skills AND existing installed skills
+        skill_id_map: dict[str, str] = {}
+        # Existing installed skills (from batch-load below, but we need them now)
+        existing_skills_r = await self.db.execute(
+            select(Skill).where(
+                Skill.origin_pack_id == pack_id,
+                Skill.org_id == org_id,
+                Skill.status != ContentStatus.ARCHIVED,
+            )
+        )
+        for s in existing_skills_r.scalars().all():
+            if s.origin_component_id:
+                skill_id_map[s.origin_component_id] = s.id
+
+        # Create prerequisite rows for added skills
+        for lid in set(new_skills) - set(old_skills):
+            skill_def = new_skills[lid]
+            for prereq_logical in skill_def.get("prerequisites", []):
+                if prereq_logical in skill_id_map and lid in skill_id_map:
+                    prereq = SkillPrerequisite(
+                        skill_id=skill_id_map[lid],
+                        prerequisite_id=skill_id_map[prereq_logical],
+                    )
+                    self.db.add(prereq)
+
         # Batch-load all installed skills and templates for this pack (avoid N+1)
         all_skills_r = await self.db.execute(
             select(Skill).where(
@@ -751,4 +781,26 @@ class InstallationService:
                 .where(SkillPack.id == inst.pack_id)
                 .values(install_count=func.greatest(SkillPack.install_count - 1, 0))
             )
+
+            # Archive all installed components so they don't appear active
+            for model in [Skill, Exercise, SkillCategory]:
+                await self.db.execute(
+                    update(model)
+                    .where(
+                        model.origin_pack_id == inst.pack_id,
+                        model.org_id == inst.org_id,
+                        model.status != ContentStatus.ARCHIVED,
+                    )
+                    .values(status=ContentStatus.ARCHIVED)
+                )
+            await self.db.execute(
+                update(ProjectTemplate)
+                .where(
+                    ProjectTemplate.origin_pack_id == inst.pack_id,
+                    ProjectTemplate.org_id == inst.org_id,
+                    ProjectTemplate.status != ContentStatus.ARCHIVED,
+                )
+                .values(status=ContentStatus.ARCHIVED)
+            )
+
             await self.db.flush()
