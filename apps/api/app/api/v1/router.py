@@ -3,16 +3,30 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     admin,
     auth,
+    certificates,
     client_briefs,
     cohorts,
+    discussions,
+    duplicate,
     evaluation,
+    gamification,
     health,
+    installations,
+    learning_paths,
+    lti,
+    notifications,
     organizations,
     overview,
+    pack_io,
+    pack_reviews,
+    pack_sharing,
     peer_review,
     portfolio,
     projects,
+    registry,
+    skill_packs,
     skills,
+    webhooks,
 )
 
 api_v1_router = APIRouter()
@@ -28,3 +42,17 @@ api_v1_router.include_router(evaluation.router)
 api_v1_router.include_router(cohorts.router)
 api_v1_router.include_router(client_briefs.router)
 api_v1_router.include_router(portfolio.router)
+api_v1_router.include_router(skill_packs.router)
+api_v1_router.include_router(registry.router)
+api_v1_router.include_router(pack_reviews.router)
+api_v1_router.include_router(installations.router)
+api_v1_router.include_router(learning_paths.router)
+api_v1_router.include_router(pack_io.router)
+api_v1_router.include_router(notifications.router)
+api_v1_router.include_router(certificates.router)
+api_v1_router.include_router(lti.router)
+api_v1_router.include_router(webhooks.router)
+api_v1_router.include_router(discussions.router)
+api_v1_router.include_router(gamification.router)
+api_v1_router.include_router(duplicate.router)
+api_v1_router.include_router(pack_sharing.router)

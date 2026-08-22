@@ -24,8 +24,14 @@ async def get_s3_client():
 
 async def ensure_bucket(client) -> None:  # noqa: ANN001
     """Create the default bucket if it doesn't exist."""
+    from botocore.exceptions import ClientError
+
     try:
         await client.head_bucket(Bucket=settings.s3_bucket)
-    except Exception:
-        await client.create_bucket(Bucket=settings.s3_bucket)
-        log.info("s3_bucket_created", bucket=settings.s3_bucket)
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code in ("404", "NoSuchBucket"):
+            await client.create_bucket(Bucket=settings.s3_bucket)
+            log.info("s3_bucket_created", bucket=settings.s3_bucket)
+        else:
+            raise

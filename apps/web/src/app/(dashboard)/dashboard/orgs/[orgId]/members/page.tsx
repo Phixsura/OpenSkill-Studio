@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth } from "@/lib/api";
+import { toast } from "sonner";
 
 interface MemberUser {
   id: string;
@@ -49,8 +50,9 @@ export default function MembersPage() {
       setInviteLink(`${window.location.origin}/join/${code}`);
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
-    onError: () => {
+    onError: (err: Error) => {
       setInviteLink(null);
+      toast.error(err.message || "Failed to create invite link");
     },
   });
 
@@ -98,7 +100,13 @@ export default function MembersPage() {
               <Button
                 size="sm"
                 variant="secondary"
-                onClick={() => navigator.clipboard.writeText(inviteLink)}
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(inviteLink);
+                  } catch {
+                    /* clipboard unavailable in insecure context */
+                  }
+                }}
               >
                 Copy
               </Button>
@@ -125,9 +133,9 @@ export default function MembersPage() {
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
                     <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-xs font-medium text-[hsl(var(--primary-foreground))]">
-                      {m.user.display_name.charAt(0).toUpperCase()}
+                      {(m.user.display_name || "?").charAt(0).toUpperCase()}
                     </div>
-                    {m.user.display_name}
+                    {m.user.display_name || "Unknown"}
                   </div>
                 </td>
                 <td className="px-4 py-3 text-[hsl(var(--muted-foreground))]">

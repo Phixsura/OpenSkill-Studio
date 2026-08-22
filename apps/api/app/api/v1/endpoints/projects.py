@@ -1,8 +1,10 @@
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -15,6 +17,7 @@ from app.schemas.project import (
     CreateProjectRequest,
     CreateReviewRequest,
     CreateTemplateRequest,
+    CreatorAssignmentResponse,
     DeliverableResponse,
     ExtensionResponse,
     FileResponse,
@@ -40,6 +43,28 @@ log = structlog.get_logger()
 
 
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+
+
+class SetProjectSkillsRequest(BaseModel):
+    skill_ids: list[str] = []
+
+
+class SubmissionItemInput(BaseModel):
+    type: str = "text"
+    deliverable_id: str
+    content: str | None = None
+
+
+class UpdateSubmissionRequest(BaseModel):
+    items: list[SubmissionItemInput] = []
+
+
+class SetCommentCompletedRequest(BaseModel):
+    completed: bool = False
+
+
+class AssignCreatorRequest(BaseModel):
+    user_id: str
 
 
 async def _verify_project_org(svc: ProjectService, project_id: str, org_id: str):
@@ -91,7 +116,7 @@ async def _read_limited(file: UploadFile, limit: int = 50 * 1024 * 1024) -> byte
 # ── Project CRUD ─────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/projects", response_model=ListResponse[ProjectResponse])
+@router.get("/orgs/{org_id}/projects", response_model=ListResponse[ProjectResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def list_projects(
     org_id: str,
     status: str | None = None,
@@ -123,7 +148,8 @@ async def list_projects(
 
 
 @router.post(
-    "/orgs/{org_id}/projects", response_model=DataResponse[ProjectResponse], status_code=201
+    "/orgs/{org_id}/projects", response_model=DataResponse[ProjectResponse], status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_project(
     org_id: str,
@@ -155,7 +181,8 @@ async def create_project(
 
 
 @router.get(
-    "/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectDetailResponse]
+    "/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectDetailResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def get_project(
     org_id: str,
@@ -181,7 +208,7 @@ async def get_project(
     return DataResponse(data=resp)
 
 
-@router.put("/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectResponse])
+@router.put("/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def update_project(
     org_id: str,
     project_id: str,
@@ -197,7 +224,7 @@ async def update_project(
     return DataResponse(data=ProjectResponse.model_validate(project))
 
 
-@router.delete("/orgs/{org_id}/projects/{project_id}", status_code=204)
+@router.delete("/orgs/{org_id}/projects/{project_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def delete_project(
     org_id: str,
     project_id: str,
@@ -212,7 +239,8 @@ async def delete_project(
 
 
 @router.post(
-    "/orgs/{org_id}/projects/{project_id}/publish", response_model=DataResponse[ProjectResponse]
+    "/orgs/{org_id}/projects/{project_id}/publish", response_model=DataResponse[ProjectResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def publish_project(
     org_id: str,
@@ -229,7 +257,8 @@ async def publish_project(
 
 
 @router.post(
-    "/orgs/{org_id}/projects/{project_id}/unpublish", response_model=DataResponse[ProjectResponse]
+    "/orgs/{org_id}/projects/{project_id}/unpublish", response_model=DataResponse[ProjectResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def unpublish_project(
     org_id: str,
@@ -245,29 +274,26 @@ async def unpublish_project(
     return DataResponse(data=ProjectResponse.model_validate(project))
 
 
-@router.put("/orgs/{org_id}/projects/{project_id}/skills", status_code=200)
+@router.put("/orgs/{org_id}/projects/{project_id}/skills", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def set_project_skills(
     org_id: str,
     project_id: str,
-    body: dict,
+    body: SetProjectSkillsRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
-    skill_ids = body.get("skill_ids", [])
-    if not isinstance(skill_ids, list) or not all(isinstance(s, str) for s in skill_ids):
-        raise HTTPException(status_code=422, detail="skill_ids must be a list of strings")
-    await svc.set_project_skills(project_id, skill_ids)
+    await svc.set_project_skills(project_id, body.skill_ids)
     await db.commit()
-    return {"message": "Project skills updated"}
 
 
 @router.post(
     "/orgs/{org_id}/projects/{project_id}/extensions",
     response_model=DataResponse[ExtensionResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def grant_extension(
     org_id: str,
@@ -292,6 +318,7 @@ async def grant_extension(
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/deliverables",
     response_model=DataResponse[list[DeliverableResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_deliverables(
     org_id: str,
@@ -310,6 +337,7 @@ async def list_deliverables(
     "/orgs/{org_id}/projects/{project_id}/deliverables",
     response_model=DataResponse[DeliverableResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_deliverable(
     org_id: str,
@@ -337,6 +365,7 @@ async def create_deliverable(
 @router.put(
     "/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}",
     response_model=DataResponse[DeliverableResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def update_deliverable(
     org_id: str,
@@ -358,7 +387,8 @@ async def update_deliverable(
 
 
 @router.delete(
-    "/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}", status_code=204
+    "/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}", status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def delete_deliverable(
     org_id: str,
@@ -383,6 +413,7 @@ async def delete_deliverable(
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/submissions",
     response_model=ListResponse[SubmissionWithAuthorResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_submissions(
     org_id: str,
@@ -418,6 +449,7 @@ async def list_submissions(
     "/orgs/{org_id}/projects/{project_id}/submissions",
     response_model=DataResponse[SubmissionResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_submission(
     org_id: str,
@@ -442,6 +474,7 @@ async def create_submission(
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}",
     response_model=DataResponse[SubmissionDetailResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def get_submission(
     org_id: str,
@@ -503,12 +536,13 @@ async def get_submission(
 @router.put(
     "/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}",
     response_model=DataResponse[SubmissionResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def update_submission(
     org_id: str,
     project_id: str,
     submission_id: str,
-    body: dict,
+    body: UpdateSubmissionRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -537,8 +571,8 @@ async def update_submission(
     # Validate every deliverable belongs to THIS project before writing rows
     project_deliverables = {d.id for d in await svc.list_deliverables(project_id)}
 
-    for item_data in body.get("items", []):
-        raw_type = item_data.get("type", "text")
+    for item_data in body.items:
+        raw_type = item_data.type
         try:
             item_type = ItemType(raw_type)
         except ValueError as exc:
@@ -548,11 +582,11 @@ async def update_submission(
                 status_code=422,
                 detail=f"Item type '{raw_type}' must be created via its dedicated endpoint",
             )
-        deliverable_id = item_data.get("deliverable_id")
+        deliverable_id = item_data.deliverable_id
         if not deliverable_id or deliverable_id not in project_deliverables:
             raise HTTPException(status_code=422, detail="Unknown deliverable for this project")
-        content = item_data.get("content")
-        if content is not None and (not isinstance(content, str) or len(content) > max_content):
+        content = item_data.content
+        if content is not None and len(content) > max_content:
             raise HTTPException(status_code=422, detail="Item content too large or invalid")
         # A link item's content is rendered as a clickable href — restrict to
         # http(s) so a stored javascript:/data: URL can't become an XSS vector.
@@ -593,6 +627,7 @@ async def update_submission(
 @router.post(
     "/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}/submit",
     response_model=DataResponse[SubmissionResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def submit_draft(
     org_id: str,
@@ -627,7 +662,7 @@ async def submit_draft(
     return DataResponse(data=SubmissionResponse.model_validate(sub))
 
 
-@router.delete("/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}", status_code=204)
+@router.delete("/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def delete_submission(
     org_id: str,
     project_id: str,
@@ -651,6 +686,7 @@ async def delete_submission(
     "/orgs/{org_id}/submissions/{submission_id}/files",
     response_model=DataResponse[FileResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def upload_file(
     org_id: str,
@@ -682,7 +718,7 @@ async def upload_file(
     return DataResponse(data=FileResponse.model_validate(item))
 
 
-@router.get("/orgs/{org_id}/submissions/{submission_id}/files/{file_id}/download")
+@router.get("/orgs/{org_id}/submissions/{submission_id}/files/{file_id}/download", dependencies=[Depends(rate_limit(30, 60))])
 async def download_file(
     org_id: str,
     submission_id: str,
@@ -711,7 +747,7 @@ async def download_file(
     return {"download_url": url}
 
 
-@router.delete("/orgs/{org_id}/submissions/{submission_id}/files/{file_id}", status_code=204)
+@router.delete("/orgs/{org_id}/submissions/{submission_id}/files/{file_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def delete_file(
     org_id: str,
     submission_id: str,
@@ -721,6 +757,7 @@ async def delete_file(
 ):
     await require_org_member(org_id, user, db)
     svc = ProjectService(db)
+    await _verify_submission_org(svc, submission_id, org_id)
     await svc.delete_file(file_id, user.id)
     await db.commit()
 
@@ -731,6 +768,7 @@ async def delete_file(
 @router.get(
     "/orgs/{org_id}/submissions/{submission_id}/reviews",
     response_model=DataResponse[list[ReviewResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_reviews(
     org_id: str,
@@ -751,6 +789,7 @@ async def list_reviews(
     "/orgs/{org_id}/submissions/{submission_id}/reviews",
     response_model=DataResponse[ReviewResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_review(
     org_id: str,
@@ -777,7 +816,7 @@ async def create_review(
 # ── Review Dashboard ─────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[PendingReviewResponse])
+@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[PendingReviewResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def pending_reviews(
     org_id: str,
     page: int = Query(default=1, ge=1),
@@ -839,7 +878,7 @@ def _template_response(t) -> TemplateResponse:  # noqa: ANN001
     )
 
 
-@router.get("/orgs/{org_id}/project-templates", response_model=DataResponse[list[TemplateResponse]])
+@router.get("/orgs/{org_id}/project-templates", response_model=DataResponse[list[TemplateResponse]], dependencies=[Depends(rate_limit(30, 60))])
 async def list_templates(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -861,6 +900,7 @@ async def list_templates(
     "/orgs/{org_id}/project-templates",
     response_model=DataResponse[TemplateResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_template(
     org_id: str,
@@ -891,6 +931,7 @@ async def create_template(
 @router.get(
     "/orgs/{org_id}/project-templates/{template_id}",
     response_model=DataResponse[TemplateResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def get_template(
     org_id: str,
@@ -907,6 +948,7 @@ async def get_template(
 @router.put(
     "/orgs/{org_id}/project-templates/{template_id}",
     response_model=DataResponse[TemplateResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def update_template(
     org_id: str,
@@ -922,7 +964,7 @@ async def update_template(
     return DataResponse(data=_template_response(template))
 
 
-@router.delete("/orgs/{org_id}/project-templates/{template_id}", status_code=204)
+@router.delete("/orgs/{org_id}/project-templates/{template_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def delete_template(
     org_id: str,
     template_id: str,
@@ -939,6 +981,7 @@ async def delete_template(
     "/orgs/{org_id}/projects/from-template",
     response_model=DataResponse[ProjectResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_from_template(
     org_id: str,
@@ -959,6 +1002,7 @@ async def create_from_template(
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/assets",
     response_model=DataResponse[list[AssetResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_assets(
     org_id: str,
@@ -977,6 +1021,7 @@ async def list_assets(
     "/orgs/{org_id}/projects/{project_id}/assets",
     response_model=DataResponse[AssetResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def upload_asset(
     org_id: str,
@@ -1011,7 +1056,7 @@ async def upload_asset(
     return DataResponse(data=AssetResponse.model_validate(asset))
 
 
-@router.get("/orgs/{org_id}/projects/{project_id}/assets/{asset_id}/download")
+@router.get("/orgs/{org_id}/projects/{project_id}/assets/{asset_id}/download", dependencies=[Depends(rate_limit(30, 60))])
 async def download_asset(
     org_id: str,
     project_id: str,
@@ -1029,7 +1074,7 @@ async def download_asset(
     return {"download_url": url}
 
 
-@router.delete("/orgs/{org_id}/projects/{project_id}/assets/{asset_id}", status_code=204)
+@router.delete("/orgs/{org_id}/projects/{project_id}/assets/{asset_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def delete_asset(
     org_id: str,
     project_id: str,
@@ -1053,6 +1098,7 @@ async def delete_asset(
     "/orgs/{org_id}/submissions/{submission_id}/prompt-items",
     response_model=DataResponse[SubmissionItemResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def add_prompt_item(
     org_id: str,
@@ -1090,6 +1136,7 @@ async def add_prompt_item(
 @router.get(
     "/orgs/{org_id}/submissions/{submission_id}/comments",
     response_model=DataResponse[list[CommentResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_comments(
     org_id: str,
@@ -1118,6 +1165,7 @@ async def list_comments(
     "/orgs/{org_id}/submissions/{submission_id}/comments",
     response_model=DataResponse[CommentResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_comment(
     org_id: str,
@@ -1151,11 +1199,12 @@ async def create_comment(
 @router.put(
     "/orgs/{org_id}/comments/{comment_id}/completed",
     response_model=DataResponse[CommentResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def set_comment_completed(
     org_id: str,
     comment_id: str,
-    body: dict,
+    body: SetCommentCompletedRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1165,12 +1214,12 @@ async def set_comment_completed(
     sub = await svc.get_submission(comment.submission_id)
     if sub.user_id != user.id and member.role not in INSTRUCTOR_ROLES:
         raise HTTPException(status_code=403, detail="Access denied")
-    comment = await svc.set_comment_completed(comment_id, org_id, bool(body.get("completed")))
+    comment = await svc.set_comment_completed(comment_id, org_id, body.completed)
     await db.commit()
     return DataResponse(data=CommentResponse.model_validate(comment))
 
 
-@router.delete("/orgs/{org_id}/comments/{comment_id}", status_code=204)
+@router.delete("/orgs/{org_id}/comments/{comment_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def delete_comment(
     org_id: str,
     comment_id: str,
@@ -1188,13 +1237,14 @@ async def delete_comment(
 
 @router.post(
     "/orgs/{org_id}/projects/{project_id}/creators",
-    response_model=DataResponse[dict],
+    response_model=DataResponse[CreatorAssignmentResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def assign_creator(
     org_id: str,
     project_id: str,
-    body: dict,
+    body: AssignCreatorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1202,10 +1252,6 @@ async def assign_creator(
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
-
-    user_id = body.get("user_id")
-    if not user_id or not isinstance(user_id, str):
-        raise HTTPException(status_code=422, detail="user_id is required")
 
     # Verify user is an org member
     from sqlalchemy import select as _sel
@@ -1215,7 +1261,7 @@ async def assign_creator(
     mem_r = await db.execute(
         _sel(OrgMember.id).where(
             OrgMember.org_id == org_id,
-            OrgMember.user_id == user_id,
+            OrgMember.user_id == body.user_id,
             OrgMember.status == MemberStatus.ACTIVE,
         )
     )
@@ -1228,7 +1274,7 @@ async def assign_creator(
 
     assignment = ProjectCreatorAssignment(
         project_id=project_id,
-        user_id=user_id,
+        user_id=body.user_id,
         assigned_by=user.id,
     )
     db.add(assignment)
@@ -1239,18 +1285,19 @@ async def assign_creator(
         raise HTTPException(status_code=409, detail="Creator already assigned") from None
     await db.commit()
     return DataResponse(
-        data={
-            "id": assignment.id,
-            "project_id": project_id,
-            "user_id": user_id,
-            "assigned_at": assignment.assigned_at.isoformat(),
-        }
+        data=CreatorAssignmentResponse(
+            id=assignment.id,
+            project_id=project_id,
+            user_id=body.user_id,
+            assigned_at=assignment.assigned_at,
+        )
     )
 
 
 @router.delete(
     "/orgs/{org_id}/projects/{project_id}/creators/{user_id}",
     status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def unassign_creator(
     org_id: str,
@@ -1283,7 +1330,8 @@ async def unassign_creator(
 
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/creators",
-    response_model=DataResponse[list[dict]],
+    response_model=DataResponse[list[CreatorAssignmentResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_creators(
     org_id: str,
@@ -1308,12 +1356,13 @@ async def list_creators(
     )
     return DataResponse(
         data=[
-            {
-                "id": a.id,
-                "user_id": a.user_id,
-                "user_name": name,
-                "assigned_at": a.assigned_at.isoformat(),
-            }
+            CreatorAssignmentResponse(
+                id=a.id,
+                project_id=project_id,
+                user_id=a.user_id,
+                user_name=name,
+                assigned_at=a.assigned_at,
+            )
             for a, name in result.all()
         ]
     )

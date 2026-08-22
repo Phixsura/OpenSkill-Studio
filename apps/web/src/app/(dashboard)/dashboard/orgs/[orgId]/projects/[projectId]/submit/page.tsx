@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -107,6 +107,7 @@ export default function SubmitPage() {
     onError: (err) => setError(err instanceof ApiError ? err.message : "Failed to create draft"),
   });
 
+  const submittingRef = useRef(false);
   const submitDraft = useMutation({
     mutationFn: () =>
       apiWithAuth(`/orgs/${orgId}/projects/${projectId}/submissions/${submissionId}/submit`, {
@@ -551,33 +552,39 @@ export default function SubmitPage() {
 
       <Button
         onClick={async () => {
-          // Save text/link items via the submission update endpoint
-          const items = Object.entries(textInputs)
-            .filter(([, content]) => content.trim())
-            .map(([delivId, content]) => ({
-              deliverable_id: delivId,
-              content: content.trim(),
-              // Preserve the deliverable's declared format so markdown renders as markdown
-              type: deliverables.find((d) => d.id === delivId)?.type === "markdown" ? "markdown" : "text",
-            }));
+          if (submittingRef.current) return;
+          submittingRef.current = true;
+          try {
+            // Save text/link items via the submission update endpoint
+            const items = Object.entries(textInputs)
+              .filter(([, content]) => content.trim())
+              .map(([delivId, content]) => ({
+                deliverable_id: delivId,
+                content: content.trim(),
+                // Preserve the deliverable's declared format so markdown renders as markdown
+                type: deliverables.find((d) => d.id === delivId)?.type === "markdown" ? "markdown" : "text",
+              }));
 
-          if (items.length > 0) {
-            try {
-              await apiWithAuth(
-                `/orgs/${orgId}/projects/${projectId}/submissions/${submissionId}`,
-                {
-                  method: "PUT",
-                  body: JSON.stringify({ items }),
-                },
-              );
-            } catch {
-              setError("Failed to save deliverable content.");
-              return;
+            if (items.length > 0) {
+              try {
+                await apiWithAuth(
+                  `/orgs/${orgId}/projects/${projectId}/submissions/${submissionId}`,
+                  {
+                    method: "PUT",
+                    body: JSON.stringify({ items }),
+                  },
+                );
+              } catch {
+                setError("Failed to save deliverable content.");
+                return;
+              }
             }
+            submitDraft.mutate();
+          } finally {
+            submittingRef.current = false;
           }
-          submitDraft.mutate();
         }}
-        disabled={submitDraft.isPending}
+        disabled={submitDraft.isPending || submittingRef.current}
       >
         {submitDraft.isPending ? "Submitting..." : "Submit"}
       </Button>

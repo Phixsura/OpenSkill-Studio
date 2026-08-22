@@ -87,7 +87,8 @@ async def _admin_h(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"55-{uuid.uuid4().hex[:6]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
 
@@ -174,7 +175,6 @@ async def test_skill_exercise_update_wrong_org_check(c):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Lifespan may hang after pg warn", strict=False)
 async def test_main_postgres_warn_dev():
     """main.py:33 — postgres warn in dev."""
     from app.main import app, lifespan

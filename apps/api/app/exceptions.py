@@ -1,5 +1,6 @@
 import structlog
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -56,6 +57,19 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=_error_body("HTTP_ERROR", exc.detail or "Request error", request),
         )
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError):
+        """Format FastAPI's per-field validation errors into the app's error envelope."""
+        details = []
+        for err in exc.errors():
+            field = ".".join(str(loc) for loc in err.get("loc", []) if loc != "body")
+            details.append({"field": field, "message": err.get("msg", "Validation error")})
+        message = details[0]["message"] if len(details) == 1 else f"{len(details)} validation errors"
+        return JSONResponse(
+            status_code=422,
+            content=_error_body("VALIDATION_ERROR", message, request, details),
+        )
+
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError):
         """Catch DB-level value errors (e.g. null bytes, integer overflow)."""
@@ -74,6 +88,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             error=str(exc),
             type=type(exc).__name__,
             request_id=getattr(request.state, "request_id", None),
+            exc_info=True,
         )
         return JSONResponse(
             status_code=500,

@@ -42,7 +42,7 @@ export default function CreateOrgPage() {
         }),
       });
       queryClient.invalidateQueries({ queryKey: ["my-orgs"] });
-      router.push(`/dashboard/orgs/${res.data.id}`);
+      router.replace(`/dashboard/orgs/${res.data.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create organization.");
     } finally {
@@ -74,6 +74,8 @@ export default function CreateOrgPage() {
           <Input
             id="name"
             required
+            minLength={2}
+            maxLength={100}
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="AI Creators Academy"
@@ -87,6 +89,7 @@ export default function CreateOrgPage() {
           </label>
           <Input
             id="slug"
+            maxLength={100}
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder={autoSlug || "auto-generated"}
@@ -106,6 +109,7 @@ export default function CreateOrgPage() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
+            maxLength={2000}
             className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
             placeholder="What is this organization about?"
           />

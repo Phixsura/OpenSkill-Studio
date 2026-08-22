@@ -147,10 +147,15 @@ async def test_ensure_bucket_exists():
 
 @pytest.mark.asyncio
 async def test_ensure_bucket_creates():
+    from botocore.exceptions import ClientError
+
     from app.core.storage import ensure_bucket
 
     client = AsyncMock()
-    client.head_bucket = AsyncMock(side_effect=Exception("not found"))
+    error_response = {"Error": {"Code": "404", "Message": "Not Found"}}
+    client.head_bucket = AsyncMock(
+        side_effect=ClientError(error_response, "HeadBucket")
+    )
     client.create_bucket = AsyncMock()
     await ensure_bucket(client)
     client.create_bucket.assert_called_once()

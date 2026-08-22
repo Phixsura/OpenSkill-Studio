@@ -1,4 +1,5 @@
 from app.models.base import Base  # noqa: F401
+from app.models.certificate import Certificate  # noqa: F401
 from app.models.client_brief import (  # noqa: F401
     ApplicationStatus,
     BriefApplication,
@@ -14,11 +15,24 @@ from app.models.cohort import (  # noqa: F401
     CohortStatus,
     ParticipationMode,
 )
+from app.models.discussion import PackDiscussion  # noqa: F401
 from app.models.evaluation import (  # noqa: F401
     EvalStatus,
     EvalType,
     EvaluationTask,
     EvalUsageMonthly,
+)
+from app.models.gamification import PointsLedger, UserPoints  # noqa: F401
+from app.models.learning_path import (  # noqa: F401
+    CohortLearningPathAssignment,
+    LearningPath,
+    LearningPathItem,
+    PathItemType,
+)
+from app.models.notification import (  # noqa: F401
+    Notification,
+    PackApprovalEvent,
+    UserNotificationPreference,
 )
 from app.models.organization import (  # noqa: F401
     InviteStatus,
@@ -30,6 +44,9 @@ from app.models.organization import (  # noqa: F401
     OrgRole,
     OrgStatus,
 )
+from app.models.pack_category import PackCategory, PackCategoryAssignment  # noqa: F401
+from app.models.pack_review import PackReview, ReviewHelpfulVote  # noqa: F401
+from app.models.pack_share import PackShare  # noqa: F401
 from app.models.portfolio import (  # noqa: F401
     ItemVisibility,
     PortfolioItem,
@@ -73,6 +90,16 @@ from app.models.skill import (  # noqa: F401
     SkillPrerequisite,
     SkillProgress,
 )
+from app.models.skill_pack import (  # noqa: F401
+    InstallStatus,
+    PackStatus,
+    PackVisibility,
+    SkillPack,
+    SkillPackInstallation,
+    SkillPackRelease,
+    SkillPackSkill,
+    SkillPackTemplate,
+)
 from app.models.user import (  # noqa: F401
     EmailVerificationToken,
     OAuthAccount,
@@ -82,3 +109,4 @@ from app.models.user import (  # noqa: F401
     UserRole,
     UserStatus,
 )
+from app.models.webhook import WebhookSubscription  # noqa: F401

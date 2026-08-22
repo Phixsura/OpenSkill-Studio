@@ -330,11 +330,11 @@ class ProjectService:
             max_submissions=max_submissions,
             created_by=created_by,
         )
-        self.db.add(project)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(project)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             project.slug = f"{project.slug}-{secrets.token_hex(3)}"
             self.db.add(project)
             await self.db.flush()
@@ -449,6 +449,13 @@ class ProjectService:
     async def delete_project(self, project_id: str) -> None:
         project = await self.get_project(project_id)
         project.status = ContentStatus.ARCHIVED
+
+        # Clean up learning path items referencing this project
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.learning_path import LearningPathItem
+
+        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.project_id == project_id))
         await self.db.flush()
 
     async def publish_project(self, project_id: str) -> Project:
@@ -545,7 +552,14 @@ class ProjectService:
         project_id: str,
         user_id: str,
     ) -> Submission:
-        project = await self.get_project(project_id)
+        # Lock the project row to prevent concurrent submissions from
+        # bypassing the max_submissions check (SELECT ... FOR UPDATE).
+        result = await self.db.execute(
+            select(Project).where(Project.id == project_id).with_for_update()
+        )
+        project = result.scalar_one_or_none()
+        if project is None or project.status == ContentStatus.ARCHIVED:
+            raise ProjectNotFoundError()
 
         # ── Cohort visibility gate ──
         # If this project is assigned to specific cohorts or individual creators,
@@ -703,6 +717,22 @@ class ProjectService:
         sub.is_late = timing == "late"
         await self.db.flush()
 
+        # Award gamification points for project submission
+        try:
+            from app.services.gamification import POINTS_PROJECT_SUBMISSION, GamificationService
+
+            gam = GamificationService(self.db)
+            await gam.award_points(
+                user_id,
+                sub.org_id,
+                POINTS_PROJECT_SUBMISSION,
+                "project_submission",
+                reference_id=sub.id,
+                description=f"Submitted project {sub.project_id}",
+            )
+        except Exception:
+            log.warning("gamification_award_failed", user_id=user_id, reason="project_submission")
+
         log.info(
             "submission_submitted", submission_id=sub.id, version=sub.version, is_late=sub.is_late
         )
@@ -748,6 +778,16 @@ class ProjectService:
         """MIME whitelist + magic-byte + per-deliverable config enforcement."""
         whitelist = MEDIA_MIME_WHITELIST.get(deliverable.type)
         config = deliverable.config or {}
+
+        # FILE type has no whitelist — deny known-dangerous MIME types
+        # that could enable stored XSS via inline rendering
+        if whitelist is None:
+            dangerous_mimes = {
+                "text/html", "text/xml", "application/xhtml+xml",
+                "image/svg+xml", "application/javascript", "text/javascript",
+            }
+            if content_type.lower() in dangerous_mimes:
+                raise UnsupportedMediaTypeError(content_type)
 
         if whitelist is not None:
             allowed = whitelist
@@ -838,13 +878,22 @@ class ProjectService:
         # Upload to S3
         from app.core.storage import get_s3_client
 
-        async for client in get_s3_client():
-            await client.put_object(
-                Bucket=settings.s3_bucket,
-                Key=file_key,
-                Body=file_content,
-                ContentType=content_type,
-            )
+        try:
+            async for client in get_s3_client():
+                await client.put_object(
+                    Bucket=settings.s3_bucket,
+                    Key=file_key,
+                    Body=file_content,
+                    ContentType=content_type,
+                )
+        except AppError:
+            raise
+        except Exception as exc:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError):
+                raise AppError("STORAGE_ERROR", "Failed to upload file. Please try again.", 500) from exc
+            raise
 
         # Auto-extract generation metadata from AI-tool PNGs (A1111/ComfyUI).
         # Stored as JSON in the item's content column (NULL otherwise).
@@ -898,11 +947,14 @@ class ProjectService:
         from app.core.storage import get_s3_client
 
         params: dict = {"Bucket": settings.s3_bucket, "Key": item.file_key}
-        # Pin content type from DB (never trust stored object metadata) and
-        # force inline disposition so media previews render in-browser.
+        # Pin content type from DB (never trust stored object metadata).
+        # Use inline disposition only for safe media types; attachment for
+        # everything else to prevent stored XSS via HTML/SVG served inline.
         if item.mime_type:
             params["ResponseContentType"] = item.mime_type
-            params["ResponseContentDisposition"] = "inline"
+            _safe_prefixes = ("image/", "video/", "audio/")
+            is_safe = item.mime_type.startswith(_safe_prefixes) or item.mime_type == "application/pdf"
+            params["ResponseContentDisposition"] = "inline" if is_safe else "attachment"
 
         async for client in get_s3_client():
             url = await client.generate_presigned_url(
@@ -955,7 +1007,9 @@ class ProjectService:
         if sub.status in (SubmissionStatus.DRAFT,):
             raise InvalidStateError("Cannot review a draft submission")
 
-        # Score cannot exceed this project's configured maximum
+        # Score must be non-negative and within the project's configured maximum
+        if score is not None and score < 0:
+            raise AppError("INVALID_SCORE", "Score cannot be negative", 422)
         if score is not None and score > project.max_score:
             raise AppError(
                 "SCORE_EXCEEDS_MAX",
@@ -987,9 +1041,28 @@ class ProjectService:
             sub.final_score = None
         elif review_status == ReviewStatus.REJECTED:
             sub.status = SubmissionStatus.REJECTED
-            sub.final_score = score
+            # Apply late penalty for consistency with APPROVED path;
+            # rejected submissions may still carry an informational score.
+            sub.final_score = self._calculate_final_score(score or 0, sub.is_late, project)
 
         await self.db.flush()
+
+        # Award gamification points for posting a review
+        if reviewer_id:
+            try:
+                from app.services.gamification import POINTS_REVIEW_POSTED, GamificationService
+
+                gam = GamificationService(self.db)
+                await gam.award_points(
+                    reviewer_id,
+                    sub.org_id,
+                    POINTS_REVIEW_POSTED,
+                    "review_posted",
+                    reference_id=review.id,
+                    description=f"Reviewed submission {submission_id}",
+                )
+            except Exception:
+                log.warning("gamification_award_failed", user_id=reviewer_id, reason="review_posted")
 
         log.info("submission_reviewed", submission_id=sub.id, status=status, score=sub.final_score)
         return review
@@ -1327,6 +1400,9 @@ class ProjectService:
                 if k == "difficulty":
                     v = DifficultyLevel(v)
                 setattr(template, k, v)
+        # Mark as locally modified if this template was installed from a pack
+        if template.origin_pack_id is not None:
+            template.locally_modified = True
         await self.db.flush()
         return template
 
@@ -1334,6 +1410,19 @@ class ProjectService:
         template = await self.get_template(template_id, org_id)
         if isinstance(template, dict):
             raise AppError("BUILTIN_READONLY", "Built-in templates cannot be deleted", 422)
+
+        # Clean up SkillPackTemplate join rows so packs referencing this
+        # template don't break on their next publish_release attempt.
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.skill_pack import SkillPackTemplate
+
+        await self.db.execute(
+            sa_delete(SkillPackTemplate).where(
+                SkillPackTemplate.template_id == template_id
+            )
+        )
+
         template.status = ContentStatus.ARCHIVED
         await self.db.flush()
 
@@ -1452,13 +1541,22 @@ class ProjectService:
 
         from app.core.storage import get_s3_client
 
-        async for client in get_s3_client():
-            await client.put_object(
-                Bucket=settings.s3_bucket,
-                Key=file_key,
-                Body=file_content,
-                ContentType=content_type,
-            )
+        try:
+            async for client in get_s3_client():
+                await client.put_object(
+                    Bucket=settings.s3_bucket,
+                    Key=file_key,
+                    Body=file_content,
+                    ContentType=content_type,
+                )
+        except AppError:
+            raise
+        except Exception as exc:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError):
+                raise AppError("STORAGE_ERROR", "Failed to upload file. Please try again.", 500) from exc
+            raise
 
         asset = ProjectAsset(
             org_id=org_id,

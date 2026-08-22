@@ -102,9 +102,9 @@ class PortfolioService:
         profile = await self.get_or_create_profile(user_id)
         profile.username = username
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             raise UsernameUnavailableError() from None
         return profile
 
@@ -266,13 +266,13 @@ class PortfolioService:
             featured=featured,
             published_at=datetime.now(UTC),
         )
-        self.db.add(item)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(item)
+                await self.db.flush()
         except IntegrityError:
             # Slug collides with the user's existing item (same title) — the
             # (user_id, slug) unique index would 500. Append a random suffix.
-            await self.db.rollback()
             item.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
             self.db.add(item)
             await self.db.flush()

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse
@@ -24,6 +25,7 @@ INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     "/orgs/{org_id}/peer-review-rounds",
     response_model=DataResponse[RoundResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def create_round(
     org_id: str,
@@ -50,6 +52,7 @@ async def create_round(
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/peer-review-rounds",
     response_model=DataResponse[list[RoundResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def list_rounds(
     org_id: str,
@@ -68,6 +71,7 @@ async def list_rounds(
 @router.post(
     "/orgs/{org_id}/peer-review-rounds/{round_id}/start",
     response_model=DataResponse[RoundResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def start_assessment(
     org_id: str,
@@ -85,6 +89,7 @@ async def start_assessment(
 @router.post(
     "/orgs/{org_id}/peer-review-rounds/{round_id}/close",
     response_model=DataResponse[RoundResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def close_round(
     org_id: str,
@@ -102,6 +107,7 @@ async def close_round(
 @router.get(
     "/orgs/{org_id}/peer-review-rounds/{round_id}/my-assessments",
     response_model=DataResponse[list[AssessmentResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def my_assessments(
     org_id: str,
@@ -119,6 +125,7 @@ async def my_assessments(
 @router.get(
     "/orgs/{org_id}/peer-review-rounds/{round_id}/assessments",
     response_model=DataResponse[list[AssessmentWithReviewerResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def all_assessments(
     org_id: str,
@@ -139,6 +146,7 @@ async def all_assessments(
 @router.post(
     "/orgs/{org_id}/peer-assessments/{assessment_id}/submit",
     response_model=DataResponse[AssessmentResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def submit_assessment(
     org_id: str,
@@ -164,6 +172,7 @@ async def submit_assessment(
 @router.get(
     "/orgs/{org_id}/peer-review-rounds/{round_id}/results",
     response_model=DataResponse[list[RoundResultEntry]],
+    dependencies=[Depends(rate_limit(20, 60))],
 )
 async def round_results(
     org_id: str,

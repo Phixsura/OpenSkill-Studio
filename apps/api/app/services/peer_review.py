@@ -271,6 +271,8 @@ class PeerReviewService:
         rnd = await self.get_round(assessment.round_id, org_id)
         if assessment.reviewer_id != reviewer_id:
             raise AppError("PERMISSION_DENIED", "Not your assessment", 403)
+        if assessment.status == PeerAssessmentStatus.SUBMITTED:
+            raise AppError("ALREADY_SUBMITTED", "Assessment has already been submitted", 409)
         if rnd.phase != PeerReviewPhase.ASSESSMENT:
             raise AppError("INVALID_PHASE", "Round is not accepting assessments", 422)
 

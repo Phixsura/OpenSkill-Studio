@@ -65,7 +65,7 @@ export default function CohortDetailPage() {
   const [editEndsAt, setEditEndsAt] = useState("");
   const [editMaxLearners, setEditMaxLearners] = useState("");
 
-  const { data: cohort, isError: cohortError } = useQuery({
+  const { data: cohort, isLoading: cohortLoading, isError: cohortError } = useQuery({
     queryKey: ["cohort", cohortId],
     queryFn: () =>
       apiWithAuth<{ data: CohortDetail }>(`/orgs/${orgId}/cohorts/${cohortId}`),
@@ -119,6 +119,14 @@ export default function CohortDetailPage() {
 
   const c = cohort?.data;
   const p = progress?.data;
+
+  if (cohortLoading) {
+    return (
+      <p className="text-sm text-[hsl(var(--muted-foreground))]">
+        Loading cohort...
+      </p>
+    );
+  }
 
   if (cohortError) {
     return (
@@ -275,7 +283,7 @@ export default function CohortDetailPage() {
                     : undefined,
                 })
               }
-              disabled={editMutation.isPending}
+              disabled={!editName.trim() || editMutation.isPending}
             >
               {editMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>

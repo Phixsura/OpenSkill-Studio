@@ -90,11 +90,11 @@ class SkillService:
             status=ContentStatus.PUBLISHED,
             created_by=created_by,
         )
-        self.db.add(cat)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(cat)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             cat.slug = f"{cat.slug}-{secrets.token_hex(3)}"
             self.db.add(cat)
             await self.db.flush()
@@ -119,11 +119,30 @@ class SkillService:
         for k, v in fields.items():
             if v is not None and hasattr(cat, k):
                 setattr(cat, k, v)
+        # Mark as locally modified if this category was installed from a pack
+        if cat.origin_pack_id is not None:
+            cat.locally_modified = True
         await self.db.flush()
         return cat
 
     async def delete_category(self, category_id: str) -> None:
         cat = await self.get_category(category_id)
+
+        # Prevent archiving a category that still has active skills — those
+        # skills would have a dangling category_id pointing to nothing.
+        active_count_r = await self.db.execute(
+            select(func.count(Skill.id)).where(
+                Skill.category_id == category_id,
+                Skill.status != ContentStatus.ARCHIVED,
+            )
+        )
+        if active_count_r.scalar_one() > 0:
+            raise AppError(
+                "CATEGORY_HAS_SKILLS",
+                "Archive or move skills before deleting the category",
+                422,
+            )
+
         cat.status = ContentStatus.ARCHIVED
         await self.db.flush()
 
@@ -167,11 +186,11 @@ class SkillService:
             tags=tags or [],
             created_by=created_by,
         )
-        self.db.add(skill)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(skill)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             # Slug collision — append random suffix and retry
             skill.slug = f"{skill.slug}-{secrets.token_hex(3)}"
             self.db.add(skill)
@@ -246,7 +265,9 @@ class SkillService:
         if tag:
             base = base.where(Skill.tags.contains([tag]))
         if q:
-            base = base.where(Skill.name.ilike(f"%{q}%"))
+            # Escape LIKE wildcards to prevent pattern injection
+            q_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            base = base.where(Skill.name.ilike(f"%{q_escaped}%"))
 
         total_result = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_result.scalar_one()
@@ -280,6 +301,9 @@ class SkillService:
                 if k == "difficulty":
                     v = DifficultyLevel(v)
                 setattr(skill, k, v)
+        # Mark as locally modified if this skill was installed from a pack
+        if skill.origin_pack_id is not None:
+            skill.locally_modified = True
         await self.db.flush()
         return skill
 
@@ -292,6 +316,23 @@ class SkillService:
     async def delete_skill(self, skill_id: str) -> None:
         skill = await self.get_skill(skill_id)
         skill.status = ContentStatus.ARCHIVED
+
+        # Clean up references so archived skills don't block other features
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.learning_path import LearningPathItem
+        from app.models.skill_pack import SkillPackSkill
+
+        await self.db.execute(sa_delete(SkillPackSkill).where(SkillPackSkill.skill_id == skill_id))
+        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.skill_id == skill_id))
+
+        # Clean up cohort and project skill assignments
+        from app.models.cohort import CohortSkillAssignment
+        from app.models.project import ProjectSkill
+
+        await self.db.execute(sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.skill_id == skill_id))
+        await self.db.execute(sa_delete(ProjectSkill).where(ProjectSkill.skill_id == skill_id))
+
         await self.db.flush()
 
     async def publish_skill(self, skill_id: str) -> Skill:
@@ -381,6 +422,9 @@ class SkillService:
         for k, v in fields.items():
             if v is not None and hasattr(ex, k):
                 setattr(ex, k, v)
+        # Mark as locally modified if this exercise was installed from a pack
+        if ex.origin_pack_id is not None:
+            ex.locally_modified = True
         await self.db.flush()
         return ex
 
@@ -469,7 +513,7 @@ class SkillService:
             raise AttemptNotFoundError()
 
         exercise = await self.get_exercise(attempt.exercise_id)
-        attempt.score = min(score, exercise.max_score)
+        attempt.score = max(0, min(score, exercise.max_score))
         attempt.is_correct = score >= exercise.max_score * 0.6
         attempt.feedback = feedback
         attempt.graded_by = GradingMethod.MANUAL
@@ -522,10 +566,15 @@ class SkillService:
         )
         skills_total = skills_result.scalar_one()
 
-        # Count progress entries
+        # Count progress entries (exclude archived skills)
         progress_result = await self.db.execute(
             select(SkillProgress.status, func.count(SkillProgress.id))
-            .where(SkillProgress.user_id == user_id, SkillProgress.org_id == org_id)
+            .join(Skill, Skill.id == SkillProgress.skill_id)
+            .where(
+                SkillProgress.user_id == user_id,
+                SkillProgress.org_id == org_id,
+                Skill.status != ContentStatus.ARCHIVED,
+            )
             .group_by(SkillProgress.status)
         )
         status_counts = {row[0].value: row[1] for row in progress_result.all()}
@@ -542,10 +591,14 @@ class SkillService:
         )
         exercises_total = exercises_result.scalar_one()
 
-        # Count completed exercises (at least one correct attempt)
+        # Count completed exercises (exclude archived skills)
         done_result = await self.db.execute(
-            select(func.sum(SkillProgress.exercises_done)).where(
-                SkillProgress.user_id == user_id, SkillProgress.org_id == org_id
+            select(func.sum(SkillProgress.exercises_done))
+            .join(Skill, Skill.id == SkillProgress.skill_id)
+            .where(
+                SkillProgress.user_id == user_id,
+                SkillProgress.org_id == org_id,
+                Skill.status != ContentStatus.ARCHIVED,
             )
         )
         exercises_done = done_result.scalar_one() or 0
@@ -675,6 +728,7 @@ class SkillService:
                 queue.append(row)
 
     async def _update_skill_progress(self, skill_id: str, user_id: str, org_id: str) -> None:
+        # TODO: Per-exercise attempt queries below are O(N) — batch-load in future
         exercises = await self.list_exercises(skill_id)
         total = len(exercises)
 
@@ -716,11 +770,25 @@ class SkillService:
                 skill_id=skill_id,
                 user_id=user_id,
             )
-            self.db.add(progress)
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(progress)
+                    await self.db.flush()
+            except IntegrityError:
+                # Concurrent insert — re-fetch the existing row
+                result2 = await self.db.execute(
+                    select(SkillProgress).where(
+                        SkillProgress.skill_id == skill_id,
+                        SkillProgress.user_id == user_id,
+                    )
+                )
+                progress = result2.scalar_one()
 
         progress.exercises_total = total
         progress.exercises_done = done
         progress.best_score = best_score
+
+        was_completed = progress.status == ProgressStatus.COMPLETED
 
         if done == 0:
             progress.status = ProgressStatus.NOT_STARTED
@@ -735,6 +803,23 @@ class SkillService:
 
         await self.db.flush()
         await self._sync_skill_badge(skill_id, user_id, org_id, progress)
+
+        # Award points on first completion
+        if not was_completed and progress.status == ProgressStatus.COMPLETED:
+            try:
+                from app.services.gamification import POINTS_SKILL_COMPLETION, GamificationService
+
+                gam = GamificationService(self.db)
+                await gam.award_points(
+                    user_id,
+                    org_id,
+                    POINTS_SKILL_COMPLETION,
+                    "skill_completion",
+                    reference_id=skill_id,
+                    description=f"Completed skill {skill_id}",
+                )
+            except Exception:
+                log.warning("gamification_award_failed", user_id=user_id, reason="skill_completion")
 
     async def _sync_skill_badge(
         self, skill_id: str, user_id: str, org_id: str, progress: SkillProgress

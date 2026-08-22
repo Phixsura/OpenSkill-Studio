@@ -249,7 +249,8 @@ def test_access_token_roundtrip():
     token = create_access_token("user123", "test@example.com", "student")
     payload = decode_token(token)
     assert payload["sub"] == "user123"
-    assert payload["email"] == "test@example.com"
+    # email is NOT included in JWT payload to avoid PII exposure
+    assert "email" not in payload
     assert payload["role"] == "student"
     assert payload["type"] == "access"
 

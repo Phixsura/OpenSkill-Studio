@@ -1,5 +1,6 @@
 """AI evaluation service — trigger, execute, track usage."""
 
+import asyncio
 import json
 import time
 from datetime import UTC, date, datetime
@@ -7,8 +8,10 @@ from decimal import Decimal
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.llm import calculate_cost, create_llm_client
 from app.exceptions import AppError
 from app.models.evaluation import EvalStatus, EvalType, EvaluationTask, EvalUsageMonthly
@@ -271,11 +274,25 @@ class EvaluationService:
                 system = SYSTEM_PROMPT
 
             llm = create_llm_client(org_settings.get("default_model"))
-            response = await llm.complete(
-                system_prompt=system,
-                user_prompt=user_prompt,
-                temperature=0.1,
-            )
+            try:
+                response = await asyncio.wait_for(
+                    llm.complete(
+                        system_prompt=system,
+                        user_prompt=user_prompt,
+                        temperature=0.1,
+                    ),
+                    timeout=settings.eval_timeout_seconds,
+                )
+            except TimeoutError:
+                task.status = EvalStatus.FAILED
+                task.error = "LLM request timed out"
+                await self.db.flush()
+                log.warning(
+                    "eval_llm_timeout",
+                    task_id=task.id,
+                    timeout=settings.eval_timeout_seconds,
+                )
+                return
 
             # Parse result
             result = self._parse_evaluation_response(response.content, project.rubric)
@@ -343,17 +360,17 @@ class EvaluationService:
 
         except json.JSONDecodeError:
             task.retries += 1
-            task.error = "Failed to parse LLM response"
-            if task.retries < 3:
-                task.status = EvalStatus.PENDING
-            else:
-                task.status = EvalStatus.FAILED  # pragma: no cover
+            # Always set to FAILED — no background worker picks up PENDING tasks
+            task.status = EvalStatus.FAILED
+            task.error = "Failed to parse LLM response — retry via the evaluation UI"
             await self.db.flush()
             log.warning("eval_parse_failed", task_id=task.id, retries=task.retries)
 
         except Exception as e:
             task.status = EvalStatus.FAILED
-            task.error = str(e)
+            # Sanitize error: don't expose internal details (connection strings,
+            # file paths, API keys) to the client. Log the full error server-side.
+            task.error = "Evaluation failed due to an internal error"
             task.completed_at = datetime.now(UTC)
             await self.db.flush()
             log.error("eval_failed", task_id=task.id, error=str(e))
@@ -786,7 +803,9 @@ Please evaluate the submission against the rubric above."""
         }
 
     async def _update_monthly_usage(self, task: EvaluationTask) -> None:
-        """Upsert monthly usage stats."""
+        """Upsert monthly usage stats with atomic SQL to prevent lost updates."""
+        from sqlalchemy import update as sa_update
+
         current_month = date.today().replace(day=1)
         result = await self.db.execute(
             select(EvalUsageMonthly).where(
@@ -800,17 +819,33 @@ Please evaluate the submission against the rubric above."""
             usage = EvalUsageMonthly(
                 org_id=task.org_id,
                 month=current_month,
-                total_tasks=0,
-                total_input_tokens=0,
-                total_output_tokens=0,
-                total_cost_usd=Decimal("0"),
+                total_tasks=1,
+                total_input_tokens=task.input_tokens or 0,
+                total_output_tokens=task.output_tokens or 0,
+                total_cost_usd=task.cost_usd or Decimal("0"),
             )
-            self.db.add(usage)
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(usage)
+                    await self.db.flush()
+            except IntegrityError:
+                # Concurrent insert — fall through to atomic UPDATE
+                pass
+            else:
+                return
 
-        usage.total_tasks = (usage.total_tasks or 0) + 1
-        usage.total_input_tokens = (usage.total_input_tokens or 0) + (task.input_tokens or 0)
-        usage.total_output_tokens = (usage.total_output_tokens or 0) + (task.output_tokens or 0)
-        usage.total_cost_usd = (usage.total_cost_usd or Decimal("0")) + (
-            task.cost_usd or Decimal("0")
+        # Atomic SQL update — values computed DB-side, not from stale Python state
+        await self.db.execute(
+            sa_update(EvalUsageMonthly)
+            .where(
+                EvalUsageMonthly.org_id == task.org_id,
+                EvalUsageMonthly.month == current_month,
+            )
+            .values(
+                total_tasks=EvalUsageMonthly.total_tasks + 1,
+                total_input_tokens=EvalUsageMonthly.total_input_tokens + (task.input_tokens or 0),
+                total_output_tokens=EvalUsageMonthly.total_output_tokens + (task.output_tokens or 0),
+                total_cost_usd=EvalUsageMonthly.total_cost_usd + (task.cost_usd or Decimal("0")),
+            )
         )
         await self.db.flush()

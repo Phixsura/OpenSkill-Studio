@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.models.organization import ROLE_HIERARCHY, OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -9,10 +11,12 @@ from app.schemas.organization import (
     AcceptInviteRequest,
     CreateInviteLinkRequest,
     CreateOrgRequest,
+    InvitationResponse,
     InviteLinkResponse,
     InviteMembersRequest,
     InviteResponse,
     JoinByCodeRequest,
+    JoinOrgResponse,
     OrgDetailResponse,
     OrgMemberResponse,
     OrgMemberUserResponse,
@@ -26,14 +30,25 @@ from app.services.organization import OrgService
 router = APIRouter(tags=["Organizations"])
 
 
+class AddMemberRequest(BaseModel):
+    user_id: str
+    role: str = "student"
+
+
+class ToggleInviteLinkRequest(BaseModel):
+    is_active: bool = True
+
+
 # ── Helpers ───────────────────────────────────────────────
 
 
-def _link_response(link, base_url: str = "http://localhost:3000") -> InviteLinkResponse:
+def _link_response(link) -> InviteLinkResponse:
+    from app.config import settings
+
     return InviteLinkResponse(
         id=link.id,
         code=link.code,
-        url=f"{base_url}/join/{link.code}",
+        url=f"{settings.frontend_url}/join/{link.code}",
         role=link.role.value,
         max_uses=link.max_uses,
         use_count=link.use_count,
@@ -69,7 +84,7 @@ async def _member_response(
 # ── Organization CRUD ────────────────────────────────────
 
 
-@router.post("/orgs", response_model=DataResponse[OrgResponse], status_code=201)
+@router.post("/orgs", response_model=DataResponse[OrgResponse], status_code=201, dependencies=[Depends(rate_limit(10, 60))])
 async def create_org(
     body: CreateOrgRequest,
     user: User = Depends(get_current_user),
@@ -98,7 +113,7 @@ async def create_org(
     return DataResponse(data=resp)
 
 
-@router.get("/orgs", response_model=DataResponse[list[OrgResponse]])
+@router.get("/orgs", response_model=DataResponse[list[OrgResponse]], dependencies=[Depends(rate_limit(30, 60))])
 async def list_my_orgs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -121,7 +136,7 @@ async def list_my_orgs(
     return DataResponse(data=items)
 
 
-@router.get("/orgs/{org_id}", response_model=DataResponse[OrgDetailResponse])
+@router.get("/orgs/{org_id}", response_model=DataResponse[OrgDetailResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def get_org(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -152,7 +167,7 @@ async def get_org(
     return DataResponse(data=resp)
 
 
-@router.put("/orgs/{org_id}", response_model=DataResponse[OrgResponse])
+@router.put("/orgs/{org_id}", response_model=DataResponse[OrgResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def update_org(
     org_id: str,
     body: UpdateOrgRequest,
@@ -179,7 +194,7 @@ async def update_org(
     return DataResponse(data=resp)
 
 
-@router.delete("/orgs/{org_id}", status_code=204)
+@router.delete("/orgs/{org_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def delete_org(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -190,7 +205,7 @@ async def delete_org(
     await db.commit()
 
 
-@router.put("/orgs/{org_id}/settings", response_model=DataResponse[OrgDetailResponse])
+@router.put("/orgs/{org_id}/settings", response_model=DataResponse[OrgDetailResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def update_org_settings(
     org_id: str,
     body: UpdateOrgSettingsRequest,
@@ -223,7 +238,7 @@ async def update_org_settings(
 # ── Members ──────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/members", response_model=ListResponse[OrgMemberResponse])
+@router.get("/orgs/{org_id}/members", response_model=ListResponse[OrgMemberResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def list_members(
     org_id: str,
     page: int = Query(default=1, ge=1),
@@ -249,7 +264,7 @@ async def list_members(
     )
 
 
-@router.put("/orgs/{org_id}/members/{user_id}")
+@router.put("/orgs/{org_id}/members/{user_id}", response_model=DataResponse[OrgMemberResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def update_member_role(
     org_id: str,
     user_id: str,
@@ -269,7 +284,7 @@ async def update_member_role(
     return DataResponse(data=resp)
 
 
-@router.delete("/orgs/{org_id}/members/{user_id}", status_code=204)
+@router.delete("/orgs/{org_id}/members/{user_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def remove_member(
     org_id: str,
     user_id: str,
@@ -284,7 +299,7 @@ async def remove_member(
 # ── Invitations ──────────────────────────────────────────
 
 
-@router.post("/orgs/{org_id}/invites", response_model=InviteResponse)
+@router.post("/orgs/{org_id}/invites", response_model=InviteResponse, dependencies=[Depends(rate_limit(10, 60))])
 async def invite_members(
     org_id: str,
     body: InviteMembersRequest,
@@ -314,7 +329,7 @@ async def invite_members(
     )
 
 
-@router.get("/orgs/{org_id}/invites")
+@router.get("/orgs/{org_id}/invites", response_model=DataResponse[list[InvitationResponse]], dependencies=[Depends(rate_limit(30, 60))])
 async def list_invitations(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -325,20 +340,20 @@ async def list_invitations(
     invites = await service.get_invitations(org_id)
     return DataResponse(
         data=[
-            {
-                "id": inv.id,
-                "email": inv.email,
-                "role": inv.role.value,
-                "status": inv.status.value,
-                "expires_at": inv.expires_at.isoformat(),
-                "created_at": inv.created_at.isoformat(),
-            }
+            InvitationResponse(
+                id=inv.id,
+                email=inv.email,
+                role=inv.role.value,
+                status=inv.status.value,
+                expires_at=inv.expires_at,
+                created_at=inv.created_at,
+            )
             for inv in invites
         ]
     )
 
 
-@router.delete("/orgs/{org_id}/invites/{invite_id}", status_code=204)
+@router.delete("/orgs/{org_id}/invites/{invite_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def revoke_invite(
     org_id: str,
     invite_id: str,
@@ -354,25 +369,19 @@ async def revoke_invite(
 # ── Direct Member Add ────────────────────────────────────
 
 
-@router.post("/orgs/{org_id}/members")
+@router.post("/orgs/{org_id}/members", response_model=DataResponse[OrgMemberResponse], status_code=201, dependencies=[Depends(rate_limit(10, 60))])
 async def add_member_directly(
     org_id: str,
-    body: dict,
+    body: AddMemberRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Directly add an existing user to the org (admin+)."""
     actor = await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
-    user_id = body.get("user_id")
-    role_str = body.get("role", "student")
-    if not user_id or not isinstance(user_id, str):
-        raise HTTPException(status_code=422, detail="user_id is required and must be a string")
-    if not isinstance(role_str, str):
-        raise HTTPException(status_code=422, detail="role must be a string")
     try:
-        role = OrgRole(role_str)
+        role = OrgRole(body.role)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid role: {role_str}") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
 
     # Cannot add a member at a role higher than your own (admin adding an owner)
     if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
@@ -381,7 +390,7 @@ async def add_member_directly(
         )
 
     service = OrgService(db)
-    member = await service.add_member(org_id, user_id, role, invited_by=user.id)
+    member = await service.add_member(org_id, body.user_id, role, invited_by=user.id)
     await db.commit()
     resp = await _member_response(member, db)
     return DataResponse(data=resp)
@@ -394,6 +403,7 @@ async def add_member_directly(
     "/orgs/{org_id}/invite-links",
     response_model=DataResponse[InviteLinkResponse],
     status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_invite_link(
     org_id: str,
@@ -424,7 +434,7 @@ async def create_invite_link(
     return DataResponse(data=_link_response(link))
 
 
-@router.get("/orgs/{org_id}/invite-links", response_model=DataResponse[list[InviteLinkResponse]])
+@router.get("/orgs/{org_id}/invite-links", response_model=DataResponse[list[InviteLinkResponse]], dependencies=[Depends(rate_limit(30, 60))])
 async def list_invite_links(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -437,26 +447,24 @@ async def list_invite_links(
 
 
 @router.put(
-    "/orgs/{org_id}/invite-links/{link_id}", response_model=DataResponse[InviteLinkResponse]
+    "/orgs/{org_id}/invite-links/{link_id}", response_model=DataResponse[InviteLinkResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def toggle_invite_link(
     org_id: str,
     link_id: str,
-    body: dict,
+    body: ToggleInviteLinkRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
-    is_active = body.get("is_active", True)
-    if not isinstance(is_active, bool):
-        raise HTTPException(status_code=422, detail="is_active must be a boolean")
     service = OrgService(db)
-    link = await service.toggle_invite_link(org_id, link_id, is_active)
+    link = await service.toggle_invite_link(org_id, link_id, body.is_active)
     await db.commit()
     return DataResponse(data=_link_response(link))
 
 
-@router.delete("/orgs/{org_id}/invite-links/{link_id}", status_code=204)
+@router.delete("/orgs/{org_id}/invite-links/{link_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def delete_invite_link(
     org_id: str,
     link_id: str,
@@ -472,7 +480,7 @@ async def delete_invite_link(
 # ── Invite Actions (public-ish) ──────────────────────────
 
 
-@router.post("/invites/accept")
+@router.post("/invites/accept", response_model=DataResponse[JoinOrgResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def accept_email_invite(
     body: AcceptInviteRequest,
     user: User = Depends(get_current_user),
@@ -481,10 +489,10 @@ async def accept_email_invite(
     service = OrgService(db)
     member = await service.accept_email_invite(body.token, user.id)
     await db.commit()
-    return {"message": "Invitation accepted", "org_id": member.org_id}
+    return DataResponse(data=JoinOrgResponse(message="Invitation accepted", org_id=member.org_id))
 
 
-@router.post("/invites/join")
+@router.post("/invites/join", response_model=DataResponse[JoinOrgResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def join_by_code(
     body: JoinByCodeRequest,
     user: User = Depends(get_current_user),
@@ -493,4 +501,4 @@ async def join_by_code(
     service = OrgService(db)
     member = await service.join_by_code(body.code, user.id)
     await db.commit()
-    return {"message": "Joined organization", "org_id": member.org_id}
+    return DataResponse(data=JoinOrgResponse(message="Joined organization", org_id=member.org_id))

@@ -165,6 +165,18 @@ class UpdateSkillRequest(BaseModel):
     difficulty: str | None = None
     estimated_minutes: int | None = None
     tags: list[str] | None = None
+    sandbox_url: str | None = None
+
+    @field_validator("sandbox_url")
+    @classmethod
+    def validate_sandbox_url(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if not v.startswith("https://"):
+                raise ValueError("Sandbox URL must start with https://")
+            if len(v) > 500:
+                raise ValueError("Sandbox URL must be 500 characters or less")
+        return v
 
     @field_validator("difficulty")
     @classmethod
@@ -226,6 +238,7 @@ class SkillResponse(BaseModel):
     sort_order: int
     status: str
     published_at: datetime | None
+    sandbox_url: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -251,14 +264,14 @@ class CreateExerciseRequest(BaseModel):
     @field_validator("max_score")
     @classmethod
     def validate_max_score(cls, v: int) -> int:
-        if v < 0 or v > 10000:
-            raise ValueError("Max score must be between 0 and 10,000")
+        if v < 1 or v > 10000:
+            raise ValueError("Max score must be between 1 and 10,000")
         return v
 
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"multiple_choice", "text_answer", "code_submission"}
+        allowed = {"multiple_choice", "text_answer", "code_submission", "file_upload"}
         if v not in allowed:
             raise ValueError(f"Exercise type must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -304,6 +317,7 @@ class UpdateExerciseRequest(BaseModel):
     description: str | None = None
     config: dict | None = None
     max_score: int | None = None
+    sandbox_config: dict | None = None
 
     @field_validator("title")
     @classmethod
@@ -334,6 +348,13 @@ class UpdateExerciseRequest(BaseModel):
             raise ValueError("config is too large")
         return v
 
+    @field_validator("sandbox_config")
+    @classmethod
+    def validate_sandbox_config(cls, v: dict | None) -> dict | None:
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("sandbox_config is too large (max 20,000 chars)")
+        return v
+
 
 class ExerciseResponse(BaseModel):
     id: str
@@ -345,6 +366,7 @@ class ExerciseResponse(BaseModel):
     sort_order: int
     max_score: int
     status: str
+    sandbox_config: dict | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -424,6 +446,19 @@ class OverallProgressResponse(BaseModel):
     exercises_completed: int
     completion_percentage: float
     categories: list[dict]
+
+
+class SkillProgressSummaryResponse(BaseModel):
+    skill_id: str
+    skill_name: str
+    status: str
+    exercises_total: int
+    exercises_done: int
+
+
+class SkillTreeResponse(BaseModel):
+    skill: SkillResponse
+    prerequisites: list[SkillResponse]
 
 
 # ── Reorder ───────────────────────────────────────────────
