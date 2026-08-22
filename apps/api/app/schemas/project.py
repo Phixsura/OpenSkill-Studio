@@ -214,8 +214,23 @@ class UpdateProjectRequest(BaseModel):
     @field_validator("rubric")
     @classmethod
     def validate_rubric(cls, v: list[dict] | None) -> list[dict] | None:
-        if v is not None and len(v) == 0:
+        if v is None:
+            return v
+        if len(v) == 0:
             raise ValueError("Rubric must have at least one criterion")
+        if len(v) > 20:
+            raise ValueError("Rubric must have at most 20 criteria")
+        for item in v:
+            if not isinstance(item, dict):
+                raise ValueError("Each rubric item must be an object")
+            if "criterion" not in item or not isinstance(item["criterion"], str):
+                raise ValueError("Each rubric item must have a 'criterion' string")
+            if len(item["criterion"]) > 200:
+                raise ValueError("Criterion name must be 200 characters or less")
+            if "max_score" not in item or not isinstance(item["max_score"], int | float):
+                raise ValueError("Each rubric item must have a numeric 'max_score'")
+            if item["max_score"] <= 0:
+                raise ValueError("Rubric item max_score must be positive")
         return v
 
     @field_validator("max_score")

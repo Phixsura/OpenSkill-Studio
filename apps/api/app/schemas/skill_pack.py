@@ -113,6 +113,65 @@ class UpdateSkillPackRequest(BaseModel):
                 raise ValueError(f"Visibility must be one of: {', '.join(sorted(valid))}")
         return v
 
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 500:
+            raise ValueError("Summary must be 500 characters or less")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10000:
+            raise ValueError("Description must be 10000 characters or less")
+        return v
+
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str | None) -> str | None:
+        if v is not None:
+            valid = {"beginner", "intermediate", "advanced", "expert"}
+            if v not in valid:
+                raise ValueError(f"Difficulty must be one of: {', '.join(sorted(valid))}")
+        return v
+
+    @field_validator("estimated_minutes")
+    @classmethod
+    def validate_estimated_minutes(cls, v: int | None) -> int | None:
+        if v is not None and (v < 0 or v > 9999):
+            raise ValueError("Estimated minutes must be between 0 and 9999")
+        return v
+
+    @field_validator("scenario_tags", "tool_tags", "capability_tags")
+    @classmethod
+    def validate_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            if len(v) > 50:
+                raise ValueError("Maximum 50 tags allowed")
+            for tag in v:
+                if len(tag) > 100:
+                    raise ValueError("Each tag must be 100 characters or less")
+        return v
+
+    @field_validator("learning_outcomes")
+    @classmethod
+    def validate_learning_outcomes(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            if len(v) > 20:
+                raise ValueError("Maximum 20 learning outcomes allowed")
+            for outcome in v:
+                if len(outcome) > 500:
+                    raise ValueError("Each learning outcome must be 500 characters or less")
+        return v
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10:
+            raise ValueError("Language code must be 10 characters or less")
+        return v
+
 
 class RejectPackRequest(BaseModel):
     reason: str | None = None
@@ -198,9 +257,15 @@ class PublishReleaseRequest(BaseModel):
     @field_validator("version")
     @classmethod
     def validate_version(cls, v: str) -> str:
+        import re
+
         v = v.strip()
+        if not v:
+            raise ValueError("Version is required")
         if len(v) > 50:
             raise ValueError("Version must be 50 characters or less")
+        if not re.match(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$", v):
+            raise ValueError("Version must be in semver format X.Y.Z or X.Y.Z-prerelease")
         return v
 
 

@@ -37,7 +37,7 @@ export default function CohortPathsPage() {
     queryKey: ["org-paths-published", orgId],
     queryFn: () =>
       apiWithAuth<{ data: OrgPath[]; meta: { total: number } }>(
-        `/orgs/${orgId}/paths?status=published`,
+        `/orgs/${orgId}/paths?per_page=100`,
       ),
   });
 

@@ -255,6 +255,7 @@ export default function PackDetailPage() {
         queryKey: ["pack-releases", orgId, packId],
       });
       queryClient.invalidateQueries({ queryKey: ["pack", orgId, packId] });
+      queryClient.invalidateQueries({ queryKey: ["packs", orgId] });
       setReleaseVersion("");
       setReleaseChangelog("");
       toast.success("Release published");

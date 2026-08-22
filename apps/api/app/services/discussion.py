@@ -133,10 +133,13 @@ class DiscussionService:
         self,
         comment_id: str,
         user_id: str,
+        pack_id: str | None = None,
     ) -> None:
         comment = await self.db.get(PackDiscussion, comment_id)
         if comment is None:
             raise AppError("COMMENT_NOT_FOUND", "Comment not found", 404)
+        if pack_id and comment.pack_id != pack_id:
+            raise AppError("COMMENT_NOT_FOUND", "Comment not found in this pack", 404)
         if comment.user_id != user_id:
             raise AppError("NOT_AUTHOR", "Only the author can delete their comment", 403)
         await self.db.delete(comment)

@@ -90,5 +90,5 @@ async def delete_comment(
     db: AsyncSession = Depends(get_db),
 ):
     svc = DiscussionService(db)
-    await svc.delete_comment(comment_id, user.id)
+    await svc.delete_comment(comment_id, user.id, pack_id)
     await db.commit()
