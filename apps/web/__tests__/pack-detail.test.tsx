@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ orgId: "org-1", packId: "pack-1" }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 vi.mock("sonner", () => ({
