@@ -61,6 +61,8 @@ export default function ReviewDetailPage() {
         `/orgs/${orgId}/projects/${sub.project_id}/submissions/${submissionId}`,
       );
     },
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
   });
 
   const sub = data?.data;

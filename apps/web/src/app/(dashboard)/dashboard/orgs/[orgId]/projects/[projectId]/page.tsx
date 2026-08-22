@@ -99,7 +99,7 @@ export default function ProjectDetailPage() {
   // For workflow status: pull the full items of MY latest submission so each
   // stage can show completion state + the latest submitted asset. Instructors
   // see everyone's rows in subsData, so filter to own first.
-  const mySubs = (subsData?.data ?? []).filter((s) => !myId || s.user_id === myId);
+  const mySubs = (subsData?.data ?? []).filter((s) => myId != null && s.user_id === myId);
   const latestSubId = mySubs[0]?.id;
   const { data: latestSubDetail } = useQuery({
     queryKey: ["latest-sub-items", projectId, latestSubId],

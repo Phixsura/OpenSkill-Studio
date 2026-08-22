@@ -254,12 +254,27 @@ export default function PackDetailPage() {
       queryClient.invalidateQueries({
         queryKey: ["pack-releases", orgId, packId],
       });
+      queryClient.invalidateQueries({ queryKey: ["pack", orgId, packId] });
       setReleaseVersion("");
       setReleaseChangelog("");
       toast.success("Release published");
     },
     onError: (err: Error) =>
       toast.error(err.message || "Failed to publish release"),
+  });
+
+  const archivePackMutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/orgs/${orgId}/packs/${packId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pack", orgId, packId] });
+      queryClient.invalidateQueries({ queryKey: ["packs", orgId] });
+      toast.success("Pack archived");
+    },
+    onError: (err: Error) =>
+      toast.error(err.message || "Failed to archive pack"),
   });
 
   /* ---- Loading / error states ---- */
@@ -336,10 +351,10 @@ export default function PackDetailPage() {
               className="text-red-600 hover:bg-red-50"
               onClick={() => {
                 if (confirm("Archive this pack? This cannot be undone.")) {
-                  updatePackMutation.mutate({ status: "archived" });
+                  archivePackMutation.mutate();
                 }
               }}
-              disabled={updatePackMutation.isPending}
+              disabled={archivePackMutation.isPending}
             >
               Archive
             </Button>

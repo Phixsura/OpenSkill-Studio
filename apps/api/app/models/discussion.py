@@ -22,7 +22,7 @@ class PackDiscussion(Base):
         String(26), ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False
     )
     user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id"), nullable=False
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     parent_id: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("pack_discussions.id", ondelete="CASCADE"), nullable=True

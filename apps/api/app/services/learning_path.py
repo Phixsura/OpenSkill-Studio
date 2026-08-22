@@ -332,7 +332,7 @@ class LearningPathService:
             if is_required:
                 all_prev_done = all_prev_done and is_done
 
-        pct = round(completed * 100 / total_required) if total_required > 0 else 100
+        pct = round(completed * 100 / total_required) if total_required > 0 else 0
 
         # Issue certificate on 100% completion
         certificate_number = None

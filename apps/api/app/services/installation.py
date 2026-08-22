@@ -154,8 +154,11 @@ class InstallationService:
             category_id = cat_id_map.get(cat_logical) if cat_logical else None
 
             if category_id is None and cat_logical:
-                # Category might not exist yet — skip prerequisite for now
-                continue
+                raise AppError(
+                    "CATEGORY_NOT_FOUND",
+                    f"Category '{cat_logical}' referenced by skill '{skill_def['name']}' not found in manifest",
+                    422,
+                )
 
             import secrets as _secrets
 
@@ -348,8 +351,11 @@ class InstallationService:
         if new_release is None:
             raise AppError("RELEASE_NOT_FOUND", f"Version {target_version} not found", 404)
 
-        old_m = old_release.manifest
-        new_m = new_release.manifest
+        old_m = old_release.manifest if old_release and old_release.manifest else {}
+        new_m = new_release.manifest if new_release.manifest else {}
+
+        if not old_m and not new_m:
+            return {"added": [], "changed": [], "removed": [], "conflicts": []}
 
         old_skills = {s["logical_id"]: s for s in old_m.get("skills", [])}
         new_skills = {s["logical_id"]: s for s in new_m.get("skills", [])}
@@ -653,7 +659,7 @@ class InstallationService:
                                 config=ex_def.get("config", {}),
                                 max_score=ex_def.get("max_score", 100),
                                 sort_order=ex_def.get("sort_order", 0),
-                                status=ContentStatus.DRAFT,
+                                status=ContentStatus.PUBLISHED,
                                 created_by=installed_by,
                                 origin_pack_id=pack_id,
                                 origin_component_id=ex_lid,

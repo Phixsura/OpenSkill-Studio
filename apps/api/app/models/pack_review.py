@@ -32,7 +32,7 @@ class PackReview(Base):
         String(26), ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False
     )
     user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id"), nullable=False
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     rating: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str | None] = mapped_column(String(200))

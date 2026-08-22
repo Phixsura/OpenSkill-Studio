@@ -20,6 +20,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # --- fix certificates unique constraint (was non-unique in b2c3d4e5f607) ---
+    op.drop_index("ix_certificates_user_path", table_name="certificates")
+    op.create_index("uq_certificates_user_path", "certificates", ["user_id", "path_id"], unique=True)
+
     # --- missing columns ---
     op.add_column("skill_packs", sa.Column("quality_score", sa.Integer(), nullable=True))
     op.add_column("skill_packs", sa.Column("sharing_enabled", sa.Boolean(), nullable=False, server_default="false"))
@@ -116,3 +120,6 @@ def downgrade() -> None:
     op.drop_column("skills", "sandbox_url")
     op.drop_column("skill_packs", "sharing_enabled")
     op.drop_column("skill_packs", "quality_score")
+    # --- revert certificates unique constraint fix ---
+    op.drop_index("uq_certificates_user_path", table_name="certificates")
+    op.create_index("ix_certificates_user_path", "certificates", ["user_id", "path_id"])

@@ -411,7 +411,7 @@ async def test_path_progress_empty_path(c):
     r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
     assert r.status_code == 200
     data = r.json()["data"]
-    assert data["pct"] == 100
+    assert data["pct"] == 0
     assert data["total_required"] == 0
 
 
@@ -428,7 +428,7 @@ async def test_path_progress_section_only(c):
     }, headers=h)
     r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
     assert r.status_code == 200
-    assert r.json()["data"]["pct"] == 100
+    assert r.json()["data"]["pct"] == 0
 
 
 @pytest.mark.asyncio

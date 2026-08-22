@@ -120,6 +120,16 @@ class PackReviewService:
         if body is not None:
             review.body = body
 
+        # Low ratings require a substantive body so authors get actionable feedback
+        effective_rating = review.rating
+        effective_body = review.body
+        if effective_rating <= 2 and (effective_body is None or len(effective_body) < 20):
+            raise AppError(
+                "LOW_RATING_NEEDS_BODY",
+                "Reviews rated 2 or below need a body of at least 20 characters",
+                422,
+            )
+
         await self.db.flush()
 
         if rating is not None:

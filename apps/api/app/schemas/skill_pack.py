@@ -53,6 +53,33 @@ class CreateSkillPackRequest(BaseModel):
                 raise ValueError(f"Difficulty must be one of: {', '.join(sorted(valid))}")
         return v
 
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10000:
+            raise ValueError("Description must be 10000 characters or less")
+        return v
+
+    @field_validator("scenario_tags", "tool_tags", "capability_tags")
+    @classmethod
+    def validate_tags(cls, v: list[str]) -> list[str]:
+        if len(v) > 50:
+            raise ValueError("Maximum 50 tags allowed")
+        for tag in v:
+            if len(tag) > 100:
+                raise ValueError("Each tag must be 100 characters or less")
+        return v
+
+    @field_validator("learning_outcomes")
+    @classmethod
+    def validate_learning_outcomes(cls, v: list[str]) -> list[str]:
+        if len(v) > 20:
+            raise ValueError("Maximum 20 learning outcomes allowed")
+        for outcome in v:
+            if len(outcome) > 500:
+                raise ValueError("Each learning outcome must be 500 characters or less")
+        return v
+
 
 class UpdateSkillPackRequest(BaseModel):
     name: str | None = None

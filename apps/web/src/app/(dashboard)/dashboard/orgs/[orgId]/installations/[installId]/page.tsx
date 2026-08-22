@@ -171,13 +171,16 @@ export default function InstallationDetailPage() {
 
       {diff && (
         <div className="space-y-4">
-          {diff.added.length > 0 && (
+          {(!diff.added?.length && !diff.changed?.length && !diff.removed?.length && !diff.conflicts?.length) && (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">No changes</p>
+          )}
+          {(diff.added?.length ?? 0) > 0 && (
             <div>
               <h3 className="mb-2 text-sm font-semibold text-green-700 dark:text-green-300">
                 Added ({diff.added.length})
               </h3>
               <div className="space-y-1">
-                {diff.added.map((item) => (
+                {(diff.added ?? []).map((item) => (
                   <div
                     key={item.logical_id}
                     className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-950"
@@ -190,13 +193,13 @@ export default function InstallationDetailPage() {
             </div>
           )}
 
-          {diff.changed.length > 0 && (
+          {(diff.changed?.length ?? 0) > 0 && (
             <div>
               <h3 className="mb-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
                 Changed ({diff.changed.length})
               </h3>
               <div className="space-y-1">
-                {diff.changed.map((item) => (
+                {(diff.changed ?? []).map((item) => (
                   <div
                     key={item.logical_id}
                     className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-800 dark:bg-blue-950"
@@ -209,13 +212,13 @@ export default function InstallationDetailPage() {
             </div>
           )}
 
-          {diff.removed.length > 0 && (
+          {(diff.removed?.length ?? 0) > 0 && (
             <div>
               <h3 className="mb-2 text-sm font-semibold text-red-700 dark:text-red-300">
                 Removed ({diff.removed.length})
               </h3>
               <div className="space-y-1">
-                {diff.removed.map((item) => (
+                {(diff.removed ?? []).map((item) => (
                   <div
                     key={item.logical_id}
                     className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm dark:border-red-800 dark:bg-red-950"
@@ -228,13 +231,13 @@ export default function InstallationDetailPage() {
             </div>
           )}
 
-          {diff.conflicts.length > 0 && (
+          {(diff.conflicts?.length ?? 0) > 0 && (
             <div>
               <h3 className="mb-2 text-sm font-semibold text-yellow-700 dark:text-yellow-300">
                 Conflicts ({diff.conflicts.length})
               </h3>
               <div className="space-y-1">
-                {diff.conflicts.map((item) => (
+                {(diff.conflicts ?? []).map((item) => (
                   <div
                     key={item.logical_id}
                     className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm dark:border-yellow-800 dark:bg-yellow-950"

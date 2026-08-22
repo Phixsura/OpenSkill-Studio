@@ -98,6 +98,16 @@ class NotificationService:
 
     # ── Preferences ──
 
+    _DEFAULT_PREFERENCES: dict = {
+        "pack.installed": True,
+        "pack.updated": True,
+        "pack.approved": True,
+        "pack.rejected": True,
+        "submission.reviewed": True,
+        "cohort.status_changed": True,
+        "project.deadline_approaching": True,
+    }
+
     async def get_preferences(self, user_id: str) -> dict:
         result = await self.db.execute(
             select(UserNotificationPreference).where(
@@ -105,7 +115,10 @@ class NotificationService:
             )
         )
         pref = result.scalar_one_or_none()
-        return pref.preferences if pref else {}
+        if pref is None:
+            return dict(self._DEFAULT_PREFERENCES)
+        # Merge: stored prefs override defaults, but defaults fill any gaps
+        return {**self._DEFAULT_PREFERENCES, **pref.preferences}
 
     async def update_preferences(self, user_id: str, preferences: dict) -> dict:
         result = await self.db.execute(

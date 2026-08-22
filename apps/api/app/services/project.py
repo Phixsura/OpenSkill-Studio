@@ -861,13 +861,22 @@ class ProjectService:
         # Upload to S3
         from app.core.storage import get_s3_client
 
-        async for client in get_s3_client():
-            await client.put_object(
-                Bucket=settings.s3_bucket,
-                Key=file_key,
-                Body=file_content,
-                ContentType=content_type,
-            )
+        try:
+            async for client in get_s3_client():
+                await client.put_object(
+                    Bucket=settings.s3_bucket,
+                    Key=file_key,
+                    Body=file_content,
+                    ContentType=content_type,
+                )
+        except AppError:
+            raise
+        except Exception as exc:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError):
+                raise AppError("STORAGE_ERROR", "Failed to upload file. Please try again.", 500) from exc
+            raise
 
         # Auto-extract generation metadata from AI-tool PNGs (A1111/ComfyUI).
         # Stored as JSON in the item's content column (NULL otherwise).
@@ -1495,13 +1504,22 @@ class ProjectService:
 
         from app.core.storage import get_s3_client
 
-        async for client in get_s3_client():
-            await client.put_object(
-                Bucket=settings.s3_bucket,
-                Key=file_key,
-                Body=file_content,
-                ContentType=content_type,
-            )
+        try:
+            async for client in get_s3_client():
+                await client.put_object(
+                    Bucket=settings.s3_bucket,
+                    Key=file_key,
+                    Body=file_content,
+                    ContentType=content_type,
+                )
+        except AppError:
+            raise
+        except Exception as exc:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError):
+                raise AppError("STORAGE_ERROR", "Failed to upload file. Please try again.", 500) from exc
+            raise
 
         asset = ProjectAsset(
             org_id=org_id,
