@@ -90,11 +90,11 @@ class SkillService:
             status=ContentStatus.PUBLISHED,
             created_by=created_by,
         )
-        self.db.add(cat)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(cat)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             cat.slug = f"{cat.slug}-{secrets.token_hex(3)}"
             self.db.add(cat)
             await self.db.flush()
@@ -170,11 +170,11 @@ class SkillService:
             tags=tags or [],
             created_by=created_by,
         )
-        self.db.add(skill)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(skill)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             # Slug collision — append random suffix and retry
             skill.slug = f"{skill.slug}-{secrets.token_hex(3)}"
             self.db.add(skill)
@@ -754,7 +754,19 @@ class SkillService:
                 skill_id=skill_id,
                 user_id=user_id,
             )
-            self.db.add(progress)
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(progress)
+                    await self.db.flush()
+            except IntegrityError:
+                # Concurrent insert — re-fetch the existing row
+                result2 = await self.db.execute(
+                    select(SkillProgress).where(
+                        SkillProgress.skill_id == skill_id,
+                        SkillProgress.user_id == user_id,
+                    )
+                )
+                progress = result2.scalar_one()
 
         progress.exercises_total = total
         progress.exercises_done = done

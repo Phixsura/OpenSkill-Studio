@@ -43,6 +43,10 @@ class PackSharingService:
         if target_org is None or target_org.status == OrgStatus.ARCHIVED:
             raise AppError("TARGET_ORG_NOT_FOUND", "Target organization not found", 404)
 
+        # Lock parent row to serialize concurrent share additions
+        await self.db.execute(
+            select(SkillPack).where(SkillPack.id == pack_id).with_for_update()
+        )
         # Check share limit
         existing_count_r = await self.db.execute(
             select(func.count()).where(PackShare.pack_id == pack_id)
@@ -60,13 +64,11 @@ class PackSharingService:
             target_org_id=target_org_id,
             shared_by=user_id,
         )
-        self.db.add(share)
-
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(share)
+                await self.db.flush()
         except IntegrityError:
-            # Use savepoint rollback — don't roll back the whole session
-            await self.db.rollback()
             raise AppError(
                 "ALREADY_SHARED", "Pack is already shared with this organization", 409
             ) from None

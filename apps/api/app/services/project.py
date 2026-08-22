@@ -330,11 +330,11 @@ class ProjectService:
             max_submissions=max_submissions,
             created_by=created_by,
         )
-        self.db.add(project)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(project)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             project.slug = f"{project.slug}-{secrets.token_hex(3)}"
             self.db.add(project)
             await self.db.flush()
@@ -779,6 +779,16 @@ class ProjectService:
         whitelist = MEDIA_MIME_WHITELIST.get(deliverable.type)
         config = deliverable.config or {}
 
+        # FILE type has no whitelist — deny known-dangerous MIME types
+        # that could enable stored XSS via inline rendering
+        if whitelist is None:
+            dangerous_mimes = {
+                "text/html", "text/xml", "application/xhtml+xml",
+                "image/svg+xml", "application/javascript", "text/javascript",
+            }
+            if content_type.lower() in dangerous_mimes:
+                raise UnsupportedMediaTypeError(content_type)
+
         if whitelist is not None:
             allowed = whitelist
             # Instructor-configured accepted_formats can only NARROW the safe set
@@ -937,11 +947,14 @@ class ProjectService:
         from app.core.storage import get_s3_client
 
         params: dict = {"Bucket": settings.s3_bucket, "Key": item.file_key}
-        # Pin content type from DB (never trust stored object metadata) and
-        # force inline disposition so media previews render in-browser.
+        # Pin content type from DB (never trust stored object metadata).
+        # Use inline disposition only for safe media types; attachment for
+        # everything else to prevent stored XSS via HTML/SVG served inline.
         if item.mime_type:
             params["ResponseContentType"] = item.mime_type
-            params["ResponseContentDisposition"] = "inline"
+            _safe_prefixes = ("image/", "video/", "audio/")
+            is_safe = item.mime_type.startswith(_safe_prefixes) or item.mime_type == "application/pdf"
+            params["ResponseContentDisposition"] = "inline" if is_safe else "attachment"
 
         async for client in get_s3_client():
             url = await client.generate_presigned_url(

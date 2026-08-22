@@ -263,16 +263,17 @@ class OrgService:
         member = await self._get_active_member(org_id, user_id)
         old_role = member.role
 
-        # Prevent removing the last owner
+        # Prevent removing the last owner — lock owner rows to serialize
+        # concurrent demotions and prevent TOCTOU race to zero owners
         if old_role == OrgRole.OWNER and new_role != OrgRole.OWNER:
-            owner_count_result = await self.db.execute(
-                select(func.count(OrgMember.id)).where(
+            owner_result = await self.db.execute(
+                select(OrgMember.id).where(
                     OrgMember.org_id == org_id,
                     OrgMember.role == OrgRole.OWNER,
                     OrgMember.status == MemberStatus.ACTIVE,
-                )
+                ).with_for_update()
             )
-            if owner_count_result.scalar_one() <= 1:
+            if len(owner_result.all()) <= 1:
                 raise AppError("LAST_OWNER", "Cannot demote the last owner", 400)
 
         member.role = new_role

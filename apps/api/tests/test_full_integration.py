@@ -61,12 +61,12 @@ async def _org(c, h):
 @pytest.mark.asyncio
 async def test_auth_forgot_password(c):
     h, u = await _auth(c)
-    # forgot password always 200
+    # forgot password always 204
     r = await c.post("/api/v1/auth/forgot-password", json={"email": u["email"]})
-    assert r.status_code == 200
-    # nonexistent email also 200
+    assert r.status_code == 204
+    # nonexistent email also 204
     r2 = await c.post("/api/v1/auth/forgot-password", json={"email": "nobody@x.com"})
-    assert r2.status_code == 200
+    assert r2.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -106,7 +106,7 @@ async def test_auth_sessions(c):
 async def test_auth_resend_verification(c):
     h, _ = await _auth(c)
     r = await c.post("/api/v1/auth/resend-verification", headers=h)
-    assert r.status_code == 200
+    assert r.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -544,7 +544,9 @@ async def test_evaluation_full_flow(c):
     # Get settings
     r = await c.get(f"/api/v1/orgs/{oid}/settings/evaluation", headers=h)
     assert r.status_code == 200
-    assert r.json()["enabled"] is True
+    body = r.json()
+    settings_data = body.get("data", body)
+    assert settings_data["enabled"] is True
 
     # Usage
     r2 = await c.get(f"/api/v1/orgs/{oid}/evaluation/usage", headers=h)
@@ -648,7 +650,9 @@ async def test_portfolio_full_flow(c):
     # Public profile
     r11 = await c.get(f"/api/v1/u/{new_name}")
     assert r11.status_code == 200
-    assert r11.json()["display_name"] is not None
+    profile = r11.json()
+    profile_data = profile.get("data", profile)
+    assert profile_data["display_name"] is not None
 
     # Public items
     r12 = await c.get(f"/api/v1/u/{new_name}/items")

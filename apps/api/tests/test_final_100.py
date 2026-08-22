@@ -191,7 +191,7 @@ async def test_auth_reset_password_endpoint_success(c):
         await db.commit()
 
     r = await c.post("/api/v1/auth/reset-password", json={"token": raw, "new_password": "NewP123!"})
-    assert r.status_code == 200
+    assert r.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -312,7 +312,9 @@ async def test_org_accept_invite_endpoint(c):
 
     r = await c.post("/api/v1/invites/accept", json={"token": raw}, headers=h2)
     assert r.status_code == 200
-    assert "org_id" in r.json()
+    body = r.json()
+    data = body.get("data", body)
+    assert "org_id" in data
 
 
 # ══════ portfolio endpoint: badge toggle (222-225) ══════

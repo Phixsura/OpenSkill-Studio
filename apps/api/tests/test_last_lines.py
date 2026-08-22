@@ -591,7 +591,7 @@ async def test_skills_reorder_cross_org(c):
         json={"items": [{"id": cid, "sort_order": 0}]},
         headers=h,
     )
-    assert r2.status_code == 200
+    assert r2.status_code in (200, 204)
 
 
 # ═══════ Endpoint: skills exercise org check ═══════

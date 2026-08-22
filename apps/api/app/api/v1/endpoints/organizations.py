@@ -42,11 +42,13 @@ class ToggleInviteLinkRequest(BaseModel):
 # ── Helpers ───────────────────────────────────────────────
 
 
-def _link_response(link, base_url: str = "http://localhost:3000") -> InviteLinkResponse:
+def _link_response(link) -> InviteLinkResponse:
+    from app.config import settings
+
     return InviteLinkResponse(
         id=link.id,
         code=link.code,
-        url=f"{base_url}/join/{link.code}",
+        url=f"{settings.frontend_url}/join/{link.code}",
         role=link.role.value,
         max_uses=link.max_uses,
         use_count=link.use_count,

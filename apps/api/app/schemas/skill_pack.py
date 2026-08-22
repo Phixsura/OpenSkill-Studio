@@ -95,6 +95,13 @@ class CreateSkillPackRequest(BaseModel):
             raise ValueError("Language code must be 10 characters or less")
         return v
 
+    @field_validator("provenance")
+    @classmethod
+    def validate_provenance_size(cls, v: dict | None) -> dict | None:
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("Provenance data too large (max 20,000 chars)")
+        return v
+
 
 class UpdateSkillPackRequest(BaseModel):
     name: str | None = None
@@ -188,6 +195,13 @@ class UpdateSkillPackRequest(BaseModel):
             raise ValueError("Language code must be 10 characters or less")
         return v
 
+    @field_validator("provenance")
+    @classmethod
+    def validate_provenance_size(cls, v: dict | None) -> dict | None:
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("Provenance data too large (max 20,000 chars)")
+        return v
+
 
 class RejectPackRequest(BaseModel):
     reason: str | None = None
@@ -239,10 +253,24 @@ class AddSkillToPackRequest(BaseModel):
     skill_id: str
     sort_order: int = 0
 
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v: int) -> int:
+        if v < 0 or v > 100000:
+            raise ValueError("sort_order must be between 0 and 100,000")
+        return v
+
 
 class AddTemplateToPackRequest(BaseModel):
     template_id: str
     sort_order: int = 0
+
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort_order(cls, v: int) -> int:
+        if v < 0 or v > 100000:
+            raise ValueError("sort_order must be between 0 and 100,000")
+        return v
 
 
 class PackSkillResponse(BaseModel):

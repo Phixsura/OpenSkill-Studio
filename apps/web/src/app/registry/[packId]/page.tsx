@@ -327,9 +327,9 @@ function ReviewsSection({ packId, isAuthed }: { packId: string; isAuthed: boolea
 }
 
 function CurriculumSection({ preview }: { preview: PackPreview }) {
-  const [expandedSkills, setExpandedSkills] = useState<Set<number>>(new Set());
+  const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set());
 
-  const toggleSkill = (index: number) => {
+  const toggleSkill = (index: string) => {
     setExpandedSkills((prev) => {
       const next = new Set(prev);
       if (next.has(index)) {
@@ -342,7 +342,7 @@ function CurriculumSection({ preview }: { preview: PackPreview }) {
   };
 
   const expandAll = () => {
-    setExpandedSkills(new Set(preview.skills.map((_, i) => i)));
+    setExpandedSkills(new Set(preview.skills.map((s) => s.name)));
   };
 
   const collapseAll = () => {
@@ -378,13 +378,13 @@ function CurriculumSection({ preview }: { preview: PackPreview }) {
         {preview.total_exercises} {preview.total_exercises === 1 ? "exercise" : "exercises"}
       </p>
       <div className="mt-3 space-y-2" role="list">
-        {preview.skills.map((skill, i) => {
-          const isExpanded = expandedSkills.has(i);
+        {preview.skills.map((skill) => {
+          const isExpanded = expandedSkills.has(skill.name);
           return (
-            <div key={i} className="rounded-lg border">
+            <div key={skill.name} className="rounded-lg border">
               <button
                 type="button"
-                onClick={() => toggleSkill(i)}
+                onClick={() => toggleSkill(skill.name)}
                 className="flex w-full items-center justify-between p-3 text-left hover:bg-[hsl(var(--secondary)/0.5)] transition-colors"
                 aria-expanded={isExpanded}
               >
@@ -417,8 +417,8 @@ function CurriculumSection({ preview }: { preview: PackPreview }) {
                   )}
                   {skill.exercises.length > 0 && (
                     <ul className="mt-2 space-y-1">
-                      {skill.exercises.map((ex, j) => (
-                        <li key={j} className="flex items-start gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+                      {skill.exercises.map((ex) => (
+                        <li key={ex.title} className="flex items-start gap-2 text-sm text-[hsl(var(--muted-foreground))]">
                           <span className="mt-0.5 text-xs">&#9679;</span>
                           {ex.title}
                         </li>
@@ -576,8 +576,8 @@ export default function RegistryPackDetailPage() {
             <div>
               <h2 className="text-xl font-semibold">What you&apos;ll learn</h2>
               <ul className="mt-2 space-y-1">
-                {pack.learning_outcomes.map((outcome, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm">
+                {pack.learning_outcomes.map((outcome) => (
+                  <li key={outcome} className="flex items-start gap-2 text-sm">
                     <span className="mt-0.5 text-green-500">&#10003;</span>
                     {outcome}
                   </li>
@@ -597,8 +597,8 @@ export default function RegistryPackDetailPage() {
                 {preview.total_templates} project {preview.total_templates === 1 ? "template" : "templates"}
               </p>
               <div className="mt-3 space-y-2" role="list">
-                {preview.templates.map((tmpl, i) => (
-                  <div key={i} className="rounded-lg border p-3">
+                {preview.templates.map((tmpl) => (
+                  <div key={tmpl.name} className="rounded-lg border p-3">
                     <div className="flex items-center justify-between">
                       <span className="font-medium">{tmpl.name}</span>
                       <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">

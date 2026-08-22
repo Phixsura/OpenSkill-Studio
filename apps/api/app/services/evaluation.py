@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.llm import calculate_cost, create_llm_client
@@ -786,7 +787,9 @@ Please evaluate the submission against the rubric above."""
         }
 
     async def _update_monthly_usage(self, task: EvaluationTask) -> None:
-        """Upsert monthly usage stats."""
+        """Upsert monthly usage stats with atomic SQL to prevent lost updates."""
+        from sqlalchemy import update as sa_update
+
         current_month = date.today().replace(day=1)
         result = await self.db.execute(
             select(EvalUsageMonthly).where(
@@ -800,17 +803,33 @@ Please evaluate the submission against the rubric above."""
             usage = EvalUsageMonthly(
                 org_id=task.org_id,
                 month=current_month,
-                total_tasks=0,
-                total_input_tokens=0,
-                total_output_tokens=0,
-                total_cost_usd=Decimal("0"),
+                total_tasks=1,
+                total_input_tokens=task.input_tokens or 0,
+                total_output_tokens=task.output_tokens or 0,
+                total_cost_usd=task.cost_usd or Decimal("0"),
             )
-            self.db.add(usage)
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(usage)
+                    await self.db.flush()
+            except IntegrityError:
+                # Concurrent insert — fall through to atomic UPDATE
+                pass
+            else:
+                return
 
-        usage.total_tasks = (usage.total_tasks or 0) + 1
-        usage.total_input_tokens = (usage.total_input_tokens or 0) + (task.input_tokens or 0)
-        usage.total_output_tokens = (usage.total_output_tokens or 0) + (task.output_tokens or 0)
-        usage.total_cost_usd = (usage.total_cost_usd or Decimal("0")) + (
-            task.cost_usd or Decimal("0")
+        # Atomic SQL update — values computed DB-side, not from stale Python state
+        await self.db.execute(
+            sa_update(EvalUsageMonthly)
+            .where(
+                EvalUsageMonthly.org_id == task.org_id,
+                EvalUsageMonthly.month == current_month,
+            )
+            .values(
+                total_tasks=EvalUsageMonthly.total_tasks + 1,
+                total_input_tokens=EvalUsageMonthly.total_input_tokens + (task.input_tokens or 0),
+                total_output_tokens=EvalUsageMonthly.total_output_tokens + (task.output_tokens or 0),
+                total_cost_usd=EvalUsageMonthly.total_cost_usd + (task.cost_usd or Decimal("0")),
+            )
         )
         await self.db.flush()

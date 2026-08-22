@@ -39,6 +39,13 @@ class CreateClientBriefRequest(BaseModel):
             raise ValueError("Client name must be 1-200 characters")
         return v
 
+    @field_validator("client_industry")
+    @classmethod
+    def validate_client_industry(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100:
+            raise ValueError("Client industry must be 100 characters or less")
+        return v
+
     @field_validator("project_type")
     @classmethod
     def validate_project_type(cls, v: str) -> str:

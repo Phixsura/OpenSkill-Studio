@@ -122,7 +122,7 @@ async def test_auth_refresh_token_not_found():
 
 @pytest.mark.asyncio
 async def test_auth_refresh_token_reuse():
-    from app.services.auth import AuthService, TokenReuseError
+    from app.services.auth import AuthService, TokenInvalidError
 
     db = _mock_db()
     token_record = MagicMock()
@@ -135,7 +135,7 @@ async def test_auth_refresh_token_reuse():
     with patch(
         "app.services.auth.decode_token", return_value={"type": "refresh", "sub": "x", "jti": "y"}
     ):
-        with pytest.raises(TokenReuseError):
+        with pytest.raises(TokenInvalidError):
             await svc.refresh_tokens("fake-token")
 
 
@@ -428,14 +428,33 @@ async def test_submit_not_draft():
 
 @pytest.mark.asyncio
 async def test_max_submissions_reached():
+    from app.models.skill import ContentStatus
     from app.services.project import MaxSubmissionsReachedError, ProjectService
 
     db = _mock_db()
     project = MagicMock()
     project.max_submissions = 2
+    project.status = ContentStatus.PUBLISHED
+    project.org_id = "org1"
 
-    db.get = AsyncMock(return_value=project)
-    db.execute = AsyncMock(return_value=_mock_result(value=2))
+    # The first db.execute call returns the project (SELECT ... FOR UPDATE),
+    # subsequent calls return None (no cohort/creator assignments) or count=2.
+    call_count = 0
+
+    async def _mock_execute(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # Project query
+            return _mock_result(value=project)
+        elif call_count <= 3:
+            # Cohort/creator assignment checks — no assignments
+            return _mock_result(value=None)
+        else:
+            # Submission count
+            return _mock_result(value=2)
+
+    db.execute = _mock_execute
 
     svc = ProjectService(db)
     with pytest.raises(MaxSubmissionsReachedError):

@@ -81,7 +81,7 @@ class CreateProjectRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str) -> str:
-        allowed = {"beginner", "intermediate", "advanced"}
+        allowed = {"beginner", "intermediate", "advanced", "expert"}
         if v not in allowed:
             raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -194,7 +194,7 @@ class UpdateProjectRequest(BaseModel):
     @classmethod
     def validate_difficulty(cls, v: str | None) -> str | None:
         if v is not None:
-            allowed = {"beginner", "intermediate", "advanced"}
+            allowed = {"beginner", "intermediate", "advanced", "expert"}
             if v not in allowed:
                 raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -653,7 +653,7 @@ class CreateTemplateRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str) -> str:
-        allowed = {"beginner", "intermediate", "advanced"}
+        allowed = {"beginner", "intermediate", "advanced", "expert"}
         if v not in allowed:
             raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -719,7 +719,7 @@ class UpdateTemplateRequest(BaseModel):
         # Same whitelist as UpdateProjectRequest — the service converts to
         # DifficultyLevel directly, so an unknown value would 500.
         if v is not None:
-            allowed = {"beginner", "intermediate", "advanced"}
+            allowed = {"beginner", "intermediate", "advanced", "expert"}
             if v not in allowed:
                 raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v

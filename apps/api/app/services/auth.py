@@ -304,7 +304,9 @@ class AuthService:
         """Validate reset token and set new password."""
         token_hash = sha256(raw_token.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+            select(PasswordResetToken)
+            .where(PasswordResetToken.token_hash == token_hash)
+            .with_for_update()
         )
         token_record = stmt_result.scalar_one_or_none()
 
@@ -337,7 +339,9 @@ class AuthService:
         """Validate verification token and mark email as verified."""
         token_hash = sha256(raw_token.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(EmailVerificationToken).where(EmailVerificationToken.token_hash == token_hash)
+            select(EmailVerificationToken)
+            .where(EmailVerificationToken.token_hash == token_hash)
+            .with_for_update()
         )
         token_record = stmt_result.scalar_one_or_none()
 

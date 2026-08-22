@@ -1,5 +1,7 @@
 """Pydantic schemas for the personal overview / dashboard landing."""
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -13,7 +15,7 @@ class DraftSummary(BaseModel):
 class ReviewReceived(BaseModel):
     review_id: str
     score: int | None
-    created_at: str
+    created_at: datetime
     project_id: str
     org_id: str
     submission_id: str

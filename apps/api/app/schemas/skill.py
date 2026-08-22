@@ -271,7 +271,7 @@ class CreateExerciseRequest(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"multiple_choice", "text_answer", "code_submission"}
+        allowed = {"multiple_choice", "text_answer", "code_submission", "file_upload"}
         if v not in allowed:
             raise ValueError(f"Exercise type must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -346,6 +346,13 @@ class UpdateExerciseRequest(BaseModel):
         # Same bound as create — update must not bypass it.
         if v is not None and len(str(v)) > 20000:
             raise ValueError("config is too large")
+        return v
+
+    @field_validator("sandbox_config")
+    @classmethod
+    def validate_sandbox_config(cls, v: dict | None) -> dict | None:
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("sandbox_config is too large (max 20,000 chars)")
         return v
 
 
