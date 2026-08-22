@@ -449,6 +449,13 @@ class ProjectService:
     async def delete_project(self, project_id: str) -> None:
         project = await self.get_project(project_id)
         project.status = ContentStatus.ARCHIVED
+
+        # Clean up learning path items referencing this project
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.learning_path import LearningPathItem
+
+        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.project_id == project_id))
         await self.db.flush()
 
     async def publish_project(self, project_id: str) -> Project:

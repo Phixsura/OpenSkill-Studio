@@ -149,6 +149,16 @@ class SkillPackService:
     async def delete_pack(self, pack_id: str, org_id: str) -> None:
         pack = await self.get_pack(pack_id, org_id)
         pack.status = PackStatus.ARCHIVED
+
+        # Clean up join-table references
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.pack_share import PackShare
+
+        await self.db.execute(sa_delete(SkillPackSkill).where(SkillPackSkill.pack_id == pack_id))
+        await self.db.execute(sa_delete(SkillPackTemplate).where(SkillPackTemplate.pack_id == pack_id))
+        await self.db.execute(sa_delete(PackShare).where(PackShare.pack_id == pack_id))
+
         await self.db.flush()
         from app.core.cache import cache_delete_pattern
         await cache_delete_pattern("registry:*")
@@ -157,6 +167,13 @@ class SkillPackService:
 
     async def add_skill(self, pack_id: str, skill_id: str, org_id: str, sort_order: int = 0) -> None:
         await self.get_pack(pack_id, org_id)  # validates existence + ownership
+
+        # Enforce skill count limit before insert
+        count_r = await self.db.execute(
+            select(func.count()).where(SkillPackSkill.pack_id == pack_id)
+        )
+        if count_r.scalar_one() >= MAX_SKILLS_PER_PACK:
+            raise AppError("PACK_TOO_LARGE", f"Maximum {MAX_SKILLS_PER_PACK} skills per pack", 422)
 
         skill = await self.db.get(Skill, skill_id)
         if skill is None or skill.org_id != org_id:

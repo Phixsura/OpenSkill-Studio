@@ -151,6 +151,8 @@ class InstallationService:
             cat_id_map[cat_def["logical_id"]] = cat.id
 
         # Create skills + exercises
+        # NOTE: Each skill flushes to get its ULID for exercise FKs — O(N) flushes.
+        # Future optimization: pre-generate ULIDs and single-flush.
         skill_id_map: dict[str, str] = {}  # logical_id -> new ULID
         for skill_def in manifest.get("skills", []):
             cat_logical = skill_def.get("category_logical_id")
@@ -834,5 +836,30 @@ class InstallationService:
                 )
                 .values(status=ContentStatus.ARCHIVED)
             )
+
+            # Clean up prerequisites between archived skills
+            from sqlalchemy import delete as sa_delete
+
+            archived_skill_ids_r = await self.db.execute(
+                select(Skill.id).where(
+                    Skill.origin_pack_id == inst.pack_id,
+                    Skill.org_id == inst.org_id,
+                    Skill.status == ContentStatus.ARCHIVED,
+                )
+            )
+            archived_ids = [r[0] for r in archived_skill_ids_r.all()]
+            if archived_ids:
+                from app.models.skill import SkillPrerequisite
+
+                await self.db.execute(
+                    sa_delete(SkillPrerequisite).where(
+                        SkillPrerequisite.skill_id.in_(archived_ids)
+                    )
+                )
+                await self.db.execute(
+                    sa_delete(SkillPrerequisite).where(
+                        SkillPrerequisite.prerequisite_id.in_(archived_ids)
+                    )
+                )
 
             await self.db.flush()

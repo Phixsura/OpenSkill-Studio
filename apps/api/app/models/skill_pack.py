@@ -105,7 +105,7 @@ class SkillPack(Base):
     # Provenance (author, license, attribution)
     provenance: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
 
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

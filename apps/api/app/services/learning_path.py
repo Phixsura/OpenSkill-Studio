@@ -81,6 +81,14 @@ class LearningPathService:
     async def delete_path(self, path_id: str, org_id: str) -> None:
         path = await self.get_path(path_id, org_id)
         path.status = ContentStatus.ARCHIVED
+
+        # Clean up path items and cohort assignments
+        from sqlalchemy import delete as sa_delete
+
+        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.path_id == path_id))
+        await self.db.execute(
+            sa_delete(CohortLearningPathAssignment).where(CohortLearningPathAssignment.path_id == path_id)
+        )
         await self.db.flush()
 
     # ── Items ──

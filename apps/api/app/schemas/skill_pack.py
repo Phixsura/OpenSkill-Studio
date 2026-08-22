@@ -63,6 +63,7 @@ class CreateSkillPackRequest(BaseModel):
     @field_validator("scenario_tags", "tool_tags", "capability_tags")
     @classmethod
     def validate_tags(cls, v: list[str]) -> list[str]:
+        v = [t.strip() for t in v if t.strip()]
         if len(v) > 50:
             raise ValueError("Maximum 50 tags allowed")
         for tag in v:
@@ -78,6 +79,13 @@ class CreateSkillPackRequest(BaseModel):
         for outcome in v:
             if len(outcome) > 500:
                 raise ValueError("Each learning outcome must be 500 characters or less")
+        return v
+
+    @field_validator("estimated_minutes")
+    @classmethod
+    def validate_estimated_minutes(cls, v: int | None) -> int | None:
+        if v is not None and (v < 0 or v > 9999):
+            raise ValueError("Estimated minutes must be between 0 and 9999")
         return v
 
     @field_validator("language")
@@ -154,6 +162,7 @@ class UpdateSkillPackRequest(BaseModel):
     @classmethod
     def validate_tags(cls, v: list[str] | None) -> list[str] | None:
         if v is not None:
+            v = [t.strip() for t in v if t.strip()]
             if len(v) > 50:
                 raise ValueError("Maximum 50 tags allowed")
             for tag in v:
@@ -280,6 +289,10 @@ class PublishReleaseRequest(BaseModel):
             raise ValueError("Version must be 50 characters or less")
         if not re.match(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$", v):
             raise ValueError("Version must be in semver format X.Y.Z or X.Y.Z-prerelease")
+        # Prevent integer overflow in _parse_semver
+        base = v.partition("-")[0]
+        if any(int(p) > 999 for p in base.split(".")):
+            raise ValueError("Version components must be 999 or less")
         return v
 
 

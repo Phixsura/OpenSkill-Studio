@@ -159,6 +159,17 @@ class CohortService:
         if cohort.status != CohortStatus.DRAFT:
             raise AppError("INVALID_STATE", "Only draft cohorts can be deleted", 422)
         cohort.status = CohortStatus.ARCHIVED
+
+        # Clean up all cohort assignment and membership rows
+        from sqlalchemy import delete as sa_delete
+
+        await self.db.execute(sa_delete(CohortMember).where(CohortMember.cohort_id == cohort_id))
+        await self.db.execute(sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.cohort_id == cohort_id))
+        await self.db.execute(sa_delete(CohortProjectAssignment).where(CohortProjectAssignment.cohort_id == cohort_id))
+
+        from app.models.learning_path import CohortLearningPathAssignment
+
+        await self.db.execute(sa_delete(CohortLearningPathAssignment).where(CohortLearningPathAssignment.cohort_id == cohort_id))
         await self.db.flush()
 
     # ── Members ──

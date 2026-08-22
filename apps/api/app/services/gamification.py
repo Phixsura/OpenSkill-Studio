@@ -1,7 +1,7 @@
 """Gamification service — points, levels, leaderboard."""
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import Float, cast, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,7 +84,7 @@ class GamificationService:
                     .where(UserPoints.user_id == user_id, UserPoints.org_id == org_id)
                     .values(
                         total_points=UserPoints.total_points + points,
-                        level=((UserPoints.total_points + points) / _LEVEL_STEP) + 1,
+                        level=func.floor(cast(UserPoints.total_points + points, Float) / _LEVEL_STEP) + 1,
                     )
                 )
                 await self.db.flush()
@@ -99,7 +99,7 @@ class GamificationService:
                 )
                 .values(
                     total_points=UserPoints.total_points + points,
-                    level=((UserPoints.total_points + points) / _LEVEL_STEP) + 1,
+                    level=func.floor(cast(UserPoints.total_points + points, Float) / _LEVEL_STEP) + 1,
                 )
             )
             await self.db.flush()

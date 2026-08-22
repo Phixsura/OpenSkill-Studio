@@ -1482,21 +1482,20 @@ async def test_installed_skills_survive_source_org_deletion(c):
 
 
 @pytest.mark.asyncio
-async def test_install_pack_from_archived_org_still_works(c):
-    """Pack from an archived org is still installable (org delete is soft-delete)."""
+async def test_install_pack_from_archived_org_blocked(c):
+    """Pack from an archived org is NOT installable — org deletion archives its packs."""
     h1, _ = await _auth(c)
     h2, _ = await _auth(c)
     oid_source = await _org(c, h1)
     oid_target = await _org(c, h2)
     pid = await _pack_with_release(c, h1, oid_source, "Archived Org Pack")
 
-    # Archive source org (soft-delete — pack rows are NOT cascade-deleted)
+    # Archive source org — this now archives all owned packs too
     await c.delete(f"/api/v1/orgs/{oid_source}", headers=h1)
 
-    # Pack is still in DB and still public+published, so install succeeds
+    # Pack is now archived, install should be rejected
     r = await c.post(f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2)
-    assert r.status_code == 201
-    assert r.json()["data"]["installed_version"] == "1.0.0"
+    assert r.status_code == 404
 
 
 @pytest.mark.asyncio

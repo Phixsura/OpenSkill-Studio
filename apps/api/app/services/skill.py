@@ -301,14 +301,21 @@ class SkillService:
         skill = await self.get_skill(skill_id)
         skill.status = ContentStatus.ARCHIVED
 
-        # Clean up pack references so archived skills don't block publish_release
+        # Clean up references so archived skills don't block other features
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.learning_path import LearningPathItem
         from app.models.skill_pack import SkillPackSkill
 
-        pack_skills_r = await self.db.execute(
-            select(SkillPackSkill).where(SkillPackSkill.skill_id == skill_id)
-        )
-        for ps in pack_skills_r.scalars().all():
-            await self.db.delete(ps)
+        await self.db.execute(sa_delete(SkillPackSkill).where(SkillPackSkill.skill_id == skill_id))
+        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.skill_id == skill_id))
+
+        # Clean up cohort and project skill assignments
+        from app.models.cohort import CohortSkillAssignment
+        from app.models.project import ProjectSkill
+
+        await self.db.execute(sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.skill_id == skill_id))
+        await self.db.execute(sa_delete(ProjectSkill).where(ProjectSkill.skill_id == skill_id))
 
         await self.db.flush()
 
@@ -705,6 +712,7 @@ class SkillService:
                 queue.append(row)
 
     async def _update_skill_progress(self, skill_id: str, user_id: str, org_id: str) -> None:
+        # TODO: Per-exercise attempt queries below are O(N) — batch-load in future
         exercises = await self.list_exercises(skill_id)
         total = len(exercises)
 

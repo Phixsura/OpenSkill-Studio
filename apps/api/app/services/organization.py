@@ -175,6 +175,18 @@ class OrgService:
             raise InsufficientOrgPermissionError()
 
         org.status = OrgStatus.ARCHIVED
+
+        # Archive all packs owned by this org so they're removed from registry
+        from sqlalchemy import update as sa_update
+
+        from app.models.skill_pack import PackStatus, SkillPack
+
+        await self.db.execute(
+            sa_update(SkillPack)
+            .where(SkillPack.owner_org_id == org_id, SkillPack.status != PackStatus.ARCHIVED)
+            .values(status=PackStatus.ARCHIVED)
+        )
+
         await self.db.flush()
         log.info("org_deleted", org_id=org_id, by=user_id)
 
