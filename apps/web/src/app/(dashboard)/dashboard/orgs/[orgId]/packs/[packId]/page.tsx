@@ -393,7 +393,7 @@ export default function PackDetailPage() {
                     type="button"
                     className="text-red-600 hover:text-red-800"
                     onClick={() => removeSkillMutation.mutate(ps.skill_id)}
-                    disabled={removeSkillMutation.isPending}
+                    disabled={removeSkillMutation.isPending && removeSkillMutation.variables === ps.skill_id}
                     aria-label={`Remove skill ${ps.skill_name}`}
                   >
                     &times;
@@ -458,7 +458,7 @@ export default function PackDetailPage() {
                     onClick={() =>
                       removeTemplateMutation.mutate(pt.template_id)
                     }
-                    disabled={removeTemplateMutation.isPending}
+                    disabled={removeTemplateMutation.isPending && removeTemplateMutation.variables === pt.template_id}
                     aria-label={`Remove template ${pt.template_name}`}
                   >
                     &times;

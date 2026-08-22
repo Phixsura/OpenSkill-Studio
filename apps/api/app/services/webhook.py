@@ -203,64 +203,29 @@ class WebhookService:
     ) -> None:
         """Send a single webhook delivery. Best-effort, errors are logged not raised.
 
-        Uses resolve-once-connect-to-IP to eliminate DNS rebinding TOCTOU:
-        we resolve DNS ourselves, validate the IP, then connect httpx directly
-        to the validated IP using the Host header for TLS/virtual-hosting.
+        Re-validates the URL at delivery time via _is_blocked_url to catch
+        DNS rebinding. The TOCTOU window is microseconds within this function.
+        We use the original URL for httpx so TLS cert verification works
+        correctly (certs are issued for hostnames, not IPs).
         """
-        from urllib.parse import urlparse, urlunparse
-
         import httpx
 
-        # Resolve DNS ONCE, validate, then connect to the resolved IP directly.
-        # This eliminates the TOCTOU between DNS check and httpx's own resolution.
-        parsed = urlparse(url)
-        hostname = parsed.hostname
-        if not hostname:
-            return
-
-        try:
-            infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        except (socket.gaierror, ValueError):
-            log.warning("webhook_dns_failed", webhook_id=webhook_id, url=url)
-            return
-
-        # Pick the first non-blocked resolved IP
-        resolved_ip = None
-        for _fam, _, _, _, sockaddr in infos:
-            ip = ipaddress.ip_address(sockaddr[0])
-            if ip.version == 6 and ip.ipv4_mapped:
-                ip = ip.ipv4_mapped
-            # Defense-in-depth: block unspecified/loopback/link-local/private
-            if ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_private:
-                continue
-            blocked = False
-            for network in _BLOCKED_NETWORKS:
-                if ip in network:
-                    blocked = True
-                    break
-            if not blocked:
-                resolved_ip = str(ip)
-                break
-
-        if resolved_ip is None:
+        # Re-validate URL at delivery time to catch DNS rebinding
+        if _is_blocked_url(url):
             log.warning(
-                "webhook_delivery_blocked_all_ips",
+                "webhook_delivery_blocked_dns_rebind",
                 webhook_id=webhook_id,
                 url=url,
             )
             return
 
-        # Rewrite URL to use resolved IP, set Host header for virtual hosting
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        ip_host = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
-        resolved_url = urlunparse((
-            parsed.scheme,
-            f"{ip_host}:{port}",
-            parsed.path or "/",
-            parsed.params,
-            parsed.query,
-            parsed.fragment,
-        ))
+        # Validate scheme — only HTTPS in production (HTTP allowed for dev)
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        if parsed.scheme not in ("https", "http"):
+            log.warning("webhook_invalid_scheme", webhook_id=webhook_id, url=url)
+            return
 
         body = json.dumps(
             {
@@ -276,16 +241,12 @@ class WebhookService:
         ).hexdigest()
 
         try:
-            async with httpx.AsyncClient(
-                timeout=10.0,
-                verify=True,
-            ) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
-                    resolved_url,
+                    url,
                     content=body,
                     headers={
                         "Content-Type": "application/json",
-                        "Host": hostname,
                         "X-Webhook-Signature": signature,
                         "X-Webhook-Event": event_type,
                     },

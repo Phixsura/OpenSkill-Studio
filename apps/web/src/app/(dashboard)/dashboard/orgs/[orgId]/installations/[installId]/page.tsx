@@ -12,6 +12,7 @@ interface InstallDetail {
   id: string;
   org_id: string;
   pack_id: string | null;
+  pack_name: string | null;
   release_id: string | null;
   installed_version: string;
   status: string;
@@ -48,6 +49,7 @@ export default function InstallationDetailPage() {
   const queryClient = useQueryClient();
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitting = useRef(false);
 
@@ -118,6 +120,26 @@ export default function InstallationDetailPage() {
     }
   };
 
+  const handleUpgrade = async () => {
+    if (!install?.latest_version || upgrading) return;
+    setUpgrading(true);
+    setError(null);
+    try {
+      await apiWithAuth(`/orgs/${orgId}/installations/${installId}/upgrade`, {
+        method: "POST",
+        body: JSON.stringify({ version: install.latest_version }),
+      });
+      toast.success(`Upgraded to v${install.latest_version}`);
+      setDiff(null);
+      queryClient.invalidateQueries({ queryKey: ["installation", orgId, installId] });
+      queryClient.invalidateQueries({ queryKey: ["installations", orgId] });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to upgrade.");
+    } finally {
+      setUpgrading(false);
+    }
+  };
+
   if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
   if (isError) return <p className="text-sm text-red-600">Failed to load installation. Please try again.</p>;
   if (!install) return null;
@@ -132,7 +154,7 @@ export default function InstallationDetailPage() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Installation Detail</h1>
+          <h1 className="text-3xl font-bold">{install.pack_name ?? "Installation Detail"}</h1>
           <div className="mt-1 flex items-center gap-3">
             <span className="text-[hsl(var(--muted-foreground))]">
               v{install.installed_version}
@@ -145,9 +167,11 @@ export default function InstallationDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={handleFork}>
-            Fork
-          </Button>
+          {install.status !== "forked" && (
+            <Button variant="secondary" onClick={handleFork}>
+              Fork
+            </Button>
+          )}
           <Button variant="destructive" onClick={handleRemove}>
             Remove
           </Button>
@@ -254,6 +278,14 @@ export default function InstallationDetailPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {diff && install.update_available && install.latest_version && (
+        <div className="flex justify-end">
+          <Button onClick={handleUpgrade} disabled={upgrading}>
+            {upgrading ? "Upgrading..." : `Apply Upgrade to v${install.latest_version}`}
+          </Button>
         </div>
       )}
 

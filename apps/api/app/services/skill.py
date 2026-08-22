@@ -541,10 +541,15 @@ class SkillService:
         )
         skills_total = skills_result.scalar_one()
 
-        # Count progress entries
+        # Count progress entries (exclude archived skills)
         progress_result = await self.db.execute(
             select(SkillProgress.status, func.count(SkillProgress.id))
-            .where(SkillProgress.user_id == user_id, SkillProgress.org_id == org_id)
+            .join(Skill, Skill.id == SkillProgress.skill_id)
+            .where(
+                SkillProgress.user_id == user_id,
+                SkillProgress.org_id == org_id,
+                Skill.status != ContentStatus.ARCHIVED,
+            )
             .group_by(SkillProgress.status)
         )
         status_counts = {row[0].value: row[1] for row in progress_result.all()}
@@ -561,10 +566,14 @@ class SkillService:
         )
         exercises_total = exercises_result.scalar_one()
 
-        # Count completed exercises (at least one correct attempt)
+        # Count completed exercises (exclude archived skills)
         done_result = await self.db.execute(
-            select(func.sum(SkillProgress.exercises_done)).where(
-                SkillProgress.user_id == user_id, SkillProgress.org_id == org_id
+            select(func.sum(SkillProgress.exercises_done))
+            .join(Skill, Skill.id == SkillProgress.skill_id)
+            .where(
+                SkillProgress.user_id == user_id,
+                SkillProgress.org_id == org_id,
+                Skill.status != ContentStatus.ARCHIVED,
             )
         )
         exercises_done = done_result.scalar_one() or 0

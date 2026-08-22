@@ -652,6 +652,10 @@ class InstallationService:
                     existing.estimated_minutes = skill_def.get("estimated_minutes")
                     existing.tags = skill_def.get("tags", [])
                     existing.origin_release_id = release.id
+                    # Update category_id if skill moved to a different category
+                    cat_logical = skill_def.get("category_logical_id")
+                    if cat_logical and cat_logical in cat_id_map:
+                        existing.category_id = cat_id_map[cat_logical]
 
                     # ---- Sync exercises for changed skill ----
                     new_exercises = {
@@ -711,6 +715,15 @@ class InstallationService:
             existing = skills_by_component.get(lid)
             if existing:
                 existing.status = ContentStatus.ARCHIVED
+                # Also archive the skill's exercises
+                ex_r = await self.db.execute(
+                    select(Exercise).where(
+                        Exercise.skill_id == existing.id,
+                        Exercise.status != ContentStatus.ARCHIVED,
+                    )
+                )
+                for ex in ex_r.scalars():
+                    ex.status = ContentStatus.ARCHIVED
 
         # ---- Handle ADDED templates ----
         for lid in set(new_tmpls) - set(old_tmpls):
@@ -743,6 +756,13 @@ class InstallationService:
                     existing.name = tmpl_def["name"]
                     existing.description = tmpl_def.get("description", "")
                     existing.instructions = tmpl_def.get("instructions", "")
+                    existing.project_type = tmpl_def.get("project_type", "general")
+                    existing.difficulty = tmpl_def.get("difficulty", "intermediate")
+                    existing.suggested_minutes = tmpl_def.get("suggested_minutes")
+                    existing.max_score = tmpl_def.get("max_score", 100)
+                    existing.rubric = tmpl_def.get("rubric", [{"criterion": "Overall", "max_score": 100}])
+                    existing.deliverables = tmpl_def.get("deliverables", [])
+                    existing.skill_names = tmpl_def.get("skill_names", [])
                     existing.origin_release_id = release.id
 
         # ---- Handle REMOVED templates (archive) ----
@@ -769,6 +789,7 @@ class InstallationService:
 
     async def remove(self, install_id: str, org_id: str) -> None:
         inst = await self.get_installation(install_id, org_id)
+        was_forked = inst.status == InstallStatus.FORKED
         inst.status = InstallStatus.REMOVED
         await self.db.flush()
 
@@ -782,10 +803,16 @@ class InstallationService:
                 .values(install_count=func.greatest(SkillPack.install_count - 1, 0))
             )
 
-            # Archive all installed components so they don't appear active
+        # Archive installed components — but NOT if the installation was forked.
+        # fork() nulls origin_pack_id (severing tracking), so the WHERE clause
+        # wouldn't match anything. More importantly, fork is a deliberate choice
+        # to keep the content independently, so archiving would be wrong.
+        if not was_forked and inst.pack_id:
+            from sqlalchemy import update as _update
+
             for model in [Skill, Exercise, SkillCategory]:
                 await self.db.execute(
-                    update(model)
+                    _update(model)
                     .where(
                         model.origin_pack_id == inst.pack_id,
                         model.org_id == inst.org_id,
@@ -794,7 +821,7 @@ class InstallationService:
                     .values(status=ContentStatus.ARCHIVED)
                 )
             await self.db.execute(
-                update(ProjectTemplate)
+                _update(ProjectTemplate)
                 .where(
                     ProjectTemplate.origin_pack_id == inst.pack_id,
                     ProjectTemplate.org_id == inst.org_id,
