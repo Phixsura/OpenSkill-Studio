@@ -142,12 +142,16 @@ class SkillPackService:
             await self.db.rollback()
             raise AppError("SLUG_CONFLICT", "A pack with this name already exists", 409) from None
         await self.db.refresh(pack)
+        from app.core.cache import cache_delete_pattern
+        await cache_delete_pattern("registry:*")
         return pack
 
     async def delete_pack(self, pack_id: str, org_id: str) -> None:
         pack = await self.get_pack(pack_id, org_id)
         pack.status = PackStatus.ARCHIVED
         await self.db.flush()
+        from app.core.cache import cache_delete_pattern
+        await cache_delete_pattern("registry:*")
 
     # ── Pack Contents ──
 
@@ -248,6 +252,8 @@ class SkillPackService:
         await self.db.refresh(pack)
 
         await self._record_approval_event(pack_id, "approved", actor_id)
+        from app.core.cache import cache_delete_pattern
+        await cache_delete_pattern("registry:*")
         log.info("pack_approved", pack_id=pack_id, org_id=org_id)
         return pack
 
@@ -265,6 +271,8 @@ class SkillPackService:
 
         if actor_id:
             await self._record_approval_event(pack_id, "rejected", actor_id, reason)
+        from app.core.cache import cache_delete_pattern
+        await cache_delete_pattern("registry:*")
         log.info("pack_rejected", pack_id=pack_id, org_id=org_id, reason=reason)
         return pack
 

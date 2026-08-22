@@ -199,6 +199,7 @@ async def update_me(
 @router.post("/change-password", status_code=204, dependencies=[Depends(rate_limit(5, 60))])
 async def change_password(
     body: ChangePasswordRequest,
+    response: Response,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -209,6 +210,8 @@ async def change_password(
         new_password=body.new_password,
     )
     await db.commit()
+    # Clear refresh cookie — all sessions were revoked, force re-login
+    response.delete_cookie("refresh_token", path="/", httponly=True, samesite="lax")
 
 
 # ── Forgot password ───────────────────────────────────────

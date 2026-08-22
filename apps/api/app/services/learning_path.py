@@ -136,7 +136,11 @@ class LearningPathService:
             unlock_rule=unlock_rule,
         )
         self.db.add(item)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise AppError("REFERENCE_NOT_FOUND", "Referenced skill or project no longer exists", 404) from None
         return item
 
     async def remove_item(self, item_id: str, path_id: str, org_id: str) -> None:

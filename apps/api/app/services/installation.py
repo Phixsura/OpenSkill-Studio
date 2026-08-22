@@ -1,5 +1,8 @@
 """Pack installation, upgrade, diff, and fork service."""
 
+import re
+import secrets
+
 import structlog
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -166,7 +169,7 @@ class InstallationService:
                 org_id=org_id,
                 category_id=category_id,
                 name=skill_def["name"],
-                slug=skill_def.get("slug", skill_def["name"].lower().replace(" ", "-")[:200]),
+                slug=re.sub(r"[^a-z0-9]+", "-", skill_def.get("slug", skill_def["name"]).lower()).strip("-")[:200] or f"skill-{secrets.token_hex(3)}",
                 description=skill_def.get("description", ""),
                 learning_content=skill_def.get("learning_content"),
                 difficulty=skill_def.get("difficulty", "beginner"),

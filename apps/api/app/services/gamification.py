@@ -2,6 +2,7 @@
 
 import structlog
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gamification import PointsLedger, UserPoints
@@ -65,8 +66,29 @@ class GamificationService:
                 total_points=points,
                 level=_compute_level(points),
             )
-            self.db.add(user_points)
-            await self.db.flush()
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(user_points)
+                    await self.db.flush()
+            except IntegrityError:
+                # Concurrent insert — fall through to the UPDATE path
+                result2 = await self.db.execute(
+                    select(UserPoints).where(
+                        UserPoints.user_id == user_id,
+                        UserPoints.org_id == org_id,
+                    )
+                )
+                user_points = result2.scalar_one()
+                await self.db.execute(
+                    update(UserPoints)
+                    .where(UserPoints.user_id == user_id, UserPoints.org_id == org_id)
+                    .values(
+                        total_points=UserPoints.total_points + points,
+                        level=((UserPoints.total_points + points) / _LEVEL_STEP) + 1,
+                    )
+                )
+                await self.db.flush()
+                await self.db.refresh(user_points)
         else:
             # Atomic SQL update — level computed from the DB-side total, not stale Python value
             await self.db.execute(

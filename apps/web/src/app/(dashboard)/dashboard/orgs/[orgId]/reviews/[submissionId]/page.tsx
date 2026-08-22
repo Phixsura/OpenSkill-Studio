@@ -61,8 +61,7 @@ export default function ReviewDetailPage() {
         `/orgs/${orgId}/projects/${sub.project_id}/submissions/${submissionId}`,
       );
     },
-    refetchOnWindowFocus: false,
-    staleTime: Infinity,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   const sub = data?.data;
@@ -95,7 +94,8 @@ export default function ReviewDetailPage() {
         }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pending-reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-reviews", orgId] });
+      queryClient.invalidateQueries({ queryKey: ["review-submission", submissionId] });
       router.push(`/dashboard/orgs/${orgId}/reviews`);
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Review failed"),

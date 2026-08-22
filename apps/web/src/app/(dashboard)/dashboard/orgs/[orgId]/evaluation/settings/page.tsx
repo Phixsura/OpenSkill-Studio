@@ -64,7 +64,7 @@ export default function EvalSettingsPage() {
         }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["eval-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["eval-settings", orgId] });
       setMessage("Settings saved.");
     },
     onError: (err) => {

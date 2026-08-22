@@ -138,7 +138,8 @@ class CohortService:
                 )
             cohort.status = new_status
         if fields.get("name"):
-            cohort.slug = self._generate_slug(fields["name"])
+            slug = self._generate_slug(fields["name"])
+            cohort.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
         for k, v in fields.items():
             if v is not None and hasattr(cohort, k):
                 setattr(cohort, k, v)

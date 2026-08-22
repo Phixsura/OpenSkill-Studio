@@ -184,7 +184,9 @@ class AuthService:
         # Look up token record by hash
         token_hash = sha256(jti.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+            select(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash)
+            .with_for_update()
         )
         token_record = stmt_result.scalar_one_or_none()
 
@@ -192,10 +194,10 @@ class AuthService:
             raise TokenInvalidError("Token not found")
 
         if token_record.is_revoked:
-            # ⚠ Already-revoked token reused → possible theft
-            await self._revoke_all_user_tokens(user_id)
-            log.warning("auth_token_reuse", user_id=user_id, jti=jti)
-            raise TokenReuseError()
+            # Token was revoked — could be user-initiated session revocation
+            # or password change, not necessarily theft. Don't nuke all sessions.
+            log.info("auth_revoked_token_used", user_id=user_id, jti=jti)
+            raise TokenInvalidError("Session has been revoked. Please log in again.")
 
         # Revoke old token
         token_record.revoked_at = datetime.now(UTC)

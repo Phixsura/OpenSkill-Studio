@@ -38,13 +38,20 @@ async def export_release(
 
     svc = PackExportService(db)
     zip_bytes, filename = await svc.export_release(pack_id, version)
-    # Sanitize filename for Content-Disposition header
+    # RFC 6266: ASCII-only filename= fallback + UTF-8 filename*= for non-ASCII
     import re
-    safe_filename = re.sub(r'[^\w\-.]', '_', filename)
+    from urllib.parse import quote
+    ascii_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+    utf8_filename = quote(filename)
     return Response(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_filename}"; '
+                f"filename*=UTF-8''{utf8_filename}"
+            )
+        },
     )
 
 

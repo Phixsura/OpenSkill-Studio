@@ -112,7 +112,8 @@ class ClientBriefService:
                 )
             brief.status = new_status
         if fields.get("title"):
-            brief.slug = self._generate_slug(fields["title"])
+            slug = self._generate_slug(fields["title"])
+            brief.slug = f"{slug[:290]}-{secrets.token_hex(3)}"
         for k, v in fields.items():
             if v is not None and hasattr(brief, k):
                 setattr(brief, k, v)

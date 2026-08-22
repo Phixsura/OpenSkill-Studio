@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 import zipfile
 
 import structlog
@@ -47,7 +48,7 @@ class PackExportService:
             zf.writestr("openskill-pack.json", manifest_json)
 
         buf.seek(0)
-        pack_name = manifest.get("pack", {}).get("name", "pack").lower().replace(" ", "-")
+        pack_name = re.sub(r"[^a-z0-9]+", "-", manifest.get("pack", {}).get("name", "pack").lower()).strip("-") or "pack"
         filename = f"{pack_name}-{version}.zip"
 
         log.info("pack_exported", pack_id=pack_id, version=version, size=buf.getbuffer().nbytes)

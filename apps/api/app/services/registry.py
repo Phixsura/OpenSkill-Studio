@@ -76,12 +76,23 @@ class RegistryService:
             pack_ids = cached.get("ids", [])
             total = cached.get("total", 0)
             if pack_ids:
+                # Re-apply access-control filters on cache hit to prevent
+                # serving archived/private/rejected packs from stale cache
                 result = await self.db.execute(
-                    select(SkillPack).where(SkillPack.id.in_(pack_ids))
+                    select(SkillPack).where(
+                        SkillPack.id.in_(pack_ids),
+                        SkillPack.status == PackStatus.PUBLISHED,
+                        SkillPack.visibility == PackVisibility.PUBLIC,
+                        or_(
+                            SkillPack.review_status.is_(None),
+                            SkillPack.review_status == "approved",
+                        ),
+                    )
                 )
                 packs_by_id = {p.id: p for p in result.scalars().all()}
-                return [packs_by_id[pid] for pid in pack_ids if pid in packs_by_id], total
-            return [], total
+                filtered = [packs_by_id[pid] for pid in pack_ids if pid in packs_by_id]
+                return filtered, len(filtered)
+            return [], 0
 
         # ── Build query ──
         base = select(SkillPack).where(
@@ -98,7 +109,7 @@ class RegistryService:
         if search and search.strip():
             # Full-text search on name + summary + description
             search_vector = func.to_tsvector(
-                "english",
+                "simple",
                 func.coalesce(SkillPack.name, "")
                 + " "
                 + func.coalesce(SkillPack.summary, "")
@@ -119,7 +130,7 @@ class RegistryService:
             )
             # Combine FTS and ILIKE — FTS failure is caught at query execution time
             fts_cond = search_vector.op("@@")(
-                func.websearch_to_tsquery("english", search)
+                func.websearch_to_tsquery("simple", search)
             )
             base = base.where(or_(fts_cond, ilike_cond))
             # Store ILIKE-only fallback for use if FTS fails at execution time
