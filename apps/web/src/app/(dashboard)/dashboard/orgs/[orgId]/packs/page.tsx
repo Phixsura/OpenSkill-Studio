@@ -12,7 +12,7 @@ interface Pack {
   id: string;
   name: string;
   slug: string;
-  summary: string;
+  summary: string | null;
   status: string;
   visibility: string;
   install_count: number;

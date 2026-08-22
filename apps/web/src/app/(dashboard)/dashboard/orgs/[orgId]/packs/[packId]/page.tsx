@@ -410,6 +410,9 @@ export default function PackDetailPage() {
               aria-label="Select a skill to add"
             >
               <option value="">Select skill...</option>
+              {orgSkills.filter((s) => !packSkills.some((ps) => ps.skill_id === s.id)).length === 0 && (
+                <option disabled>All skills already added</option>
+              )}
               {orgSkills
                 .filter(
                   (s) => !packSkills.some((ps) => ps.skill_id === s.id),
@@ -475,6 +478,9 @@ export default function PackDetailPage() {
               aria-label="Select a template to add"
             >
               <option value="">Select template...</option>
+              {orgTemplates.filter((t) => !packTemplates.some((pt) => pt.template_id === t.id)).length === 0 && (
+                <option disabled>No templates available</option>
+              )}
               {orgTemplates
                 .filter(
                   (t) =>

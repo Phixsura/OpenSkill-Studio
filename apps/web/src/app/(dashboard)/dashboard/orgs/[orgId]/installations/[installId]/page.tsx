@@ -294,11 +294,11 @@ export default function InstallationDetailPage() {
         <dl className="grid gap-2 text-sm sm:grid-cols-2">
           <div>
             <dt className="text-[hsl(var(--muted-foreground))]">Pack ID</dt>
-            <dd className="font-mono">{install.pack_id}</dd>
+            <dd className="font-mono">{install.pack_id ?? "—"}</dd>
           </div>
           <div>
             <dt className="text-[hsl(var(--muted-foreground))]">Release ID</dt>
-            <dd className="font-mono">{install.release_id}</dd>
+            <dd className="font-mono">{install.release_id ?? "—"}</dd>
           </div>
           <div>
             <dt className="text-[hsl(var(--muted-foreground))]">Installed by</dt>
