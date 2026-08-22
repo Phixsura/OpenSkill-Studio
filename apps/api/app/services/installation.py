@@ -376,11 +376,12 @@ class InstallationService:
         for lid in set(old_tmpls) - set(new_tmpls):
             diff["removed"].append({"type": "template", "logical_id": lid, "name": old_tmpls[lid]["name"]})
 
-        # Batch-load locally_modified flags for skills and templates (avoid N+1)
+        # Batch-load locally_modified flags (exclude archived — they don't conflict)
         skill_mod_r = await self.db.execute(
             select(Skill.origin_component_id, Skill.locally_modified).where(
                 Skill.origin_pack_id == inst.pack_id,
                 Skill.org_id == org_id,
+                Skill.status != ContentStatus.ARCHIVED,
             )
         )
         skill_modified_map = {row[0]: row[1] for row in skill_mod_r.all()}
@@ -389,6 +390,7 @@ class InstallationService:
             select(ProjectTemplate.origin_component_id, ProjectTemplate.locally_modified).where(
                 ProjectTemplate.origin_pack_id == inst.pack_id,
                 ProjectTemplate.org_id == org_id,
+                ProjectTemplate.status != ContentStatus.ARCHIVED,
             )
         )
         tmpl_modified_map = {row[0]: row[1] for row in tmpl_mod_r.all()}

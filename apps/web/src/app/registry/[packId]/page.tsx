@@ -537,7 +537,7 @@ export default function RegistryPackDetailPage() {
               </span>
             )}
             <span className="text-sm text-[hsl(var(--muted-foreground))]">
-              {pack.install_count} installs
+              {pack.install_count} install{pack.install_count !== 1 ? "s" : ""}
             </span>
           </div>
         </div>
@@ -684,7 +684,7 @@ export default function RegistryPackDetailPage() {
             <div className="rounded-lg border p-4">
               <h3 className="text-sm font-medium">Estimated time</h3>
               <p className="mt-1 text-lg font-semibold">
-                {Math.floor(pack.estimated_minutes / 60)}h {pack.estimated_minutes % 60}m
+                {pack.estimated_minutes >= 60 ? `${Math.floor(pack.estimated_minutes / 60)}h ` : ""}{pack.estimated_minutes % 60}m
               </p>
             </div>
           )}

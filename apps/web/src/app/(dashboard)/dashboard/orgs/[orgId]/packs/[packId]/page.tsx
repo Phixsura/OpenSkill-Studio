@@ -15,12 +15,12 @@ interface PackDetail {
   id: string;
   name: string;
   slug: string;
-  summary: string;
+  summary: string | null;
   description: string | null;
   status: string;
   visibility: string;
   install_count: number;
-  difficulty: string;
+  difficulty: string | null;
   estimated_minutes: number | null;
   scenario_tags: string[];
   tool_tags: string[];
@@ -31,14 +31,14 @@ interface PackDetail {
 interface PackSkill {
   pack_id: string;
   skill_id: string;
-  skill_name: string;
+  skill_name: string | null;
   sort_order: number;
 }
 
 interface PackTemplate {
   pack_id: string;
   template_id: string;
-  template_name: string;
+  template_name: string | null;
   sort_order: number;
 }
 
@@ -46,7 +46,7 @@ interface Release {
   id: string;
   version: string;
   component_count: number;
-  changelog: string;
+  changelog: string | null;
   checksum: string;
   released_at: string;
 }

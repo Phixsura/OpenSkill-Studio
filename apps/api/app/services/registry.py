@@ -93,7 +93,9 @@ class RegistryService:
             ),
         )
 
-        if search:
+        _ilike_fallback = None  # set if FTS is used, for fallback on DB error
+
+        if search and search.strip():
             # Full-text search on name + summary + description
             search_vector = func.to_tsvector(
                 "english",
@@ -115,15 +117,13 @@ class RegistryService:
                 cast(SkillPack.tool_tags, String).ilike(term),
                 cast(SkillPack.capability_tags, String).ilike(term),
             )
-            # Combine FTS and ILIKE with OR so both token and substring matches work
-            try:
-                fts_cond = search_vector.op("@@")(
-                    func.websearch_to_tsquery("english", search)
-                )
-                base = base.where(or_(fts_cond, ilike_cond))
-            except Exception:
-                # If websearch_to_tsquery fails (bad syntax), fall back to ILIKE only
-                base = base.where(ilike_cond)
+            # Combine FTS and ILIKE — FTS failure is caught at query execution time
+            fts_cond = search_vector.op("@@")(
+                func.websearch_to_tsquery("english", search)
+            )
+            base = base.where(or_(fts_cond, ilike_cond))
+            # Store ILIKE-only fallback for use if FTS fails at execution time
+            _ilike_fallback = ilike_cond
 
         if scenario:
             base = base.where(SkillPack.scenario_tags.contains([scenario]))
@@ -158,11 +158,29 @@ class RegistryService:
         else:  # newest
             base = base.order_by(SkillPack.created_at.desc())
 
-        total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
-        total = total_r.scalar_one()
-        offset = (page - 1) * effective_per_page
-        result = await self.db.execute(base.offset(offset).limit(effective_per_page))
-        packs = list(result.scalars().all())
+        try:
+            total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
+            total = total_r.scalar_one()
+            offset = (page - 1) * effective_per_page
+            result = await self.db.execute(base.offset(offset).limit(effective_per_page))
+            packs = list(result.scalars().all())
+        except Exception:
+            if _ilike_fallback is not None:
+                # FTS query failed (bad search syntax) — rebuild with ILIKE only
+                log.warning("fts_query_failed_fallback_to_ilike", search=search)
+                base = select(SkillPack).where(
+                    SkillPack.visibility == PackVisibility.PUBLIC,
+                    SkillPack.status == PackStatus.PUBLISHED,
+                    or_(SkillPack.review_status.is_(None), SkillPack.review_status == "approved"),
+                    _ilike_fallback,
+                ).order_by(SkillPack.created_at.desc())
+                total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
+                total = total_r.scalar_one()
+                offset = (page - 1) * effective_per_page
+                result = await self.db.execute(base.offset(offset).limit(effective_per_page))
+                packs = list(result.scalars().all())
+            else:
+                raise
 
         # ── Populate cache ──
         await cache_set(cache_key, {"ids": [p.id for p in packs], "total": total}, ttl=300)
@@ -201,9 +219,13 @@ class RegistryService:
 
     async def get_public_releases(self, pack_id: str) -> list[SkillPackRelease]:
         """List releases for a public pack."""
+        from sqlalchemy.orm import defer
+
         await self.get_public_pack(pack_id)  # verify accessible
         result = await self.db.execute(
-            select(SkillPackRelease).where(SkillPackRelease.pack_id == pack_id)
+            select(SkillPackRelease)
+            .where(SkillPackRelease.pack_id == pack_id)
+            .options(defer(SkillPackRelease.manifest))
         )
         releases = list(result.scalars().all())
         releases.sort(key=lambda r: _parse_semver(r.version), reverse=True)

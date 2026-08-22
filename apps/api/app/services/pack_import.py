@@ -212,6 +212,14 @@ class PackImportService:
                             422,
                         )
 
+        # 11c. Reject empty manifests (no content to install)
+        if not skills and not templates:
+            raise AppError(
+                "EMPTY_MANIFEST",
+                "Manifest must contain at least one skill or template",
+                422,
+            )
+
         zf.close()
 
         # 12. Create pack + release
@@ -219,6 +227,16 @@ class PackImportService:
         svc = SkillPackService(self.db)
         pack_name = pack_meta["name"]
         version = manifest.get("version", "1.0.0")
+
+        # 12a. Validate version format (same semver regex as publish_release)
+        import re as _re
+
+        if not _re.match(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$", version):
+            raise AppError(
+                "INVALID_VERSION",
+                f"Version '{version}' must be in semver format X.Y.Z",
+                422,
+            )
 
         pack = await svc.create_pack(
             org_id=org_id,

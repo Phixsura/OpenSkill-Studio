@@ -68,9 +68,7 @@ class GamificationService:
             self.db.add(user_points)
             await self.db.flush()
         else:
-            # Atomic SQL update to prevent race conditions on concurrent awards
-            new_total = user_points.total_points + points
-            new_level = _compute_level(new_total)
+            # Atomic SQL update — level computed from the DB-side total, not stale Python value
             await self.db.execute(
                 update(UserPoints)
                 .where(
@@ -79,7 +77,7 @@ class GamificationService:
                 )
                 .values(
                     total_points=UserPoints.total_points + points,
-                    level=new_level,
+                    level=((UserPoints.total_points + points) / _LEVEL_STEP) + 1,
                 )
             )
             await self.db.flush()

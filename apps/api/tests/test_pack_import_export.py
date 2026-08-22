@@ -336,7 +336,7 @@ async def test_import_missing_pack_name(c):
 
 @pytest.mark.asyncio
 async def test_import_missing_skills_field(c):
-    """Manifest without skills key should import successfully."""
+    """Manifest without skills or templates should be rejected as empty."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
     manifest = {
@@ -348,8 +348,8 @@ async def test_import_missing_skills_field(c):
         files={"file": ("pack.zip", _make_zip(manifest), "application/zip")},
         headers=h,
     )
-    assert r.status_code == 201
-    assert r.json()["data"]["pack"]["name"] == "No Skills Pack"
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "EMPTY_MANIFEST"
 
 
 @pytest.mark.asyncio

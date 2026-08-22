@@ -25,6 +25,16 @@ export default function DashboardLayout({
 
   useEffect(() => setMounted(true), []);
 
+  // Close mobile sidebar on Escape key
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSidebarOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [sidebarOpen]);
+
   // Redirect to login when auth is lost (logout, session expiry, bfcache)
   // Track: once authenticated, redirect if it becomes false
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -154,7 +164,7 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+      <main id="main-content" className="flex-1 overflow-y-auto pt-14 md:pt-0">
         {/* Desktop header bar */}
         <div className="hidden items-center justify-end border-b px-8 py-3 md:flex">
           {mounted && isAuthenticated && <NotificationBell />}

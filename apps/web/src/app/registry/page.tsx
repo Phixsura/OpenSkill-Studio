@@ -179,7 +179,7 @@ export default function RegistryPage() {
             )}
             <div className="mt-3 flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))]">
               <span>{pack.provenance?.author_name ?? "Unknown author"}</span>
-              <span>{pack.install_count} installs</span>
+              <span>{pack.install_count} install{pack.install_count !== 1 ? "s" : ""}</span>
             </div>
             {pack.scenario_tags.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">

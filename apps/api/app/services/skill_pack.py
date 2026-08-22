@@ -586,14 +586,20 @@ class SkillPackService:
                 )
                 notif_svc = NotificationService(self.db)
                 for user_id, org_id_val in owner_r.all():
-                    await notif_svc.create(
-                        user_id=user_id,
-                        notification_type="pack.updated",
-                        title=f"New version {version} available for {pack.name}",
-                        body=changelog[:500] if changelog else None,
-                        org_id=org_id_val,
-                        data={"pack_id": pack_id, "version": version},
-                    )
+                    try:
+                        await notif_svc.create(
+                            user_id=user_id,
+                            notification_type="pack.updated",
+                            title=f"New version {version} available for {pack.name}",
+                            body=changelog[:500] if changelog else None,
+                            org_id=org_id_val,
+                            data={"pack_id": pack_id, "version": version},
+                        )
+                    except Exception:
+                        log.warning(
+                            "notify_pack_update_failed_user",
+                            pack_id=pack_id, user_id=user_id, version=version,
+                        )
         except Exception:
             log.warning("notify_pack_update_failed", pack_id=pack_id, version=version)
 
@@ -628,8 +634,12 @@ class SkillPackService:
         return release
 
     async def list_releases(self, pack_id: str) -> list[SkillPackRelease]:
+        from sqlalchemy.orm import defer
+
         result = await self.db.execute(
-            select(SkillPackRelease).where(SkillPackRelease.pack_id == pack_id)
+            select(SkillPackRelease)
+            .where(SkillPackRelease.pack_id == pack_id)
+            .options(defer(SkillPackRelease.manifest))
         )
         releases = list(result.scalars().all())
         releases.sort(key=lambda r: _parse_semver(r.version), reverse=True)
