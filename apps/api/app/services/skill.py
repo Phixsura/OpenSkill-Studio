@@ -298,6 +298,16 @@ class SkillService:
     async def delete_skill(self, skill_id: str) -> None:
         skill = await self.get_skill(skill_id)
         skill.status = ContentStatus.ARCHIVED
+
+        # Clean up pack references so archived skills don't block publish_release
+        from app.models.skill_pack import SkillPackSkill
+
+        pack_skills_r = await self.db.execute(
+            select(SkillPackSkill).where(SkillPackSkill.skill_id == skill_id)
+        )
+        for ps in pack_skills_r.scalars().all():
+            await self.db.delete(ps)
+
         await self.db.flush()
 
     async def publish_skill(self, skill_id: str) -> Skill:

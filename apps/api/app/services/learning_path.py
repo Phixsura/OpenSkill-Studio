@@ -151,7 +151,7 @@ class LearningPathService:
         result = await self.db.execute(
             select(LearningPathItem)
             .where(LearningPathItem.path_id == path_id)
-            .order_by(LearningPathItem.sort_order)
+            .order_by(LearningPathItem.sort_order, LearningPathItem.id)
         )
         return list(result.scalars().all())
 

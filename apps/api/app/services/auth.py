@@ -282,13 +282,15 @@ class AuthService:
 
         # Send email
         sender = get_email_sender()
+        import html as html_mod
+
         from app.config import settings
 
-        reset_url = f"{settings.frontend_url}/reset-password?token={raw_token}"
+        reset_url = f"{settings.frontend_url}/reset-password?token={html_mod.escape(raw_token)}"
         await sender.send(
             to=user.email,
             subject="Reset your OpenSkill Studio password",
-            html=f'<p>Click <a href="{reset_url}">here</a> to reset your password. '
+            html=f'<p>Click <a href="{html_mod.escape(reset_url)}">here</a> to reset your password. '
             f"This link expires in 1 hour.</p>",
         )
 
@@ -441,11 +443,13 @@ class AuthService:
         from app.config import settings
 
         sender = get_email_sender()
+        import html as html_mod
+
         # Points to backend endpoint which verifies and redirects to frontend
-        verify_url = f"{settings.frontend_url}/api/v1/auth/verify-email?token={raw_token}"
+        verify_url = f"{settings.frontend_url}/api/v1/auth/verify-email?token={html_mod.escape(raw_token)}"
         await sender.send(
             to=user.email,
             subject="Verify your OpenSkill Studio email",
-            html=f'<p>Click <a href="{verify_url}">here</a> to verify your email. '
+            html=f'<p>Click <a href="{html_mod.escape(verify_url)}">here</a> to verify your email. '
             f"This link expires in 24 hours.</p>",
         )

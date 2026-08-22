@@ -261,6 +261,13 @@ class PublishReleaseRequest(BaseModel):
     version: str
     changelog: str | None = None
 
+    @field_validator("changelog")
+    @classmethod
+    def validate_changelog(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 5000:
+            raise ValueError("Changelog must be 5000 characters or less")
+        return v
+
     @field_validator("version")
     @classmethod
     def validate_version(cls, v: str) -> str:

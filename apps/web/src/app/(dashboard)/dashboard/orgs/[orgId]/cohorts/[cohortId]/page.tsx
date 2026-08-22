@@ -283,7 +283,7 @@ export default function CohortDetailPage() {
                     : undefined,
                 })
               }
-              disabled={editMutation.isPending}
+              disabled={!editName.trim() || editMutation.isPending}
             >
               {editMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>

@@ -397,8 +397,9 @@ class OrgService:
 
     async def accept_email_invite(self, raw_token: str, user_id: str) -> OrgMember:
         token_hash = sha256(raw_token.encode()).hexdigest()
+        # Lock the invite row to prevent accept/revoke TOCTOU race
         result = await self.db.execute(
-            select(OrgInvitation).where(OrgInvitation.token_hash == token_hash)
+            select(OrgInvitation).where(OrgInvitation.token_hash == token_hash).with_for_update()
         )
         invite = result.scalar_one_or_none()
 

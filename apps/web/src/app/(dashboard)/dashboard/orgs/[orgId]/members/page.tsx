@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth } from "@/lib/api";
+import { toast } from "sonner";
 
 interface MemberUser {
   id: string;
@@ -49,8 +50,9 @@ export default function MembersPage() {
       setInviteLink(`${window.location.origin}/join/${code}`);
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
-    onError: () => {
+    onError: (err: Error) => {
       setInviteLink(null);
+      toast.error(err.message || "Failed to create invite link");
     },
   });
 

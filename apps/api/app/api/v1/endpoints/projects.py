@@ -274,7 +274,7 @@ async def unpublish_project(
     return DataResponse(data=ProjectResponse.model_validate(project))
 
 
-@router.put("/orgs/{org_id}/projects/{project_id}/skills", status_code=200, dependencies=[Depends(rate_limit(10, 60))])
+@router.put("/orgs/{org_id}/projects/{project_id}/skills", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def set_project_skills(
     org_id: str,
     project_id: str,
@@ -287,7 +287,6 @@ async def set_project_skills(
     await _verify_project_org(svc, project_id, org_id)
     await svc.set_project_skills(project_id, body.skill_ids)
     await db.commit()
-    return {"message": "Project skills updated"}
 
 
 @router.post(

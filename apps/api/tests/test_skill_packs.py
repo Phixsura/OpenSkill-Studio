@@ -464,12 +464,13 @@ async def test_publish_release_archived_skill(c):
     oid = await _org(c, h)
     pid, sid = await _pack_with_skill(c, h, oid, "ArchPack", "ArchSkill")
 
-    # Archive the skill
+    # Archive the skill — this now also removes SkillPackSkill join rows,
+    # so the pack becomes empty and publishing fails with EMPTY_PACK
     await c.delete(f"/api/v1/orgs/{oid}/skills/{sid}", headers=h)
 
     r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
     assert r.status_code == 422
-    assert r.json()["error"]["code"] == "COMPONENT_ARCHIVED"
+    assert r.json()["error"]["code"] == "EMPTY_PACK"
 
 
 # ── 3. Manifest prerequisites array ──

@@ -76,9 +76,9 @@ class CohortService:
         )
         self.db.add(cohort)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             cohort.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
             self.db.add(cohort)
             await self.db.flush()
@@ -165,11 +165,16 @@ class CohortService:
     async def add_member(
         self, cohort_id: str, user_id: str, role: CohortRole, org_id: str
     ) -> CohortMember:
-        cohort = await self.get_cohort(cohort_id)
-        if cohort.org_id != org_id:
+        # Lock the cohort row to serialize concurrent add_member calls
+        # (prevents max_learners race condition)
+        cohort_r = await self.db.execute(
+            select(Cohort).where(Cohort.id == cohort_id).with_for_update()
+        )
+        cohort = cohort_r.scalar_one_or_none()
+        if cohort is None or cohort.org_id != org_id or cohort.status == CohortStatus.ARCHIVED:
             raise CohortNotFoundError()
         # Completed/archived cohorts are frozen — no new enrollments
-        if cohort.status in (CohortStatus.COMPLETED, CohortStatus.ARCHIVED):
+        if cohort.status == CohortStatus.COMPLETED:
             raise AppError("COHORT_FROZEN", "Cannot add members to a completed cohort", 422)
 
         # User must be an active org member
@@ -183,7 +188,7 @@ class CohortService:
         if org_member.scalar_one_or_none() is None:
             raise AppError("USER_NOT_FOUND", "User is not a member of this organization", 404)
 
-        # Check max_learners
+        # Check max_learners (safe under the FOR UPDATE lock above)
         if role == CohortRole.LEARNER and cohort.max_learners is not None:
             count_r = await self.db.execute(
                 select(func.count(CohortMember.id)).where(
@@ -201,9 +206,9 @@ class CohortService:
         )
         self.db.add(member)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             raise AlreadyCohortMemberError() from None
 
         log.info("cohort_member_added", cohort_id=cohort_id, user_id=user_id, role=role.value)
@@ -285,9 +290,9 @@ class CohortService:
         )
         self.db.add(assignment)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             raise AppError(
                 "ALREADY_ASSIGNED", "Skill already assigned to this cohort", 409
             ) from None
@@ -367,9 +372,9 @@ class CohortService:
         )
         self.db.add(assignment)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             raise AppError(
                 "ALREADY_ASSIGNED", "Project already assigned to this cohort", 409
             ) from None

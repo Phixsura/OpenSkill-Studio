@@ -60,6 +60,7 @@ export default function NewProjectPage() {
       router.push(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create from template.");
+    } finally {
       setLoading(false);
       submitting.current = false;
     }

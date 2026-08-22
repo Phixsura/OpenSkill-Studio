@@ -590,7 +590,7 @@ class SkillPackService:
                         user_id=user_id,
                         notification_type="pack_update",
                         title=f"New version {version} available for {pack.name}",
-                        body=changelog,
+                        body=changelog[:500] if changelog else None,
                         org_id=org_id_val,
                         data={"pack_id": pack_id, "version": version},
                     )
