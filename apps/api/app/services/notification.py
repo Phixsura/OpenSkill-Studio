@@ -8,6 +8,18 @@ from app.models.notification import Notification, UserNotificationPreference
 
 log = structlog.get_logger()
 
+# Mapping from notification type strings (used when creating notifications)
+# to preference keys (stored in UserNotificationPreference.preferences).
+# The endpoint stores keys like "pack_update" but notifications are created
+# with type "pack.updated" — this mapping bridges the gap.
+_TYPE_TO_PREF_KEY: dict[str, str] = {
+    "pack.updated": "pack_update",
+    "pack.installed": "pack_update",
+    "pack.published": "pack_update",
+    "pack.approved": "review",
+    "pack.rejected": "review",
+}
+
 
 class NotificationService:
     def __init__(self, db: AsyncSession):
@@ -22,9 +34,13 @@ class NotificationService:
         org_id: str | None = None,
         data: dict | None = None,
     ) -> Notification | None:
+        # Truncate title to fit the String(200) DB column
+        title = title[:200]
+
         # Check if user has opted out of this notification type
         prefs = await self.get_preferences(user_id)
-        if prefs and prefs.get(notification_type) is False:
+        pref_key = _TYPE_TO_PREF_KEY.get(notification_type, notification_type)
+        if prefs and prefs.get(pref_key) is False:
             log.debug(
                 "notification_suppressed",
                 user_id=user_id,

@@ -127,6 +127,22 @@ class SkillService:
 
     async def delete_category(self, category_id: str) -> None:
         cat = await self.get_category(category_id)
+
+        # Prevent archiving a category that still has active skills — those
+        # skills would have a dangling category_id pointing to nothing.
+        active_count_r = await self.db.execute(
+            select(func.count(Skill.id)).where(
+                Skill.category_id == category_id,
+                Skill.status != ContentStatus.ARCHIVED,
+            )
+        )
+        if active_count_r.scalar_one() > 0:
+            raise AppError(
+                "CATEGORY_HAS_SKILLS",
+                "Archive or move skills before deleting the category",
+                422,
+            )
+
         cat.status = ContentStatus.ARCHIVED
         await self.db.flush()
 
@@ -497,7 +513,7 @@ class SkillService:
             raise AttemptNotFoundError()
 
         exercise = await self.get_exercise(attempt.exercise_id)
-        attempt.score = min(score, exercise.max_score)
+        attempt.score = max(0, min(score, exercise.max_score))
         attempt.is_correct = score >= exercise.max_score * 0.6
         attempt.feedback = feedback
         attempt.graded_by = GradingMethod.MANUAL

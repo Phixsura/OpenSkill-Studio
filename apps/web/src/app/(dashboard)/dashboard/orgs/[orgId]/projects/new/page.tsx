@@ -57,7 +57,7 @@ export default function NewProjectPage() {
         },
       );
       queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
-      router.push(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
+      router.replace(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create from template.");
     } finally {
@@ -104,7 +104,7 @@ export default function NewProjectPage() {
         },
       );
       queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
-      router.push(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
+      router.replace(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Failed to create project.",

@@ -107,8 +107,13 @@ class AuthService:
             await self.db.rollback()
             raise EmailAlreadyExistsError() from None
 
-        # Generate email verification token
-        await self._create_email_verification(user)
+        # Generate email verification token — fire-and-forget so email
+        # failure doesn't roll back the user creation. The user can
+        # re-request verification via /resend-verification.
+        try:
+            await self._create_email_verification(user)
+        except Exception:
+            log.warning("registration_email_failed", user_id=user.id)
 
         result = await self._create_token_pair(user, ip_address, device_info)
 
@@ -437,6 +442,17 @@ class AuthService:
 
     async def _create_email_verification(self, user: User) -> None:
         """Generate a verification token and send email."""
+        # Invalidate any existing unused verification tokens (same pattern
+        # as forgot_password) to prevent stale token accumulation.
+        existing = await self.db.execute(
+            select(EmailVerificationToken).where(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.used_at.is_(None),
+            )
+        )
+        for tok in existing.scalars():
+            tok.used_at = datetime.now(UTC)
+
         raw_token = secrets.token_urlsafe(32)
         token_record = EmailVerificationToken(
             user_id=user.id,

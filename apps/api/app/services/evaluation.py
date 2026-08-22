@@ -1,5 +1,6 @@
 """AI evaluation service — trigger, execute, track usage."""
 
+import asyncio
 import json
 import time
 from datetime import UTC, date, datetime
@@ -10,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.llm import calculate_cost, create_llm_client
 from app.exceptions import AppError
 from app.models.evaluation import EvalStatus, EvalType, EvaluationTask, EvalUsageMonthly
@@ -272,11 +274,25 @@ class EvaluationService:
                 system = SYSTEM_PROMPT
 
             llm = create_llm_client(org_settings.get("default_model"))
-            response = await llm.complete(
-                system_prompt=system,
-                user_prompt=user_prompt,
-                temperature=0.1,
-            )
+            try:
+                response = await asyncio.wait_for(
+                    llm.complete(
+                        system_prompt=system,
+                        user_prompt=user_prompt,
+                        temperature=0.1,
+                    ),
+                    timeout=settings.eval_timeout_seconds,
+                )
+            except TimeoutError:
+                task.status = EvalStatus.FAILED
+                task.error = "LLM request timed out"
+                await self.db.flush()
+                log.warning(
+                    "eval_llm_timeout",
+                    task_id=task.id,
+                    timeout=settings.eval_timeout_seconds,
+                )
+                return
 
             # Parse result
             result = self._parse_evaluation_response(response.content, project.rubric)

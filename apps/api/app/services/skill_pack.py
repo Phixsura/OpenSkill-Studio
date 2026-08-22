@@ -522,15 +522,24 @@ class SkillPackService:
         seen_ids: set[str] = set()
         for lid in all_logical_ids:
             if lid in seen_ids:
+                # Provide a hint about the collision source
+                hint = ""
+                if "/" in lid:
+                    # Exercise logical_ids have the form "skill-slug/exercise-slug"
+                    hint = (
+                        " This is likely caused by two exercises with titles "
+                        "that normalize to the same slug within the same skill."
+                    )
                 raise AppError(
                     "DUPLICATE_LOGICAL_ID",
-                    f"Duplicate logical_id '{lid}' — rename components to have distinct slugs",
+                    f"Duplicate logical_id '{lid}' — rename components to have distinct slugs.{hint}",
                     422,
                 )
             seen_ids.add(lid)
 
         manifest = {
             "schema_version": "1",
+            "version": version,
             "pack": {
                 "name": pack.name,
                 "summary": pack.summary,

@@ -1007,7 +1007,9 @@ class ProjectService:
         if sub.status in (SubmissionStatus.DRAFT,):
             raise InvalidStateError("Cannot review a draft submission")
 
-        # Score cannot exceed this project's configured maximum
+        # Score must be non-negative and within the project's configured maximum
+        if score is not None and score < 0:
+            raise AppError("INVALID_SCORE", "Score cannot be negative", 422)
         if score is not None and score > project.max_score:
             raise AppError(
                 "SCORE_EXCEEDS_MAX",
@@ -1039,7 +1041,9 @@ class ProjectService:
             sub.final_score = None
         elif review_status == ReviewStatus.REJECTED:
             sub.status = SubmissionStatus.REJECTED
-            sub.final_score = score
+            # Apply late penalty for consistency with APPROVED path;
+            # rejected submissions may still carry an informational score.
+            sub.final_score = self._calculate_final_score(score or 0, sub.is_late, project)
 
         await self.db.flush()
 
@@ -1406,6 +1410,19 @@ class ProjectService:
         template = await self.get_template(template_id, org_id)
         if isinstance(template, dict):
             raise AppError("BUILTIN_READONLY", "Built-in templates cannot be deleted", 422)
+
+        # Clean up SkillPackTemplate join rows so packs referencing this
+        # template don't break on their next publish_release attempt.
+        from sqlalchemy import delete as sa_delete
+
+        from app.models.skill_pack import SkillPackTemplate
+
+        await self.db.execute(
+            sa_delete(SkillPackTemplate).where(
+                SkillPackTemplate.template_id == template_id
+            )
+        )
+
         template.status = ContentStatus.ARCHIVED
         await self.db.flush()
 

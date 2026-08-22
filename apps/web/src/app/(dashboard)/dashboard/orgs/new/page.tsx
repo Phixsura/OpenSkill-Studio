@@ -42,7 +42,7 @@ export default function CreateOrgPage() {
         }),
       });
       queryClient.invalidateQueries({ queryKey: ["my-orgs"] });
-      router.push(`/dashboard/orgs/${res.data.id}`);
+      router.replace(`/dashboard/orgs/${res.data.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create organization.");
     } finally {

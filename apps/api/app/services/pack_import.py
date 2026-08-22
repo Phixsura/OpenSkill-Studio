@@ -110,13 +110,34 @@ class PackImportService:
         if not pack_meta.get("name"):
             raise AppError("INVALID_MANIFEST", "Manifest pack.name is required", 422)
 
-        # 9. Check logical_id uniqueness
+        # 8a. Enforce component count limits (same as publish_release)
+        from app.services.skill_pack import MAX_SKILLS_PER_PACK, MAX_TEMPLATES_PER_PACK
+
+        if len(skills) > MAX_SKILLS_PER_PACK:
+            raise AppError(
+                "TOO_MANY_SKILLS",
+                f"Manifest contains {len(skills)} skills (max {MAX_SKILLS_PER_PACK})",
+                422,
+            )
+        if len(templates) > MAX_TEMPLATES_PER_PACK:
+            raise AppError(
+                "TOO_MANY_TEMPLATES",
+                f"Manifest contains {len(templates)} templates (max {MAX_TEMPLATES_PER_PACK})",
+                422,
+            )
+
+        # 9. Check logical_id uniqueness (skills + templates + exercises)
         all_logical_ids: list[str] = []
         for s in skills:
             lid = s.get("logical_id")
             if not lid:
                 raise AppError("INVALID_MANIFEST", "Every skill must have a logical_id", 422)
             all_logical_ids.append(lid)
+            # Also collect exercise logical_ids
+            for ex in s.get("exercises", []):
+                ex_lid = ex.get("logical_id")
+                if ex_lid:
+                    all_logical_ids.append(ex_lid)
         for t in templates:
             lid = t.get("logical_id")
             if not lid:

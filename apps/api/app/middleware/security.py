@@ -75,6 +75,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Only apply CSP to HTML responses — JSON API responses don't need it,
         # and applying it breaks Swagger docs in debug mode.
+        # Note: 'unsafe-inline' is required for Swagger UI's inline scripts in
+        # debug mode. In production the backend serves only JSON, so this CSP
+        # never reaches end users. The frontend applies its own stricter CSP
+        # via next.config.ts headers. Nonce-based CSP would be ideal but
+        # requires per-request nonce injection which is out of scope for the
+        # backend (it only serves HTML for Swagger/debug).
         content_type = response.headers.get("content-type", "")
         if "text/html" in content_type:
             response.headers["Content-Security-Policy"] = (

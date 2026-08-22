@@ -67,15 +67,23 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Graceful shutdown — close DB pool and Redis connections
+    # Graceful shutdown
     log = structlog.get_logger()
     log.info("shutdown_start")
+
+    # 1. Drain in-flight webhook deliveries before tearing down connections
+    from app.services.webhook import drain_webhook_tasks
+
+    await drain_webhook_tasks()
+
+    # 2. Close DB pool
     await engine.dispose()
-    try:
-        r = redis_pool()
-        await r.aclose()
-    except Exception:
-        pass
+
+    # 3. Close Redis
+    from app.core.redis import close_redis
+
+    await close_redis()
+
     log.info("shutdown_complete")
 
 

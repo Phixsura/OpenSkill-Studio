@@ -43,6 +43,23 @@ _BLOCKED_NETWORKS = [
 MAX_WEBHOOKS_PER_ORG = 25
 MAX_EVENTS_PER_WEBHOOK = 20
 
+# Track background delivery tasks so they aren't garbage-collected
+# and can be drained on shutdown.
+_pending_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+
+async def drain_webhook_tasks(timeout: float = 10.0) -> None:
+    """Await all in-flight webhook deliveries. Call from lifespan shutdown."""
+    if not _pending_tasks:
+        return
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*_pending_tasks, return_exceptions=True),
+            timeout=timeout,
+        )
+    except TimeoutError:
+        log.warning("webhook_drain_timeout", pending=len(_pending_tasks))
+
 
 def _is_blocked_url(url: str) -> bool:
     """Check if a URL resolves to a blocked (internal) IP address."""
@@ -181,9 +198,10 @@ class WebhookService:
         if not deliveries:
             return
 
-        # Fire-and-forget: don't block the caller
+        # Fire-and-forget: don't block the caller.
+        # Keep strong references so tasks aren't GC'd before completion.
         for delivery in deliveries:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 self._deliver_background(
                     delivery["url"],
                     delivery["secret"],
@@ -192,6 +210,8 @@ class WebhookService:
                     payload,
                 )
             )
+            _pending_tasks.add(task)
+            task.add_done_callback(_pending_tasks.discard)
 
     @staticmethod
     async def _deliver_background(

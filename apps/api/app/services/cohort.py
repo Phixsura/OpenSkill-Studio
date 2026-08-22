@@ -137,6 +137,31 @@ class CohortService:
                     422,
                 )
             cohort.status = new_status
+            # When archiving, clean up membership and assignment rows so
+            # learners from archived cohorts don't retain stale access.
+            if new_status == CohortStatus.ARCHIVED:
+                from sqlalchemy import delete as sa_delete
+
+                from app.models.learning_path import CohortLearningPathAssignment
+
+                await self.db.execute(
+                    sa_delete(CohortMember).where(CohortMember.cohort_id == cohort_id)
+                )
+                await self.db.execute(
+                    sa_delete(CohortSkillAssignment).where(
+                        CohortSkillAssignment.cohort_id == cohort_id
+                    )
+                )
+                await self.db.execute(
+                    sa_delete(CohortProjectAssignment).where(
+                        CohortProjectAssignment.cohort_id == cohort_id
+                    )
+                )
+                await self.db.execute(
+                    sa_delete(CohortLearningPathAssignment).where(
+                        CohortLearningPathAssignment.cohort_id == cohort_id
+                    )
+                )
         if fields.get("name"):
             slug = self._generate_slug(fields["name"])
             cohort.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
