@@ -343,11 +343,9 @@ class EvaluationService:
 
         except json.JSONDecodeError:
             task.retries += 1
-            task.error = "Failed to parse LLM response"
-            if task.retries < 3:
-                task.status = EvalStatus.PENDING
-            else:
-                task.status = EvalStatus.FAILED  # pragma: no cover
+            # Always set to FAILED — no background worker picks up PENDING tasks
+            task.status = EvalStatus.FAILED
+            task.error = "Failed to parse LLM response — retry via the evaluation UI"
             await self.db.flush()
             log.warning("eval_parse_failed", task_id=task.id, retries=task.retries)
 

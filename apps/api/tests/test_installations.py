@@ -1401,7 +1401,7 @@ async def test_concurrent_install_same_org_one_wins(c):
     # OR both could be 201 if one races through before the check (but then a DB constraint fails).
     # Either (201, 409) or in case of DB unique constraint error, (201, 4xx).
     assert 201 in statuses
-    assert statuses[1] in (409, 500)  # second attempt should be rejected
+    assert statuses[1] == 409  # second attempt should be rejected with conflict
 
 
 @pytest.mark.asyncio

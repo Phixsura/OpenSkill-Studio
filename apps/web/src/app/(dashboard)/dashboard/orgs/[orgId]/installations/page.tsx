@@ -69,7 +69,7 @@ export default function InstallationsListPage() {
       )}
 
       {installations.length > 0 && (
-        <div className="overflow-hidden rounded-lg border">
+        <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
             <thead className="bg-[hsl(var(--secondary))]">
               <tr>

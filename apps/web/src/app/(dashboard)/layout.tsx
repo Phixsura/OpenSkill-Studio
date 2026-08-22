@@ -107,7 +107,7 @@ export default function DashboardLayout({
       <div className="fixed left-0 right-0 top-0 z-40 flex items-center border-b bg-[hsl(var(--card))] px-4 py-3 md:hidden">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="mr-3 rounded-md p-1 hover:bg-[hsl(var(--secondary))]"
+          className="mr-3 rounded-md p-2.5 hover:bg-[hsl(var(--secondary))]"
           aria-label="Toggle menu"
         >
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

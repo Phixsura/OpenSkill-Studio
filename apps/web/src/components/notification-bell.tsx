@@ -85,7 +85,7 @@ export function NotificationBell() {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setOpen(!open)}
-        className="relative rounded-md p-2 hover:bg-[hsl(var(--secondary))] transition-colors"
+        className="relative rounded-md p-3 hover:bg-[hsl(var(--secondary))] transition-colors"
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
         aria-expanded={open}
       >
@@ -111,7 +111,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border bg-[hsl(var(--card))] shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border bg-[hsl(var(--card))] shadow-lg">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h3 className="text-sm font-semibold">Notifications</h3>
             {unreadCount > 0 && (

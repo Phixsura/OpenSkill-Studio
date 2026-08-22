@@ -77,6 +77,22 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET must be set to a unique value in production")
         return v
 
+    @field_validator("s3_secret_key")
+    @classmethod
+    def validate_s3_secret(cls, v: str, info: Any) -> str:
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if app_env not in ("development", "test") and v == "minioadmin":
+            raise ValueError("S3_SECRET_KEY must be changed from default in production")
+        return v
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, v: str, info: Any) -> str:
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if app_env not in ("development", "test") and "postgres:postgres@" in v:
+            raise ValueError("DATABASE_URL must not use default postgres:postgres credentials in production")
+        return v
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

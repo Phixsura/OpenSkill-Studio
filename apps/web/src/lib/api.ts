@@ -1,5 +1,8 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+// Default fetch timeout (30 seconds)
+const FETCH_TIMEOUT_MS = 30_000;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -12,10 +15,41 @@ export class ApiError extends Error {
 }
 
 /**
+ * Safely parse JSON from a response. Throws ApiError on parse failure.
+ */
+async function safeJson<T>(res: Response): Promise<T> {
+  try {
+    return await res.json();
+  } catch {
+    throw new ApiError(res.status, "PARSE_ERROR", "Server returned invalid JSON");
+  }
+}
+
+/**
+ * Wrap a fetch call with timeout and network error handling.
+ */
+async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      throw new ApiError(0, "TIMEOUT", "Request timed out");
+    }
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiError(0, "ABORTED", "Request was aborted");
+    }
+    throw new ApiError(0, "NETWORK_ERROR", "Unable to reach the server");
+  }
+}
+
+/**
  * Unauthenticated API client — for public endpoints (login, register, health).
  */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}/api/v1${path}`, {
+  const res = await safeFetch(`${API_BASE}/api/v1${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -33,7 +67,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+  return safeJson<T>(res);
 }
 
 // ── Authenticated API client ────────────────────────────────
@@ -95,7 +129,7 @@ export async function apiWithAuth<T>(
   let token = useAuthStore.getState().accessToken;
 
   const doFetch = (t: string | null) =>
-    fetch(`${API_BASE}/api/v1${path}`, {
+    safeFetch(`${API_BASE}/api/v1${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -128,5 +162,5 @@ export async function apiWithAuth<T>(
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+  return safeJson<T>(res);
 }

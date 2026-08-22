@@ -249,7 +249,9 @@ class SkillService:
         if tag:
             base = base.where(Skill.tags.contains([tag]))
         if q:
-            base = base.where(Skill.name.ilike(f"%{q}%"))
+            # Escape LIKE wildcards to prevent pattern injection
+            q_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            base = base.where(Skill.name.ilike(f"%{q_escaped}%"))
 
         total_result = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_result.scalar_one()

@@ -100,7 +100,7 @@ export default function RegistryPage() {
           aria-label="Search skill packs"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          className="max-w-xs"
+          className="sm:max-w-xs"
         />
         <label className="sr-only" htmlFor="difficulty-filter">Difficulty</label>
         <select
