@@ -440,6 +440,7 @@ export default function RegistryPackDetailPage() {
 
   const [isAuthed, setIsAuthed] = useState(false);
   useEffect(() => {
+    let unsub: (() => void) | undefined;
     // Check auth state. The apiWithAuth client (used by useQuery calls
     // on this page) auto-refreshes the token on 401. We subscribe to
     // the store so we pick up the state as soon as the refresh completes.
@@ -451,15 +452,17 @@ export default function RegistryPackDetailPage() {
       }
       // Subscribe to store changes — the apiWithAuth auto-refresh
       // will update the store when the refresh token cookie is valid.
-      const unsub = m.useAuthStore.subscribe((state) => {
+      unsub = m.useAuthStore.subscribe((state) => {
         if (state.isAuthenticated) {
           setIsAuthed(true);
-          unsub();
+          unsub?.();
         }
       });
-      // Cleanup on unmount
-      return () => unsub();
     });
+    // Cleanup on unmount — unsub is set asynchronously by .then()
+    return () => {
+      unsub?.();
+    };
   }, []);
 
   const { data: packData, isLoading, isError } = useQuery({

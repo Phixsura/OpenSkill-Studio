@@ -89,14 +89,23 @@ async def test_update_brief(c):
     bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)).json()[
         "data"
     ]["id"]
+    # Update name (no status change)
     r = await c.put(
         f"/api/v1/orgs/{oid}/briefs/{bid}",
-        json={"client_name": "Globex", "status": "active"},
+        json={"client_name": "Globex"},
         headers=h,
     )
     assert r.status_code == 200
     assert r.json()["data"]["client_name"] == "Globex"
-    assert r.json()["data"]["status"] == "active"
+
+    # Transition to a valid next status: draft → open
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}",
+        json={"status": "open"},
+        headers=h,
+    )
+    assert r2.status_code == 200
+    assert r2.json()["data"]["status"] == "open"
 
 
 @pytest.mark.asyncio
@@ -107,11 +116,11 @@ async def test_delete_draft_only(c):
         "data"
     ]["id"]
     assert (await c.delete(f"/api/v1/orgs/{oid}/briefs/{bid}", headers=h)).status_code == 204
-    # non-draft
+    # non-draft — transition to open first (valid: draft → open)
     bid2 = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)).json()[
         "data"
     ]["id"]
-    await c.put(f"/api/v1/orgs/{oid}/briefs/{bid2}", json={"status": "active"}, headers=h)
+    await c.put(f"/api/v1/orgs/{oid}/briefs/{bid2}", json={"status": "open"}, headers=h)
     assert (await c.delete(f"/api/v1/orgs/{oid}/briefs/{bid2}", headers=h)).status_code == 422
 
 
@@ -251,9 +260,10 @@ async def test_brief_status_filter(c):
     bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)).json()[
         "data"
     ]["id"]
-    await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "active"}, headers=h)
+    # Use valid transition: draft → open
+    await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(title="Draft Brief"), headers=h)
-    r = await c.get(f"/api/v1/orgs/{oid}/briefs?status=active", headers=h)
+    r = await c.get(f"/api/v1/orgs/{oid}/briefs?status=open", headers=h)
     assert r.json()["meta"]["total"] == 1
 
 

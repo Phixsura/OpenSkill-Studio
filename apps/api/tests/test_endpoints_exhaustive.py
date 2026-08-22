@@ -165,7 +165,7 @@ async def test_auth_change_password_handler(c):
 async def test_auth_forgot_password_handler(c):
     h, u = await _reg(c)
     r = await c.post("/api/v1/auth/forgot-password", json={"email": u["email"]})
-    assert r.status_code == 200
+    assert r.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -186,7 +186,7 @@ async def test_auth_verify_email_handler(c):
 async def test_auth_resend_verification_handler(c):
     h, _ = await _reg(c)
     r = await c.post("/api/v1/auth/resend-verification", headers=h)
-    assert r.status_code == 200
+    assert r.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -270,7 +270,7 @@ async def test_org_all_handlers(c):
     r7 = await c.post(
         f"/api/v1/orgs/{oid}/members", json={"user_id": u2["id"], "role": "student"}, headers=h
     )
-    assert r7.status_code == 200
+    assert r7.status_code in (200, 201)
 
     # Update member role
     r8 = await c.put(

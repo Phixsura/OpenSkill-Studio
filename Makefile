@@ -43,6 +43,9 @@ db-generate:                      ## Generate migration file
 db-reset:                         ## Reset database
 	cd apps/api && uv run alembic downgrade base && uv run alembic upgrade head
 
+db-seed:                          ## Create initial admin user (set ADMIN_EMAIL, ADMIN_PASSWORD)
+	cd apps/api && uv run python -m app.cli create-admin
+
 # ─── Quality ─────────────────────────────────────────────
 lint:                             ## Lint all code
 	pnpm lint

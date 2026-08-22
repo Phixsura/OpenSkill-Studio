@@ -13,7 +13,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             staleTime: 60 * 1000,
-            retry: 1,
+            retry: (failureCount, error) => {
+              // Don't retry auth errors — they won't resolve on retry
+              if (
+                error &&
+                typeof error === "object" &&
+                "status" in error &&
+                [401, 403].includes(error.status as number)
+              ) {
+                return false;
+              }
+              return failureCount < 1;
+            },
           },
         },
       }),

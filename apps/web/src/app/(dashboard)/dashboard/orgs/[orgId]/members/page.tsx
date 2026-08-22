@@ -100,7 +100,13 @@ export default function MembersPage() {
               <Button
                 size="sm"
                 variant="secondary"
-                onClick={() => navigator.clipboard.writeText(inviteLink)}
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(inviteLink);
+                  } catch {
+                    /* clipboard unavailable in insecure context */
+                  }
+                }}
               >
                 Copy
               </Button>

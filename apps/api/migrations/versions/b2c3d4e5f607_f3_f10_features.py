@@ -1,7 +1,7 @@
 """F3-F10 features: notifications, pack_categories, certificates, review_status
 
 Revision ID: b2c3d4e5f607
-Revises: a1b2c3d4e5f6
+Revises: e5f607182930
 Create Date: 2026-08-20 14:00:00.000000
 
 """
@@ -150,22 +150,21 @@ def upgrade() -> None:
     )
 
     # ── Seed default pack categories ──
-    from ulid import ULID
-
+    # Deterministic IDs so they are consistent across all environments.
     categories = [
-        ("AI & ML", "ai-ml", "brain", 0),
-        ("Design", "design", "palette", 1),
-        ("Development", "development", "code", 2),
-        ("Business", "business", "briefcase", 3),
-        ("Marketing", "marketing", "megaphone", 4),
+        ("01J00000000000000000000AIML", "AI & ML", "ai-ml", "brain", 0),
+        ("01J00000000000000000DESIGN", "Design", "design", "palette", 1),
+        ("01J000000000000000000DEVLOP", "Development", "development", "code", 2),
+        ("01J0000000000000000BUSINESS", "Business", "business", "briefcase", 3),
+        ("01J000000000000000MARKETING", "Marketing", "marketing", "megaphone", 4),
     ]
-    for name, slug, icon, sort_order in categories:
+    for cat_id, name, slug, icon, sort_order in categories:
         op.execute(
             sa.text(
                 "INSERT INTO pack_categories (id, name, slug, icon, sort_order) "
                 "VALUES (:id, :name, :slug, :icon, :sort_order)"
             ).bindparams(
-                id=str(ULID()),
+                id=cat_id,
                 name=name,
                 slug=slug,
                 icon=icon,

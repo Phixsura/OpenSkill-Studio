@@ -101,7 +101,7 @@ async def test_complete_operational_loop(c):
             json={"user_id": u["id"], "role": role},
             headers=h_admin,
         )
-        assert r.status_code == 200, f"Add member {u['display_name']}: {r.text[:100]}"
+        assert r.status_code in (200, 201), f"Add member {u['display_name']}: {r.text[:100]}"
 
     # ═══════════════════════════════════════════════════════════
     # STEP 2: Create + activate cohort

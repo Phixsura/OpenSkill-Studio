@@ -134,8 +134,10 @@ async def test_auth_verify_email_success(db):
 
 @pytest.mark.asyncio
 async def test_auth_refresh_reuse_detection(db):
-    """Cover token reuse detection (lines 153-154)."""
-    from app.services.auth import AuthService, TokenReuseError
+    """Cover token reuse detection — revoked token raises TokenInvalidError
+    (changed from TokenReuseError to avoid nuking all sessions on
+    legitimate session revocation scenarios)."""
+    from app.services.auth import AuthService, TokenInvalidError
 
     email = f"reu-{uuid.uuid4().hex[:8]}@test.com"
     svc = AuthService(db)
@@ -147,7 +149,7 @@ async def test_auth_refresh_reuse_detection(db):
     await db.flush()
 
     # Try to use the old token again → reuse detection
-    with pytest.raises(TokenReuseError):
+    with pytest.raises(TokenInvalidError):
         await svc.refresh_tokens(reg.refresh_token)
 
 
@@ -633,11 +635,6 @@ async def test_rate_limit_real_redis():
 @pytest.mark.asyncio
 async def test_rate_limit_dependency_denied():
     """Cover rate_limit dependency 429 path (lines 55-67)."""
-    import os
-
-    old = os.environ.get("APP_ENV")
-    os.environ["APP_ENV"] = "production"  # Enable rate limiting
-
     from app.core.rate_limit import rate_limit
 
     checker = rate_limit(1, 60)
@@ -646,21 +643,26 @@ async def test_rate_limit_dependency_denied():
     mock_request.client.host = "127.0.0.1"
     mock_request.url = MagicMock()
     mock_request.url.path = f"/test/{uuid.uuid4().hex[:8]}"
+    mock_request.method = "GET"
+    mock_request.state = MagicMock()
 
-    # First call should pass
-    with patch(
-        "app.core.rate_limit.check_rate_limit", new_callable=AsyncMock, return_value=(True, 0)
-    ):
-        await checker(mock_request)
+    # Patch settings.app_env to enable rate limiting (settings is a singleton;
+    # os.environ changes after import don't affect it)
+    with patch("app.core.rate_limit.settings") as mock_settings:
+        mock_settings.app_env = "production"
 
-    # Second call should deny
-    from fastapi import HTTPException
-
-    with patch(
-        "app.core.rate_limit.check_rate_limit", new_callable=AsyncMock, return_value=(False, 0)
-    ):
-        with pytest.raises(HTTPException) as exc:
+        # First call should pass
+        with patch(
+            "app.core.rate_limit.check_rate_limit", new_callable=AsyncMock, return_value=(True, 0)
+        ):
             await checker(mock_request)
-        assert exc.value.status_code == 429
 
-    os.environ["APP_ENV"] = old or "test"
+        # Second call should deny
+        from fastapi import HTTPException
+
+        with patch(
+            "app.core.rate_limit.check_rate_limit", new_callable=AsyncMock, return_value=(False, 0)
+        ):
+            with pytest.raises(HTTPException) as exc:
+                await checker(mock_request)
+            assert exc.value.status_code == 429
