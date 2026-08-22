@@ -588,7 +588,7 @@ class SkillPackService:
                 for user_id, org_id_val in owner_r.all():
                     await notif_svc.create(
                         user_id=user_id,
-                        notification_type="pack_update",
+                        notification_type="pack.updated",
                         title=f"New version {version} available for {pack.name}",
                         body=changelog[:500] if changelog else None,
                         org_id=org_id_val,

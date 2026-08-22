@@ -1,5 +1,6 @@
 """Cohort management endpoints."""
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,8 @@ from app.schemas.cohort import (
     UpdateCohortRequest,
 )
 from app.services.cohort import CohortService
+
+log = structlog.get_logger()
 
 router = APIRouter(tags=["Cohorts"])
 
@@ -198,7 +201,8 @@ async def bulk_enroll(
                 errors.append(f"Cohort is full (max {e.message})")
                 break  # No point trying more
             # ALREADY_MEMBER, USER_NOT_FOUND, COHORT_FROZEN — continue
-        except Exception:  # noqa: BLE001 — unexpected errors
+        except Exception as exc:  # noqa: BLE001 — unexpected errors
+            log.error("cohort_enroll_unexpected", user_id=uid, cohort_id=cohort_id, error=str(exc))
             skipped += 1
     await db.commit()
     result: dict = {"enrolled": enrolled, "skipped": skipped}

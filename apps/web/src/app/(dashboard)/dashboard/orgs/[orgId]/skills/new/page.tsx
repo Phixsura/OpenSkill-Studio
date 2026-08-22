@@ -171,6 +171,7 @@ export default function NewSkillPage() {
               <option value="beginner">Beginner</option>
               <option value="intermediate">Intermediate</option>
               <option value="advanced">Advanced</option>
+              <option value="expert">Expert</option>
             </select>
           </div>
         </div>
@@ -199,6 +200,8 @@ export default function NewSkillPage() {
             <Input
               id="minutes"
               type="number"
+              min={0}
+              max={9999}
               value={estimatedMinutes}
               onChange={(e) => setEstimatedMinutes(e.target.value)}
               placeholder="30"

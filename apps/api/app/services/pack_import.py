@@ -76,7 +76,12 @@ class PackImportService:
             manifest_bytes = zf.read("openskill-pack.json")
             manifest = json.loads(manifest_bytes)
         except (json.JSONDecodeError, KeyError) as exc:
-            raise AppError("INVALID_MANIFEST", f"Cannot parse manifest: {exc}", 422) from exc
+            log.warning("manifest_parse_failed", error=str(exc))
+            raise AppError(
+                "INVALID_MANIFEST",
+                "Manifest file openskill-pack.json is not valid JSON or missing required fields",
+                422,
+            ) from exc
 
         # 6b. Manifest size limit (same as publish_release)
         max_manifest = 10_000_000  # 10 MB

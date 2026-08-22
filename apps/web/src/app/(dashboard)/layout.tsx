@@ -60,8 +60,8 @@ export default function DashboardLayout({
     <>
       <NavLink href="/dashboard" active={pathname === "/dashboard"} onClick={closeSidebar}>Dashboard</NavLink>
       <NavLink href="/dashboard/orgs" active={pathname.startsWith("/dashboard/orgs")} onClick={closeSidebar}>Organizations</NavLink>
-      <NavLink href="/dashboard/skills" active={pathname === "/dashboard/skills"} onClick={closeSidebar}>Skills</NavLink>
-      <NavLink href="/dashboard/projects" active={pathname === "/dashboard/projects"} onClick={closeSidebar}>Projects</NavLink>
+      <NavLink href="/dashboard/skills" active={pathname.startsWith("/dashboard/skills")} onClick={closeSidebar}>Skills</NavLink>
+      <NavLink href="/dashboard/projects" active={pathname.startsWith("/dashboard/projects")} onClick={closeSidebar}>Projects</NavLink>
       <NavLink href="/dashboard/portfolio" active={pathname.startsWith("/dashboard/portfolio")} onClick={closeSidebar}>Portfolio</NavLink>
       <NavLink href="/dashboard/settings" active={pathname === "/dashboard/settings"} onClick={closeSidebar}>Settings</NavLink>
     </>

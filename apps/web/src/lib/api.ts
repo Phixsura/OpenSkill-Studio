@@ -16,11 +16,11 @@ export class ApiError extends Error {
  */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}/api/v1${path}`, {
+    ...init,
     headers: {
       "Content-Type": "application/json",
       ...init?.headers,
     },
-    ...init,
   });
 
   if (!res.ok) {
@@ -43,14 +43,23 @@ let refreshPromise: Promise<string> | null = null;
 async function refreshAccessToken(): Promise<string> {
   const { useAuthStore } = await import("@/stores/auth");
 
-  const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
-    method: "POST",
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch {
+    // Network error during refresh — clear auth and redirect
+    useAuthStore.getState().clearAuth();
+    if (typeof window !== "undefined") {
+      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+    }
+    throw new ApiError(0, "NETWORK_ERROR", "Network error during token refresh");
+  }
 
   if (!res.ok) {
     useAuthStore.getState().clearAuth();
-    // Redirect to login — session expired
     if (typeof window !== "undefined") {
       const current = window.location.pathname;
       window.location.href = `/login?redirect=${encodeURIComponent(current)}`;
@@ -59,8 +68,20 @@ async function refreshAccessToken(): Promise<string> {
   }
 
   const data = await res.json();
-  useAuthStore.getState().setAuth(data.access_token, data.user);
-  return data.access_token;
+  const token = data.access_token;
+  const user = data.user;
+
+  // Validate refresh response before trusting it
+  if (!token || typeof token !== "string" || !user) {
+    useAuthStore.getState().clearAuth();
+    if (typeof window !== "undefined") {
+      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+    }
+    throw new ApiError(401, "INVALID_REFRESH", "Refresh response missing token or user");
+  }
+
+  useAuthStore.getState().setAuth(token, user);
+  return token;
 }
 
 /**

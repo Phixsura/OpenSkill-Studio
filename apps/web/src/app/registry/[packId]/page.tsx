@@ -147,6 +147,7 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
   const [rating, setRating] = useState(5);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [formError, setFormError] = useState("");
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -159,6 +160,7 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
       setRating(5);
       setTitle("");
       setBody("");
+      setFormError("");
       onSuccess();
     },
     onError: (err: Error) => toast.error(err.message || "Failed to submit review"),
@@ -170,6 +172,12 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          // Validate: low ratings require a body of at least 20 chars
+          if (rating <= 2 && (!body || body.trim().length < 20)) {
+            setFormError("Reviews with a rating of 2 or below must include a body of at least 20 characters");
+            return;
+          }
+          setFormError("");
           mutation.mutate();
         }}
         className="mt-3 space-y-3"
@@ -186,6 +194,7 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Summarize your experience"
             required
+            maxLength={200}
           />
         </div>
         <div>
@@ -196,9 +205,13 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
             onChange={(e) => setBody(e.target.value)}
             placeholder="Share more details about your experience..."
             rows={4}
+            maxLength={5000}
             className="block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] placeholder:text-[hsl(var(--muted-foreground))]"
           />
         </div>
+        {formError && (
+          <p className="text-sm text-red-600 mb-2">{formError}</p>
+        )}
         {mutation.isError && (
           <p className="text-sm text-red-600 mb-2">{(mutation.error as Error).message}</p>
         )}
