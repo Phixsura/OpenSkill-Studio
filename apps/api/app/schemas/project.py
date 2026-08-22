@@ -89,8 +89,8 @@ class CreateProjectRequest(BaseModel):
     @field_validator("max_score")
     @classmethod
     def validate_max_score(cls, v: int) -> int:
-        if v < 0 or v > 10000:
-            raise ValueError("Max score must be between 0 and 10,000")
+        if v < 1 or v > 10000:
+            raise ValueError("Max score must be between 1 and 10,000")
         return v
 
     @field_validator("title")
@@ -1031,5 +1031,15 @@ class CommentResponse(BaseModel):
     region: dict | None
     completed: bool
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CreatorAssignmentResponse(BaseModel):
+    id: str
+    project_id: str
+    user_id: str
+    user_name: str | None = None
+    assigned_at: datetime
 
     model_config = {"from_attributes": True}

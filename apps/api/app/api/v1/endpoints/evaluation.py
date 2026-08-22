@@ -128,7 +128,7 @@ async def cancel_eval_task(
 # ── Usage ────────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/evaluation/usage", response_model=EvalUsageResponse, dependencies=[Depends(rate_limit(20, 60))])
+@router.get("/orgs/{org_id}/evaluation/usage", response_model=DataResponse[EvalUsageResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def get_eval_usage(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -136,13 +136,14 @@ async def get_eval_usage(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
-    return await svc.get_usage(org_id)
+    usage = await svc.get_usage(org_id)
+    return DataResponse(data=usage)
 
 
 # ── Settings ─────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/settings/evaluation", response_model=EvalSettingsResponse, dependencies=[Depends(rate_limit(20, 60))])
+@router.get("/orgs/{org_id}/settings/evaluation", response_model=DataResponse[EvalSettingsResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def get_eval_settings(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -150,10 +151,11 @@ async def get_eval_settings(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = EvaluationService(db)
-    return await svc.get_eval_settings(org_id)
+    settings = await svc.get_eval_settings(org_id)
+    return DataResponse(data=settings)
 
 
-@router.put("/orgs/{org_id}/settings/evaluation", response_model=EvalSettingsResponse, dependencies=[Depends(rate_limit(20, 60))])
+@router.put("/orgs/{org_id}/settings/evaluation", response_model=DataResponse[EvalSettingsResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def update_eval_settings(
     org_id: str,
     body: UpdateEvalSettingsRequest,
@@ -164,4 +166,4 @@ async def update_eval_settings(
     svc = EvaluationService(db)
     result = await svc.update_eval_settings(org_id, body.model_dump(exclude_none=True))
     await db.commit()
-    return result
+    return DataResponse(data=result)

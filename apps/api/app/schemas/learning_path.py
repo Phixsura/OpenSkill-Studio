@@ -146,3 +146,10 @@ class PathItemResponse(BaseModel):
 
 class AssignPathRequest(BaseModel):
     path_id: str
+
+
+class CohortPathAssignmentResponse(BaseModel):
+    cohort_id: str
+    path_id: str
+    path_name: str | None = None
+    assigned_at: datetime

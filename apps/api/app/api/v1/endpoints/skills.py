@@ -19,7 +19,9 @@ from app.schemas.skill import (
     ReorderRequest,
     SkillDetailResponse,
     SkillProgressResponse,
+    SkillProgressSummaryResponse,
     SkillResponse,
+    SkillTreeResponse,
     SubmitAttemptRequest,
     UpdateCategoryRequest,
     UpdateExerciseRequest,
@@ -102,7 +104,7 @@ async def create_category(
     return DataResponse(data=CategoryResponse.model_validate(cat))
 
 
-@router.put("/orgs/{org_id}/categories/reorder", status_code=200, dependencies=[Depends(rate_limit(20, 60))])
+@router.put("/orgs/{org_id}/categories/reorder", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
 async def reorder_categories(
     org_id: str,
     body: ReorderRequest,
@@ -117,7 +119,6 @@ async def reorder_categories(
             raise HTTPException(status_code=404, detail="Category not in this org")
         await svc.update_category(item.id, sort_order=item.sort_order)
     await db.commit()
-    return {"message": "Categories reordered"}
 
 
 @router.put(
@@ -317,7 +318,7 @@ async def unpublish_skill(
     return DataResponse(data=SkillResponse.model_validate(skill))
 
 
-@router.put("/orgs/{org_id}/skills/{skill_id}/prerequisites", status_code=200, dependencies=[Depends(rate_limit(20, 60))])
+@router.put("/orgs/{org_id}/skills/{skill_id}/prerequisites", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
 async def set_prerequisites(
     org_id: str,
     skill_id: str,
@@ -331,7 +332,6 @@ async def set_prerequisites(
     _verify_org(skill, org_id, "Skill")
     await svc.set_prerequisites(skill_id, body.prerequisite_ids)
     await db.commit()
-    return {"message": "Prerequisites updated"}
 
 
 # ── Exercises ────────────────────────────────────────────
@@ -499,7 +499,7 @@ async def list_my_attempts(
 # ── Progress ─────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/progress/me", response_model=OverallProgressResponse, dependencies=[Depends(rate_limit(20, 60))])
+@router.get("/orgs/{org_id}/progress/me", response_model=DataResponse[OverallProgressResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def get_my_progress(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -507,7 +507,8 @@ async def get_my_progress(
 ):
     await require_org_member(org_id, user, db)
     svc = SkillService(db)
-    return await svc.get_user_progress(user.id, org_id)
+    progress = await svc.get_user_progress(user.id, org_id)
+    return DataResponse(data=progress)
 
 
 @router.get(
@@ -589,7 +590,7 @@ async def get_category(
     return DataResponse(data=CategoryResponse.model_validate(cat))
 
 
-@router.put("/orgs/{org_id}/skills/{skill_id}/exercises/reorder", status_code=200, dependencies=[Depends(rate_limit(20, 60))])
+@router.put("/orgs/{org_id}/skills/{skill_id}/exercises/reorder", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
 async def reorder_exercises(
     org_id: str,
     skill_id: str,
@@ -609,10 +610,9 @@ async def reorder_exercises(
             raise HTTPException(status_code=404, detail="Exercise not in this skill")
         await svc.update_exercise(item.id, sort_order=item.sort_order)
     await db.commit()
-    return {"message": "Exercises reordered"}
 
 
-@router.get("/orgs/{org_id}/skills/{skill_id}/tree", dependencies=[Depends(rate_limit(20, 60))])
+@router.get("/orgs/{org_id}/skills/{skill_id}/tree", response_model=DataResponse[SkillTreeResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def get_skill_tree(
     org_id: str,
     skill_id: str,
@@ -632,13 +632,15 @@ async def get_skill_tree(
     ):
         raise HTTPException(status_code=404, detail="Skill not found")
     prereqs = await svc.get_skill_prerequisites(skill_id)
-    return {
-        "skill": SkillResponse.model_validate(skill),
-        "prerequisites": [SkillResponse.model_validate(p) for p in prereqs],
-    }
+    return DataResponse(
+        data=SkillTreeResponse(
+            skill=SkillResponse.model_validate(skill),
+            prerequisites=[SkillResponse.model_validate(p) for p in prereqs],
+        )
+    )
 
 
-@router.get("/orgs/{org_id}/progress/me/skills", dependencies=[Depends(rate_limit(20, 60))])
+@router.get("/orgs/{org_id}/progress/me/skills", response_model=DataResponse[list[SkillProgressSummaryResponse]], dependencies=[Depends(rate_limit(20, 60))])
 async def list_my_skill_progress(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -690,18 +692,18 @@ async def list_my_skill_progress(
         else:
             status = "in_progress"
         result.append(
-            {
-                "skill_id": skill.id,
-                "skill_name": skill.name,
-                "status": status,
-                "exercises_total": live_total,
-                "exercises_done": done,
-            }
+            SkillProgressSummaryResponse(
+                skill_id=skill.id,
+                skill_name=skill.name,
+                status=status,
+                exercises_total=live_total,
+                exercises_done=done,
+            )
         )
     return DataResponse(data=result)
 
 
-@router.get("/orgs/{org_id}/progress/students/{student_id}", dependencies=[Depends(rate_limit(20, 60))])
+@router.get("/orgs/{org_id}/progress/students/{student_id}", response_model=DataResponse[OverallProgressResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def get_student_progress(
     org_id: str,
     student_id: str,
@@ -711,4 +713,5 @@ async def get_student_progress(
     """Instructor view: get a specific student's progress."""
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     svc = SkillService(db)
-    return await svc.get_user_progress(student_id, org_id)
+    progress = await svc.get_user_progress(student_id, org_id)
+    return DataResponse(data=progress)

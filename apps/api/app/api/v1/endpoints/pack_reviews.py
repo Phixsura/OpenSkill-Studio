@@ -65,6 +65,7 @@ async def update_review(
         rating=body.rating,
         title=body.title,
         body=body.body,
+        pack_id=pack_id,
     )
     await db.commit()
     return DataResponse(data=ReviewResponse.model_validate(review))
@@ -164,7 +165,7 @@ async def toggle_helpful(
 ):
     """Toggle a helpful vote on a review. Authenticated users only."""
     svc = PackReviewService(db)
-    review = await svc.toggle_helpful(review_id=review_id, user_id=user.id)
+    review = await svc.toggle_helpful(review_id=review_id, user_id=user.id, pack_id=pack_id)
     await db.commit()
     return DataResponse(data=ReviewResponse.model_validate(review))
 
@@ -182,5 +183,5 @@ async def delete_review(
 ):
     """Delete your own review. Owner only."""
     svc = PackReviewService(db)
-    await svc.delete_review(review_id, user.id)
+    await svc.delete_review(review_id, user.id, pack_id=pack_id)
     await db.commit()

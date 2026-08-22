@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 interface Certificate {
   certificate_number: string;
@@ -18,13 +18,15 @@ interface Certificate {
 export default function CertificateVerificationPage() {
   const { certificateNumber } = useParams<{ certificateNumber: string }>();
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["certificate", certificateNumber],
     queryFn: () =>
       api<{ data: Certificate }>(`/certificates/${certificateNumber}`),
   });
 
   const cert = data?.data;
+
+  const is404 = error instanceof ApiError && error.status === 404;
 
   if (isLoading) {
     return (
@@ -43,9 +45,13 @@ export default function CertificateVerificationPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold">Certificate Not Found</h1>
+          <h1 className="text-2xl font-bold">
+            {is404 ? "Certificate Not Found" : "Unable to Verify"}
+          </h1>
           <p className="mt-2 text-[hsl(var(--muted-foreground))]">
-            The certificate number provided could not be verified. Please check the number and try again.
+            {is404
+              ? "The certificate number provided could not be verified. Please check the number and try again."
+              : "We were unable to verify this certificate at the moment. Please try again later."}
           </p>
           <Link
             href="/"

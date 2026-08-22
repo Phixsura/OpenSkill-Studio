@@ -13,9 +13,20 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ certificateNumber: "abc-123-def-456" }),
 }));
 
+const { MockApiError } = vi.hoisted(() => {
+  class MockApiError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  }
+  return { MockApiError };
+});
+
 vi.mock("@/lib/api", () => ({
   api: vi.fn(),
-  ApiError: class extends Error {},
+  ApiError: MockApiError,
 }));
 
 import CertificateVerificationPage from "@/app/certificates/[certificateNumber]/page";
@@ -42,7 +53,7 @@ describe("CertificateVerificationPage", () => {
   });
 
   it("shows not found state on error", async () => {
-    mockApi.mockRejectedValue(new Error("not found"));
+    mockApi.mockRejectedValue(new MockApiError("not found", 404));
     render(<CertificateVerificationPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("Certificate Not Found")).toBeDefined();
     expect(
@@ -73,7 +84,7 @@ describe("CertificateVerificationPage", () => {
   });
 
   it("links homepage in not-found state", async () => {
-    mockApi.mockRejectedValue(new Error("not found"));
+    mockApi.mockRejectedValue(new MockApiError("not found", 404));
     render(<CertificateVerificationPage />, { wrapper: createWrapper() });
     const link = await screen.findByText("Go to homepage");
     expect(link.closest("a")?.getAttribute("href")).toBe("/");

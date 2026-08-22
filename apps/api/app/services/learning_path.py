@@ -167,7 +167,7 @@ class LearningPathService:
 
     async def assign_to_cohort(
         self, path_id: str, cohort_id: str, org_id: str, assigned_by: str
-    ) -> None:
+    ) -> CohortLearningPathAssignment:
         await self._verify_cohort_org(cohort_id, org_id)
         path = await self.get_path(path_id, org_id)
         if path.status != ContentStatus.PUBLISHED:
@@ -184,6 +184,7 @@ class LearningPathService:
         except IntegrityError:
             await self.db.rollback()
             raise AppError("ALREADY_ASSIGNED", "Path already assigned to this cohort", 409) from None
+        return assignment
 
     async def unassign_from_cohort(self, path_id: str, cohort_id: str, org_id: str) -> None:
         await self._verify_cohort_org(cohort_id, org_id)

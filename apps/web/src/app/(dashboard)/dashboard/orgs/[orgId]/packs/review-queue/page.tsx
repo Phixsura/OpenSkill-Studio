@@ -114,6 +114,10 @@ export default function ReviewQueuePage() {
                 {new Date(pack.created_at).toLocaleDateString()}
               </p>
             </div>
+            {/* TODO: Hide approve/reject for instructor-role users once the
+                current user's org role is available in client context. Currently
+                the buttons render for all authenticated members; the backend
+                should still reject unauthorized calls. */}
             <div className="flex items-center gap-2">
               <Button
                 size="sm"

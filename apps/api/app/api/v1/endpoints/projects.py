@@ -17,6 +17,7 @@ from app.schemas.project import (
     CreateProjectRequest,
     CreateReviewRequest,
     CreateTemplateRequest,
+    CreatorAssignmentResponse,
     DeliverableResponse,
     ExtensionResponse,
     FileResponse,
@@ -1236,7 +1237,7 @@ async def delete_comment(
 
 @router.post(
     "/orgs/{org_id}/projects/{project_id}/creators",
-    response_model=DataResponse[dict],
+    response_model=DataResponse[CreatorAssignmentResponse],
     status_code=201,
     dependencies=[Depends(rate_limit(10, 60))],
 )
@@ -1284,12 +1285,12 @@ async def assign_creator(
         raise HTTPException(status_code=409, detail="Creator already assigned") from None
     await db.commit()
     return DataResponse(
-        data={
-            "id": assignment.id,
-            "project_id": project_id,
-            "user_id": body.user_id,
-            "assigned_at": assignment.assigned_at.isoformat(),
-        }
+        data=CreatorAssignmentResponse(
+            id=assignment.id,
+            project_id=project_id,
+            user_id=body.user_id,
+            assigned_at=assignment.assigned_at,
+        )
     )
 
 
@@ -1329,7 +1330,7 @@ async def unassign_creator(
 
 @router.get(
     "/orgs/{org_id}/projects/{project_id}/creators",
-    response_model=DataResponse[list[dict]],
+    response_model=DataResponse[list[CreatorAssignmentResponse]],
     dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_creators(
@@ -1355,12 +1356,13 @@ async def list_creators(
     )
     return DataResponse(
         data=[
-            {
-                "id": a.id,
-                "user_id": a.user_id,
-                "user_name": name,
-                "assigned_at": a.assigned_at.isoformat(),
-            }
+            CreatorAssignmentResponse(
+                id=a.id,
+                project_id=project_id,
+                user_id=a.user_id,
+                user_name=name,
+                assigned_at=a.assigned_at,
+            )
             for a, name in result.all()
         ]
     )

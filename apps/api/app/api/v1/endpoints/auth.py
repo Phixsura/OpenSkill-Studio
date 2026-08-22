@@ -216,18 +216,17 @@ async def change_password(
 
 @router.post(
     "/forgot-password",
-    status_code=200,
+    status_code=204,
     dependencies=[Depends(rate_limit(3, 900))],
 )
 async def forgot_password(
     body: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Always returns 200 — never reveals whether the email exists."""
+    """Always returns 204 — never reveals whether the email exists."""
     service = AuthService(db)
     await service.forgot_password(body.email)
     await db.commit()
-    return {"message": "If an account exists, a reset link has been sent."}
 
 
 # ── Reset password ────────────────────────────────────────
@@ -235,7 +234,7 @@ async def forgot_password(
 
 @router.post(
     "/reset-password",
-    status_code=200,
+    status_code=204,
     dependencies=[Depends(rate_limit(5, 900))],
 )
 async def reset_password(
@@ -245,7 +244,6 @@ async def reset_password(
     service = AuthService(db)
     await service.reset_password(body.token, body.new_password)
     await db.commit()
-    return {"message": "Password has been reset. Please log in."}
 
 
 # ── Email verification ───────────────────────────────────
@@ -266,7 +264,7 @@ async def verify_email(
 
 @router.post(
     "/resend-verification",
-    status_code=200,
+    status_code=204,
     dependencies=[Depends(rate_limit(3, 900))],
 )
 async def resend_verification(
@@ -276,7 +274,6 @@ async def resend_verification(
     service = AuthService(db)
     await service.resend_verification(user)
     await db.commit()
-    return {"message": "Verification email sent."}
 
 
 # ── Sessions ──────────────────────────────────────────────

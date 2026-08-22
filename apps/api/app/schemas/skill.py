@@ -264,8 +264,8 @@ class CreateExerciseRequest(BaseModel):
     @field_validator("max_score")
     @classmethod
     def validate_max_score(cls, v: int) -> int:
-        if v < 0 or v > 10000:
-            raise ValueError("Max score must be between 0 and 10,000")
+        if v < 1 or v > 10000:
+            raise ValueError("Max score must be between 1 and 10,000")
         return v
 
     @field_validator("type")
@@ -439,6 +439,19 @@ class OverallProgressResponse(BaseModel):
     exercises_completed: int
     completion_percentage: float
     categories: list[dict]
+
+
+class SkillProgressSummaryResponse(BaseModel):
+    skill_id: str
+    skill_name: str
+    status: str
+    exercises_total: int
+    exercises_done: int
+
+
+class SkillTreeResponse(BaseModel):
+    skill: SkillResponse
+    prerequisites: list[SkillResponse]
 
 
 # ── Reorder ───────────────────────────────────────────────

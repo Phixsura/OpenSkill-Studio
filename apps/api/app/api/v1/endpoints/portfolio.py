@@ -34,7 +34,7 @@ def _public_item(item) -> PortfolioItemResponse:
     return resp
 
 
-@router.get("/u/{username}", response_model=PublicProfileResponse, dependencies=[Depends(rate_limit(30, 60))])
+@router.get("/u/{username}", response_model=DataResponse[PublicProfileResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
     svc = PortfolioService(db)
     profile = await svc.get_public_profile(username)
@@ -43,7 +43,7 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
 
     # Convert featured items to response format
     profile["featured_items"] = [_public_item(i) for i in profile["featured_items"]]
-    return profile
+    return DataResponse(data=PublicProfileResponse(**profile))
 
 
 @router.get("/u/{username}/items", response_model=DataResponse[list[PortfolioItemResponse]], dependencies=[Depends(rate_limit(30, 60))])

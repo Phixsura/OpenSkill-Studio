@@ -12,6 +12,7 @@ from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.learning_path import (
     AddPathItemRequest,
     AssignPathRequest,
+    CohortPathAssignmentResponse,
     CreateLearningPathRequest,
     LearningPathResponse,
     PathItemResponse,
@@ -132,16 +133,20 @@ async def list_items(
 # ── Cohort Assignment ──
 
 
-@router.post("/orgs/{org_id}/cohorts/{cohort_id}/paths", status_code=201, dependencies=[Depends(rate_limit(20, 60))])
+@router.post("/orgs/{org_id}/cohorts/{cohort_id}/paths", response_model=DataResponse[CohortPathAssignmentResponse], status_code=201, dependencies=[Depends(rate_limit(20, 60))])
 async def assign_path_to_cohort(
     org_id: str, cohort_id: str, body: AssignPathRequest,
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
-    await svc.assign_to_cohort(body.path_id, cohort_id, org_id, user.id)
+    assignment = await svc.assign_to_cohort(body.path_id, cohort_id, org_id, user.id)
     await db.commit()
-    return DataResponse(data={"cohort_id": cohort_id, "path_id": body.path_id})
+    return DataResponse(data=CohortPathAssignmentResponse(
+        cohort_id=cohort_id,
+        path_id=body.path_id,
+        assigned_at=assignment.assigned_at,
+    ))
 
 
 @router.delete("/orgs/{org_id}/cohorts/{cohort_id}/paths/{path_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
@@ -155,7 +160,7 @@ async def unassign_path(
     await db.commit()
 
 
-@router.get("/orgs/{org_id}/cohorts/{cohort_id}/paths", response_model=DataResponse[list[dict]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get("/orgs/{org_id}/cohorts/{cohort_id}/paths", response_model=DataResponse[list[CohortPathAssignmentResponse]], dependencies=[Depends(rate_limit(20, 60))])
 async def list_cohort_paths(
     org_id: str, cohort_id: str,
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
@@ -164,7 +169,7 @@ async def list_cohort_paths(
     svc = LearningPathService(db)
     assignments = await svc.list_cohort_paths(cohort_id, org_id)
     return DataResponse(data=[
-        {"cohort_id": cohort_id, "path_id": a.path_id, "path_name": name, "assigned_at": a.assigned_at.isoformat()}
+        CohortPathAssignmentResponse(cohort_id=cohort_id, path_id=a.path_id, path_name=name, assigned_at=a.assigned_at)
         for a, name in assignments
     ])
 

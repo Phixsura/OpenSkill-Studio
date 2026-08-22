@@ -11,10 +11,12 @@ from app.schemas.organization import (
     AcceptInviteRequest,
     CreateInviteLinkRequest,
     CreateOrgRequest,
+    InvitationResponse,
     InviteLinkResponse,
     InviteMembersRequest,
     InviteResponse,
     JoinByCodeRequest,
+    JoinOrgResponse,
     OrgDetailResponse,
     OrgMemberResponse,
     OrgMemberUserResponse,
@@ -260,7 +262,7 @@ async def list_members(
     )
 
 
-@router.put("/orgs/{org_id}/members/{user_id}", dependencies=[Depends(rate_limit(10, 60))])
+@router.put("/orgs/{org_id}/members/{user_id}", response_model=DataResponse[OrgMemberResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def update_member_role(
     org_id: str,
     user_id: str,
@@ -325,7 +327,7 @@ async def invite_members(
     )
 
 
-@router.get("/orgs/{org_id}/invites", dependencies=[Depends(rate_limit(30, 60))])
+@router.get("/orgs/{org_id}/invites", response_model=DataResponse[list[InvitationResponse]], dependencies=[Depends(rate_limit(30, 60))])
 async def list_invitations(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -336,14 +338,14 @@ async def list_invitations(
     invites = await service.get_invitations(org_id)
     return DataResponse(
         data=[
-            {
-                "id": inv.id,
-                "email": inv.email,
-                "role": inv.role.value,
-                "status": inv.status.value,
-                "expires_at": inv.expires_at.isoformat(),
-                "created_at": inv.created_at.isoformat(),
-            }
+            InvitationResponse(
+                id=inv.id,
+                email=inv.email,
+                role=inv.role.value,
+                status=inv.status.value,
+                expires_at=inv.expires_at,
+                created_at=inv.created_at,
+            )
             for inv in invites
         ]
     )
@@ -365,7 +367,7 @@ async def revoke_invite(
 # ── Direct Member Add ────────────────────────────────────
 
 
-@router.post("/orgs/{org_id}/members", dependencies=[Depends(rate_limit(10, 60))])
+@router.post("/orgs/{org_id}/members", response_model=DataResponse[OrgMemberResponse], status_code=201, dependencies=[Depends(rate_limit(10, 60))])
 async def add_member_directly(
     org_id: str,
     body: AddMemberRequest,
@@ -476,7 +478,7 @@ async def delete_invite_link(
 # ── Invite Actions (public-ish) ──────────────────────────
 
 
-@router.post("/invites/accept", dependencies=[Depends(rate_limit(10, 60))])
+@router.post("/invites/accept", response_model=DataResponse[JoinOrgResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def accept_email_invite(
     body: AcceptInviteRequest,
     user: User = Depends(get_current_user),
@@ -485,10 +487,10 @@ async def accept_email_invite(
     service = OrgService(db)
     member = await service.accept_email_invite(body.token, user.id)
     await db.commit()
-    return {"message": "Invitation accepted", "org_id": member.org_id}
+    return DataResponse(data=JoinOrgResponse(message="Invitation accepted", org_id=member.org_id))
 
 
-@router.post("/invites/join", dependencies=[Depends(rate_limit(10, 60))])
+@router.post("/invites/join", response_model=DataResponse[JoinOrgResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def join_by_code(
     body: JoinByCodeRequest,
     user: User = Depends(get_current_user),
@@ -497,4 +499,4 @@ async def join_by_code(
     service = OrgService(db)
     member = await service.join_by_code(body.code, user.id)
     await db.commit()
-    return {"message": "Joined organization", "org_id": member.org_id}
+    return DataResponse(data=JoinOrgResponse(message="Joined organization", org_id=member.org_id))

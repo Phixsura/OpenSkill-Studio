@@ -80,6 +80,13 @@ class CreateSkillPackRequest(BaseModel):
                 raise ValueError("Each learning outcome must be 500 characters or less")
         return v
 
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        if len(v) > 10:
+            raise ValueError("Language code must be 10 characters or less")
+        return v
+
 
 class UpdateSkillPackRequest(BaseModel):
     name: str | None = None

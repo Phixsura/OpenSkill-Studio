@@ -98,6 +98,9 @@ export default function PathDetailPage() {
     }
   }, [path, synced]);
 
+  // ── Remove item double-click guard ──
+  const [removingItemId, setRemovingItemId] = useState<string | null>(null);
+
   // ── Add item form state ──
   const [addType, setAddType] = useState<"skill" | "project" | "section">("skill");
   const [addSkillId, setAddSkillId] = useState("");
@@ -190,6 +193,7 @@ export default function PathDetailPage() {
   };
 
   const handleRemoveItem = async (itemId: string) => {
+    setRemovingItemId(itemId);
     try {
       await apiWithAuth(`/orgs/${orgId}/paths/${pathId}/items/${itemId}`, {
         method: "DELETE",
@@ -198,6 +202,8 @@ export default function PathDetailPage() {
       toast.success("Item removed.");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to remove item.");
+    } finally {
+      setRemovingItemId(null);
     }
   };
 
@@ -270,6 +276,7 @@ export default function PathDetailPage() {
                     size="sm"
                     variant="ghost"
                     onClick={() => handleRemoveItem(item.id)}
+                    disabled={removingItemId === item.id}
                   >
                     Remove
                   </Button>
@@ -302,6 +309,7 @@ export default function PathDetailPage() {
                   size="sm"
                   variant="ghost"
                   onClick={() => handleRemoveItem(item.id)}
+                  disabled={removingItemId === item.id}
                 >
                   Remove
                 </Button>

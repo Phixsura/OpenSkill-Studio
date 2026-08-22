@@ -105,10 +105,13 @@ class PackReviewService:
         rating: int | None = None,
         title: str | None = None,
         body: str | None = None,
+        pack_id: str | None = None,
     ) -> PackReview:
         """Update an existing review. Owner only."""
         review = await self.db.get(PackReview, review_id)
         if review is None:
+            raise ReviewNotFoundError()
+        if pack_id and review.pack_id != pack_id:
             raise ReviewNotFoundError()
         if review.user_id != user_id:
             raise AppError("FORBIDDEN", "You can only edit your own reviews", 403)
@@ -171,9 +174,11 @@ class PackReviewService:
         )
         return list(result.scalars().all()), total
 
-    async def delete_review(self, review_id: str, user_id: str) -> None:
+    async def delete_review(self, review_id: str, user_id: str, pack_id: str | None = None) -> None:
         review = await self.db.get(PackReview, review_id)
         if review is None:
+            raise ReviewNotFoundError()
+        if pack_id and review.pack_id != pack_id:
             raise ReviewNotFoundError()
         if review.user_id != user_id:
             raise AppError("FORBIDDEN", "You can only delete your own reviews", 403)
@@ -240,10 +245,12 @@ class PackReviewService:
             "distribution": distribution,
         }
 
-    async def toggle_helpful(self, review_id: str, user_id: str) -> PackReview:
+    async def toggle_helpful(self, review_id: str, user_id: str, pack_id: str | None = None) -> PackReview:
         """Toggle a helpful vote on a review."""
         review = await self.db.get(PackReview, review_id)
         if review is None:
+            raise ReviewNotFoundError()
+        if pack_id and review.pack_id != pack_id:
             raise ReviewNotFoundError()
 
         # Check if user already voted
