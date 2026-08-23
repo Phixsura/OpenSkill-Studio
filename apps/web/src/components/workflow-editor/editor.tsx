@@ -1,0 +1,492 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { addEdge, applyEdgeChanges, applyNodeChanges } from "@xyflow/react";
+import type { Connection, Edge, EdgeChange, Node, NodeChange } from "@xyflow/react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { apiWithAuth, ApiError } from "@/lib/api";
+
+import { CanvasView } from "./canvas-view";
+import { autoLayout, toDefinition, toReactFlow } from "./convert";
+import type { StepNodeData } from "./convert";
+import { ListView } from "./list-view";
+import { StepConfigPanel } from "./step-config-panel";
+import type {
+  StepDef,
+  ValidationErrorItem,
+  WorkflowDefinition,
+  WorkflowInput,
+  WorkflowOutput,
+} from "./types";
+import { emptyDefinition, IO_TYPES } from "./types";
+
+interface PackDetail {
+  id: string;
+  name: string;
+  status: string;
+  definition: Record<string, unknown>;
+}
+
+interface Capability {
+  key: string;
+  name: string;
+}
+
+export default function WorkflowEditor({
+  orgId,
+  packId,
+}: {
+  orgId: string;
+  packId: string;
+}) {
+  const queryClient = useQueryClient();
+
+  const { data: packData, isLoading } = useQuery({
+    queryKey: ["workflow-pack", orgId, packId],
+    queryFn: () =>
+      apiWithAuth<{ data: PackDetail }>(`/orgs/${orgId}/workflow-packs/${packId}`),
+  });
+
+  const { data: capsData } = useQuery({
+    queryKey: ["capabilities"],
+    queryFn: () => apiWithAuth<{ data: Capability[] }>("/capabilities"),
+  });
+  const capabilities = capsData?.data ?? [];
+
+  const [definition, setDefinition] = useState<WorkflowDefinition | null>(null);
+  const [nodes, setNodes] = useState<Node<StepNodeData>[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
+  const [view, setView] = useState<"canvas" | "list">("canvas");
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [errors, setErrors] = useState<ValidationErrorItem[]>([]);
+  const [dirty, setDirty] = useState(false);
+
+  // Initialize once from server
+  useEffect(() => {
+    if (packData && definition === null) {
+      const raw = packData.data.definition;
+      const def: WorkflowDefinition =
+        raw && Array.isArray((raw as { steps?: unknown }).steps)
+          ? (raw as unknown as WorkflowDefinition)
+          : emptyDefinition();
+      setDefinition(def);
+      const rf = toReactFlow(def);
+      setNodes(rf.nodes);
+      setEdges(rf.edges);
+    }
+  }, [packData, definition]);
+
+  // Apply a definition update + resync React Flow state
+  const applyDefinition = useCallback((def: WorkflowDefinition) => {
+    setDefinition(def);
+    const rf = toReactFlow(def);
+    setNodes(rf.nodes);
+    setEdges(rf.edges);
+    setDirty(true);
+  }, []);
+
+  const currentDefinition = useCallback((): WorkflowDefinition => {
+    if (!definition) return emptyDefinition();
+    return toDefinition(definition, nodes, edges);
+  }, [definition, nodes, edges]);
+
+  const onNodesChange = useCallback((changes: NodeChange<Node<StepNodeData>>[]) => {
+    setNodes((nds) => applyNodeChanges(changes, nds));
+    if (changes.some((c) => c.type !== "select" && c.type !== "dimensions")) {
+      setDirty(true);
+    }
+  }, []);
+
+  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
+    setEdges((eds) => applyEdgeChanges(changes, eds));
+    if (changes.some((c) => c.type !== "select")) setDirty(true);
+  }, []);
+
+  const onConnect = useCallback((connection: Connection) => {
+    setEdges((eds) => addEdge(connection, eds));
+    setDirty(true);
+  }, []);
+
+  const updateStep = useCallback(
+    (updated: StepDef) => {
+      const def = currentDefinition();
+      applyDefinition({
+        ...def,
+        steps: def.steps.map((s) => (s.id === updated.id ? updated : s)),
+      });
+    },
+    [currentDefinition, applyDefinition],
+  );
+
+  const deleteStep = useCallback(
+    (stepId: string) => {
+      const def = currentDefinition();
+      applyDefinition({
+        ...def,
+        steps: def.steps.filter((s) => s.id !== stepId),
+        edges: def.edges.filter((e) => e.from_step !== stepId && e.to_step !== stepId),
+        outputs: def.outputs.filter((o) => o.from_step !== stepId),
+      });
+      setSelectedStepId(null);
+    },
+    [currentDefinition, applyDefinition],
+  );
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const def = currentDefinition();
+      // Validate first for structured errors (the PUT would 422 with the same
+      // details, but the dry-run keeps the flow simple)
+      const validation = await apiWithAuth<{
+        data: { valid: boolean; errors: ValidationErrorItem[] };
+      }>(`/orgs/${orgId}/workflow-packs/validate`, {
+        method: "POST",
+        body: JSON.stringify({ definition: def }),
+      });
+      if (!validation.data.valid) {
+        setErrors(validation.data.errors);
+        throw new ApiError(422, "WF_VALIDATION_FAILED", "Definition has validation errors");
+      }
+      setErrors([]);
+      return apiWithAuth(`/orgs/${orgId}/workflow-packs/${packId}/definition`, {
+        method: "PUT",
+        body: JSON.stringify({ definition: def }),
+      });
+    },
+    onSuccess: () => {
+      setDirty(false);
+      toast.success("Workflow saved");
+      queryClient.invalidateQueries({ queryKey: ["workflow-pack", orgId, packId] });
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : "Failed to save workflow");
+    },
+  });
+
+  if (isLoading || !definition) {
+    return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading editor…</p>;
+  }
+
+  const selectedStep =
+    selectedStepId != null
+      ? currentDefinition().steps.find((s) => s.id === selectedStepId) ?? null
+      : null;
+
+  const handleErrorClick = (error: ValidationErrorItem) => {
+    const match = error.pointer.match(/^\/steps\/(\d+)/);
+    const index = match?.[1];
+    if (index !== undefined) {
+      const def = currentDefinition();
+      const step = def.steps[parseInt(index, 10)];
+      if (step) setSelectedStepId(step.id);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/dashboard/orgs/${orgId}/workflow-packs/${packId}`}
+            className="text-sm text-[hsl(var(--muted-foreground))] hover:underline"
+          >
+            ← {packData?.data.name}
+          </Link>
+          {dirty && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+              Unsaved changes
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-md border">
+            <button
+              onClick={() => setView("canvas")}
+              className={`px-3 py-1.5 text-sm ${view === "canvas" ? "bg-[hsl(var(--secondary))]" : ""}`}
+            >
+              Canvas
+            </button>
+            <button
+              onClick={() => setView("list")}
+              className={`px-3 py-1.5 text-sm ${view === "list" ? "bg-[hsl(var(--secondary))]" : ""}`}
+            >
+              List
+            </button>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => applyDefinition(autoLayout(currentDefinition()))}
+          >
+            Auto-layout
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
+
+      {errors.length > 0 && (
+        <div
+          role="alert"
+          className="rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950"
+        >
+          <p className="text-sm font-medium text-red-800 dark:text-red-200">
+            {errors.length} validation error{errors.length !== 1 ? "s" : ""}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {errors.map((error, i) => (
+              <li key={i}>
+                <button
+                  onClick={() => handleErrorClick(error)}
+                  className="text-left text-xs text-red-700 hover:underline dark:text-red-300"
+                >
+                  <code className="font-mono">{error.code}</code> {error.pointer} —{" "}
+                  {error.message}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex gap-4">
+        <div className="min-w-0 flex-1">
+          {view === "canvas" ? (
+            <CanvasView
+              definition={currentDefinition()}
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onSelectStep={setSelectedStepId}
+            />
+          ) : (
+            <ListView
+              definition={currentDefinition()}
+              selectedStepId={selectedStepId}
+              onSelectStep={setSelectedStepId}
+              onChange={applyDefinition}
+            />
+          )}
+
+          <IOSection definition={currentDefinition()} onChange={applyDefinition} />
+        </div>
+
+        {selectedStep && (
+          <StepConfigPanel
+            step={selectedStep}
+            capabilities={capabilities}
+            onChange={updateStep}
+            onDelete={() => deleteStep(selectedStep.id)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Workflow inputs / outputs editors ─────────────────────
+
+function IOSection({
+  definition,
+  onChange,
+}: {
+  definition: WorkflowDefinition;
+  onChange: (def: WorkflowDefinition) => void;
+}) {
+  const setInputs = (inputs: WorkflowInput[]) => onChange({ ...definition, inputs });
+  const setOutputs = (outputs: WorkflowOutput[]) => onChange({ ...definition, outputs });
+
+  return (
+    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <section className="rounded-lg border p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">Workflow Inputs</h2>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              setInputs([
+                ...definition.inputs,
+                { key: `input_${definition.inputs.length + 1}`, type: "text", required: true },
+              ])
+            }
+          >
+            Add input
+          </Button>
+        </div>
+        <div className="mt-3 space-y-2">
+          {definition.inputs.map((input, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-1.5">
+              <Input
+                value={input.key}
+                aria-label={`Input key ${i + 1}`}
+                onChange={(e) =>
+                  setInputs(
+                    definition.inputs.map((inp, idx) =>
+                      idx === i
+                        ? { ...inp, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_") }
+                        : inp,
+                    ),
+                  )
+                }
+                className="w-36"
+              />
+              <select
+                value={input.type}
+                aria-label={`Input type ${i + 1}`}
+                onChange={(e) =>
+                  setInputs(
+                    definition.inputs.map((inp, idx) =>
+                      idx === i ? { ...inp, type: e.target.value } : inp,
+                    ),
+                  )
+                }
+                className="rounded border bg-transparent px-2 py-1.5 text-sm"
+              >
+                {IO_TYPES.map((t) => (
+                  <option key={t.type} value={t.type}>
+                    {t.type}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1 text-xs">
+                <input
+                  type="checkbox"
+                  checked={input.required !== false}
+                  onChange={(e) =>
+                    setInputs(
+                      definition.inputs.map((inp, idx) =>
+                        idx === i ? { ...inp, required: e.target.checked } : inp,
+                      ),
+                    )
+                  }
+                />
+                required
+              </label>
+              <button
+                onClick={() => setInputs(definition.inputs.filter((_, idx) => idx !== i))}
+                aria-label={`Remove input ${input.key}`}
+                className="rounded px-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {definition.inputs.length === 0 && (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">No inputs declared.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">Workflow Outputs</h2>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              setOutputs([
+                ...definition.outputs,
+                {
+                  key: `output_${definition.outputs.length + 1}`,
+                  type: "image",
+                  from_step: definition.steps[0]?.id ?? "",
+                  from_port: "",
+                },
+              ])
+            }
+          >
+            Add output
+          </Button>
+        </div>
+        <div className="mt-3 space-y-2">
+          {definition.outputs.map((output, i) => {
+            const srcStep = definition.steps.find((s) => s.id === output.from_step);
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-1.5">
+                <Input
+                  value={output.key}
+                  aria-label={`Output key ${i + 1}`}
+                  onChange={(e) =>
+                    setOutputs(
+                      definition.outputs.map((out, idx) =>
+                        idx === i
+                          ? { ...out, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_") }
+                          : out,
+                      ),
+                    )
+                  }
+                  className="w-32"
+                />
+                <select
+                  value={output.from_step}
+                  aria-label={`Output source step ${i + 1}`}
+                  onChange={(e) =>
+                    setOutputs(
+                      definition.outputs.map((out, idx) =>
+                        idx === i ? { ...out, from_step: e.target.value, from_port: "" } : out,
+                      ),
+                    )
+                  }
+                  className="rounded border bg-transparent px-2 py-1.5 text-sm"
+                >
+                  <option value="">from step…</option>
+                  {definition.steps.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={output.from_port}
+                  aria-label={`Output source port ${i + 1}`}
+                  onChange={(e) => {
+                    const port = srcStep?.outputs.find((p) => p.port === e.target.value);
+                    setOutputs(
+                      definition.outputs.map((out, idx) =>
+                        idx === i
+                          ? { ...out, from_port: e.target.value, type: port?.type ?? out.type }
+                          : out,
+                      ),
+                    );
+                  }}
+                  className="rounded border bg-transparent px-2 py-1.5 text-sm"
+                  disabled={!srcStep}
+                >
+                  <option value="">port…</option>
+                  {(srcStep?.outputs ?? []).map((p) => (
+                    <option key={p.port} value={p.port}>
+                      {p.port} ({p.type})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setOutputs(definition.outputs.filter((_, idx) => idx !== i))}
+                  aria-label={`Remove output ${output.key}`}
+                  className="rounded px-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+          {definition.outputs.length === 0 && (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">No outputs declared.</p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
