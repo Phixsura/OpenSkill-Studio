@@ -25,7 +25,13 @@ COOKIE_OPTS = {
     "secure": settings.app_env != "development",
     "samesite": "lax",
     "max_age": settings.refresh_token_expire_days * 24 * 3600,
-    "path": "/api/v1/auth",
+    # Path must stay "/" — the Next.js middleware gates dashboard routes on
+    # the presence of this cookie (request.cookies.has), and page routes only
+    # receive it with a root path. Narrowing to /api/v1/auth breaks browser
+    # login entirely (redirect loop to /login). The token is httpOnly, so JS
+    # exposure is unchanged; the wider path only affects which requests carry
+    # the cookie header.
+    "path": "/",
 }
 
 

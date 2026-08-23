@@ -91,13 +91,13 @@ test("production flow: create → edit steps → publish → approve → registr
   await page.locator("#new-step-type").selectOption("prompt_template");
   await page.locator("#new-step-name").fill("Build Prompt");
   await page.getByRole("button", { name: "Add step" }).click();
-  await expect(page.getByText("build_prompt")).toBeVisible();
+  await expect(page.getByText("build_prompt").first()).toBeVisible();
 
   // Step 2: instruction (no ports — keeps the graph trivially valid in UI E2E)
   await page.locator("#new-step-type").selectOption("instruction");
   await page.locator("#new-step-name").fill("Review Notes");
   await page.getByRole("button", { name: "Add step" }).click();
-  await expect(page.getByText("review_notes")).toBeVisible();
+  await expect(page.getByText("review_notes").first()).toBeVisible();
 
   // Save (validate-then-save flow)
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -141,8 +141,8 @@ test("production flow: create → edit steps → publish → approve → registr
     if (idx >= 0) await adapterSelect.selectOption({ index: idx });
   });
   await page.getByPlaceholder(/name/i).first().fill("Mock Conn");
-  await page.getByRole("button", { name: /create connection|add connection/i }).click();
-  await expect(page.getByText("Mock Conn")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: /^Connect$|create connection|add connection/i }).click();
+  await expect(page.getByText("Mock Conn").first()).toBeVisible({ timeout: 10_000 });
 
   // Offering: capability image_generation via API (form flow varies) — the
   // install gate is what we assert through the UI
@@ -168,6 +168,33 @@ test("production flow: create → edit steps → publish → approve → registr
 
 test("learning flow: intake → confirm → compose → confirm draft → path created", async () => {
   test.setTimeout(120_000);
+
+  // ── Seed: a published skill pack teaching image_generation so the
+  // composer has content to include (otherwise the draft is empty and
+  // Confirm is correctly disabled) ──
+  const skillPack = await api(admin, "POST", `/orgs/${orgId}/packs`, {
+    name: `Prompt Fundamentals ${Date.now()}`,
+    summary: "Teaches image generation prompting",
+    capability_tags: ["image_generation"],
+    estimated_minutes: 60,
+  });
+  const spId = skillPack.data.id;
+  // A pack needs at least one skill to publish a release
+  const cat = await api(admin, "POST", `/orgs/${orgId}/categories`, {
+    name: `Cat ${Date.now()}`,
+  });
+  const skill = await api(admin, "POST", `/orgs/${orgId}/skills`, {
+    name: `Prompting ${Date.now()}`,
+    description: "Prompting fundamentals for image generation",
+    difficulty: "beginner",
+    category_id: cat.data.id,
+  });
+  await api(admin, "POST", `/orgs/${orgId}/packs/${spId}/skills`, {
+    skill_id: skill.data.id,
+  });
+  await api(admin, "POST", `/orgs/${orgId}/packs/${spId}/releases`, {
+    version: "1.0.0",
+  });
 
   // ── Guided intake ──
   await page.goto(`/dashboard/orgs/${orgId}/requirements/new`);

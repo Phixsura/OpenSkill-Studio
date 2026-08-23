@@ -74,6 +74,17 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 let refreshPromise: Promise<string> | null = null;
 
+/** Redirect to login only from protected routes — public pages (registry,
+ * certificates) may probe auth without a session and must not bounce
+ * anonymous visitors to /login. */
+function redirectToLoginIfProtected(): void {
+  if (typeof window === "undefined") return;
+  const path = window.location.pathname;
+  if (path.startsWith("/dashboard")) {
+    window.location.href = `/login?redirect=${encodeURIComponent(path)}`;
+  }
+}
+
 async function refreshAccessToken(): Promise<string> {
   const { useAuthStore } = await import("@/stores/auth");
 
@@ -86,18 +97,13 @@ async function refreshAccessToken(): Promise<string> {
   } catch {
     // Network error during refresh — clear auth and redirect
     useAuthStore.getState().clearAuth();
-    if (typeof window !== "undefined") {
-      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
-    }
+    redirectToLoginIfProtected();
     throw new ApiError(0, "NETWORK_ERROR", "Network error during token refresh");
   }
 
   if (!res.ok) {
     useAuthStore.getState().clearAuth();
-    if (typeof window !== "undefined") {
-      const current = window.location.pathname;
-      window.location.href = `/login?redirect=${encodeURIComponent(current)}`;
-    }
+    redirectToLoginIfProtected();
     throw new ApiError(401, "SESSION_EXPIRED", "Please log in again");
   }
 
@@ -108,14 +114,27 @@ async function refreshAccessToken(): Promise<string> {
   // Validate refresh response before trusting it
   if (!token || typeof token !== "string" || !user) {
     useAuthStore.getState().clearAuth();
-    if (typeof window !== "undefined") {
-      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
-    }
+    redirectToLoginIfProtected();
     throw new ApiError(401, "INVALID_REFRESH", "Refresh response missing token or user");
   }
 
   useAuthStore.getState().setAuth(token, user);
   return token;
+}
+
+/**
+ * Shared, deduplicated token refresh. All refresh paths (AuthInitializer on
+ * mount, apiWithAuth on 401) MUST go through this: refresh tokens rotate on
+ * use, so two concurrent raw refresh calls race — the loser presents the
+ * just-revoked token, gets 401, and wrongly clears the session.
+ */
+export function sharedRefresh(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
 }
 
 /**
@@ -141,14 +160,13 @@ export async function apiWithAuth<T>(
 
   let res = await doFetch(token);
 
-  // 401 → try refresh (dedup: concurrent requests share one refresh promise)
-  if (res.status === 401 && token) {
-    if (!refreshPromise) {
-      refreshPromise = refreshAccessToken().finally(() => {
-        refreshPromise = null;
-      });
-    }
-    token = await refreshPromise;
+  // 401 → try refresh (dedup: concurrent requests share one refresh promise).
+  // Also attempt when token is null: on a hard reload the in-memory store is
+  // empty but the browser may hold a valid refresh cookie — skipping refresh
+  // here caused permanent 401s on deep links (queries fired before
+  // AuthInitializer completed and never retried).
+  if (res.status === 401) {
+    token = await sharedRefresh();
     res = await doFetch(token);
   }
 
