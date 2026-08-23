@@ -1,5 +1,7 @@
 """Workflow Pack management endpoints (ADR-010)."""
 
+import base64 as _base64
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +11,10 @@ from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.workflow_pack import (
+    ComfyUIImportDetailResponse,
+    ComfyUIImportRequest,
+    ComfyUIImportResponse,
+    CreatePackFromImportRequest,
     CreateWorkflowPackRequest,
     PublishWorkflowReleaseRequest,
     RejectPackRequest,
@@ -20,6 +26,7 @@ from app.schemas.workflow_pack import (
     WorkflowPackResponse,
     WorkflowReleaseResponse,
 )
+from app.services.comfyui_import import ComfyUIImportService
 from app.services.workflow_pack import WorkflowPackService
 
 router = APIRouter(tags=["Workflow Packs"])
@@ -283,5 +290,94 @@ async def reject_pack(
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
     svc = WorkflowPackService(db)
     pack = await svc.reject_pack(pack_id, org_id, reason=body.reason)
+    await db.commit()
+    return DataResponse(data=WorkflowPackResponse.model_validate(pack))
+
+
+# ── ComfyUI import (ADR-010 D4 layer 4) ───────────────────
+# Imported workflows are parsed and inspected only — NEVER executed.
+
+
+@router.post(
+    "/orgs/{org_id}/comfyui-imports",
+    response_model=DataResponse[ComfyUIImportResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def import_comfyui_workflow(
+    org_id: str,
+    body: ComfyUIImportRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_org_member(org_id, user, db, *WRITE_ROLES)
+    if body.encoding == "base64":
+        try:
+            raw = _base64.b64decode(body.data, validate=True)
+        except Exception:
+            from app.exceptions import AppError
+
+            raise AppError("INVALID_BASE64", "Data is not valid base64", 422) from None
+    else:
+        raw = body.data.encode("utf-8")
+    svc = ComfyUIImportService(db)
+    imp = await svc.parse_and_import(org_id, raw, created_by=user.id)
+    await db.commit()
+    return DataResponse(data=ComfyUIImportResponse.model_validate(imp))
+
+
+@router.get(
+    "/orgs/{org_id}/comfyui-imports",
+    response_model=DataResponse[list[ComfyUIImportResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def list_comfyui_imports(
+    org_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_org_member(org_id, user, db)
+    svc = ComfyUIImportService(db)
+    imports = await svc.list_imports(org_id)
+    return DataResponse(data=[ComfyUIImportResponse.model_validate(i) for i in imports])
+
+
+@router.get(
+    "/orgs/{org_id}/comfyui-imports/{import_id}",
+    response_model=DataResponse[ComfyUIImportDetailResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def get_comfyui_import(
+    org_id: str,
+    import_id: str,
+    include_original: bool = False,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_org_member(org_id, user, db)
+    svc = ComfyUIImportService(db)
+    imp = await svc.get_import(import_id, org_id)
+    detail = ComfyUIImportDetailResponse.model_validate(imp)
+    if not include_original:
+        detail.original_json = None
+    return DataResponse(data=detail)
+
+
+@router.post(
+    "/orgs/{org_id}/comfyui-imports/{import_id}/create-pack",
+    response_model=DataResponse[WorkflowPackResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def create_pack_from_import(
+    org_id: str,
+    import_id: str,
+    body: CreatePackFromImportRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_org_member(org_id, user, db, *WRITE_ROLES)
+    svc = ComfyUIImportService(db)
+    pack = await svc.create_pack_draft(import_id, org_id, created_by=user.id, name=body.name)
     await db.commit()
     return DataResponse(data=WorkflowPackResponse.model_validate(pack))

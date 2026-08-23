@@ -28,7 +28,9 @@ from app.api.v1.endpoints import (
     skill_packs,
     skills,
     webhooks,
+    workflow_installations,
     workflow_packs,
+    workflow_registry,
     workflow_runs,
 )
 
@@ -62,3 +64,5 @@ api_v1_router.include_router(pack_sharing.router)
 api_v1_router.include_router(providers.router)
 api_v1_router.include_router(workflow_packs.router)
 api_v1_router.include_router(workflow_runs.router)
+api_v1_router.include_router(workflow_installations.router)
+api_v1_router.include_router(workflow_registry.router)

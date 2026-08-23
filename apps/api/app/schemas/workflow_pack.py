@@ -222,3 +222,185 @@ class ValidationErrorItem(BaseModel):
 class ValidateDefinitionResponse(BaseModel):
     valid: bool
     errors: list[ValidationErrorItem]
+
+
+# ── Installation (Batch 4) ────────────────────────────────
+
+
+class InstallWorkflowPackRequest(BaseModel):
+    pack_id: str
+    version: str | None = None
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str | None) -> str | None:
+        if v is not None:
+            import re
+
+            if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", v):
+                raise ValueError("Version must be semver (X.Y.Z)")
+        return v
+
+
+class UpgradeInstallationRequest(BaseModel):
+    version: str
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        import re
+
+        if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", v):
+            raise ValueError("Version must be semver (X.Y.Z)")
+        return v
+
+
+class ConfirmBindingRequest(BaseModel):
+    offering_id: str
+    binding_mode: str = "preferred"
+
+    @field_validator("binding_mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        if v not in ("auto", "preferred", "pinned"):
+            raise ValueError("Binding mode must be auto, preferred, or pinned")
+        return v
+
+
+class WorkflowInstallationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    org_id: str
+    pack_id: str | None = None
+    release_id: str | None = None
+    installed_version: str
+    status: str
+    locally_modified: bool
+    installed_at: datetime
+    updated_at: datetime
+
+
+class StepBindingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    step_id: str
+    binding_mode: str
+    offering_id: str | None = None
+    reasons: list
+    gaps: list
+    confirmed_by: str | None = None
+
+
+class InstallDiffResponse(BaseModel):
+    steps: dict
+    inputs: dict
+    edges: dict
+
+
+# ── Public registry (Batch 4) ─────────────────────────────
+
+
+class PublicWorkflowPackResponse(BaseModel):
+    """Public registry card/detail — metadata only, no working definition."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    slug: str
+    summary: str | None = None
+    description: str | None = None
+    workflow_type: str
+    scenario_tags: list
+    tool_tags: list
+    capability_tags: list
+    difficulty: str | None = None
+    install_count: int
+    language: str
+    input_schema: list
+    output_schema: list
+    provenance: dict
+    created_at: datetime
+    updated_at: datetime
+
+
+class PublicWorkflowReleaseResponse(BaseModel):
+    """Release list entry — no manifest body."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    version: str
+    changelog: str | None = None
+    checksum: str
+    step_count: int
+    deprecated_by: str | None = None
+    released_at: datetime
+
+
+class WorkflowPreviewResponse(BaseModel):
+    version: str
+    definition: dict
+    step_count: int
+    inputs: list
+    outputs: list
+    requires_capabilities: list
+    recommended_packs: list
+
+
+# ── ComfyUI import (Batch 5) ──────────────────────────────
+
+
+class ComfyUIImportRequest(BaseModel):
+    # JSON text or base64-encoded PNG bytes
+    data: str
+    encoding: str = "json"  # json | base64
+
+    @field_validator("data")
+    @classmethod
+    def validate_data_size(cls, v: str) -> str:
+        if len(v) > 7 * 1024 * 1024:
+            raise ValueError("Import data too large")
+        if not v.strip():
+            raise ValueError("Import data is empty")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def validate_encoding(cls, v: str) -> str:
+        if v not in ("json", "base64"):
+            raise ValueError("Encoding must be json or base64")
+        return v
+
+
+class ComfyUIImportResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    org_id: str
+    pack_id: str | None = None
+    format_detected: str
+    status: str
+    dependency_report: dict
+    original_sha256: str
+    created_at: datetime
+
+
+class ComfyUIImportDetailResponse(ComfyUIImportResponse):
+    """Detail response optionally including the original JSON (provenance)."""
+
+    original_json: dict | None = None
+
+
+class CreatePackFromImportRequest(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v or len(v) > 200:
+            raise ValueError("Name must be 1-200 characters")
+        return v
