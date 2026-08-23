@@ -195,7 +195,7 @@ async def test_org_get_user_orgs(db):
 
     user = await _user(db)
     svc = OrgService(db)
-    await svc.create("TestOrg", None, None, user.id)
+    await svc.create(f"TestOrg-{uuid.uuid4().hex[:6]}", None, None, user.id)
     await db.flush()
     orgs = await svc.get_user_orgs(user.id)
     assert len(orgs) >= 1

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.core.rate_limit import rate_limit
 from app.models.organization import MemberStatus, OrgMember, OrgRole
 from app.models.project import (
     PeerAssessment,
@@ -23,11 +24,12 @@ from app.models.project import (
 )
 from app.models.user import User
 from app.schemas.base import DataResponse
+from app.schemas.overview import DraftSummary, OverviewResponse, ReviewReceived
 
 router = APIRouter(tags=["Overview"])
 
 
-@router.get("/me/overview")
+@router.get("/me/overview", response_model=DataResponse[OverviewResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def my_overview(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -46,12 +48,12 @@ async def my_overview(
 
     if not org_ids:
         return DataResponse(
-            data={
-                "drafts": [],
-                "peer_assessments_pending": 0,
-                "reviews_received": [],
-                "pending_reviews_to_grade": 0,
-            }
+            data=OverviewResponse(
+                drafts=[],
+                peer_assessments_pending=0,
+                reviews_received=[],
+                pending_reviews_to_grade=0,
+            )
         )
 
     # My draft submissions (unfinished work) with project context
@@ -69,7 +71,7 @@ async def my_overview(
         .limit(5)
     )
     drafts = [
-        {"submission_id": sid, "project_id": pid, "org_id": oid, "project_title": title}
+        DraftSummary(submission_id=sid, project_id=pid, org_id=oid, project_title=title)
         for sid, pid, oid, title in drafts_r.all()
     ]
 
@@ -105,15 +107,15 @@ async def my_overview(
         .limit(5)
     )
     reviews = [
-        {
-            "review_id": rid,
-            "score": score,
-            "created_at": created_at.isoformat(),
-            "project_id": pid,
-            "org_id": oid,
-            "submission_id": sid,
-            "project_title": title,
-        }
+        ReviewReceived(
+            review_id=rid,
+            score=score,
+            created_at=created_at.isoformat(),
+            project_id=pid,
+            org_id=oid,
+            submission_id=sid,
+            project_title=title,
+        )
         for rid, score, created_at, pid, oid, sid, title in reviews_r.all()
     ]
 
@@ -131,10 +133,10 @@ async def my_overview(
         to_grade = grade_r.scalar_one()
 
     return DataResponse(
-        data={
-            "drafts": drafts,
-            "peer_assessments_pending": peer_pending,
-            "reviews_received": reviews,
-            "pending_reviews_to_grade": to_grade,
-        }
+        data=OverviewResponse(
+            drafts=drafts,
+            peer_assessments_pending=peer_pending,
+            reviews_received=reviews,
+            pending_reviews_to_grade=to_grade,
+        )
     )

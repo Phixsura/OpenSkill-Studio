@@ -61,6 +61,7 @@ export default function ReviewDetailPage() {
         `/orgs/${orgId}/projects/${sub.project_id}/submissions/${submissionId}`,
       );
     },
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   const sub = data?.data;
@@ -88,12 +89,13 @@ export default function ReviewDetailPage() {
         method: "POST",
         body: JSON.stringify({
           status,
-          score: score ? parseInt(score) : undefined,
+          score: score ? parseInt(score, 10) : undefined,
           feedback: feedback || undefined,
         }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pending-reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-reviews", orgId] });
+      queryClient.invalidateQueries({ queryKey: ["review-submission", submissionId] });
       router.push(`/dashboard/orgs/${orgId}/reviews`);
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Review failed"),
@@ -245,6 +247,8 @@ export default function ReviewDetailPage() {
           <label className="block text-sm font-medium">Score</label>
           <input
             type="number"
+            min={0}
+            max={100}
             value={score}
             onChange={(e) => setScore(e.target.value)}
             className="mt-1 block w-32 rounded-md border bg-transparent px-3 py-2 text-sm"
@@ -267,7 +271,16 @@ export default function ReviewDetailPage() {
 
         <div className="flex gap-3">
           <Button
-            onClick={() => reviewMutation.mutate("approved")}
+            onClick={() => {
+              if (score) {
+                const n = parseInt(score, 10);
+                if (isNaN(n) || n < 0 || n > 100) {
+                  setError("Score must be between 0 and 100");
+                  return;
+                }
+              }
+              reviewMutation.mutate("approved");
+            }}
             disabled={reviewMutation.isPending}
           >
             ✅ Approve

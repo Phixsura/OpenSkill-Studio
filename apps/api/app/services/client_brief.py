@@ -87,12 +87,33 @@ class ClientBriefService:
             raise BriefNotFoundError()
         return brief
 
+    # Valid status transitions for client briefs
+    _VALID_TRANSITIONS: dict[BriefStatus, set[BriefStatus]] = {
+        BriefStatus.DRAFT: {BriefStatus.OPEN, BriefStatus.CANCELLED},
+        BriefStatus.OPEN: {BriefStatus.ASSIGNED, BriefStatus.CANCELLED},
+        BriefStatus.ASSIGNED: {BriefStatus.IN_PRODUCTION, BriefStatus.CANCELLED},
+        BriefStatus.IN_PRODUCTION: {BriefStatus.REVIEW, BriefStatus.CANCELLED},
+        BriefStatus.REVIEW: {BriefStatus.COMPLETED, BriefStatus.CANCELLED},
+        BriefStatus.COMPLETED: {BriefStatus.ARCHIVED},
+        BriefStatus.ACTIVE: {BriefStatus.COMPLETED, BriefStatus.CANCELLED},
+        BriefStatus.CANCELLED: {BriefStatus.ARCHIVED},
+    }
+
     async def update_brief(self, brief_id: str, **fields) -> ClientBrief:
         brief = await self.get_brief(brief_id)
         if fields.get("status"):
-            brief.status = BriefStatus(fields.pop("status"))
+            new_status = BriefStatus(fields.pop("status"))
+            allowed = self._VALID_TRANSITIONS.get(brief.status, set())
+            if new_status not in allowed:
+                raise AppError(
+                    "INVALID_TRANSITION",
+                    f"Cannot transition from {brief.status.value} to {new_status.value}",
+                    422,
+                )
+            brief.status = new_status
         if fields.get("title"):
-            brief.slug = self._generate_slug(fields["title"])
+            slug = self._generate_slug(fields["title"])
+            brief.slug = f"{slug[:290]}-{secrets.token_hex(3)}"
         for k, v in fields.items():
             if v is not None and hasattr(brief, k):
                 setattr(brief, k, v)

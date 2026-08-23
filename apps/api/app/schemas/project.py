@@ -81,7 +81,7 @@ class CreateProjectRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str) -> str:
-        allowed = {"beginner", "intermediate", "advanced"}
+        allowed = {"beginner", "intermediate", "advanced", "expert"}
         if v not in allowed:
             raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -89,8 +89,8 @@ class CreateProjectRequest(BaseModel):
     @field_validator("max_score")
     @classmethod
     def validate_max_score(cls, v: int) -> int:
-        if v < 0 or v > 10000:
-            raise ValueError("Max score must be between 0 and 10,000")
+        if v < 1 or v > 10000:
+            raise ValueError("Max score must be between 1 and 10,000")
         return v
 
     @field_validator("title")
@@ -194,7 +194,7 @@ class UpdateProjectRequest(BaseModel):
     @classmethod
     def validate_difficulty(cls, v: str | None) -> str | None:
         if v is not None:
-            allowed = {"beginner", "intermediate", "advanced"}
+            allowed = {"beginner", "intermediate", "advanced", "expert"}
             if v not in allowed:
                 raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -214,8 +214,23 @@ class UpdateProjectRequest(BaseModel):
     @field_validator("rubric")
     @classmethod
     def validate_rubric(cls, v: list[dict] | None) -> list[dict] | None:
-        if v is not None and len(v) == 0:
+        if v is None:
+            return v
+        if len(v) == 0:
             raise ValueError("Rubric must have at least one criterion")
+        if len(v) > 20:
+            raise ValueError("Rubric must have at most 20 criteria")
+        for item in v:
+            if not isinstance(item, dict):
+                raise ValueError("Each rubric item must be an object")
+            if "criterion" not in item or not isinstance(item["criterion"], str):
+                raise ValueError("Each rubric item must have a 'criterion' string")
+            if len(item["criterion"]) > 200:
+                raise ValueError("Criterion name must be 200 characters or less")
+            if "max_score" not in item or not isinstance(item["max_score"], int | float):
+                raise ValueError("Each rubric item must have a numeric 'max_score'")
+            if item["max_score"] <= 0:
+                raise ValueError("Rubric item max_score must be positive")
         return v
 
     @field_validator("max_score")
@@ -638,7 +653,7 @@ class CreateTemplateRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str) -> str:
-        allowed = {"beginner", "intermediate", "advanced"}
+        allowed = {"beginner", "intermediate", "advanced", "expert"}
         if v not in allowed:
             raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -704,7 +719,7 @@ class UpdateTemplateRequest(BaseModel):
         # Same whitelist as UpdateProjectRequest — the service converts to
         # DifficultyLevel directly, so an unknown value would 500.
         if v is not None:
-            allowed = {"beginner", "intermediate", "advanced"}
+            allowed = {"beginner", "intermediate", "advanced", "expert"}
             if v not in allowed:
                 raise ValueError(f"Difficulty must be one of: {', '.join(sorted(allowed))}")
         return v
@@ -1016,5 +1031,15 @@ class CommentResponse(BaseModel):
     region: dict | None
     completed: bool
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CreatorAssignmentResponse(BaseModel):
+    id: str
+    project_id: str
+    user_id: str
+    user_name: str | None = None
+    assigned_at: datetime
 
     model_config = {"from_attributes": True}

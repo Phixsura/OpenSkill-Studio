@@ -9,6 +9,7 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
+import { NotificationBell } from "@/components/notification-bell";
 
 export default function DashboardLayout({
   children,
@@ -23,6 +24,16 @@ export default function DashboardLayout({
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
+
+  // Close mobile sidebar on Escape key
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSidebarOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [sidebarOpen]);
 
   // Redirect to login when auth is lost (logout, session expiry, bfcache)
   // Track: once authenticated, redirect if it becomes false
@@ -59,8 +70,8 @@ export default function DashboardLayout({
     <>
       <NavLink href="/dashboard" active={pathname === "/dashboard"} onClick={closeSidebar}>Dashboard</NavLink>
       <NavLink href="/dashboard/orgs" active={pathname.startsWith("/dashboard/orgs")} onClick={closeSidebar}>Organizations</NavLink>
-      <NavLink href="/dashboard/skills" active={pathname === "/dashboard/skills"} onClick={closeSidebar}>Skills</NavLink>
-      <NavLink href="/dashboard/projects" active={pathname === "/dashboard/projects"} onClick={closeSidebar}>Projects</NavLink>
+      <NavLink href="/dashboard/skills" active={pathname.startsWith("/dashboard/skills")} onClick={closeSidebar}>Skills</NavLink>
+      <NavLink href="/dashboard/projects" active={pathname.startsWith("/dashboard/projects")} onClick={closeSidebar}>Projects</NavLink>
       <NavLink href="/dashboard/portfolio" active={pathname.startsWith("/dashboard/portfolio")} onClick={closeSidebar}>Portfolio</NavLink>
       <NavLink href="/dashboard/settings" active={pathname === "/dashboard/settings"} onClick={closeSidebar}>Settings</NavLink>
     </>
@@ -96,7 +107,7 @@ export default function DashboardLayout({
       <div className="fixed left-0 right-0 top-0 z-40 flex items-center border-b bg-[hsl(var(--card))] px-4 py-3 md:hidden">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="mr-3 rounded-md p-1 hover:bg-[hsl(var(--secondary))]"
+          className="mr-3 rounded-md p-2.5 hover:bg-[hsl(var(--secondary))]"
           aria-label="Toggle menu"
         >
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -107,9 +118,10 @@ export default function DashboardLayout({
             )}
           </svg>
         </button>
-        <Link href="/dashboard" className="text-lg font-bold">
+        <Link href="/dashboard" className="flex-1 text-lg font-bold">
           OpenSkill Studio
         </Link>
+        {mounted && isAuthenticated && <NotificationBell />}
       </div>
 
       {/* Mobile overlay */}
@@ -152,7 +164,11 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+      <main id="main-content" className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        {/* Desktop header bar */}
+        <div className="hidden items-center justify-end border-b px-8 py-3 md:flex">
+          {mounted && isAuthenticated && <NotificationBell />}
+        </div>
         <div className="p-4 md:p-8">{children}</div>
       </main>
     </div>

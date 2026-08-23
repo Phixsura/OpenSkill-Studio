@@ -59,7 +59,7 @@ class Cohort(Base):
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     max_learners: Mapped[int | None] = mapped_column(Integer, nullable=True)
     settings: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -112,7 +112,7 @@ class CohortSkillAssignment(Base):
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    assigned_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    assigned_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
 
 
 class CohortProjectAssignment(Base):
@@ -149,4 +149,4 @@ class CohortProjectAssignment(Base):
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    assigned_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)
+    assigned_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)

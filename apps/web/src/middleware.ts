@@ -18,7 +18,9 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/join/") ||
-    pathname.startsWith("/u/")
+    pathname.startsWith("/u/") ||
+    pathname.startsWith("/registry") ||
+    pathname.startsWith("/certificates")
   ) {
     return NextResponse.next();
   }

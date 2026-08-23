@@ -1,5 +1,8 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+// Default fetch timeout (30 seconds)
+const FETCH_TIMEOUT_MS = 30_000;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -12,15 +15,46 @@ export class ApiError extends Error {
 }
 
 /**
+ * Safely parse JSON from a response. Throws ApiError on parse failure.
+ */
+async function safeJson<T>(res: Response): Promise<T> {
+  try {
+    return await res.json();
+  } catch {
+    throw new ApiError(res.status, "PARSE_ERROR", "Server returned invalid JSON");
+  }
+}
+
+/**
+ * Wrap a fetch call with timeout and network error handling.
+ */
+async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      throw new ApiError(0, "TIMEOUT", "Request timed out");
+    }
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiError(0, "ABORTED", "Request was aborted");
+    }
+    throw new ApiError(0, "NETWORK_ERROR", "Unable to reach the server");
+  }
+}
+
+/**
  * Unauthenticated API client — for public endpoints (login, register, health).
  */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}/api/v1${path}`, {
+  const res = await safeFetch(`${API_BASE}/api/v1${path}`, {
+    ...init,
     headers: {
       "Content-Type": "application/json",
       ...init?.headers,
     },
-    ...init,
   });
 
   if (!res.ok) {
@@ -32,7 +66,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
-  return res.json();
+  if (res.status === 204) return undefined as T;
+  return safeJson<T>(res);
 }
 
 // ── Authenticated API client ────────────────────────────────
@@ -42,14 +77,23 @@ let refreshPromise: Promise<string> | null = null;
 async function refreshAccessToken(): Promise<string> {
   const { useAuthStore } = await import("@/stores/auth");
 
-  const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
-    method: "POST",
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch {
+    // Network error during refresh — clear auth and redirect
+    useAuthStore.getState().clearAuth();
+    if (typeof window !== "undefined") {
+      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+    }
+    throw new ApiError(0, "NETWORK_ERROR", "Network error during token refresh");
+  }
 
   if (!res.ok) {
     useAuthStore.getState().clearAuth();
-    // Redirect to login — session expired
     if (typeof window !== "undefined") {
       const current = window.location.pathname;
       window.location.href = `/login?redirect=${encodeURIComponent(current)}`;
@@ -58,8 +102,20 @@ async function refreshAccessToken(): Promise<string> {
   }
 
   const data = await res.json();
-  useAuthStore.getState().setAuth(data.access_token, data.user);
-  return data.access_token;
+  const token = data.access_token;
+  const user = data.user;
+
+  // Validate refresh response before trusting it
+  if (!token || typeof token !== "string" || !user) {
+    useAuthStore.getState().clearAuth();
+    if (typeof window !== "undefined") {
+      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+    }
+    throw new ApiError(401, "INVALID_REFRESH", "Refresh response missing token or user");
+  }
+
+  useAuthStore.getState().setAuth(token, user);
+  return token;
 }
 
 /**
@@ -73,7 +129,7 @@ export async function apiWithAuth<T>(
   let token = useAuthStore.getState().accessToken;
 
   const doFetch = (t: string | null) =>
-    fetch(`${API_BASE}/api/v1${path}`, {
+    safeFetch(`${API_BASE}/api/v1${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -105,5 +161,6 @@ export async function apiWithAuth<T>(
     );
   }
 
-  return res.json();
+  if (res.status === 204) return undefined as T;
+  return safeJson<T>(res);
 }

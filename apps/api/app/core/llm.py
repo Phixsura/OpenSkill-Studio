@@ -52,8 +52,17 @@ class AnthropicClient(LLMClient):
     def __init__(self, api_key: str, model: str = "claude-sonnet-5"):
         import anthropic
 
-        self.client = anthropic.AsyncAnthropic(api_key=api_key)
+        self.client = anthropic.AsyncAnthropic(
+            api_key=api_key,
+            timeout=settings.eval_timeout_seconds,
+        )
         self.model = model
+        # Only retry on transient errors
+        self._transient = (
+            anthropic.APITimeoutError,
+            anthropic.RateLimitError,
+            anthropic.InternalServerError,
+        )
 
     async def complete(
         self,
@@ -80,13 +89,15 @@ class AnthropicClient(LLMClient):
                     model=self.model,
                     provider="anthropic",
                 )
-            except Exception as exc:
+            except self._transient as exc:
                 last_exc = exc
                 if attempt < MAX_RETRIES - 1:
                     delay = RETRY_BASE_DELAY * (2**attempt)
                     logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
                     await asyncio.sleep(delay)
-        raise last_exc  # type: ignore[misc]
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Max retries exceeded with no exception")
 
 
 class OpenAIClient(LLMClient):
@@ -95,8 +106,19 @@ class OpenAIClient(LLMClient):
     def __init__(self, api_key: str, model: str = "gpt-4o"):
         from openai import AsyncOpenAI
 
-        self.client = AsyncOpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            timeout=settings.eval_timeout_seconds,
+        )
         self.model = model
+        # Only retry on transient errors
+        import openai
+
+        self._transient = (
+            openai.APITimeoutError,
+            openai.RateLimitError,
+            openai.InternalServerError,
+        )
 
     async def complete(
         self,
@@ -127,13 +149,15 @@ class OpenAIClient(LLMClient):
                     model=self.model,
                     provider="openai",
                 )
-            except Exception as exc:
+            except self._transient as exc:
                 last_exc = exc
                 if attempt < MAX_RETRIES - 1:
                     delay = RETRY_BASE_DELAY * (2**attempt)
                     logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
                     await asyncio.sleep(delay)
-        raise last_exc  # type: ignore[misc]
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Max retries exceeded with no exception")
 
 
 def _to_openai_content(blocks: list) -> list:

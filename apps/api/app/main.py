@@ -13,7 +13,7 @@ from app.core.redis import redis_pool
 from app.exceptions import register_exception_handlers
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.request_id import RequestIDMiddleware
-from app.middleware.security import SecurityHeadersMiddleware
+from app.middleware.security import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 
 
 @asynccontextmanager
@@ -67,15 +67,23 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Graceful shutdown — close DB pool and Redis connections
+    # Graceful shutdown
     log = structlog.get_logger()
     log.info("shutdown_start")
+
+    # 1. Drain in-flight webhook deliveries before tearing down connections
+    from app.services.webhook import drain_webhook_tasks
+
+    await drain_webhook_tasks()
+
+    # 2. Close DB pool
     await engine.dispose()
-    try:
-        r = redis_pool()
-        await r.aclose()
-    except Exception:
-        pass
+
+    # 3. Close Redis
+    from app.core.redis import close_redis
+
+    await close_redis()
+
     log.info("shutdown_complete")
 
 
@@ -84,7 +92,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/api/v1/docs" if settings.debug else None,
     redoc_url="/api/v1/redoc" if settings.debug else None,
-    openapi_url="/api/v1/openapi.json",
+    openapi_url="/api/v1/openapi.json" if settings.debug else None,
     lifespan=lifespan,
 )
 
@@ -92,6 +100,9 @@ app = FastAPI(
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+# BodySizeLimitMiddleware is raw ASGI — wraps `receive` to enforce body
+# size limits on ALL requests including chunked transfer encoding.
+app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

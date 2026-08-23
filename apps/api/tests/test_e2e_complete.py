@@ -70,7 +70,8 @@ async def _auth(c, name="E2E"):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"E2E-{uuid.uuid4().hex[:6]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
 
@@ -100,7 +101,7 @@ async def test_complete_operational_loop(c):
             json={"user_id": u["id"], "role": role},
             headers=h_admin,
         )
-        assert r.status_code == 200, f"Add member {u['display_name']}: {r.text[:100]}"
+        assert r.status_code in (200, 201), f"Add member {u['display_name']}: {r.text[:100]}"
 
     # ═══════════════════════════════════════════════════════════
     # STEP 2: Create + activate cohort

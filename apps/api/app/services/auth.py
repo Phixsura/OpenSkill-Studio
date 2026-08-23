@@ -107,12 +107,17 @@ class AuthService:
             await self.db.rollback()
             raise EmailAlreadyExistsError() from None
 
-        # Generate email verification token
-        await self._create_email_verification(user)
+        # Generate email verification token — fire-and-forget so email
+        # failure doesn't roll back the user creation. The user can
+        # re-request verification via /resend-verification.
+        try:
+            await self._create_email_verification(user)
+        except Exception:
+            log.warning("registration_email_failed", user_id=user.id)
 
         result = await self._create_token_pair(user, ip_address, device_info)
 
-        log.info("auth_register", user_id=user.id, email=user.email)
+        log.info("auth_register", user_id=user.id)
         return result
 
     # ── Login ──
@@ -138,7 +143,13 @@ class AuthService:
             raise InvalidCredentialsError()
 
         if not verify_password(password, user.password_hash):  # type: ignore[arg-type]
-            log.warning("auth_login_failed", email=email, reason="invalid_password")
+            import hashlib
+
+            log.warning(
+                "auth_login_failed",
+                email_hash=hashlib.sha256(email.encode()).hexdigest()[:12],
+                reason="invalid_password",
+            )
             raise InvalidCredentialsError()
 
         if user.status == UserStatus.SUSPENDED:
@@ -178,7 +189,9 @@ class AuthService:
         # Look up token record by hash
         token_hash = sha256(jti.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+            select(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash)
+            .with_for_update()
         )
         token_record = stmt_result.scalar_one_or_none()
 
@@ -186,10 +199,10 @@ class AuthService:
             raise TokenInvalidError("Token not found")
 
         if token_record.is_revoked:
-            # ⚠ Already-revoked token reused → possible theft
-            await self._revoke_all_user_tokens(user_id)
-            log.warning("auth_token_reuse", user_id=user_id, jti=jti)
-            raise TokenReuseError()
+            # Token was revoked — could be user-initiated session revocation
+            # or password change, not necessarily theft. Don't nuke all sessions.
+            log.info("auth_revoked_token_used", user_id=user_id, jti=jti)
+            raise TokenInvalidError("Session has been revoked. Please log in again.")
 
         # Revoke old token
         token_record.revoked_at = datetime.now(UTC)
@@ -219,8 +232,8 @@ class AuthService:
                 if token_record and not token_record.is_revoked:
                     token_record.revoked_at = datetime.now(UTC)
                     await self.db.flush()
-        except Exception:
-            pass  # Token invalid — still clear cookie on the caller side
+        except Exception as exc:
+            log.debug("logout_cleanup_failed", error=str(exc))
 
     # ── Change password ──
 
@@ -245,7 +258,14 @@ class AuthService:
         user = stmt_result.scalar_one_or_none()
 
         if user is None:
-            return  # Silently succeed — don't reveal user existence
+            # Perform dummy work to equalize timing with the real path,
+            # preventing email enumeration via response latency.
+            import secrets as _secrets
+            from hashlib import sha256 as _sha256
+
+            _secrets.token_urlsafe(32)
+            _sha256(_secrets.token_urlsafe(32).encode()).hexdigest()
+            return
 
         # Invalidate any existing reset tokens
         existing = await self.db.execute(
@@ -269,13 +289,15 @@ class AuthService:
 
         # Send email
         sender = get_email_sender()
+        import html as html_mod
+
         from app.config import settings
 
-        reset_url = f"{settings.frontend_url}/reset-password?token={raw_token}"
+        reset_url = f"{settings.frontend_url}/reset-password?token={html_mod.escape(raw_token)}"
         await sender.send(
             to=user.email,
             subject="Reset your OpenSkill Studio password",
-            html=f'<p>Click <a href="{reset_url}">here</a> to reset your password. '
+            html=f'<p>Click <a href="{html_mod.escape(reset_url)}">here</a> to reset your password. '
             f"This link expires in 1 hour.</p>",
         )
 
@@ -287,7 +309,9 @@ class AuthService:
         """Validate reset token and set new password."""
         token_hash = sha256(raw_token.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+            select(PasswordResetToken)
+            .where(PasswordResetToken.token_hash == token_hash)
+            .with_for_update()
         )
         token_record = stmt_result.scalar_one_or_none()
 
@@ -320,7 +344,9 @@ class AuthService:
         """Validate verification token and mark email as verified."""
         token_hash = sha256(raw_token.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(EmailVerificationToken).where(EmailVerificationToken.token_hash == token_hash)
+            select(EmailVerificationToken)
+            .where(EmailVerificationToken.token_hash == token_hash)
+            .with_for_update()
         )
         token_record = stmt_result.scalar_one_or_none()
 
@@ -416,6 +442,17 @@ class AuthService:
 
     async def _create_email_verification(self, user: User) -> None:
         """Generate a verification token and send email."""
+        # Invalidate any existing unused verification tokens (same pattern
+        # as forgot_password) to prevent stale token accumulation.
+        existing = await self.db.execute(
+            select(EmailVerificationToken).where(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.used_at.is_(None),
+            )
+        )
+        for tok in existing.scalars():
+            tok.used_at = datetime.now(UTC)
+
         raw_token = secrets.token_urlsafe(32)
         token_record = EmailVerificationToken(
             user_id=user.id,
@@ -428,11 +465,13 @@ class AuthService:
         from app.config import settings
 
         sender = get_email_sender()
+        import html as html_mod
+
         # Points to backend endpoint which verifies and redirects to frontend
-        verify_url = f"{settings.frontend_url}/api/v1/auth/verify-email?token={raw_token}"
+        verify_url = f"{settings.frontend_url}/api/v1/auth/verify-email?token={html_mod.escape(raw_token)}"
         await sender.send(
             to=user.email,
             subject="Verify your OpenSkill Studio email",
-            html=f'<p>Click <a href="{verify_url}">here</a> to verify your email. '
+            html=f'<p>Click <a href="{html_mod.escape(verify_url)}">here</a> to verify your email. '
             f"This link expires in 24 hours.</p>",
         )

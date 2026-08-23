@@ -99,7 +99,7 @@ export default function ProjectDetailPage() {
   // For workflow status: pull the full items of MY latest submission so each
   // stage can show completion state + the latest submitted asset. Instructors
   // see everyone's rows in subsData, so filter to own first.
-  const mySubs = (subsData?.data ?? []).filter((s) => !myId || s.user_id === myId);
+  const mySubs = (subsData?.data ?? []).filter((s) => myId != null && s.user_id === myId);
   const latestSubId = mySubs[0]?.id;
   const { data: latestSubDetail } = useQuery({
     queryKey: ["latest-sub-items", projectId, latestSubId],
@@ -261,7 +261,7 @@ export default function ProjectDetailPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium">{d.name}</span>
                             <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs capitalize">
-                              {d.type.replace("_", " ")}
+                              {d.type.replaceAll("_", " ")}
                             </span>
                             {d.required ? (
                               <span className="text-xs text-red-500">Required</span>
@@ -431,7 +431,7 @@ export default function ProjectDetailPage() {
                   )}
                   {isInstructor && <span className="font-medium">{s.author_name}</span>}
                   <span>
-                    v{s.version} — <span className="capitalize">{s.status.replace("_", " ")}</span>
+                    v{s.version} — <span className="capitalize">{s.status.replaceAll("_", " ")}</span>
                   </span>
                   {s.submitted_at && (
                     <span className="text-xs text-[hsl(var(--muted-foreground))]">

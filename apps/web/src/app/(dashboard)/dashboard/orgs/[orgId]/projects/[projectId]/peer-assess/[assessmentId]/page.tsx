@@ -98,6 +98,7 @@ export default function PeerAssessPage() {
       router.push(`/dashboard/orgs/${orgId}/projects/${projectId}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to submit assessment");
+    } finally {
       setBusy(false);
     }
   };

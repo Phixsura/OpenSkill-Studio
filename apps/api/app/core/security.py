@@ -27,9 +27,11 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(user_id: str, email: str, role: str) -> str:
     now = datetime.now(UTC)
+    # Note: email is accepted as parameter for signature compatibility
+    # but NOT included in the JWT payload to avoid PII exposure.
+    # The API resolves user details from sub (user_id) via DB lookup.
     payload = {
         "sub": user_id,
-        "email": email,
         "role": role,
         "type": "access",
         "iat": now,

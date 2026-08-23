@@ -25,7 +25,7 @@ COOKIE_OPTS = {
     "secure": settings.app_env != "development",
     "samesite": "lax",
     "max_age": settings.refresh_token_expire_days * 24 * 3600,
-    "path": "/",
+    "path": "/api/v1/auth",
 }
 
 
@@ -153,7 +153,7 @@ async def refresh(
 # ── Logout ────────────────────────────────────────────────
 
 
-@router.post("/logout", status_code=204)
+@router.post("/logout", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def logout(
     request: Request,
     response: Response,
@@ -172,12 +172,12 @@ async def logout(
 # ── Me ────────────────────────────────────────────────────
 
 
-@router.get("/me", response_model=DataResponse[UserResponse])
+@router.get("/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(60, 60))])
 async def get_me(user: User = Depends(get_current_user)):
     return DataResponse(data=UserResponse.model_validate(user))
 
 
-@router.put("/me", response_model=DataResponse[UserResponse])
+@router.put("/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(10, 60))])
 async def update_me(
     body: UpdateProfileRequest,
     user: User = Depends(get_current_user),
@@ -196,9 +196,10 @@ async def update_me(
 # ── Change password ───────────────────────────────────────
 
 
-@router.post("/change-password", status_code=204)
+@router.post("/change-password", status_code=204, dependencies=[Depends(rate_limit(5, 60))])
 async def change_password(
     body: ChangePasswordRequest,
+    response: Response,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -209,6 +210,8 @@ async def change_password(
         new_password=body.new_password,
     )
     await db.commit()
+    # Clear refresh cookie — all sessions were revoked, force re-login
+    _clear_refresh_cookie(response)
 
 
 # ── Forgot password ───────────────────────────────────────
@@ -216,18 +219,17 @@ async def change_password(
 
 @router.post(
     "/forgot-password",
-    status_code=200,
+    status_code=204,
     dependencies=[Depends(rate_limit(3, 900))],
 )
 async def forgot_password(
     body: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Always returns 200 — never reveals whether the email exists."""
+    """Always returns 204 — never reveals whether the email exists."""
     service = AuthService(db)
     await service.forgot_password(body.email)
     await db.commit()
-    return {"message": "If an account exists, a reset link has been sent."}
 
 
 # ── Reset password ────────────────────────────────────────
@@ -235,17 +237,19 @@ async def forgot_password(
 
 @router.post(
     "/reset-password",
-    status_code=200,
+    status_code=204,
     dependencies=[Depends(rate_limit(5, 900))],
 )
 async def reset_password(
     body: ResetPasswordRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     service = AuthService(db)
     await service.reset_password(body.token, body.new_password)
     await db.commit()
-    return {"message": "Password has been reset. Please log in."}
+    # Clear refresh cookie — all sessions were revoked server-side
+    _clear_refresh_cookie(response)
 
 
 # ── Email verification ───────────────────────────────────
@@ -266,7 +270,7 @@ async def verify_email(
 
 @router.post(
     "/resend-verification",
-    status_code=200,
+    status_code=204,
     dependencies=[Depends(rate_limit(3, 900))],
 )
 async def resend_verification(
@@ -276,13 +280,12 @@ async def resend_verification(
     service = AuthService(db)
     await service.resend_verification(user)
     await db.commit()
-    return {"message": "Verification email sent."}
 
 
 # ── Sessions ──────────────────────────────────────────────
 
 
-@router.get("/sessions", response_model=DataResponse[list[SessionResponse]])
+@router.get("/sessions", response_model=DataResponse[list[SessionResponse]], dependencies=[Depends(rate_limit(20, 60))])
 async def list_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -292,12 +295,26 @@ async def list_sessions(
     return DataResponse(data=[SessionResponse.model_validate(t) for t in tokens])
 
 
-@router.delete("/sessions/{token_id}", status_code=204)
+@router.delete("/sessions/{token_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
 async def revoke_session(
     token_id: str,
+    request: Request,
+    response: Response,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = AuthService(db)
     await service.revoke_session(user.id, token_id)
     await db.commit()
+
+    # If the revoked session is the current browser session, clear the cookie
+    raw_cookie = request.cookies.get("refresh_token")
+    if raw_cookie:
+        try:
+            from app.core.security import decode_token
+
+            payload = decode_token(raw_cookie)
+            if payload.get("jti") == token_id:
+                _clear_refresh_cookie(response)
+        except Exception:
+            pass  # Token already expired/invalid — no action needed

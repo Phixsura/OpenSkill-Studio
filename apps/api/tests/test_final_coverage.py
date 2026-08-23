@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 
-from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
 from app.models.user import User, UserRole, UserStatus
 
@@ -30,11 +29,15 @@ async def _user(db, role=UserRole.STUDENT):
 
 @pytest_asyncio.fixture
 async def db():
+    from app.core.database import AsyncSessionLocal as SessionLocal
     from app.core.database import engine
 
-    async with AsyncSessionLocal() as session:
-        yield session
-        await session.rollback()
+    # Ensure engine pool is fresh (prior tests may have disposed it)
+    async with SessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()
     await engine.dispose()
 
 
@@ -43,7 +46,6 @@ async def db():
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(15)
-@pytest.mark.xfail(reason="Engine may be disposed by prior tests", strict=False)
 async def test_lifespan_with_real_infra():
     """Cover the lifespan function (lines 22-66 of main.py)."""
     from sqlalchemy import text
@@ -66,7 +68,6 @@ async def test_lifespan_with_real_infra():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Engine may be disposed by prior tests", strict=False)
 async def test_auth_reset_password_full_flow(db):
     """Cover forgot → reset password success path."""
     from sqlalchemy import select
@@ -307,7 +308,6 @@ async def test_unhandled_exception_handler():
 
     from httpx import ASGITransport, AsyncClient
 
-    from app.core.database import engine
     from app.main import app
 
     @asynccontextmanager
@@ -321,5 +321,3 @@ async def test_unhandled_exception_handler():
         r = await c.get("/api/v1/nonexistent-path")
         assert r.status_code in (404, 405)
         assert "error" in r.json()
-
-    await engine.dispose()

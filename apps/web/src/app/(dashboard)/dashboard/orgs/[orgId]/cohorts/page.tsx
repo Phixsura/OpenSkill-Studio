@@ -23,10 +23,10 @@ interface Cohort {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-yellow-100 text-yellow-800",
-  active: "bg-green-100 text-green-800",
-  completed: "bg-blue-100 text-blue-800",
-  archived: "bg-gray-100 text-gray-800",
+  draft: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+  active: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  completed: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  archived: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300",
 };
 
 export default function CohortsPage() {
@@ -176,7 +176,7 @@ export default function CohortsPage() {
                 </p>
               )}
               <div className="mt-3 flex gap-4 text-xs text-[hsl(var(--muted-foreground))]">
-                <span>{cohort.member_count} members</span>
+                <span>{cohort.member_count} member{cohort.member_count !== 1 ? "s" : ""}</span>
                 {cohort.starts_at && (
                   <span>Starts {new Date(cohort.starts_at).toLocaleDateString()}</span>
                 )}

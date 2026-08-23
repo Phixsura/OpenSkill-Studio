@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { apiWithAuth } from "@/lib/api";
 
@@ -110,7 +111,7 @@ export function VersionHistory({
                     );
                     window.open(res.download_url, "_blank", "noopener");
                   } catch {
-                    // ignore
+                    toast.error("Download failed. Please try again.");
                   }
                 }}
               >

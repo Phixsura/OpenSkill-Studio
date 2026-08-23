@@ -41,8 +41,10 @@ async def get_current_user_optional(
         return None
     try:
         return await get_current_user(token, db)
-    except HTTPException:
-        return None
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            return None
+        raise
 
 
 def require_role(*roles: UserRole):

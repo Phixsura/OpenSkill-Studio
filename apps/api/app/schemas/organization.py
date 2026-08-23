@@ -167,6 +167,22 @@ class InviteLinkResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class InvitationResponse(BaseModel):
+    id: str
+    email: str
+    role: str
+    status: str
+    expires_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class JoinOrgResponse(BaseModel):
+    message: str
+    org_id: str
+
+
 class AcceptInviteRequest(BaseModel):
     token: str
 

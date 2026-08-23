@@ -175,6 +175,18 @@ class OrgService:
             raise InsufficientOrgPermissionError()
 
         org.status = OrgStatus.ARCHIVED
+
+        # Archive all packs owned by this org so they're removed from registry
+        from sqlalchemy import update as sa_update
+
+        from app.models.skill_pack import PackStatus, SkillPack
+
+        await self.db.execute(
+            sa_update(SkillPack)
+            .where(SkillPack.owner_org_id == org_id, SkillPack.status != PackStatus.ARCHIVED)
+            .values(status=PackStatus.ARCHIVED)
+        )
+
         await self.db.flush()
         log.info("org_deleted", org_id=org_id, by=user_id)
 
@@ -251,16 +263,17 @@ class OrgService:
         member = await self._get_active_member(org_id, user_id)
         old_role = member.role
 
-        # Prevent removing the last owner
+        # Prevent removing the last owner — lock owner rows to serialize
+        # concurrent demotions and prevent TOCTOU race to zero owners
         if old_role == OrgRole.OWNER and new_role != OrgRole.OWNER:
-            owner_count_result = await self.db.execute(
-                select(func.count(OrgMember.id)).where(
+            owner_result = await self.db.execute(
+                select(OrgMember.id).where(
                     OrgMember.org_id == org_id,
                     OrgMember.role == OrgRole.OWNER,
                     OrgMember.status == MemberStatus.ACTIVE,
-                )
+                ).with_for_update()
             )
-            if owner_count_result.scalar_one() <= 1:
+            if len(owner_result.all()) <= 1:
                 raise AppError("LAST_OWNER", "Cannot demote the last owner", 400)
 
         member.role = new_role
@@ -397,8 +410,9 @@ class OrgService:
 
     async def accept_email_invite(self, raw_token: str, user_id: str) -> OrgMember:
         token_hash = sha256(raw_token.encode()).hexdigest()
+        # Lock the invite row to prevent accept/revoke TOCTOU race
         result = await self.db.execute(
-            select(OrgInvitation).where(OrgInvitation.token_hash == token_hash)
+            select(OrgInvitation).where(OrgInvitation.token_hash == token_hash).with_for_update()
         )
         invite = result.scalar_one_or_none()
 

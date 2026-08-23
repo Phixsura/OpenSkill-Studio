@@ -39,15 +39,18 @@ export function VersionCompare({ items, downloadPath }: VersionCompareProps) {
     value,
     onChange,
     exclude,
+    ariaLabel,
   }: {
     value: VersionItem;
     onChange: (id: string) => void;
     exclude: string;
+    ariaLabel?: string;
   }) => (
     <select
       className="rounded-md border bg-transparent px-2 py-1 text-xs"
       value={value.id}
       onChange={(e) => onChange(e.target.value)}
+      aria-label={ariaLabel}
     >
       {sorted.map((i) => (
         <option key={i.id} value={i.id} disabled={i.id === exclude}>
@@ -75,7 +78,7 @@ export function VersionCompare({ items, downloadPath }: VersionCompareProps) {
           ].map(({ item, set, other }, idx) => (
             <div key={idx} className="space-y-1.5 rounded-md border p-2">
               <div className="flex items-center justify-between gap-2">
-                <Selector value={item} onChange={set} exclude={other} />
+                <Selector value={item} onChange={set} exclude={other} ariaLabel={idx === 0 ? "Left comparison version" : "Right comparison version"} />
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                     item.version === sorted[0]!.version
