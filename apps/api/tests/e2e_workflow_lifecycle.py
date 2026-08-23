@@ -30,7 +30,7 @@ def _definition() -> dict:
             {"key": "product_name", "type": "text", "required": True},
         ],
         "outputs": [
-            {"key": "final", "type": "image", "from_step": "deliver", "from_port": "final"},
+            {"key": "final", "type": "image", "from_step": "deliver", "from_port": "delivered"},
         ],
         "steps": [
             {
@@ -66,7 +66,7 @@ def _definition() -> dict:
                 "name": "Deliver",
                 "config": {},
                 "inputs": [{"port": "final", "type": "image"}],
-                "outputs": [{"port": "final", "type": "image"}],
+                "outputs": [{"port": "delivered", "type": "image"}],
             },
         ],
         "edges": [
