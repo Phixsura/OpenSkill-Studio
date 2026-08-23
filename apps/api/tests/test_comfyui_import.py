@@ -443,3 +443,46 @@ def test_sanitize_empty_and_none_safe():
     from app.core.sanitize import sanitize_untrusted_text
 
     assert sanitize_untrusted_text("") == ""
+
+
+@pytest.mark.asyncio
+async def test_create_pack_with_hostile_class_type(c):
+    """A class_type containing moustache/data-URI syntax must not make the
+    generated draft definition fail validation (audit fix)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    payload = {
+        "1": {"class_type": "KSampler", "inputs": {}},
+        "2": {"class_type": "{{inputs.x}}", "inputs": {}},
+        "3": {"class_type": "data:text/html;base64,EvilNode", "inputs": {}},
+    }
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": json.dumps(payload), "encoding": "json"},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    import_id = r.json()["data"]["id"]
+
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports/{import_id}/create-pack",
+        json={"name": "Hostile Class Types"},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text
+
+
+@pytest.mark.asyncio
+async def test_deeply_nested_json_returns_422(c):
+    """RecursionError from deeply nested JSON must be a 422, not a 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    deep = "[" * 50000 + "]" * 50000
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": deep, "encoding": "json"},
+        headers=h,
+    )
+    assert r.status_code == 422
+    # INVALID_JSON (RecursionError path) or UNRECOGNIZED_FORMAT (if it parsed)
+    assert r.json()["error"]["code"] in ("INVALID_JSON", "UNRECOGNIZED_FORMAT")

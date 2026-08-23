@@ -408,3 +408,75 @@ async def test_draft_cross_org_isolation(c):
     o2 = await _org(c, h2)
     r2 = await c.get(f"/api/v1/orgs/{o2}/drafts/{draft_id}", headers=h2)
     assert r2.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_budget_cut_propagates_to_dependents(c):
+    """A dependent must never stay included when its prerequisite was cut
+    for budget — cuts propagate along prereq edges (audit HIGH 3)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # Big prerequisite (won't fit the budget) + small dependent (would fit)
+    prereq_id = await _skill_pack(c, h, oid, "Big Prereq", ["upscale"], minutes=90)
+    dep_id = await _skill_pack(c, h, oid, "Small Dependent", ["background_removal"], minutes=45)
+
+    # Wire the dependency: dependent declares the prereq's slug
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPack
+
+    async with AsyncSessionLocal() as db:
+        prereq = await db.get(SkillPack, prereq_id)
+        dep = await db.get(SkillPack, dep_id)
+        dep.prerequisite_packs = [prereq.slug]
+        await db.commit()
+
+    profile_id = await _confirmed_profile(
+        c,
+        h,
+        oid,
+        {"required_capabilities": ["background_removal"], "time_budget": 60},
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    statuses = {i["entity_id"]: i["status"] for i in payload["items"]}
+    # Prereq sorts first (topo) and exceeds the budget → cut
+    assert statuses[prereq_id] == "cut_for_budget"
+    # The dependent would fit (45 <= 60) but its prereq was cut → also cut
+    assert statuses[dep_id] == "cut_for_budget"
+    assert payload["estimated_total_minutes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_composer_runs_record_no_impressions(c):
+    """Composer-internal match runs must not write 'shown' feedback rows
+    (audit LOW 4 — position-bias analytics pollution)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await _skill_pack(c, h, oid, "Impression Pack", ["upscale"])
+    profile_id = await _confirmed_profile(c, h, oid, {"required_capabilities": ["upscale"]})
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["payload"]["match_run_id"]
+
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.matching import FeedbackEvent
+
+    async with AsyncSessionLocal() as db:
+        ev_r = await db.execute(
+            _select(FeedbackEvent).where(
+                FeedbackEvent.match_run_id == run_id,
+                FeedbackEvent.event_type == "shown",
+            )
+        )
+        assert list(ev_r.scalars().all()) == []

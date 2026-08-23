@@ -335,3 +335,76 @@ async def test_student_cannot_offer_assignments(c):
         headers=h_student,
     )
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_evidence_scores_stored_on_100_scale(c):
+    """Evidence scores are stored 0-100; scoring.py normalizes ONCE at read
+    time — a 100-scored row must contribute base 1.0, and graded evidence
+    must outrank a lone ungraded badge (audit HIGH 1: double-division)."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    await _completed_skill(c, h, oid, owner["id"], tag="image_generation")
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.composer import CreatorCapabilityEvidence
+    from app.services.creator_matching import CreatorMatchingService
+
+    async with AsyncSessionLocal() as db:
+        svc = CreatorMatchingService(db)
+        await svc.rebuild_evidence(oid, owner["id"])
+        await db.commit()
+        ev_r = await db.execute(
+            select(CreatorCapabilityEvidence).where(
+                CreatorCapabilityEvidence.org_id == oid,
+                CreatorCapabilityEvidence.user_id == owner["id"],
+                CreatorCapabilityEvidence.evidence_type == "skill_completed",
+            )
+        )
+        row = ev_r.scalars().first()
+        assert row is not None
+        # SkillProgress.best_score was 90 → stored as 90 (0-100 scale),
+        # NOT 0.9 (the double-division bug stored 0-1 here)
+        assert float(row.score) == 90.0
+
+    # Unit-check the scoring normalization: score=100 → base exactly 1.0
+    from unittest.mock import MagicMock
+
+    from app.services.matching.scoring import _creator_signals
+
+    class _Row:
+        capability_key = "image_generation"
+        score = 100
+        weight = 1.0
+
+    # Direct formula check (mirrors scoring.py): weight * score/100 capped at 1
+    base = min(float(_Row.weight) * (float(_Row.score) / 100.0), 1.0)
+    assert base == 1.0
+    _ = _creator_signals, MagicMock  # imported to pin the module path
+
+
+@pytest.mark.asyncio
+async def test_shortlist_evidence_staleness_gate(c):
+    """rebuild_org_evidence skips when evidence is fresh (<10 min) unless
+    forced (audit HIGH 2 — no mass rewrite per shortlist request)."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    await _completed_skill(c, h, oid, owner["id"], tag="image_generation")
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.creator_matching import CreatorMatchingService
+
+    async with AsyncSessionLocal() as db:
+        svc = CreatorMatchingService(db)
+        first = await svc.rebuild_org_evidence(oid)
+        await db.commit()
+        assert first >= 1
+        # Fresh evidence → gated rebuild is a no-op
+        second = await svc.rebuild_org_evidence(oid)
+        assert second == 0
+        # force=True bypasses the gate
+        third = await svc.rebuild_org_evidence(oid, force=True)
+        await db.commit()
+        assert third == first

@@ -62,6 +62,7 @@ class LearningComposerService:
                 requirement_profile_id=profile.id,
                 created_by=created_by,
                 limit=50,
+                record_impressions=False,  # composer-internal — user never sees this list
             )
         )
         ranked_ids = [r.entity_id for r in results if r.rank is not None]
@@ -108,7 +109,7 @@ class LearningComposerService:
             selected = ranked_packs[:5]
 
         # ── Prerequisite expansion (cycle-checked, depth-bounded) ──
-        ordered_entries = await self._expand_prerequisites(
+        ordered_entries, prereq_edges = await self._expand_prerequisites(
             org_id, selected, profile.user_id
         )
 
@@ -127,6 +128,10 @@ class LearningComposerService:
                     entry["reason_code"] = "cut_for_budget"
                 else:
                     running += minutes
+            # Propagate cuts to dependents: an item whose (transitive)
+            # prerequisite was cut must be cut too — never materialize a
+            # dependent without its required prereq (R8: visible, not silent).
+            running = self._propagate_budget_cuts(ordered_entries, prereq_edges)
             total_minutes = running
             if running == 0 and any(e["status"] == "cut_for_budget" for e in ordered_entries):
                 minimum = min(
@@ -168,10 +173,42 @@ class LearningComposerService:
         )
         return draft
 
+    @staticmethod
+    def _propagate_budget_cuts(
+        entries: list[dict], prereq_edges: list[tuple[str, str]]
+    ) -> int:
+        """Cut any entry whose (transitive) prerequisite was cut for budget.
+
+        Waived prerequisites don't force cuts (the learner already has them).
+        Returns the recomputed running total of included minutes.
+        """
+        status_by_id = {e["entity_id"]: e for e in entries}
+        # Iterate to a fixed point (edges are acyclic; ≤N passes)
+        changed = True
+        while changed:
+            changed = False
+            for prereq_id, dependent_id in prereq_edges:
+                prereq = status_by_id.get(prereq_id)
+                dependent = status_by_id.get(dependent_id)
+                if prereq is None or dependent is None:
+                    continue
+                if prereq["status"] == "cut_for_budget" and dependent["status"] == "included":
+                    dependent["status"] = "cut_for_budget"
+                    dependent["reason_code"] = "cut_for_budget"
+                    changed = True
+        return sum(
+            (e["estimated_minutes"] or DEFAULT_PACK_MINUTES)
+            for e in entries
+            if e["status"] == "included"
+        )
+
     async def _expand_prerequisites(
         self, org_id: str, selected: list[SkillPack], user_id: str | None
-    ) -> list[dict]:
-        """Expand prerequisite_packs recursively, topo-sort, mark waived items."""
+    ) -> tuple[list[dict], list[tuple[str, str]]]:
+        """Expand prerequisite_packs recursively, topo-sort, mark waived items.
+
+        Returns (entries, prereq_edges) — edges as (prereq_id, dependent_id).
+        """
         # Collect the full node set (selected + transitive prereqs)
         packs: dict[str, SkillPack] = {p.id: p for p in selected}
         prereq_edges: list[tuple[str, str]] = []  # (prereq_id, dependent_id)
@@ -272,7 +309,7 @@ class LearningComposerService:
                 entry["reason_code"] = "waived"
                 entry["evidence"] = "Learner already completed this pack's skills"
             entries.append(entry)
-        return entries
+        return entries, prereq_edges
 
     # ── Confirm (materialize) ─────────────────────────────
 

@@ -183,8 +183,11 @@ class RequirementProfileService:
                 extracted_ok = True
                 break
             except (ValidationError, ValueError) as exc:
-                prompt_error = str(exc)[:500]
-                log.warning("requirement_extraction_retry", error=prompt_error)
+                # Log the real error, but never feed model/attacker-steerable
+                # text back into the prompt (it would sit outside the boundary
+                # markers) — the retry gets a generic instruction only.
+                log.warning("requirement_extraction_retry", error=str(exc)[:500])
+                prompt_error = "generic"
             except Exception:
                 log.exception("requirement_extraction_failed")
                 break
@@ -229,8 +232,13 @@ class RequirementProfileService:
                 structured.pop(key, None)
                 provenance.pop(key, None)
             else:
+                # R14: promote to user_entered ONLY when the value actually
+                # changed. A UI that round-trips the full object back would
+                # otherwise silently convert extracted values into S2 hard
+                # constraints the human never confirmed.
+                if structured.get(key) != value:
+                    provenance[key] = "user_entered"
                 structured[key] = value
-                provenance[key] = "user_entered"  # human touched it → confirmed
         meta["provenance"] = provenance
         profile.structured_requirements = structured
         profile.extraction_meta = meta
@@ -363,7 +371,10 @@ class RequirementProfileService:
         )
         user_prompt = f"{boundary}\n{clean_raw}\n{boundary}"
         if prior_error:
-            user_prompt += f"\n\nYour previous output failed validation: {prior_error}. Return corrected JSON only."
+            user_prompt += (
+                "\n\nYour previous output was not valid JSON matching the schema. "
+                "Return corrected JSON only — a single JSON object, no prose."
+            )
         client = create_llm_client()
         response = await client.complete(
             system_prompt=system_prompt,

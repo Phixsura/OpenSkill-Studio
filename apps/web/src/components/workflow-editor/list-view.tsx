@@ -171,6 +171,14 @@ function AddConnectionRow({
     (p) => !dstPort || (COERCIBLE[p.type]?.includes(dstPort.type) ?? false),
   );
 
+  // Fan-in 1: a port that already has an incoming edge cannot take another —
+  // the runtime resolves edges last-writer-wins, so a second feed would be
+  // silently nondeterministic.
+  const fedPorts = new Set(
+    definition.edges.filter((e) => e.to_step === step).map((e) => e.to_port),
+  );
+  const openInputs = target.inputs.filter((p) => !fedPorts.has(p.port));
+
   const canAdd = toPort && fromStep && fromPort;
 
   return (
@@ -185,7 +193,7 @@ function AddConnectionRow({
         className="rounded border bg-transparent px-1 py-1"
       >
         <option value="">into port…</option>
-        {target.inputs.map((p) => (
+        {openInputs.map((p) => (
           <option key={p.port} value={p.port}>
             {p.port} ({p.type})
           </option>
@@ -224,16 +232,21 @@ function AddConnectionRow({
       <button
         type="button"
         disabled={!canAdd}
-        onClick={() =>
-          canAdd &&
+        onClick={() => {
+          if (!canAdd) return;
+          // '.'-joined id: unambiguous (ids contain '_' but never '.') —
+          // keep in sync with convert.ts edge-id generation.
           onAdd({
-            id: `e_${fromStep}_${fromPort}_${step}_${toPort}`,
+            id: `e_${fromStep}.${fromPort}.${step}.${toPort}`,
             from_step: fromStep,
             from_port: fromPort,
             to_step: step,
             to_port: toPort,
-          })
-        }
+          });
+          setToPort("");
+          setFromStep("");
+          setFromPort("");
+        }}
         className="rounded border px-2 py-1 disabled:opacity-50"
       >
         Connect

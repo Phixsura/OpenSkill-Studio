@@ -147,14 +147,20 @@ export default function WorkflowInstallationDetailPage() {
 
   const confirmBindingMutation = useMutation({
     mutationFn: ({ stepId }: { stepId: string }) => {
+      // Merge edits over the binding's current values — confirming an
+      // auto-suggested binding without touching the selects must send the
+      // suggested offering, not undefined (which 422s server-side).
       const edit = bindingEdits[stepId];
+      const binding = bindings.find((b) => b.step_id === stepId);
+      const offeringId = edit?.offering_id || binding?.offering_id || null;
+      const bindingMode = edit?.binding_mode ?? binding?.binding_mode ?? "preferred";
       return apiWithAuth(
         `/orgs/${orgId}/workflow-installations/${installId}/bindings/${stepId}`,
         {
           method: "PUT",
           body: JSON.stringify({
-            offering_id: edit?.offering_id,
-            binding_mode: edit?.binding_mode ?? "preferred",
+            offering_id: offeringId,
+            binding_mode: bindingMode,
           }),
         },
       );

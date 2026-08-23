@@ -52,9 +52,16 @@ export function CanvasView({
       const srcPort = source.outputs.find((p) => p.port === conn.sourceHandle);
       const dstPort = target.inputs.find((p) => p.port === conn.targetHandle);
       if (!srcPort || !dstPort) return false;
+      // Fan-in 1: an input port that already has an incoming edge cannot
+      // take another — the runtime resolves edges last-writer-wins, so a
+      // second feed would be silently nondeterministic.
+      const alreadyFed = edges.some(
+        (e) => e.target === conn.target && e.targetHandle === conn.targetHandle,
+      );
+      if (alreadyFed) return false;
       return COERCIBLE[srcPort.type]?.includes(dstPort.type) ?? false;
     },
-    [definition],
+    [definition, edges],
   );
 
   return (

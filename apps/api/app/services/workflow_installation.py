@@ -12,6 +12,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
+from app.models.provider import ProviderModelOffering
 from app.models.skill_pack import InstallStatus, PackStatus, PackVisibility
 from app.models.workflow_pack import (
     WorkflowPack,
@@ -318,6 +319,17 @@ class WorkflowInstallationService:
 
     # ── Internals ─────────────────────────────────────────
 
+    async def _binding_capability_matches(
+        self, binding: WorkflowStepBinding, step_capability: str
+    ) -> bool:
+        """A confirmed binding stays valid only if its offering (when set)
+        still serves the step's capability in the new definition."""
+        if not binding.offering_id:
+            # Confirmed but offering gone (SET NULL) — re-suggest
+            return False
+        offering = await self.db.get(ProviderModelOffering, binding.offering_id)
+        return offering is not None and offering.capability_key == step_capability
+
     async def _resolve_release(
         self, pack_id: str, version: str | None
     ) -> WorkflowPackRelease | None:
@@ -335,7 +347,11 @@ class WorkflowInstallationService:
         releases = list(result.scalars().all())
         if not releases:
             return None
-        return max(releases, key=lambda r: _parse_semver(r.version))
+        # Implicit "latest" prefers stable releases — a newer pre-release
+        # (1.1.0-beta) must not shadow the stable 1.0.0 (npm dist-tag semantics)
+        stable = [r for r in releases if "-" not in r.version]
+        pool = stable if stable else releases
+        return max(pool, key=lambda r: _parse_semver(r.version))
 
     async def _capability_gate(self, org_id: str, release: WorkflowPackRelease) -> None:
         """Hard install gate: unsatisfied capabilities → 422 with gaps (never auto-connect)."""
@@ -365,17 +381,47 @@ class WorkflowInstallationService:
     async def _rebuild_bindings(
         self, inst: WorkflowPackInstallation, release: WorkflowPackRelease
     ) -> None:
-        """Delete + recreate unconfirmed binding suggestions per provider_action step."""
-        await self.db.execute(
-            sa_delete(WorkflowStepBinding).where(
+        """Rebuild binding suggestions per provider_action step.
+
+        Human-CONFIRMED bindings are preserved when the step still exists in
+        the new definition with an unchanged capability — upgrades must not
+        silently discard explicit provider choices (D5). Unconfirmed
+        suggestions, and confirmed bindings whose step disappeared or changed
+        capability, are deleted and re-suggested.
+        """
+        definition = release.manifest.get("definition", {})
+        # Map of step_id → capability for provider_action steps in the NEW definition
+        new_caps: dict[str, str] = {
+            step["id"]: step.get("config", {}).get("capability", "")
+            for step in definition.get("steps", [])
+            if step.get("type") == "provider_action"
+        }
+
+        existing_r = await self.db.execute(
+            select(WorkflowStepBinding).where(
                 WorkflowStepBinding.installation_id == inst.id
             )
         )
-        definition = release.manifest.get("definition", {})
+        preserved_step_ids: set[str] = set()
+        for binding in existing_r.scalars().all():
+            step_capability = new_caps.get(binding.step_id)
+            keep = (
+                binding.confirmed_by is not None
+                and step_capability is not None
+                and await self._binding_capability_matches(binding, step_capability)
+            )
+            if keep:
+                preserved_step_ids.add(binding.step_id)
+            else:
+                await self.db.delete(binding)
+        await self.db.flush()
+
         provider_svc = ProviderService(self.db)
         for step in definition.get("steps", []):
             if step.get("type") != "provider_action":
                 continue
+            if step["id"] in preserved_step_ids:
+                continue  # confirmed binding kept as-is
             config = step.get("config", {})
             capability = config.get("capability", "")
             required = set(config.get("required_features", []))

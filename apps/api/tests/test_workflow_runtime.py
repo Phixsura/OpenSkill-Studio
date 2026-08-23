@@ -487,3 +487,142 @@ async def test_transform_concat_text(c):
     data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
     assert data["status"] == "completed", data
     assert set(data["outputs"]["joined"].split(" | ")) == {"hello", "world"}
+
+
+# ── Sweeper recovery (audit fixes) ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_sweep_exhausted_attempts_fails_step(c):
+    """A crashed executor whose step already burned max_attempts must go to
+    FAILED WF_RETRY_EXHAUSTED, not loop forever through WAITING_RETRY."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import (
+        RunStatus,
+        StepRunStatus,
+        WorkflowRun,
+        WorkflowStepRun,
+    )
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Seed a RUNNING run with a RUNNING step at attempt == max_attempts and
+    # an expired lease (simulates an executor that crashed on final attempt)
+    async with AsyncSessionLocal() as db:
+        run = WorkflowRun(
+            org_id=oid,
+            definition_snapshot={"steps": [], "edges": [], "inputs": [], "outputs": []},
+            inputs={},
+            status=RunStatus.RUNNING,
+        )
+        db.add(run)
+        await db.flush()
+        sr = WorkflowStepRun(
+            run_id=run.id,
+            step_id="poison",
+            step_type="provider_action",
+            status=StepRunStatus.RUNNING,
+            attempt=3,
+            max_attempts=3,
+            lease_expires_at=datetime.now(UTC) - timedelta(minutes=5),
+        )
+        db.add(sr)
+        await db.commit()
+        run_id, sr_id = run.id, sr.id
+
+    # GET run detail triggers the lazy sweep
+    r = await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}", headers=h)
+    assert r.status_code == 200
+
+    data = await _wait_run(c, h, oid, run_id, {"failed"})
+    assert data["status"] == "failed"
+    step = next(s for s in data["step_runs"] if s["id"] == sr_id)
+    assert step["status"] == "failed"
+    assert step["error_code"] == "WF_RETRY_EXHAUSTED"
+
+
+@pytest.mark.asyncio
+async def test_sweep_expired_review_fails_run(c):
+    """An overdue review must expire, fail the step, AND move the run out of
+    WAITING_REVIEW so it settles into FAILED (not stuck forever)."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import WorkflowStepReview
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition(with_review=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "expire me"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"waiting_review"})
+    assert data["status"] == "waiting_review"
+
+    # Force the open review past its due date
+    qa = next(s for s in data["step_runs"] if s["step_id"] == "qa")
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import update as sa_update
+
+        await db.execute(
+            sa_update(WorkflowStepReview)
+            .where(WorkflowStepReview.step_run_id == qa["id"])
+            .values(due_at=datetime.now(UTC) - timedelta(hours=1))
+        )
+        await db.commit()
+
+    # First GET sweeps (expires review, fails step, resumes run) and
+    # re-dispatches; poll until the advance loop settles the run
+    await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}", headers=h)
+    data = await _wait_run(c, h, oid, run_id, {"failed"})
+    assert data["status"] == "failed"
+    qa = next(s for s in data["step_runs"] if s["step_id"] == "qa")
+    assert qa["status"] == "failed"
+    assert qa["error_code"] == "WF_REVIEW_TIMEOUT"
+    # The review row records the expiry, and no open review remains
+    r2 = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h)
+    assert not any(rv["step_run_id"] == qa["id"] for rv in r2.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_pinned_binding_with_deleted_offering_hard_stops(c):
+    """A pinned binding whose offering was deleted (FK SET NULL) must hard-stop
+    with NO_ELIGIBLE_PROVIDER — never silently fall back to auto-selection."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import WorkflowStepBinding
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # An eligible auto candidate EXISTS — the pinned hard-stop must ignore it
+    await _mock_offering(c, h, oid)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+
+    # Seed a pinned binding with offering_id NULL (as left by ondelete=SET NULL)
+    async with AsyncSessionLocal() as db:
+        db.add(
+            WorkflowStepBinding(
+                org_id=oid,
+                installation_id=install_id,
+                step_id="generate",
+                binding_mode="pinned",
+                offering_id=None,
+            )
+        )
+        await db.commit()
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "pinned"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"failed"})
+    assert data["status"] == "failed"
+    gen = next(s for s in data["step_runs"] if s["step_id"] == "generate")
+    assert gen["error_code"] == "NO_ELIGIBLE_PROVIDER"

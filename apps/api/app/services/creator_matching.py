@@ -9,7 +9,7 @@ auto-assignment path anywhere in this module (red line, R9).
 
 import structlog
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,16 @@ class CreatorMatchingService:
     async def _capability_keys(self) -> set[str]:
         result = await self.db.execute(select(CapabilityTag.key))
         return {row[0] for row in result.all()}
+
+    async def _load_projects(self, project_ids: set[str]) -> dict:
+        """Batch-load projects by id (avoids per-row db.get N+1)."""
+        from app.models.project import Project as _Project
+
+        ids = {pid for pid in project_ids if pid}
+        if not ids:
+            return {}
+        result = await self.db.execute(select(_Project).where(_Project.id.in_(ids)))
+        return {p.id: p for p in result.scalars().all()}
 
     @staticmethod
     def _map_tags(tags: list[str] | None, keys: set[str]) -> list[str]:
@@ -85,9 +95,11 @@ class CreatorMatchingService:
             )
         )
         for progress, skill in sp_r.all():
+            # Scores are stored on the 0-100 scale (column is Numeric(5,2));
+            # scoring.py normalizes to 0-1 exactly once at read time.
             score = None
             if progress.best_score is not None:
-                score = min(progress.best_score / 100.0, 1.0)
+                score = min(float(progress.best_score), 100.0)
             for cap in self._map_tags(list(skill.tags or []), keys):
                 add(cap, "skill_completed", progress.id, progress.completed_at or progress.started_at or skill.created_at, score)
 
@@ -111,13 +123,15 @@ class CreatorMatchingService:
                 SubmissionReview.status == ReviewStatus.APPROVED,
             )
         )
-        for review, submission in rev_r.all():
-            from app.models.project import Project as _Project
-
-            project = await self.db.get(_Project, submission.project_id)
+        review_rows = rev_r.all()
+        # Batch-load referenced projects (avoid per-row db.get N+1)
+        review_project_ids = {submission.project_id for _, submission in review_rows}
+        projects_by_id = await self._load_projects(review_project_ids)
+        for review, submission in review_rows:
+            project = projects_by_id.get(submission.project_id)
             cap = (project.project_type or "").strip().lower() if project else ""
             if cap in keys:
-                score = min((review.score or 0) / 100.0, 1.0) if review.score is not None else None
+                score = min(float(review.score), 100.0) if review.score is not None else None
                 add(cap, "approved_submission", review.id, review.created_at, score)
 
         # 4. Accepted commercial brief applications
@@ -163,16 +177,17 @@ class CreatorMatchingService:
                 EvaluationTask.result.isnot(None),
             )
         )
-        for task, submission in eval_r.all():
-            from app.models.project import Project as _Project
-
-            project = await self.db.get(_Project, submission.project_id)
+        eval_rows = eval_r.all()
+        eval_project_ids = {submission.project_id for _, submission in eval_rows}
+        eval_projects_by_id = await self._load_projects(eval_project_ids)
+        for task, submission in eval_rows:
+            project = eval_projects_by_id.get(submission.project_id)
             cap = (project.project_type or "").strip().lower() if project else ""
             if cap in keys:
                 raw = task.result.get("overall_score", task.result.get("score"))
                 score = None
                 if isinstance(raw, int | float):
-                    score = min(float(raw) / 100.0, 1.0)
+                    score = min(float(raw), 100.0)
                 add(cap, "eval_result", task.id, task.completed_at or task.created_at, score)
 
         for row in rows:
@@ -180,7 +195,31 @@ class CreatorMatchingService:
         await self.db.flush()
         return len(rows)
 
-    async def rebuild_org_evidence(self, org_id: str) -> int:
+    # Evidence younger than this is considered fresh enough for shortlisting;
+    # callers pass force=True to bypass (e.g. an explicit refresh action).
+    EVIDENCE_STALENESS_SECONDS = 600
+
+    async def rebuild_org_evidence(self, org_id: str, force: bool = False) -> int:
+        """Rebuild evidence for all active members.
+
+        Skipped (returns 0) when existing evidence is fresh and force is
+        False — shortlisting is a read path and must not mass-rewrite the
+        evidence table on every request (N+1 + lock contention).
+        """
+        if not force:
+            from datetime import UTC, datetime, timedelta
+
+            newest_r = await self.db.execute(
+                select(func.max(CreatorCapabilityEvidence.created_at)).where(
+                    CreatorCapabilityEvidence.org_id == org_id
+                )
+            )
+            newest = newest_r.scalar_one_or_none()
+            if newest is not None:
+                ref = newest if newest.tzinfo else newest.replace(tzinfo=UTC)
+                if datetime.now(UTC) - ref < timedelta(seconds=self.EVIDENCE_STALENESS_SECONDS):
+                    return 0  # fresh enough — skip the rebuild
+
         members_r = await self.db.execute(
             select(OrgMember.user_id).where(
                 OrgMember.org_id == org_id, OrgMember.status == MemberStatus.ACTIVE
@@ -194,7 +233,13 @@ class CreatorMatchingService:
     # ── Shortlist (offer, never assign) ───────────────────
 
     async def shortlist(
-        self, org_id: str, project_id: str, profile_id: str, created_by: str, limit: int = 10
+        self,
+        org_id: str,
+        project_id: str,
+        profile_id: str,
+        created_by: str,
+        limit: int = 10,
+        force_refresh: bool = False,
     ):
         from app.models.project import Project as _Project
 
@@ -211,8 +256,9 @@ class CreatorMatchingService:
                 422,
             )
 
-        # Fresh evidence for the whole org before ranking
-        await self.rebuild_org_evidence(org_id)
+        # Evidence refresh, staleness-gated (skipped when <10 min old unless
+        # the caller explicitly forces a refresh)
+        await self.rebuild_org_evidence(org_id, force=force_refresh)
 
         requirement = RequirementProfileService.build_match_requirement(profile)
         engine = MatchingEngine(self.db)

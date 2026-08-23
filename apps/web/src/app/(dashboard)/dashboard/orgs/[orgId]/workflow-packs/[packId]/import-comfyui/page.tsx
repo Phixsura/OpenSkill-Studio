@@ -115,6 +115,9 @@ export default function ImportComfyUIPage() {
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) handleFile(file);
+            // Reset so re-selecting the same file retriggers (e.g. retry
+            // after a transient import failure)
+            e.target.value = "";
           }}
           className="mx-auto mt-3 block text-sm"
         />

@@ -46,7 +46,7 @@ export default function WorkflowEditor({
 }) {
   const queryClient = useQueryClient();
 
-  const { data: packData, isLoading } = useQuery({
+  const { data: packData, isLoading, isError } = useQuery({
     queryKey: ["workflow-pack", orgId, packId],
     queryFn: () =>
       apiWithAuth<{ data: PackDetail }>(`/orgs/${orgId}/workflow-packs/${packId}`),
@@ -168,6 +168,19 @@ export default function WorkflowEditor({
     },
   });
 
+  if (isError) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-red-600">Failed to load this workflow pack.</p>
+        <Link
+          href={`/dashboard/orgs/${orgId}/workflow-packs`}
+          className="text-sm text-[hsl(var(--muted-foreground))] hover:underline"
+        >
+          ← Back to workflow packs
+        </Link>
+      </div>
+    );
+  }
   if (isLoading || !definition) {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading editor…</p>;
   }

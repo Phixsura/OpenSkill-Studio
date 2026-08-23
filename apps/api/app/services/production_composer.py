@@ -58,6 +58,7 @@ class ProductionComposerService:
                 requirement_profile_id=profile.id,
                 created_by=created_by,
                 limit=50,
+                record_impressions=False,  # composer-internal run — user never sees this list
             )
         )
         ranked_ids = [r.entity_id for r in results if r.rank is not None]
@@ -145,6 +146,7 @@ class ProductionComposerService:
                     requirement_profile_id=profile.id,
                     created_by=created_by,
                     limit=1,
+                    record_impressions=False,  # composer-internal run
                 )
             )
             ranked_templates = [r for r in t_results if r.rank is not None]

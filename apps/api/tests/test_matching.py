@@ -389,3 +389,43 @@ async def test_creator_matching_requires_verified_evidence(c):
     # Verified evidence appears as a reason for A
     top = next(r for r in data["results"] if r["entity_id"] == u_a["id"])
     assert any(rs["evidence"] == "verified" for rs in top["reasons"]) or top["score"] is not None
+
+
+@pytest.mark.asyncio
+async def test_feedback_foreign_match_run_rejected(c):
+    """Feedback rows cannot be attached to another org's match run
+    (audit LOW 5 — loose non-FK ref needs an ownership check)."""
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    await _wf_pack(c, h1, o1, "FB Cross Pack", capability="upscale")
+    profile_id = await _confirmed_profile(c, h1, o1, {"required_capabilities": ["upscale"]})
+    data = await _match(c, h1, o1, profile_id)
+    run_id = data["id"]
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    r = await c.post(
+        f"/api/v1/orgs/{o2}/feedback-events",
+        json={
+            "match_run_id": run_id,
+            "entity_type": "workflow_pack",
+            "entity_id": "01AAAAAAAAAAAAAAAAAAAAAAAA",
+            "event_type": "opened",
+        },
+        headers=h2,
+    )
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "MATCH_RUN_NOT_FOUND"
+
+    # Own org with the same run id still works
+    r2 = await c.post(
+        f"/api/v1/orgs/{o1}/feedback-events",
+        json={
+            "match_run_id": run_id,
+            "entity_type": "workflow_pack",
+            "entity_id": "01AAAAAAAAAAAAAAAAAAAAAAAA",
+            "event_type": "opened",
+        },
+        headers=h1,
+    )
+    assert r2.status_code == 201

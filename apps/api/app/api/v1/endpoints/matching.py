@@ -218,6 +218,12 @@ async def record_feedback(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
+    # match_run_id is a loose (non-FK) reference — verify org ownership so
+    # feedback rows cannot be attached to another org's match runs.
+    if body.match_run_id is not None:
+        run = await db.get(MatchRun, body.match_run_id)
+        if run is None or run.org_id != org_id:
+            raise AppError("MATCH_RUN_NOT_FOUND", "Match run not found", 404)
     event = FeedbackEvent(
         org_id=org_id,
         match_run_id=body.match_run_id,

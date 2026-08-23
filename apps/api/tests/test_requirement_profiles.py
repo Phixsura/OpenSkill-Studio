@@ -259,13 +259,14 @@ async def test_patch_sets_user_entered_provenance(c):
 
     r = await c.patch(
         f"/api/v1/orgs/{oid}/requirement-profiles/{profile_id}",
-        json={"edits": {"output_type": "video", "scenario": "ecommerce"}},
+        json={"edits": {"output_type": "video", "scenario": "social_media"}},
         headers=h,
     )
     assert r.status_code == 200
     prov = r.json()["data"]["extraction_meta"]["provenance"]
+    # output_type is NEW and scenario's value CHANGED → both promoted
     assert prov["output_type"] == "user_entered"
-    assert prov["scenario"] == "user_entered"  # edited → promoted
+    assert prov["scenario"] == "user_entered"
     assert prov["goal"] == "extracted"  # untouched stays extracted
 
 
@@ -377,3 +378,72 @@ async def test_profile_cross_org_isolation(c):
     o2 = await _org(c, h2)
     r2 = await c.get(f"/api/v1/orgs/{o2}/requirement-profiles/{pid}", headers=h2)
     assert r2.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_patch_unchanged_values_keep_extracted_provenance(c):
+    """R14 audit fix: PATCHing the full object back UNCHANGED must not promote
+    extracted values to user_entered (which would turn them into S2 hard
+    constraints the human never actually confirmed)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Seed a profile with extracted provenance via direct DB write (mirrors
+    # what extraction produces without needing the LLM flag)
+    from app.core.database import AsyncSessionLocal
+    from app.models.matching import RequirementContext, RequirementProfile
+
+    async with AsyncSessionLocal() as db:
+        profile = RequirementProfile(
+            org_id=oid,
+            context_type=RequirementContext.PRODUCTION,
+            raw_request="make a product video",
+            structured_requirements={
+                "goal": "make a product video",
+                "required_capabilities": ["image_to_video"],
+            },
+            extraction_meta={
+                "provenance": {
+                    "goal": "extracted",
+                    "required_capabilities": "extracted",
+                }
+            },
+        )
+        db.add(profile)
+        await db.commit()
+        profile_id = profile.id
+
+    # Round-trip the FULL object back unchanged (common UI save pattern)
+    r = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{profile_id}",
+        json={
+            "edits": {
+                "goal": "make a product video",
+                "required_capabilities": ["image_to_video"],
+            }
+        },
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    prov = r.json()["data"]["extraction_meta"]["provenance"]
+    assert prov["goal"] == "extracted"  # unchanged → stays extracted
+    assert prov["required_capabilities"] == "extracted"
+
+    # An ACTUAL change does promote
+    r2 = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{profile_id}",
+        json={"edits": {"goal": "make a BETTER product video"}},
+        headers=h,
+    )
+    prov2 = r2.json()["data"]["extraction_meta"]["provenance"]
+    assert prov2["goal"] == "user_entered"
+    assert prov2["required_capabilities"] == "extracted"  # untouched
+
+    # build_match_requirement still demotes the extracted caps
+    from app.services.requirement_profile import RequirementProfileService
+
+    async with AsyncSessionLocal() as db:
+        stored = await db.get(RequirementProfile, profile_id)
+        requirement = RequirementProfileService.build_match_requirement(stored)
+        assert "required_capabilities" not in requirement
+        assert requirement.get("preferred_capabilities") == ["image_to_video"]

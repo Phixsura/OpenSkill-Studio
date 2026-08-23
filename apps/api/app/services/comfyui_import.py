@@ -9,6 +9,7 @@ installs anything. This module performs no network I/O of any kind.
 
 import hashlib
 import json
+import re
 
 import structlog
 from sqlalchemy import select
@@ -217,7 +218,9 @@ class ComfyUIImportService:
 
         try:
             parsed = json.loads(json_text)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
+            # RecursionError: deeply nested JSON (e.g. 50k '[' chars) blows the
+            # parser's recursion guard — must be a 422, not an unhandled 500
             raise AppError("INVALID_JSON", "Import is not valid JSON", 422) from None
 
         if not isinstance(parsed, dict):
@@ -389,8 +392,14 @@ class ComfyUIImportService:
             )
         custom = report.get("custom_nodes", [])
         if custom:
+            # Restrict listed class_types to a safe charset: a crafted
+            # class_type like '{{inputs.x}}' or 'data:...;base64,' would
+            # otherwise land verbatim in the instruction config and make the
+            # generated definition permanently fail validate_or_raise
+            # (WF_EXPR_INVALID / WF_DATA_URI_REJECTED).
             listing = ", ".join(
-                sanitize_untrusted_text(c["class_type"], 100) for c in custom[:50]
+                re.sub(r"[^A-Za-z0-9_.: -]", "", sanitize_untrusted_text(c["class_type"], 100))
+                for c in custom[:50]
             )
             content = (
                 "This workflow was imported from ComfyUI and uses custom nodes that "

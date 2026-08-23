@@ -28,6 +28,9 @@ class MatchSpec:
     created_by: str | None = None
     limit: int = 20
     explain: bool = False
+    # False for composer-internal runs — the user never sees that ranked
+    # list, so recording 'shown' rows would pollute position-bias analytics.
+    record_impressions: bool = True
 
 
 class MatchingEngine:
@@ -111,20 +114,22 @@ class MatchingEngine:
             results.append(result)
             if spec.explain:
                 explain_trees.append(build_explain_tree(item, config))
-            # Impression logging with rank position (R17 — day one)
-            self.db.add(
-                FeedbackEvent(
-                    org_id=spec.org_id,
-                    match_run_id=run.id,
-                    entity_type=spec.target_entity_type,
-                    entity_id=item["entity_id"],
-                    event_type="shown",
-                    rank_position=rank,
-                    score=score_val,
-                    config_version=config.version,
-                    created_by=spec.created_by,
+            # Impression logging with rank position (R17 — day one).
+            # Skipped for composer-internal runs (record_impressions=False).
+            if spec.record_impressions:
+                self.db.add(
+                    FeedbackEvent(
+                        org_id=spec.org_id,
+                        match_run_id=run.id,
+                        entity_type=spec.target_entity_type,
+                        entity_id=item["entity_id"],
+                        event_type="shown",
+                        rank_position=rank,
+                        score=score_val,
+                        config_version=config.version,
+                        created_by=spec.created_by,
+                    )
                 )
-            )
 
         # Hard failures persisted too — distinguishable from low rank
         for exc in excluded:

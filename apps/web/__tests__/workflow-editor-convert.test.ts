@@ -105,7 +105,8 @@ describe("toDefinition round-trip", () => {
     });
     const def = toDefinition(original, nodes, edges);
     const newEdge = def.edges.find((e) => e.from_step === "generate");
-    expect(newEdge?.id).toBe("e_generate_result_write_prompt_loop");
+    // '.'-joined: unambiguous since ids/ports contain '_' but never '.'
+    expect(newEdge?.id).toBe("e_generate.result.write_prompt.loop");
   });
 
   it("drops steps whose nodes were removed", () => {

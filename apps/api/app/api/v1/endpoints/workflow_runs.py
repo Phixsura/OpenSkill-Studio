@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.models.user import User
+from app.models.workflow_run import RunStatus
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.workflow_run import (
     CreateRunRequest,
@@ -98,8 +99,20 @@ async def get_run(
     swept = await sweep_stale(db, org_id)
     if swept["expired_leases"] or swept["expired_reviews"]:
         await db.commit()
-        dispatch_advance(run_id)
+        # Re-dispatch EVERY run the sweep touched — the sweep repairs step
+        # state globally but does not resume advance loops itself; without
+        # this, a run swept while a different run was viewed would stall.
+        for swept_run_id in swept["run_ids"]:
+            dispatch_advance(swept_run_id)
         run = await svc.get_run(run_id, org_id)
+
+    # Durable re-dispatch trigger: the advance loop is an in-memory
+    # continuation over durable state — a crash/deploy between commit and
+    # dispatch (or a drained task at shutdown) would otherwise leave the run
+    # stuck in PENDING/RUNNING forever. Conditional claims make this
+    # idempotent and cheap, so dispatch on every read of a non-settled run.
+    if run.status in (RunStatus.PENDING, RunStatus.RUNNING):
+        dispatch_advance(run_id)
 
     step_runs = await svc.get_step_runs(run_id)
     events = await svc.get_events(run_id)

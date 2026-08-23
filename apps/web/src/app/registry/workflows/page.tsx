@@ -57,7 +57,7 @@ export default function WorkflowRegistryPage() {
     setPage(1);
   }, [debouncedSearch, capability, workflowType, sort]);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["wf-registry", debouncedSearch, capability, workflowType, sort, page],
     queryFn: () => {
       const params = new URLSearchParams();
@@ -162,7 +162,13 @@ export default function WorkflowRegistryPage() {
         <p className="mt-8 text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
       )}
 
-      {!isLoading && packs.length === 0 && (
+      {isError && (
+        <div className="mt-8 rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          Failed to load the registry. Please try again in a moment.
+        </div>
+      )}
+
+      {!isLoading && !isError && packs.length === 0 && (
         <div className="mt-8 rounded-lg border border-dashed p-12 text-center text-[hsl(var(--muted-foreground))]">
           No workflow packs found.
         </div>

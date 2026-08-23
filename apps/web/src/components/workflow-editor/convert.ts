@@ -54,10 +54,15 @@ export function toDefinition(
     .map((n) => n.data.step);
 
   const edgeDefs: EdgeDef[] = edges.map((e) => ({
+    // Join with '.' — step ids/ports contain '_' themselves, so an
+    // underscore-joined id is ambiguous (a/b_c collides with a_b/c) and
+    // collisions get rejected server-side as WF_DUPLICATE_EDGE_ID.
+    // '.' is excluded from the id charset (^[a-z][a-z0-9_]*$), so this
+    // encoding is unambiguous.
     id:
       e.id && !e.id.startsWith("xy-edge")
         ? e.id
-        : `e_${e.source}_${e.sourceHandle ?? ""}_${e.target}_${e.targetHandle ?? ""}`,
+        : `e_${e.source}.${e.sourceHandle ?? ""}.${e.target}.${e.targetHandle ?? ""}`,
     from_step: e.source,
     from_port: e.sourceHandle ?? "",
     to_step: e.target,

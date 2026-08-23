@@ -448,3 +448,107 @@ async def test_student_cannot_create_pack(c):
         headers=h_student,
     )
     assert r.status_code == 403
+
+
+# ── Audit fixes: approval bypass + re-approval on definition change ──
+
+
+@pytest.mark.asyncio
+async def test_visibility_public_requires_approval(c):
+    """Direct PUT visibility=public on an unapproved pack must be rejected."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "public"},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "APPROVAL_REQUIRED"
+
+    # unlisted/private remain freely settable
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "unlisted"},
+        headers=h,
+    )
+    assert r2.status_code == 200
+    assert r2.json()["data"]["visibility"] == "unlisted"
+
+    # The approval flow still reaches public
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    r3 = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
+    assert r3.json()["data"]["visibility"] == "public"
+
+    # And once approved, PUT visibility=public is allowed (e.g. after
+    # voluntarily going unlisted)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "unlisted"},
+        headers=h,
+    )
+    r4 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "public"},
+        headers=h,
+    )
+    assert r4.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_definition_change_resets_public_approval(c):
+    """Editing the definition of an approved-public pack must force re-review
+    so the public registry card can never drift from what was approved."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
+
+    # Change the definition post-approval
+    d = _valid_definition()
+    d["steps"][0]["config"]["template"] = "Changed {{inputs.product_name}}"
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": d},
+        headers=h,
+    )
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["review_status"] is None
+    assert data["visibility"] == "unlisted"
+
+
+@pytest.mark.asyncio
+async def test_latest_release_prefers_stable_over_prerelease(c):
+    """A newer pre-release must not shadow the stable release for implicit installs."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    for v in ["1.0.0", "1.1.0-beta.1"]:
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+            json={"version": v},
+            headers=h,
+        )
+        assert r.status_code == 201, r.text
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.workflow_pack import WorkflowPackService
+
+    async with AsyncSessionLocal() as db:
+        svc = WorkflowPackService(db)
+        latest = await svc.get_latest_release(pid)
+        assert latest is not None
+        assert latest.version == "1.0.0"  # stable wins over 1.1.0-beta.1

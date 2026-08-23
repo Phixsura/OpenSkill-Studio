@@ -596,3 +596,64 @@ async def test_registry_search_and_output_type_filter(c):
         f"/api/v1/registry/workflow-packs?search={marker}&output_type=audio"
     )
     assert r4.json()["data"] == []
+
+
+# ── Audit fixes: confirmed-binding preservation + stable-latest ──
+
+
+@pytest.mark.asyncio
+async def test_upgrade_preserves_confirmed_binding(c):
+    """Human-confirmed bindings survive an upgrade when the step and its
+    capability are unchanged (audit fix — upgrades must not silently discard
+    explicit provider choices)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid, versions=("1.0.0", "1.1.0"))
+    offering_id = await _mock_offering(c, h, oid)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=h,
+    )
+    install_id = r.json()["data"]["id"]
+
+    # Confirm the binding for the provider_action step ("generate")
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings/generate",
+        json={"offering_id": offering_id, "binding_mode": "preferred"},
+        headers=h,
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["data"]["confirmed_by"] is not None
+
+    # Upgrade — same definition in 1.1.0, so the binding must be preserved
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/upgrade",
+        json={"version": "1.1.0"},
+        headers=h,
+    )
+    assert r3.status_code == 200, r3.text
+
+    r4 = await c.get(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings", headers=h
+    )
+    binding = next(b for b in r4.json()["data"] if b["step_id"] == "generate")
+    assert binding["confirmed_by"] is not None  # preserved, not wiped
+    assert binding["offering_id"] == offering_id
+
+
+@pytest.mark.asyncio
+async def test_install_without_version_prefers_stable(c):
+    """Implicit 'latest' must resolve to the stable release, not a newer
+    pre-release (npm dist-tag semantics)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid, versions=("1.0.0", "1.1.0-beta.1"))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations",
+        json={"pack_id": pid},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["data"]["installed_version"] == "1.0.0"

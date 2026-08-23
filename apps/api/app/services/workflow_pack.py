@@ -88,6 +88,20 @@ class WorkflowPackService:
 
     async def update_pack(self, pack_id: str, org_id: str, **fields) -> WorkflowPack:
         pack = await self.get_pack(pack_id, org_id)
+        # Approval gate: public visibility is only reachable through the
+        # review flow (submit-review → approve). Direct PUT visibility=public
+        # on an unapproved pack would bypass the registry approval filter
+        # (which accepts review_status IS NULL).
+        requested_visibility = fields.get("visibility")
+        if (
+            requested_visibility in ("public", PackVisibility.PUBLIC)
+            and pack.review_status != "approved"
+        ):
+            raise AppError(
+                "APPROVAL_REQUIRED",
+                "Public visibility requires approval — submit for review first",
+                422,
+            )
         if "name" in fields and fields["name"] and fields["name"] != pack.name:
             pack.slug = f"{self._generate_slug(fields['name'])[:190]}-{secrets.token_hex(3)}"
         for key, value in fields.items():
@@ -128,8 +142,20 @@ class WorkflowPackService:
         )
         pack.capability_tags = caps
         pack.definition_updated_at = datetime.now(UTC)
+        # A definition change mutates registry-facing fields (input/output
+        # schemas, capability tags). An approved-public pack must re-enter
+        # review so the public card can never drift from what was approved.
+        if pack.review_status == "approved" and pack.visibility == PackVisibility.PUBLIC:
+            pack.review_status = None
+            pack.visibility = PackVisibility.UNLISTED
+            log.info(
+                "workflow_pack_approval_reset_on_definition_change",
+                pack_id=pack_id,
+                org_id=org_id,
+            )
         await self.db.flush()
         await self.db.refresh(pack)
+        await self._invalidate_registry_cache()
         return pack
 
     async def validate_pack_definition(self, definition: dict) -> list[dict]:
@@ -231,14 +257,19 @@ class WorkflowPackService:
         return release
 
     async def get_latest_release(self, pack_id: str) -> WorkflowPackRelease | None:
+        """Latest = max semver among STABLE releases; pre-releases only when
+        no stable release exists (npm dist-tag semantics — a newer 1.1.0-beta
+        must not shadow the stable 1.0.0 for implicit installs/previews)."""
         result = await self.db.execute(
             select(WorkflowPackRelease).where(WorkflowPackRelease.pack_id == pack_id)
         )
         releases = list(result.scalars().all())
         if not releases:
             return None
-        releases.sort(key=lambda r: _parse_semver(r.version), reverse=True)
-        return releases[0]
+        stable = [r for r in releases if "-" not in r.version]
+        pool = stable if stable else releases
+        pool.sort(key=lambda r: _parse_semver(r.version), reverse=True)
+        return pool[0]
 
     # ── Approval workflow (mirror skill_pack) ─────────────
 

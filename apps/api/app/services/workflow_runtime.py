@@ -573,12 +573,18 @@ async def _execute_step(
     step_type = step["type"]
     inputs_resolved = _resolve_step_inputs(step, run, edges, step_runs)
 
+    # Fencing token: the attempt number this claim will own. A resurrected
+    # executor from an earlier attempt must never settle a newer attempt's
+    # row, so every settlement UPDATE also guards on attempt == claimed.
+    claimed_attempt = sr.attempt + 1
+
     # Claim: PENDING/WAITING_RETRY → RUNNING (conditional — R11)
     claim = await db.execute(
         update(WorkflowStepRun)
         .where(
             WorkflowStepRun.id == sr.id,
             WorkflowStepRun.status.in_([StepRunStatus.PENDING, StepRunStatus.WAITING_RETRY]),
+            WorkflowStepRun.attempt == sr.attempt,  # fence the claim itself too
         )
         .values(
             status=StepRunStatus.RUNNING,
@@ -600,26 +606,28 @@ async def _execute_step(
     try:
         if step_type == "instruction" or step_type == "output":
             output = dict(inputs_resolved) if step_type == "output" else {}
-            await _complete_step(db, run, sr, output)
+            await _complete_step(db, run, sr, output, claimed_attempt)
         elif step_type == "prompt_template":
             rendered = _render_template(step.get("config", {}).get("template", ""), run, step_runs)
             ports = step.get("outputs", [])
             output = {ports[0]["port"]: rendered} if ports else {}
-            await _complete_step(db, run, sr, output)
+            await _complete_step(db, run, sr, output, claimed_attempt)
         elif step_type == "asset_input":
-            await _complete_step(db, run, sr, inputs_resolved)
+            await _complete_step(db, run, sr, inputs_resolved, claimed_attempt)
         elif step_type == "transform":
             output = _run_transform(step.get("config", {}), inputs_resolved, step)
-            await _complete_step(db, run, sr, output)
+            await _complete_step(db, run, sr, output, claimed_attempt)
         elif step_type == "review_gate":
-            await _suspend_for_review(db, run, sr, step)
+            await _suspend_for_review(db, run, sr, step, claimed_attempt)
         elif step_type == "provider_action":
-            await _execute_provider_action(db, run, sr, step, inputs_resolved)
+            await _execute_provider_action(db, run, sr, step, inputs_resolved, claimed_attempt)
         else:
-            await _fail_step(db, run, sr, "WF_UNKNOWN_STEP_TYPE", f"Unknown step type {step_type}")
+            await _fail_step(
+                db, run, sr, "WF_UNKNOWN_STEP_TYPE", f"Unknown step type {step_type}", claimed_attempt
+            )
     except Exception as exc:
         log.exception("workflow_step_crashed", run_id=run.id, step_id=step["id"])
-        await _fail_or_retry(db, run, sr, "WF_STEP_ERROR", str(exc)[:500])
+        await _fail_or_retry(db, run, sr, "WF_STEP_ERROR", str(exc)[:500], claimed_attempt)
     return True
 
 
@@ -648,13 +656,23 @@ def _run_transform(config: dict, inputs: dict, step: dict) -> dict:
     return {out_port: values[0] if values else None, "_operation": op, "_params": params}
 
 
-async def _complete_step(db: AsyncSession, run: WorkflowRun, sr: WorkflowStepRun, output: dict) -> None:
+async def _complete_step(
+    db: AsyncSession,
+    run: WorkflowRun,
+    sr: WorkflowStepRun,
+    output: dict,
+    claimed_attempt: int,
+) -> None:
     if len(json.dumps(output, ensure_ascii=False, default=str)) > MAX_STEP_OUTPUT_BYTES:
-        await _fail_step(db, run, sr, "WF_OUTPUT_TOO_LARGE", "Step output exceeds 48KB")
+        await _fail_step(db, run, sr, "WF_OUTPUT_TOO_LARGE", "Step output exceeds 48KB", claimed_attempt)
         return
     result = await db.execute(
         update(WorkflowStepRun)
-        .where(WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.RUNNING)
+        .where(
+            WorkflowStepRun.id == sr.id,
+            WorkflowStepRun.status == StepRunStatus.RUNNING,
+            WorkflowStepRun.attempt == claimed_attempt,  # fencing token
+        )
         .values(
             status=StepRunStatus.COMPLETED,
             output=output,
@@ -671,11 +689,20 @@ async def _complete_step(db: AsyncSession, run: WorkflowRun, sr: WorkflowStepRun
 
 
 async def _fail_step(
-    db: AsyncSession, run: WorkflowRun, sr: WorkflowStepRun, code: str, message: str
+    db: AsyncSession,
+    run: WorkflowRun,
+    sr: WorkflowStepRun,
+    code: str,
+    message: str,
+    claimed_attempt: int,
 ) -> None:
     result = await db.execute(
         update(WorkflowStepRun)
-        .where(WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.RUNNING)
+        .where(
+            WorkflowStepRun.id == sr.id,
+            WorkflowStepRun.status == StepRunStatus.RUNNING,
+            WorkflowStepRun.attempt == claimed_attempt,  # fencing token
+        )
         .values(
             status=StepRunStatus.FAILED,
             error_code=code,
@@ -696,7 +723,12 @@ async def _fail_step(
 
 
 async def _fail_or_retry(
-    db: AsyncSession, run: WorkflowRun, sr: WorkflowStepRun, code: str, message: str
+    db: AsyncSession,
+    run: WorkflowRun,
+    sr: WorkflowStepRun,
+    code: str,
+    message: str,
+    claimed_attempt: int,
 ) -> None:
     """Failed attempt: retry if attempts remain, else FAIL."""
     fresh = await db.get(WorkflowStepRun, sr.id)
@@ -705,7 +737,11 @@ async def _fail_or_retry(
     if fresh.attempt < fresh.max_attempts:
         result = await db.execute(
             update(WorkflowStepRun)
-            .where(WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.RUNNING)
+            .where(
+                WorkflowStepRun.id == sr.id,
+                WorkflowStepRun.status == StepRunStatus.RUNNING,
+                WorkflowStepRun.attempt == claimed_attempt,  # fencing token
+            )
             .values(
                 status=StepRunStatus.WAITING_RETRY,
                 error_code=code,
@@ -724,17 +760,21 @@ async def _fail_or_retry(
                 )
             )
     else:
-        await _fail_step(db, run, sr, code, message)
+        await _fail_step(db, run, sr, code, message, claimed_attempt)
 
 
 async def _suspend_for_review(
-    db: AsyncSession, run: WorkflowRun, sr: WorkflowStepRun, step: dict
+    db: AsyncSession, run: WorkflowRun, sr: WorkflowStepRun, step: dict, claimed_attempt: int
 ) -> None:
     config = step.get("config", {})
     due_days = min(max(int(config.get("due_days", 7)), 1), 30)
     result = await db.execute(
         update(WorkflowStepRun)
-        .where(WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.RUNNING)
+        .where(
+            WorkflowStepRun.id == sr.id,
+            WorkflowStepRun.status == StepRunStatus.RUNNING,
+            WorkflowStepRun.attempt == claimed_attempt,  # fencing token
+        )
         .values(status=StepRunStatus.WAITING_REVIEW, lease_expires_at=None)
     )
     if not result.rowcount:
@@ -759,7 +799,12 @@ async def _suspend_for_review(
 
 
 async def _execute_provider_action(
-    db: AsyncSession, run: WorkflowRun, sr: WorkflowStepRun, step: dict, inputs_resolved: dict
+    db: AsyncSession,
+    run: WorkflowRun,
+    sr: WorkflowStepRun,
+    step: dict,
+    inputs_resolved: dict,
+    claimed_attempt: int,
 ) -> None:
     """Execute a provider call with write-ahead idempotency (R13)."""
     from app.core.crypto import decrypt_credentials
@@ -777,24 +822,33 @@ async def _execute_provider_action(
             sr,
             "NO_ELIGIBLE_PROVIDER",
             f"No active provider offering for capability '{capability}'",
+            claimed_attempt,
         )
         return
 
     connection = await db.get(ProviderConnection, offering.connection_id)
     if connection is None or connection.status != "active":
-        await _fail_step(db, run, sr, "BINDING_STALE", "Provider connection is no longer active")
+        await _fail_step(
+            db, run, sr, "BINDING_STALE", "Provider connection is no longer active", claimed_attempt
+        )
         return
     adapter_row = await db.get(ProviderAdapter, connection.adapter_id)
     adapter = get_adapter(adapter_row.key) if adapter_row else None
     if adapter is None:
-        await _fail_step(db, run, sr, "ADAPTER_UNAVAILABLE", "Provider adapter not available")
+        await _fail_step(
+            db, run, sr, "ADAPTER_UNAVAILABLE", "Provider adapter not available", claimed_attempt
+        )
         return
 
     # Write-ahead: persist provider_request_id + offering BEFORE the outbound call
-    provider_request_id = f"wf-{sr.id}-a{sr.attempt}-{secrets.token_hex(4)}"
+    provider_request_id = f"wf-{sr.id}-a{claimed_attempt}-{secrets.token_hex(4)}"
     await db.execute(
         update(WorkflowStepRun)
-        .where(WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.RUNNING)
+        .where(
+            WorkflowStepRun.id == sr.id,
+            WorkflowStepRun.status == StepRunStatus.RUNNING,
+            WorkflowStepRun.attempt == claimed_attempt,  # fencing token
+        )
         .values(provider_request_id=provider_request_id, offering_id=offering.id)
     )
     await db.commit()  # flush write-ahead state before the call (R13)
@@ -819,10 +873,12 @@ async def _execute_provider_action(
             timeout=settings.workflow_step_timeout_seconds,
         )
     except TimeoutError:
-        await _fail_or_retry(db, run, sr, "WF_PROVIDER_TIMEOUT", "Provider call timed out")
+        await _fail_or_retry(
+            db, run, sr, "WF_PROVIDER_TIMEOUT", "Provider call timed out", claimed_attempt
+        )
         return
     except Exception as exc:
-        await _fail_or_retry(db, run, sr, "WF_PROVIDER_ERROR", str(exc)[:500])
+        await _fail_or_retry(db, run, sr, "WF_PROVIDER_ERROR", str(exc)[:500], claimed_attempt)
         return
 
     if not isinstance(output, dict):
@@ -835,7 +891,7 @@ async def _execute_provider_action(
         mapped[port["port"]] = output.get(port["port"], output.get("result"))
     if not ports:
         mapped = output
-    await _complete_step(db, run, sr, mapped)
+    await _complete_step(db, run, sr, mapped, claimed_attempt)
 
 
 async def _resolve_offering(
@@ -863,14 +919,25 @@ async def _resolve_offering(
             )
         )
         binding = binding_r.scalar_one_or_none()
-        if binding is not None and binding.offering_id:
-            offering = await db.get(ProviderModelOffering, binding.offering_id)
-            if offering is not None and offering.is_active:
-                conn = await db.get(ProviderConnection, offering.connection_id)
-                if conn is not None and conn.status == "active":
-                    return offering
-            if binding.binding_mode == "pinned":
-                return None  # pinned binding gone stale = hard stop
+        if binding is not None:
+            # Pinned offering deleted (FK SET NULL) — hard stop, never a
+            # silent fallback to auto-selection (no-auto-assign red line)
+            if binding.binding_mode == "pinned" and not binding.offering_id:
+                return None
+            if binding.offering_id:
+                offering = await db.get(ProviderModelOffering, binding.offering_id)
+                if offering is not None and offering.is_active:
+                    conn = await db.get(ProviderConnection, offering.connection_id)
+                    # Defense-in-depth on the credential path: the binding's
+                    # offering must belong to THIS org (R3)
+                    if (
+                        conn is not None
+                        and conn.org_id == run.org_id
+                        and conn.status == "active"
+                    ):
+                        return offering
+                if binding.binding_mode == "pinned":
+                    return None  # pinned binding gone stale = hard stop
 
     # Auto: cheapest active offering for the capability in this org
     result = await db.execute(
@@ -900,17 +967,24 @@ async def _resolve_offering(
 
 
 async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
-    """Recover crashed executors (expired leases) and expire overdue reviews."""
-    now = _now()
-    swept = {"expired_leases": 0, "expired_reviews": 0}
+    """Recover crashed executors (expired leases) and expire overdue reviews.
 
-    # Expired leases: RUNNING + lease past → WAITING_RETRY (advance loop will retry/exhaust)
-    lease_q = (
+    Returns swept counts plus ``run_ids`` — every run touched by the sweep.
+    Callers MUST dispatch_advance each returned run_id after commit; sweep
+    only repairs step state, it does not resume the advance loop itself.
+    """
+    now = _now()
+    swept: dict = {"expired_leases": 0, "expired_reviews": 0, "run_ids": []}
+    affected_runs: set[str] = set()
+
+    # Expired leases with attempts remaining → WAITING_RETRY
+    retry_q = (
         update(WorkflowStepRun)
         .where(
             WorkflowStepRun.status == StepRunStatus.RUNNING,
             WorkflowStepRun.lease_expires_at.isnot(None),
             WorkflowStepRun.lease_expires_at < now,
+            WorkflowStepRun.attempt < WorkflowStepRun.max_attempts,
         )
         .values(
             status=StepRunStatus.WAITING_RETRY,
@@ -918,11 +992,40 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
             error="Executor lease expired",
             lease_expires_at=None,
         )
+        .returning(WorkflowStepRun.run_id)
     )
-    result = await db.execute(lease_q)
-    swept["expired_leases"] = result.rowcount or 0
+    retry_result = await db.execute(retry_q)
+    retry_runs = [row[0] for row in retry_result.all()]
+    affected_runs.update(retry_runs)
+    swept["expired_leases"] += len(retry_runs)
 
-    # Overdue reviews → expire review, fail step
+    # Expired leases with attempts exhausted → FAILED (max_attempts must hold
+    # on the crash-recovery path too — no unbounded poison-pill retries)
+    exhausted_q = (
+        update(WorkflowStepRun)
+        .where(
+            WorkflowStepRun.status == StepRunStatus.RUNNING,
+            WorkflowStepRun.lease_expires_at.isnot(None),
+            WorkflowStepRun.lease_expires_at < now,
+            WorkflowStepRun.attempt >= WorkflowStepRun.max_attempts,
+        )
+        .values(
+            status=StepRunStatus.FAILED,
+            error_code="WF_RETRY_EXHAUSTED",
+            error="Executor lease expired after final attempt",
+            lease_expires_at=None,
+            finished_at=now,
+        )
+        .returning(WorkflowStepRun.run_id)
+    )
+    exhausted_result = await db.execute(exhausted_q)
+    exhausted_runs = [row[0] for row in exhausted_result.all()]
+    affected_runs.update(exhausted_runs)
+    swept["expired_leases"] += len(exhausted_runs)
+
+    # Overdue reviews → expire review (guarded — never overwrite a decision
+    # made concurrently by decide_review), fail step, resume the run so the
+    # advance loop can propagate SKIPPED and settle it into FAILED
     overdue_q = select(WorkflowStepReview).where(
         WorkflowStepReview.decision.is_(None), WorkflowStepReview.due_at < now
     )
@@ -930,8 +1033,17 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
         overdue_q = overdue_q.where(WorkflowStepReview.org_id == org_id)
     overdue_r = await db.execute(overdue_q)
     for review in overdue_r.scalars().all():
-        review.decision = "expired"
-        review.decided_at = now
+        # Guarded expiry: rowcount 0 = a reviewer decided in the meantime
+        expire_result = await db.execute(
+            update(WorkflowStepReview)
+            .where(
+                WorkflowStepReview.id == review.id,
+                WorkflowStepReview.decision.is_(None),
+            )
+            .values(decision="expired", decided_at=now)
+        )
+        if not expire_result.rowcount:
+            continue
         await db.execute(
             update(WorkflowStepRun)
             .where(
@@ -945,6 +1057,20 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
                 finished_at=now,
             )
         )
+        step_run = await db.get(WorkflowStepRun, review.step_run_id)
+        if step_run is not None:
+            # Move the run out of WAITING_REVIEW so the advance loop (which
+            # only progresses RUNNING runs) can settle it
+            await db.execute(
+                update(WorkflowRun)
+                .where(
+                    WorkflowRun.id == step_run.run_id,
+                    WorkflowRun.status == RunStatus.WAITING_REVIEW,
+                )
+                .values(status=RunStatus.RUNNING)
+            )
+            affected_runs.add(step_run.run_id)
         swept["expired_reviews"] += 1
     await db.flush()
+    swept["run_ids"] = sorted(affected_runs)
     return swept

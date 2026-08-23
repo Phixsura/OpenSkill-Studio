@@ -93,6 +93,17 @@ class UpdateConnectionRequest(BaseModel):
             raise ValueError("Config too large (max 10,000 chars)")
         return v
 
+    @field_validator("credentials")
+    @classmethod
+    def validate_credentials(cls, v: dict | None) -> dict | None:
+        if v is not None:
+            if len(v) > 10:
+                raise ValueError("Too many credential fields")
+            for key, val in v.items():
+                if len(key) > 64 or len(val) > 2000:
+                    raise ValueError("Credential field too large")
+        return v
+
 
 class ConnectionResponse(BaseModel):
     """Connection response — NEVER includes credential values."""

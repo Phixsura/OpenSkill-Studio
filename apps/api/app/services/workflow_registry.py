@@ -64,7 +64,10 @@ class WorkflowRegistryService:
                 )
                 packs_by_id = {p.id: p for p in result.scalars().all()}
                 filtered = [packs_by_id[pid] for pid in pack_ids if pid in packs_by_id]
-                return filtered, len(filtered)
+                # Return the cached TOTAL (across all pages), not the page
+                # size — otherwise has_more computes False and pagination
+                # stops at page 1 for the cache TTL.
+                return filtered, cached.get("total", len(filtered))
             return [], 0
 
         # ── Build query ──
@@ -155,7 +158,11 @@ class WorkflowRegistryService:
         releases = list(result.scalars().all())
         if not releases:
             raise AppError("NO_RELEASES", "This pack has no releases yet", 404)
-        latest = max(releases, key=lambda r: _parse_semver(r.version))
+        # Public preview shows the latest STABLE release; pre-releases only
+        # when nothing stable exists (a 1.1.0-beta must not shadow 1.0.0)
+        stable = [r for r in releases if "-" not in r.version]
+        pool = stable if stable else releases
+        latest = max(pool, key=lambda r: _parse_semver(r.version))
         manifest = latest.manifest or {}
         definition = {k: v for k, v in (manifest.get("definition") or {}).items() if k != "ui"}
         deps = manifest.get("dependencies") or {}
