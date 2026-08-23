@@ -296,15 +296,33 @@ class ProviderService:
         entry: {"capability": str, "features": [str]}.
         """
         gaps: list[dict] = []
+        # One query for all requested capabilities (was N+1: one list_offerings
+        # per requirement — up to MAX_DEPENDENCIES sequential SELECTs per install)
+        cap_keys = {req.get("capability", "") for req in required if req.get("capability")}
+        offerings_by_cap: dict[str, list] = {k: [] for k in cap_keys}
+        if cap_keys:
+            result = await self.db.execute(
+                select(ProviderModelOffering)
+                .join(
+                    ProviderConnection,
+                    ProviderConnection.id == ProviderModelOffering.connection_id,
+                )
+                .where(
+                    ProviderConnection.org_id == org_id,
+                    ProviderConnection.status == "active",
+                    ProviderModelOffering.is_active.is_(True),
+                    ProviderModelOffering.capability_key.in_(cap_keys),
+                )
+            )
+            for off in result.scalars().all():
+                offerings_by_cap[off.capability_key].append(off)
         for req in required:
             cap_key = req.get("capability", "")
             req_features = set(req.get("features", []))
-            offerings = await self.list_offerings(org_id, capability_key=cap_key)
-            satisfied = False
-            for off in offerings:
-                if req_features <= set(off.features or []):
-                    satisfied = True
-                    break
+            satisfied = any(
+                req_features <= set(off.features or [])
+                for off in offerings_by_cap.get(cap_key, [])
+            )
             if not satisfied:
                 gaps.append(
                     {

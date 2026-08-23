@@ -218,14 +218,20 @@ class WorkflowRuntimeService:
                 self.db.add(run)
                 await self.db.flush()
         except IntegrityError:
-            # Concurrent idempotent create — return the winner
-            existing_r = await self.db.execute(
-                select(WorkflowRun).where(
-                    WorkflowRun.org_id == org_id,
-                    WorkflowRun.idempotency_key == idempotency_key,
+            # Concurrent idempotent create — return the winner. Only assume
+            # the idempotency index when a key was actually supplied; any
+            # other constraint violation must not be masked as NoResultFound.
+            if idempotency_key is not None:
+                existing_r = await self.db.execute(
+                    select(WorkflowRun).where(
+                        WorkflowRun.org_id == org_id,
+                        WorkflowRun.idempotency_key == idempotency_key,
+                    )
                 )
-            )
-            return existing_r.scalar_one()
+                existing = existing_r.scalar_one_or_none()
+                if existing is not None:
+                    return existing
+            raise
 
         # Pre-create all step runs as PENDING
         for step in definition.get("steps", []):
@@ -569,11 +575,11 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
             if result.rowcount:
                 db.add(WorkflowRunEvent(run_id=run_id, event_type="run_failed", payload={}))
         else:
-            # Collect workflow outputs
+            # Collect workflow outputs ({} is a valid output — only skip None)
             outputs = {}
             for out in definition.get("outputs", []):
                 src = step_runs.get(out["from_step"])
-                if src and src.output:
+                if src is not None and src.output is not None:
                     outputs[out["key"]] = src.output.get(out["from_port"])
             result = await db.execute(
                 update(WorkflowRun)
@@ -594,7 +600,7 @@ def _resolve_step_inputs(
         if edge["to_step"] != step["id"]:
             continue
         src = step_runs.get(edge["from_step"])
-        if src and src.output:
+        if src is not None and src.output is not None:
             resolved[edge["to_port"]] = src.output.get(edge["from_port"])
     # asset_input: output ports feed from run inputs by port name
     if step["type"] == "asset_input":

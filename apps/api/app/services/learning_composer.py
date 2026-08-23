@@ -33,6 +33,21 @@ log = structlog.get_logger()
 
 DEFAULT_PACK_MINUTES = 60
 MAX_PREREQ_DEPTH = 5
+# Defensive cap mirroring ck_wfpack_definition_size — the payload is
+# server-generated, but prereq expansion could balloon it pathologically
+MAX_DRAFT_PAYLOAD_BYTES = 262_144
+
+
+def check_draft_payload_size(payload: dict) -> None:
+    import json
+
+    size = len(json.dumps(payload, ensure_ascii=False, default=str).encode())
+    if size > MAX_DRAFT_PAYLOAD_BYTES:
+        raise AppError(
+            "DRAFT_TOO_LARGE",
+            f"Composed draft payload exceeds {MAX_DRAFT_PAYLOAD_BYTES // 1024}KB",
+            422,
+        )
 
 
 class LearningComposerService:
@@ -168,6 +183,7 @@ class LearningComposerService:
             "estimated_total_minutes": total_minutes,
             "match_run_id": run.id,
         }
+        check_draft_payload_size(payload)
         draft = SolutionDraft(
             org_id=org_id,
             draft_type="learning_path",
@@ -230,17 +246,22 @@ class LearningComposerService:
         in_progress: set[str] = set()
 
         async def resolve_slug(slug: str) -> SkillPack | None:
+            # Deterministic pick among same-slug packs: own-org pack wins,
+            # then oldest (ULID asc) — slug is only unique per owner org.
             r = await self.db.execute(
-                select(SkillPack).where(
+                select(SkillPack)
+                .where(
                     SkillPack.slug == slug,
                     SkillPack.status == PackStatus.PUBLISHED,
                 )
+                .order_by(SkillPack.id.asc())
             )
-            for candidate in r.scalars().all():
-                if candidate.owner_org_id == org_id or candidate.visibility in (
-                    PackVisibility.PUBLIC,
-                    PackVisibility.UNLISTED,
-                ):
+            candidates = list(r.scalars().all())
+            for candidate in candidates:
+                if candidate.owner_org_id == org_id:
+                    return candidate
+            for candidate in candidates:
+                if candidate.visibility in (PackVisibility.PUBLIC, PackVisibility.UNLISTED):
                     return candidate
             return None
 

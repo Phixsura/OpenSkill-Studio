@@ -884,14 +884,25 @@ async def test_remove_template_not_in_pack(c):
 
 @pytest.mark.asyncio
 async def test_publish_release_archived_template(c):
+    """COMPONENT_ARCHIVED is defense-in-depth: the DELETE endpoint now
+    detaches the template from packs (making the pack EMPTY_PACK instead),
+    so archive directly in the DB to exercise the publish-time guard."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "ArchTmplPub"}, headers=h)).json()["data"]["id"]
     tid = await _template(c, h, oid, "Doomed Template")
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/templates", json={"template_id": tid}, headers=h)
 
-    # Archive the template
-    await c.delete(f"/api/v1/orgs/{oid}/project-templates/{tid}", headers=h)
+    # Archive the template directly (bypassing the endpoint's join-row
+    # cleanup) — simulates any archival path that misses the pack detach
+    from app.core.database import AsyncSessionLocal
+    from app.models.project import ProjectTemplate
+    from app.models.skill import ContentStatus
+
+    async with AsyncSessionLocal() as db:
+        tmpl = await db.get(ProjectTemplate, tid)
+        tmpl.status = ContentStatus.ARCHIVED
+        await db.commit()
 
     r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
     assert r.status_code == 422

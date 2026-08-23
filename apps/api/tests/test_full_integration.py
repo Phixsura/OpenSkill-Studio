@@ -1130,15 +1130,15 @@ async def test_eval_settings_bounds_and_persist(c):
     await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"pass_threshold": 0.5}, headers=h)
     await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"pass_threshold": 0.9}, headers=h)
     r = await c.get(f"/api/v1/orgs/{oid}/settings/evaluation", headers=h)
-    assert r.json()["pass_threshold"] == 0.9
+    assert r.json()["data"]["pass_threshold"] == 0.9
 
     # zero budget is a real budget, not "unlimited"
     await c.put(
         f"/api/v1/orgs/{oid}/settings/evaluation", json={"monthly_budget_usd": 0}, headers=h
     )
     r = await c.get(f"/api/v1/orgs/{oid}/evaluation/usage", headers=h)
-    assert r.json()["budget_usd"] == 0
-    assert r.json()["budget_remaining"] == 0
+    assert r.json()["data"]["budget_usd"] == 0
+    assert r.json()["data"]["budget_remaining"] == 0
 
 
 @pytest.mark.asyncio
@@ -1200,7 +1200,7 @@ async def test_wrong_mcq_does_not_complete_skill(c):
     )
     assert r.json()["data"]["is_correct"] is False
     prog = await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)
-    assert prog.json()["skills_completed"] == 0
+    assert prog.json()["data"]["skills_completed"] == 0
 
     # correct answer → skill completes
     r = await c.post(
@@ -1210,7 +1210,7 @@ async def test_wrong_mcq_does_not_complete_skill(c):
     )
     assert r.json()["data"]["is_correct"] is True
     prog = await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)
-    assert prog.json()["skills_completed"] == 1
+    assert prog.json()["data"]["skills_completed"] == 1
 
 
 @pytest.mark.asyncio
@@ -1635,7 +1635,7 @@ async def test_duplicate_prerequisites_and_project_skills(c):
         json={"prerequisite_ids": [b, b, b]},
         headers=h,
     )
-    assert r.status_code == 200
+    assert r.status_code == 204
 
     # self-prerequisite → cycle 422
     r = await c.put(
@@ -1659,7 +1659,7 @@ async def test_duplicate_prerequisites_and_project_skills(c):
     r = await c.put(
         f"/api/v1/orgs/{oid}/projects/{pid}/skills", json={"skill_ids": [a, a, b]}, headers=h
     )
-    assert r.status_code == 200
+    assert r.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -2833,7 +2833,7 @@ async def test_progress_categories_populated(c):
             },
             headers=h,
         )
-    d = (await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)).json()
+    d = (await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)).json()["data"]
     assert len(d["categories"]) == 1
     entry = d["categories"][0]
     assert entry["name"] == "Programming"
@@ -3718,12 +3718,12 @@ async def test_skill_badges_sync_from_progress(c):
     # badge shows on public profile, and hiding removes it
     un = f"user{uuid.uuid4().hex[:8]}"
     await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)
-    skills = (await c.get(f"/api/v1/u/{un}")).json()["skills"]
+    skills = (await c.get(f"/api/v1/u/{un}")).json()["data"]["skills"]
     assert any(s["name"] == "Badge Skill" for s in skills)
     await c.put(
         f"/api/v1/portfolio/badges/{badges[0]['id']}", json={"show_on_profile": False}, headers=h
     )
-    skills = (await c.get(f"/api/v1/u/{un}")).json()["skills"]
+    skills = (await c.get(f"/api/v1/u/{un}")).json()["data"]["skills"]
     assert not any(s["name"] == "Badge Skill" for s in skills)
 
 

@@ -446,9 +446,11 @@ async def test_skill_full_crud(db):
     # Pending grading
     await svc.get_pending_grading(org.id)
 
-    # Delete
+    # Delete — category delete requires ALL its skills archived
+    # (CATEGORY_HAS_SKILLS guard), including the first one
     await svc.delete_exercise(ex2.id)
     await svc.delete_skill(skill2.id)
+    await svc.delete_skill(skill.id)
     await svc.delete_category(cat.id)
 
 

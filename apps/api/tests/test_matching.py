@@ -501,3 +501,47 @@ async def test_excluded_rows_capped_at_50(c):
     assert len(data["excluded"]) <= 50
     # The run-level counter is never capped
     assert data["excluded_count"] >= len(data["excluded"])
+
+
+def test_soft_keys_feed_scoring_signals():
+    """_soft_output_type/_soft_difficulty must influence scoring — the R14
+    demotion strips them from S2 hard filters but scoring should still use
+    them (audit LOW: 'keep for scoring' comment was dead code)."""
+    from types import SimpleNamespace
+
+    from app.services.matching.scoring import _entity_signals
+
+    spec = SimpleNamespace(target_entity_type="workflow_pack")
+    entity = SimpleNamespace(
+        capability_tags=["image_generation"],
+        scenario_tags=[],
+        tool_tags=[],
+        output_schema=[{"key": "img", "type": "image"}],
+        install_count=0,
+        created_at=None,
+    )
+    # Soft output_type matching the entity should score 1.0, not neutral 0.5
+    soft = _entity_signals(entity, spec, {"_soft_output_type": "image"})
+    hard = _entity_signals(entity, spec, {"output_type": "image"})
+    assert soft["output_type_match"] == hard["output_type_match"] == 1.0
+    # And a mismatching soft type scores 0.0 (used, not ignored)
+    miss = _entity_signals(entity, spec, {"_soft_output_type": "video"})
+    assert miss["output_type_match"] == 0.0
+
+
+def test_soft_difficulty_feeds_skill_pack_scoring():
+    from types import SimpleNamespace
+
+    from app.services.matching.scoring import _entity_signals
+
+    spec = SimpleNamespace(target_entity_type="skill_pack")
+    entity = SimpleNamespace(
+        capability_tags=["upscale"],
+        scenario_tags=[],
+        difficulty="beginner",
+        estimated_minutes=30,
+        install_count=0,
+    )
+    soft = _entity_signals(entity, spec, {"_soft_difficulty": "beginner"})
+    hard = _entity_signals(entity, spec, {"difficulty": "beginner"})
+    assert soft["difficulty_fit"] == hard["difficulty_fit"]

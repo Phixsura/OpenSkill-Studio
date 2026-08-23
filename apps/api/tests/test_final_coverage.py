@@ -62,6 +62,9 @@ async def test_lifespan_with_real_infra():
 
     r = redis_pool()
     await r.ping()
+    # Dispose so the pooled connection (bound to THIS test's event loop)
+    # doesn't leak into the next test's loop ("attached to a different loop")
+    await engine.dispose()
 
 
 # ── Auth: reset password success path ────────────────────

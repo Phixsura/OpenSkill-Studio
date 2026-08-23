@@ -351,16 +351,22 @@ async def test_offering_cross_org_isolation(c):
 @pytest.mark.asyncio
 async def test_capability_check_service():
     """check_capabilities returns gaps for unsatisfied requirements."""
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
 
     from app.services.provider import ProviderService
 
-    svc = ProviderService(AsyncMock())
-    svc.list_offerings = AsyncMock(return_value=[])
+    db = AsyncMock()
+    # Single batched query returns no offerings (N+1 fix: one execute call)
+    empty_result = MagicMock()
+    empty_result.scalars.return_value.all.return_value = []
+    db.execute = AsyncMock(return_value=empty_result)
+    svc = ProviderService(db)
     gaps = await svc.check_capabilities("org1", [{"capability": "image_generation", "features": []}])
     assert len(gaps) == 1
     assert gaps[0]["code"] == "CAPABILITY_UNSATISFIED"
     assert gaps[0]["capability"] == "image_generation"
+    # One query total regardless of requirement count (was one per capability)
+    assert db.execute.await_count == 1
 
 
 # ── Audit fixes (Issue #21 follow-up) ─────────────────────

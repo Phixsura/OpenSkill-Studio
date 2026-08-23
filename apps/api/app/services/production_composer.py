@@ -128,6 +128,28 @@ class ProductionComposerService:
                 chain.append(producer)
                 used.add(producer.id)
                 frontier.extend(producer.input_schema or [])
+
+            # Chain hit MAX_CHAIN_LENGTH with unresolved inputs left on the
+            # frontier — surface them as placeholders, never drop silently
+            # (red line: incompatibilities are first-class placeholders).
+            for inp in frontier:
+                itype = inp.get("type")
+                if itype in _ASSET_TYPES and inp.get("required", True):
+                    placeholders.append(
+                        {
+                            "input_key": inp.get("key"),
+                            "type": itype,
+                            "reason": "chain_length_cap",
+                        }
+                    )
+                elif itype in _USER_TYPES:
+                    placeholders.append(
+                        {
+                            "input_key": inp.get("key"),
+                            "type": itype,
+                            "reason": "needs_user_value",
+                        }
+                    )
         else:
             gaps.append({"code": "NO_WORKFLOWS_AVAILABLE"})
 
@@ -196,26 +218,35 @@ class ProductionComposerService:
             if not slug or slug in seen_rec:
                 continue
             seen_rec.add(slug)
+            # Deterministic pick among same-slug packs: own-org pack wins,
+            # then oldest (ULID asc) — slug is only unique per owner org.
             sp_r = await self.db.execute(
-                select(SkillPack).where(
-                    SkillPack.slug == slug, SkillPack.status == PackStatus.PUBLISHED
-                )
+                select(SkillPack)
+                .where(SkillPack.slug == slug, SkillPack.status == PackStatus.PUBLISHED)
+                .order_by(SkillPack.id.asc())
             )
-            for sp in sp_r.scalars().all():
-                if sp.owner_org_id == org_id or sp.visibility in (
-                    PackVisibility.PUBLIC,
-                    PackVisibility.UNLISTED,
-                ):
-                    items.append(
-                        {
-                            "family": "skill_pack",
-                            "entity_id": sp.id,
-                            "name": sp.name,
-                            "required": False,
-                            "status": "included",
-                        }
-                    )
-                    break
+            candidates = list(sp_r.scalars().all())
+            chosen = next(
+                (sp for sp in candidates if sp.owner_org_id == org_id),
+                next(
+                    (
+                        sp
+                        for sp in candidates
+                        if sp.visibility in (PackVisibility.PUBLIC, PackVisibility.UNLISTED)
+                    ),
+                    None,
+                ),
+            )
+            if chosen is not None:
+                items.append(
+                    {
+                        "family": "skill_pack",
+                        "entity_id": chosen.id,
+                        "name": chosen.name,
+                        "required": False,
+                        "status": "included",
+                    }
+                )
 
         payload = {
             "workflow_chain": [
@@ -235,6 +266,9 @@ class ProductionComposerService:
             "required_capabilities": required_caps,
             "match_run_id": run.id,
         }
+        from app.services.learning_composer import check_draft_payload_size
+
+        check_draft_payload_size(payload)
         draft = SolutionDraft(
             org_id=org_id,
             draft_type="production_solution",

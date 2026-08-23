@@ -150,7 +150,8 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
         )
         caps = set(entity.capability_tags or [])
         scenario = requirement.get("scenario")
-        output_type = requirement.get("output_type")
+        # Scoring may use extracted (soft) values — only hard filters can't (R14)
+        output_type = requirement.get("output_type") or requirement.get("_soft_output_type")
         tools = requirement.get("tool_constraints") or []
         out_types = {o.get("type") for o in (entity.output_schema or [])}
         return {
@@ -179,9 +180,10 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
             )
         else:
             time_fit = 0.5
+        difficulty = requirement.get("difficulty") or requirement.get("_soft_difficulty")
         return {
             "capability_teach_match": _fraction_present(required_caps, caps),
-            "difficulty_fit": _difficulty_fit(requirement.get("difficulty"), entity.difficulty),
+            "difficulty_fit": _difficulty_fit(difficulty, entity.difficulty),
             "scenario_match": (
                 0.5 if not scenario else (1.0 if scenario in (entity.scenario_tags or []) else 0.0)
             ),
@@ -200,7 +202,10 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
             "scenario_match": (
                 0.5 if not scenario else (1.0 if scenario == entity.project_type else 0.0)
             ),
-            "difficulty_fit": _difficulty_fit(requirement.get("difficulty"), difficulty_val),
+            "difficulty_fit": _difficulty_fit(
+                requirement.get("difficulty") or requirement.get("_soft_difficulty"),
+                difficulty_val,
+            ),
         }
 
     raise ValueError(f"Unknown target entity type: {spec.target_entity_type}")

@@ -695,3 +695,44 @@ async def test_oversized_text_input_rejected(c):
     )
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "INVALID_INPUT_VALUE"
+
+
+@pytest.mark.asyncio
+async def test_empty_dict_step_output_still_collected(c):
+    """A step whose output is {} (instruction steps, adapters returning {})
+    must still surface its declared workflow-output key — `if src.output:`
+    treated {} as missing and silently dropped the key (audit LOW)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    definition = {
+        "schema_version": 1,
+        "inputs": [{"key": "topic", "type": "text", "required": True}],
+        "outputs": [
+            {"key": "final", "type": "text", "from_step": "note", "from_port": "done"}
+        ],
+        "steps": [
+            {
+                "id": "note",
+                "type": "instruction",
+                "name": "Note",
+                "config": {"content": "Read the brief"},
+                "inputs": [],
+                "outputs": [{"port": "done", "type": "text"}],
+            }
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    install_id = await _install(c, h, oid, definition)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "x"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, ("completed",))
+    assert data["status"] == "completed"
+    # The key must be PRESENT (value None — instruction steps emit {}),
+    # not silently dropped from the outputs dict
+    assert "final" in (data["outputs"] or {})

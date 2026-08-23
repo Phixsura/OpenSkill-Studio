@@ -521,8 +521,12 @@ async def test_skills_full_crud(c):
     r33 = await c.delete(f"/api/v1/orgs/{oid}/skills/{sid}", headers=h)
     assert r33.status_code == 204
 
-    r34 = await c.delete(f"/api/v1/orgs/{oid}/categories/{cid}", headers=h)
+    # Category delete requires ALL its skills archived (CATEGORY_HAS_SKILLS
+    # guard) — the prerequisites skill (sid2) is still active
+    r34 = await c.delete(f"/api/v1/orgs/{oid}/skills/{sid2}", headers=h)
     assert r34.status_code == 204
+    r35 = await c.delete(f"/api/v1/orgs/{oid}/categories/{cid}", headers=h)
+    assert r35.status_code == 204
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

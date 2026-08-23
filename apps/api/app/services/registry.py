@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cache_get, cache_set
@@ -107,15 +107,10 @@ class RegistryService:
         _ilike_fallback = None  # set if FTS is used, for fallback on DB error
 
         if search and search.strip():
-            # Full-text search on name + summary + description
-            search_vector = func.to_tsvector(
-                "simple",
-                func.coalesce(SkillPack.name, "")
-                + " "
-                + func.coalesce(SkillPack.summary, "")
-                + " "
-                + func.coalesce(SkillPack.description, ""),
-            )
+            # Full-text search via the STORED search_tsv column (GIN-indexed,
+            # migration b9ca3e445203) — same expression, but computed once at
+            # write time instead of per-row per-query
+            search_vector = literal_column("skill_packs.search_tsv")
             # ILIKE fallback for substring / random-token searches
             # Escape LIKE wildcards to prevent CPU-intensive pattern matching
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
