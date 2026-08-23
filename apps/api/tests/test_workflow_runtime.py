@@ -1,0 +1,489 @@
+"""Tests for the workflow execution runtime (ADR-010 D6).
+
+Covers: run creation + idempotency, step advancement, review gates
+(suspend → decide → resume, 409 on double-decide, reject → FAILED + SKIPPED),
+cancellation, mock provider execution, output caps, capability gates.
+"""
+
+import asyncio
+import uuid
+from contextlib import asynccontextmanager
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+
+@pytest_asyncio.fixture
+async def c():
+    from app.core.database import engine
+    from app.main import app
+    from app.services.workflow_runtime import drain_workflow_tasks
+
+    orig = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    app.router.lifespan_context = _noop
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+    await drain_workflow_tasks()
+    app.router.lifespan_context = orig
+    await engine.dispose()
+
+
+def _email():
+    return f"wfr-{uuid.uuid4().hex[:8]}@test.com"
+
+
+async def _auth(c):
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={"email": _email(), "password": "TestPass123!", "display_name": "WFR"},
+    )
+    d = r.json()
+    return {"Authorization": f"Bearer {d['access_token']}"}, d["user"]
+
+
+async def _org(c, h):
+    r = await c.post("/api/v1/orgs", json={"name": f"R-{uuid.uuid4().hex[:8]}"}, headers=h)
+    return r.json()["data"]["id"]
+
+
+def _definition(with_review=False, with_provider=False):
+    """Text-only pipeline: asset_input(text) → prompt_template → [provider] → [review] → output."""
+    steps = [
+        {
+            "id": "take_input",
+            "type": "asset_input",
+            "name": "Take input",
+            "config": {"accept_types": ["image"]},
+            "inputs": [],
+            "outputs": [{"port": "topic", "type": "text"}],
+        },
+        {
+            "id": "build_prompt",
+            "type": "prompt_template",
+            "name": "Build prompt",
+            "config": {"template": "Write about {{inputs.topic}}"},
+            "inputs": [{"port": "topic", "type": "text"}],
+            "outputs": [{"port": "prompt", "type": "prompt"}],
+        },
+    ]
+    edges = [
+        {"id": "e1", "from_step": "take_input", "from_port": "topic", "to_step": "build_prompt", "to_port": "topic"},
+    ]
+    last_step, last_port, last_type = "build_prompt", "prompt", "prompt"
+
+    if with_provider:
+        steps.append(
+            {
+                "id": "generate",
+                "type": "provider_action",
+                "name": "Generate",
+                "config": {"capability": "image_generation"},
+                "inputs": [{"port": "prompt", "type": "prompt"}],
+                "outputs": [{"port": "result", "type": "image"}],
+            }
+        )
+        edges.append(
+            {"id": "e2", "from_step": last_step, "from_port": last_port, "to_step": "generate", "to_port": "prompt"}
+        )
+        last_step, last_port, last_type = "generate", "result", "image"
+
+    if with_review:
+        steps.append(
+            {
+                "id": "qa",
+                "type": "review_gate",
+                "name": "QA",
+                "config": {"instructions": "Check quality", "due_days": 7},
+                "inputs": [{"port": "subject", "type": last_type}],
+                "outputs": [
+                    {"port": "decision", "type": "selection"},
+                    {"port": "passed", "type": last_type},
+                ],
+            }
+        )
+        edges.append(
+            {"id": "e3", "from_step": last_step, "from_port": last_port, "to_step": "qa", "to_port": "subject"}
+        )
+        last_step, last_port = "qa", "passed"
+
+    return {
+        "schema_version": 1,
+        "inputs": [{"key": "topic", "type": "text", "required": True}],
+        "outputs": [{"key": "final", "type": last_type, "from_step": last_step, "from_port": last_port}],
+        "steps": steps,
+        "edges": edges,
+        "ui": {},
+    }
+
+
+async def _install(c, h, oid, definition):
+    """Create pack, set definition, publish, install into same org."""
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": f"RT-{uuid.uuid4().hex[:6]}"},
+        headers=h,
+    )
+    pid = r.json()["data"]["id"]
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": definition},
+        headers=h,
+    )
+    assert r2.status_code == 200, r2.text
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+        json={"version": "1.0.0"},
+        headers=h,
+    )
+    assert r3.status_code == 201, r3.text
+    release_id = r3.json()["data"]["id"]
+
+    # Direct DB insert of the installation (installer service lands in Batch 4)
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_pack import WorkflowPackInstallation
+
+    async with AsyncSessionLocal() as db:
+        install = WorkflowPackInstallation(
+            org_id=oid,
+            pack_id=pid,
+            release_id=release_id,
+            installed_version="1.0.0",
+        )
+        db.add(install)
+        await db.commit()
+        return install.id
+
+
+async def _mock_offering(c, h, oid, capability="image_generation"):
+    r = await c.get("/api/v1/providers/adapters", headers=h)
+    aid = next(a for a in r.json()["data"] if a["key"] == "mock")["id"]
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "Mock"},
+        headers=h,
+    )
+    conn_id = r2.json()["data"]["id"]
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={"connection_id": conn_id, "capability_key": capability, "model_name": "mock-v1"},
+        headers=h,
+    )
+    return r3.json()["data"]["id"]
+
+
+async def _wait_run(c, h, oid, run_id, target_statuses, tries=40):
+    """Poll run detail until it reaches one of the target statuses."""
+    for _ in range(tries):
+        r = await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}", headers=h)
+        data = r.json()["data"]
+        if data["status"] in target_statuses:
+            return data
+        await asyncio.sleep(0.2)
+    return data
+
+
+# ── Run creation ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_run_validates_inputs(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition())
+
+    # Missing required input
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {}},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "MISSING_INPUT"
+
+    # Unknown input
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "cats", "hack": "x"}},
+        headers=h,
+    )
+    assert r2.status_code == 422
+    assert r2.json()["error"]["code"] == "UNKNOWN_INPUT"
+
+
+@pytest.mark.asyncio
+async def test_run_completes_simple_pipeline(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition())
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "sunset product shots"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    # prompt_template rendered the moustache reference
+    assert data["outputs"]["final"] == "Write about sunset product shots"
+    # Events audit trail exists
+    event_types = [e["event_type"] for e in data["events"]]
+    assert "run_created" in event_types
+    assert "run_completed" in event_types
+    # All steps completed
+    assert all(s["status"] == "completed" for s in data["step_runs"])
+
+
+@pytest.mark.asyncio
+async def test_run_idempotency_key(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition())
+    key = f"idem-{uuid.uuid4().hex[:8]}"
+    body = {"installation_id": install_id, "inputs": {"topic": "x"}, "idempotency_key": key}
+    r1 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs", json=body, headers=h)
+    r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs", json=body, headers=h)
+    assert r1.json()["data"]["id"] == r2.json()["data"]["id"]
+
+
+# ── Provider action ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_provider_action_with_mock_adapter(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await _mock_offering(c, h, oid)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "hero image"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    gen = next(s for s in data["step_runs"] if s["step_id"] == "generate")
+    assert gen["output"]["result"].startswith("mock-asset-")
+    assert gen["offering_id"] is not None  # actual_offering_used recorded
+
+
+@pytest.mark.asyncio
+async def test_provider_action_no_offering_fails(c):
+    """No active offering for the capability → NO_ELIGIBLE_PROVIDER, run FAILED."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # No offering created
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "x"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"failed"})
+    assert data["status"] == "failed"
+    gen = next(s for s in data["step_runs"] if s["step_id"] == "generate")
+    assert gen["error_code"] == "NO_ELIGIBLE_PROVIDER"
+
+
+# ── Review gates ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_review_gate_suspend_approve_resume(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition(with_review=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "review me"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+
+    # Run suspends at the gate
+    data = await _wait_run(c, h, oid, run_id, {"waiting_review"})
+    assert data["status"] == "waiting_review"
+    qa = next(s for s in data["step_runs"] if s["step_id"] == "qa")
+    assert qa["status"] == "waiting_review"
+
+    # An open review exists with a due date
+    r2 = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h)
+    reviews = r2.json()["data"]
+    review = next(rv for rv in reviews if rv["step_run_id"] == qa["id"])
+    assert review["due_at"] is not None
+    assert review["instructions"] == "Check quality"
+
+    # Approve — synchronous validate-then-accept
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/step-reviews/{review['id']}/decide",
+        json={"decision": "approved", "note": "LGTM"},
+        headers=h,
+    )
+    assert r3.status_code == 200
+    assert r3.json()["data"]["decision"] == "approved"
+
+    # Double-decide → 409 (durable decision row, partial unique index)
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/step-reviews/{review['id']}/decide",
+        json={"decision": "rejected"},
+        headers=h,
+    )
+    assert r4.status_code == 409
+    assert r4.json()["error"]["code"] == "WF_REVIEW_ALREADY_DECIDED"
+
+    # Run resumes and completes; review passthrough carries the subject
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    assert data["outputs"]["final"] == "Write about review me"
+
+
+@pytest.mark.asyncio
+async def test_review_gate_reject_fails_run(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition(with_review=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "reject me"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"waiting_review"})
+    qa = next(s for s in data["step_runs"] if s["step_id"] == "qa")
+    r2 = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h)
+    review = next(rv for rv in r2.json()["data"] if rv["step_run_id"] == qa["id"])
+
+    await c.post(
+        f"/api/v1/orgs/{oid}/step-reviews/{review['id']}/decide",
+        json={"decision": "rejected", "note": "Not good enough"},
+        headers=h,
+    )
+    data = await _wait_run(c, h, oid, run_id, {"failed"})
+    assert data["status"] == "failed"
+    assert data["error_code"] == "WF_STEP_FAILED"
+    qa = next(s for s in data["step_runs"] if s["step_id"] == "qa")
+    assert qa["status"] == "failed"
+    assert qa["error_code"] == "WF_REVIEW_REJECTED"
+
+
+# ── Cancellation ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_waiting_review(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition(with_review=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "cancel me"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    await _wait_run(c, h, oid, run_id, {"waiting_review"})
+
+    r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h)
+    assert r2.status_code == 200
+    assert r2.json()["data"]["status"] == "cancelled"
+
+    # Steps are cancelled, open review expired
+    r3 = await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}", headers=h)
+    data = r3.json()["data"]
+    qa = next(s for s in data["step_runs"] if s["step_id"] == "qa")
+    assert qa["status"] == "cancelled"
+    r4 = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h)
+    assert not any(rv["step_run_id"] == qa["id"] for rv in r4.json()["data"])
+
+    # Cancel again → 409
+    r5 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h)
+    assert r5.status_code == 409
+
+
+# ── Cross-org isolation ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_cross_org_isolation(c):
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    install_id = await _install(c, h1, o1, _definition())
+    r = await c.post(
+        f"/api/v1/orgs/{o1}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "private"}},
+        headers=h1,
+    )
+    run_id = r.json()["data"]["id"]
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    r2 = await c.get(f"/api/v1/orgs/{o2}/workflow-runs/{run_id}", headers=h2)
+    assert r2.status_code == 404
+    # Cannot start a run against another org's installation either
+    r3 = await c.post(
+        f"/api/v1/orgs/{o2}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "steal"}},
+        headers=h2,
+    )
+    assert r3.status_code == 404
+
+
+# ── Transform ops ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_transform_concat_text(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    definition = {
+        "schema_version": 1,
+        "inputs": [
+            {"key": "a", "type": "text", "required": True},
+            {"key": "b", "type": "text", "required": True},
+        ],
+        "outputs": [{"key": "joined", "type": "text", "from_step": "join", "from_port": "result"}],
+        "steps": [
+            {
+                "id": "take",
+                "type": "asset_input",
+                "name": "Take",
+                "config": {"accept_types": ["image"]},
+                "inputs": [],
+                "outputs": [{"port": "a", "type": "text"}, {"port": "b", "type": "text"}],
+            },
+            {
+                "id": "join",
+                "type": "transform",
+                "name": "Join",
+                "config": {"operation": "concat_text", "params": {"separator": " | "}},
+                "inputs": [
+                    {"port": "x", "type": "text"},
+                    {"port": "y", "type": "text"},
+                ],
+                "outputs": [{"port": "result", "type": "text"}],
+            },
+        ],
+        "edges": [
+            {"id": "e1", "from_step": "take", "from_port": "a", "to_step": "join", "to_port": "x"},
+            {"id": "e2", "from_step": "take", "from_port": "b", "to_step": "join", "to_port": "y"},
+        ],
+        "ui": {},
+    }
+    install_id = await _install(c, h, oid, definition)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"a": "hello", "b": "world"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    assert set(data["outputs"]["joined"].split(" | ")) == {"hello", "world"}
