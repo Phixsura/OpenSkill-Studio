@@ -16,6 +16,11 @@ from app.models.cohort import (  # noqa: F401
     CohortStatus,
     ParticipationMode,
 )
+from app.models.composer import (  # noqa: F401
+    CreatorAssignment,
+    CreatorCapabilityEvidence,
+    SolutionDraft,
+)
 from app.models.discussion import PackDiscussion  # noqa: F401
 from app.models.evaluation import (  # noqa: F401
     EvalStatus,
@@ -29,6 +34,14 @@ from app.models.learning_path import (  # noqa: F401
     LearningPath,
     LearningPathItem,
     PathItemType,
+)
+from app.models.matching import (  # noqa: F401
+    FeedbackEvent,
+    MatchingConfig,
+    MatchResult,
+    MatchRun,
+    RequirementContext,
+    RequirementProfile,
 )
 from app.models.notification import (  # noqa: F401
     Notification,

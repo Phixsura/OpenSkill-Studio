@@ -28,6 +28,7 @@ class PathItemType(str, enum.Enum):
     SKILL = "skill"
     PROJECT = "project"
     SECTION = "section"  # heading only, no FK
+    WORKFLOW_PACK = "workflow_pack"  # Issue #21: installed workflow pack reference
 
 
 # ── Learning Path ────────────────────────────────────────
@@ -69,7 +70,8 @@ class LearningPathItem(Base):
         CheckConstraint(
             "(item_type = 'SKILL' AND skill_id IS NOT NULL) OR "
             "(item_type = 'PROJECT' AND project_id IS NOT NULL) OR "
-            "(item_type = 'SECTION' AND section_title IS NOT NULL)",
+            "(item_type = 'SECTION' AND section_title IS NOT NULL) OR "
+            "(item_type = 'WORKFLOW_PACK' AND workflow_pack_id IS NOT NULL)",
             name="ck_path_item_type_ref",
         ),
     )
@@ -88,6 +90,8 @@ class LearningPathItem(Base):
         String(26), ForeignKey("projects.id", ondelete="CASCADE")
     )
     section_title: Mapped[str | None] = mapped_column(String(200))
+    # Loose ref to an installed workflow pack (Issue #21) — no FK by design
+    workflow_pack_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     unlock_rule: Mapped[str] = mapped_column(String(30), nullable=False, default="previous_required")

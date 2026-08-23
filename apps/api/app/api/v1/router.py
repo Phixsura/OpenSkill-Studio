@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     installations,
     learning_paths,
     lti,
+    matching,
     notifications,
     organizations,
     overview,
@@ -25,6 +26,7 @@ from app.api.v1.endpoints import (
     projects,
     providers,
     registry,
+    requirement_profiles,
     skill_packs,
     skills,
     webhooks,
@@ -66,3 +68,5 @@ api_v1_router.include_router(workflow_packs.router)
 api_v1_router.include_router(workflow_runs.router)
 api_v1_router.include_router(workflow_installations.router)
 api_v1_router.include_router(workflow_registry.router)
+api_v1_router.include_router(requirement_profiles.router)
+api_v1_router.include_router(matching.router)
