@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
     peer_review,
     portfolio,
     projects,
+    providers,
     registry,
     skill_packs,
     skills,
@@ -56,3 +57,4 @@ api_v1_router.include_router(discussions.router)
 api_v1_router.include_router(gamification.router)
 api_v1_router.include_router(duplicate.router)
 api_v1_router.include_router(pack_sharing.router)
+api_v1_router.include_router(providers.router)

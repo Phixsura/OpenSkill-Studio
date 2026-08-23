@@ -1,4 +1,5 @@
 from app.models.base import Base  # noqa: F401
+from app.models.capability import CapabilityTag  # noqa: F401
 from app.models.certificate import Certificate  # noqa: F401
 from app.models.client_brief import (  # noqa: F401
     ApplicationStatus,
@@ -76,6 +77,12 @@ from app.models.project import (  # noqa: F401
     SubmissionItem,
     SubmissionReview,
     SubmissionStatus,
+)
+from app.models.provider import (  # noqa: F401
+    OrgCredential,
+    ProviderAdapter,
+    ProviderConnection,
+    ProviderModelOffering,
 )
 from app.models.skill import (  # noqa: F401
     ContentStatus,

@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     eval_max_image_size: int = 20 * 1024 * 1024  # 20 MB
     eval_max_retries: int = 3
 
+    # Workflow runtime (Issue #21)
+    credential_encryption_key: str = ""  # Fernet key or passphrase; required in production
+    extraction_enabled: bool = False  # LLM requirement extraction feature flag
+    workflow_step_timeout_seconds: int = 120
+    workflow_max_concurrent_runs: int = 20
+
     # Frontend
     frontend_url: str = "http://localhost:3000"
 
@@ -91,6 +97,14 @@ class Settings(BaseSettings):
         app_env = (info.data.get("app_env") or "development") if info.data else "development"
         if app_env not in ("development", "test") and "postgres:postgres@" in v:
             raise ValueError("DATABASE_URL must not use default postgres:postgres credentials in production")
+        return v
+
+    @field_validator("credential_encryption_key")
+    @classmethod
+    def validate_credential_key(cls, v: str, info: Any) -> str:
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if app_env not in ("development", "test") and not v:
+            raise ValueError("CREDENTIAL_ENCRYPTION_KEY must be set in production")
         return v
 
     model_config = {
