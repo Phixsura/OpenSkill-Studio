@@ -28,15 +28,27 @@ async def apply_hard_constraints(
         for pack in candidates:
             failures: list[dict] = []
             pack_caps = set(pack.capability_tags or [])
-            for cap in required_caps:
-                if cap not in pack_caps:
-                    failures.append(
-                        {
-                            "code": "CAPABILITY_MISSING",
-                            "capability": cap,
-                            "detail": f"Pack does not provide capability '{cap}'",
-                        }
-                    )
+            if spec.target_entity_type == "workflow_pack":
+                # A production workflow must provide every required capability
+                for cap in required_caps:
+                    if cap not in pack_caps:
+                        failures.append(
+                            {
+                                "code": "CAPABILITY_MISSING",
+                                "capability": cap,
+                                "detail": f"Pack does not provide capability '{cap}'",
+                            }
+                        )
+            elif required_caps and not (set(required_caps) & pack_caps):
+                # Learning coverage is CUMULATIVE across packs — the composer's
+                # set cover assembles full coverage. A pack is only hard-excluded
+                # when it teaches none of the requested capabilities.
+                failures.append(
+                    {
+                        "code": "CAPABILITY_IRRELEVANT",
+                        "detail": "Pack teaches none of the requested capabilities",
+                    }
+                )
             if spec.target_entity_type == "workflow_pack" and output_type:
                 out_types = {o.get("type") for o in (pack.output_schema or [])}
                 if output_type not in out_types:

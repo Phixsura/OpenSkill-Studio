@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     certificates,
     client_briefs,
     cohorts,
+    composer,
     discussions,
     duplicate,
     evaluation,
@@ -66,6 +67,7 @@ api_v1_router.include_router(pack_sharing.router)
 api_v1_router.include_router(providers.router)
 api_v1_router.include_router(workflow_packs.router)
 api_v1_router.include_router(workflow_runs.router)
+api_v1_router.include_router(composer.router)
 api_v1_router.include_router(workflow_installations.router)
 api_v1_router.include_router(workflow_registry.router)
 api_v1_router.include_router(requirement_profiles.router)
