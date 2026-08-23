@@ -117,3 +117,18 @@ from app.models.user import (  # noqa: F401
     UserStatus,
 )
 from app.models.webhook import WebhookSubscription  # noqa: F401
+from app.models.workflow_pack import (  # noqa: F401
+    ComfyUIImport,
+    WorkflowPack,
+    WorkflowPackInstallation,
+    WorkflowPackRelease,
+)
+from app.models.workflow_run import (  # noqa: F401
+    RunStatus,
+    StepRunStatus,
+    WorkflowRun,
+    WorkflowRunEvent,
+    WorkflowStepBinding,
+    WorkflowStepReview,
+    WorkflowStepRun,
+)

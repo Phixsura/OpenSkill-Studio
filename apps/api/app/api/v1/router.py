@@ -28,6 +28,7 @@ from app.api.v1.endpoints import (
     skill_packs,
     skills,
     webhooks,
+    workflow_packs,
 )
 
 api_v1_router = APIRouter()
@@ -58,3 +59,4 @@ api_v1_router.include_router(gamification.router)
 api_v1_router.include_router(duplicate.router)
 api_v1_router.include_router(pack_sharing.router)
 api_v1_router.include_router(providers.router)
+api_v1_router.include_router(workflow_packs.router)
