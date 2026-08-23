@@ -98,9 +98,10 @@ class CreatorAssignment(Base):
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     match_run_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="offered", server_default="offered")
-    # Always a human user — never a service account (R9)
-    assigned_by: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    # Always a human user — never a service account (R9). Nullable because
+    # ondelete='SET NULL' must be able to fire when the assigner is deleted.
+    assigned_by: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
+from app.models.organization import OrgRole
 from app.models.user import User
 from app.models.workflow_run import RunStatus
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -28,6 +29,8 @@ from app.services.workflow_runtime import (
 )
 
 router = APIRouter(tags=["Workflow Runs"])
+
+WRITE_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
 @router.post(
@@ -172,7 +175,8 @@ async def decide_review(
     db: AsyncSession = Depends(get_db),
 ):
     """Synchronous validate-then-accept decision (Temporal Update semantics)."""
-    await require_org_member(org_id, user, db)
+    # Review gates approve real provider work — students must not self-approve
+    await require_org_member(org_id, user, db, *WRITE_ROLES)
     svc = WorkflowRuntimeService(db)
     review = await svc.decide_review(
         review_id, org_id, decision=body.decision, note=body.note, decided_by=user.id

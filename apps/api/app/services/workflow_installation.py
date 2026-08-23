@@ -9,6 +9,7 @@ hard 422 with structured gaps.
 import structlog
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -84,7 +85,15 @@ class WorkflowInstallationService:
             existing.local_definition = None
             existing.locally_modified = False
             existing.installed_by = installed_by
-            await self.db.flush()
+            try:
+                async with self.db.begin_nested():
+                    await self.db.flush()
+            except IntegrityError:
+                raise AppError(
+                    "ALREADY_INSTALLED",
+                    "Workflow pack already installed in this organization",
+                    409,
+                ) from None
             await self._rebuild_bindings(existing, release)
             await self._bump_install_count(pack_id, +1)
             await self.db.refresh(existing)
@@ -98,8 +107,18 @@ class WorkflowInstallationService:
             installed_version=release.version,
             installed_by=installed_by,
         )
-        self.db.add(install)
-        await self.db.flush()
+        try:
+            async with self.db.begin_nested():
+                self.db.add(install)
+                await self.db.flush()
+        except IntegrityError:
+            # Concurrent install lost the race on uq_wfinstall_org_pack — 409,
+            # not an unhandled 500 with a poisoned session (audit TOCTOU)
+            raise AppError(
+                "ALREADY_INSTALLED",
+                "Workflow pack already installed in this organization",
+                409,
+            ) from None
         await self._rebuild_bindings(install, release)
         await self._bump_install_count(pack_id, +1)
         log.info(
@@ -151,6 +170,8 @@ class WorkflowInstallationService:
             )
         if inst.pack_id is None:
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Original pack no longer exists", 404)
+        # Re-check pack access — visibility/status may have changed since install
+        await self._check_pack_access(inst.pack_id, org_id)
 
         release = await self._resolve_release(inst.pack_id, target_version)
         if release is None:
@@ -277,6 +298,8 @@ class WorkflowInstallationService:
         inst = await self.get_installation(installation_id, org_id)
         if inst.pack_id is None:
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Original pack no longer exists", 404)
+        # Re-check pack access — visibility/status may have changed since install
+        await self._check_pack_access(inst.pack_id, org_id)
         current = await self._effective_definition(inst)
         target_release = await self._resolve_release(inst.pack_id, to_version)
         if target_release is None:
@@ -318,6 +341,23 @@ class WorkflowInstallationService:
         }
 
     # ── Internals ─────────────────────────────────────────
+
+    async def _check_pack_access(self, pack_id: str, org_id: str) -> WorkflowPack:
+        """Same access rules as install() — owner org always, otherwise the
+        pack must be PUBLISHED, non-private, and approved. Uniform 404 to
+        prevent pack-id enumeration."""
+        pack = await self.db.get(WorkflowPack, pack_id)
+        if pack is None:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        if pack.owner_org_id == org_id:
+            return pack
+        if (
+            pack.status != PackStatus.PUBLISHED
+            or pack.visibility == PackVisibility.PRIVATE
+            or pack.review_status not in (None, "approved")
+        ):
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        return pack
 
     async def _binding_capability_matches(
         self, binding: WorkflowStepBinding, step_capability: str
@@ -377,6 +417,28 @@ class WorkflowInstallationService:
         if release is None:
             raise AppError("NO_DEFINITION", "Release no longer exists", 422)
         return release.manifest.get("definition", {})
+
+    async def get_input_schema(self, inst: WorkflowPackInstallation) -> list[dict]:
+        """Effective run-input schema for the detail endpoint.
+
+        The frontend run form must read this (authenticated) — the public
+        registry endpoint 404s for own-org private packs (audit HIGH).
+        """
+        try:
+            definition = await self._effective_definition(inst)
+        except AppError:
+            return []
+        return [
+            {
+                "key": i.get("key"),
+                "type": i.get("type"),
+                "label": i.get("label") or i.get("key"),
+                "required": i.get("required", True),
+                "default": i.get("default"),
+                "options": i.get("options"),
+            }
+            for i in definition.get("inputs", [])
+        ]
 
     async def _rebuild_bindings(
         self, inst: WorkflowPackInstallation, release: WorkflowPackRelease

@@ -447,3 +447,81 @@ async def test_patch_unchanged_values_keep_extracted_provenance(c):
         requirement = RequirementProfileService.build_match_requirement(stored)
         assert "required_capabilities" not in requirement
         assert requirement.get("preferred_capabilities") == ["image_to_video"]
+
+
+# ── Audit fixes (Issue #21 follow-up) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_time_budget_type_validation(c):
+    """Untyped time_budget values crash scoring (int<=str TypeError) —
+    reject anything that isn't an int in 1..100000 (audit MEDIUM 7)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for bad in ("60", -5, 0, True, 100_001, {"m": 60}):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/requirement-profiles",
+            json={
+                "context_type": "learning",
+                "structured_requirements": {"time_budget": bad},
+            },
+            headers=h,
+        )
+        assert r.status_code == 422, f"time_budget={bad!r}: {r.status_code}"
+        assert r.json()["error"]["code"] == "INVALID_TIME_BUDGET"
+    # Valid value passes
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={
+            "context_type": "learning",
+            "structured_requirements": {"time_budget": 60},
+        },
+        headers=h,
+    )
+    assert r2.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_tool_constraints_type_validation(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for bad in ("photoshop", [1, 2], [{"t": "x"}], ["x" * 101]):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/requirement-profiles",
+            json={
+                "context_type": "learning",
+                "structured_requirements": {"tool_constraints": bad},
+            },
+            headers=h,
+        )
+        assert r.status_code == 422, f"tool_constraints={bad!r}: {r.status_code}"
+        assert r.json()["error"]["code"] == "INVALID_TOOL_CONSTRAINTS"
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={
+            "context_type": "learning",
+            "structured_requirements": {"tool_constraints": ["photoshop"]},
+        },
+        headers=h,
+    )
+    assert r2.status_code == 201
+
+
+def test_build_match_requirement_demotes_extracted_time_budget():
+    """Extracted time_budget must become _soft_time_budget — an LLM-
+    hallucinated budget can never drive hard truncation (R14 gray zone)."""
+    from app.models.matching import RequirementProfile
+    from app.services.requirement_profile import RequirementProfileService
+
+    profile = RequirementProfile(
+        org_id="o",
+        structured_requirements={"time_budget": 60, "difficulty": "beginner"},
+        extraction_meta={
+            "provenance": {"time_budget": "extracted", "difficulty": "user_entered"}
+        },
+    )
+    req = RequirementProfileService.build_match_requirement(profile)
+    assert "time_budget" not in req
+    assert req["_soft_time_budget"] == 60
+    # user_entered fields stay hard
+    assert req["difficulty"] == "beginner"

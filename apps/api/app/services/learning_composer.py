@@ -12,7 +12,7 @@ SECTION placeholders (red line: no auto-install).
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -114,7 +114,22 @@ class LearningComposerService:
         )
 
         # ── Budget truncation (required-first is implicit: prereqs sort first) ──
+        # Only a HUMAN-entered time_budget may drive hard cuts (R14):
+        # build_match_requirement demotes extracted budgets to _soft_time_budget,
+        # which is surfaced as an advisory gap instead of truncating items.
         time_budget = requirement.get("time_budget")
+        soft_budget = requirement.get("_soft_time_budget")
+        if soft_budget is not None and time_budget is None:
+            gaps.append(
+                {
+                    "code": "SOFT_TIME_BUDGET",
+                    "minutes": soft_budget,
+                    "detail": (
+                        "An AI-extracted time budget was not applied — confirm it "
+                        "on the requirement profile to enable budget truncation"
+                    ),
+                }
+            )
         total_minutes = 0
         if isinstance(time_budget, int | float) and time_budget > 0:
             budget = int(time_budget)
@@ -254,22 +269,34 @@ class LearningComposerService:
             await visit(pack, 1, {pack.id})
         _ = in_progress  # cycle detection handled via path sets
 
-        # Waived check: user already completed the pack's installed content
+        # Waived check: user completed ALL of the pack's installed content.
+        # Any-one-skill waiving silently dropped whole packs (and their
+        # capability coverage) after a single completed lesson (audit MEDIUM).
         waived_ids: set[str] = set()
         if user_id:
             for pack_id in packs:
+                total_r = await self.db.execute(
+                    select(func.count(Skill.id)).where(
+                        Skill.org_id == org_id,
+                        Skill.origin_pack_id == pack_id,
+                        Skill.status != ContentStatus.ARCHIVED,
+                    )
+                )
+                total = total_r.scalar_one()
+                if total == 0:
+                    continue  # pack not installed locally — nothing to waive
                 done_r = await self.db.execute(
-                    select(SkillProgress.id)
+                    select(func.count(SkillProgress.id))
                     .join(Skill, Skill.id == SkillProgress.skill_id)
                     .where(
                         Skill.org_id == org_id,
                         Skill.origin_pack_id == pack_id,
+                        Skill.status != ContentStatus.ARCHIVED,
                         SkillProgress.user_id == user_id,
                         SkillProgress.status == ProgressStatus.COMPLETED,
                     )
-                    .limit(1)
                 )
-                if done_r.scalar_one_or_none() is not None:
+                if done_r.scalar_one() >= total:
                     waived_ids.add(pack_id)
 
         # Kahn topo sort: prereqs first; stable order preserves selection rank
@@ -292,6 +319,17 @@ class LearningComposerService:
                 if indegree[nxt] == 0:
                     queue.append(nxt)
             queue.sort(key=lambda p: order_hint[p])
+
+        # Cycle members that were ALL pre-selected slip past visit()'s path
+        # check (it never recurses into already-known packs) — Kahn would then
+        # silently drop them from the path (audit MEDIUM). Fail loudly instead.
+        if len(topo) != len(packs):
+            leftover = [packs[pid].name for pid in packs if pid not in set(topo)]
+            raise AppError(
+                "PREREQ_CYCLE",
+                f"Prerequisite cycle detected involving: {', '.join(sorted(leftover))}",
+                422,
+            )
 
         entries: list[dict] = []
         for order, pack_id in enumerate(topo):

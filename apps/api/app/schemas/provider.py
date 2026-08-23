@@ -196,6 +196,44 @@ class UpdateOfferingRequest(BaseModel):
             raise ValueError("Quality tier must be draft, standard, or premium")
         return v
 
+    # None-tolerant mirrors of the create-request validators — updates must
+    # not bypass the bounds enforced at creation time
+    @field_validator("model_name")
+    @classmethod
+    def validate_model_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v or len(v) > 200:
+            raise ValueError("Model name must be 1-200 characters")
+        return v
+
+    @field_validator("features")
+    @classmethod
+    def validate_features(cls, v: list | None) -> list | None:
+        if v is None:
+            return v
+        if len(v) > 20:
+            raise ValueError("Too many features (max 20)")
+        for f in v:
+            if not isinstance(f, str) or len(f) > 64:
+                raise ValueError("Feature entries must be strings of max 64 chars")
+        return v
+
+    @field_validator("limits")
+    @classmethod
+    def validate_limits_size(cls, v: dict | None) -> dict | None:
+        if v is not None and len(str(v)) > 5000:
+            raise ValueError("Limits too large (max 5,000 chars)")
+        return v
+
+    @field_validator("cost_per_call_usd")
+    @classmethod
+    def validate_cost(cls, v: float | None) -> float | None:
+        if v is not None and (v < 0 or v > 10000):
+            raise ValueError("Cost must be between 0 and 10,000")
+        return v
+
 
 class OfferingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

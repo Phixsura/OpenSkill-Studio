@@ -82,7 +82,10 @@ async def get_installation(
     await require_org_member(org_id, user, db)
     svc = WorkflowInstallationService(db)
     install = await svc.get_installation(installation_id, org_id)
-    return DataResponse(data=WorkflowInstallationResponse.model_validate(install))
+    detail = WorkflowInstallationResponse.model_validate(install)
+    # Effective input schema for the run form (works for private packs too)
+    detail.input_schema = await svc.get_input_schema(install)
+    return DataResponse(data=detail)
 
 
 @router.post(

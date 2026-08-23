@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addEdge, applyEdgeChanges, applyNodeChanges } from "@xyflow/react";
 import type { Connection, Edge, EdgeChange, Node, NodeChange } from "@xyflow/react";
@@ -37,19 +37,16 @@ interface Capability {
   name: string;
 }
 
-export default function WorkflowEditor({
-  orgId,
-  packId,
-}: {
-  orgId: string;
-  packId: string;
-}) {
+export default function WorkflowEditor({ orgId, packId }: { orgId: string; packId: string }) {
   const queryClient = useQueryClient();
 
-  const { data: packData, isLoading, isError } = useQuery({
+  const {
+    data: packData,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["workflow-pack", orgId, packId],
-    queryFn: () =>
-      apiWithAuth<{ data: PackDetail }>(`/orgs/${orgId}/workflow-packs/${packId}`),
+    queryFn: () => apiWithAuth<{ data: PackDetail }>(`/orgs/${orgId}/workflow-packs/${packId}`),
   });
 
   const { data: capsData } = useQuery({
@@ -65,15 +62,42 @@ export default function WorkflowEditor({
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [errors, setErrors] = useState<ValidationErrorItem[]>([]);
   const [dirty, setDirty] = useState(false);
+  // Monotonic edit counter — lets a save that succeeds AFTER further edits
+  // avoid clearing the dirty flag (the newer edits are still unsaved).
+  const editCountRef = useRef(0);
+  const savedEditCountRef = useRef(0);
+  const markDirty = useCallback(() => {
+    editCountRef.current += 1;
+    setDirty(true);
+  }, []);
 
-  // Initialize once from server
+  // Real navigation guard while dirty — the badge alone is cosmetic.
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
+
+  // Initialize once from server. Normalize instead of casting: the backend
+  // stores the raw dict from PUT /definition, so keys the author never sent
+  // (edges/inputs/outputs/ui) can be legitimately absent.
   useEffect(() => {
     if (packData && definition === null) {
-      const raw = packData.data.definition;
-      const def: WorkflowDefinition =
-        raw && Array.isArray((raw as { steps?: unknown }).steps)
-          ? (raw as unknown as WorkflowDefinition)
-          : emptyDefinition();
+      const raw = (packData.data.definition ?? {}) as Partial<WorkflowDefinition> &
+        Record<string, unknown>;
+      const def: WorkflowDefinition = {
+        ...emptyDefinition(),
+        schema_version: typeof raw.schema_version === "number" ? raw.schema_version : 1,
+        inputs: Array.isArray(raw.inputs) ? raw.inputs : [],
+        outputs: Array.isArray(raw.outputs) ? raw.outputs : [],
+        steps: Array.isArray(raw.steps) ? raw.steps : [],
+        edges: Array.isArray(raw.edges) ? raw.edges : [],
+        ui: raw.ui && typeof raw.ui === "object" ? (raw.ui as WorkflowDefinition["ui"]) : {},
+      };
       setDefinition(def);
       const rf = toReactFlow(def);
       setNodes(rf.nodes);
@@ -82,42 +106,95 @@ export default function WorkflowEditor({
   }, [packData, definition]);
 
   // Apply a definition update + resync React Flow state
-  const applyDefinition = useCallback((def: WorkflowDefinition) => {
-    setDefinition(def);
-    const rf = toReactFlow(def);
-    setNodes(rf.nodes);
-    setEdges(rf.edges);
-    setDirty(true);
-  }, []);
+  const applyDefinition = useCallback(
+    (def: WorkflowDefinition) => {
+      setDefinition(def);
+      const rf = toReactFlow(def);
+      setNodes(rf.nodes);
+      setEdges(rf.edges);
+      markDirty();
+    },
+    [markDirty],
+  );
 
   const currentDefinition = useCallback((): WorkflowDefinition => {
     if (!definition) return emptyDefinition();
     return toDefinition(definition, nodes, edges);
   }, [definition, nodes, edges]);
 
-  const onNodesChange = useCallback((changes: NodeChange<Node<StepNodeData>>[]) => {
-    setNodes((nds) => applyNodeChanges(changes, nds));
-    if (changes.some((c) => c.type !== "select" && c.type !== "dimensions")) {
-      setDirty(true);
-    }
-  }, []);
+  const onNodesChange = useCallback(
+    (changes: NodeChange<Node<StepNodeData>>[]) => {
+      setNodes((nds) => applyNodeChanges(changes, nds));
+      // Canvas-level deletion (Backspace/Delete) bypasses deleteStep — clean
+      // up dangling edges and workflow outputs pointing at the removed nodes.
+      const removedIds = new Set(changes.filter((c) => c.type === "remove").map((c) => c.id));
+      if (removedIds.size > 0) {
+        setEdges((eds) =>
+          eds.filter((e) => !removedIds.has(e.source) && !removedIds.has(e.target)),
+        );
+        setDefinition((def) =>
+          def
+            ? {
+                ...def,
+                steps: def.steps.filter((s) => !removedIds.has(s.id)),
+                edges: def.edges.filter(
+                  (e) => !removedIds.has(e.from_step) && !removedIds.has(e.to_step),
+                ),
+                outputs: def.outputs.filter((o) => !removedIds.has(o.from_step)),
+              }
+            : def,
+        );
+        setSelectedStepId((sel) => (sel && removedIds.has(sel) ? null : sel));
+      }
+      if (changes.some((c) => c.type !== "select" && c.type !== "dimensions")) {
+        markDirty();
+      }
+    },
+    [markDirty],
+  );
 
-  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
-    setEdges((eds) => applyEdgeChanges(changes, eds));
-    if (changes.some((c) => c.type !== "select")) setDirty(true);
-  }, []);
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<Edge>[]) => {
+      setEdges((eds) => applyEdgeChanges(changes, eds));
+      if (changes.some((c) => c.type !== "select")) markDirty();
+    },
+    [markDirty],
+  );
 
-  const onConnect = useCallback((connection: Connection) => {
-    setEdges((eds) => addEdge(connection, eds));
-    setDirty(true);
-  }, []);
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      setEdges((eds) => addEdge(connection, eds));
+      markDirty();
+    },
+    [markDirty],
+  );
 
   const updateStep = useCallback(
     (updated: StepDef) => {
       const def = currentDefinition();
+      const prev = def.steps.find((s) => s.id === updated.id);
+      // Ports removed or renamed leave edges/outputs referencing names that
+      // no longer exist — the save would then fail validation. Cascade the
+      // removal the same way deleteStep does for whole steps.
+      const newInputPorts = new Set(updated.inputs.map((p) => p.port));
+      const newOutputPorts = new Set(updated.outputs.map((p) => p.port));
+      const goneInputs = new Set(
+        (prev?.inputs ?? []).filter((p) => !newInputPorts.has(p.port)).map((p) => p.port),
+      );
+      const goneOutputs = new Set(
+        (prev?.outputs ?? []).filter((p) => !newOutputPorts.has(p.port)).map((p) => p.port),
+      );
       applyDefinition({
         ...def,
         steps: def.steps.map((s) => (s.id === updated.id ? updated : s)),
+        edges: def.edges.filter(
+          (e) =>
+            !(e.to_step === updated.id && goneInputs.has(e.to_port)) &&
+            !(e.from_step === updated.id && goneOutputs.has(e.from_port)),
+        ),
+        outputs: def.outputs.filter(
+          (o) => !(o.from_step === updated.id && goneOutputs.has(o.from_port)),
+        ),
       });
     },
     [currentDefinition, applyDefinition],
@@ -139,6 +216,9 @@ export default function WorkflowEditor({
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      // Snapshot the edit counter — if more edits land while the save is in
+      // flight, onSuccess must NOT clear the dirty flag.
+      savedEditCountRef.current = editCountRef.current;
       const def = currentDefinition();
       // Validate first for structured errors (the PUT would 422 with the same
       // details, but the dry-run keeps the flow simple)
@@ -159,7 +239,10 @@ export default function WorkflowEditor({
       });
     },
     onSuccess: () => {
-      setDirty(false);
+      // Only clear dirty if nothing changed since the save was snapshotted
+      if (editCountRef.current === savedEditCountRef.current) {
+        setDirty(false);
+      }
       toast.success("Workflow saved");
       queryClient.invalidateQueries({ queryKey: ["workflow-pack", orgId, packId] });
     },
@@ -187,7 +270,7 @@ export default function WorkflowEditor({
 
   const selectedStep =
     selectedStepId != null
-      ? currentDefinition().steps.find((s) => s.id === selectedStepId) ?? null
+      ? (currentDefinition().steps.find((s) => s.id === selectedStepId) ?? null)
       : null;
 
   const handleErrorClick = (error: ValidationErrorItem) => {
@@ -238,11 +321,7 @@ export default function WorkflowEditor({
           >
             Auto-layout
           </Button>
-          <Button
-            size="sm"
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
-          >
+          <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
             {saveMutation.isPending ? "Saving…" : "Save"}
           </Button>
         </div>
@@ -263,8 +342,7 @@ export default function WorkflowEditor({
                   onClick={() => handleErrorClick(error)}
                   className="text-left text-xs text-red-700 hover:underline dark:text-red-300"
                 >
-                  <code className="font-mono">{error.code}</code> {error.pointer} —{" "}
-                  {error.message}
+                  <code className="font-mono">{error.code}</code> {error.pointer} — {error.message}
                 </button>
               </li>
             ))}
@@ -298,6 +376,10 @@ export default function WorkflowEditor({
 
         {selectedStep && (
           <StepConfigPanel
+            // Remount per step: the panel has uncontrolled fields (transform
+            // params textarea) whose defaultValue only applies on mount —
+            // without the key, switching steps shows the previous step's text.
+            key={selectedStep.id}
             step={selectedStep}
             capabilities={capabilities}
             onChange={updateStep}
@@ -436,7 +518,10 @@ function IOSection({
                     setOutputs(
                       definition.outputs.map((out, idx) =>
                         idx === i
-                          ? { ...out, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_") }
+                          ? {
+                              ...out,
+                              key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"),
+                            }
                           : out,
                       ),
                     )

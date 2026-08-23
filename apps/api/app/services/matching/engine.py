@@ -16,6 +16,8 @@ from app.services.matching.explain import build_explain_tree
 log = structlog.get_logger()
 
 ENGINE_VERSION = "1.0.0"
+# Cap persisted/returned hard-failure rows per run (excluded_count keeps truth)
+MAX_PERSISTED_EXCLUSIONS = 50
 
 
 @dataclass
@@ -131,8 +133,13 @@ class MatchingEngine:
                     )
                 )
 
-        # Hard failures persisted too — distinguishable from low rank
-        for exc in excluded:
+        # Hard failures persisted too — distinguishable from low rank.
+        # Bounded: S1 can load the whole registry, so a broad hard constraint
+        # would otherwise persist thousands of exclusion rows per run.
+        # Newest-first (ULIDs are time-ordered) so the cap keeps the most
+        # recently created packs; excluded_count on the run keeps the TRUE total.
+        capped = sorted(excluded, key=lambda e: e["entity_id"], reverse=True)
+        for exc in capped[:MAX_PERSISTED_EXCLUSIONS]:
             result = MatchResult(
                 match_run_id=run.id,
                 entity_type=spec.target_entity_type,

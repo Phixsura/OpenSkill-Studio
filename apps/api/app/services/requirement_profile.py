@@ -309,8 +309,10 @@ class RequirementProfileService:
                 preferred = set(requirement.get("preferred_capabilities") or [])
                 preferred.update(extracted_caps)
                 requirement["preferred_capabilities"] = sorted(preferred)
-        # Same demotion for hard filterable fields set only by extraction
-        for hard_field in ("output_type", "difficulty"):
+        # Same demotion for hard filterable fields set only by extraction.
+        # time_budget included: an LLM-hallucinated budget must never drive
+        # hard cut_for_budget truncation in the composer (R14 gray zone).
+        for hard_field in ("output_type", "difficulty", "time_budget"):
             if hard_field in requirement and provenance.get(hard_field) != "user_entered":
                 # keep for scoring; S2 constraint predicates read these keys,
                 # so strip to a scoring-only variant
@@ -333,6 +335,26 @@ class RequirementProfileService:
         difficulty = structured.get("difficulty")
         if difficulty is not None and difficulty not in _DIFFICULTIES:
             raise AppError("INVALID_DIFFICULTY", "Unknown difficulty", 422)
+        # Type/range guards — untyped values crash scoring (int<=str TypeError)
+        time_budget = structured.get("time_budget")
+        if time_budget is not None and (
+            not isinstance(time_budget, int)
+            or isinstance(time_budget, bool)
+            or not (1 <= time_budget <= 100_000)
+        ):
+            raise AppError(
+                "INVALID_TIME_BUDGET", "time_budget must be minutes (1-100000)", 422
+            )
+        tools = structured.get("tool_constraints")
+        if tools is not None and (
+            not isinstance(tools, list)
+            or any(not isinstance(t, str) or len(t) > 100 for t in tools)
+        ):
+            raise AppError(
+                "INVALID_TOOL_CONSTRAINTS",
+                "tool_constraints must be a list of strings (max 100 chars each)",
+                422,
+            )
         for cap_field in ("required_capabilities", "preferred_capabilities"):
             caps = structured.get(cap_field)
             if caps:

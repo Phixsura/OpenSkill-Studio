@@ -22,6 +22,7 @@ async def apply_hard_constraints(
 
     if spec.target_entity_type in ("workflow_pack", "skill_pack"):
         required_caps = requirement.get("required_capabilities") or []
+        preferred_caps = requirement.get("preferred_capabilities") or []
         output_type = requirement.get("output_type")
         user_level = requirement.get("difficulty")
 
@@ -39,10 +40,14 @@ async def apply_hard_constraints(
                                 "detail": f"Pack does not provide capability '{cap}'",
                             }
                         )
-            elif required_caps and not (set(required_caps) & pack_caps):
+            elif (
+                (required_caps or preferred_caps)
+                and not (set(required_caps) | set(preferred_caps)) & pack_caps
+            ):
                 # Learning coverage is CUMULATIVE across packs — the composer's
-                # set cover assembles full coverage. A pack is only hard-excluded
-                # when it teaches none of the requested capabilities.
+                # set cover assembles coverage over required AND preferred caps,
+                # so a pack teaching only a preferred capability must survive S2.
+                # Hard-exclude only packs teaching none of the requested caps.
                 failures.append(
                     {
                         "code": "CAPABILITY_IRRELEVANT",

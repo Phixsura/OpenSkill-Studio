@@ -429,3 +429,75 @@ async def test_feedback_foreign_match_run_rejected(c):
         headers=h1,
     )
     assert r2.status_code == 201
+
+
+# ── Audit fixes (Issue #21 follow-up) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_s2_preferred_only_skill_pack_survives(c):
+    """A skill pack teaching only a PREFERRED capability must survive S2 —
+    the composer's set cover assembles coverage over required AND preferred
+    caps (audit MEDIUM 5)."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import PackStatus, SkillPack
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    async def _sp(name, caps):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={"name": name, "summary": "s"},
+            headers=h,
+        )
+        pid = r.json()["data"]["id"]
+        async with AsyncSessionLocal() as db:
+            pack = await db.get(SkillPack, pid)
+            pack.capability_tags = caps
+            pack.status = PackStatus.PUBLISHED
+            await db.commit()
+        return pid
+
+    preferred_only = await _sp("Preferred Only", ["upscale"])
+    irrelevant = await _sp("Irrelevant", ["text_to_speech"])
+
+    profile_id = await _confirmed_profile(
+        c,
+        h,
+        oid,
+        {
+            "required_capabilities": ["image_generation"],
+            "preferred_capabilities": ["upscale"],
+        },
+        context="learning",
+    )
+    data = await _match(c, h, oid, profile_id, target="skill_pack", limit=50)
+    ranked_ids = [r["entity_id"] for r in data["results"]]
+    excluded_ids = {e["entity_id"] for e in data["excluded"]}
+    assert preferred_only in ranked_ids
+    assert irrelevant not in ranked_ids
+    if irrelevant in excluded_ids:
+        failures = next(
+            e for e in data["excluded"] if e["entity_id"] == irrelevant
+        )["failures"]
+        assert failures[0]["code"] == "CAPABILITY_IRRELEVANT"
+
+
+@pytest.mark.asyncio
+async def test_excluded_rows_capped_at_50(c):
+    """Persisted/returned hard-failure rows are capped; excluded_count keeps
+    the true total (audit MEDIUM — match_results bloat)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # One matching pack; the shared registry supplies plenty of non-matching
+    # public packs from other tests, all excluded on CAPABILITY_MISSING.
+    good = await _wf_pack(c, h, oid, "Cap Match", capability="image_to_video", output_type="video")
+    profile_id = await _confirmed_profile(
+        c, h, oid, {"required_capabilities": ["image_to_video"]}
+    )
+    data = await _match(c, h, oid, profile_id, limit=50)
+    assert good in [r["entity_id"] for r in data["results"]]
+    assert len(data["excluded"]) <= 50
+    # The run-level counter is never capped
+    assert data["excluded_count"] >= len(data["excluded"])

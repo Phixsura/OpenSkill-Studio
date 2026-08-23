@@ -170,10 +170,13 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
         required_caps = requirement.get("required_capabilities") or []
         caps = set(entity.capability_tags or [])
         scenario = requirement.get("scenario")
-        time_budget = requirement.get("time_budget")
+        # Scoring may use extracted (soft) budgets — only hard filters can't (R14)
+        time_budget = requirement.get("time_budget") or requirement.get("_soft_time_budget")
         est = entity.estimated_minutes
-        if time_budget and est:
-            time_fit = 1.0 if est <= time_budget else min(time_budget / est, 1.0)
+        if isinstance(time_budget, int | float) and time_budget > 0 and est:
+            time_fit = max(
+                0.0, 1.0 if est <= time_budget else min(time_budget / est, 1.0)
+            )
         else:
             time_fit = 0.5
         return {

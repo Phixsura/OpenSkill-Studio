@@ -279,6 +279,10 @@ class WorkflowInstallationResponse(BaseModel):
     locally_modified: bool
     installed_at: datetime
     updated_at: datetime
+    # Effective input schema (from local_definition or release manifest) —
+    # populated on the detail endpoint only. The run form must not depend on
+    # the PUBLIC registry endpoint, which 404s for own-org private packs.
+    input_schema: list = []
 
 
 class StepBindingResponse(BaseModel):

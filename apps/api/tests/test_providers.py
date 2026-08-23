@@ -361,3 +361,45 @@ async def test_capability_check_service():
     assert len(gaps) == 1
     assert gaps[0]["code"] == "CAPABILITY_UNSATISFIED"
     assert gaps[0]["capability"] == "image_generation"
+
+
+# ── Audit fixes (Issue #21 follow-up) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_offering_validators_mirror_create(c):
+    """UpdateOfferingRequest must enforce the same bounds as create —
+    updates previously bypassed cost/model/features/limits validation
+    (audit MEDIUM 13)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    conn_id = await _connection(c, h, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "mock-v1",
+        },
+        headers=h,
+    )
+    offering_id = r.json()["data"]["id"]
+    url = f"/api/v1/orgs/{oid}/provider-offerings/{offering_id}"
+
+    bad_bodies = [
+        {"cost_per_call_usd": -1},
+        {"cost_per_call_usd": 10_001},
+        {"model_name": ""},
+        {"model_name": "x" * 201},
+        {"features": ["f"] * 21},
+        {"features": ["x" * 65]},
+        {"limits": {"note": "x" * 5001}},
+    ]
+    for body in bad_bodies:
+        r2 = await c.put(url, json=body, headers=h)
+        assert r2.status_code == 422, f"{body}: {r2.status_code}"
+
+    # Valid partial update still works
+    r3 = await c.put(url, json={"cost_per_call_usd": 0.05}, headers=h)
+    assert r3.status_code == 200
+    assert r3.json()["data"]["cost_per_call_usd"] == 0.05

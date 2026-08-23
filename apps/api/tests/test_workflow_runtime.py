@@ -626,3 +626,72 @@ async def test_pinned_binding_with_deleted_offering_hard_stops(c):
     assert data["status"] == "failed"
     gen = next(s for s in data["step_runs"] if s["step_id"] == "generate")
     assert gen["error_code"] == "NO_ELIGIBLE_PROVIDER"
+
+
+# ── Audit round 2: removed installations + input value validation ──
+
+
+@pytest.mark.asyncio
+async def test_removed_installation_rejects_new_runs(c):
+    """A REMOVED installation must not create/execute new runs."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition())
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import InstallStatus
+    from app.models.workflow_pack import WorkflowPackInstallation
+
+    async with AsyncSessionLocal() as db:
+        install = await db.get(WorkflowPackInstallation, install_id)
+        install.status = InstallStatus.REMOVED
+        await db.commit()
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "nope"}},
+        headers=h,
+    )
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "INSTALLATION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_selection_input_invalid_option_rejected(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    definition = _definition()
+    definition["inputs"].append(
+        {"key": "ratio", "type": "selection", "options": ["1:1", "9:16"], "required": True}
+    )
+    install_id = await _install(c, h, oid, definition)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "x", "ratio": "4:3"}},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "INVALID_INPUT_VALUE"
+
+    # Valid option passes creation
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "x", "ratio": "1:1"}},
+        headers=h,
+    )
+    assert r2.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_oversized_text_input_rejected(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition())
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "y" * 9000}},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "INVALID_INPUT_VALUE"

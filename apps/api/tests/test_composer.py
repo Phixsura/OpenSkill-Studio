@@ -480,3 +480,175 @@ async def test_composer_runs_record_no_impressions(c):
             )
         )
         assert list(ev_r.scalars().all()) == []
+
+
+# ── Audit fixes (Issue #21 follow-up) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_prereq_cycle_all_selected_fails_loudly(c):
+    """A cycle whose members are ALL pre-selected bypasses the DFS path check
+    (visit never recurses into known packs) — the post-Kahn check must raise
+    PREREQ_CYCLE instead of silently dropping the packs (audit MEDIUM)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    a_id = await _skill_pack(c, h, oid, "Cycle A", ["upscale"])
+    b_id = await _skill_pack(c, h, oid, "Cycle B", ["background_removal"])
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPack
+
+    async with AsyncSessionLocal() as db:
+        a = await db.get(SkillPack, a_id)
+        b = await db.get(SkillPack, b_id)
+        a.prerequisite_packs = [b.slug]
+        b.prerequisite_packs = [a.slug]
+        await db.commit()
+
+    # Require BOTH caps so the set cover selects both cycle members
+    profile_id = await _confirmed_profile(
+        c, h, oid, {"required_capabilities": ["upscale", "background_removal"]}
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "PREREQ_CYCLE"
+
+
+@pytest.mark.asyncio
+async def test_partial_completion_does_not_waive(c):
+    """Waiving requires ALL of a pack's installed skills completed — one
+    finished lesson must not drop the whole pack (audit MEDIUM 4)."""
+    h, user = await _auth(c)
+    oid = await _org(c, h)
+    pack_id = await _skill_pack(c, h, oid, "Waiver Pack", ["upscale"])
+
+    # Two org skills that originate from this pack
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories",
+            json={"name": f"WC-{uuid.uuid4().hex[:4]}"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    skill_ids = []
+    for i in range(2):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"Waiver Skill {i}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+        skill_ids.append(r.json()["data"]["id"])
+
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill import ProgressStatus, SkillProgress
+
+    async with AsyncSessionLocal() as db:
+        for sid in skill_ids:
+            await db.execute(
+                text("UPDATE skills SET origin_pack_id = :p WHERE id = :id"),
+                {"p": pack_id, "id": sid},
+            )
+        # Complete only the FIRST skill
+        db.add(
+            SkillProgress(
+                org_id=oid,
+                skill_id=skill_ids[0],
+                user_id=user["id"],
+                status=ProgressStatus.COMPLETED,
+            )
+        )
+        await db.commit()
+
+    profile_id = await _confirmed_profile(c, h, oid, {"required_capabilities": ["upscale"]})
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    items = {i["entity_id"]: i for i in r.json()["data"]["payload"]["items"]}
+    assert items[pack_id]["status"] == "included"  # NOT waived
+
+    # Complete the second skill → now fully done → waived
+    async with AsyncSessionLocal() as db:
+        db.add(
+            SkillProgress(
+                org_id=oid,
+                skill_id=skill_ids[1],
+                user_id=user["id"],
+                status=ProgressStatus.COMPLETED,
+            )
+        )
+        await db.commit()
+
+    profile_id2 = await _confirmed_profile(c, h, oid, {"required_capabilities": ["upscale"]})
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id2},
+        headers=h,
+    )
+    items2 = {i["entity_id"]: i for i in r2.json()["data"]["payload"]["items"]}
+    assert items2[pack_id]["status"] == "waived"
+
+
+@pytest.mark.asyncio
+async def test_extracted_time_budget_is_advisory_not_hard_cut(c):
+    """An LLM-extracted time_budget must never drive cut_for_budget — it is
+    demoted to _soft_time_budget and surfaced as a SOFT_TIME_BUDGET gap
+    (R14 gray zone, audit MEDIUM)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await _skill_pack(c, h, oid, "Big Pack", ["upscale"], minutes=90)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={
+            "context_type": "learning",
+            "structured_requirements": {
+                "required_capabilities": ["upscale"],
+                "time_budget": 60,
+            },
+        },
+        headers=h,
+    )
+    profile_id = r.json()["data"]["id"]
+
+    # Simulate extraction provenance for time_budget
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            text(
+                "UPDATE requirement_profiles SET extraction_meta = "
+                """'{"provenance": {"required_capabilities": "user_entered", """
+                """"time_budget": "extracted"}}'::jsonb WHERE id = :id"""
+            ),
+            {"id": profile_id},
+        )
+        await db.commit()
+
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{profile_id}/confirm", headers=h)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text
+    payload = r2.json()["data"]["payload"]
+    # 90-minute pack survives the 60-minute EXTRACTED budget (no hard cut)
+    assert all(i["status"] != "cut_for_budget" for i in payload["items"])
+    assert payload["estimated_total_minutes"] == 90
+    assert any(g["code"] == "SOFT_TIME_BUDGET" for g in payload["gaps"])

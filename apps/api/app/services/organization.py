@@ -180,12 +180,26 @@ class OrgService:
         from sqlalchemy import update as sa_update
 
         from app.models.skill_pack import PackStatus, SkillPack
+        from app.models.workflow_pack import WorkflowPack
 
         await self.db.execute(
             sa_update(SkillPack)
             .where(SkillPack.owner_org_id == org_id, SkillPack.status != PackStatus.ARCHIVED)
             .values(status=PackStatus.ARCHIVED)
         )
+        # Workflow packs live in a sibling registry — archive them too, or a
+        # deleted org's PUBLIC workflow packs stay live and installable
+        await self.db.execute(
+            sa_update(WorkflowPack)
+            .where(
+                WorkflowPack.owner_org_id == org_id,
+                WorkflowPack.status != PackStatus.ARCHIVED,
+            )
+            .values(status=PackStatus.ARCHIVED)
+        )
+        from app.core.cache import cache_delete_pattern
+
+        await cache_delete_pattern("wfregistry:*")
 
         await self.db.flush()
         log.info("org_deleted", org_id=org_id, by=user_id)

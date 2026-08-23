@@ -71,15 +71,27 @@ def _track(coro) -> asyncio.Task:
 
 
 async def drain_workflow_tasks(timeout: float = 15.0) -> None:
-    """Await in-flight workflow executions (lifespan shutdown / tests)."""
+    """Await in-flight workflow executions (lifespan shutdown / tests).
+
+    Only drains tasks bound to the CURRENT event loop — tasks left over from
+    a previous, closed loop (test isolation) can never complete and would
+    make gather() raise; they are discarded from the tracking set instead.
+    """
     if not _pending_tasks:
+        return
+    loop = asyncio.get_running_loop()
+    current = [t for t in _pending_tasks if t.get_loop() is loop]
+    stale = [t for t in _pending_tasks if t.get_loop() is not loop]
+    for t in stale:
+        _pending_tasks.discard(t)
+    if not current:
         return
     try:
         await asyncio.wait_for(
-            asyncio.gather(*list(_pending_tasks), return_exceptions=True), timeout=timeout
+            asyncio.gather(*current, return_exceptions=True), timeout=timeout
         )
-    except TimeoutError:
-        log.warning("workflow_drain_timeout", pending=len(_pending_tasks))
+    except Exception:
+        log.warning("workflow_drain_timeout", pending=len(current))
 
 
 def _now() -> datetime:
@@ -102,8 +114,14 @@ class WorkflowRuntimeService:
         started_by: str,
         idempotency_key: str | None = None,
     ) -> WorkflowRun:
+        from app.models.skill_pack import InstallStatus
+
         install = await self.db.get(WorkflowPackInstallation, installation_id)
-        if install is None or install.org_id != org_id:
+        if (
+            install is None
+            or install.org_id != org_id
+            or install.status == InstallStatus.REMOVED
+        ):
             raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
 
         # Resolve the effective definition: forked local copy or release manifest
@@ -133,6 +151,42 @@ class WorkflowRuntimeService:
         for key, idef in input_defs.items():
             if key not in effective_inputs and idef.get("default") is not None:
                 effective_inputs[key] = idef["default"]
+        # Per-type value validation — selection options enforced, text bounded,
+        # asset refs must be short strings (never blobs), json shape-checked.
+        for key, value in effective_inputs.items():
+            idef = input_defs.get(key)
+            if idef is None:
+                continue
+            itype = idef.get("type", "text")
+            if itype == "selection":
+                options = idef.get("options") or []
+                if value not in options:
+                    raise AppError(
+                        "INVALID_INPUT_VALUE",
+                        f"Input '{key}' must be one of: {', '.join(str(o) for o in options)}",
+                        422,
+                    )
+            elif itype in ("text", "prompt"):
+                if not isinstance(value, str) or len(value) > 8000:
+                    raise AppError(
+                        "INVALID_INPUT_VALUE",
+                        f"Input '{key}' must be a string of at most 8,000 characters",
+                        422,
+                    )
+            elif itype in ("image", "video", "audio", "reference_asset"):
+                if not isinstance(value, str) or len(value) > 500:
+                    raise AppError(
+                        "INVALID_INPUT_VALUE",
+                        f"Input '{key}' must be an asset reference string (max 500 chars)",
+                        422,
+                    )
+            elif itype == "json":
+                if not isinstance(value, (dict, list)) or len(str(value)) > 8000:
+                    raise AppError(
+                        "INVALID_INPUT_VALUE",
+                        f"Input '{key}' must be a JSON object or array (max 8,000 chars)",
+                        422,
+                    )
         # Bound input payload
         if len(json.dumps(effective_inputs, ensure_ascii=False)) > MAX_STEP_OUTPUT_BYTES:
             raise AppError("WF_INPUT_TOO_LARGE", "Run inputs exceed 48KB", 422)
@@ -337,18 +391,13 @@ class WorkflowRuntimeService:
         run = await self.get_run(run_id, org_id)
         if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
             raise AppError("RUN_ALREADY_FINISHED", "Run is already in a terminal state", 409)
-        await self.db.execute(
-            update(WorkflowRun)
-            .where(
-                WorkflowRun.id == run_id,
-                WorkflowRun.status.in_(
-                    [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_REVIEW]
-                ),
-            )
-            .values(status=RunStatus.CANCELLED, error_code="WF_CANCELLED", finished_at=_now())
-        )
-        # Cancel all non-terminal steps (in-flight provider completions will
-        # lose their conditional UPDATE — safe)
+
+        # Lock ORDER matters: the executor claims step rows first and touches
+        # the run row last — cancel must use the same order (steps → reviews
+        # → run) or the two transactions deadlock under contention.
+
+        # 1. Cancel all non-terminal steps (in-flight provider completions
+        #    will lose their conditional UPDATE — safe)
         await self.db.execute(
             update(WorkflowStepRun)
             .where(
@@ -365,7 +414,7 @@ class WorkflowRuntimeService:
             )
             .values(status=StepRunStatus.CANCELLED, finished_at=_now())
         )
-        # Expire open reviews for this run's steps
+        # 2. Expire open reviews for this run's steps
         step_ids_r = await self.db.execute(
             select(WorkflowStepRun.id).where(WorkflowStepRun.run_id == run_id)
         )
@@ -379,6 +428,17 @@ class WorkflowRuntimeService:
                 )
                 .values(decision="expired", decided_at=_now())
             )
+        # 3. Run row LAST (matches executor lock order)
+        await self.db.execute(
+            update(WorkflowRun)
+            .where(
+                WorkflowRun.id == run_id,
+                WorkflowRun.status.in_(
+                    [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_REVIEW]
+                ),
+            )
+            .values(status=RunStatus.CANCELLED, error_code="WF_CANCELLED", finished_at=_now())
+        )
         self.db.add(WorkflowRunEvent(run_id=run_id, event_type="run_cancelled", payload={}))
         await self.db.flush()
         await self.db.refresh(run)
@@ -842,7 +902,7 @@ async def _execute_provider_action(
 
     # Write-ahead: persist provider_request_id + offering BEFORE the outbound call
     provider_request_id = f"wf-{sr.id}-a{claimed_attempt}-{secrets.token_hex(4)}"
-    await db.execute(
+    write_ahead = await db.execute(
         update(WorkflowStepRun)
         .where(
             WorkflowStepRun.id == sr.id,
@@ -851,7 +911,22 @@ async def _execute_provider_action(
         )
         .values(provider_request_id=provider_request_id, offering_id=offering.id)
     )
+    if not write_ahead.rowcount:
+        return  # step no longer ours (cancelled / swept) — never call the provider
     await db.commit()  # flush write-ahead state before the call (R13)
+
+    # Post-commit cancellation check: a cancel_run blocked on our row lock may
+    # have flipped the step the instant the commit released it. Column SELECT
+    # (bypasses the identity map — expire_on_commit=False would otherwise
+    # return the stale in-memory object) and bail BEFORE spending provider money.
+    fresh_r = await db.execute(
+        select(WorkflowStepRun.status, WorkflowStepRun.attempt).where(
+            WorkflowStepRun.id == sr.id
+        )
+    )
+    fresh = fresh_r.one_or_none()
+    if fresh is None or fresh.status != StepRunStatus.RUNNING or fresh.attempt != claimed_attempt:
+        return
 
     # Late credential resolution — only here, never earlier (R3)
     credentials = None

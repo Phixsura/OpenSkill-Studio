@@ -5,6 +5,7 @@ hits re-apply access-control filters so stale entries can never serve
 archived/private/rejected packs.
 """
 
+import copy
 import hashlib
 
 import structlog
@@ -138,6 +139,12 @@ class WorkflowRegistryService:
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
         if pack.visibility == PackVisibility.PRIVATE:
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        # PUBLIC packs must pass review (mirror _public_filters / list path)
+        if pack.visibility == PackVisibility.PUBLIC and pack.review_status not in (
+            None,
+            "approved",
+        ):
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
         return pack
 
     async def get_public_releases(self, pack_id: str) -> list[WorkflowPackRelease]:
@@ -164,7 +171,16 @@ class WorkflowRegistryService:
         pool = stable if stable else releases
         latest = max(pool, key=lambda r: _parse_semver(r.version))
         manifest = latest.manifest or {}
-        definition = {k: v for k, v in (manifest.get("definition") or {}).items() if k != "ui"}
+        definition = copy.deepcopy(
+            {k: v for k, v in (manifest.get("definition") or {}).items() if k != "ui"}
+        )
+        # Strip org-internal binding details from the anonymous preview —
+        # pinned offerings / binding modes leak the author org's provider setup
+        for step in definition.get("steps", []) or []:
+            config = step.get("config")
+            if isinstance(config, dict):
+                config.pop("pinned_offering_id", None)
+                config.pop("binding_mode", None)
         deps = manifest.get("dependencies") or {}
         return {
             "version": latest.version,

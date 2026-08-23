@@ -300,3 +300,185 @@ async def test_workflow_run_step_review_cross_org(c):
     # Cancel across orgs also blocked
     r3 = await c.post(f"/api/v1/orgs/{o2}/workflow-runs/{run_id}/cancel", headers=h2)
     assert r3.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_org_archives_workflow_packs(c):
+    """Deleting an org must archive its workflow packs too — otherwise a
+    dead org's PUBLIC packs stay live and installable (audit HIGH 1)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Publish + approve a PUBLIC workflow pack
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "Zombie Pack"}, headers=h)
+    pid = r.json()["data"]["id"]
+    definition = {
+        "schema_version": 1,
+        "inputs": [{"key": "topic", "type": "text", "required": True}],
+        "outputs": [{"key": "final", "type": "image", "from_step": "gen", "from_port": "result"}],
+        "steps": [
+            {
+                "id": "gen",
+                "type": "provider_action",
+                "name": "Gen",
+                "config": {"capability": "image_generation"},
+                "inputs": [],
+                "outputs": [{"port": "result", "type": "image"}],
+            }
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": definition},
+        headers=h,
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
+
+    # Visible in the public registry before deletion
+    r1 = await c.get(f"/api/v1/registry/workflow-packs/{pid}")
+    assert r1.status_code == 200
+
+    # Delete the org
+    r2 = await c.delete(f"/api/v1/orgs/{oid}", headers=h)
+    assert r2.status_code == 204
+
+    # Pack is archived: gone from registry detail AND not installable elsewhere
+    r3 = await c.get(f"/api/v1/registry/workflow-packs/{pid}")
+    assert r3.status_code == 404
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    r4 = await c.post(
+        f"/api/v1/orgs/{o2}/workflow-installations", json={"pack_id": pid}, headers=h2
+    )
+    assert r4.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_decide_step_review(c):
+    """decide_review approves real provider work — students must not
+    self-approve (audit MEDIUM 14)."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    h_student, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h_owner,
+    )
+
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import (
+        RunStatus,
+        StepRunStatus,
+        WorkflowRun,
+        WorkflowStepReview,
+        WorkflowStepRun,
+    )
+
+    async with AsyncSessionLocal() as db:
+        run = WorkflowRun(
+            org_id=oid,
+            definition_snapshot={"steps": []},
+            inputs={},
+            status=RunStatus.WAITING_REVIEW,
+        )
+        db.add(run)
+        await db.flush()
+        sr = WorkflowStepRun(
+            run_id=run.id,
+            step_id="gate",
+            step_type="review_gate",
+            status=StepRunStatus.WAITING_REVIEW,
+        )
+        db.add(sr)
+        await db.flush()
+        review = WorkflowStepReview(
+            step_run_id=sr.id, org_id=oid, due_at=datetime.now(UTC) + timedelta(days=7)
+        )
+        db.add(review)
+        await db.commit()
+        review_id = review.id
+
+    # Student blocked
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/step-reviews/{review_id}/decide",
+        json={"decision": "approved"},
+        headers=h_student,
+    )
+    assert r.status_code == 403
+
+    # Owner allowed
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/step-reviews/{review_id}/decide",
+        json={"decision": "approved"},
+        headers=h_owner,
+    )
+    assert r2.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_workflow_pack_path_item_progress_no_crash(c):
+    """get_path_progress must tolerate WORKFLOW_PACK items — they were added
+    to the enum without a progress branch (audit finding 16)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    path_id = (
+        await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "WF Path"}, headers=h)
+    ).json()["data"]["id"]
+
+    # A regular skill item so there's real progress to compute
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories", json={"name": f"PC-{uuid.uuid4().hex[:4]}"}, headers=h
+        )
+    ).json()["data"]["id"]
+    skill_id = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "WF Path Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/paths/{path_id}/items",
+        json={"item_type": "skill", "skill_id": skill_id},
+        headers=h,
+    )
+
+    # Insert a WORKFLOW_PACK item directly (creation API is out of scope)
+    from app.core.database import AsyncSessionLocal
+    from app.models.learning_path import LearningPathItem, PathItemType
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            LearningPathItem(
+                path_id=path_id,
+                item_type=PathItemType.WORKFLOW_PACK,
+                workflow_pack_id="01AAAAAAAAAAAAAAAAAAAAAAAA",
+                sort_order=99,
+            )
+        )
+        await db.commit()
+
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{path_id}/my-progress", headers=h)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    types = {i["type"] for i in data["items"]}
+    assert "workflow_pack" in types
+    # Both items count as required; neither is done
+    assert data["total_required"] == 2
+    assert data["completed"] == 0

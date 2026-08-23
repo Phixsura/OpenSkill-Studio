@@ -657,3 +657,197 @@ async def test_install_without_version_prefers_stable(c):
     )
     assert r.status_code == 201, r.text
     assert r.json()["data"]["installed_version"] == "1.0.0"
+
+
+# ── Audit fixes (Issue #21 follow-up) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_installation_detail_returns_input_schema(c):
+    """Run form for PRIVATE packs breaks without the definition's inputs —
+    the installation detail endpoint must expose input_schema (audit HIGH 2)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # Private (unapproved) pack — the registry preview is NOT available
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "Priv IS"}, headers=h)
+    pid = r.json()["data"]["id"]
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _definition()},
+        headers=h,
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
+    )
+    install_id = r2.json()["data"]["id"]
+
+    r3 = await c.get(f"/api/v1/orgs/{oid}/workflow-installations/{install_id}", headers=h)
+    assert r3.status_code == 200
+    schema = r3.json()["data"]["input_schema"]
+    assert schema, "input_schema must be populated on the detail endpoint"
+    assert schema[0]["key"] == "topic"
+    assert schema[0]["type"] == "text"
+    assert schema[0]["required"] is True
+
+    # List endpoint stays lean (schema not resolved per row)
+    r4 = await c.get(f"/api/v1/orgs/{oid}/workflow-installations", headers=h)
+    assert all(row["input_schema"] == [] for row in r4.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_install_race_integrity_error_maps_to_409(c):
+    """A concurrent install losing the unique-index race must surface 409
+    ALREADY_INSTALLED, not a 500 (audit MEDIUM 9 — TOCTOU)."""
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid)
+
+    # Seed a conflicting row directly so the service's pre-check misses it
+    # is impossible via API; instead call the service with a stale session
+    # state: pre-insert the row AFTER the service's existence check by
+    # simulating the outcome — insert first, then call install() which
+    # will pass its own check only if we bypass it. Simplest determinis-
+    # tic reproduction: two service calls on one session, second one's
+    # pre-check sees nothing because we expunge the row from identity map.
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.services.workflow_installation import WorkflowInstallationService
+
+    async with AsyncSessionLocal() as db:
+        svc = WorkflowInstallationService(db)
+        install = await svc.install(oid, pid, None, u["id"])
+        await db.commit()
+        first_id = install.id
+
+    async with AsyncSessionLocal() as db:
+        svc = WorkflowInstallationService(db)
+        # Monkeypatch the pre-check SELECT to simulate the race window:
+        # the concurrent transaction's row isn't visible yet.
+        orig_execute = db.execute
+
+        async def patched(stmt, *a, **kw):
+            res = await orig_execute(stmt, *a, **kw)
+            desc = getattr(stmt, "column_descriptions", None)
+            if desc and desc[0].get("type") is WorkflowPackInstallation:
+
+                class _Empty:
+                    def scalar_one_or_none(self):
+                        return None
+
+                return _Empty()
+            return res
+
+        db.execute = patched
+        try:
+            with pytest.raises(AppError) as exc_info:
+                await svc.install(oid, pid, None, u["id"])
+        finally:
+            db.execute = orig_execute
+        assert exc_info.value.code == "ALREADY_INSTALLED"
+        assert exc_info.value.status_code == 409
+
+    # First installation is intact
+    r = await c.get(f"/api/v1/orgs/{oid}/workflow-installations/{first_id}", headers=h)
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_upgrade_and_diff_recheck_pack_access(c):
+    """If a pack goes PRIVATE after a cross-org install, upgrade and diff
+    must re-apply access rules → 404 (audit MEDIUM 10)."""
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    pid = await _public_pack(c, h1, o1, versions=("1.0.0", "2.0.0"))
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    r = await c.post(
+        f"/api/v1/orgs/{o2}/workflow-installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=h2,
+    )
+    assert r.status_code == 201, r.text
+    install_id = r.json()["data"]["id"]
+
+    # Owner flips the pack to PRIVATE
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import PackVisibility
+    from app.models.workflow_pack import WorkflowPack
+
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(WorkflowPack, pid)
+        pack.visibility = PackVisibility.PRIVATE
+        await db.commit()
+
+    r2 = await c.post(
+        f"/api/v1/orgs/{o2}/workflow-installations/{install_id}/upgrade",
+        json={"version": "2.0.0"},
+        headers=h2,
+    )
+    assert r2.status_code == 404
+    assert r2.json()["error"]["code"] == "WORKFLOW_PACK_NOT_FOUND"
+
+    r3 = await c.get(
+        f"/api/v1/orgs/{o2}/workflow-installations/{install_id}/diff?to=2.0.0", headers=h2
+    )
+    assert r3.status_code == 404
+
+    # The OWNER org can still upgrade its own private pack
+    r4 = await c.post(
+        f"/api/v1/orgs/{o1}/workflow-installations", json={"pack_id": pid}, headers=h1
+    )
+    own_install = r4.json()["data"]["id"]
+    r5 = await c.get(
+        f"/api/v1/orgs/{o1}/workflow-installations/{own_install}/diff?to=2.0.0", headers=h1
+    )
+    assert r5.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_registry_rejected_public_pack_hidden(c):
+    """A PUBLIC pack whose review_status regressed past 'approved' must 404
+    on the registry detail/releases/preview endpoints (audit MEDIUM 11)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid)
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_pack import WorkflowPack
+
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(WorkflowPack, pid)
+        pack.review_status = "rejected"
+        await db.commit()
+
+    for path in (
+        f"/api/v1/registry/workflow-packs/{pid}",
+        f"/api/v1/registry/workflow-packs/{pid}/releases",
+        f"/api/v1/registry/workflow-packs/{pid}/preview",
+    ):
+        r = await c.get(path)
+        assert r.status_code == 404, f"{path}: {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_preview_strips_pinned_binding_details(c):
+    """The anonymous registry preview must not leak the author org's
+    pinned_offering_id / binding_mode provider setup (audit MEDIUM 12)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    d = _definition()
+    d["steps"][1]["config"]["binding_mode"] = "pinned"
+    d["steps"][1]["config"]["pinned_offering_id"] = "01SECRETOFFERING0000000000"
+    pid = await _public_pack(c, h, oid, definition=d)
+
+    r = await c.get(f"/api/v1/registry/workflow-packs/{pid}/preview")
+    assert r.status_code == 200
+    preview = r.json()["data"]
+    assert "01SECRETOFFERING0000000000" not in r.text
+    for step in preview["definition"]["steps"]:
+        cfg = step.get("config") or {}
+        assert "pinned_offering_id" not in cfg
+        assert "binding_mode" not in cfg

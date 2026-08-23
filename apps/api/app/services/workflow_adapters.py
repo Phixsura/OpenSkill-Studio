@@ -65,7 +65,12 @@ class MockAdapter(ProviderAdapterBase):
 
 
 class AnthropicReviewAdapter(ProviderAdapterBase):
-    """multimodal_review capability via the existing LLM client (create_llm_client)."""
+    """multimodal_review capability via the org's OWN Anthropic API key.
+
+    The org credential is mandatory: falling back to the platform key would
+    let any org burn the platform LLM budget with attacker-chosen models
+    (the offering's model_name is org-controlled).
+    """
 
     key = "anthropic"
 
@@ -78,11 +83,19 @@ class AnthropicReviewAdapter(ProviderAdapterBase):
         credentials: dict[str, str] | None,
         idempotency_key: str,
     ) -> dict:
-        from app.core.llm import create_llm_client
+        from app.core.llm import AnthropicClient
 
-        # Note: Phase 1 uses the platform-level LLM key from settings; the
-        # org credential (if provided) is reserved for Phase 2 per-org keys.
-        client = create_llm_client(model_name or None)
+        # ORG key required — never fall back to the platform key (R-budget).
+        if not credentials or not credentials.get("api_key"):
+            raise RuntimeError(
+                "Anthropic connection has no API key credential — "
+                "the org must supply its own key"
+            )
+        # Model allowlist: org-controlled model_name must be a Claude model id.
+        model = model_name or "claude-sonnet-5"
+        if not model.startswith("claude-"):
+            raise RuntimeError(f"Model '{model}' is not an allowed Anthropic model")
+        client = AnthropicClient(credentials["api_key"], model)
         prompt_text = str(inputs.get("prompt", "Review the provided content."))[:4000]
         subject = str(inputs.get("subject", ""))[:4000]
         response = await client.complete(

@@ -16,6 +16,9 @@ interface Installation {
   status: string;
   locally_modified: boolean;
   installed_at: string;
+  // Effective input schema from the installed release / local definition —
+  // works for PRIVATE packs where the public registry 404s.
+  input_schema?: InputField[];
 }
 
 interface Binding {
@@ -64,9 +67,7 @@ export default function WorkflowInstallationDetailPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["workflow-installation", orgId, installId],
     queryFn: () =>
-      apiWithAuth<{ data: Installation }>(
-        `/orgs/${orgId}/workflow-installations/${installId}`,
-      ),
+      apiWithAuth<{ data: Installation }>(`/orgs/${orgId}/workflow-installations/${installId}`),
   });
   const install = data?.data;
 
@@ -81,12 +82,13 @@ export default function WorkflowInstallationDetailPage() {
 
   const { data: offeringsData } = useQuery({
     queryKey: ["provider-offerings", orgId],
-    queryFn: () =>
-      apiWithAuth<{ data: Offering[] }>(`/orgs/${orgId}/provider-offerings`),
+    queryFn: () => apiWithAuth<{ data: Offering[] }>(`/orgs/${orgId}/provider-offerings`),
   });
   const offerings = offeringsData?.data ?? [];
 
-  // Public registry carries the input_schema for the run form
+  // Pack name (and legacy input_schema fallback) from the public registry —
+  // fails silently for PRIVATE packs, which is fine: the authoritative
+  // input schema comes from the installation detail itself.
   const { data: packData } = useQuery({
     queryKey: ["registry-workflow-pack", install?.pack_id],
     enabled: !!install?.pack_id,
@@ -95,7 +97,11 @@ export default function WorkflowInstallationDetailPage() {
         `/registry/workflow-packs/${install!.pack_id}`,
       ).catch(() => null),
   });
-  const inputSchema = packData?.data?.input_schema ?? [];
+  // Prefer the installation's own schema (works for private org packs);
+  // fall back to the registry copy only when absent/empty.
+  const installSchema = install?.input_schema ?? [];
+  const inputSchema =
+    installSchema.length > 0 ? installSchema : (packData?.data?.input_schema ?? []);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["workflow-installation", orgId, installId] });
@@ -114,8 +120,7 @@ export default function WorkflowInstallationDetailPage() {
       invalidate();
       toast.success("Installation updated");
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Upgrade failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Upgrade failed"),
   });
 
   const forkMutation = useMutation({
@@ -127,8 +132,7 @@ export default function WorkflowInstallationDetailPage() {
       invalidate();
       toast.success("Installation forked — it no longer tracks the source pack");
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Fork failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Fork failed"),
   });
 
   const removeMutation = useMutation({
@@ -141,8 +145,7 @@ export default function WorkflowInstallationDetailPage() {
       toast.success("Installation removed");
       router.replace(`/dashboard/orgs/${orgId}/workflow-installations`);
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Remove failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Remove failed"),
   });
 
   const confirmBindingMutation = useMutation({
@@ -154,23 +157,19 @@ export default function WorkflowInstallationDetailPage() {
       const binding = bindings.find((b) => b.step_id === stepId);
       const offeringId = edit?.offering_id || binding?.offering_id || null;
       const bindingMode = edit?.binding_mode ?? binding?.binding_mode ?? "preferred";
-      return apiWithAuth(
-        `/orgs/${orgId}/workflow-installations/${installId}/bindings/${stepId}`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            offering_id: offeringId,
-            binding_mode: bindingMode,
-          }),
-        },
-      );
+      return apiWithAuth(`/orgs/${orgId}/workflow-installations/${installId}/bindings/${stepId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          offering_id: offeringId,
+          binding_mode: bindingMode,
+        }),
+      });
     },
     onSuccess: () => {
       invalidate();
       toast.success("Binding confirmed");
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Binding update failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Binding update failed"),
   });
 
   const startRunMutation = useMutation({
@@ -183,8 +182,7 @@ export default function WorkflowInstallationDetailPage() {
       toast.success("Run started");
       router.push(`/dashboard/orgs/${orgId}/workflow-runs/${res.data.id}`);
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Run failed to start"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Run failed to start"),
   });
 
   const loadDiff = async () => {
@@ -234,9 +232,7 @@ export default function WorkflowInstallationDetailPage() {
                 <select
                   id={`run-${field.key}`}
                   value={runInputs[field.key] ?? ""}
-                  onChange={(e) =>
-                    setRunInputs({ ...runInputs, [field.key]: e.target.value })
-                  }
+                  onChange={(e) => setRunInputs({ ...runInputs, [field.key]: e.target.value })}
                   className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 text-sm"
                 >
                   <option value="">Select…</option>
@@ -250,9 +246,7 @@ export default function WorkflowInstallationDetailPage() {
                 <Input
                   id={`run-${field.key}`}
                   value={runInputs[field.key] ?? ""}
-                  onChange={(e) =>
-                    setRunInputs({ ...runInputs, [field.key]: e.target.value })
-                  }
+                  onChange={(e) => setRunInputs({ ...runInputs, [field.key]: e.target.value })}
                   placeholder={
                     ["image", "video", "audio", "reference_asset"].includes(field.type)
                       ? "Asset reference (ULID)"
@@ -335,9 +329,7 @@ export default function WorkflowInstallationDetailPage() {
                       ...bindingEdits,
                       [binding.step_id]: {
                         offering_id:
-                          bindingEdits[binding.step_id]?.offering_id ??
-                          binding.offering_id ??
-                          "",
+                          bindingEdits[binding.step_id]?.offering_id ?? binding.offering_id ?? "",
                         binding_mode: e.target.value,
                       },
                     })
@@ -390,8 +382,8 @@ export default function WorkflowInstallationDetailPage() {
           {diff && (
             <div className="rounded border p-3 text-sm">
               <p>
-                Steps: +{diff.steps.added.length} added, −{diff.steps.removed.length}{" "}
-                removed, ~{diff.steps.changed.length} changed
+                Steps: +{diff.steps.added.length} added, −{diff.steps.removed.length} removed, ~
+                {diff.steps.changed.length} changed
               </p>
               {diff.steps.added.length > 0 && (
                 <p className="text-xs text-green-700 dark:text-green-300">

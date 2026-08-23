@@ -64,12 +64,13 @@ const NON_TERMINAL = new Set(["pending", "running", "waiting_review"]);
 export default function WorkflowRunDetailPage() {
   const { orgId, runId } = useParams<{ orgId: string; runId: string }>();
   const queryClient = useQueryClient();
-  const [note, setNote] = useState("");
+  // Keyed per review id — parallel branches can suspend multiple review
+  // gates at once, and a single shared note would leak text across gates.
+  const [notes, setNotes] = useState<Record<string, string>>({});
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["workflow-run", orgId, runId],
-    queryFn: () =>
-      apiWithAuth<{ data: RunDetail }>(`/orgs/${orgId}/workflow-runs/${runId}`),
+    queryFn: () => apiWithAuth<{ data: RunDetail }>(`/orgs/${orgId}/workflow-runs/${runId}`),
     refetchInterval: (query) =>
       NON_TERMINAL.has(query.state.data?.data.status ?? "") ? 3000 : false,
   });
@@ -80,24 +81,27 @@ export default function WorkflowRunDetailPage() {
   const { data: reviewsData } = useQuery({
     queryKey: ["step-reviews", orgId],
     enabled: waitingReview,
-    queryFn: () =>
-      apiWithAuth<{ data: StepReview[] }>(`/orgs/${orgId}/step-reviews`),
+    queryFn: () => apiWithAuth<{ data: StepReview[] }>(`/orgs/${orgId}/step-reviews`),
   });
 
   const decideMutation = useMutation({
     mutationFn: ({ reviewId, decision }: { reviewId: string; decision: string }) =>
       apiWithAuth(`/orgs/${orgId}/step-reviews/${reviewId}/decide`, {
         method: "POST",
-        body: JSON.stringify({ decision, note: note || undefined }),
+        body: JSON.stringify({ decision, note: notes[reviewId] || undefined }),
       }),
-    onSuccess: () => {
-      setNote("");
+    onSuccess: (_data, { reviewId }) => {
+      // Clear only the decided review's note — other gates keep theirs
+      setNotes((prev) => {
+        const next = { ...prev };
+        delete next[reviewId];
+        return next;
+      });
       queryClient.invalidateQueries({ queryKey: ["workflow-run", orgId, runId] });
       queryClient.invalidateQueries({ queryKey: ["step-reviews", orgId] });
       toast.success("Decision recorded");
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Decision failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Decision failed"),
   });
 
   const cancelMutation = useMutation({
@@ -107,8 +111,7 @@ export default function WorkflowRunDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["workflow-run", orgId, runId] });
       toast.success("Run cancelled");
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Cancel failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Cancel failed"),
   });
 
   if (isLoading) {
@@ -200,15 +203,15 @@ export default function WorkflowRunDetailPage() {
                 {step.status === "waiting_review" && review && (
                   <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950">
                     <p className="text-sm font-medium">Review required</p>
-                    {review.instructions && (
-                      <p className="mt-1 text-sm">{review.instructions}</p>
-                    )}
+                    {review.instructions && <p className="mt-1 text-sm">{review.instructions}</p>}
                     <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
                       Due {new Date(review.due_at).toLocaleString()}
                     </p>
                     <textarea
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
+                      value={notes[review.id] ?? ""}
+                      onChange={(e) =>
+                        setNotes((prev) => ({ ...prev, [review.id]: e.target.value }))
+                      }
                       rows={2}
                       maxLength={2000}
                       placeholder="Decision note (optional)"
