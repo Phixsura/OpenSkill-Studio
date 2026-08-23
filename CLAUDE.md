@@ -69,3 +69,8 @@ All architecture decisions are documented in `docs/design/`:
 - ADR-006: AI evaluation pipeline
 - ADR-007: Portfolio & public page
 - ADR-008: Cohorts, client briefs & multimodal AI evaluation
+- ADR-009: Skill pack registry & versioned content distribution
+- ADR-010: Workflow Packs & execution runtime
+- ADR-011: Provider capability abstraction
+- ADR-012: Explainable matching engine
+- ADR-013: Solution composers & creator matching

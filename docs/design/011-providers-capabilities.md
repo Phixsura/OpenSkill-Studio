@@ -1,0 +1,91 @@
+# ADR-011: Provider Capability Abstraction
+
+## Status: Accepted
+
+## Context
+
+Workflow steps must not hard-code vendors or models: AI tools change faster than curricula, and a workflow pinned to one vendor dies with that vendor's API. Issue #21 requires steps to reference *capabilities* (`image_generation`, `image_to_video`, …) that organizations satisfy with whatever providers they have connected — while guaranteeing that provider credentials never leak into definitions, manifests, exports, or API responses.
+
+Industry precedent (LiteLLM's `mode` field, OpenRouter's model catalog, HuggingFace's `pipeline_tag`, Kubernetes device plugins) converges on the same shape: a closed capability taxonomy as the join key, with a separate adapter/config/offering/credential split.
+
+## Decision
+
+### Capability taxonomy — a reference table, not a Python enum
+
+`capability_tags` is seeded by migration with deterministic ULIDs and extended only through curated migrations (platform) or `x-<org-slug>.`-prefixed org extensions (excluded from global matching):
+
+| key | category | io_signature |
+|---|---|---|
+| `image_generation` | generation | prompt → image |
+| `image_editing` | editing | image+prompt → image |
+| `image_to_video` | generation | image+prompt → video |
+| `text_to_video` | generation | prompt → video |
+| `video_editing` | editing | video → video |
+| `voice_generation` | audio | text → audio |
+| `multimodal_review` | review | image+prompt → json |
+| `upscale` | editing | image → image |
+| `background_removal` | editing | image → image |
+
+Each capability carries a `contract_version` (bumped when its feature-key contract changes). Closed ≠ frozen: the vocabulary grows by migration review, never by free-form publisher tags — free tags never reach hard filters.
+
+### Four-entity provider split
+
+```
+ProviderAdapter        platform code catalog: key, config_schema,
+   │                   credential_fields (NAMES only — never values)
+   ▼
+ProviderConnection     org-scoped: adapter + non-sensitive config +
+   │                   credential_id (reference), status, health fields
+   ▼
+ProviderModelOffering  the MATCHABLE unit: capability_key + model_name +
+   │                   features[] + limits + cost_per_call_usd + quality_tier
+   ▼
+OrgCredential          Fernet envelope-encrypted {field: value} JSON
+```
+
+Rationale: matching operates on *offerings* (capability + features + cost), connections carry org configuration, adapters carry code, and credentials are an isolated write-only store. No entity mixes concerns.
+
+### Credential contract (write-only, late decryption)
+
+- Credential values are accepted on connection create/update, encrypted with Fernet (`CREDENTIAL_ENCRYPTION_KEY`, required in production; dev derives from the JWT secret), and **never returned by any endpoint** — responses carry only `credential_id`.
+- Field names smuggled into non-sensitive `config` are rejected (`CREDENTIAL_IN_CONFIG` 422); fields the adapter did not declare are rejected (`UNKNOWN_CREDENTIAL_FIELD` 422).
+- Decryption happens in exactly one place: inside the workflow executor, immediately before the adapter call. Definitions, manifests, exports, and job rows carry references only.
+- Deleting a connection deletes its credential row.
+
+### Binding ladder (auto / preferred / pinned)
+
+Each `provider_action` step in an installation gets a `workflow_step_bindings` row resolving which offering executes it:
+
+1. **pinned** in the step config (`pinned_offering_id`): that offering or nothing — unavailable means hard stop (`allow_fallbacks: false` semantics).
+2. **confirmed binding** for the installation+step (human-confirmed, `confirmed_by`): used if still active; a stale *pinned* binding is a hard stop.
+3. **auto**: cheapest active offering for the capability whose `features` are a superset of the step's `required_features`.
+
+Bindings are **revalidated at execution time** — a disabled connection or deactivated offering yields `BINDING_STALE` / `NO_ELIGIBLE_PROVIDER` step failure rather than silently switching providers. The offering actually used is recorded on every step run (`offering_id` = actual_offering_used).
+
+### Capability gate on install — never auto-connect
+
+Installing a workflow pack checks the release manifest's `dependencies.requires_capabilities` against the org's *active* offerings (feature-superset match). Unsatisfied requirements fail the install with 422 `CAPABILITY_UNSATISFIED` and a structured gaps list naming each missing capability/feature.
+
+The platform **never** auto-connects a provider to satisfy a gap: auto-connecting a provider is this platform's equivalent of auto-purchasing, and it is a red line. Upgrades re-run the same gate.
+
+### Phase-1 adapters
+
+- `mock` — deterministic echo (same inputs → same output hash), no credentials, no network. Powers tests, demos, and local development.
+- `anthropic` — `multimodal_review` via the existing LLM client (`create_llm_client`); declares `credential_fields: ["api_key"]` (Phase 1 uses the platform key; per-org keys are the declared Phase-2 use of the credential).
+
+Adapters implement one contract: `execute(capability, model_name, inputs, config, credentials, idempotency_key) -> dict`. Retry policy lives in the runtime, not the adapter. Health checks are manual/endpoint-triggered — never in the request path.
+
+## Consequences
+
+### Positive
+
+- Workflows survive vendor churn: swapping providers is an org-level offering change, not a pack edit.
+- Credential exposure surface is a single decryption call site; the leak-test sweep (`test_issue21_security.py`) asserts secrets appear in no read endpoint.
+- Cost-aware auto-binding gives sensible defaults while pinning preserves author intent with fail-fast semantics.
+- The offerings table doubles as the provider-resolution candidate pool for the matching engine (ADR-012) with no extra modeling.
+
+### Negative
+
+- A closed taxonomy requires governance: new capabilities need a migration + review (deliberate friction).
+- Feature-superset matching is exact-string; rich constraint matching (resolution ranges, duration limits) is deferred — `limits` JSONB is stored but not yet enforced at binding time.
+- Phase 1 has no background health probing; a dead provider surfaces only at execution (mitigated by retry + BINDING_STALE reporting).
