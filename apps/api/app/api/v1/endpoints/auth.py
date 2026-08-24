@@ -163,9 +163,15 @@ async def refresh(
 async def logout(
     request: Request,
     response: Response,
-    _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # No Bearer requirement: logout means "revoke the session in my cookie".
+    # Requiring an access token made logout silently FAIL when clicked before
+    # auth hydration (store token still null) — the 401 was swallowed
+    # client-side, the refresh cookie stayed valid, and the "logged out"
+    # user was re-authenticated on the next visit (shared-machine hazard).
+    # Revocation is keyed on the httpOnly cookie itself, which is the
+    # credential being revoked — possession is sufficient authorization.
     raw_token = request.cookies.get("refresh_token")
     if raw_token:
         service = AuthService(db)

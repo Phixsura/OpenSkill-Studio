@@ -117,10 +117,21 @@ async def get_brief(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    # Plain members may view OPEN/ACTIVE briefs — the apply flow lives on
+    # this page and apply_to_brief already allows any org member. Draft and
+    # closed briefs stay instructor-only.
+    member = await require_org_member(org_id, user, db)
     svc = ClientBriefService(db)
     brief = await svc.get_brief(brief_id)
     if brief.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Brief not found")
+    from app.models.client_brief import BriefStatus
+
+    if brief.status not in (BriefStatus.OPEN, BriefStatus.ACTIVE) and member.role not in (
+        OrgRole.OWNER,
+        OrgRole.ADMIN,
+        OrgRole.INSTRUCTOR,
+    ):
         raise HTTPException(status_code=404, detail="Brief not found")
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
@@ -261,8 +272,10 @@ async def list_applications(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Instructor: list all applications for a brief."""
-    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    """Instructors see ALL applications; plain members see only their own
+    (the brief detail page uses this to show the "you have applied" state)."""
+    member = await require_org_member(org_id, user, db)
+    is_instructor = member.role in INSTRUCTOR_ROLES
 
     # Verify the brief belongs to this org
     svc = ClientBriefService(db)
@@ -275,12 +288,15 @@ async def list_applications(
     from app.models.client_brief import BriefApplication
     from app.models.user import User as UserModel
 
-    result = await db.execute(
+    query = (
         select(BriefApplication, UserModel.display_name)
         .join(UserModel, UserModel.id == BriefApplication.user_id, isouter=True)
         .where(BriefApplication.brief_id == brief_id)
         .order_by(BriefApplication.applied_at)
     )
+    if not is_instructor:
+        query = query.where(BriefApplication.user_id == user.id)
+    result = await db.execute(query)
     return DataResponse(
         data=[
             {

@@ -74,12 +74,12 @@ export default function JoinByCodePage() {
     setError(null);
 
     try {
-      const res = await apiWithAuth<{ org_id: string }>("/invites/join", {
+      const res = await apiWithAuth<{ data: { org_id: string } }>("/invites/join", {
         method: "POST",
         body: JSON.stringify({ code }),
       });
       setSuccess(true);
-      setTimeout(() => router.push(`/dashboard/orgs/${res.org_id}`), 1500);
+      setTimeout(() => router.push(`/dashboard/orgs/${res.data.org_id}`), 1500);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to join.");
     } finally {

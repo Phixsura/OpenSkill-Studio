@@ -12,7 +12,13 @@ interface ProgressData {
   exercises_total: number;
   exercises_completed: number;
   completion_percentage: number;
-  categories: { id: string; name: string; skills_total: number; skills_completed: number; completion_percentage: number }[];
+  categories: {
+    id: string;
+    name: string;
+    skills_total: number;
+    skills_completed: number;
+    completion_percentage: number;
+  }[];
 }
 
 export default function ProgressPage() {
@@ -20,7 +26,8 @@ export default function ProgressPage() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["progress", orgId],
-    queryFn: () => apiWithAuth<ProgressData>(`/orgs/${orgId}/progress/me`),
+    queryFn: () =>
+      apiWithAuth<{ data: ProgressData }>(`/orgs/${orgId}/progress/me`).then((r) => r.data),
   });
 
   if (isLoading) {
@@ -42,9 +49,15 @@ export default function ProgressPage() {
       {/* Overall stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Completion" value={`${data.completion_percentage}%`} />
-        <StatCard label="Skills Completed" value={`${data.skills_completed}/${data.skills_total}`} />
+        <StatCard
+          label="Skills Completed"
+          value={`${data.skills_completed}/${data.skills_total}`}
+        />
         <StatCard label="In Progress" value={String(data.skills_in_progress)} />
-        <StatCard label="Exercises Done" value={`${data.exercises_completed}/${data.exercises_total}`} />
+        <StatCard
+          label="Exercises Done"
+          value={`${data.exercises_completed}/${data.exercises_total}`}
+        />
       </div>
 
       {/* Progress bar */}

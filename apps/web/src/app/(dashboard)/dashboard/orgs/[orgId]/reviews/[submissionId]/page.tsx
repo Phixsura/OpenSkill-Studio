@@ -7,11 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { Button } from "@/components/ui/button";
-import {
-  AnnotatedImage,
-  type CommentRegion,
-  type ItemComment,
-} from "@/components/annotated-media";
+import { AnnotatedImage, type CommentRegion, type ItemComment } from "@/components/annotated-media";
 import { CommentPanel } from "@/components/comment-panel";
 import { GenerationData, parseGenerationMeta } from "@/components/generation-data";
 import { MediaPreview } from "@/components/media-preview";
@@ -39,7 +35,13 @@ interface SubmissionDetail {
   status: string;
   is_late: boolean;
   items: SubItem[];
-  reviews: { id: string; status: string; score: number | null; feedback: string | null; created_at: string }[];
+  reviews: {
+    id: string;
+    status: string;
+    score: number | null;
+    feedback: string | null;
+    created_at: string;
+  }[];
 }
 
 export default function ReviewDetailPage() {
@@ -65,6 +67,17 @@ export default function ReviewDetailPage() {
   });
 
   const sub = data?.data;
+
+  // The project's configured max_score — the backend validates score against
+  // it (SCORE_EXCEEDS_MAX), so the form must too instead of hardcoding 100.
+  const { data: projectData } = useQuery({
+    queryKey: ["review-project", sub?.project_id],
+    enabled: !!sub?.project_id,
+    queryFn: () =>
+      apiWithAuth<{ data: { max_score: number } }>(`/orgs/${orgId}/projects/${sub!.project_id}`),
+  });
+  const maxScore = projectData?.data?.max_score ?? 100;
+
   const [score, setScore] = useState("");
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +115,8 @@ export default function ReviewDetailPage() {
   });
 
   if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
-  if (isError || !sub) return <p className="text-[hsl(var(--destructive))]">Submission not found.</p>;
+  if (isError || !sub)
+    return <p className="text-[hsl(var(--destructive))]">Submission not found.</p>;
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -189,7 +203,7 @@ export default function ReviewDetailPage() {
                       })()}
                     </div>
                   ) : latest.type === "markdown" ? (
-                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {latest.content ?? ""}
                       </ReactMarkdown>
@@ -240,7 +254,7 @@ export default function ReviewDetailPage() {
       </div>
 
       {/* Review form */}
-      <div className="rounded-lg border p-6 space-y-4">
+      <div className="space-y-4 rounded-lg border p-6">
         <h2 className="text-lg font-semibold">Your Review</h2>
 
         <div>
@@ -248,11 +262,11 @@ export default function ReviewDetailPage() {
           <input
             type="number"
             min={0}
-            max={100}
+            max={maxScore}
             value={score}
             onChange={(e) => setScore(e.target.value)}
             className="mt-1 block w-32 rounded-md border bg-transparent px-3 py-2 text-sm"
-            placeholder="0-100"
+            placeholder={`0-${maxScore}`}
           />
         </div>
 
@@ -274,8 +288,8 @@ export default function ReviewDetailPage() {
             onClick={() => {
               if (score) {
                 const n = parseInt(score, 10);
-                if (isNaN(n) || n < 0 || n > 100) {
-                  setError("Score must be between 0 and 100");
+                if (isNaN(n) || n < 0 || n > maxScore) {
+                  setError(`Score must be between 0 and ${maxScore}`);
                   return;
                 }
               }
@@ -313,7 +327,9 @@ export default function ReviewDetailPage() {
                   <span className="capitalize">{r.status.replace("_", " ")}</span>
                   {r.score !== null && <span className="font-bold">{r.score} pts</span>}
                 </div>
-                {r.feedback && <p className="mt-2 text-[hsl(var(--muted-foreground))]">{r.feedback}</p>}
+                {r.feedback && (
+                  <p className="mt-2 text-[hsl(var(--muted-foreground))]">{r.feedback}</p>
+                )}
               </div>
             ))}
           </div>

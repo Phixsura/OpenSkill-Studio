@@ -39,6 +39,7 @@ interface Offering {
   capability_key: string;
   model_name: string;
   quality_tier: string;
+  cost_per_call_usd: number | null;
   is_active: boolean;
 }
 
@@ -55,6 +56,7 @@ export default function ProvidersPage() {
   const [offCapability, setOffCapability] = useState("");
   const [offModel, setOffModel] = useState("");
   const [offTier, setOffTier] = useState("standard");
+  const [offCost, setOffCost] = useState("");
 
   const { data: adaptersData } = useQuery({
     queryKey: ["provider-adapters"],
@@ -71,15 +73,13 @@ export default function ProvidersPage() {
 
   const { data: connectionsData } = useQuery({
     queryKey: ["provider-connections", orgId],
-    queryFn: () =>
-      apiWithAuth<{ data: Connection[] }>(`/orgs/${orgId}/provider-connections`),
+    queryFn: () => apiWithAuth<{ data: Connection[] }>(`/orgs/${orgId}/provider-connections`),
   });
   const connections = connectionsData?.data ?? [];
 
   const { data: offeringsData } = useQuery({
     queryKey: ["provider-offerings", orgId],
-    queryFn: () =>
-      apiWithAuth<{ data: Offering[] }>(`/orgs/${orgId}/provider-offerings`),
+    queryFn: () => apiWithAuth<{ data: Offering[] }>(`/orgs/${orgId}/provider-offerings`),
   });
   const offerings = offeringsData?.data ?? [];
 
@@ -104,8 +104,7 @@ export default function ProvidersPage() {
       setCredValues({});
       queryClient.invalidateQueries({ queryKey: ["provider-connections", orgId] });
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Connection failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Connection failed"),
   });
 
   const deleteConnection = useMutation({
@@ -134,15 +133,29 @@ export default function ProvidersPage() {
           capability_key: offCapability,
           model_name: offModel,
           quality_tier: offTier,
+          // Cost drives binding auto-suggestion ranking ("cheapest active
+          // offering") — optional but should be settable from the UI
+          cost_per_call_usd: offCost ? Number(offCost) : undefined,
         }),
       }),
     onSuccess: () => {
       toast.success("Offering added");
       setOffModel("");
+      setOffCost("");
+      queryClient.invalidateQueries({ queryKey: ["provider-offerings", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to add offering"),
+  });
+
+  const deleteOffering = useMutation({
+    mutationFn: (offeringId: string) =>
+      apiWithAuth(`/orgs/${orgId}/provider-offerings/${offeringId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Offering removed");
       queryClient.invalidateQueries({ queryKey: ["provider-offerings", orgId] });
     },
     onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Failed to add offering"),
+      toast.error(err instanceof ApiError ? err.message : "Failed to remove offering"),
   });
 
   return (
@@ -150,8 +163,8 @@ export default function ProvidersPage() {
       <div>
         <h1 className="text-3xl font-bold">Providers</h1>
         <p className="mt-1 text-[hsl(var(--muted-foreground))]">
-          Connect AI providers and declare which capabilities each model offers.
-          Workflows bind to capabilities, never to vendors.
+          Connect AI providers and declare which capabilities each model offers. Workflows bind to
+          capabilities, never to vendors.
         </p>
       </div>
 
@@ -199,20 +212,12 @@ export default function ProvidersPage() {
                         >
                           Confirm delete?
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setArmedDelete(null)}
-                        >
+                        <Button size="sm" variant="secondary" onClick={() => setArmedDelete(null)}>
                           Cancel
                         </Button>
                       </div>
                     ) : (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setArmedDelete(conn.id)}
-                      >
+                      <Button size="sm" variant="secondary" onClick={() => setArmedDelete(conn.id)}>
                         Delete
                       </Button>
                     )}
@@ -225,7 +230,9 @@ export default function ProvidersPage() {
                         <th className="py-1 font-medium">Capability</th>
                         <th className="py-1 font-medium">Model</th>
                         <th className="py-1 font-medium">Tier</th>
+                        <th className="py-1 font-medium">Cost/call</th>
                         <th className="py-1 font-medium">Active</th>
+                        <th className="py-1" />
                       </tr>
                     </thead>
                     <tbody>
@@ -234,7 +241,21 @@ export default function ProvidersPage() {
                           <td className="py-1.5">{o.capability_key}</td>
                           <td className="py-1.5">{o.model_name}</td>
                           <td className="py-1.5">{o.quality_tier}</td>
+                          <td className="py-1.5">
+                            {o.cost_per_call_usd != null ? `$${o.cost_per_call_usd}` : "—"}
+                          </td>
                           <td className="py-1.5">{o.is_active ? "✓" : "—"}</td>
+                          <td className="py-1.5 text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label={`Remove offering ${o.model_name}`}
+                              disabled={deleteOffering.isPending}
+                              onClick={() => deleteOffering.mutate(o.id)}
+                            >
+                              Remove
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -309,8 +330,8 @@ export default function ProvidersPage() {
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Add Offering</h2>
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          Declare a model on a connection as providing a capability — this is what
-          workflow steps bind to.
+          Declare a model on a connection as providing a capability — this is what workflow steps
+          bind to.
         </p>
         <div className="grid gap-3 sm:grid-cols-4">
           <select
@@ -355,6 +376,16 @@ export default function ProvidersPage() {
             <option value="standard">Standard</option>
             <option value="premium">Premium</option>
           </select>
+          <Input
+            type="number"
+            min={0}
+            max={10000}
+            step="0.000001"
+            placeholder="Cost per call USD (optional)"
+            aria-label="Cost per call USD"
+            value={offCost}
+            onChange={(e) => setOffCost(e.target.value)}
+          />
         </div>
         <Button
           size="sm"
