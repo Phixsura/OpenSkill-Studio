@@ -35,6 +35,12 @@ def sanitize_untrusted_text(s: str, max_len: int = 1000) -> str:
     """Normalize and strip invisible/control characters, then truncate."""
     if not s:
         return ""
+    # Pre-slice BEFORE normalization: NFKC on a hostile multi-MB string costs
+    # seconds of CPU (U+FDFA expands 18x) just to throw it away at truncation.
+    # 8x headroom covers any contracting sequences (invisible chars stripped
+    # below plus combining-mark folds) so the visible output still reaches
+    # max_len for legitimate input.
+    s = s[: max_len * 8]
     s = unicodedata.normalize("NFKC", s)
     s = _INVISIBLE_RE.sub("", s)
     s = _CTRL_RE.sub("", s)

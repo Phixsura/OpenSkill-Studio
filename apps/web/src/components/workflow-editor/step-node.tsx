@@ -46,7 +46,10 @@ export function StepNode({ data, selected }: NodeProps & { data: StepNodeData })
       {step.inputs.length > 0 && (
         <div className="border-t px-3 py-1">
           {step.inputs.map((port) => (
-            <div key={port.port} className="flex items-center gap-1 text-[10px] text-[hsl(var(--muted-foreground))]">
+            <div
+              key={port.port}
+              className="flex items-center gap-1 text-[10px] text-[hsl(var(--muted-foreground))]"
+            >
               <span
                 className="inline-block h-2 w-2 rounded-full"
                 style={{ backgroundColor: ioColor(port.type) }}

@@ -12,16 +12,16 @@ For talent matching, GDPR Art 22 and EEOC adverse-impact concerns require a huma
 
 ### Draft/confirm — the single side-effect gate
 
-All three composers write only `solution_drafts` rows (`draft_type: learning_path | production_solution`), stamped with `engine_version`, the profile id, and the `match_run_id` they derived from. State machine: `draft → confirmed | discarded`; double-confirm returns 422 `DRAFT_ALREADY_CONFIRMED`. Confirmation (`confirmed_by` — always a human user) materializes real entities and records `materialized_entity_id`. Composition requires a **confirmed** requirement profile (`PROFILE_NOT_CONFIRMED` 422).
+All three composers write only `solution_drafts` rows (`draft_type: learning_path | production_solution`), stamped with `engine_version`, the profile id, and the `match_run_id` they derived from. Composer-internal match runs record **no impression events** (the user never sees those lists — ADR-012). Draft payloads are capped at 256 KB (`DRAFT_TOO_LARGE` 422, mirroring the workflow-definition CHECK). State machine: `draft → confirmed | discarded`; double-confirm returns 422 `DRAFT_ALREADY_CONFIRMED`. Confirmation (`confirmed_by` — always a human user) materializes real entities and records `materialized_entity_id`. Composition requires a **confirmed** requirement profile (`PROFILE_NOT_CONFIRMED` 422).
 
 ### Learning composer (Part E)
 
 Algorithm, in order:
 
 1. **Set cover** — greedy weighted: each round picks the ranked pack covering the most uncovered required+preferred capabilities per estimated minute. Capabilities no pack covers become gaps: `{code: NO_CONTENT_AVAILABLE, capability}`.
-2. **Prerequisite expansion** — recursive over `prerequisite_packs` (depth ≤ 5, visited-set cycle detection → 422 `PREREQ_CYCLE`). Prerequisites the learner already completed (SkillProgress COMPLETED on installed pack content) are included as **`waived`** items with evidence — waived is distinct from omitted.
-3. **Ordering** — Kahn topological sort on prerequisite edges (prereqs first, score order within levels).
-4. **Budget truncation** — when `time_budget` is set, items beyond the budget become **`cut_for_budget`** rows *kept in the payload* (struck through in the UI, never silently dropped). If even required items don't fit: gap `{code: BUDGET_INFEASIBLE, minimum_minutes}`.
+2. **Prerequisite expansion** — recursive over `prerequisite_packs` (depth ≤ 5, visited-set cycle detection → 422 `PREREQ_CYCLE`; slugs resolve deterministically — own-org pack first, then oldest by ULID). A pack is **`waived`** only when the learner completed **all** of its installed skills (SkillProgress COMPLETED counted against the pack's non-archived content) — any-one-skill waiving would silently drop whole packs and their capability coverage. Waived is distinct from omitted.
+3. **Ordering** — Kahn topological sort on prerequisite edges (prereqs first, score order within levels). If the sort cannot place every pack, the leftover set is a cycle whose members were all pre-selected (the recursive check never enters already-known packs) — this also fails loudly with `PREREQ_CYCLE` rather than silently dropping the cycle.
+4. **Budget truncation** — when a *user-entered* `time_budget` is set, items beyond the budget become **`cut_for_budget`** rows *kept in the payload* (struck through in the UI, never silently dropped), and cuts **propagate to dependents** — a dependent is never materialized without its required prerequisite. An LLM-*extracted* budget is advisory only (`SOFT_TIME_BUDGET` gap, no cuts — ADR-012 R14). If even required items don't fit: gap `{code: BUDGET_INFEASIBLE, minimum_minutes}`.
 
 Item statuses: `included | waived | cut_for_budget | removed_by_user` (the last via draft PATCH). Every omission is a first-class row with a reason code.
 
@@ -30,7 +30,7 @@ Item statuses: `included | waived | cut_for_budget | removed_by_user` (the last 
 ### Production composer (Part F)
 
 1. Matching engine ranks workflow packs against the production profile.
-2. **Chain assembly** — output-type back-matching: start from the highest-ranked pack producing the goal output type, then walk unresolved required asset inputs (image/video/audio/reference_asset — identity coercion only) backwards, chaining the best-ranked producer for each. Max chain length 4. Unresolvable required inputs become placeholders `{input_key, type, reason: no_producer}`; user-suppliable inputs (text/prompt/selection) become informational `{reason: needs_user_value}` placeholders.
+2. **Chain assembly** — output-type back-matching: start from the highest-ranked pack producing the goal output type, then walk unresolved required asset inputs (image/video/audio/reference_asset — identity coercion only) backwards, chaining the best-ranked producer for each. Max chain length 4; inputs still unresolved when the cap is hit surface as `{reason: chain_length_cap}` placeholders — never silently dropped. Unresolvable required inputs become placeholders `{input_key, type, reason: no_producer}`; user-suppliable inputs (text/prompt/selection) become informational `{reason: needs_user_value}` placeholders.
 3. **Template match** — top project_template or gap `NO_TEMPLATE_AVAILABLE`.
 4. **Capability roll-up** — union of `requires_capabilities` across chained packs' latest release manifests, checked against org offerings (ADR-011); unsatisfied → gaps with `NO_ELIGIBLE_PROVIDER`. Never auto-connects.
 5. Recommended skill packs from chained manifests attach as optional items (family `skill_pack`, `required: false`).
@@ -41,22 +41,24 @@ Item statuses: `included | waived | cut_for_budget | removed_by_user` (the last 
 
 **Evidence, not declarations.** `creator_capability_evidence` is a derived decomposition table rebuilt idempotently (delete + rebuild per user) from six platform-verified sources:
 
-| evidence_type | Source | Score |
+| evidence_type | Source | Score (stored 0–100) |
 |---|---|---|
-| `skill_completed` | SkillProgress COMPLETED (skill tags → capability) | best_score/100 |
+| `skill_completed` | SkillProgress COMPLETED (skill tags → capability) | best_score |
 | `badge` | SkillBadge | — |
-| `approved_submission` | SubmissionReview APPROVED | score/100 |
+| `approved_submission` | SubmissionReview APPROVED | review score |
 | `commercial_project` | BriefApplication ACCEPTED | — |
 | `workflow_run` | WorkflowRun COMPLETED (capabilities from snapshot) | — |
 | `eval_result` | EvaluationTask COMPLETED | result score |
+
+Scores are stored on a single 0–100 scale and normalized to 0–1 exactly once, at scoring time — a mixed-scale store double-divides and inverts rankings.
 
 All carry weight 1.0 (verified); the schema reserves lower weights for future self-declared signals (0.6, retrieval-hint only). Scoring uses Bayesian shrinkage (k=3, prior 0.5) per capability and 90-day-half-life recency (ADR-012).
 
 **Structural privacy (R9)**: the candidate query reads only `id`, `display_name`, `last_login_at`. Protected attributes are absent from the feature space by construction — there is nothing to filter because nothing else is read. Missing evidence for a required capability is a hard S2 exclusion (`CAPABILITY_UNVERIFIED`) shown in the "Not eligible" section with the specific capability named — a remediable gap, not a hidden veto.
 
-**Shortlist-as-offer.** The shortlist endpoint refreshes org evidence, runs the creator pipeline, and returns ranked candidates with per-capability evidence detail. Assignment is strictly:
+**Shortlist-as-offer.** The shortlist endpoint refreshes org evidence (skipped when refreshed within the last 10 minutes — a staleness gate, not a rebuild-per-GET), runs the creator pipeline, and returns ranked candidates with per-capability evidence detail. Evidence scores are stored on a 0–100 scale end to end. Assignment is strictly:
 
-1. A human instructor **offers**: `creator_assignments` row with `assigned_by` (human FK, never a service account), optional `match_run_id` + `override_reason` (assigning off-shortlist is allowed and recorded). Duplicate → 409 `ASSIGNMENT_EXISTS`.
+1. A human instructor **offers**: `creator_assignments` row with `assigned_by` (human FK with SET NULL — the column is nullable so deleting the assigning user preserves the assignment record), optional `match_run_id` + `override_reason` (assigning off-shortlist is allowed and recorded). Duplicate → 409 `ASSIGNMENT_EXISTS`.
 2. The **creator responds**: accept/decline, self-only (403 otherwise), single response (409 on repeat).
 
 **No auto-assignment code path exists** — there is no API surface or service method that creates an accepted assignment without both the human offer and the creator's response.

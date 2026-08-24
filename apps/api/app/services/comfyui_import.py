@@ -229,17 +229,32 @@ class ComfyUIImportService:
         # Lenient format detection (ingestion tolerance — C2)
         nodes: list[dict] = []
         links_count = 0
+        too_complex = AppError(
+            "IMPORT_TOO_COMPLEX",
+            f"Import exceeds structural caps ({MAX_NODES} nodes / {MAX_LINKS} links)",
+            422,
+        )
         if isinstance(parsed.get("nodes"), list) and all(
             isinstance(n, dict) and "type" in n for n in parsed["nodes"]
         ):
             # UI format
             if format_detected is None:
                 format_detected = "ui"
+            # Cap BEFORE normalization: a 5MB payload can pack ~300k minimal
+            # nodes — normalizing them first costs seconds of CPU + ~80MB
+            # per request just to reject it afterwards
+            if len(parsed["nodes"]) > MAX_NODES:
+                raise too_complex
             nodes = [
                 {
                     "class_type": str(n.get("type", "")),
                     "title": str(n.get("title", "")) if n.get("title") else None,
-                    "widgets_values": n.get("widgets_values") or [],
+                    # widgets_values may be any JSON type in hostile input —
+                    # a scalar (5, true) is truthy, so `or []` keeps it and
+                    # the report loop's iteration would TypeError (500)
+                    "widgets_values": n["widgets_values"]
+                    if isinstance(n.get("widgets_values"), list)
+                    else [],
                 }
                 for n in parsed["nodes"]
             ]
@@ -252,8 +267,14 @@ class ComfyUIImportService:
             if api_nodes:
                 if format_detected is None:
                     format_detected = "api"
+                if len(api_nodes) > MAX_NODES:
+                    raise too_complex
                 for v in api_nodes:
-                    inputs = v.get("inputs") or {}
+                    # inputs may be any JSON type — a non-empty list/str is
+                    # truthy, so `or {}` keeps it and .values() AttributeErrors
+                    inputs = v.get("inputs")
+                    if not isinstance(inputs, dict):
+                        inputs = {}
                     widget_like = [
                         val for val in inputs.values() if isinstance(val, str | int | float)
                     ]
@@ -275,11 +296,7 @@ class ComfyUIImportService:
                 )
 
         if len(nodes) > MAX_NODES or links_count > MAX_LINKS:
-            raise AppError(
-                "IMPORT_TOO_COMPLEX",
-                f"Import exceeds structural caps ({MAX_NODES} nodes / {MAX_LINKS} links)",
-                422,
-            )
+            raise too_complex
 
         report = self._build_dependency_report(nodes)
 
@@ -313,7 +330,7 @@ class ComfyUIImportService:
         capabilities: set[str] = set()
 
         for node in nodes:
-            ct = sanitize_untrusted_text(node["class_type"], 120)
+            ct = sanitize_untrusted_text(str(node.get("class_type") or ""), 120)
             class_counts[ct] = class_counts.get(ct, 0) + 1
             if ct not in COMFYUI_CORE_NODES:
                 custom_counts[ct] = custom_counts.get(ct, 0) + 1
@@ -338,10 +355,13 @@ class ComfyUIImportService:
             count for ct, count in class_counts.items() if ct in COMFYUI_CORE_NODES
         )
         return {
+            # Cap listed types (true totals preserved in custom_node_count):
+            # 2000 nodes x 120-char class_types is a ~300KB JSONB row otherwise
             "custom_nodes": [
                 {"class_type": ct, "count": count}
-                for ct, count in sorted(custom_counts.items())
+                for ct, count in sorted(custom_counts.items())[:500]
             ],
+            "custom_node_types_total": len(custom_counts),
             "models": models[:100],
             "input_nodes": input_nodes,
             "output_nodes": output_nodes,

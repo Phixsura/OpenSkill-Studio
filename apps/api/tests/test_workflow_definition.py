@@ -366,3 +366,17 @@ def test_validate_or_raise_produces_app_error():
     assert exc.value.status_code == 422
     assert len(exc.value.details) >= 1
     assert all("pointer" in e for e in exc.value.details)
+
+
+def test_selection_input_without_options_rejected():
+    """A selection input with no options is unrunnable — every submitted
+    value fails INVALID_INPUT_VALUE at create_run. Reject at publish time."""
+    d = _minimal_valid()
+    d["inputs"].append({"key": "pick", "type": "selection", "required": True})
+    _, errors = validate_definition(d)
+    assert "WF_SELECTION_NO_OPTIONS" in _codes(errors)
+
+    # With options it validates
+    d["inputs"][-1]["options"] = ["a", "b"]
+    _, errors2 = validate_definition(d)
+    assert "WF_SELECTION_NO_OPTIONS" not in _codes(errors2)

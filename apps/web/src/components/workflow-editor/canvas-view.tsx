@@ -1,19 +1,8 @@
 "use client";
 
 import { useCallback } from "react";
-import {
-  Background,
-  Controls,
-  MiniMap,
-  ReactFlow,
-} from "@xyflow/react";
-import type {
-  Connection,
-  Edge,
-  EdgeChange,
-  Node,
-  NodeChange,
-} from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
+import type { Connection, Edge, EdgeChange, Node, NodeChange } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import type { StepNodeData } from "./convert";

@@ -486,3 +486,139 @@ async def test_deeply_nested_json_returns_422(c):
     assert r.status_code == 422
     # INVALID_JSON (RecursionError path) or UNRECOGNIZED_FORMAT (if it parsed)
     assert r.json()["error"]["code"] in ("INVALID_JSON", "UNRECOGNIZED_FORMAT")
+
+
+# ── Adversarial hardening (parser fuzz round) ─────────────
+
+
+@pytest.mark.asyncio
+async def test_scalar_widgets_values_no_crash(c):
+    """widgets_values may be any JSON type in hostile input — scalars were
+    kept by `or []` (truthy) and TypeError'd in the report loop (500)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for hostile in (5, True, 3.14, "model.safetensors", {"k.ckpt": 1}):
+        payload = {"nodes": [{"type": "CheckpointLoaderSimple", "widgets_values": hostile}]}
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/comfyui-imports",
+            json={"data": json.dumps(payload), "encoding": "json"},
+            headers=h,
+        )
+        assert r.status_code == 201, f"widgets={hostile!r}: {r.status_code} {r.text[:200]}"
+        # Non-list widgets are discarded — never scanned for model refs
+        assert r.json()["data"]["dependency_report"]["models"] == []
+
+
+@pytest.mark.asyncio
+async def test_non_dict_api_inputs_no_crash(c):
+    """API-format `inputs` may be list/str/int — non-empty ones were kept by
+    `or {}` (truthy) and .values() AttributeError'd (500)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for hostile in ([1, 2, 3], "evil", 99):
+        payload = {"1": {"class_type": "KSampler", "inputs": hostile}}
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/comfyui-imports",
+            json={"data": json.dumps(payload), "encoding": "json"},
+            headers=h,
+        )
+        assert r.status_code == 201, f"inputs={hostile!r}: {r.status_code} {r.text[:200]}"
+        assert r.json()["data"]["format_detected"] == "api"
+
+
+@pytest.mark.asyncio
+async def test_node_count_capped_before_normalization(c):
+    """The MAX_NODES cap must fire BEFORE per-node normalization — a dense
+    payload packs ~300k minimal nodes into the size cap and normalizing
+    them first burns seconds of CPU + ~80MB just to reject afterwards."""
+    import time
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    payload = {"nodes": [{"type": "a"} for _ in range(100_000)], "links": []}
+    t0 = time.time()
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": json.dumps(payload), "encoding": "json"},
+        headers=h,
+    )
+    elapsed = time.time() - t0
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "IMPORT_TOO_COMPLEX"
+    # Generous bound: JSON transport dominates; normalization would add seconds
+    assert elapsed < 10, f"reject took {elapsed:.1f}s — cap likely after normalization"
+
+
+@pytest.mark.asyncio
+async def test_dependency_report_size_bounded(c):
+    """2000 nodes with unique 100+-char class_types must not produce an
+    unbounded JSONB report — listed types cap at 500, true total kept."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    payload = {"nodes": [{"type": f"Custom{i}" + "x" * 100} for i in range(1000)]}
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": json.dumps(payload), "encoding": "json"},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    report = r.json()["data"]["dependency_report"]
+    assert len(report["custom_nodes"]) == 500
+    assert report["custom_node_types_total"] == 1000
+    assert report["custom_node_count"] == 1000  # true node total preserved
+
+
+def test_sanitize_hostile_megastring_fast():
+    """NFKC on a multi-MB hostile string cost ~4.5s of CPU before the
+    pre-slice fix (U+FDFA expands 18x) — a cheap DoS via any sanitized field."""
+    import time
+
+    from app.core.sanitize import sanitize_untrusted_text
+
+    s = "ﷺ" * (1024 * 1024)
+    t0 = time.time()
+    out = sanitize_untrusted_text(s, 300)
+    assert time.time() - t0 < 0.5
+    assert len(out) == 300
+
+
+def test_sanitize_preslice_keeps_legit_length():
+    """Pre-slice headroom (8x) must not shorten legitimate invisible-heavy
+    input below max_len."""
+    from app.core.sanitize import sanitize_untrusted_text
+
+    s = ("​" * 7 + "a") * 300  # 7 invisibles per visible char
+    assert len(sanitize_untrusted_text(s, 300)) == 300
+
+
+@pytest.mark.asyncio
+async def test_hostile_png_chunk_walker(c):
+    """PNG walker must survive truncated/oversized/looping chunk structures."""
+    import struct
+    import zlib
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    sig = b"\x89PNG\r\n\x1a\n"
+
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+
+    hostiles = {
+        "len_2^31": sig + struct.pack(">I", 2**31 - 1) + b"tEXt" + b"x" * 100,
+        "len_2^32-1": sig + b"\xff\xff\xff\xff" + b"tEXt" + b"x" * 100,
+        "no_iend": sig + chunk(b"IDAT", b"x" * 50) * 100,
+        "text_no_null": sig + chunk(b"tEXt", b"workflowNOSEP") + chunk(b"IEND", b""),
+        "truncated": sig + struct.pack(">I", 500) + b"tEXt" + b"short",
+        "itxt_compressed": sig
+        + chunk(b"iTXt", b"workflow\x00\x01\x00\x00\x00" + zlib.compress(b"{}"))
+        + chunk(b"IEND", b""),
+    }
+    for name, raw in hostiles.items():
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/comfyui-imports",
+            json={"data": base64.b64encode(raw).decode(), "encoding": "base64"},
+            headers=h,
+        )
+        # Clean 422 (no workflow found / bad json) — never a 500
+        assert r.status_code == 422, f"{name}: {r.status_code} {r.text[:200]}"

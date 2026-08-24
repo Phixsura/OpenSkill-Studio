@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import type { PortDef, StepDef } from "./types";
-import { IO_TYPES, STEP_TYPES } from "./types";
+import { IO_TYPES, sanitizeKey, STEP_TYPES } from "./types";
 
 interface Capability {
   key: string;
@@ -87,7 +87,9 @@ export function StepConfigPanel({ step, onChange, onDelete, capabilities }: Prop
             placeholder="Photo of {{inputs.product_name}}"
           />
           <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-            {"Reference workflow inputs with {{inputs.key}} and upstream outputs with {{steps.id.outputs.port}}"}
+            {
+              "Reference workflow inputs with {{inputs.key}} and upstream outputs with {{steps.id.outputs.port}}"
+            }
           </p>
         </div>
       )}
@@ -251,20 +253,24 @@ export function StepConfigPanel({ step, onChange, onDelete, capabilities }: Prop
 
       {step.type === "output" && (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          Marks final output. Connect upstream ports and declare workflow outputs in
-          the Outputs section.
+          Marks final output. Connect upstream ports and declare workflow outputs in the Outputs
+          section.
         </p>
       )}
 
       <PortEditor
         label="Input ports"
         ports={step.inputs}
+        // Duplicate check spans BOTH lists — a step has a single port
+        // namespace (backend WF_DUPLICATE_PORT walks inputs + outputs)
+        siblingPorts={step.outputs}
         onChange={(ports) => setPorts("inputs", ports)}
         showRequired
       />
       <PortEditor
         label="Output ports"
         ports={step.outputs}
+        siblingPorts={step.inputs}
         onChange={(ports) => setPorts("outputs", ports)}
       />
     </div>
@@ -274,29 +280,46 @@ export function StepConfigPanel({ step, onChange, onDelete, capabilities }: Prop
 function PortEditor({
   label,
   ports,
+  siblingPorts = [],
   onChange,
   showRequired = false,
 }: {
   label: string;
   ports: PortDef[];
+  /** The step's OTHER port list — one namespace per step (WF_DUPLICATE_PORT). */
+  siblingPorts?: PortDef[];
   onChange: (ports: PortDef[]) => void;
   showRequired?: boolean;
 }) {
   const update = (i: number, patch: Partial<PortDef>) =>
     onChange(ports.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
 
+  const addPort = () => {
+    // `port_${length+1}` collides after a mid-list delete (add 2, remove
+    // #1, add again → two "port_2" → WF_DUPLICATE_PORT at save). Probe for
+    // the first free name across the step's WHOLE port namespace.
+    const taken = new Set([...ports, ...siblingPorts].map((p) => p.port));
+    let n = ports.length + 1;
+    while (taken.has(`port_${n}`)) n += 1;
+    onChange([...ports, { port: `port_${n}`, type: "text", required: true }]);
+  };
+
+  // Backend rejects duplicates across the step's whole namespace — surface
+  // the collision inline instead of only at save time.
+  const dupes = new Set<string>();
+  {
+    const seen = new Set(siblingPorts.map((p) => p.port));
+    for (const p of ports) {
+      if (seen.has(p.port)) dupes.add(p.port);
+      seen.add(p.port);
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">{label}</span>
-        <Button
-          size="sm"
-          variant="secondary"
-          type="button"
-          onClick={() =>
-            onChange([...ports, { port: `port_${ports.length + 1}`, type: "text", required: true }])
-          }
-        >
+        <Button size="sm" variant="secondary" type="button" onClick={addPort}>
           Add
         </Button>
       </div>
@@ -305,13 +328,13 @@ function PortEditor({
           <div key={i} className="flex items-center gap-1">
             <input
               value={port.port}
-              onChange={(e) =>
-                update(i, {
-                  port: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"),
-                })
-              }
+              onChange={(e) => update(i, { port: sanitizeKey(e.target.value) })}
               aria-label={`${label} name ${i + 1}`}
-              className="w-24 rounded border bg-transparent px-2 py-1 text-xs"
+              aria-invalid={dupes.has(port.port) || undefined}
+              className={`w-24 rounded border bg-transparent px-2 py-1 text-xs ${
+                dupes.has(port.port) ? "border-red-500" : ""
+              }`}
+              title={dupes.has(port.port) ? "Duplicate port name on this step" : undefined}
             />
             <select
               value={port.type}

@@ -19,7 +19,7 @@ Two hard requirements shape the design:
 - **WorkflowPackRelease** — immutable snapshot: `manifest` JSONB (`{schema_version, version, name, summary, workflow_type, definition, dependencies, provenance}`), `checksum` = sha256 over the canonical (sorted-keys) manifest JSON, `step_count`, structured `deprecated_by`. The `ui` block (editor layout) is **excluded** from the manifest so layout changes never invalidate releases.
 - **WorkflowPackInstallation** — org install of a release; `local_definition` holds the forked copy when status = FORKED. Unique per (org, pack); REMOVED rows are reactivated on reinstall.
 
-Status/visibility enums are reused from ADR-009 (`pack_status`, `pack_visibility`, `install_status`).
+Status/visibility enums are reused from ADR-009 (`pack_status`, `pack_visibility`, `install_status`). Public-registry reads gate PUBLIC packs on `review_status` approved (rejected/pending → 404), and the unauthenticated preview **strips org-internal binding details** (`pinned_offering_id`, `binding_mode`) from step configs. Archiving an organization archives its workflow packs — a dead org's public packs do not stay live and installable.
 
 ### Definition contract (pure data, closed vocabulary)
 
@@ -58,6 +58,8 @@ Validation accumulates every error (Argo pattern), each with a JSON pointer and 
 | `WF_DATA_URI_REJECTED` | Inline data URI / base64 blob |
 | `WF_VALIDATION_FAILED` | Envelope code (422) carrying the details array |
 
+Run-creation codes: `INSTALLATION_NOT_FOUND` (404, includes REMOVED installs), `MISSING_INPUT` / `UNKNOWN_INPUT` / `INVALID_INPUT_VALUE` / `WF_INPUT_TOO_LARGE` (422). Install codes: `ALREADY_INSTALLED` (409, also the loser of a concurrent-install race), `CAPABILITY_UNSATISFIED` (422, ADR-011).
+
 ### Execution runtime
 
 **Run state machine** (`workflow_runs.status`):
@@ -82,13 +84,13 @@ PENDING ──► READY ──► RUNNING ──► COMPLETED
    (any non-terminal state ──► CANCELLED on run cancellation)
 ```
 
-Concurrency discipline (R11): **every transition is a conditional UPDATE with an expected-status guard**; zero rows updated means a lost race and the loser backs off silently. `definition_snapshot` is frozen at run creation — running workflows never observe definition changes. Run creation supports an idempotency key (partial unique index).
+Concurrency discipline (R11): **every transition is a conditional UPDATE with an expected-status guard**; zero rows updated means a lost race and the loser backs off silently. `definition_snapshot` is frozen at run creation — running workflows never observe definition changes. Run creation supports an idempotency key (partial unique index), rejects REMOVED installations (404), and validates input **values** per declared type — selection values must be in `options`, text/prompt/json capped at 8,000 chars, asset references at 500 chars (`INVALID_INPUT_VALUE` 422) — on top of presence/unknown-key checks (`MISSING_INPUT` / `UNKNOWN_INPUT`) and the 48 KB total input cap.
 
-- **Review gates** suspend as durable `WorkflowStepReview` rows (a decision is persisted state, never an ephemeral event) with a **mandatory `due_at`** (1–30 days, default 7). Decisions are synchronous validate-then-accept under a row lock; double-decide returns 409 `WF_REVIEW_ALREADY_DECIDED` (partial unique index on open reviews). Approve passes the subject through; reject fails the step (`WF_REVIEW_REJECTED`).
-- **provider_action** steps write `provider_request_id` + `offering_id` + a lease **and commit before the outbound call** (write-ahead idempotency, R13). Credentials are decrypted only at this point (ADR-011). Timeout via `workflow_step_timeout_seconds`; failures retry up to `max_attempts` (output cleared on re-claim).
-- **Outputs are capped at 48 KB** per step (Airflow XCom lesson); media flows as asset references.
-- **Execution model (Phase 1)**: tracked `asyncio` background tasks with their own DB sessions, drained on shutdown (`drain_workflow_tasks`). The ARQ worker is the planned Phase-2 flip — zero schema change required.
-- **Lazy sweeper** (`sweep_stale`): triggered on run-detail reads; recovers crashed executors (expired lease → `WAITING_RETRY`, `WF_EXECUTOR_CRASHED`) and expires overdue reviews (`WF_REVIEW_TIMEOUT`). No resident scheduler process.
+- **Review gates** suspend as durable `WorkflowStepReview` rows (a decision is persisted state, never an ephemeral event) with a **mandatory `due_at`** (1–30 days, default 7). Decisions are synchronous validate-then-accept under a row lock and **role-gated to OWNER/ADMIN/INSTRUCTOR** — review gates approve real provider spend, so run initiators (students) cannot self-approve. Double-decide returns 409 `WF_REVIEW_ALREADY_DECIDED` (partial unique index on open reviews). Approve passes the subject through; reject fails the step (`WF_REVIEW_REJECTED`).
+- **provider_action** steps write `provider_request_id` + `offering_id` + a lease **and commit before the outbound call** (write-ahead idempotency, R13). After that commit the executor re-reads the step status (a concurrent cancel may have flipped it the instant the row lock released) and bails before spending provider money; the read transaction is closed before the outbound call so no connection sits idle-in-transaction for the call's duration. Credentials are decrypted only at this point (ADR-011). Timeout via `workflow_step_timeout_seconds`; failures retry up to `max_attempts` (output cleared on re-claim). Every settlement UPDATE carries the claimed attempt as a **fencing token** — a resurrected executor cannot settle a newer attempt.
+- **Outputs are capped at 48 KB** per step (Airflow XCom lesson); media flows as asset references. An empty-dict output (`{}` — instruction steps, adapters with nothing to say) is a valid output, distinct from "no output yet".
+- **Execution model (Phase 1)**: tracked `asyncio` background tasks with their own DB sessions, drained on shutdown (`drain_workflow_tasks`). The advance loop is an in-memory continuation over durable state, so it has a **durable re-dispatch trigger**: reading a non-terminal run re-dispatches its advance loop (conditional claims make this idempotent) — a crash or deploy between commit and dispatch can no longer strand a run. The ARQ worker is the planned Phase-2 flip — zero schema change required.
+- **Lazy sweeper** (`sweep_stale`): triggered on run-detail reads; recovers crashed executors (expired lease → `WAITING_RETRY`, `WF_EXECUTOR_CRASHED`; attempts exhausted → `WF_RETRY_EXHAUSTED` — `max_attempts` holds on the crash path too) and expires overdue reviews (`WF_REVIEW_TIMEOUT`) with a guarded UPDATE that can never overwrite a concurrently committed decision. The sweep returns every touched `run_id` and callers re-dispatch each one — repairing step state without resuming the loop would strand the run. No resident scheduler process.
 - Every lifecycle change appends a `WorkflowRunEvent` row (append-only audit trail).
 
 ### ComfyUI import — parse-only, never execute
@@ -105,7 +107,7 @@ Imports (JSON or PNG with embedded tEXt/iTXt `workflow`/`prompt` chunks, pure-Py
 ## Red Lines
 
 - No arbitrary code execution in workflows — ever. The step vocabulary is closed; adding a step type requires a new ADR.
-- Published releases are immutable; edits ship as new releases.
+- Published releases are immutable; edits ship as new releases. Public visibility is only reachable through the review flow (`APPROVAL_REQUIRED` on direct PUT), and editing an approved-public pack's definition resets its approval.
 - Installation never auto-installs dependencies and never auto-connects providers.
 - Imported ComfyUI content is never executed and its dependencies are never fetched.
 

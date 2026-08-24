@@ -104,6 +104,67 @@ export function emptyDefinition(): WorkflowDefinition {
   return { schema_version: 1, inputs: [], outputs: [], steps: [], edges: [], ui: {} };
 }
 
+/** Validate a ui.positions entry into [x, y] numbers, or null if malformed.
+ * The ui block is excluded from backend validation (any dict is storable),
+ * so positions can legitimately contain garbage. */
+export function normalizePosition(v: unknown): [number, number] | null {
+  if (Array.isArray(v) && v.length >= 2) {
+    const x = Number(v[0]);
+    const y = Number(v[1]);
+    if (Number.isFinite(x) && Number.isFinite(y)) return [x, y];
+  }
+  return null;
+}
+
+/** Deep-normalize a raw stored definition. The backend validates with
+ * Pydantic (which FILLS defaults) but stores the author's RAW dict — so a
+ * perfectly valid stored definition can omit defaulted keys like
+ * step.config/inputs/outputs or carry arbitrary junk in ui.positions.
+ * Top-level-only normalization crashes on `step.inputs.map(...)`. */
+export function normalizeDefinition(raw: unknown): WorkflowDefinition {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const steps: StepDef[] = (Array.isArray(r.steps) ? r.steps : [])
+    .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+    .map((s) => ({
+      ...(s as unknown as StepDef),
+      id: typeof s.id === "string" ? s.id : "",
+      type: typeof s.type === "string" ? s.type : "instruction",
+      name: typeof s.name === "string" ? s.name : "",
+      config: s.config && typeof s.config === "object" ? (s.config as Record<string, unknown>) : {},
+      inputs: Array.isArray(s.inputs) ? (s.inputs as PortDef[]) : [],
+      outputs: Array.isArray(s.outputs) ? (s.outputs as PortDef[]) : [],
+    }));
+  const rawUi = r.ui && typeof r.ui === "object" ? (r.ui as Record<string, unknown>) : {};
+  const rawPositions =
+    rawUi.positions && typeof rawUi.positions === "object"
+      ? (rawUi.positions as Record<string, unknown>)
+      : {};
+  const positions: Record<string, [number, number]> = {};
+  for (const [id, pos] of Object.entries(rawPositions)) {
+    const norm = normalizePosition(pos);
+    if (norm) positions[id] = norm;
+  }
+  return {
+    schema_version: typeof r.schema_version === "number" ? r.schema_version : 1,
+    inputs: Array.isArray(r.inputs) ? (r.inputs as WorkflowInput[]) : [],
+    outputs: Array.isArray(r.outputs) ? (r.outputs as WorkflowOutput[]) : [],
+    steps,
+    edges: Array.isArray(r.edges) ? (r.edges as EdgeDef[]) : [],
+    ui: { ...rawUi, positions },
+  };
+}
+
+/** Sanitize a user-typed input/output/port key toward the backend regex
+ * ^[a-z][a-z0-9_]{0,63}$ — lowercase, replace illegal chars, strip leading
+ * digits/underscores (a leading digit can never become valid), cap length. */
+export function sanitizeKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .slice(0, 64);
+}
+
 /** Generate a valid step id slug from a display name (backend regex: ^[a-z][a-z0-9_]{0,63}$). */
 export function slugifyStepId(name: string, existing: Set<string>): string {
   let slug = name

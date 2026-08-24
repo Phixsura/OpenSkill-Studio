@@ -6,6 +6,7 @@ import dagre from "dagre";
 import type { Edge, Node } from "@xyflow/react";
 
 import type { EdgeDef, StepDef, WorkflowDefinition } from "./types";
+import { normalizePosition } from "./types";
 
 export type StepNodeData = { step: StepDef };
 
@@ -15,7 +16,9 @@ export function toReactFlow(def: WorkflowDefinition): {
 } {
   const positions = def.ui?.positions ?? {};
   const nodes: Node<StepNodeData>[] = def.steps.map((step, index) => {
-    const pos = positions[step.id] ?? [index * 280, 80];
+    // The ui block is excluded from backend validation, so a stored
+    // position can be arbitrary junk — a NaN position blanks the canvas.
+    const pos = normalizePosition(positions[step.id]) ?? [index * 280, 80];
     return {
       id: step.id,
       type: "stepNode",
@@ -79,6 +82,66 @@ export function toDefinition(
     steps,
     edges: edgeDefs,
     ui: { ...prev.ui, positions },
+  };
+}
+
+/** Apply a step edit to the definition, cascading port renames/removals.
+ *
+ * A 1:1 gone/added port pair is a RENAME (every keystroke in the port name
+ * field is one): edges and workflow outputs referencing the old name are
+ * REWRITTEN to the new name — dropping them would silently destroy the
+ * user's connections one keystroke at a time. Anything else (pure removal,
+ * multi-port changes) cascades removal the same way deleting a step does.
+ * Pure function — unit-testable without React. */
+export function applyStepUpdate(def: WorkflowDefinition, updated: StepDef): WorkflowDefinition {
+  const prev = def.steps.find((s) => s.id === updated.id);
+  const prevInputPorts = new Set((prev?.inputs ?? []).map((p) => p.port));
+  const prevOutputPorts = new Set((prev?.outputs ?? []).map((p) => p.port));
+  const newInputPorts = new Set(updated.inputs.map((p) => p.port));
+  const newOutputPorts = new Set(updated.outputs.map((p) => p.port));
+  const goneInputs = new Set([...prevInputPorts].filter((p) => !newInputPorts.has(p)));
+  const goneOutputs = new Set([...prevOutputPorts].filter((p) => !newOutputPorts.has(p)));
+  const addedInputs = [...newInputPorts].filter((p) => !prevInputPorts.has(p));
+  const addedOutputs = [...newOutputPorts].filter((p) => !prevOutputPorts.has(p));
+
+  const inputRename =
+    goneInputs.size === 1 && addedInputs.length === 1
+      ? { from: [...goneInputs][0] as string, to: addedInputs[0] as string }
+      : null;
+  const outputRename =
+    goneOutputs.size === 1 && addedOutputs.length === 1
+      ? { from: [...goneOutputs][0] as string, to: addedOutputs[0] as string }
+      : null;
+
+  const edges = def.edges
+    .map((e) => {
+      let next = e;
+      if (inputRename && e.to_step === updated.id && e.to_port === inputRename.from) {
+        next = { ...next, to_port: inputRename.to };
+      }
+      if (outputRename && e.from_step === updated.id && e.from_port === outputRename.from) {
+        next = { ...next, from_port: outputRename.to };
+      }
+      return next;
+    })
+    .filter(
+      (e) =>
+        !(e.to_step === updated.id && !newInputPorts.has(e.to_port)) &&
+        !(e.from_step === updated.id && !newOutputPorts.has(e.from_port)),
+    );
+  const outputs = def.outputs
+    .map((o) =>
+      outputRename && o.from_step === updated.id && o.from_port === outputRename.from
+        ? { ...o, from_port: outputRename.to }
+        : o,
+    )
+    .filter((o) => !(o.from_step === updated.id && !newOutputPorts.has(o.from_port)));
+
+  return {
+    ...def,
+    steps: def.steps.map((s) => (s.id === updated.id ? updated : s)),
+    edges,
+    outputs,
   };
 }
 

@@ -295,6 +295,16 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
         if inp.key in input_keys:
             errors.append(_err("WF_DUPLICATE_PORT", f"/inputs/{i}/key", f"Duplicate input '{inp.key}'"))
         input_keys.add(inp.key)
+        # A selection input without options can never be satisfied at run
+        # time (every value fails INVALID_INPUT_VALUE) — reject at publish
+        if inp.type == "selection" and not inp.options:
+            errors.append(
+                _err(
+                    "WF_SELECTION_NO_OPTIONS",
+                    f"/inputs/{i}/options",
+                    f"Selection input '{inp.key}' must declare at least one option",
+                )
+            )
 
     # ── Edges ──
     edge_ids: set[str] = set()

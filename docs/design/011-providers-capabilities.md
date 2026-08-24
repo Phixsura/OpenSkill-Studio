@@ -43,7 +43,7 @@ ProviderModelOffering  the MATCHABLE unit: capability_key + model_name +
 OrgCredential          Fernet envelope-encrypted {field: value} JSON
 ```
 
-Rationale: matching operates on *offerings* (capability + features + cost), connections carry org configuration, adapters carry code, and credentials are an isolated write-only store. No entity mixes concerns.
+Rationale: matching operates on *offerings* (capability + features + cost), connections carry org configuration, adapters carry code, and credentials are an isolated write-only store. No entity mixes concerns. Offering create **and update** enforce the same value bounds (cost 0–10000, model name 1–200 chars, ≤20 features of ≤64 chars, limits ≤5 KB) — partial updates cannot bypass validation.
 
 ### Credential contract (write-only, late decryption)
 
@@ -60,18 +60,18 @@ Each `provider_action` step in an installation gets a `workflow_step_bindings` r
 2. **confirmed binding** for the installation+step (human-confirmed, `confirmed_by`): used if still active; a stale *pinned* binding is a hard stop.
 3. **auto**: cheapest active offering for the capability whose `features` are a superset of the step's `required_features`.
 
-Bindings are **revalidated at execution time** — a disabled connection or deactivated offering yields `BINDING_STALE` / `NO_ELIGIBLE_PROVIDER` step failure rather than silently switching providers. The offering actually used is recorded on every step run (`offering_id` = actual_offering_used).
+Bindings are **revalidated at execution time** — a disabled connection or deactivated offering yields `BINDING_STALE` / `NO_ELIGIBLE_PROVIDER` step failure rather than silently switching providers. A pinned binding whose offering row was deleted (FK SET NULL) is a **hard stop**, never a silent fallback to auto-selection. The offering actually used is recorded on every step run (`offering_id` = actual_offering_used). Upgrades preserve human-confirmed bindings when the step and its capability are unchanged; changed steps get fresh unconfirmed suggestions.
 
 ### Capability gate on install — never auto-connect
 
 Installing a workflow pack checks the release manifest's `dependencies.requires_capabilities` against the org's *active* offerings (feature-superset match). Unsatisfied requirements fail the install with 422 `CAPABILITY_UNSATISFIED` and a structured gaps list naming each missing capability/feature.
 
-The platform **never** auto-connects a provider to satisfy a gap: auto-connecting a provider is this platform's equivalent of auto-purchasing, and it is a red line. Upgrades re-run the same gate.
+The platform **never** auto-connects a provider to satisfy a gap: auto-connecting a provider is this platform's equivalent of auto-purchasing, and it is a red line. Upgrades re-run the same gate (and re-check pack visibility/approval — a pack gone private after install cannot be upgraded by non-owners). Concurrent installs of the same pack race safely: the loser gets 409 `ALREADY_INSTALLED` via unique-constraint recovery, never a 500.
 
 ### Phase-1 adapters
 
 - `mock` — deterministic echo (same inputs → same output hash), no credentials, no network. Powers tests, demos, and local development.
-- `anthropic` — `multimodal_review` via the existing LLM client (`create_llm_client`); declares `credential_fields: ["api_key"]` (Phase 1 uses the platform key; per-org keys are the declared Phase-2 use of the credential).
+- `anthropic` — `multimodal_review`; declares `credential_fields: ["api_key"]` and **requires the org's own key** — the adapter constructs its client directly from the decrypted org credential and never falls back to the platform key (the offering's `model_name` is org-controlled, so a platform-key fallback would let any org burn the platform LLM budget with arbitrary models). `model_name` is additionally allowlisted to `claude-*` ids.
 
 Adapters implement one contract: `execute(capability, model_name, inputs, config, credentials, idempotency_key) -> dict`. Retry policy lives in the runtime, not the adapter. Health checks are manual/endpoint-triggered — never in the request path.
 

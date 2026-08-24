@@ -21,7 +21,8 @@ S1 eligibility   silent exclusions: org scope, visibility, status, banned
 S2 hard filters  set operations; failures produce structured gap output
 S3 scoring       linear weighted sum over [0,1]-normalized signals
 S4 semantic      DEFERRED — socket: matching_configs reserves semantic keys;
-                 skill_packs.search_tsv STORED tsvector + GIN already shipped
+                 skill_packs.search_tsv STORED tsvector + GIN shipped and
+                 already serving registry full-text search
 S5 LLM rerank    DEFERRED — when it ships it receives survivor ordinals only
                  and can only permute them (structurally cannot re-admit
                  filtered candidates)
@@ -34,7 +35,7 @@ S5 LLM rerank    DEFERRED — when it ships it receives survivor ordinals only
 |---|---|---|
 | `CAPABILITY_MISSING` | workflow_pack | Required capability not in `capability_tags` |
 | `OUTPUT_TYPE_MISMATCH` | workflow_pack | Requested output type not produced |
-| `CAPABILITY_IRRELEVANT` | skill_pack | Teaches none of the requested capabilities |
+| `CAPABILITY_IRRELEVANT` | skill_pack | Teaches none of the requested (required ∪ preferred) capabilities |
 | `DIFFICULTY_TOO_HIGH` | skill_pack | More than one level above the learner |
 | `CAPABILITY_UNVERIFIED` | creator | No verified evidence row for a required capability |
 
@@ -64,9 +65,9 @@ Both derive from the **same signal values used in the sum** — there is no para
 
 ### Auditability (Part H)
 
-Every match persists a `match_runs` row stamped with `engine_version` (`"1.0.0"` constant) and `config_version` (snapshot of the immutable `matching_configs` row used) plus all `match_results` — ranked *and* hard-failed. A future weight change is a new config version; historical runs stay replayable and explainable.
+Every match persists a `match_runs` row stamped with `engine_version` (`"1.0.0"` constant) and `config_version` (snapshot of the immutable `matching_configs` row used) plus all ranked `match_results`. Hard-failed rows are persisted too, capped at the **50 newest** (S1 loads whole registries, so exclusions are unbounded) — `excluded_count` on the run always records the true total. A future weight change is a new config version; historical runs stay replayable and explainable.
 
-`feedback_events` ships day one (R17): the engine writes a `shown` event per ranked result with its `rank_position`; a table CHECK (`event_type != 'shown' OR rank_position IS NOT NULL`) makes position-bias data loss impossible — it cannot be backfilled later. Client events (`opened/accepted/rejected/installed/added_to_path/used_in_project/human_override`) post through a dedicated endpoint. Scoring code never reads feedback_events; weight tuning is a human-reviewed config-version bump.
+`feedback_events` ships day one (R17): the engine writes a `shown` event per ranked result with its `rank_position`; a table CHECK (`event_type != 'shown' OR rank_position IS NOT NULL`) makes position-bias data loss impossible — it cannot be backfilled later. Composer-internal match runs set `record_impressions=False` — the user never sees those lists, so logging them would poison position-bias data. Client events (`opened/accepted/rejected/installed/added_to_path/used_in_project/human_override`) post through a dedicated endpoint that verifies `match_run_id` belongs to the caller's org (404 otherwise — the column is a loose reference, not an FK). Scoring code never reads feedback_events; weight tuning is a human-reviewed config-version bump.
 
 ### Requirement profiles and provenance gating (R14)
 
@@ -75,8 +76,8 @@ Every match persists a `match_runs` row stamped with `engine_version` (`"1.0.0"`
 **A hallucinated hard constraint silently deleting valid candidates is the worst matching failure**, so `build_match_requirement` enforces:
 
 - `required_capabilities` with provenance ≠ `user_entered` are **demoted to preferred** (scoring only).
-- Extracted `output_type`/`difficulty` are renamed to `_soft_*` keys that S2 predicates do not read.
-- Editing a field via PATCH flips its provenance to `user_entered`; matching requires the profile to be **confirmed** (`PROFILE_NOT_CONFIRMED` 422 otherwise).
+- Extracted `output_type`/`difficulty`/`time_budget` are renamed to `_soft_*` keys that S2 predicates do not read but scoring signals still consume — an extracted value influences rank, never eligibility, and an extracted time budget produces an advisory `SOFT_TIME_BUDGET` gap rather than hard `cut_for_budget` truncation (ADR-013). `_soft_*` keys cannot be injected through the API: `ALLOWED_FIELDS` rejects them on create and PATCH.
+- Editing a field via PATCH flips its provenance to `user_entered` **only when the value actually changed** — re-submitting an unchanged extracted value does not launder its provenance. Matching requires the profile to be **confirmed** (`PROFILE_NOT_CONFIRMED` 422 otherwise). `time_budget` and `tool_constraints` are type/range-validated on write (`INVALID_TIME_BUDGET` / `INVALID_TOOL_CONSTRAINTS` 422) — untyped values would crash scoring.
 
 ### LLM extraction contract (flag: `EXTRACTION_ENABLED`, default off)
 

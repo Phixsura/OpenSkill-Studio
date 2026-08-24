@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { apiWithAuth, ApiError } from "@/lib/api";
 
 import { CanvasView } from "./canvas-view";
-import { autoLayout, toDefinition, toReactFlow } from "./convert";
+import { applyStepUpdate, autoLayout, toDefinition, toReactFlow } from "./convert";
 import type { StepNodeData } from "./convert";
 import { ListView } from "./list-view";
 import { StepConfigPanel } from "./step-config-panel";
@@ -23,7 +23,7 @@ import type {
   WorkflowInput,
   WorkflowOutput,
 } from "./types";
-import { emptyDefinition, IO_TYPES } from "./types";
+import { emptyDefinition, IO_TYPES, normalizeDefinition, sanitizeKey } from "./types";
 
 interface PackDetail {
   id: string;
@@ -82,22 +82,14 @@ export default function WorkflowEditor({ orgId, packId }: { orgId: string; packI
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
-  // Initialize once from server. Normalize instead of casting: the backend
-  // stores the raw dict from PUT /definition, so keys the author never sent
-  // (edges/inputs/outputs/ui) can be legitimately absent.
+  // Initialize once from server. DEEP-normalize instead of casting: the
+  // backend validates with Pydantic (which fills defaults) but stores the
+  // author's RAW dict — so a valid stored definition can omit per-step
+  // config/inputs/outputs keys entirely, and ui.positions can hold junk.
+  // Top-level-only normalization crashed on `step.inputs.map(...)`.
   useEffect(() => {
     if (packData && definition === null) {
-      const raw = (packData.data.definition ?? {}) as Partial<WorkflowDefinition> &
-        Record<string, unknown>;
-      const def: WorkflowDefinition = {
-        ...emptyDefinition(),
-        schema_version: typeof raw.schema_version === "number" ? raw.schema_version : 1,
-        inputs: Array.isArray(raw.inputs) ? raw.inputs : [],
-        outputs: Array.isArray(raw.outputs) ? raw.outputs : [],
-        steps: Array.isArray(raw.steps) ? raw.steps : [],
-        edges: Array.isArray(raw.edges) ? raw.edges : [],
-        ui: raw.ui && typeof raw.ui === "object" ? (raw.ui as WorkflowDefinition["ui"]) : {},
-      };
+      const def = normalizeDefinition(packData.data.definition ?? {});
       setDefinition(def);
       const rf = toReactFlow(def);
       setNodes(rf.nodes);
@@ -171,31 +163,9 @@ export default function WorkflowEditor({ orgId, packId }: { orgId: string; packI
 
   const updateStep = useCallback(
     (updated: StepDef) => {
-      const def = currentDefinition();
-      const prev = def.steps.find((s) => s.id === updated.id);
-      // Ports removed or renamed leave edges/outputs referencing names that
-      // no longer exist — the save would then fail validation. Cascade the
-      // removal the same way deleteStep does for whole steps.
-      const newInputPorts = new Set(updated.inputs.map((p) => p.port));
-      const newOutputPorts = new Set(updated.outputs.map((p) => p.port));
-      const goneInputs = new Set(
-        (prev?.inputs ?? []).filter((p) => !newInputPorts.has(p.port)).map((p) => p.port),
-      );
-      const goneOutputs = new Set(
-        (prev?.outputs ?? []).filter((p) => !newOutputPorts.has(p.port)).map((p) => p.port),
-      );
-      applyDefinition({
-        ...def,
-        steps: def.steps.map((s) => (s.id === updated.id ? updated : s)),
-        edges: def.edges.filter(
-          (e) =>
-            !(e.to_step === updated.id && goneInputs.has(e.to_port)) &&
-            !(e.from_step === updated.id && goneOutputs.has(e.from_port)),
-        ),
-        outputs: def.outputs.filter(
-          (o) => !(o.from_step === updated.id && goneOutputs.has(o.from_port)),
-        ),
-      });
+      // Cascade port renames/removals to edges + workflow outputs (pure
+      // function in convert.ts — see applyStepUpdate for the semantics).
+      applyDefinition(applyStepUpdate(currentDefinition(), updated));
     },
     [currentDefinition, applyDefinition],
   );
@@ -411,12 +381,17 @@ function IOSection({
           <Button
             size="sm"
             variant="secondary"
-            onClick={() =>
+            onClick={() => {
+              // `_${length+1}` collides after a mid-list delete — probe for
+              // the first free key (backend rejects duplicates)
+              const taken = new Set(definition.inputs.map((inp) => inp.key));
+              let n = definition.inputs.length + 1;
+              while (taken.has(`input_${n}`)) n += 1;
               setInputs([
                 ...definition.inputs,
-                { key: `input_${definition.inputs.length + 1}`, type: "text", required: true },
-              ])
-            }
+                { key: `input_${n}`, type: "text", required: true },
+              ]);
+            }}
           >
             Add input
           </Button>
@@ -430,9 +405,7 @@ function IOSection({
                 onChange={(e) =>
                   setInputs(
                     definition.inputs.map((inp, idx) =>
-                      idx === i
-                        ? { ...inp, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_") }
-                        : inp,
+                      idx === i ? { ...inp, key: sanitizeKey(e.target.value) } : inp,
                     ),
                   )
                 }
@@ -491,17 +464,20 @@ function IOSection({
           <Button
             size="sm"
             variant="secondary"
-            onClick={() =>
+            onClick={() => {
+              const taken = new Set(definition.outputs.map((out) => out.key));
+              let n = definition.outputs.length + 1;
+              while (taken.has(`output_${n}`)) n += 1;
               setOutputs([
                 ...definition.outputs,
                 {
-                  key: `output_${definition.outputs.length + 1}`,
+                  key: `output_${n}`,
                   type: "image",
                   from_step: definition.steps[0]?.id ?? "",
                   from_port: "",
                 },
-              ])
-            }
+              ]);
+            }}
           >
             Add output
           </Button>
@@ -517,12 +493,7 @@ function IOSection({
                   onChange={(e) =>
                     setOutputs(
                       definition.outputs.map((out, idx) =>
-                        idx === i
-                          ? {
-                              ...out,
-                              key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"),
-                            }
-                          : out,
+                        idx === i ? { ...out, key: sanitizeKey(e.target.value) } : out,
                       ),
                     )
                   }
