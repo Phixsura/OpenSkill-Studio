@@ -90,8 +90,11 @@ async def drain_workflow_tasks(timeout: float = 15.0) -> None:
         await asyncio.wait_for(
             asyncio.gather(*current, return_exceptions=True), timeout=timeout
         )
-    except Exception:
+    except TimeoutError:
         log.warning("workflow_drain_timeout", pending=len(current))
+    # CancelledError propagates: a lifespan-shutdown cancellation must not be
+    # swallowed (or mislabelled as a timeout) — gather(return_exceptions=True)
+    # already absorbs task-level exceptions, so nothing else can raise here.
 
 
 def _now() -> datetime:
@@ -940,6 +943,14 @@ async def _execute_provider_action(
         cred = await db.get(OrgCredential, connection.credential_id)
         if cred is not None:
             credentials = decrypt_credentials(cred.encrypted_data)
+
+    # Close the read transaction opened by the freshness/credential SELECTs —
+    # otherwise it sits idle-in-transaction for the whole provider call (up to
+    # workflow_step_timeout_seconds), holding a pool slot and blocking VACUUM.
+    # commit (not rollback): rollback would expire run/sr/offering and the
+    # next attribute access would MissingGreenlet; expire_on_commit=False
+    # keeps them populated and a read-only commit is a no-op server-side.
+    await db.commit()
 
     try:
         output = await asyncio.wait_for(

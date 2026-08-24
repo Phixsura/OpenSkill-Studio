@@ -78,22 +78,17 @@ class WorkflowInstallationService:
                 raise AppError(
                     "ALREADY_INSTALLED", "Workflow pack already installed in this organization", 409
                 )
-            # Reactivate the removed installation
+            # Reactivate the removed installation — a plain UPDATE on the
+            # existing row (cannot violate uq_wfinstall_org_pack, so no
+            # IntegrityError handling needed; the race guard lives on the
+            # new-install INSERT path below)
             existing.release_id = release.id
             existing.installed_version = release.version
             existing.status = InstallStatus.ACTIVE
             existing.local_definition = None
             existing.locally_modified = False
             existing.installed_by = installed_by
-            try:
-                async with self.db.begin_nested():
-                    await self.db.flush()
-            except IntegrityError:
-                raise AppError(
-                    "ALREADY_INSTALLED",
-                    "Workflow pack already installed in this organization",
-                    409,
-                ) from None
+            await self.db.flush()
             await self._rebuild_bindings(existing, release)
             await self._bump_install_count(pack_id, +1)
             await self.db.refresh(existing)
