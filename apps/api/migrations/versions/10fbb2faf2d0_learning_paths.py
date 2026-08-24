@@ -7,6 +7,7 @@ Create Date: 2026-08-19
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import ENUM as PGENUM
 
 revision: str = "10fbb2faf2d0"
 down_revision: str | None = "2aecf3bfe954"
@@ -23,7 +24,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(200), nullable=False),
         sa.Column("slug", sa.String(200), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("status", sa.Enum("DRAFT", "PUBLISHED", "ARCHIVED", name="content_status", create_constraint=False, create_type=False), nullable=False, server_default="DRAFT"),
+        sa.Column("status", PGENUM("DRAFT", "PUBLISHED", "ARCHIVED", name="content_status", create_type=False), nullable=False, server_default="DRAFT"),
         sa.Column("estimated_minutes", sa.Integer(), nullable=True),
         sa.Column("created_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -40,7 +41,7 @@ def upgrade() -> None:
         "learning_path_items",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column("path_id", sa.String(26), sa.ForeignKey("learning_paths.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("item_type", sa.Enum("SKILL", "PROJECT", "SECTION", name="path_item_type", create_constraint=False, create_type=False), nullable=False),
+        sa.Column("item_type", PGENUM("SKILL", "PROJECT", "SECTION", name="path_item_type", create_type=False), nullable=False),
         sa.Column("skill_id", sa.String(26), sa.ForeignKey("skills.id", ondelete="CASCADE"), nullable=True),
         sa.Column("project_id", sa.String(26), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=True),
         sa.Column("section_title", sa.String(200), nullable=True),
