@@ -11,7 +11,14 @@
  * - Path detail: editable name input, Type select (Skill/Project/Section), "Select a skill..." dropdown, "Add Item" button, "Publish"/"Archive" buttons
  */
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
-import { registerUser, createOrg, loginInBrowser, createCohort, activateCohort, type AuthContext } from "./helpers";
+import {
+  registerUser,
+  createOrg,
+  loginInBrowser,
+  createCohort,
+  activateCohort,
+  type AuthContext,
+} from "./helpers";
 
 const API = process.env.E2E_API_URL || "http://localhost:8000/api/v1";
 
@@ -24,10 +31,14 @@ let adminPage: Page;
 let conCtx: BrowserContext;
 let conPage: Page;
 
-async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 async function api(auth: AuthContext, method: string, path: string, body?: object) {
   const res = await fetch(`${API}${path}`, {
-    method, headers: auth.headers, body: body ? JSON.stringify(body) : undefined,
+    method,
+    headers: auth.headers,
+    body: body ? JSON.stringify(body) : undefined,
   });
   return res.json();
 }
@@ -36,22 +47,44 @@ test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ browser }) => {
   // Register both users with rate-limit handling
-  for (let i = 0; i < 5; i++) { try { admin = await registerUser("FullE2E Admin"); break; } catch { await sleep(5000); } }
+  for (let i = 0; i < 5; i++) {
+    try {
+      admin = await registerUser("FullE2E Admin");
+      break;
+    } catch {
+      await sleep(5000);
+    }
+  }
   await sleep(3000);
-  for (let i = 0; i < 5; i++) { try { consumer = await registerUser("FullE2E Consumer"); break; } catch { await sleep(5000); } }
+  for (let i = 0; i < 5; i++) {
+    try {
+      consumer = await registerUser("FullE2E Consumer");
+      break;
+    } catch {
+      await sleep(5000);
+    }
+  }
 
   orgId = await createOrg(admin, `FullE2E-${Date.now()}`);
   conOrgId = await createOrg(consumer, `FullCon-${Date.now()}`);
 
   // Pre-create a category + skills for the pack detail tests
-  const cat = await api(admin, "POST", `/orgs/${orgId}/categories`, { name: `FullCat-${Date.now()}` });
+  const cat = await api(admin, "POST", `/orgs/${orgId}/categories`, {
+    name: `FullCat-${Date.now()}`,
+  });
   console.log("CAT CREATE:", JSON.stringify(cat));
   const sk1 = await api(admin, "POST", `/orgs/${orgId}/skills`, {
-    name: "Prompt Engineering", description: "Learn prompts", difficulty: "beginner", category_id: cat.data.id,
+    name: "Prompt Engineering",
+    description: "Learn prompts",
+    difficulty: "beginner",
+    category_id: cat.data.id,
   });
   console.log("SKILL1 CREATE:", JSON.stringify(sk1).slice(0, 200));
   const sk2 = await api(admin, "POST", `/orgs/${orgId}/skills`, {
-    name: "Image Generation", description: "AI images", difficulty: "intermediate", category_id: cat.data.id,
+    name: "Image Generation",
+    description: "AI images",
+    difficulty: "intermediate",
+    category_id: cat.data.id,
   });
   console.log("SKILL2 CREATE:", JSON.stringify(sk2).slice(0, 200));
 
@@ -83,13 +116,17 @@ test("1. Fill pack creation form with all fields and submit", async () => {
   // Fill every field using exact IDs from DOM audit
   await adminPage.locator("#name").fill("AI Photography Masterclass");
   await adminPage.locator("#summary").fill("Complete AI product photography training");
-  await adminPage.locator("#description").fill("Master AI-powered product photography from beginner to expert level");
+  await adminPage
+    .locator("#description")
+    .fill("Master AI-powered product photography from beginner to expert level");
   await adminPage.locator("#visibility").selectOption("Public");
   await adminPage.locator("#difficulty").selectOption("Beginner");
   await adminPage.locator("#minutes").fill("480");
   await adminPage.locator("#scenarioTags").fill("ecommerce, product-ads");
   await adminPage.locator("#toolTags").fill("midjourney, comfyui, photoshop");
-  await adminPage.locator("#learningOutcomes").fill("Create hero product images\nControl AI composition\nPost-process AI outputs");
+  await adminPage
+    .locator("#learningOutcomes")
+    .fill("Create hero product images\nControl AI composition\nPost-process AI outputs");
 
   // Take screenshot before submit
   await adminPage.screenshot({ path: "e2e/screenshots/pack-form-filled.png" });
@@ -117,7 +154,10 @@ test("1. Fill pack creation form with all fields and submit", async () => {
 
 test("2. Add skill to pack via dropdown and Add button", async () => {
   // Create a separate pack via API for this test (UI-created pack from test 1 may not have reloaded skills)
-  const apiPack = await api(admin, "POST", `/orgs/${orgId}/packs`, { name: "API Detail Pack", visibility: "public" });
+  const apiPack = await api(admin, "POST", `/orgs/${orgId}/packs`, {
+    name: "API Detail Pack",
+    visibility: "public",
+  });
   const apiPackId = apiPack.data.id;
 
   // Navigate to this pack's detail page
@@ -132,7 +172,7 @@ test("2. Add skill to pack via dropdown and Add button", async () => {
   // Get dropdown options
   const options = await skillSelect.locator("option").allTextContents();
 
-  const promptOpt = options.find(o => o.includes("Prompt Engineering"));
+  const promptOpt = options.find((o) => o.includes("Prompt Engineering"));
   expect(promptOpt).toBeTruthy();
   await skillSelect.selectOption({ label: promptOpt! });
 
@@ -148,7 +188,7 @@ test("2. Add skill to pack via dropdown and Add button", async () => {
   await sleep(500);
   const skillSelect2 = adminPage.locator("select").filter({ hasText: "Select skill..." });
   const options2 = await skillSelect2.locator("option").allTextContents();
-  const imageOpt = options2.find(o => o.includes("Image Generation"));
+  const imageOpt = options2.find((o) => o.includes("Image Generation"));
   expect(imageOpt).toBeTruthy();
   await skillSelect2.selectOption({ label: imageOpt! });
   await adminPage.locator("button:has-text('Add')").first().click();
@@ -186,8 +226,9 @@ test("3. Publish release: fill version, changelog, click Publish", async () => {
 
   // Assert: release version visible in Releases section
   await expect(adminPage.locator("text=1.0.0")).toBeVisible();
-  // Assert: pack status changed to published
-  await expect(adminPage.locator("text=published")).toBeVisible();
+  // Assert: pack status changed to published (badge may render in more
+  // than one place — status chip + release row)
+  await expect(adminPage.locator("text=published").first()).toBeVisible();
 
   await adminPage.screenshot({ path: "e2e/screenshots/pack-published.png" });
 });
@@ -271,13 +312,17 @@ test("7. Registry: click pack card → detail page → verify content", async ()
   await adminPage.goto("/registry");
   await adminPage.waitForLoadState("networkidle");
 
-  // Click first pack card
-  await adminPage.locator("a[href*='/registry/']").first().click();
+  // Click first pack card — exclude the "/registry/workflows" family-tab
+  // link (Issue #21) which now also matches a[href*='/registry/']
+  await adminPage
+    .locator("a[href*='/registry/']:not([href*='/registry/workflows'])")
+    .first()
+    .click();
   await adminPage.waitForLoadState("networkidle");
 
-  // Assert: on detail page
-  await expect(adminPage.locator("text=← Back to Registry")).toBeVisible();
-  await expect(adminPage.locator("text=Releases")).toBeVisible();
+  // Assert: on detail page ("Releases" section renamed "Version History")
+  await expect(adminPage.locator("text=← Back to Registry").first()).toBeVisible();
+  await expect(adminPage.locator("text=Version History")).toBeVisible();
   await expect(adminPage.locator("text=Install in your organization")).toBeVisible();
 
   await adminPage.screenshot({ path: "e2e/screenshots/registry-detail.png" });
@@ -326,7 +371,7 @@ test("9. Installation detail: Fork button click → status changes", async () =>
   await conPage.screenshot({ path: "e2e/screenshots/install-detail-before-fork.png" });
 
   // Click Fork, accept dialog
-  conPage.on("dialog", d => d.accept());
+  conPage.on("dialog", (d) => d.accept());
   await conPage.locator("button:has-text('Fork')").click();
   await conPage.waitForLoadState("networkidle");
   await sleep(1000);
@@ -379,7 +424,9 @@ test("11. Add section item to path", async () => {
   await sleep(500);
 
   // Fill section title input (placeholder: "e.g. Week 1: Getting Started")
-  const titleInput = conPage.locator('input[placeholder*="Week" i], input[placeholder*="Getting" i]').first();
+  const titleInput = conPage
+    .locator('input[placeholder*="Week" i], input[placeholder*="Getting" i]')
+    .first();
   await titleInput.fill("Module 1: Foundations");
 
   // Click "Add Item"
@@ -395,14 +442,17 @@ test("11. Add section item to path", async () => {
 
 test("12. Add skill item to path", async () => {
   // Select "Skill" from Type dropdown
-  const typeSelect = conPage.locator("select").filter({ hasText: /Skill|Section/ }).first();
+  const typeSelect = conPage
+    .locator("select")
+    .filter({ hasText: /Skill|Section/ })
+    .first();
   await typeSelect.selectOption("Skill");
   await sleep(500);
 
   // Pick a skill from the skill dropdown
   const skillSelect = conPage.locator("select").filter({ hasText: "Select a skill..." });
   const options = await skillSelect.locator("option").allTextContents();
-  const realSkill = options.find(o => o.length > 3 && !o.includes("Select"));
+  const realSkill = options.find((o) => o.length > 3 && !o.includes("Select"));
 
   if (realSkill) {
     await skillSelect.selectOption({ label: realSkill });
@@ -447,7 +497,7 @@ test("14. Assign path to cohort via UI", async () => {
   // Select path from dropdown
   const pathSelect = conPage.locator("select").first();
   const options = await pathSelect.locator("option").allTextContents();
-  const pathOption = options.find(o => o.includes("AI Creator Bootcamp"));
+  const pathOption = options.find((o) => o.includes("AI Creator Bootcamp"));
 
   if (pathOption) {
     await pathSelect.selectOption({ label: pathOption });
@@ -464,7 +514,7 @@ test("14. Assign path to cohort via UI", async () => {
 
     // Unassign: click Remove
     await conPage.locator("button:has-text('Remove')").click();
-    conPage.on("dialog", d => d.accept());
+    conPage.on("dialog", (d) => d.accept());
     await conPage.waitForLoadState("networkidle");
     await sleep(500);
   }
@@ -541,7 +591,10 @@ test("18. Publish v1.1.0 update with an additional skill", async () => {
   const cat = await api(admin, "GET", `/orgs/${orgId}/categories`);
   const catId = cat.data[0].id;
   const sk3 = await api(admin, "POST", `/orgs/${orgId}/skills`, {
-    name: "Video Editing", description: "AI video editing", difficulty: "advanced", category_id: catId,
+    name: "Video Editing",
+    description: "AI video editing",
+    difficulty: "advanced",
+    category_id: catId,
   });
   expect(sk3.data).toBeTruthy();
 
@@ -550,7 +603,8 @@ test("18. Publish v1.1.0 update with an additional skill", async () => {
 
   // Publish v1.1.0
   const rel = await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/releases`, {
-    version: "1.1.0", changelog: "Added Video Editing skill",
+    version: "1.1.0",
+    changelog: "Added Video Editing skill",
   });
   expect(rel.data.version).toBe("1.1.0");
 
@@ -572,7 +626,8 @@ test("19. Install pack fresh and check update diff via API", async () => {
 
   // Install v1.0.0 explicitly
   const inst = await api(consumer, "POST", `/orgs/${conOrgId2}/installations`, {
-    pack_id: packId, version: "1.0.0",
+    pack_id: packId,
+    version: "1.0.0",
   });
   expect(inst.data).toBeTruthy();
   freshInstallId = inst.data.id;
@@ -584,7 +639,11 @@ test("19. Install pack fresh and check update diff via API", async () => {
   expect(detail.data.latest_version).toBe("1.1.0");
 
   // Get diff
-  const diff = await api(consumer, "GET", `/orgs/${conOrgId2}/installations/${freshInstallId}/diff?version=1.1.0`);
+  const diff = await api(
+    consumer,
+    "GET",
+    `/orgs/${conOrgId2}/installations/${freshInstallId}/diff?version=1.1.0`,
+  );
   expect(diff.data).toBeTruthy();
   // v1.1.0 added a skill, so diff.added should be non-empty
   expect(diff.data.added.length).toBeGreaterThanOrEqual(1);
@@ -596,9 +655,14 @@ test("19. Install pack fresh and check update diff via API", async () => {
 
 test("20. Upgrade installation to v1.1.0 and verify", async () => {
   // Upgrade via API
-  const upg = await api(consumer, "POST", `/orgs/${conOrgId2}/installations/${freshInstallId}/upgrade`, {
-    version: "1.1.0",
-  });
+  const upg = await api(
+    consumer,
+    "POST",
+    `/orgs/${conOrgId2}/installations/${freshInstallId}/upgrade`,
+    {
+      version: "1.1.0",
+    },
+  );
   expect(upg.data).toBeTruthy();
   expect(upg.data.installed_version).toBe("1.1.0");
 

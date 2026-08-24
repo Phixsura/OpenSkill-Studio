@@ -244,7 +244,13 @@ class AuthService:
                 )
                 token_record = stmt_result.scalar_one_or_none()
                 if token_record and not token_record.is_revoked:
-                    token_record.revoked_at = datetime.now(UTC)
+                    # Backdate past the concurrent-refresh grace window: the
+                    # grace exists ONLY for rotation races — an explicit
+                    # logout must be immediately final, or anyone holding the
+                    # cookie could revive the session within the window.
+                    token_record.revoked_at = datetime.now(UTC) - timedelta(
+                        seconds=settings.refresh_reuse_grace_seconds + 1
+                    )
                     await self.db.flush()
         except Exception as exc:
             log.debug("logout_cleanup_failed", error=str(exc))
@@ -415,7 +421,11 @@ class AuthService:
         if token.is_revoked:
             return  # Already revoked
 
-        token.revoked_at = datetime.now(UTC)
+        # Backdate past the rotation-race grace window — explicit revocation
+        # must be immediately final (see logout)
+        token.revoked_at = datetime.now(UTC) - timedelta(
+            seconds=settings.refresh_reuse_grace_seconds + 1
+        )
         await self.db.flush()
 
     # ── Helpers ───────────────────────────────────────────────
@@ -445,6 +455,9 @@ class AuthService:
         )
 
     async def _revoke_all_user_tokens(self, user_id: str) -> None:
+        # Backdated past the rotation-race grace window: password changes and
+        # bulk revocations must be immediately final (see logout)
+        final = datetime.now(UTC) - timedelta(seconds=settings.refresh_reuse_grace_seconds + 1)
         stmt_result = await self.db.execute(
             select(RefreshToken).where(
                 RefreshToken.user_id == user_id,
@@ -452,7 +465,7 @@ class AuthService:
             )
         )
         for token in stmt_result.scalars():
-            token.revoked_at = datetime.now(UTC)
+            token.revoked_at = final
 
     async def _create_email_verification(self, user: User) -> None:
         """Generate a verification token and send email."""
