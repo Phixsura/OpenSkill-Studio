@@ -282,3 +282,83 @@ def test_common_password_check():
     assert is_common_password("123456")
     assert is_common_password("qwerty")
     assert not is_common_password("xK9#mL2$pQ7!")
+
+
+# ── Concurrent-refresh grace window (cross-tab race) ─────────
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_within_grace_window_succeeds(client):
+    """Two browser tabs share the refresh cookie but dedup per tab: the
+    loser presents a just-rotated token. Within the grace window that must
+    mint a fresh pair, not force a logout."""
+    import uuid as _uuid
+
+    email = f"grace-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Grace"},
+    )
+    assert r.status_code == 201
+    cookie = r.cookies.get("refresh_token")
+    assert cookie
+
+    # Tab 1 refreshes (rotates the token)
+    client.cookies.set("refresh_token", cookie)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+
+    # Tab 2 re-presents the ORIGINAL (now-revoked) token within the grace
+    # window → fresh pair, not 401
+    client.cookies.set("refresh_token", cookie)
+    r2 = await client.post("/api/v1/auth/refresh")
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["access_token"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_after_grace_window_rejected(client):
+    """Outside the grace window, reuse of a rotated token is a revoked
+    session (or replay) and must 401."""
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+    from hashlib import sha256
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.core.security import decode_token
+    from app.models.user import RefreshToken
+
+    # Fresh pool: earlier tests in this file leave pooled connections bound
+    # to their own (closed) event loops ("attached to a different loop")
+    await engine.dispose()
+
+    email = f"grace2-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Grace2"},
+    )
+    cookie = r.cookies.get("refresh_token")
+
+    client.cookies.set("refresh_token", cookie)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+
+    # Backdate the revocation beyond the grace window
+    jti = decode_token(cookie)["jti"]
+    token_hash = sha256(jti.encode()).hexdigest()
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import update as sa_update
+
+        await db.execute(
+            sa_update(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash)
+            .values(revoked_at=datetime.now(UTC) - timedelta(seconds=60))
+        )
+        await db.commit()
+
+    client.cookies.set("refresh_token", cookie)
+    r2 = await client.post("/api/v1/auth/refresh")
+    assert r2.status_code == 401
+
+    # Leave a fresh pool for the next test file (loop hygiene)
+    await engine.dispose()

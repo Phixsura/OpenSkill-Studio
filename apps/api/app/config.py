@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret-change-me-in-production"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
+    # Concurrent-refresh grace: a just-rotated token re-presented within this
+    # window is a cross-tab race (shared cookie, per-tab dedup), not theft —
+    # the loser tab gets its own fresh pair instead of a forced logout.
+    refresh_reuse_grace_seconds: int = 10
 
     # LLM
     llm_provider: str = "anthropic"  # anthropic | openai

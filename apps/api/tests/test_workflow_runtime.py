@@ -736,3 +736,67 @@ async def test_empty_dict_step_output_still_collected(c):
     # The key must be PRESENT (value None — instruction steps emit {}),
     # not silently dropped from the outputs dict
     assert "final" in (data["outputs"] or {})
+
+
+@pytest.mark.asyncio
+async def test_admin_sweep_endpoint(c):
+    """POST /admin/workflows/sweep — the operator/cron sweep path (the lazy
+    sweep only fires for orgs whose runs someone is viewing)."""
+    from app.models.user import UserRole
+
+    h, user = await _auth(c)
+    oid = await _org(c, h)
+
+    # Promote to platform admin directly
+    from app.core.database import AsyncSessionLocal
+    from app.models.user import User
+
+    async with AsyncSessionLocal() as db:
+        u = await db.get(User, user["id"])
+        u.role = UserRole.ADMIN
+        await db.commit()
+
+    # Plant a run with an expired lease
+    import datetime as _dt
+
+    from app.models.workflow_run import (
+        RunStatus,
+        StepRunStatus,
+        WorkflowRun,
+        WorkflowStepRun,
+    )
+
+    async with AsyncSessionLocal() as db:
+        run = WorkflowRun(
+            org_id=oid,
+            definition_snapshot={"steps": [], "edges": [], "inputs": [], "outputs": []},
+            inputs={},
+            status=RunStatus.RUNNING,
+        )
+        db.add(run)
+        await db.flush()
+        db.add(
+            WorkflowStepRun(
+                run_id=run.id,
+                step_id="ghost",
+                step_type="provider_action",
+                status=StepRunStatus.RUNNING,
+                attempt=1,
+                max_attempts=3,
+                lease_expires_at=_dt.datetime.now(_dt.UTC) - _dt.timedelta(minutes=5),
+            )
+        )
+        await db.commit()
+
+    r = await c.post("/api/v1/admin/workflows/sweep", headers=h)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["expired_leases"] >= 1
+    assert data["runs_redispatched"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_admin_sweep_requires_platform_admin(c):
+    h, _ = await _auth(c)
+    r = await c.post("/api/v1/admin/workflows/sweep", headers=h)
+    assert r.status_code == 403

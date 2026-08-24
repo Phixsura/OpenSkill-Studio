@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.email import get_email_sender
 from app.core.security import (
     create_access_token,
@@ -199,13 +200,26 @@ class AuthService:
             raise TokenInvalidError("Token not found")
 
         if token_record.is_revoked:
-            # Token was revoked — could be user-initiated session revocation
-            # or password change, not necessarily theft. Don't nuke all sessions.
-            log.info("auth_revoked_token_used", user_id=user_id, jti=jti)
-            raise TokenInvalidError("Session has been revoked. Please log in again.")
-
-        # Revoke old token
-        token_record.revoked_at = datetime.now(UTC)
+            # Rotation is strict, but the refresh cookie is shared across
+            # browser tabs while the client-side dedup is per-tab: two tabs
+            # restoring a session refresh simultaneously and the loser
+            # presents the just-revoked token. Within a short grace window
+            # treat that as the race it is — mint the loser its own pair —
+            # instead of logging the tab out. Outside the window it's a
+            # revoked session (user action, password change, or replay).
+            revoked_age = (
+                (datetime.now(UTC) - token_record.revoked_at).total_seconds()
+                if token_record.revoked_at
+                else None
+            )
+            if revoked_age is not None and revoked_age <= settings.refresh_reuse_grace_seconds:
+                log.info("auth_refresh_race_grace", user_id=user_id, age_s=round(revoked_age, 2))
+            else:
+                log.info("auth_revoked_token_used", user_id=user_id, jti=jti)
+                raise TokenInvalidError("Session has been revoked. Please log in again.")
+        else:
+            # Revoke old token (rotation)
+            token_record.revoked_at = datetime.now(UTC)
 
         # Fetch user
         user = await self.db.get(User, user_id)

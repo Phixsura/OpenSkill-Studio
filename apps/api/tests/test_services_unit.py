@@ -122,11 +122,15 @@ async def test_auth_refresh_token_not_found():
 
 @pytest.mark.asyncio
 async def test_auth_refresh_token_reuse():
+    from datetime import UTC, datetime, timedelta
+
     from app.services.auth import AuthService, TokenInvalidError
 
     db = _mock_db()
     token_record = MagicMock()
     token_record.is_revoked = True
+    # Revoked OUTSIDE the concurrent-refresh grace window → reuse rejected
+    token_record.revoked_at = datetime.now(UTC) - timedelta(seconds=60)
     db.execute = AsyncMock(return_value=_mock_result(value=token_record))
 
     svc = AuthService(db)

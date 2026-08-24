@@ -262,3 +262,42 @@ async def delete_pack_category(
     await db.delete(category)
     await db.commit()
     log.info("pack_category_deleted", category_id=category_id, by=admin.id)
+
+
+# ── Workflow sweeper (manual/cron trigger) ────────────────
+
+
+@router.post(
+    "/workflows/sweep",
+    dependencies=[Depends(rate_limit(6, 60))],
+)
+async def sweep_workflows(
+    admin: User = Depends(require_role(UserRole.ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide sweep: recover expired executor leases + expire overdue
+    reviews across ALL orgs, then re-dispatch every touched run.
+
+    The lazy sweep (run-detail reads) only fires for orgs whose runs someone
+    is actually viewing — this is the operator/cron path for the rest.
+    """
+    from app.services.workflow_runtime import dispatch_advance, sweep_stale
+
+    swept = await sweep_stale(db, org_id=None)
+    await db.commit()
+    for run_id in swept["run_ids"]:
+        dispatch_advance(run_id)
+    log.info(
+        "workflow_sweep_manual",
+        by=admin.id,
+        expired_leases=swept["expired_leases"],
+        expired_reviews=swept["expired_reviews"],
+        runs_redispatched=len(swept["run_ids"]),
+    )
+    return {
+        "data": {
+            "expired_leases": swept["expired_leases"],
+            "expired_reviews": swept["expired_reviews"],
+            "runs_redispatched": len(swept["run_ids"]),
+        }
+    }
