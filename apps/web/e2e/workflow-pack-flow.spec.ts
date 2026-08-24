@@ -237,3 +237,149 @@ test("learning flow: intake → confirm → compose → confirm draft → path c
   await page.getByRole("button", { name: /Confirm & Create Path/i }).click();
   await expect(page.getByText(/created|path/i).first()).toBeVisible({ timeout: 15_000 });
 });
+
+test("run flow: start from install form → review gate → decide in UI → completed", async () => {
+  // A review-gated workflow: input → review_gate → output. Uses the mock
+  // provider org state from the production-flow test (serial mode).
+  const packRes = await api(admin, "POST", `/orgs/${orgId}/workflow-packs`, {
+    name: `Review Run ${Date.now()}`,
+  });
+  const packId = packRes.data.id;
+  await api(admin, "PUT", `/orgs/${orgId}/workflow-packs/${packId}/definition`, {
+    definition: {
+      schema_version: 1,
+      inputs: [{ key: "brief", type: "text", label: "Brief", required: true }],
+      outputs: [{ key: "final", type: "text", from_step: "gate", from_port: "passed" }],
+      steps: [
+        {
+          id: "take",
+          type: "asset_input",
+          name: "Take brief",
+          config: { accept_types: ["image"] },
+          inputs: [],
+          outputs: [{ port: "brief", type: "text" }],
+        },
+        {
+          id: "gate",
+          type: "review_gate",
+          name: "QA gate",
+          config: { instructions: "Check the brief", due_days: 7 },
+          inputs: [{ port: "subject", type: "text" }],
+          outputs: [
+            { port: "decision", type: "selection" },
+            { port: "passed", type: "text" },
+          ],
+        },
+      ],
+      edges: [
+        { id: "e1", from_step: "take", from_port: "brief", to_step: "gate", to_port: "subject" },
+      ],
+      ui: {},
+    },
+  });
+  await api(admin, "POST", `/orgs/${orgId}/workflow-packs/${packId}/releases`, {
+    version: "1.0.0",
+  });
+  const install = await api(admin, "POST", `/orgs/${orgId}/workflow-installations`, {
+    pack_id: packId,
+  });
+  const installId = install.data.id;
+
+  // ── Start the run from the INSTALLATION DETAIL form (input_schema path) ──
+  await page.goto(`/dashboard/orgs/${orgId}/workflow-installations/${installId}`);
+  await page.waitForLoadState("networkidle");
+  const briefInput = page.locator("#run-brief");
+  await expect(briefInput).toBeVisible({ timeout: 10_000 });
+  await briefInput.fill("Launch banner for spring sale");
+  await page.getByRole("button", { name: /Start Run/i }).click();
+
+  // Start Run's onSuccess router.pushes straight to the run detail page
+  await page.waitForURL(/workflow-runs\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+
+  // ── Suspends at the review gate ──
+  await expect(page.getByText(/waiting_review/i).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/Review required/i)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Check the brief")).toBeVisible();
+
+  // ── Decide with a note (per-review note state, audit round 2) ──
+  await page.getByPlaceholder("Decision note (optional)").fill("Looks good — colors match brand");
+  const decideResponse = page.waitForResponse(
+    (r) => r.url().includes("/decide") && r.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: /^Approve$/i }).click();
+  // The UI-typed note round-tripped onto the review record
+  const decided = (await (await decideResponse).json()) as {
+    data: { decision: string; decision_note: string | null };
+  };
+  expect(decided.data.decision).toBe("approved");
+  expect(decided.data.decision_note).toBe("Looks good — colors match brand");
+
+  // ── Run settles to completed (poll the API — the page's status badge
+  // text also matches step badges, so a bare getByText races the settle) ──
+  const runId = page.url().match(/workflow-runs\/([^/?#]+)/)?.[1];
+  let detail: { data: { status: string; outputs?: { final?: string } } } | null = null;
+  await expect
+    .poll(
+      async () => {
+        detail = await api(admin, "GET", `/orgs/${orgId}/workflow-runs/${runId}`);
+        return detail!.data.status;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("completed");
+  expect(detail!.data.outputs?.final).toBe("Launch banner for spring sale");
+  // And the UI reflects it (3s refetch interval)
+  await expect(page.getByText(/^completed$/i).first()).toBeVisible({ timeout: 10_000 });
+});
+
+test("comfyui import: upload JSON → dependency report → draft pack", async () => {
+  const packRes = await api(admin, "POST", `/orgs/${orgId}/workflow-packs`, {
+    name: `Comfy Import ${Date.now()}`,
+  });
+  const packId = packRes.data.id;
+
+  await page.goto(`/dashboard/orgs/${orgId}/workflow-packs/${packId}/import-comfyui`);
+  await page.waitForLoadState("networkidle");
+
+  // Never-executed banner is part of the red-line contract
+  await expect(page.getByText(/never executed/i)).toBeVisible();
+
+  // Upload an API-format workflow with a known node + a custom node
+  const comfyJson = JSON.stringify({
+    "1": {
+      class_type: "KSampler",
+      inputs: { seed: 42, model: ["2", 0] },
+    },
+    "2": {
+      class_type: "CheckpointLoaderSimple",
+      inputs: { ckpt_name: "sd_xl_base_1.0.safetensors" },
+    },
+    "3": {
+      class_type: "MyCustomUpscaler",
+      inputs: { image: ["1", 0] },
+    },
+    "4": {
+      class_type: "SaveImage",
+      inputs: { images: ["3", 0] },
+    },
+  });
+  await page.setInputFiles("#comfy-file", {
+    name: "workflow_api.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(comfyJson),
+  });
+
+  // ── Dependency report renders: format, node counts, custom node, model ──
+  await expect(page.getByText(/Dependency Report/i)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Format:/i)).toBeVisible();
+  await expect(page.getByText("MyCustomUpscaler")).toBeVisible();
+  await expect(page.getByText(/sd_xl_base_1\.0\.safetensors/)).toBeVisible();
+
+  // ── Convert to draft pack (name required to enable the button) ──
+  await page.locator("#draft-name").fill(`Comfy Draft ${Date.now()}`);
+  await page.getByRole("button", { name: /Create Draft Pack/i }).click();
+  await page.waitForURL(/workflow-packs\/[^/]+$/, { timeout: 15_000 });
+  await page.waitForLoadState("networkidle");
+  // Draft pack detail shows mapped steps (KSampler → image_generation)
+  await expect(page.getByText(/draft/i).first()).toBeVisible({ timeout: 10_000 });
+});
