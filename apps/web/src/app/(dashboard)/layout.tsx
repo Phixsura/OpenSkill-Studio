@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, sharedRefresh } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 import { NotificationBell } from "@/components/notification-bell";
 
@@ -46,6 +46,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const handleLogout = async () => {
     try {
+      // Settle any in-flight refresh FIRST. AuthInitializer fires
+      // sharedRefresh() on mount, which ROTATES the refresh cookie to a new
+      // token. If we log out mid-rotation, we'd revoke the OLD token while
+      // the refresh response re-sets a valid NEW cookie that logout never
+      // saw — leaving the "logged out" session alive on the next visit.
+      // Awaiting the shared promise means the cookie is stable before we
+      // revoke + clear it.
+      await sharedRefresh().catch(() => {});
       const token = useAuthStore.getState().accessToken;
       await api("/auth/logout", {
         method: "POST",
