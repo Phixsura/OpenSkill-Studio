@@ -132,6 +132,13 @@ test("application workflow: alice applies, admin accepts", async ({ page }) => {
     body: JSON.stringify({ title: "Apply Brief", client_name: "AppCo", project_type: "viz", objective: "Test application flow" }),
   })).json();
 
+  // Briefs are created DRAFT; applications are only accepted once the brief
+  // is opened (status gate predates Issue #21). Open it before applying.
+  await fetch(`${API}/orgs/${orgId}/briefs/${brief.data.id}`, {
+    method: "PUT", headers: admin.headers,
+    body: JSON.stringify({ status: "open" }),
+  });
+
   // Alice applies
   const applyRes = await fetch(`${API}/orgs/${orgId}/briefs/${brief.data.id}/apply`, {
     method: "POST", headers: alice.headers,
