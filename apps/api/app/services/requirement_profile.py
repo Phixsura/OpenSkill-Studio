@@ -215,10 +215,30 @@ class RequirementProfileService:
 
     # ── Mutation ──────────────────────────────────────────
 
+    @staticmethod
+    def _assert_can_write(profile: RequirementProfile, acting_user_id: str, is_instructor: bool):
+        # Only the profile's own user (or an instructor+) may edit/confirm it —
+        # otherwise any org member could rewrite and confirm someone else's
+        # requirements, turning their unconfirmed extractions into hard
+        # constraints they never approved (R14-adjacent).
+        owner = profile.user_id or profile.created_by
+        if not is_instructor and owner is not None and owner != acting_user_id:
+            raise AppError(
+                "PROFILE_FORBIDDEN",
+                "Only the profile owner or an instructor can modify this profile",
+                403,
+            )
+
     async def update_profile(
-        self, profile_id: str, org_id: str, edits: dict
+        self,
+        profile_id: str,
+        org_id: str,
+        edits: dict,
+        acting_user_id: str,
+        is_instructor: bool = False,
     ) -> RequirementProfile:
         profile = await self.get_profile(profile_id, org_id)
+        self._assert_can_write(profile, acting_user_id, is_instructor)
         if profile.status != "draft":
             raise AppError(
                 "PROFILE_ALREADY_CONFIRMED", "Confirmed profiles cannot be edited", 422
@@ -246,8 +266,15 @@ class RequirementProfileService:
         await self.db.refresh(profile)
         return profile
 
-    async def confirm(self, profile_id: str, org_id: str) -> RequirementProfile:
+    async def confirm(
+        self,
+        profile_id: str,
+        org_id: str,
+        acting_user_id: str,
+        is_instructor: bool = False,
+    ) -> RequirementProfile:
         profile = await self.get_profile(profile_id, org_id)
+        self._assert_can_write(profile, acting_user_id, is_instructor)
         if profile.status == "confirmed":
             raise AppError("PROFILE_ALREADY_CONFIRMED", "Profile is already confirmed", 422)
         profile.status = "confirmed"

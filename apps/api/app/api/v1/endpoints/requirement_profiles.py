@@ -148,9 +148,11 @@ async def update_profile(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = RequirementProfileService(db)
-    profile = await svc.update_profile(profile_id, org_id, body.edits)
+    profile = await svc.update_profile(
+        profile_id, org_id, body.edits, user.id, member.role in WRITE_ROLES
+    )
     await db.commit()
     return DataResponse(data=ProfileResponse.model_validate(profile))
 
@@ -166,8 +168,8 @@ async def confirm_profile(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = RequirementProfileService(db)
-    profile = await svc.confirm(profile_id, org_id)
+    profile = await svc.confirm(profile_id, org_id, user.id, member.role in WRITE_ROLES)
     await db.commit()
     return DataResponse(data=ProfileResponse.model_validate(profile))

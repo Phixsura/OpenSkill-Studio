@@ -408,3 +408,48 @@ async def test_shortlist_evidence_staleness_gate(c):
         third = await svc.rebuild_org_evidence(oid, force=True)
         await db.commit()
         assert third == first
+
+
+@pytest.mark.asyncio
+async def test_offer_rejects_foreign_and_overlong_match_run(c):
+    """offer_assignment must validate the loose match_run_id ref the same way
+    feedback-events does: a cross-org run → 404, an over-length id → 422 (not
+    a StringDataRightTruncation 500)."""
+    h_owner, _ = await _auth(c, "Owner")
+    oid = await _org(c, h_owner)
+    h_creator, creator = await _auth(c, "Creator")
+    await _add_member(c, h_owner, oid, creator)
+    project_id = await _project(c, h_owner, oid)
+
+    # A match run owned by a DIFFERENT org
+    h_other, _ = await _auth(c, "Other")
+    o2 = await _org(c, h_other)
+    prof2 = await c.post(
+        f"/api/v1/orgs/{o2}/requirement-profiles",
+        json={"context_type": "commercial_project", "structured_requirements": {"goal": "x"}},
+        headers=h_other,
+    )
+    p2 = prof2.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{o2}/requirement-profiles/{p2}/confirm", headers=h_other)
+    mr = await c.post(
+        f"/api/v1/orgs/{o2}/match",
+        json={"requirement_profile_id": p2, "target_entity_type": "creator"},
+        headers=h_other,
+    )
+    foreign_run_id = mr.json()["data"]["id"]
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"], "match_run_id": foreign_run_id},
+        headers=h_owner,
+    )
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "MATCH_RUN_NOT_FOUND"
+
+    # Over-length match_run_id → clean 422, never a 500
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"], "match_run_id": "x" * 200},
+        headers=h_owner,
+    )
+    assert r2.status_code == 422

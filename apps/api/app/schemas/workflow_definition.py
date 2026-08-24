@@ -50,6 +50,9 @@ EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 # data: URIs and large base64 blobs are rejected — assets are ULID references
 DATA_URI_RE = re.compile(r"data:[a-z]+/[a-z0-9.+-]+;base64,", re.IGNORECASE)
 BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/=]{1024,}")
+# NUL + C0/C1 control chars except tab (\x09) and newline (\x0a) — these
+# crash asyncpg when stored into JSONB (UntranslatableCharacterError)
+_CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 MAX_STEPS = 50
 MAX_EDGES = 150
@@ -216,6 +219,29 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             )
         )
 
+    # NUL / C0-C1 control chars would be stored verbatim into a JSONB column
+    # and crash asyncpg (UntranslatableCharacterError) at write time — a 500.
+    # Reject as 422 (tab/newline allowed). Must scan the ACTUAL string values,
+    # not json.dumps(raw): dumps escapes a NUL to a 6-char backslash sequence,
+    # regex would never match. Same class of bug create_run/ComfyUI also guard.
+    def _has_ctrl(v) -> bool:
+        if isinstance(v, str):
+            return bool(_CTRL_RE.search(v))
+        if isinstance(v, dict):
+            return any(_has_ctrl(k) or _has_ctrl(val) for k, val in v.items())
+        if isinstance(v, list):
+            return any(_has_ctrl(x) for x in v)
+        return False
+
+    if _has_ctrl(raw):
+        errors.append(
+            _err(
+                "WF_INVALID_CHARACTER",
+                "",
+                "Definition contains NUL or control characters that are not allowed",
+            )
+        )
+
     try:
         definition = WorkflowDefinition.model_validate(raw)
     except ValidationError as exc:
@@ -303,6 +329,21 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                     "WF_SELECTION_NO_OPTIONS",
                     f"/inputs/{i}/options",
                     f"Selection input '{inp.key}' must declare at least one option",
+                )
+            )
+        # A default outside the option set bricks every default-driven run:
+        # create_run applies the default, then rejects it as INVALID_INPUT_VALUE
+        if (
+            inp.type == "selection"
+            and inp.options
+            and inp.default is not None
+            and inp.default not in inp.options
+        ):
+            errors.append(
+                _err(
+                    "WF_SELECTION_BAD_DEFAULT",
+                    f"/inputs/{i}/default",
+                    f"Selection input '{inp.key}' default must be one of its options",
                 )
             )
 

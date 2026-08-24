@@ -380,3 +380,31 @@ def test_selection_input_without_options_rejected():
     d["inputs"][-1]["options"] = ["a", "b"]
     _, errors2 = validate_definition(d)
     assert "WF_SELECTION_NO_OPTIONS" not in _codes(errors2)
+
+
+def test_control_characters_rejected():
+    """NUL / C0 control chars would crash asyncpg on the JSONB write (a 500) —
+    the validator must reject them as WF_INVALID_CHARACTER (422)."""
+    d = _minimal_valid()
+    d["inputs"][0]["label"] = "a" + chr(0) + "b"
+    _, errors = validate_definition(d)
+    assert "WF_INVALID_CHARACTER" in _codes(errors)
+    # tab + newline stay allowed
+    d2 = _minimal_valid()
+    d2["inputs"][0]["label"] = "line1\nline2\tcol"
+    _, errors2 = validate_definition(d2)
+    assert "WF_INVALID_CHARACTER" not in _codes(errors2)
+
+
+def test_selection_default_must_be_in_options():
+    """A selection input whose default is outside its options bricks every
+    default-driven run (create_run applies then rejects it)."""
+    d = _minimal_valid()
+    d["inputs"].append(
+        {"key": "pick", "type": "selection", "required": True, "options": ["a", "b"], "default": "z"}
+    )
+    _, errors = validate_definition(d)
+    assert "WF_SELECTION_BAD_DEFAULT" in _codes(errors)
+    d["inputs"][-1]["default"] = "a"
+    _, errors2 = validate_definition(d)
+    assert "WF_SELECTION_BAD_DEFAULT" not in _codes(errors2)

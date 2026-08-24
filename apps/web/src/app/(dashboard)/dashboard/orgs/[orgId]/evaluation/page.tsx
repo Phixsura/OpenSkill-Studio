@@ -47,7 +47,8 @@ export default function EvaluationPage() {
 
   const { data: usage } = useQuery({
     queryKey: ["eval-usage", orgId],
-    queryFn: () => apiWithAuth<Usage>(`/orgs/${orgId}/evaluation/usage`),
+    queryFn: () =>
+      apiWithAuth<{ data: Usage }>(`/orgs/${orgId}/evaluation/usage`).then((r) => r.data),
   });
 
   const tasks = tasksData?.data ?? [];

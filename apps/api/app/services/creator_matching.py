@@ -311,6 +311,15 @@ class CreatorMatchingService:
         project = await self.db.get(_Project, project_id)
         if project is None or project.org_id != org_id:
             raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+        # match_run_id is a loose (non-FK) reference — validate org ownership
+        # the same way feedback-events does (ADR-012), or an over-length /
+        # cross-org value 500s or silently attaches a foreign run.
+        if match_run_id is not None:
+            from app.models.matching import MatchRun
+
+            run = await self.db.get(MatchRun, match_run_id)
+            if run is None or run.org_id != org_id:
+                raise AppError("MATCH_RUN_NOT_FOUND", "Match run not found", 404)
         member_r = await self.db.execute(
             select(OrgMember).where(
                 OrgMember.org_id == org_id,

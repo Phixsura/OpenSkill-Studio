@@ -57,6 +57,21 @@ from app.models.workflow_run import (
 log = structlog.get_logger()
 
 MAX_STEP_OUTPUT_BYTES = 48 * 1024  # Airflow XCom lesson
+# NUL + C0/C1 controls (tab/newline allowed) — crash asyncpg on JSONB write
+_CTRL_CHAR_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _values_have_ctrl(v) -> bool:
+    """True if any string ANYWHERE in a nested structure holds a control char.
+    Must recurse over real values — json.dumps escapes NUL so a serialized
+    scan would miss it."""
+    if isinstance(v, str):
+        return bool(_CTRL_CHAR_RE.search(v))
+    if isinstance(v, dict):
+        return any(_values_have_ctrl(k) or _values_have_ctrl(val) for k, val in v.items())
+    if isinstance(v, list):
+        return any(_values_have_ctrl(x) for x in v)
+    return False
 _EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 
 # Tracked background tasks (webhook.py pattern) — drained on shutdown
@@ -190,9 +205,18 @@ class WorkflowRuntimeService:
                         f"Input '{key}' must be a JSON object or array (max 8,000 chars)",
                         422,
                     )
-        # Bound input payload
+        # Bound input payload + reject NUL/control chars (stored into JSONB;
+        # asyncpg raises UntranslatableCharacterError → 500 otherwise). Scan
+        # the ACTUAL string values, not json.dumps — dumps escapes NUL to the
+        # 6-char \\u0000 sequence, which the control-char regex never matches.
         if len(json.dumps(effective_inputs, ensure_ascii=False)) > MAX_STEP_OUTPUT_BYTES:
             raise AppError("WF_INPUT_TOO_LARGE", "Run inputs exceed 48KB", 422)
+        if _values_have_ctrl(effective_inputs):
+            raise AppError(
+                "INVALID_INPUT_VALUE",
+                "Inputs contain NUL or control characters that are not allowed",
+                422,
+            )
 
         # Idempotent creation
         if idempotency_key:
@@ -204,6 +228,16 @@ class WorkflowRuntimeService:
             )
             existing = existing_r.scalar_one_or_none()
             if existing is not None:
+                # Idempotency must be scoped to the SAME request — reusing a
+                # key with a different installation or inputs is a client bug,
+                # not a retry; returning the old run would silently ignore the
+                # new intent.
+                if existing.installation_id != installation_id or existing.inputs != effective_inputs:
+                    raise AppError(
+                        "IDEMPOTENCY_KEY_CONFLICT",
+                        "This idempotency key was already used with different inputs",
+                        409,
+                    )
                 return existing
 
         run = WorkflowRun(
@@ -306,7 +340,20 @@ class WorkflowRuntimeService:
         if decision not in ("approved", "rejected"):
             raise AppError("INVALID_DECISION", "Decision must be approved or rejected", 422)
 
-        # Row lock — concurrent decisions serialize here
+        # Lock order MUST be steps → reviews → run to match cancel_run and the
+        # executor — otherwise decide_review (review-first) vs cancel_run
+        # (step-first) deadlock under concurrency (observed live). Resolve the
+        # step id without a lock, take the step lock first, THEN the review
+        # lock (concurrent decisions still serialize on the review row).
+        pre = await self.db.execute(
+            select(WorkflowStepReview.step_run_id).where(WorkflowStepReview.id == review_id)
+        )
+        step_run_id = pre.scalar_one_or_none()
+        if step_run_id is None:
+            raise AppError("REVIEW_NOT_FOUND", "Review not found", 404)
+        await self.db.execute(
+            select(WorkflowStepRun.id).where(WorkflowStepRun.id == step_run_id).with_for_update()
+        )
         result = await self.db.execute(
             select(WorkflowStepReview)
             .where(WorkflowStepReview.id == review_id)
@@ -909,8 +956,13 @@ async def _execute_provider_action(
         )
         return
 
-    # Write-ahead: persist provider_request_id + offering BEFORE the outbound call
-    provider_request_id = f"wf-{sr.id}-a{claimed_attempt}-{secrets.token_hex(4)}"
+    # Write-ahead: persist provider_request_id + offering BEFORE the outbound
+    # call (R13). The key is STABLE per step-run and reused across retries /
+    # crash recovery — a fresh key each attempt would let a provider that
+    # already did the work (crash after the call, before we recorded it)
+    # redo/recharge it on the next attempt. Reuse any key persisted by a
+    # prior attempt; only mint one the first time.
+    provider_request_id = sr.provider_request_id or f"wf-{sr.id}-{secrets.token_hex(6)}"
     write_ahead = await db.execute(
         update(WorkflowStepRun)
         .where(
@@ -1125,6 +1177,13 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
         overdue_q = overdue_q.where(WorkflowStepReview.org_id == org_id)
     overdue_r = await db.execute(overdue_q)
     for review in overdue_r.scalars().all():
+        # Lock the step row FIRST (steps → reviews order, matching cancel_run
+        # and decide_review) so the sweeper can't deadlock a concurrent cancel.
+        await db.execute(
+            select(WorkflowStepRun.id)
+            .where(WorkflowStepRun.id == review.step_run_id)
+            .with_for_update()
+        )
         # Guarded expiry: rowcount 0 = a reviewer decided in the meantime
         expire_result = await db.execute(
             update(WorkflowStepReview)

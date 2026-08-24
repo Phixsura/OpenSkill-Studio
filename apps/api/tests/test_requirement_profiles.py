@@ -525,3 +525,81 @@ def test_build_match_requirement_demotes_extracted_time_budget():
     assert req["_soft_time_budget"] == 60
     # user_entered fields stay hard
     assert req["difficulty"] == "beginner"
+
+
+@pytest.mark.asyncio
+async def test_member_cannot_edit_or_confirm_another_members_profile(c):
+    """A plain member must not edit/confirm a profile owned by another member
+    — otherwise they could turn someone's unconfirmed extractions into hard
+    constraints (R14-adjacent). Owner + instructors may."""
+    owner_h, owner = await _auth(c)
+    oid = await _org(c, owner_h)
+
+    # Owner (an instructor by role) creates a profile owned by owner.id
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"goal": "orig"}},
+        headers=owner_h,
+    )
+    pid = r.json()["data"]["id"]
+
+    # A second user joins as a plain student
+    student_h, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=owner_h,
+    )
+
+    # Student cannot edit the owner's profile
+    r_edit = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}",
+        json={"edits": {"goal": "hijacked"}},
+        headers=student_h,
+    )
+    assert r_edit.status_code == 403
+    assert r_edit.json()["error"]["code"] == "PROFILE_FORBIDDEN"
+
+    # ...nor confirm it
+    r_conf = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}/confirm", headers=student_h
+    )
+    assert r_conf.status_code == 403
+
+    # The owner (instructor role) still can
+    r_ok = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}",
+        json={"edits": {"goal": "updated by owner"}},
+        headers=owner_h,
+    )
+    assert r_ok.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_student_can_edit_own_profile(c):
+    """The profile's own user may edit/confirm it even as a plain student."""
+    owner_h, owner = await _auth(c)
+    oid = await _org(c, owner_h)
+    student_h, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=owner_h,
+    )
+    # Profile created BY the student (user_id = student)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"goal": "mine"}},
+        headers=student_h,
+    )
+    pid = r.json()["data"]["id"]
+    r_edit = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}",
+        json={"edits": {"goal": "my edit"}},
+        headers=student_h,
+    )
+    assert r_edit.status_code == 200
+    r_conf = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}/confirm", headers=student_h
+    )
+    assert r_conf.status_code == 200

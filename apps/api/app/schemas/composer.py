@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ComposeRequest(BaseModel):
@@ -43,9 +43,11 @@ class ConfirmResponse(BaseModel):
 
 
 class OfferAssignmentRequest(BaseModel):
-    project_id: str
-    user_id: str
-    match_run_id: str | None = None
+    project_id: str = Field(max_length=26)
+    user_id: str = Field(max_length=26)
+    # ULID-sized loose ref — bound the length so an over-length value is a
+    # clean 422 instead of a DB StringDataRightTruncation 500
+    match_run_id: str | None = Field(default=None, max_length=26)
     override_reason: str | None = None
 
     @field_validator("override_reason")

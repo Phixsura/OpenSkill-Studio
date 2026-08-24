@@ -800,3 +800,19 @@ async def test_admin_sweep_requires_platform_admin(c):
     h, _ = await _auth(c)
     r = await c.post("/api/v1/admin/workflows/sweep", headers=h)
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_run_input_with_nul_rejected(c):
+    """A NUL in a run input value would crash asyncpg on the JSONB insert
+    (500). create_run must reject it as INVALID_INPUT_VALUE (422)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition())
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "a" + chr(0) + "b"}},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "INVALID_INPUT_VALUE"

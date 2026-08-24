@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.client_brief import ApplicationStatus, BriefApplication
+from app.models.client_brief import ApplicationStatus, BriefApplication, ClientBrief
 from app.models.composer import CreatorCapabilityEvidence
 from app.models.project import ReviewStatus, Submission, SubmissionReview
 
@@ -245,10 +245,16 @@ async def _creator_signals(
     )
     rubric_avg = {row[0]: float(row[1]) for row in rubric_r.all()}
 
-    # Commercial history (accepted brief applications) in bulk
+    # Commercial history (accepted brief applications) in bulk — scoped to
+    # THIS org via the brief join. BriefApplication has no org_id column, so
+    # an unscoped query would leak a creator's accepted briefs from OTHER
+    # orgs into the score (and emit a false "verified" reason). Cross-org
+    # data must never enter scoring (S1 privacy / creator-fairness red line).
     commercial_r = await db.execute(
         select(BriefApplication.user_id, func.count())
+        .join(ClientBrief, ClientBrief.id == BriefApplication.brief_id)
         .where(
+            ClientBrief.org_id == spec.org_id,
             BriefApplication.user_id.in_(user_ids),
             BriefApplication.status == ApplicationStatus.ACCEPTED,
         )

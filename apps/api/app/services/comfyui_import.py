@@ -226,6 +226,14 @@ class ComfyUIImportService:
         if not isinstance(parsed, dict):
             raise AppError("UNRECOGNIZED_FORMAT", "Import is not a recognized ComfyUI format", 422)
 
+        # A NUL embedded in a JSON string value (valid JSON) would be stored
+        # verbatim into the original_json JSONB column and crash asyncpg with
+        # UntranslatableCharacterError (a 500). Reject as a clean 422.
+        if "\x00" in json_text:
+            raise AppError(
+                "INVALID_JSON", "Import contains NUL characters that are not allowed", 422
+            )
+
         # Lenient format detection (ingestion tolerance — C2)
         nodes: list[dict] = []
         links_count = 0
