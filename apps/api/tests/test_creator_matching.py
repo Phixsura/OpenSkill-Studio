@@ -340,17 +340,45 @@ async def test_student_cannot_offer_assignments(c):
 @pytest.mark.asyncio
 async def test_evidence_scores_stored_on_100_scale(c):
     """Evidence scores are stored 0-100; scoring.py normalizes ONCE at read
-    time — a 100-scored row must contribute base 1.0, and graded evidence
-    must outrank a lone ungraded badge (audit HIGH 1: double-division)."""
+    time. best_score is a SUM across exercises, so rebuild_evidence must
+    divide by the exercise count — and the read-time check must CALL the
+    real _creator_signals, not re-implement its formula on test constants."""
     h, owner = await _auth(c)
     oid = await _org(c, h)
-    await _completed_skill(c, h, oid, owner["id"], tag="image_generation")
+    skill_id = await _completed_skill(c, h, oid, owner["id"], tag="image_generation")
 
+    # Seed 2 exercises for the skill and bump best_score to a SUM of 150
+    # (2 exercises at 75 each) — the stored evidence score must be the
+    # per-exercise normalization 150/2 = 75, NOT a clamped 100.
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
     from app.models.composer import CreatorCapabilityEvidence
+    from app.models.skill import Exercise, ExerciseType, SkillProgress
     from app.services.creator_matching import CreatorMatchingService
+
+    async with AsyncSessionLocal() as db:
+        for i in range(2):
+            db.add(
+                Exercise(
+                    org_id=oid,
+                    skill_id=skill_id,
+                    title=f"Ex {i}",
+                    description="d" * 10,
+                    type=ExerciseType.TEXT_ANSWER,
+                    config={},
+                    sort_order=i,
+                )
+            )
+        sp_r = await db.execute(
+            select(SkillProgress).where(
+                SkillProgress.skill_id == skill_id,
+                SkillProgress.user_id == owner["id"],
+            )
+        )
+        progress = sp_r.scalar_one()
+        progress.best_score = 150  # SUM across the 2 exercises
+        await db.commit()
 
     async with AsyncSessionLocal() as db:
         svc = CreatorMatchingService(db)
@@ -365,49 +393,139 @@ async def test_evidence_scores_stored_on_100_scale(c):
         )
         row = ev_r.scalars().first()
         assert row is not None
-        # SkillProgress.best_score was 90 → stored as 90 (0-100 scale),
-        # NOT 0.9 (the double-division bug stored 0-1 here)
-        assert float(row.score) == 90.0
+        # 150 summed over 2 exercises → 75 on the 0-100 scale
+        assert float(row.score) == 75.0
 
-    # Unit-check the scoring normalization: score=100 → base exactly 1.0
-    from unittest.mock import MagicMock
+        # Read-time normalization through the REAL scoring path: one evidence
+        # row scored 75 → base 0.75, Bayesian shrinkage with n=1 →
+        # (1/4)*0.75 + (3/4)*0.5 = 0.5625. Fails if scoring.py's formula
+        # changes (unlike the old inline re-implementation).
+        from types import SimpleNamespace
 
-    from app.services.matching.scoring import _creator_signals
+        from app.services.matching.scoring import _creator_signals
 
-    class _Row:
-        capability_key = "image_generation"
-        score = 100
-        weight = 1.0
-
-    # Direct formula check (mirrors scoring.py): weight * score/100 capped at 1
-    base = min(float(_Row.weight) * (float(_Row.score) / 100.0), 1.0)
-    assert base == 1.0
-    _ = _creator_signals, MagicMock  # imported to pin the module path
+        spec = SimpleNamespace(org_id=oid, target_entity_type="creator")
+        signal_rows = await _creator_signals(
+            db,
+            [{"id": owner["id"], "last_login_at": None}],
+            spec,
+            {"required_capabilities": ["image_generation"]},
+        )
+        assert len(signal_rows) == 1
+        _, signals = signal_rows[0]
+        assert signals["capability_evidence"] == pytest.approx(0.5625)
 
 
 @pytest.mark.asyncio
 async def test_shortlist_evidence_staleness_gate(c):
     """rebuild_org_evidence skips when evidence is fresh (<10 min) unless
-    forced (audit HIGH 2 — no mass rewrite per shortlist request)."""
+    forced (audit HIGH 2 — no mass rewrite per shortlist request). Sequential
+    rebuilds must be idempotent: the advisory-lock + post-lock staleness
+    re-check means the row count never grows (no duplicated evidence)."""
     h, owner = await _auth(c)
     oid = await _org(c, h)
     await _completed_skill(c, h, oid, owner["id"], tag="image_generation")
 
+    from sqlalchemy import func as sa_func
+    from sqlalchemy import select
+
     from app.core.database import AsyncSessionLocal
+    from app.models.composer import CreatorCapabilityEvidence
     from app.services.creator_matching import CreatorMatchingService
+
+    async def _count(db):
+        r = await db.execute(
+            select(sa_func.count(CreatorCapabilityEvidence.id)).where(
+                CreatorCapabilityEvidence.org_id == oid
+            )
+        )
+        return r.scalar_one()
 
     async with AsyncSessionLocal() as db:
         svc = CreatorMatchingService(db)
         first = await svc.rebuild_org_evidence(oid)
         await db.commit()
         assert first >= 1
+        count_after_first = await _count(db)
         # Fresh evidence → gated rebuild is a no-op
         second = await svc.rebuild_org_evidence(oid)
         assert second == 0
-        # force=True bypasses the gate
+        await db.commit()
+        assert await _count(db) == count_after_first  # no duplicates
+        # force=True bypasses the gate — still idempotent (delete + re-insert)
         third = await svc.rebuild_org_evidence(oid, force=True)
         await db.commit()
         assert third == first
+        assert await _count(db) == count_after_first
+
+
+@pytest.mark.asyncio
+async def test_accept_offer_for_archived_project_rejected(c):
+    """Open offers survive project archival (soft delete) — accepting must be
+    blocked with PROJECT_NOT_AVAILABLE 409, never a silent accept against a
+    dead project. Declining stays allowed (cleans up the zombie offer)."""
+    h_owner, _ = await _auth(c, "Owner")
+    oid = await _org(c, h_owner)
+    h_creator, creator = await _auth(c, "Archived Target")
+    await _add_member(c, h_owner, oid, creator)
+    project_id = await _project(c, h_owner, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"]},
+        headers=h_owner,
+    )
+    assert r.status_code == 201, r.text
+    aid = r.json()["data"]["id"]
+
+    # Archive the project underneath the open offer (direct DB update — the
+    # delete endpoint soft-deletes to ARCHIVED the same way)
+    from app.core.database import AsyncSessionLocal
+    from app.models.project import Project
+    from app.models.skill import ContentStatus
+
+    async with AsyncSessionLocal() as db:
+        project = await db.get(Project, project_id)
+        project.status = ContentStatus.ARCHIVED
+        await db.commit()
+
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/respond",
+        json={"accept": True},
+        headers=h_creator,
+    )
+    assert r2.status_code == 409, r2.text
+    assert r2.json()["error"]["code"] == "PROJECT_NOT_AVAILABLE"
+
+    # Declining the zombie offer still works
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/respond",
+        json={"accept": False},
+        headers=h_creator,
+    )
+    assert r3.status_code == 200
+    assert r3.json()["data"]["status"] == "declined"
+
+
+def test_assignment_response_tolerates_null_assigned_by():
+    """creator_assignments.assigned_by is nullable with ON DELETE SET NULL —
+    the response schema must validate a row whose assigner was deleted, or
+    every assignments endpoint 500s for the whole org."""
+    from datetime import UTC, datetime
+
+    from app.models.composer import CreatorAssignment
+    from app.schemas.composer import AssignmentResponse
+
+    assignment = CreatorAssignment(
+        id="01AAAAAAAAAAAAAAAAAAAAAAAA",
+        org_id="01BBBBBBBBBBBBBBBBBBBBBBBB",
+        project_id="01CCCCCCCCCCCCCCCCCCCCCCCC",
+        user_id="01DDDDDDDDDDDDDDDDDDDDDDDD",
+        status="offered",
+        assigned_by=None,  # assigner deleted → SET NULL fired
+        created_at=datetime.now(UTC),
+    )
+    resp = AssignmentResponse.model_validate(assignment)
+    assert resp.assigned_by is None
 
 
 @pytest.mark.asyncio

@@ -316,6 +316,83 @@ async def test_refresh_reuse_within_grace_window_succeeds(client):
     assert r2.json()["access_token"]
 
 
+# ── Revoke-session cookie clearing ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_revoke_current_session_clears_cookie(client):
+    """Revoking the session backing the CURRENT refresh cookie must delete
+    the cookie in the response. The session id (RefreshToken.id) and the
+    cookie's jti are unrelated ULIDs — the link is sha256(jti) == token_hash,
+    so this is a regression test for the always-false jti == token_id guard."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"revoke-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Revoke"},
+    )
+    assert r.status_code == 201
+    cookie = r.cookies.get("refresh_token")
+    access = r.json()["access_token"]
+    headers = {"Authorization": f"Bearer {access}"}
+
+    # Only one session exists — it backs the current cookie
+    sessions = (await client.get("/api/v1/auth/sessions", headers=headers)).json()["data"]
+    assert len(sessions) == 1
+    session_id = sessions[0]["id"]
+
+    client.cookies.set("refresh_token", cookie)
+    r2 = await client.delete(f"/api/v1/auth/sessions/{session_id}", headers=headers)
+    assert r2.status_code == 204
+    set_cookie = r2.headers.get("set-cookie", "")
+    assert "refresh_token=" in set_cookie
+    assert "max-age=0" in set_cookie.lower() or 'refresh_token=""' in set_cookie
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_revoke_other_session_keeps_cookie(client):
+    """Revoking a DIFFERENT session must NOT touch the current cookie."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"revoke2-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Revoke2"},
+    )
+    assert r.status_code == 201
+    headers_a = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    old_sessions = (await client.get("/api/v1/auth/sessions", headers=headers_a)).json()["data"]
+    old_id = old_sessions[0]["id"]
+
+    # Second login → second session, new cookie (the "current" one)
+    r_b = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "TestPass123!"}
+    )
+    assert r_b.status_code == 200
+    cookie_b = r_b.cookies.get("refresh_token")
+    headers_b = {"Authorization": f"Bearer {r_b.json()['access_token']}"}
+
+    # Revoke the OLD session while presenting cookie B → no cookie clear
+    client.cookies.set("refresh_token", cookie_b)
+    r2 = await client.delete(f"/api/v1/auth/sessions/{old_id}", headers=headers_b)
+    assert r2.status_code == 204
+    assert "set-cookie" not in r2.headers
+
+    await engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_refresh_reuse_after_grace_window_rejected(client):
     """Outside the grace window, reuse of a rotated token is a revoked

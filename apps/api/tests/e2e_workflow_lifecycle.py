@@ -231,7 +231,9 @@ async def main() -> bool:  # noqa: PLR0915
             await asyncio.sleep(0.3)
         check("Run completes after approval", run_data["status"] == "completed",
               f"status={run_data['status']} error={run_data.get('error')}")
-        check("Run outputs present", bool(run_data.get("outputs")))
+        final_output = (run_data.get("outputs") or {}).get("final")
+        check("Run output 'final' is a real value", isinstance(final_output, str) and bool(final_output),
+              f"outputs={run_data.get('outputs')}")
         event_types = {e["event_type"] for e in run_data["events"]}
         check("Audit trail complete", {
             "run_created", "run_started", "review_requested", "review_decided", "run_completed",
@@ -291,7 +293,7 @@ async def main() -> bool:  # noqa: PLR0915
         check("Materialized learning path exists", rpath.status_code == 200)
 
         rconf2 = await c.post(f"/orgs/{o2}/drafts/{ldraft_id}/confirm", headers=h2)
-        check("Double-confirm → 422", rconf2.status_code == 422)
+        check("Double-confirm → 409", rconf2.status_code == 409)
 
         # ═══ 8. Creator shortlist → offer → accept ═══
         print("\n👥 Phase 7: Creator shortlist (human assigns, creator accepts)")

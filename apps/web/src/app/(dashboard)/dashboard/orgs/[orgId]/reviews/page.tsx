@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { apiWithAuth } from "@/lib/api";
 
@@ -20,17 +21,20 @@ interface PendingSub {
 
 export default function ReviewDashboardPage() {
   const { orgId } = useParams<{ orgId: string }>();
+  const [page, setPage] = useState(1);
+  const perPage = 20;
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["pending-reviews", orgId],
+    queryKey: ["pending-reviews", orgId, page],
     queryFn: () =>
-      apiWithAuth<{ data: PendingSub[]; meta: { total: number } }>(
-        `/orgs/${orgId}/reviews/pending`,
+      apiWithAuth<{ data: PendingSub[]; meta: { total: number; has_more: boolean } }>(
+        `/orgs/${orgId}/reviews/pending?page=${page}&per_page=${perPage}`,
       ),
   });
 
   const submissions = data?.data ?? [];
   const total = data?.meta?.total ?? 0;
+  const hasMore = data?.meta?.has_more ?? false;
 
   return (
     <div className="space-y-6">
@@ -96,10 +100,28 @@ export default function ReviewDashboardPage() {
         </table>
       </div>
 
-      {submissions.length < total && (
-        <p className="text-center text-sm text-[hsl(var(--muted-foreground))]">
-          Showing {submissions.length} of {total} pending reviews
-        </p>
+      {total > perPage && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            Showing {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} of {total}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded border px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!hasMore}
+              className="rounded border px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

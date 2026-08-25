@@ -167,6 +167,47 @@ async def test_brief_validation(c):
     assert r.status_code == 422  # bad URL scheme
 
 
+@pytest.mark.asyncio
+async def test_update_brief_validation_mirrors_create(c):
+    """UPDATE must enforce the same field caps and URL-scheme rules as CREATE:
+    oversized short-text fields → 422 (not a DB 500), javascript: URL → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)).json()[
+        "data"
+    ]["id"]
+    url = f"/api/v1/orgs/{oid}/briefs/{bid}"
+
+    # Oversized short-text fields → 422, never a StringDataRightTruncation 500
+    for bad in (
+        {"title": "X" * 400},  # > 300
+        {"client_industry": "I" * 150},  # > 100 (String(100) column)
+        {"timeline": "T" * 250},  # > 200 (String(200) column)
+        {"budget_range": "B" * 150},  # > 100
+        {"project_type": "P" * 60},  # > 50
+        {"brand_guidelines": "G" * 20000},  # > 10000
+        {"target_audience": "A" * 20000},
+        {"tone_and_style": "S" * 20000},
+        {"constraints": "C" * 20000},
+        {"client_website": "https://" + "w" * 500},  # > 500
+    ):
+        r = await c.put(url, json=bad, headers=h)
+        assert r.status_code == 422, f"{bad.keys()} → {r.status_code}: {r.text[:200]}"
+
+    # URL-scheme validation on update — create rejects this, update must too
+    r = await c.put(url, json={"client_website": "javascript:alert(1)"}, headers=h)
+    assert r.status_code == 422
+
+    # Valid values still pass
+    r = await c.put(
+        url,
+        json={"client_industry": "Tech", "client_website": "https://example.com"},
+        headers=h,
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["client_industry"] == "Tech"
+
+
 # ── Convert Brief to Project ─────────────────────────────
 
 

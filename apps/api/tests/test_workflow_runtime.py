@@ -816,3 +816,334 @@ async def test_run_input_with_nul_rejected(c):
     )
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "INVALID_INPUT_VALUE"
+
+
+# ── Audit round 3: output-step mapping, skip fixpoint, bindings, NUL outputs ──
+
+
+@pytest.mark.asyncio
+async def test_output_step_maps_input_to_declared_output_port(c):
+    """An output step's result must be keyed by its DECLARED OUTPUT port —
+    downstream collection reads by output port and the duplicate-port rule
+    makes input/output names disjoint, so input-port keys lose the value."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    definition = _definition()
+    definition["steps"].append(
+        {
+            "id": "deliver",
+            "type": "output",
+            "name": "Deliver",
+            "config": {},
+            "inputs": [{"port": "incoming", "type": "prompt"}],
+            "outputs": [{"port": "delivered", "type": "prompt"}],
+        }
+    )
+    definition["edges"].append(
+        {"id": "e9", "from_step": "build_prompt", "from_port": "prompt", "to_step": "deliver", "to_port": "incoming"}
+    )
+    definition["outputs"] = [
+        {"key": "final", "type": "prompt", "from_step": "deliver", "from_port": "delivered"}
+    ]
+    install_id = await _install(c, h, oid, definition)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "port mapping"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    # The value must arrive under the OUTPUT port key — a real string, not None
+    assert data["outputs"]["final"] == "Write about port mapping"
+    deliver = next(s for s in data["step_runs"] if s["step_id"] == "deliver")
+    assert deliver["output"] == {"delivered": "Write about port mapping"}
+
+
+@pytest.mark.asyncio
+async def test_skip_propagation_settles_multihop_chain_in_one_advance(c):
+    """Reverse-topological chain c(FAILED)->b->a: the skip-propagation
+    fixpoint must settle the run FAILED within a single advance_run call —
+    without needing extra externally-triggered advances."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import (
+        RunStatus,
+        StepRunStatus,
+        WorkflowRun,
+        WorkflowStepRun,
+    )
+    from app.services.workflow_runtime import advance_run
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    definition = {
+        "schema_version": 1,
+        "inputs": [],
+        "outputs": [],
+        "steps": [
+            {"id": s, "type": "instruction", "name": s.upper(), "config": {"content": "x"},
+             "inputs": [{"port": "trigger", "type": "text", "required": False}] if s != "c" else [],
+             "outputs": [{"port": "done", "type": "text"}]}
+            for s in ("a", "b", "c")
+        ],
+        "edges": [
+            {"id": "e1", "from_step": "c", "from_port": "done", "to_step": "b", "to_port": "trigger"},
+            {"id": "e2", "from_step": "b", "from_port": "done", "to_step": "a", "to_port": "trigger"},
+        ],
+    }
+    # Seed: c FAILED, b/a PENDING, run RUNNING. Step rows inserted a,b,c so
+    # dict iteration is reverse-topological — a single pass would only skip b.
+    async with AsyncSessionLocal() as db:
+        run = WorkflowRun(
+            org_id=oid, definition_snapshot=definition, inputs={}, status=RunStatus.RUNNING
+        )
+        db.add(run)
+        await db.flush()
+        for sid in ("a", "b"):
+            db.add(
+                WorkflowStepRun(
+                    run_id=run.id, step_id=sid, step_type="instruction",
+                    status=StepRunStatus.PENDING, max_attempts=3,
+                )
+            )
+        db.add(
+            WorkflowStepRun(
+                run_id=run.id, step_id="c", step_type="instruction",
+                status=StepRunStatus.FAILED, error_code="WF_STEP_ERROR", max_attempts=3,
+            )
+        )
+        await db.commit()
+        run_id = run.id
+
+    # ONE advance_run call must fully settle the run
+    await advance_run(run_id)
+
+    async with AsyncSessionLocal() as db:
+        settled = await db.get(WorkflowRun, run_id)
+        assert settled.status == RunStatus.FAILED
+        from sqlalchemy import select as sa_select
+
+        srs = (
+            await db.execute(
+                sa_select(WorkflowStepRun).where(WorkflowStepRun.run_id == run_id)
+            )
+        ).scalars().all()
+        by_id = {s.step_id: s.status for s in srs}
+        assert by_id["c"] == StepRunStatus.FAILED
+        assert by_id["b"] == StepRunStatus.SKIPPED
+        assert by_id["a"] == StepRunStatus.SKIPPED
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_binding_suggestion_falls_through_to_auto(c):
+    """An UNCONFIRMED suggestion row (confirmed_by=None) must NOT freeze the
+    org on the at-install offering — the auto rung re-selects the cheapest
+    eligible offering every run."""
+    from sqlalchemy import update as sa_update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.provider import ProviderModelOffering
+    from app.models.workflow_run import WorkflowStepBinding
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    expensive_id = await _mock_offering(c, h, oid)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+
+    # Unconfirmed suggestion pointing at the (only, expensive) offering
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == expensive_id)
+            .values(cost_per_call_usd=9.99)
+        )
+        db.add(
+            WorkflowStepBinding(
+                org_id=oid,
+                installation_id=install_id,
+                step_id="generate",
+                binding_mode="auto",
+                offering_id=expensive_id,
+                confirmed_by=None,  # unconfirmed suggestion (D5)
+            )
+        )
+        await db.commit()
+
+    # A cheaper offering added AFTER install must win via the auto rung
+    cheap_id = await _mock_offering(c, h, oid)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == cheap_id)
+            .values(cost_per_call_usd=0.01)
+        )
+        await db.commit()
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "auto rung"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    gen = next(s for s in data["step_runs"] if s["step_id"] == "generate")
+    assert gen["offering_id"] == cheap_id  # auto re-selected, not the frozen suggestion
+
+
+@pytest.mark.asyncio
+async def test_confirmed_binding_with_stale_features_falls_through(c):
+    """A CONFIRMED binding whose offering no longer satisfies the step's
+    required_features is stale: non-pinned mode falls through to auto."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import WorkflowStepBinding
+
+    h, user = await _auth(c)
+    oid = await _org(c, h)
+    # Offering WITHOUT the required feature (features default [])
+    bare_id = await _mock_offering(c, h, oid)
+    definition = _definition(with_provider=True)
+    definition["steps"][2]["config"]["required_features"] = ["hires"]
+    install_id = await _install(c, h, oid, definition)
+
+    # Confirmed (human) binding pointing at the featureless offering
+    async with AsyncSessionLocal() as db:
+        db.add(
+            WorkflowStepBinding(
+                org_id=oid,
+                installation_id=install_id,
+                step_id="generate",
+                binding_mode="preferred",
+                offering_id=bare_id,
+                confirmed_by=user["id"],
+            )
+        )
+        await db.commit()
+
+    # No eligible auto candidate either → NO_ELIGIBLE_PROVIDER (proves the
+    # stale confirmed binding was NOT used)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "stale features"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"failed"})
+    assert data["status"] == "failed"
+    gen = next(s for s in data["step_runs"] if s["step_id"] == "generate")
+    assert gen["error_code"] == "NO_ELIGIBLE_PROVIDER"
+
+
+@pytest.mark.asyncio
+async def test_step_output_with_nul_fails_step_cleanly(c):
+    """Adapter output containing NUL must fail the step WF_OUTPUT_INVALID and
+    settle the run FAILED — never crash the JSONB write (500 / stranded
+    RUNNING step with a live lease)."""
+    from app.services import workflow_adapters as wa
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await _mock_offering(c, h, oid)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+
+    class NulAdapter(wa.ProviderAdapterBase):
+        key = "mock"
+
+        async def execute(self, capability, model_name, inputs, config, credentials, idempotency_key):
+            return {"result": "a\x00b"}
+
+    original = wa._ADAPTERS["mock"]
+    wa._ADAPTERS["mock"] = NulAdapter()
+    try:
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/workflow-runs",
+            json={"installation_id": install_id, "inputs": {"topic": "nul output"}},
+            headers=h,
+        )
+        assert r.status_code == 201, r.text
+        run_id = r.json()["data"]["id"]
+        data = await _wait_run(c, h, oid, run_id, {"failed", "completed"})
+    finally:
+        wa._ADAPTERS["mock"] = original
+
+    assert data["status"] == "failed", data
+    gen = next(s for s in data["step_runs"] if s["step_id"] == "generate")
+    assert gen["status"] == "failed"
+    assert gen["error_code"] == "WF_OUTPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_json_input_default_applied_as_parsed_json(c):
+    """A json-typed input with a valid string default must run: create_run
+    parses the default instead of tripping its own type check (422 brick)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    definition = _definition()
+    definition["inputs"].append(
+        {"key": "cfg", "type": "json", "required": True, "default": '{"size": "1024"}'}
+    )
+    install_id = await _install(c, h, oid, definition)
+
+    # Omit 'cfg' — the default must apply, parsed, and the run completes
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "defaults"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    assert data["inputs"]["cfg"] == {"size": "1024"}
+
+
+@pytest.mark.asyncio
+async def test_template_ref_orders_execution_without_edge(c):
+    """A prompt_template referencing a LATER step with no edge must wait for
+    the ref target and render real content — not '' from an unready ref."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    definition = {
+        "schema_version": 1,
+        "inputs": [{"key": "topic", "type": "text", "required": True}],
+        "outputs": [
+            {"key": "final", "type": "prompt", "from_step": "reporter", "from_port": "out"}
+        ],
+        "steps": [
+            # 'reporter' is FIRST in definition order but data-depends on
+            # 'source' via a moustache ref only (no edge)
+            {
+                "id": "reporter",
+                "type": "prompt_template",
+                "name": "Reporter",
+                "config": {"template": "Source said: {{steps.source.outputs.text}}"},
+                "inputs": [],
+                "outputs": [{"port": "out", "type": "prompt"}],
+            },
+            {
+                "id": "source",
+                "type": "prompt_template",
+                "name": "Source",
+                "config": {"template": "value-{{inputs.topic}}"},
+                "inputs": [],
+                "outputs": [{"port": "text", "type": "prompt"}],
+            },
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    install_id = await _install(c, h, oid, definition)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "ordering"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    # The referenced value must be REAL content, not the empty string an
+    # unready ref would have rendered
+    assert data["outputs"]["final"] == "Source said: value-ordering"

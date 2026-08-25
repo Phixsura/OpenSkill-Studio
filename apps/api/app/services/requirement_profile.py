@@ -356,11 +356,17 @@ class RequirementProfileService:
                 f"Unknown requirement fields: {', '.join(sorted(unknown))}",
                 422,
             )
+        # isinstance guards first — membership tests on unhashable values
+        # (lists/dicts) raise TypeError → 500 instead of a clean 422
         output_type = structured.get("output_type")
-        if output_type is not None and output_type not in _IO_TYPES:
+        if output_type is not None and (
+            not isinstance(output_type, str) or output_type not in _IO_TYPES
+        ):
             raise AppError("INVALID_OUTPUT_TYPE", "Unknown output type", 422)
         difficulty = structured.get("difficulty")
-        if difficulty is not None and difficulty not in _DIFFICULTIES:
+        if difficulty is not None and (
+            not isinstance(difficulty, str) or difficulty not in _DIFFICULTIES
+        ):
             raise AppError("INVALID_DIFFICULTY", "Unknown difficulty", 422)
         # Type/range guards — untyped values crash scoring (int<=str TypeError)
         time_budget = structured.get("time_budget")
@@ -385,6 +391,14 @@ class RequirementProfileService:
         for cap_field in ("required_capabilities", "preferred_capabilities"):
             caps = structured.get(cap_field)
             if caps:
+                # Non-str items (dicts/lists) are unhashable — `c not in known`
+                # would TypeError → 500 instead of a clean 422
+                if not isinstance(caps, list) or any(not isinstance(c, str) for c in caps):
+                    raise AppError(
+                        "INVALID_CAPABILITIES",
+                        f"{cap_field} must be a list of strings",
+                        422,
+                    )
                 known = await self._capability_keys()
                 unknown_caps = [c for c in caps if c not in known]
                 if unknown_caps:

@@ -107,11 +107,19 @@ class RegistryService:
         _ilike_fallback = None  # set if FTS is used, for fallback on DB error
 
         if search and search.strip():
-            # Full-text search via the STORED search_tsv column (GIN-indexed,
-            # migration b9ca3e445203) — same expression, but computed once at
-            # write time instead of per-row per-query
+            # Full-text search on the STORED search_tsv column (computed once
+            # at write time, migration b9ca3e445203) OR-combined with ILIKE
+            # for substring / random-token matches that word-based FTS misses.
+            #
+            # Plan note (verified with EXPLAIN): because the tsquery match is
+            # OR-ed with unanchored ILIKEs, Postgres CANNOT use the GIN index
+            # ix_skill_packs_search_tsv for this predicate — the whole OR is
+            # evaluated as a per-row Filter. The scan is instead bounded by a
+            # Bitmap Index Scan on ix_packs_visibility_status (public +
+            # published only), so cost grows with the size of the published
+            # catalog, not the whole table. The GIN index only accelerates a
+            # future FTS-only path; acceptable at Phase 1 catalog sizes.
             search_vector = literal_column("skill_packs.search_tsv")
-            # ILIKE fallback for substring / random-token searches
             # Escape LIKE wildcards to prevent CPU-intensive pattern matching
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             term = f"%{escaped}%"

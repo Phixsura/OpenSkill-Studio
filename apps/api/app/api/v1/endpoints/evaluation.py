@@ -164,6 +164,10 @@ async def update_eval_settings(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     svc = EvaluationService(db)
-    result = await svc.update_eval_settings(org_id, body.model_dump(exclude_none=True))
+    # exclude_unset (NOT exclude_none): an explicit {"monthly_budget_usd": null}
+    # must reach the service to CLEAR the budget, while absent fields stay
+    # untouched. exclude_none silently dropped explicit nulls, making a budget
+    # impossible to remove once set.
+    result = await svc.update_eval_settings(org_id, body.model_dump(exclude_unset=True))
     await db.commit()
     return DataResponse(data=result)

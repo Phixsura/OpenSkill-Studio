@@ -73,6 +73,35 @@ def _values_have_ctrl(v) -> bool:
         return any(_values_have_ctrl(x) for x in v)
     return False
 _EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
+_STEP_REF_RE = re.compile(r"^steps\.([a-z0-9_]+)\.outputs\.[a-z0-9_]+$")
+
+
+def _template_ref_upstreams(step: dict) -> set[str]:
+    """Step ids referenced via moustache in a prompt_template's config.
+
+    Template refs are DATA dependencies: rendering an unready ref yields ''
+    and silently corrupts output, so the scheduler must order on them exactly
+    like edges. Scoped to prompt_template — the only step type whose config
+    is rendered at execution time.
+    """
+    if step.get("type") != "prompt_template":
+        return set()
+    refs: set[str] = set()
+    cfg_text = json.dumps(step.get("config", {}), ensure_ascii=False)
+    for m in _EXPR_RE.finditer(cfg_text):
+        rm = _STEP_REF_RE.match(m.group(1))
+        if rm:
+            refs.add(rm.group(1))
+    return refs
+
+
+def _upstream_ids(step_id: str, steps: dict, edges: list) -> set[str]:
+    """Combined upstreams: edge upstreams + template-ref data dependencies."""
+    ups = {e["from_step"] for e in edges if e["to_step"] == step_id}
+    step = steps.get(step_id)
+    if step is not None:
+        ups |= _template_ref_upstreams(step)
+    return ups
 
 # Tracked background tasks (webhook.py pattern) — drained on shutdown
 _pending_tasks: set[asyncio.Task] = set()
@@ -164,11 +193,23 @@ class WorkflowRuntimeService:
             raise AppError(
                 "UNKNOWN_INPUT", f"Unknown inputs: {', '.join(sorted(unknown))}", 422
             )
-        # Apply defaults
+        # Apply defaults. Defaults are stored as strings (schema), so a
+        # json-typed default must be parsed here or the type check below
+        # would reject the pack's own published default (422, never a 500).
         effective_inputs = dict(inputs)
         for key, idef in input_defs.items():
             if key not in effective_inputs and idef.get("default") is not None:
-                effective_inputs[key] = idef["default"]
+                default = idef["default"]
+                if idef.get("type") == "json" and isinstance(default, str):
+                    try:
+                        default = json.loads(default)
+                    except (ValueError, TypeError):
+                        raise AppError(
+                            "INVALID_INPUT_VALUE",
+                            f"Default for input '{key}' is not valid JSON",
+                            422,
+                        ) from None
+                effective_inputs[key] = default
         # Per-type value validation — selection options enforced, text bounded,
         # asset refs must be short strings (never blobs), json shape-checked.
         for key, value in effective_inputs.items():
@@ -566,36 +607,48 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
     )
     step_runs = {sr.step_id: sr for sr in step_runs_r.scalars().all()}
 
-    # Propagate SKIPPED: any step downstream of a FAILED/SKIPPED/CANCELLED step
-    changed = False
-    for step_id, sr in step_runs.items():
-        if sr.status != StepRunStatus.PENDING:
-            continue
-        upstream = [e["from_step"] for e in edges if e["to_step"] == step_id]
-        if any(
-            step_runs[u].status in (StepRunStatus.FAILED, StepRunStatus.SKIPPED, StepRunStatus.CANCELLED)
-            for u in upstream
-            if u in step_runs
-        ):
-            result = await db.execute(
-                update(WorkflowStepRun)
-                .where(WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.PENDING)
-                .values(status=StepRunStatus.SKIPPED, finished_at=_now())
-            )
-            changed = changed or bool(result.rowcount)
+    # Propagate SKIPPED: any step downstream of a FAILED/SKIPPED/CANCELLED
+    # step — via edges OR template-ref data dependencies. Fixpoint loop:
+    # a single pass in dict order only advances one hop over reverse-
+    # topologically ordered rows; multi-hop chains must fully settle in ONE
+    # _advance_once call so the terminal check below sees final statuses.
+    changed_any = False
+    local_status = {step_id: sr.status for step_id, sr in step_runs.items()}
+    while True:
+        changed = False
+        for step_id, sr in step_runs.items():
+            if local_status[step_id] != StepRunStatus.PENDING:
+                continue
+            upstream = _upstream_ids(step_id, steps, edges)
+            if any(
+                local_status[u] in (StepRunStatus.FAILED, StepRunStatus.SKIPPED, StepRunStatus.CANCELLED)
+                for u in upstream
+                if u in local_status
+            ):
+                result = await db.execute(
+                    update(WorkflowStepRun)
+                    .where(WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.PENDING)
+                    .values(status=StepRunStatus.SKIPPED, finished_at=_now())
+                )
+                if result.rowcount:
+                    local_status[step_id] = StepRunStatus.SKIPPED
+                    changed = True
+        changed_any = changed_any or changed
+        if not changed:
+            break
 
     # Refresh statuses after skip propagation
-    if changed:
+    if changed_any:
         step_runs_r = await db.execute(
             select(WorkflowStepRun).where(WorkflowStepRun.run_id == run_id)
         )
         step_runs = {sr.step_id: sr for sr in step_runs_r.scalars().all()}
 
-    # Find one executable step (upstreams all COMPLETED)
+    # Find one executable step (upstreams all COMPLETED — edges + template refs)
     for step_id, sr in step_runs.items():
         if sr.status not in (StepRunStatus.PENDING, StepRunStatus.WAITING_RETRY):
             continue
-        upstream = [e["from_step"] for e in edges if e["to_step"] == step_id]
+        upstream = _upstream_ids(step_id, steps, edges)
         if all(
             step_runs[u].status == StepRunStatus.COMPLETED for u in upstream if u in step_runs
         ):
@@ -721,7 +774,24 @@ async def _execute_step(
 
     try:
         if step_type == "instruction" or step_type == "output":
-            output = dict(inputs_resolved) if step_type == "output" else {}
+            if step_type == "output":
+                # Key by DECLARED OUTPUT port names — downstream edges and
+                # workflow-output collection read by output port, and the
+                # duplicate-port rule makes input/output names disjoint, so
+                # keeping input-port keys would make every value unreachable.
+                in_ports = [p["port"] for p in step.get("inputs", [])]
+                out_ports = [p["port"] for p in step.get("outputs", [])]
+                output = {}
+                for i, out_port in enumerate(out_ports):
+                    if len(in_ports) == 1:
+                        # Single input fans out to every declared output port
+                        output[out_port] = inputs_resolved.get(in_ports[0])
+                    elif i < len(in_ports):
+                        output[out_port] = inputs_resolved.get(in_ports[i])
+                    else:
+                        output[out_port] = None  # port beyond the input count
+            else:
+                output = {}
             await _complete_step(db, run, sr, output, claimed_attempt)
         elif step_type == "prompt_template":
             rendered = _render_template(step.get("config", {}).get("template", ""), run, step_runs)
@@ -779,6 +849,20 @@ async def _complete_step(
     output: dict,
     claimed_attempt: int,
 ) -> None:
+    # NUL/control chars in adapter output would crash the JSONB UPDATE
+    # (asyncpg UntranslatableCharacterError) and poison the session — the
+    # follow-up _fail_or_retry would then double-fault, stranding the step
+    # RUNNING with a live lease. Screen BEFORE touching the database.
+    if _values_have_ctrl(output):
+        await _fail_step(
+            db,
+            run,
+            sr,
+            "WF_OUTPUT_INVALID",
+            "Step output contains NUL or control characters",
+            claimed_attempt,
+        )
+        return
     if len(json.dumps(output, ensure_ascii=False, default=str)) > MAX_STEP_OUTPUT_BYTES:
         await _fail_step(db, run, sr, "WF_OUTPUT_TOO_LARGE", "Step output exceeds 48KB", claimed_attempt)
         return
@@ -1054,7 +1138,10 @@ async def _resolve_offering(
                 return offering
         return None  # pinned + unavailable = hard stop (allow_fallbacks:false)
 
-    # Org-confirmed binding for this installation+step
+    # Org-confirmed binding for this installation+step. Only a row a human
+    # actually confirmed counts — install creates UNCONFIRMED suggestion rows
+    # (confirmed_by=None, D5) and honoring those would freeze the org on the
+    # cheapest-at-install offering forever, making the auto rung dead code.
     if run.installation_id:
         binding_r = await db.execute(
             select(WorkflowStepBinding).where(
@@ -1068,20 +1155,26 @@ async def _resolve_offering(
             # silent fallback to auto-selection (no-auto-assign red line)
             if binding.binding_mode == "pinned" and not binding.offering_id:
                 return None
-            if binding.offering_id:
+            if binding.confirmed_by is not None and binding.offering_id:
                 offering = await db.get(ProviderModelOffering, binding.offering_id)
                 if offering is not None and offering.is_active:
                     conn = await db.get(ProviderConnection, offering.connection_id)
                     # Defense-in-depth on the credential path: the binding's
-                    # offering must belong to THIS org (R3)
+                    # offering must belong to THIS org (R3), and features are
+                    # mutable — a confirmed offering that no longer satisfies
+                    # required_features is stale, not silently good enough.
+                    required = set(config.get("required_features", []))
                     if (
                         conn is not None
                         and conn.org_id == run.org_id
                         and conn.status == "active"
+                        and required <= set(offering.features or [])
                     ):
                         return offering
                 if binding.binding_mode == "pinned":
                     return None  # pinned binding gone stale = hard stop
+            # Unconfirmed suggestion rows fall through to the auto rung
+            # (which re-runs the cheapest-eligible selection every time)
 
     # Auto: cheapest active offering for the capability in this org
     result = await db.execute(

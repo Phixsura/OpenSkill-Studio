@@ -93,11 +93,22 @@ describe("ComposeLearningPage", () => {
       wrapper: createWrapper(),
     });
     await screen.findByText("Compose Learning Path");
+    // Wait for the profiles query to resolve and populate the options —
+    // the positive control below fails otherwise.
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Learn AI e-commerce visuals");
+    });
     const select = container.querySelector("select");
-    expect(select).toBeDefined();
-    const optionTexts = Array.from(select?.querySelectorAll("option") ?? []).map(
+    // not.toBeNull, NOT toBeDefined — querySelector returns null when the
+    // selector is missing and toBeDefined passes for null, so the test would
+    // pass vacuously if the profile <select> never rendered.
+    expect(select).not.toBeNull();
+    const optionTexts = Array.from(select!.querySelectorAll("option")).map(
       (o) => o.textContent ?? "",
     );
+    // Positive control: the confirmed profile's goal must be present —
+    // otherwise a filter that drops ALL profiles would also pass.
+    expect(optionTexts.join(" ")).toContain("Learn AI e-commerce visuals");
     expect(optionTexts.join(" ")).not.toContain("Unconfirmed goal");
   });
 });

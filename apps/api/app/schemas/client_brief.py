@@ -141,6 +141,53 @@ class UpdateClientBriefRequest(BaseModel):
                 raise ValueError("Client name must be 1-200 characters")
         return v
 
+    @field_validator("client_industry")
+    @classmethod
+    def validate_client_industry(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100:
+            raise ValueError("Client industry must be 100 characters or less")
+        return v
+
+    @field_validator("project_type")
+    @classmethod
+    def validate_project_type(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if len(v) < 1 or len(v) > 50:
+                raise ValueError("Project type must be 1-50 characters")
+        return v
+
+    @field_validator("brand_guidelines", "target_audience", "tone_and_style", "constraints")
+    @classmethod
+    def validate_text_fields(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10000:
+            raise ValueError("Text field must be 10,000 characters or less")
+        return v
+
+    @field_validator("client_website")
+    @classmethod
+    def validate_website(cls, v: str | None) -> str | None:
+        if v is not None and v != "":
+            if len(v) > 500:
+                raise ValueError("URL must be 500 characters or less")
+            if not re.match(r"^https?://", v, re.IGNORECASE):
+                raise ValueError("URL must start with http:// or https://")
+        return v
+
+    @field_validator("budget_range")
+    @classmethod
+    def validate_budget_range(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100:
+            raise ValueError("Budget range must be 100 characters or less")
+        return v
+
+    @field_validator("timeline")
+    @classmethod
+    def validate_timeline(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Timeline must be 200 characters or less")
+        return v
+
     @field_validator("status")
     @classmethod
     def validate_status(cls, v: str | None) -> str | None:

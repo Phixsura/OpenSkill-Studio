@@ -47,8 +47,10 @@ COERCIBLE: dict[str, set[str]] = {
 STEP_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 PORT_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
-# data: URIs and large base64 blobs are rejected — assets are ULID references
-DATA_URI_RE = re.compile(r"data:[a-z]+/[a-z0-9.+-]+;base64,", re.IGNORECASE)
+# data: URIs and large base64 blobs are rejected — assets are ULID references.
+# Media-type parameters (e.g. ;charset=utf-8) must not defeat the match, so
+# any run of ;param segments between the subtype and ;base64, is consumed.
+DATA_URI_RE = re.compile(r"data:[a-z0-9.+-]+/[a-z0-9.+-]+(;[^;,]{1,80})*;base64,", re.IGNORECASE)
 BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/=]{1024,}")
 # NUL + C0/C1 control chars except tab (\x09) and newline (\x0a) — these
 # crash asyncpg when stored into JSONB (UntranslatableCharacterError)
@@ -346,6 +348,22 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                     f"Selection input '{inp.key}' default must be one of its options",
                 )
             )
+        # Same bug class for json inputs: defaults are strings (schema), so a
+        # json default must json.loads to an object/array or every
+        # default-driven run fails INVALID_INPUT_VALUE at create_run
+        if inp.type == "json" and inp.default is not None:
+            try:
+                parsed_default = _json.loads(inp.default)
+            except (ValueError, TypeError):
+                parsed_default = None
+            if not isinstance(parsed_default, (dict, list)):
+                errors.append(
+                    _err(
+                        "WF_INVALID_DEFAULT",
+                        f"/inputs/{i}/default",
+                        f"Input '{inp.key}' is json-typed; its default must be a JSON object or array",
+                    )
+                )
 
     # ── Edges ──
     edge_ids: set[str] = set()
@@ -404,30 +422,90 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             incoming.setdefault((edge.to_step, edge.to_port), []).append(edge)
             adjacency[edge.from_step].add(edge.to_step)
 
+    # ── Fan-in: at most ONE edge per input port ──
+    # The runtime resolves inputs per-edge in list order, so a second edge
+    # into the same port would silently overwrite the first upstream's value.
+    edge_index = {id(e): i for i, e in enumerate(edges)}
+    for (to_step, to_port), port_edges in incoming.items():
+        for extra in port_edges[1:]:
+            errors.append(
+                _err(
+                    "WF_PORT_MULTIPLE_EDGES",
+                    f"/edges/{edge_index[id(extra)]}",
+                    f"Input port '{to_step}.{to_port}' has multiple incoming edges; "
+                    "each input port accepts exactly one",
+                )
+            )
+
+    # ── Moustache refs are DATA dependencies: derive implicit edges ──
+    # A prompt_template referencing {{steps.X.outputs.Y}} must run after X —
+    # the runtime renders unready refs as '', silently corrupting output.
+    # Self-references can never be satisfied. Implicit edges join the Kahn
+    # cycle check below so a template-induced cycle is still WF_GRAPH_CYCLE.
+    # Scoped to prompt_template: it is the only step type whose config is
+    # rendered at execution time (refs elsewhere are documentation-only).
+    implicit_adjacency: dict[str, set[str]] = {s.id: set() for s in steps}
+    step_ref_re = re.compile(r"^steps\.([a-z0-9_]+)\.outputs\.[a-z0-9_]+$")
+    for i, step in enumerate(steps):
+        if step.type != "prompt_template":
+            continue
+        cfg_text = _json.dumps(step.config, ensure_ascii=False)
+        for m in EXPR_RE.finditer(cfg_text):
+            ref_m = step_ref_re.match(m.group(1))
+            if ref_m is None:
+                continue
+            ref_step = ref_m.group(1)
+            if ref_step == step.id:
+                errors.append(
+                    _err(
+                        "WF_EXPR_SELF_REF",
+                        f"/steps/{i}/config",
+                        f"Step '{step.id}' references its own output "
+                        f"'{{{{{m.group(1)}}}}}' — self-references can never resolve",
+                    )
+                )
+            elif ref_step in implicit_adjacency and step.id in implicit_adjacency:
+                implicit_adjacency[ref_step].add(step.id)
+
     # ── Cycle detection (Kahn) ──
-    if step_by_id:
+    # Runs over explicit edges + implicit template-ref edges; a cycle only
+    # closable through implicit edges is flagged meta.implicit=true.
+    def _kahn_has_cycle(adj_maps: list[dict[str, set[str]]]) -> list[str]:
+        """Return the steps stuck in a cycle ([] = acyclic) over merged adjacency."""
         indegree = {sid: 0 for sid in step_by_id}
-        for targets in adjacency.values():
+        merged: dict[str, set[str]] = {sid: set() for sid in step_by_id}
+        for adj in adj_maps:
+            for src_id, targets in adj.items():
+                if src_id in merged:
+                    merged[src_id].update(t for t in targets if t in indegree)
+        for targets in merged.values():
             for t in targets:
-                if t in indegree:
-                    indegree[t] += 1
+                indegree[t] += 1
         queue = [sid for sid, d in indegree.items() if d == 0]
         visited = 0
         while queue:
             node = queue.pop()
             visited += 1
-            for t in adjacency.get(node, set()):
+            for t in merged[node]:
                 indegree[t] -= 1
                 if indegree[t] == 0:
                     queue.append(t)
         if visited < len(step_by_id):
-            cycle_steps = sorted(sid for sid, d in indegree.items() if d > 0)
+            return sorted(sid for sid, d in indegree.items() if d > 0)
+        return []
+
+    if step_by_id:
+        cycle_steps = _kahn_has_cycle([adjacency, implicit_adjacency])
+        if cycle_steps:
+            meta: dict = {"cycle_steps": cycle_steps}
+            if not _kahn_has_cycle([adjacency]):
+                meta["implicit"] = True  # cycle closes through a template ref
             errors.append(
                 _err(
                     "WF_GRAPH_CYCLE",
                     "/edges",
                     f"Workflow graph contains a cycle involving: {', '.join(cycle_steps)}",
-                    meta={"cycle_steps": cycle_steps},
+                    meta=meta,
                 )
             )
 
@@ -468,7 +546,27 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             )
 
     # ── Workflow outputs reference real ports ──
+    # Output keys follow the port grammar and must be unique — the runtime
+    # collects outputs[out.key], so a duplicate silently overwrites its twin.
+    output_keys: set[str] = set()
     for i, out in enumerate(definition.outputs):
+        if not PORT_RE.match(out.key):
+            errors.append(
+                _err(
+                    "WF_INVALID_OUTPUT_KEY",
+                    f"/outputs/{i}/key",
+                    f"Output key '{out.key}' must match ^[a-z][a-z0-9_]{{0,63}}$",
+                )
+            )
+        if out.key in output_keys:
+            errors.append(
+                _err(
+                    "WF_DUPLICATE_OUTPUT_KEY",
+                    f"/outputs/{i}/key",
+                    f"Duplicate output key '{out.key}'",
+                )
+            )
+        output_keys.add(out.key)
         src = step_by_id.get(out.from_step)
         if src is None:
             errors.append(
@@ -493,30 +591,11 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                 )
             )
 
-    # ── Unreachable steps (no path from any entry step) ──
-    if step_by_id and not errors:
-        entry = {
-            s.id
-            for s in steps
-            if not any((s.id, p.port) in incoming for p in s.inputs) or s.type == "asset_input"
-        }
-        reachable: set[str] = set()
-        stack = list(entry)
-        while stack:
-            node = stack.pop()
-            if node in reachable:
-                continue
-            reachable.add(node)
-            stack.extend(adjacency.get(node, set()))
-        for i, step in enumerate(steps):
-            if step.id not in reachable:
-                errors.append(
-                    _err(
-                        "WF_UNREACHABLE_STEP",
-                        f"/steps/{i}",
-                        f"Step '{step.id}' is unreachable from any entry step",
-                    )
-                )
+    # NOTE: there is deliberately no "unreachable step" check. Every node of an
+    # acyclic graph roots at an entry step (a step with no incoming edge IS an
+    # entry step), a cyclic graph is already WF_GRAPH_CYCLE, and an input-starved
+    # step is already WF_INPUT_UNSATISFIED — an inputless island step is VALID
+    # (it simply runs as its own entry point).
 
     return definition, errors
 

@@ -179,14 +179,13 @@ def test_required_input_unsatisfied():
     assert "WF_INPUT_UNSATISFIED" in _codes(errors)
 
 
-def test_unreachable_step():
+def test_inputless_island_step_is_valid():
+    """An inputless island step IS valid (documented behavior): every node of
+    an acyclic graph roots at an entry step, so a dedicated unreachable-step
+    check can never fire — cyclic graphs are already WF_GRAPH_CYCLE and
+    input-starved steps are already WF_INPUT_UNSATISFIED. The former
+    WF_UNREACHABLE_STEP branch was dead code and has been removed."""
     d = _minimal_valid()
-    # Orphan step, not connected to anything, with no inputs (entry-like but
-    # then reachable) — instead make one that needs input but no edges to it
-    # and is not entry: give it a satisfied-optional input and no path.
-    # Simplest deterministic case: island step with an inbound edge from a
-    # step that doesn't exist isn't valid; so we mark unreachability via
-    # a step whose only feed comes from itself being skipped.
     d["steps"].append(
         {
             "id": "island",
@@ -197,9 +196,8 @@ def test_unreachable_step():
             "outputs": [],
         }
     )
-    # island IS an entry step (no inputs) so it's reachable. Verify that.
     _, errors = validate_definition(d)
-    assert "WF_UNREACHABLE_STEP" not in _codes(errors)
+    assert errors == []
 
 
 # ── Expression grammar ────────────────────────────────────
@@ -408,3 +406,155 @@ def test_selection_default_must_be_in_options():
     d["inputs"][-1]["default"] = "a"
     _, errors2 = validate_definition(d)
     assert "WF_SELECTION_BAD_DEFAULT" not in _codes(errors2)
+
+
+def test_json_default_must_parse_to_object_or_array():
+    """A json-typed input default is a string (schema); if it doesn't parse to
+    a dict/list, every default-driven run would fail INVALID_INPUT_VALUE at
+    create_run — the exact bug class WF_SELECTION_BAD_DEFAULT fixed for
+    selection inputs, recurring for json."""
+    d = _minimal_valid()
+    d["inputs"].append({"key": "cfg", "type": "json", "required": True, "default": "not-json"})
+    _, errors = validate_definition(d)
+    assert "WF_INVALID_DEFAULT" in _codes(errors)
+
+    # A scalar parses but isn't an object/array — still rejected
+    d["inputs"][-1]["default"] = "42"
+    _, errors2 = validate_definition(d)
+    assert "WF_INVALID_DEFAULT" in _codes(errors2)
+
+    # A valid JSON object default passes
+    d["inputs"][-1]["default"] = '{"a": 1}'
+    _, errors3 = validate_definition(d)
+    assert "WF_INVALID_DEFAULT" not in _codes(errors3)
+
+
+def test_data_uri_with_media_type_params_rejected():
+    """data: URIs with media-type parameters (;charset=utf-8) must not evade
+    the D4 no-inline-data guarantee."""
+    d = _minimal_valid()
+    d["steps"][0]["config"]["template"] = "data:text/plain;charset=utf-8;base64,SGVsbG8="
+    _, errors = validate_definition(d)
+    assert "WF_DATA_URI_REJECTED" in _codes(errors)
+    # Multiple parameters too
+    d["steps"][0]["config"]["template"] = "data:text/plain;charset=utf-8;foo=bar;base64,SGVsbG8="
+    _, errors2 = validate_definition(d)
+    assert "WF_DATA_URI_REJECTED" in _codes(errors2)
+
+
+def test_fan_in_multiple_edges_into_same_port_rejected():
+    """Two edges into the same input port validate to WF_PORT_MULTIPLE_EDGES —
+    the runtime resolves per-edge in list order, so the second edge would
+    silently overwrite the first upstream's value."""
+    d = _minimal_valid()
+    d["steps"].append(
+        {
+            "id": "second_prompt",
+            "type": "prompt_template",
+            "name": "Second prompt",
+            "config": {"template": "Also {{inputs.product_name}}"},
+            "inputs": [],
+            "outputs": [{"port": "prompt", "type": "prompt"}],
+        }
+    )
+    d["edges"].append(
+        {
+            "id": "e2",
+            "from_step": "second_prompt",
+            "from_port": "prompt",
+            "to_step": "generate",
+            "to_port": "prompt",  # same port as e1 — fan-in
+        }
+    )
+    _, errors = validate_definition(d)
+    fanin = next(e for e in errors if e["code"] == "WF_PORT_MULTIPLE_EDGES")
+    # Pointer names the SECOND edge (the extra one)
+    assert fanin["pointer"] == "/edges/1"
+
+    # Single-edge shape stays valid
+    _, errors2 = validate_definition(_minimal_valid())
+    assert "WF_PORT_MULTIPLE_EDGES" not in _codes(errors2)
+
+
+def test_output_key_grammar_and_duplicates():
+    """Workflow output keys follow the port grammar and must be unique —
+    duplicates silently overwrite each other in the final run outputs."""
+    d = _minimal_valid()
+    d["outputs"][0]["key"] = "WEIRD KEY!!"
+    _, errors = validate_definition(d)
+    assert "WF_INVALID_OUTPUT_KEY" in _codes(errors)
+
+    d2 = _minimal_valid()
+    d2["outputs"].append(
+        {"key": "result_image", "type": "prompt", "from_step": "write_prompt", "from_port": "prompt"}
+    )
+    _, errors2 = validate_definition(d2)
+    assert "WF_DUPLICATE_OUTPUT_KEY" in _codes(errors2)
+
+    # Distinct valid keys pass
+    d3 = _minimal_valid()
+    d3["outputs"].append(
+        {"key": "prompt_used", "type": "prompt", "from_step": "write_prompt", "from_port": "prompt"}
+    )
+    _, errors3 = validate_definition(d3)
+    assert errors3 == []
+
+
+def test_template_self_reference_rejected():
+    """{{steps.SELF.outputs.*}} can never resolve — WF_EXPR_SELF_REF."""
+    d = _minimal_valid()
+    d["steps"][0]["config"]["template"] = "Echo {{steps.write_prompt.outputs.prompt}}"
+    _, errors = validate_definition(d)
+    assert "WF_EXPR_SELF_REF" in _codes(errors)
+
+
+def test_template_ref_cycle_detected_via_implicit_edge():
+    """A moustache ref is a data dependency; a cycle only closable through it
+    is still WF_GRAPH_CYCLE, flagged meta.implicit=true."""
+    d = _minimal_valid()
+    # write_prompt --edge--> generate; generate's output referenced back into
+    # a second template that write_prompt's edge chain feeds… simplest cycle:
+    # t1 template refs t2's output, t2 template refs t1's output (no edges).
+    d["steps"] = [
+        {
+            "id": "t1",
+            "type": "prompt_template",
+            "name": "T1",
+            "config": {"template": "use {{steps.t2.outputs.out}}"},
+            "inputs": [],
+            "outputs": [{"port": "out", "type": "prompt"}],
+        },
+        {
+            "id": "t2",
+            "type": "prompt_template",
+            "name": "T2",
+            "config": {"template": "use {{steps.t1.outputs.out}}"},
+            "inputs": [],
+            "outputs": [{"port": "out", "type": "prompt"}],
+        },
+    ]
+    d["edges"] = []
+    d["outputs"] = []
+    _, errors = validate_definition(d)
+    cycle = next(e for e in errors if e["code"] == "WF_GRAPH_CYCLE")
+    assert set(cycle["meta"]["cycle_steps"]) == {"t1", "t2"}
+    assert cycle["meta"]["implicit"] is True
+
+
+def test_template_forward_ref_without_edge_is_valid_and_ordered():
+    """A template referencing another step WITHOUT an edge stays valid (the
+    endorsed authoring pattern) — ordering is enforced by the implicit edge,
+    not rejected. The runtime test asserts execution order."""
+    d = _minimal_valid()
+    d["steps"].append(
+        {
+            "id": "summary",
+            "type": "prompt_template",
+            "name": "Summary",
+            "config": {"template": "Prompt was: {{steps.write_prompt.outputs.prompt}}"},
+            "inputs": [],
+            "outputs": [{"port": "text", "type": "text"}],
+        }
+    )
+    _, errors = validate_definition(d)
+    assert errors == []

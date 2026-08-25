@@ -201,6 +201,56 @@ async def test_invalid_json_rejected(c):
 
 
 @pytest.mark.asyncio
+async def test_json_escaped_nul_rejected(c):
+    """json.loads turns \\u0000 into a real NUL in the parsed dict, bypassing
+    the literal-NUL scan of json_text — it must be a 422, not an asyncpg
+    UntranslatableCharacterError 500 at the JSONB insert."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # json.dumps escapes the NUL to the 6-char \\u0000, so the payload has no
+    # literal NUL byte — exactly the bypass case
+    payload = {
+        "nodes": [{"type": "KSampler", "title": "x\x00y", "widgets_values": []}],
+        "links": [],
+    }
+    data = json.dumps(payload)
+    assert "\x00" not in data  # precondition: escape only, no literal NUL
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": data, "encoding": "json"},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "COMFY_INVALID_CONTENT"
+
+    # NUL in a dict KEY must be caught too
+    payload_key = {"1": {"class_type": "KSampler", "inputs": {"se\x00ed": 1}}}
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": json.dumps(payload_key), "encoding": "json"},
+        headers=h,
+    )
+    assert r2.status_code == 422
+    assert r2.json()["error"]["code"] == "COMFY_INVALID_CONTENT"
+
+
+@pytest.mark.asyncio
+async def test_png_embedded_nul_rejected(c):
+    """The post-parse NUL scan applies to PNG-extracted workflows too."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    wf = {"1": {"class_type": "KSampler", "inputs": {"seed": "x\x00y"}}}
+    png = _png_with_workflow(json.dumps(wf))  # \\u0000-escaped inside the chunk
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": base64.b64encode(png).decode(), "encoding": "base64"},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "COMFY_INVALID_CONTENT"
+
+
+@pytest.mark.asyncio
 async def test_unrecognized_format_rejected(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)

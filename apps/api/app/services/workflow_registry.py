@@ -7,6 +7,7 @@ archived/private/rejected packs.
 
 import copy
 import hashlib
+import json
 
 import structlog
 from sqlalchemy import func, or_, select
@@ -19,6 +20,20 @@ from app.models.workflow_pack import WorkflowPack, WorkflowPackRelease
 from app.services.workflow_pack import _parse_semver
 
 log = structlog.get_logger()
+
+
+def _cache_key(params: dict) -> str:
+    """Build the search cache key from a canonical JSON dump of the params.
+
+    A raw ':'-join of user-controlled values collides when values themselves
+    contain ':' (search='a:b' vs scenario='b'), serving wrong cached results.
+    JSON encoding preserves field boundaries. The 'wfregistry:' prefix keeps
+    the invalidation pattern ('wfregistry:*') matching.
+    """
+    digest = hashlib.sha256(
+        json.dumps(params, sort_keys=True, default=str).encode()
+    ).hexdigest()
+    return f"wfregistry:search:{digest}"
 
 
 def _public_filters(query):
@@ -51,11 +66,20 @@ class WorkflowRegistryService:
     ) -> tuple[list[WorkflowPack], int]:
         """Search public, published workflow packs. Cached 5 minutes."""
         # ── Cache check (ids-only payload; access control re-applied on hit) ──
-        cache_key_src = (
-            f"{search}:{scenario}:{tool}:{capability}:{workflow_type}:"
-            f"{input_type}:{output_type}:{sort}:{page}:{per_page}"
+        cache_key = _cache_key(
+            {
+                "search": search,
+                "scenario": scenario,
+                "tool": tool,
+                "capability": capability,
+                "workflow_type": workflow_type,
+                "input_type": input_type,
+                "output_type": output_type,
+                "sort": sort,
+                "page": page,
+                "per_page": per_page,
+            }
         )
-        cache_key = f"wfregistry:search:{hashlib.md5(cache_key_src.encode()).hexdigest()}"
         cached = await cache_get(cache_key)
         if cached is not None:
             pack_ids = cached.get("ids", [])
@@ -69,7 +93,10 @@ class WorkflowRegistryService:
                 # size — otherwise has_more computes False and pagination
                 # stops at page 1 for the cache TTL.
                 return filtered, cached.get("total", len(filtered))
-            return [], 0
+            # Empty page (e.g. page beyond the last result) still carries the
+            # real catalog total — dropping it to 0 makes clients think the
+            # catalog shrank for the cache TTL.
+            return [], cached.get("total", 0)
 
         # ── Build query ──
         base = _public_filters(select(WorkflowPack))

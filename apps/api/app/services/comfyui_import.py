@@ -148,6 +148,28 @@ MODEL_LOADER_NODES = {
 }
 
 
+def _parsed_has_nul(v) -> bool:
+    """True if any string (key or value) anywhere in the parsed structure
+    contains a NUL byte.
+
+    json.loads turns the 6-char escape ``\\u0000`` into a real NUL inside the
+    parsed dict, so scanning json_text for a literal NUL misses it — the NUL
+    then reaches the original_json JSONB insert and crashes asyncpg with
+    UntranslatableCharacterError (a 500). Mirrors the recursion of
+    workflow_runtime._values_have_ctrl, restricted to NUL: unlike run inputs,
+    imports intentionally tolerate other control chars and strip them during
+    report sanitization (sanitize_untrusted_text), and NUL is the only
+    character JSONB cannot store.
+    """
+    if isinstance(v, str):
+        return "\x00" in v
+    if isinstance(v, dict):
+        return any(_parsed_has_nul(k) or _parsed_has_nul(val) for k, val in v.items())
+    if isinstance(v, list):
+        return any(_parsed_has_nul(x) for x in v)
+    return False
+
+
 def _extract_png_workflow(raw: bytes) -> str | None:
     """Extract 'workflow' or 'prompt' text chunk from PNG bytes.
 
@@ -229,9 +251,16 @@ class ComfyUIImportService:
         # A NUL embedded in a JSON string value (valid JSON) would be stored
         # verbatim into the original_json JSONB column and crash asyncpg with
         # UntranslatableCharacterError (a 500). Reject as a clean 422.
-        if "\x00" in json_text:
+        # Cheap fast path first (literal NUL in the raw text), then the real
+        # guard: a recursive scan of the PARSED structure, because json.loads
+        # converts \\u0000 escapes into real NULs the text scan cannot see.
+        # Applies to the PNG-embedded path too — json_text/parsed come from
+        # the extracted chunk there.
+        if "\x00" in json_text or _parsed_has_nul(parsed):
             raise AppError(
-                "INVALID_JSON", "Import contains NUL characters that are not allowed", 422
+                "COMFY_INVALID_CONTENT",
+                "Import contains NUL characters that are not allowed",
+                422,
             )
 
         # Lenient format detection (ingestion tolerance — C2)

@@ -4,8 +4,13 @@
 
 import { describe, it, expect } from "vitest";
 
-import { autoLayout, toDefinition, toReactFlow } from "@/components/workflow-editor/convert";
-import { COERCIBLE, type WorkflowDefinition } from "@/components/workflow-editor/types";
+import {
+  applyStepUpdate,
+  autoLayout,
+  toDefinition,
+  toReactFlow,
+} from "@/components/workflow-editor/convert";
+import { COERCIBLE, type StepDef, type WorkflowDefinition } from "@/components/workflow-editor/types";
 
 function sampleDefinition(): WorkflowDefinition {
   return {
@@ -138,6 +143,101 @@ describe("autoLayout", () => {
     const laid = autoLayout(def);
     expect(laid.steps).toEqual(def.steps);
     expect(laid.edges).toEqual(def.edges);
+  });
+});
+
+describe("applyStepUpdate — positional rename detection", () => {
+  // Step with two input ports 'in' and 'in2', an edge feeding each.
+  function twoPortDefinition(): WorkflowDefinition {
+    return {
+      schema_version: 1,
+      inputs: [],
+      outputs: [],
+      steps: [
+        {
+          id: "src",
+          type: "prompt_template",
+          name: "Source",
+          config: {},
+          inputs: [],
+          outputs: [
+            { port: "out1", type: "text" },
+            { port: "out2", type: "text" },
+          ],
+        },
+        {
+          id: "sink",
+          type: "provider_action",
+          name: "Sink",
+          config: {},
+          inputs: [
+            { port: "in", type: "text" },
+            { port: "in2", type: "text" },
+          ],
+          outputs: [],
+        },
+      ],
+      edges: [
+        { id: "e1", from_step: "src", from_port: "out1", to_step: "sink", to_port: "in" },
+        { id: "e2", from_step: "src", from_port: "out2", to_step: "sink", to_port: "in2" },
+      ],
+      ui: {},
+    };
+  }
+
+  it("rewrites edges on a simple rename a→b", () => {
+    const def = twoPortDefinition();
+    const sink = def.steps[1] as StepDef;
+    const next = applyStepUpdate(def, {
+      ...sink,
+      inputs: [
+        { port: "in", type: "text" },
+        { port: "in3", type: "text" },
+      ],
+    });
+    expect(next.edges).toHaveLength(2);
+    expect(next.edges.find((e) => e.id === "e2")?.to_port).toBe("in3");
+    expect(next.edges.find((e) => e.id === "e1")?.to_port).toBe("in");
+  });
+
+  it("keeps the sibling's edges when a rename keystroke passes through its exact name", () => {
+    // Rename 'in2' → 'in3' by backspacing: transient state is ['in', 'in'],
+    // colliding with the sibling. Set-based detection collapsed the
+    // duplicate, saw no rename, and dropped e2 permanently — and a naive
+    // positional rewrite at the NEXT keystroke ('in' → 'in3' at index 1
+    // while 'in' persists at index 0) would drag the sibling's e1 along.
+    let def = twoPortDefinition();
+    const sink = () => def.steps.find((s) => s.id === "sink") as StepDef;
+    for (const name of ["in", "in3"]) {
+      def = applyStepUpdate(def, {
+        ...sink(),
+        inputs: [
+          { port: "in", type: "text" },
+          { port: name, type: "text" },
+        ],
+      });
+    }
+    // No edge is ever dropped, and port 1's edge stays on 'in'
+    expect(def.edges).toHaveLength(2);
+    expect(def.edges.find((e) => e.id === "e1")?.to_port).toBe("in");
+    // e2 was rewritten onto 'in' at the collision keystroke; once the names
+    // duplicate, a name-based rewrite cannot tell the ports apart, so it
+    // parks on the surviving name rather than being destroyed.
+    expect(def.edges.find((e) => e.id === "e2")?.to_port).toBe("in");
+  });
+
+  it("keeps an in-progress workflow output row (from_port: '') across step edits", () => {
+    const def = twoPortDefinition();
+    def.outputs = [
+      { key: "done", type: "text", from_step: "src", from_port: "out1" },
+      // "Add output" creates this shape before the user picks a port
+      { key: "output_2", type: "image", from_step: "src", from_port: "" },
+    ];
+    const src = def.steps[0] as StepDef;
+    const next = applyStepUpdate(def, { ...src, name: "Renamed source" });
+    expect(next.outputs).toHaveLength(2);
+    expect(next.outputs.find((o) => o.key === "output_2")?.from_port).toBe("");
+    expect(next.outputs.find((o) => o.key === "done")?.from_port).toBe("out1");
   });
 });
 

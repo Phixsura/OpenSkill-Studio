@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.schemas.workflow_pack import _reject_ctrl
+
 
 class CreateRunRequest(BaseModel):
     installation_id: str
@@ -39,8 +41,10 @@ class DecideReviewRequest(BaseModel):
     @field_validator("note")
     @classmethod
     def validate_note(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 2000:
-            raise ValueError("Note must be 2,000 characters or less")
+        if v is not None:
+            if len(v) > 2000:
+                raise ValueError("Note must be 2,000 characters or less")
+            _reject_ctrl(v)
         return v
 
 

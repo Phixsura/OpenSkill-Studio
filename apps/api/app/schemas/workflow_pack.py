@@ -1,8 +1,25 @@
 """Schemas for workflow packs, releases, installations (ADR-010)."""
 
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
+
+# Control chars other than \t \n \r — asyncpg raises
+# UntranslatableCharacterError (→ 500) on NUL and friends, so plain-text
+# request fields must reject them at the schema boundary (same class the
+# definition and run-input paths already guard against).
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+# BCP-47-ish primary-subtag + optional one subtag ('en', 'pt-BR', 'zh-Hans')
+_LANGUAGE_RE = re.compile(r"^[a-z]{2}(-[A-Za-z]{2,8})?$")
+
+
+def _reject_ctrl(v: str) -> str:
+    """Reject NUL/control characters (tab/newline/CR allowed)."""
+    if _CTRL_CHARS_RE.search(v):
+        raise ValueError("Control characters are not allowed")
+    return v
 
 
 class CreateWorkflowPackRequest(BaseModel):
@@ -22,20 +39,24 @@ class CreateWorkflowPackRequest(BaseModel):
         v = v.strip()
         if not v or len(v) > 200:
             raise ValueError("Name must be 1-200 characters")
-        return v
+        return _reject_ctrl(v)
 
     @field_validator("summary")
     @classmethod
     def validate_summary(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
-            raise ValueError("Summary must be 500 characters or less")
+        if v is not None:
+            if len(v) > 500:
+                raise ValueError("Summary must be 500 characters or less")
+            _reject_ctrl(v)
         return v
 
     @field_validator("description")
     @classmethod
     def validate_description(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 20000:
-            raise ValueError("Description must be 20,000 characters or less")
+        if v is not None:
+            if len(v) > 20000:
+                raise ValueError("Description must be 20,000 characters or less")
+            _reject_ctrl(v)
         return v
 
     @field_validator("workflow_type")
@@ -60,6 +81,15 @@ class CreateWorkflowPackRequest(BaseModel):
     def validate_difficulty(cls, v: str | None) -> str | None:
         if v is not None and v not in ("beginner", "intermediate", "advanced", "expert"):
             raise ValueError("Invalid difficulty")
+        return v
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        v = v.strip()
+        # Column is String(10) — reject before asyncpg truncation 500s
+        if len(v) > 10 or not _LANGUAGE_RE.match(v):
+            raise ValueError("Language must be a code like 'en' or 'pt-BR' (max 10 chars)")
         return v
 
     @field_validator("provenance")
@@ -88,6 +118,25 @@ class UpdateWorkflowPackRequest(BaseModel):
             v = v.strip()
             if not v or len(v) > 200:
                 raise ValueError("Name must be 1-200 characters")
+            _reject_ctrl(v)
+        return v
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 500:
+                raise ValueError("Summary must be 500 characters or less")
+            _reject_ctrl(v)
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 20000:
+                raise ValueError("Description must be 20,000 characters or less")
+            _reject_ctrl(v)
         return v
 
     @field_validator("visibility")
@@ -102,6 +151,25 @@ class UpdateWorkflowPackRequest(BaseModel):
     def validate_workflow_type(cls, v: str | None) -> str | None:
         if v is not None and v not in ("production", "pipeline", "review"):
             raise ValueError("Workflow type must be production, pipeline, or review")
+        return v
+
+    @field_validator("scenario_tags", "tool_tags")
+    @classmethod
+    def validate_tags(cls, v: list | None) -> list | None:
+        if v is None:
+            return v
+        if len(v) > 20:
+            raise ValueError("Maximum 20 tags")
+        for tag in v:
+            if not isinstance(tag, str) or not tag.strip() or len(tag) > 50:
+                raise ValueError("Tags must be non-empty strings of max 50 chars")
+        return [t.strip() for t in v]
+
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("beginner", "intermediate", "advanced", "expert"):
+            raise ValueError("Invalid difficulty")
         return v
 
     @field_validator("provenance")
@@ -135,6 +203,10 @@ class PublishWorkflowReleaseRequest(BaseModel):
     def validate_version(cls, v: str) -> str:
         import re
 
+        # Column is String(50) — an unbounded prerelease suffix would pass
+        # the semver regex then 500 on flush (StringDataRightTruncation)
+        if len(v) > 50:
+            raise ValueError("Version must be 50 characters or less")
         if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", v):
             raise ValueError("Version must be semver (X.Y.Z)")
         return v
@@ -142,8 +214,10 @@ class PublishWorkflowReleaseRequest(BaseModel):
     @field_validator("changelog")
     @classmethod
     def validate_changelog(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 10000:
-            raise ValueError("Changelog must be 10,000 characters or less")
+        if v is not None:
+            if len(v) > 10000:
+                raise ValueError("Changelog must be 10,000 characters or less")
+            _reject_ctrl(v)
         return v
 
     @field_validator("dependencies")
@@ -160,8 +234,10 @@ class RejectPackRequest(BaseModel):
     @field_validator("reason")
     @classmethod
     def validate_reason(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 500:
-            raise ValueError("Reason must be 500 characters or less")
+        if v is not None:
+            if len(v) > 500:
+                raise ValueError("Reason must be 500 characters or less")
+            _reject_ctrl(v)
         return v
 
 
@@ -237,6 +313,8 @@ class InstallWorkflowPackRequest(BaseModel):
         if v is not None:
             import re
 
+            if len(v) > 50:
+                raise ValueError("Version must be 50 characters or less")
             if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", v):
                 raise ValueError("Version must be semver (X.Y.Z)")
         return v
@@ -250,6 +328,8 @@ class UpgradeInstallationRequest(BaseModel):
     def validate_version(cls, v: str) -> str:
         import re
 
+        if len(v) > 50:
+            raise ValueError("Version must be 50 characters or less")
         if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", v):
             raise ValueError("Version must be semver (X.Y.Z)")
         return v

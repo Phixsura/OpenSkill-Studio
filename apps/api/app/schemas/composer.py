@@ -71,7 +71,9 @@ class AssignmentResponse(BaseModel):
     user_id: str
     match_run_id: str | None = None
     status: str
-    assigned_by: str
+    # Nullable: the DB column has ON DELETE SET NULL — after the assigning
+    # user is deleted a non-nullable str would 500 every assignments endpoint
+    assigned_by: str | None = None
     override_reason: str | None = None
     responded_at: datetime | None = None
     created_at: datetime

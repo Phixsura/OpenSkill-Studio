@@ -60,6 +60,7 @@ export default function WorkflowInstallationDetailPage() {
   const [diffVersion, setDiffVersion] = useState("");
   const [diff, setDiff] = useState<Diff | null>(null);
   const [runInputs, setRunInputs] = useState<Record<string, string>>({});
+  const [runInputErrors, setRunInputErrors] = useState<Record<string, string>>({});
   const [bindingEdits, setBindingEdits] = useState<
     Record<string, { offering_id: string; binding_mode: string }>
   >({});
@@ -173,10 +174,10 @@ export default function WorkflowInstallationDetailPage() {
   });
 
   const startRunMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (inputs: Record<string, unknown>) =>
       apiWithAuth<{ data: { id: string } }>(`/orgs/${orgId}/workflow-runs`, {
         method: "POST",
-        body: JSON.stringify({ installation_id: installId, inputs: runInputs }),
+        body: JSON.stringify({ installation_id: installId, inputs }),
       }),
     onSuccess: (res) => {
       toast.success("Run started");
@@ -184,6 +185,34 @@ export default function WorkflowInstallationDetailPage() {
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Run failed to start"),
   });
+
+  // json-type inputs are edited as raw text but the backend requires a real
+  // dict/list — parse before submit, block on failure with a field error.
+  const startRun = () => {
+    const errors: Record<string, string> = {};
+    const parsed: Record<string, unknown> = { ...runInputs };
+    for (const field of inputSchema) {
+      if (field.type !== "json") continue;
+      const raw = runInputs[field.key] ?? "";
+      if (raw.trim() === "") {
+        delete parsed[field.key];
+        continue;
+      }
+      try {
+        const value: unknown = JSON.parse(raw);
+        if (typeof value !== "object" || value === null) {
+          errors[field.key] = "Enter valid JSON (object or array)";
+        } else {
+          parsed[field.key] = value;
+        }
+      } catch {
+        errors[field.key] = "Enter valid JSON (object or array)";
+      }
+    }
+    setRunInputErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    startRunMutation.mutate(parsed);
+  };
 
   const loadDiff = async () => {
     try {
@@ -242,6 +271,24 @@ export default function WorkflowInstallationDetailPage() {
                     </option>
                   ))}
                 </select>
+              ) : field.type === "json" ? (
+                <textarea
+                  id={`run-${field.key}`}
+                  value={runInputs[field.key] ?? ""}
+                  onChange={(e) => {
+                    setRunInputs({ ...runInputs, [field.key]: e.target.value });
+                    if (runInputErrors[field.key]) {
+                      setRunInputErrors((prev) => {
+                        const next = { ...prev };
+                        delete next[field.key];
+                        return next;
+                      });
+                    }
+                  }}
+                  rows={4}
+                  placeholder='{"key": "value"}'
+                  className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 font-mono text-sm"
+                />
               ) : (
                 <Input
                   id={`run-${field.key}`}
@@ -255,6 +302,9 @@ export default function WorkflowInstallationDetailPage() {
                   className="mt-1"
                 />
               )}
+              {runInputErrors[field.key] && (
+                <p className="mt-1 text-xs text-red-600">{runInputErrors[field.key]}</p>
+              )}
             </div>
           ))}
           {inputSchema.length === 0 && (
@@ -264,7 +314,7 @@ export default function WorkflowInstallationDetailPage() {
           )}
           <Button
             disabled={startRunMutation.isPending || install.status === "removed"}
-            onClick={() => startRunMutation.mutate()}
+            onClick={startRun}
           >
             {startRunMutation.isPending ? "Starting…" : "Start Run"}
           </Button>

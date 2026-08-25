@@ -1,11 +1,29 @@
 """Schemas for requirement profiles, matching, feedback (ADR-012)."""
 
+import re
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _CONTEXTS = ("learning", "production", "commercial_project", "talent_matching")
+
+# NUL / C0-C1 control chars would be stored verbatim into JSONB and crash
+# asyncpg (UntranslatableCharacterError) at write time — a 500. Reject as
+# 422 (tab/newline allowed). Same recursion as schemas/workflow_definition.py:
+# scan the ACTUAL string values, not str(v) — repr escapes a NUL to a
+# backslash sequence the regex would never match.
+_CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _has_ctrl(v) -> bool:
+    if isinstance(v, str):
+        return bool(_CTRL_RE.search(v))
+    if isinstance(v, dict):
+        return any(_has_ctrl(k) or _has_ctrl(val) for k, val in v.items())
+    if isinstance(v, list):
+        return any(_has_ctrl(x) for x in v)
+    return False
 
 
 class CreateProfileRequest(BaseModel):
@@ -25,6 +43,10 @@ class CreateProfileRequest(BaseModel):
     def validate_structured_size(cls, v: dict) -> dict:
         if len(str(v)) > 10000:
             raise ValueError("Structured requirements too large")
+        if _has_ctrl(v):
+            raise ValueError(
+                "Structured requirements contain NUL or control characters that are not allowed"
+            )
         return v
 
 
@@ -51,6 +73,8 @@ class UpdateProfileRequest(BaseModel):
     def validate_edits_size(cls, v: dict) -> dict:
         if len(str(v)) > 10000:
             raise ValueError("Edits too large")
+        if _has_ctrl(v):
+            raise ValueError("Edits contain NUL or control characters that are not allowed")
         return v
 
 
@@ -109,9 +133,13 @@ class MatchRunResponse(BaseModel):
 
 
 class FeedbackEventRequest(BaseModel):
-    match_run_id: str | None = None
+    # ULID-sized loose refs / bounded rank — over-length or out-of-int32
+    # values must be a clean 422, never an asyncpg
+    # StringDataRightTruncation / integer-overflow 500. Negative ranks would
+    # pollute the position-bias dataset (R17).
+    match_run_id: str | None = Field(default=None, max_length=26)
     entity_type: str
-    entity_id: str
+    entity_id: str = Field(min_length=1, max_length=26)
     event_type: Literal[
         "opened",
         "accepted",
@@ -121,7 +149,7 @@ class FeedbackEventRequest(BaseModel):
         "used_in_project",
         "human_override",
     ]
-    rank_position: int | None = None
+    rank_position: int | None = Field(default=None, ge=0, le=1_000_000)
 
     @field_validator("entity_type")
     @classmethod

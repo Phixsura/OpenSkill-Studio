@@ -21,7 +21,7 @@ from app.models.evaluation import EvalStatus, EvaluationTask
 from app.models.organization import MemberStatus, OrgMember
 from app.models.portfolio import SkillBadge
 from app.models.project import ReviewStatus, Submission, SubmissionReview
-from app.models.skill import ProgressStatus, Skill, SkillProgress
+from app.models.skill import Exercise, ProgressStatus, Skill, SkillProgress
 from app.models.workflow_run import RunStatus, WorkflowRun
 from app.services.matching import MatchingEngine, MatchSpec
 from app.services.requirement_profile import RequirementProfileService
@@ -94,12 +94,29 @@ class CreatorMatchingService:
                 SkillProgress.status == ProgressStatus.COMPLETED,
             )
         )
-        for progress, skill in sp_r.all():
-            # Scores are stored on the 0-100 scale (column is Numeric(5,2));
-            # scoring.py normalizes to 0-1 exactly once at read time.
+        progress_rows = sp_r.all()
+        # SkillProgress.best_score is the SUM of best attempt scores across
+        # the skill's exercises (skill.py) — NOT a 0-100 value. Normalize by
+        # the exercise count (single grouped query) so a 3-exercise skill at
+        # 50/100 each (sum 150) stores ~50, not a clamped "perfect" 100.
+        # Stored evidence scores are on the 0-100 scale (column Numeric(5,2));
+        # scoring.py normalizes to 0-1 exactly once at read time.
+        skill_ids = {skill.id for _, skill in progress_rows}
+        exercise_counts: dict[str, int] = {}
+        if skill_ids:
+            ex_r = await self.db.execute(
+                select(Exercise.skill_id, func.count(Exercise.id))
+                .where(Exercise.skill_id.in_(skill_ids))
+                .group_by(Exercise.skill_id)
+            )
+            exercise_counts = {row[0]: row[1] for row in ex_r.all()}
+        for progress, skill in progress_rows:
             score = None
             if progress.best_score is not None:
-                score = min(float(progress.best_score), 100.0)
+                exercise_count = exercise_counts.get(skill.id, 0)
+                score = min(
+                    float(progress.best_score) / max(1, exercise_count), 100.0
+                )
             for cap in self._map_tags(list(skill.tags or []), keys):
                 add(cap, "skill_completed", progress.id, progress.completed_at or progress.started_at or skill.created_at, score)
 
@@ -131,7 +148,14 @@ class CreatorMatchingService:
             project = projects_by_id.get(submission.project_id)
             cap = (project.project_type or "").strip().lower() if project else ""
             if cap in keys:
-                score = min(float(review.score), 100.0) if review.score is not None else None
+                # SubmissionReview.score is on the PROJECT's max_score scale
+                # (validated against project.max_score, which may be 10 or
+                # 10000) — rescale to 0-100 before storing so evidence scores
+                # are comparable across projects.
+                score = None
+                if review.score is not None:
+                    max_score = project.max_score if project and project.max_score else 100
+                    score = min(float(review.score) / max(max_score, 1) * 100.0, 100.0)
                 add(cap, "approved_submission", review.id, review.created_at, score)
 
         # 4. Accepted commercial brief applications
@@ -205,7 +229,22 @@ class CreatorMatchingService:
         Skipped (returns 0) when existing evidence is fresh and force is
         False — shortlisting is a read path and must not mass-rewrite the
         evidence table on every request (N+1 + lock contention).
+
+        A transaction-scoped Postgres advisory lock serializes concurrent
+        rebuilds: without it, two requests both pass the read-then-act
+        staleness gate, both run delete+re-insert, and (READ COMMITTED —
+        neither DELETE sees the other's uncommitted inserts) every evidence
+        row ends up duplicated. The second rebuild blocks on the lock, then
+        re-checks staleness against the winner's fresh rows and skips.
         """
+        from sqlalchemy import text as sa_text
+
+        # Advisory lock FIRST (auto-released at transaction end), then the
+        # staleness check — checking before the lock reintroduces the race.
+        await self.db.execute(
+            sa_text("SELECT pg_advisory_xact_lock(hashtext('evidence:' || :org_id))"),
+            {"org_id": org_id},
+        )
         if not force:
             from datetime import UTC, datetime, timedelta
 
@@ -366,6 +405,19 @@ class CreatorMatchingService:
             raise AppError("NOT_YOUR_ASSIGNMENT", "Only the offered creator can respond", 403)
         if assignment.status != "offered":
             raise AppError("ALREADY_RESPONDED", "This offer was already responded to", 409)
+        if accept:
+            # Projects are soft-deleted (status=ARCHIVED), so open offers
+            # survive archival — a creator must not accept a dead project.
+            from app.models.project import Project as _Project
+            from app.models.skill import ContentStatus as _ContentStatus
+
+            project = await self.db.get(_Project, assignment.project_id)
+            if project is None or project.status == _ContentStatus.ARCHIVED:
+                raise AppError(
+                    "PROJECT_NOT_AVAILABLE",
+                    "The project for this offer is no longer available",
+                    409,
+                )
         assignment.status = "accepted" if accept else "declined"
         assignment.responded_at = datetime.now(UTC)
         await self.db.flush()

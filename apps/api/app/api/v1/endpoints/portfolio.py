@@ -83,7 +83,10 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db),
 ):
     svc = PortfolioService(db)
-    profile = await svc.update_profile(user.id, **body.model_dump(exclude_none=True))
+    # exclude_unset (NOT exclude_none): the edit form sends explicit nulls to
+    # CLEAR headline/bio/location/website_url; exclude_none dropped them, so
+    # blanking a field was a silent no-op. Absent fields stay untouched.
+    profile = await svc.update_profile(user.id, **body.model_dump(exclude_unset=True))
     await db.commit()
     return DataResponse(data=ProfileResponse.model_validate(profile))
 

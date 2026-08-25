@@ -234,15 +234,16 @@ async def test_learning_confirm_materializes_with_placeholder_no_autoinstall(c):
     path_id = r2.json()["data"]["materialized_entity_id"]
     assert path_id
 
-    # Path has a SECTION placeholder for the uninstalled pack
+    # Path has a SECTION placeholder for the uninstalled pack — the fetch
+    # must succeed unconditionally (a guarded assert silently decays)
     r3 = await c.get(f"/api/v1/orgs/{oid}/paths/{path_id}/items", headers=h)
-    if r3.status_code == 200:
-        items = r3.json()["data"]
-        assert any(
-            i.get("item_type") == "section"
-            and "Install pack" in (i.get("section_title") or "")
-            for i in items
-        ), items
+    assert r3.status_code == 200, r3.text
+    items = r3.json()["data"]
+    assert any(
+        i.get("item_type") == "section"
+        and "Install pack" in (i.get("section_title") or "")
+        for i in items
+    ), items
 
     # NO auto-install happened (red line)
     async with AsyncSessionLocal() as db:
@@ -274,6 +275,9 @@ async def test_compose_unconfirmed_profile_rejected(c):
 
 @pytest.mark.asyncio
 async def test_double_confirm_rejected(c):
+    """Second confirm → 409: the conditional-UPDATE claim makes confirm
+    race-safe (the loser's rowcount is 0), so a sequential second confirm
+    exercises the same guarded path as a concurrent one."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
     await _skill_pack(c, h, oid, "Once Pack", ["upscale"])
@@ -286,9 +290,19 @@ async def test_double_confirm_rejected(c):
     draft_id = r.json()["data"]["id"]
     r2 = await c.post(f"/api/v1/orgs/{oid}/drafts/{draft_id}/confirm", headers=h)
     assert r2.status_code == 200
+    first_path_id = r2.json()["data"]["materialized_entity_id"]
     r3 = await c.post(f"/api/v1/orgs/{oid}/drafts/{draft_id}/confirm", headers=h)
-    assert r3.status_code == 422
+    assert r3.status_code == 409
     assert r3.json()["error"]["code"] == "DRAFT_ALREADY_CONFIRMED"
+
+    # Exactly ONE LearningPath materialized — no orphaned duplicate
+    from app.core.database import AsyncSessionLocal
+    from app.models.composer import SolutionDraft
+
+    async with AsyncSessionLocal() as db:
+        stored = await db.get(SolutionDraft, draft_id)
+        assert stored.status == "confirmed"
+        assert stored.materialized_entity_id == first_path_id
 
 
 @pytest.mark.asyncio

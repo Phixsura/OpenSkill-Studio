@@ -526,6 +526,232 @@ async def test_definition_change_resets_public_approval(c):
 
 
 @pytest.mark.asyncio
+async def test_definition_change_resets_approval_even_when_unlisted(c):
+    """R15 HIGH: the approval reset must fire regardless of visibility.
+    Otherwise an unlisted detour (public → unlisted → edit definition →
+    public) carries 'approved' past the re-public gate and a changed
+    definition reaches the public registry without re-review."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    r_approve = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
+    assert r_approve.json()["data"]["review_status"] == "approved"
+
+    # Step 1: voluntarily go unlisted (no gate on downgrade)
+    r1 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "unlisted"},
+        headers=h,
+    )
+    assert r1.status_code == 200
+
+    # Step 2: change the definition while unlisted — reset must still fire
+    d = _valid_definition()
+    d["steps"][0]["config"]["template"] = "Sneaky change {{inputs.product_name}}"
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": d},
+        headers=h,
+    )
+    assert r2.status_code == 200
+    assert r2.json()["data"]["review_status"] is None
+
+    # Step 3: PUT visibility=public must now be blocked — approval was voided
+    r3 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "public"},
+        headers=h,
+    )
+    assert r3.status_code == 422
+    assert r3.json()["error"]["code"] == "APPROVAL_REQUIRED"
+
+
+# ── R15 batch B: input validation regressions ─────────────
+
+
+@pytest.mark.asyncio
+async def test_list_packs_invalid_status_422(c):
+    """Unknown status values must 422 with INVALID_STATUS, not 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.get(f"/api/v1/orgs/{oid}/workflow-packs?status=bogus", headers=h)
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "INVALID_STATUS"
+
+
+@pytest.mark.asyncio
+async def test_create_pack_invalid_language_422(c):
+    """language column is String(10) — oversize/junk values must 422, not 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": "Lang Test", "language": "this-is-way-too-long"},
+        headers=h,
+    )
+    assert r.status_code == 422
+    # Valid short code still works
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": "Lang OK", "language": "pt-BR"},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text
+    assert r2.json()["data"]["language"] == "pt-BR"
+
+
+@pytest.mark.asyncio
+async def test_update_pack_oversize_summary_422(c):
+    """Update schema must mirror create-side length caps (String(500) column)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"summary": "x" * 501},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_pack_junk_difficulty_422(c):
+    """Update schema must mirror the create-side difficulty enum."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"difficulty": "not-a-difficulty"},
+        headers=h,
+    )
+    assert r.status_code == 422
+    # Oversize tags also rejected on update
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"scenario_tags": ["x" * 51]},
+        headers=h,
+    )
+    assert r2.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_publish_release_version_over_50_chars_422(c):
+    """Version column is String(50) — a long-but-valid semver must 422, not 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    long_version = "1.0.0-" + "a" * 54  # 60 chars, matches the semver regex
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+        json={"version": long_version},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_publish_release_non_list_dependencies_422(c):
+    """Non-list/non-dict JSON in the dependencies section must 422, not TypeError → 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    bad_dependencies = [
+        {"requires_capabilities": "nope"},  # non-list value
+        {"requires_capabilities": 5},  # int → len() TypeError before fix
+        {"requires_capabilities": [{"capability": {}}]},  # non-str capability
+        {"requires_capabilities": [{"capability": "image_generation", "features": 5}]},  # non-list features
+        {"requires_capabilities": [{"capability": "image_generation", "features": [7]}]},  # non-str feature
+        {"recommended_packs": "nope"},  # non-list value
+    ]
+    for deps in bad_dependencies:
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+            json={"version": "1.0.0", "dependencies": deps},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{deps} → {r.status_code} {r.text}"
+        assert r.json()["error"]["code"] == "INVALID_DEPENDENCY"
+
+
+@pytest.mark.asyncio
+async def test_control_chars_rejected_in_text_fields(c):
+    """NUL/control chars crash asyncpg with a 500 — reject at the schema
+    boundary. Tab/newline/CR remain legal in multi-line fields."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # NUL in name → 422
+    r1 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": "bad\x00name"},
+        headers=h,
+    )
+    assert r1.status_code == 422
+
+    # BEL in changelog → 422
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+        json={"version": "1.0.0", "changelog": "note\x07here"},
+        headers=h,
+    )
+    assert r2.status_code == 422
+
+    # Newlines in description stay valid
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": "Multiline OK", "description": "line one\nline two\n\tindented"},
+        headers=h,
+    )
+    assert r3.status_code == 201, r3.text
+
+    # NUL in update summary → 422
+    r4 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"summary": "bad\x00summary"},
+        headers=h,
+    )
+    assert r4.status_code == 422
+
+
+def test_decide_review_note_rejects_control_chars():
+    """DecideReviewRequest.note goes straight to a text column — NUL and
+    control chars must fail schema validation (tab/newline stay legal)."""
+    import pydantic
+
+    from app.schemas.workflow_run import DecideReviewRequest
+
+    with pytest.raises(pydantic.ValidationError):
+        DecideReviewRequest(decision="approved", note="bad\x00note")
+    with pytest.raises(pydantic.ValidationError):
+        DecideReviewRequest(decision="rejected", note="bad\x07note")
+    ok = DecideReviewRequest(decision="approved", note="line one\nline two")
+    assert ok.note == "line one\nline two"
+
+
+@pytest.mark.asyncio
 async def test_latest_release_prefers_stable_over_prerelease(c):
     """A newer pre-release must not shadow the stable release for implicit installs."""
     h, _ = await _auth(c)

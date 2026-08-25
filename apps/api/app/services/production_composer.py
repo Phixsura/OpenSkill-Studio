@@ -293,13 +293,32 @@ class ProductionComposerService:
 
     async def confirm(self, draft_id: str, org_id: str, confirmed_by: str) -> Project:
         from app.services.learning_composer import LearningComposerService
-        from app.services.project import ProjectService
 
-        draft = await LearningComposerService(self.db).get_draft(draft_id, org_id)
+        composer_svc = LearningComposerService(self.db)
+        draft = await composer_svc.get_draft(draft_id, org_id)
         if draft.draft_type != "production_solution":
             raise AppError("WRONG_DRAFT_TYPE", "Draft is not a production-solution draft", 422)
-        if draft.status != "draft":
-            raise AppError("DRAFT_ALREADY_CONFIRMED", "Draft was already confirmed or discarded", 422)
+        # Conditional-UPDATE claim BEFORE materialization (race-safe: the
+        # loser of two concurrent confirms gets rowcount 0 → 409)
+        await composer_svc.claim_draft_for_confirm(draft_id, org_id)
+        try:
+            return await self._materialize(draft, org_id, confirmed_by)
+        except BaseException:
+            # Revert the claim so the draft isn't stuck in 'confirming'
+            try:
+                await composer_svc.release_draft_claim(draft_id)
+            except Exception:
+                # Session unusable (aborted transaction) — rolling back also
+                # discards the uncommitted claim, so the draft stays 'draft'.
+                await self.db.rollback()
+            raise
+
+    async def _materialize(
+        self, draft: SolutionDraft, org_id: str, confirmed_by: str
+    ) -> Project:
+        from app.services.project import ProjectService
+
+        draft_id = draft.id
         template = (draft.payload or {}).get("template")
         if not template:
             raise AppError(

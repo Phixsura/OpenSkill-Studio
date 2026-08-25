@@ -361,12 +361,207 @@ async def test_capability_check_service():
     empty_result.scalars.return_value.all.return_value = []
     db.execute = AsyncMock(return_value=empty_result)
     svc = ProviderService(db)
-    gaps = await svc.check_capabilities("org1", [{"capability": "image_generation", "features": []}])
-    assert len(gaps) == 1
-    assert gaps[0]["code"] == "CAPABILITY_UNSATISFIED"
-    assert gaps[0]["capability"] == "image_generation"
+    # THREE distinct capabilities: the pre-fix per-capability implementation
+    # would issue 3 execute calls, so await_count == 1 actually pins the
+    # batched single-query property (1 requirement couldn't distinguish them)
+    gaps = await svc.check_capabilities(
+        "org1",
+        [
+            {"capability": "image_generation", "features": []},
+            {"capability": "image_to_video", "features": ["motion"]},
+            {"capability": "upscale", "features": []},
+        ],
+    )
+    assert len(gaps) == 3
+    assert all(g["code"] == "CAPABILITY_UNSATISFIED" for g in gaps)
+    assert {g["capability"] for g in gaps} == {
+        "image_generation",
+        "image_to_video",
+        "upscale",
+    }
+    video_gap = next(g for g in gaps if g["capability"] == "image_to_video")
+    assert video_gap["missing_features"] == ["motion"]
     # One query total regardless of requirement count (was one per capability)
     assert db.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_capability_check_malformed_manifest_never_raises():
+    """Manifest-controlled garbage (non-dict entries, non-string capability,
+    non-list features) must yield MALFORMED_REQUIREMENT gaps — never a
+    TypeError/500. A string features value must NOT degrade to per-character
+    subset matching (set('highres') == {'h','i','g',...})."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.provider import ProviderService
+
+    db = AsyncMock()
+    # One offering satisfies 'image_generation' with no features
+    offering = MagicMock()
+    offering.capability_key = "image_generation"
+    offering.features = []
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [offering]
+    db.execute = AsyncMock(return_value=result)
+    svc = ProviderService(db)
+
+    gaps = await svc.check_capabilities(
+        "org1",
+        [
+            "not-a-dict",
+            {"capability": {"k": "v"}, "features": []},
+            {"capability": "image_generation", "features": 5},
+            {"capability": "image_generation", "features": "highres"},
+        ],
+    )
+    malformed = [g for g in gaps if g["code"] == "MALFORMED_REQUIREMENT"]
+    # non-dict entry + dict capability + int features + str features
+    assert len(malformed) == 4
+    # No gap ever reports per-character missing_features from 'highres'
+    assert all(g["missing_features"] == [] for g in gaps)
+    # The two image_generation reqs (features coerced to []) are satisfied
+    # by the offering — no CAPABILITY_UNSATISFIED for them
+    unsatisfied = [g for g in gaps if g["code"] == "CAPABILITY_UNSATISFIED"]
+    assert unsatisfied == []
+
+
+@pytest.mark.asyncio
+async def test_long_connection_name_credential_fits_column(c):
+    """A 100-char connection name (valid per schema) previously built a
+    112-char credential name and overflowed the String(100) column (500)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    aid = await _anthropic_adapter_id(c, h)
+    long_name = "N" * 100
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={
+            "adapter_id": aid,
+            "name": long_name,
+            "credentials": {"api_key": "sk-test-long-name"},
+        },
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()["data"]
+    assert data["name"] == long_name
+    assert data["credential_id"] is not None
+
+    # Same construction on the update path (fresh connection, then add creds)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "M" * 100},
+        headers=h,
+    )
+    conn_id = r2.json()["data"]["id"]
+    r3 = await c.put(
+        f"/api/v1/orgs/{oid}/provider-connections/{conn_id}",
+        json={"credentials": {"api_key": "sk-test-upd"}},
+        headers=h,
+    )
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["data"]["credential_id"] is not None
+
+
+@pytest.mark.asyncio
+async def test_update_connection_name_validated(c):
+    """UpdateConnectionRequest must mirror create's name bounds — a >100-char
+    or blank name previously reached the String(100) column and 500ed."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    aid = await _mock_adapter_id(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "NameBound"},
+        headers=h,
+    )
+    conn_id = r.json()["data"]["id"]
+    url = f"/api/v1/orgs/{oid}/provider-connections/{conn_id}"
+
+    for bad in ("x" * 101, "x" * 300, "", "   "):
+        r2 = await c.put(url, json={"name": bad}, headers=h)
+        assert r2.status_code == 422, f"name={bad!r}: {r2.status_code}"
+
+    r3 = await c.put(url, json={"name": "  Trimmed OK  "}, headers=h)
+    assert r3.status_code == 200
+    assert r3.json()["data"]["name"] == "Trimmed OK"
+
+
+@pytest.mark.asyncio
+async def test_cost_boundary_matches_numeric_column(c):
+    """Numeric(10,6) max is 9999.999999 — exactly 10000 passed the old
+    validator (v > 10000) then overflowed at insert (500), on both create
+    and update paths."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    conn_id = await _connection(c, h, oid)
+    base = {
+        "connection_id": conn_id,
+        "capability_key": "image_generation",
+        "model_name": "cost-bound",
+    }
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={**base, "cost_per_call_usd": 10000},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={**base, "cost_per_call_usd": 9999.999999},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text
+    offering_id = r2.json()["data"]["id"]
+
+    url = f"/api/v1/orgs/{oid}/provider-offerings/{offering_id}"
+    r3 = await c.put(url, json={"cost_per_call_usd": 10000}, headers=h)
+    assert r3.status_code == 422
+    r4 = await c.put(url, json={"cost_per_call_usd": 9999.999999}, headers=h)
+    assert r4.status_code == 200
+
+
+# ── Credential key handling (rotation + fail-fast) ────────
+
+
+def test_invalid_encryption_key_raises(monkeypatch):
+    """An invalid-format CREDENTIAL_ENCRYPTION_KEY must fail fast — the old
+    silent SHA-256 derivation switched the effective key and bricked every
+    stored credential."""
+    from app.config import settings as live_settings
+    from app.core.crypto import encrypt_credentials
+    from app.exceptions import AppError
+
+    monkeypatch.setattr(live_settings, "credential_encryption_key", "not-a-fernet-key")
+    with pytest.raises(AppError) as exc_info:
+        encrypt_credentials({"api_key": "x"})
+    assert exc_info.value.code == "CREDENTIAL_KEY_INVALID"
+
+
+def test_key_rotation_round_trip(monkeypatch):
+    """Comma-separated keys: primary encrypts, all decrypt — a token written
+    under the old key still decrypts after the new key is prepended."""
+    from cryptography.fernet import Fernet
+
+    from app.config import settings as live_settings
+    from app.core.crypto import decrypt_credentials, encrypt_credentials
+
+    old_key = Fernet.generate_key().decode()
+    new_key = Fernet.generate_key().decode()
+
+    monkeypatch.setattr(live_settings, "credential_encryption_key", old_key)
+    token_old = encrypt_credentials({"api_key": "sk-rotate"})
+
+    # Rotate: new primary first, old key kept for decryption
+    monkeypatch.setattr(
+        live_settings, "credential_encryption_key", f"{new_key},{old_key}"
+    )
+    assert decrypt_credentials(token_old) == {"api_key": "sk-rotate"}
+    token_new = encrypt_credentials({"api_key": "sk-rotate"})
+    # New tokens use the primary — decryptable with the new key alone
+    monkeypatch.setattr(live_settings, "credential_encryption_key", new_key)
+    assert decrypt_credentials(token_new) == {"api_key": "sk-rotate"}
 
 
 # ── Audit fixes (Issue #21 follow-up) ─────────────────────

@@ -168,7 +168,18 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
         }
 
     if spec.target_entity_type == "skill_pack":
-        required_caps = requirement.get("required_capabilities") or []
+        # Fold soft/preferred keys into the teach-match signal, same as the
+        # workflow_pack path above. R14 demotes extracted required caps to
+        # preferred, so reading ONLY required_capabilities made this
+        # 0.35-weight signal a constant 1.0 for every survivor in the common
+        # extraction/brief flow (and emitted a false 'Teaches the required
+        # capabilities' reason chip). Soft keys never gate S2 — this is S3
+        # scoring only.
+        requested_caps = (
+            (requirement.get("required_capabilities") or [])
+            + (requirement.get("_soft_required_capabilities") or [])
+            + (requirement.get("preferred_capabilities") or [])
+        )
         caps = set(entity.capability_tags or [])
         scenario = requirement.get("scenario")
         # Scoring may use extracted (soft) budgets — only hard filters can't (R14)
@@ -182,7 +193,7 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
             time_fit = 0.5
         difficulty = requirement.get("difficulty") or requirement.get("_soft_difficulty")
         return {
-            "capability_teach_match": _fraction_present(required_caps, caps),
+            "capability_teach_match": _fraction_present(requested_caps, caps),
             "difficulty_fit": _difficulty_fit(difficulty, entity.difficulty),
             "scenario_match": (
                 0.5 if not scenario else (1.0 if scenario in (entity.scenario_tags or []) else 0.0)

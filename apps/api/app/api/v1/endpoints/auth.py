@@ -316,17 +316,24 @@ async def revoke_session(
     db: AsyncSession = Depends(get_db),
 ):
     service = AuthService(db)
-    await service.revoke_session(user.id, token_id)
+    revoked = await service.revoke_session(user.id, token_id)
     await db.commit()
 
-    # If the revoked session is the current browser session, clear the cookie
+    # If the revoked session is the current browser session, clear the cookie.
+    # The path param is the RefreshToken row id while the cookie's `jti` claim
+    # is a separately generated ULID — they NEVER match directly. What links
+    # them is the hash: sha256(jti) == RefreshToken.token_hash (see
+    # AuthService._create_token_pair), so compare hashes.
     raw_cookie = request.cookies.get("refresh_token")
     if raw_cookie:
         try:
+            from hashlib import sha256
+
             from app.core.security import decode_token
 
             payload = decode_token(raw_cookie)
-            if payload.get("jti") == token_id:
+            jti = payload.get("jti")
+            if jti and sha256(jti.encode()).hexdigest() == revoked.token_hash:
                 _clear_refresh_cookie(response)
         except Exception:
             pass  # Token already expired/invalid — no action needed

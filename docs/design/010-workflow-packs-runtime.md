@@ -49,14 +49,20 @@ Validation accumulates every error (Argo pattern), each with a JSON pointer and 
 | `WF_CONFIG_INVALID` | Per-step-type config schema violation (discriminated union) |
 | `WF_EDGE_UNKNOWN_STEP` / `WF_EDGE_UNKNOWN_PORT` | Dangling edge references |
 | `WF_EDGE_TYPE_MISMATCH` | Port types not coercible (meta carries from/to types) |
-| `WF_GRAPH_CYCLE` | Kahn detection; `meta.cycle_steps` names the participants |
+| `WF_GRAPH_CYCLE` | Kahn detection over explicit edges + implicit template-ref edges; `meta.cycle_steps` names the participants, `meta.implicit=true` when the cycle closes through a moustache reference |
 | `WF_INPUT_UNSATISFIED` | Required input port with no incoming edge |
-| `WF_UNREACHABLE_STEP` | No path from any entry step |
+| `WF_PORT_MULTIPLE_EDGES` | More than one edge into the same input port (pointer names the extra edge) |
 | `WF_EXPR_INVALID` | Moustache reference to unknown input/step output |
+| `WF_EXPR_SELF_REF` | Step's template references its own output (can never resolve) |
 | `WF_DUPLICATE_EDGE_ID` | Duplicate edge id |
+| `WF_INVALID_OUTPUT_KEY` / `WF_DUPLICATE_OUTPUT_KEY` | Workflow output key grammar violation / duplicate key |
+| `WF_INVALID_DEFAULT` | json-typed input default does not parse to a JSON object/array |
+| `WF_SELECTION_BAD_DEFAULT` | Selection input default outside its options |
 | `WF_TOO_LARGE` | Any size cap exceeded |
-| `WF_DATA_URI_REJECTED` | Inline data URI / base64 blob |
+| `WF_DATA_URI_REJECTED` | Inline data URI / base64 blob (media-type parameters do not evade the match) |
 | `WF_VALIDATION_FAILED` | Envelope code (422) carrying the details array |
+
+An inputless island step is deliberately **valid** — every node of an acyclic graph roots at an entry step, so a dedicated "unreachable step" check can never fire (cyclic graphs are already `WF_GRAPH_CYCLE`, input-starved steps are already `WF_INPUT_UNSATISFIED`).
 
 Run-creation codes: `INSTALLATION_NOT_FOUND` (404, includes REMOVED installs), `MISSING_INPUT` / `UNKNOWN_INPUT` / `INVALID_INPUT_VALUE` / `WF_INPUT_TOO_LARGE` (422). Install codes: `ALREADY_INSTALLED` (409, also the loser of a concurrent-install race), `CAPABILITY_UNSATISFIED` (422, ADR-011).
 
@@ -88,7 +94,7 @@ Concurrency discipline (R11): **every transition is a conditional UPDATE with an
 
 - **Review gates** suspend as durable `WorkflowStepReview` rows (a decision is persisted state, never an ephemeral event) with a **mandatory `due_at`** (1–30 days, default 7). Decisions are synchronous validate-then-accept under a row lock and **role-gated to OWNER/ADMIN/INSTRUCTOR** — review gates approve real provider spend, so run initiators (students) cannot self-approve. Double-decide returns 409 `WF_REVIEW_ALREADY_DECIDED` (partial unique index on open reviews). Approve passes the subject through; reject fails the step (`WF_REVIEW_REJECTED`).
 - **provider_action** steps write `provider_request_id` + `offering_id` + a lease **and commit before the outbound call** (write-ahead idempotency, R13). After that commit the executor re-reads the step status (a concurrent cancel may have flipped it the instant the row lock released) and bails before spending provider money; the read transaction is closed before the outbound call so no connection sits idle-in-transaction for the call's duration. Credentials are decrypted only at this point (ADR-011). Timeout via `workflow_step_timeout_seconds`; failures retry up to `max_attempts` (output cleared on re-claim). Every settlement UPDATE carries the claimed attempt as a **fencing token** — a resurrected executor cannot settle a newer attempt.
-- **Outputs are capped at 48 KB** per step (Airflow XCom lesson); media flows as asset references. An empty-dict output (`{}` — instruction steps, adapters with nothing to say) is a valid output, distinct from "no output yet".
+- **Outputs are capped at 48 KB** per step (Airflow XCom lesson) and **screened for NUL/control characters** before the JSONB write (`WF_OUTPUT_INVALID` — an unscreened adapter output would crash asyncpg and strand the step RUNNING with a live lease); media flows as asset references. An empty-dict output (`{}` — instruction steps, adapters with nothing to say) is a valid output, distinct from "no output yet".
 - **Execution model (Phase 1)**: tracked `asyncio` background tasks with their own DB sessions, drained on shutdown (`drain_workflow_tasks`). The advance loop is an in-memory continuation over durable state, so it has a **durable re-dispatch trigger**: reading a non-terminal run re-dispatches its advance loop (conditional claims make this idempotent) — a crash or deploy between commit and dispatch can no longer strand a run. The ARQ worker is the planned Phase-2 flip — zero schema change required.
 - **Lazy sweeper** (`sweep_stale`): triggered on run-detail reads; recovers crashed executors (expired lease → `WAITING_RETRY`, `WF_EXECUTOR_CRASHED`; attempts exhausted → `WF_RETRY_EXHAUSTED` — `max_attempts` holds on the crash path too) and expires overdue reviews (`WF_REVIEW_TIMEOUT`) with a guarded UPDATE that can never overwrite a concurrently committed decision. The sweep returns every touched `run_id` and callers re-dispatch each one — repairing step state without resuming the loop would strand the run. No resident scheduler process.
 - Every lifecycle change appends a `WorkflowRunEvent` row (append-only audit trail).

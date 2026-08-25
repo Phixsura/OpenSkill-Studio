@@ -96,7 +96,10 @@ class ProviderService:
                 )
             cred = OrgCredential(
                 org_id=org_id,
-                name=f"{name} credentials",
+                # Truncate: connection names may be up to 100 chars but the
+                # OrgCredential.name column is String(100) — " credentials"
+                # is 12 chars, so cap the prefix at 88
+                name=f"{name[:88]} credentials",
                 encrypted_data=encrypt_credentials(credentials),
                 created_by=created_by,
             )
@@ -175,7 +178,8 @@ class ProviderService:
             if not conn.credential_id:
                 cred = OrgCredential(
                     org_id=org_id,
-                    name=f"{conn.name} credentials",
+                    # Same truncation as create: String(100) column
+                    name=f"{conn.name[:88]} credentials",
                     encrypted_data=encrypt_credentials(credentials),
                     created_by=updated_by,
                 )
@@ -294,11 +298,56 @@ class ProviderService:
 
         Returns a list of gap dicts (empty = all satisfied). Each required
         entry: {"capability": str, "features": [str]}.
+
+        Manifests are attacker-controlled (public packs), so entries are
+        hardened here as defense in depth alongside the publish-time gate:
+        a non-dict entry, non-string capability, or non-list features never
+        raises — it becomes a MALFORMED_REQUIREMENT gap instead of a 500.
         """
         gaps: list[dict] = []
+        # Normalize requirements before querying: (cap_key, features) tuples
+        # plus a MALFORMED_REQUIREMENT gap for anything type-broken.
+        normalized: list[tuple[str, set[str]]] = []
+        for req in required:
+            if not isinstance(req, dict):
+                gaps.append(
+                    {
+                        "code": "MALFORMED_REQUIREMENT",
+                        "capability": "",
+                        "missing_features": [],
+                        "detail": "Capability requirement entry is not an object",
+                    }
+                )
+                continue
+            cap_key = req.get("capability", "")
+            if not isinstance(cap_key, str) or not cap_key:
+                gaps.append(
+                    {
+                        "code": "MALFORMED_REQUIREMENT",
+                        "capability": "",
+                        "missing_features": [],
+                        "detail": "Capability requirement has a non-string or empty 'capability'",
+                    }
+                )
+                continue
+            features = req.get("features", [])
+            if not isinstance(features, list):
+                # A string here would silently degrade to per-character subset
+                # matching via set("highres") — treat as [] and flag instead.
+                gaps.append(
+                    {
+                        "code": "MALFORMED_REQUIREMENT",
+                        "capability": cap_key,
+                        "missing_features": [],
+                        "detail": f"'features' for '{cap_key}' is not a list; ignored",
+                    }
+                )
+                features = []
+            req_features = {f for f in features if isinstance(f, str)}
+            normalized.append((cap_key, req_features))
         # One query for all requested capabilities (was N+1: one list_offerings
         # per requirement — up to MAX_DEPENDENCIES sequential SELECTs per install)
-        cap_keys = {req.get("capability", "") for req in required if req.get("capability")}
+        cap_keys = {cap_key for cap_key, _ in normalized}
         offerings_by_cap: dict[str, list] = {k: [] for k in cap_keys}
         if cap_keys:
             result = await self.db.execute(
@@ -316,9 +365,7 @@ class ProviderService:
             )
             for off in result.scalars().all():
                 offerings_by_cap[off.capability_key].append(off)
-        for req in required:
-            cap_key = req.get("capability", "")
-            req_features = set(req.get("features", []))
+        for cap_key, req_features in normalized:
             satisfied = any(
                 req_features <= set(off.features or [])
                 for off in offerings_by_cap.get(cap_key, [])

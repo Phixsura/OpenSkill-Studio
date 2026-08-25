@@ -90,12 +90,15 @@ async function refreshAccessToken(): Promise<string> {
 
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+    // safeFetch (not bare fetch): without the 30s timeout a hung /auth/refresh
+    // leaves sharedRefresh permanently unsettled — logout and the on-mount
+    // refresh both await it forever.
+    res = await safeFetch(`${API_BASE}/api/v1/auth/refresh`, {
       method: "POST",
       credentials: "include",
     });
   } catch {
-    // Network error during refresh — clear auth and redirect
+    // Network error or timeout during refresh — clear auth and redirect
     useAuthStore.getState().clearAuth();
     redirectToLoginIfProtected();
     throw new ApiError(0, "NETWORK_ERROR", "Network error during token refresh");

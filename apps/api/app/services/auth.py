@@ -413,13 +413,14 @@ class AuthService:
         )
         return list(stmt_result.scalars().all())
 
-    async def revoke_session(self, user_id: str, token_id: str) -> None:
-        """Revoke a specific session by token ID."""
+    async def revoke_session(self, user_id: str, token_id: str) -> RefreshToken:
+        """Revoke a specific session by token ID. Returns the revoked row so
+        callers can compare its token_hash against the current cookie."""
         token = await self.db.get(RefreshToken, token_id)
         if token is None or token.user_id != user_id:
             raise AppError("NOT_FOUND", "Session not found", 404)
         if token.is_revoked:
-            return  # Already revoked
+            return token  # Already revoked
 
         # Backdate past the rotation-race grace window — explicit revocation
         # must be immediately final (see logout)
@@ -427,6 +428,7 @@ class AuthService:
             seconds=settings.refresh_reuse_grace_seconds + 1
         )
         await self.db.flush()
+        return token
 
     # ── Helpers ───────────────────────────────────────────────
 

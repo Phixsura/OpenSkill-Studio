@@ -85,33 +85,61 @@ export function toDefinition(
   };
 }
 
+/** Detect a positional 1:1 port rename between two port-name lists.
+ *
+ * Lists must be the same length with EXACTLY one index differing. Comparing
+ * POSITIONALLY (not as Sets) matters: a rename keystroke can pass through a
+ * sibling port's exact name ('in2' → backspace → 'in' next to a port 'in'),
+ * and a Set collapses that duplicate — the rename went undetected and the
+ * edge filter silently dropped the port's edges, with no way to restore
+ * them. Length changes and multi-index diffs are not renames — the caller
+ * then keeps edges for ports whose names still exist and drops only edges
+ * whose port vanished.
+ *
+ * One extra guard: when the renamed-FROM name still exists at another index
+ * (renaming away from a transient duplicate), edges reference ports by NAME
+ * so a rewrite would drag the sibling port's edges along with it — treat
+ * that as no-rename and let the keep-if-name-still-exists filter preserve
+ * every edge instead. */
+function detectPortRename(
+  prevPorts: string[],
+  newPorts: string[],
+): { from: string; to: string } | null {
+  if (prevPorts.length !== newPorts.length) return null;
+  let rename: { from: string; to: string } | null = null;
+  for (let i = 0; i < prevPorts.length; i++) {
+    const from = prevPorts[i];
+    const to = newPorts[i];
+    if (from === undefined || to === undefined || from === to) continue;
+    if (rename) return null; // more than one index changed
+    rename = { from, to };
+  }
+  if (rename && newPorts.includes(rename.from)) return null;
+  return rename;
+}
+
 /** Apply a step edit to the definition, cascading port renames/removals.
  *
- * A 1:1 gone/added port pair is a RENAME (every keystroke in the port name
+ * A positional 1:1 port change is a RENAME (every keystroke in the port name
  * field is one): edges and workflow outputs referencing the old name are
  * REWRITTEN to the new name — dropping them would silently destroy the
  * user's connections one keystroke at a time. Anything else (pure removal,
- * multi-port changes) cascades removal the same way deleting a step does.
+ * length change, multi-port changes) keeps edges for ports whose names still
+ * exist and drops only edges whose port vanished.
  * Pure function — unit-testable without React. */
 export function applyStepUpdate(def: WorkflowDefinition, updated: StepDef): WorkflowDefinition {
   const prev = def.steps.find((s) => s.id === updated.id);
-  const prevInputPorts = new Set((prev?.inputs ?? []).map((p) => p.port));
-  const prevOutputPorts = new Set((prev?.outputs ?? []).map((p) => p.port));
   const newInputPorts = new Set(updated.inputs.map((p) => p.port));
   const newOutputPorts = new Set(updated.outputs.map((p) => p.port));
-  const goneInputs = new Set([...prevInputPorts].filter((p) => !newInputPorts.has(p)));
-  const goneOutputs = new Set([...prevOutputPorts].filter((p) => !newOutputPorts.has(p)));
-  const addedInputs = [...newInputPorts].filter((p) => !prevInputPorts.has(p));
-  const addedOutputs = [...newOutputPorts].filter((p) => !prevOutputPorts.has(p));
 
-  const inputRename =
-    goneInputs.size === 1 && addedInputs.length === 1
-      ? { from: [...goneInputs][0] as string, to: addedInputs[0] as string }
-      : null;
-  const outputRename =
-    goneOutputs.size === 1 && addedOutputs.length === 1
-      ? { from: [...goneOutputs][0] as string, to: addedOutputs[0] as string }
-      : null;
+  const inputRename = detectPortRename(
+    (prev?.inputs ?? []).map((p) => p.port),
+    updated.inputs.map((p) => p.port),
+  );
+  const outputRename = detectPortRename(
+    (prev?.outputs ?? []).map((p) => p.port),
+    updated.outputs.map((p) => p.port),
+  );
 
   const edges = def.edges
     .map((e) => {
@@ -135,7 +163,14 @@ export function applyStepUpdate(def: WorkflowDefinition, updated: StepDef): Work
         ? { ...o, from_port: outputRename.to }
         : o,
     )
-    .filter((o) => !(o.from_step === updated.id && !newOutputPorts.has(o.from_port)));
+    // Prune only rows whose selected port vanished from this step. An
+    // in-progress row with from_port === "" (user clicked "Add output" but
+    // hasn't picked a port yet) references a still-existing step and must
+    // survive unrelated step edits — "" is never a real port name.
+    .filter(
+      (o) =>
+        !(o.from_step === updated.id && o.from_port !== "" && !newOutputPorts.has(o.from_port)),
+    );
 
   return {
     ...def,

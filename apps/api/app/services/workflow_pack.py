@@ -68,7 +68,11 @@ class WorkflowPackService:
     ) -> tuple[list[WorkflowPack], int]:
         query = select(WorkflowPack).where(WorkflowPack.owner_org_id == org_id)
         if status:
-            query = query.where(WorkflowPack.status == PackStatus(status))
+            try:
+                parsed_status = PackStatus(status)
+            except ValueError:
+                raise AppError("INVALID_STATUS", f"Unknown status '{status}'", 422) from None
+            query = query.where(WorkflowPack.status == parsed_status)
         else:
             query = query.where(WorkflowPack.status != PackStatus.ARCHIVED)
         total_r = await self.db.execute(select(func.count()).select_from(query.subquery()))
@@ -143,11 +147,14 @@ class WorkflowPackService:
         pack.capability_tags = caps
         pack.definition_updated_at = datetime.now(UTC)
         # A definition change mutates registry-facing fields (input/output
-        # schemas, capability tags). An approved-public pack must re-enter
-        # review so the public card can never drift from what was approved.
-        if pack.review_status == "approved" and pack.visibility == PackVisibility.PUBLIC:
+        # schemas, capability tags). An approved pack must re-enter review so
+        # the public card can never drift from what was approved — REGARDLESS
+        # of current visibility, or an unlisted detour (public → unlisted →
+        # edit definition → public) would carry 'approved' past the gate.
+        if pack.review_status == "approved":
             pack.review_status = None
-            pack.visibility = PackVisibility.UNLISTED
+            if pack.visibility == PackVisibility.PUBLIC:
+                pack.visibility = PackVisibility.UNLISTED
             log.info(
                 "workflow_pack_approval_reset_on_definition_change",
                 pack_id=pack_id,
@@ -309,14 +316,38 @@ class WorkflowPackService:
 
     @staticmethod
     def _validate_dependencies(deps: dict) -> None:
-        """Validate the dependencies manifest section (R7)."""
+        """Validate the dependencies manifest section (R7).
+
+        Type-checks before any len()/iteration — arbitrary JSON values
+        (ints, strings, dicts) must 422, not TypeError into a 500. This is
+        the publish-side gate that also protects install-side readers.
+        """
         req_caps = deps.get("requires_capabilities", [])
         rec_packs = deps.get("recommended_packs", [])
+        if not isinstance(req_caps, list):
+            raise AppError("INVALID_DEPENDENCY", "requires_capabilities must be a list", 422)
+        if not isinstance(rec_packs, list):
+            raise AppError("INVALID_DEPENDENCY", "recommended_packs must be a list", 422)
         if len(req_caps) + len(rec_packs) > MAX_DEPENDENCIES:
             raise AppError("TOO_MANY_DEPENDENCIES", f"Max {MAX_DEPENDENCIES} dependencies", 422)
         for cap in req_caps:
-            if not isinstance(cap, dict) or not cap.get("capability"):
-                raise AppError("INVALID_DEPENDENCY", "requires_capabilities entries need a capability key", 422)
+            if not isinstance(cap, dict):
+                raise AppError("INVALID_DEPENDENCY", "requires_capabilities entries must be objects", 422)
+            capability = cap.get("capability")
+            if not isinstance(capability, str) or not capability or len(capability) > 64:
+                raise AppError(
+                    "INVALID_DEPENDENCY",
+                    "requires_capabilities entries need a capability key (non-empty string, max 64 chars)",
+                    422,
+                )
+            features = cap.get("features", [])
+            if not isinstance(features, list) or len(features) > 20:
+                raise AppError("INVALID_DEPENDENCY", "features must be a list of max 20 items", 422)
+            for feature in features:
+                if not isinstance(feature, str) or len(feature) > 64:
+                    raise AppError(
+                        "INVALID_DEPENDENCY", "features entries must be strings of max 64 chars", 422
+                    )
         for rec in rec_packs:
             if not isinstance(rec, dict):
                 raise AppError("INVALID_DEPENDENCY", "recommended_packs entries must be objects", 422)

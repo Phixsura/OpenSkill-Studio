@@ -190,6 +190,10 @@ class EvalNotEnabledError(AppError):
 
 
 class EvaluationService:
+    # Settings where an explicit JSON null is a meaningful value ("clear it"),
+    # not an omission. Only these may be nulled via update_eval_settings.
+    _NULLABLE_EVAL_SETTINGS = frozenset({"monthly_budget_usd"})
+
     def __init__(self, db: AsyncSession):
         self.db = db
 
@@ -542,6 +546,12 @@ class EvaluationService:
         for k, v in updates.items():
             if v is not None:
                 eval_cfg[k] = v
+            elif k in self._NULLABLE_EVAL_SETTINGS:
+                # Explicit null CLEARS a nullable setting (e.g. remove the
+                # monthly budget → unlimited). Absent keys never reach here —
+                # the endpoint dumps with exclude_unset, so only fields the
+                # client actually sent appear in `updates`.
+                eval_cfg[k] = None
         current["ai_evaluation"] = eval_cfg
         org.settings = current
         await self.db.flush()

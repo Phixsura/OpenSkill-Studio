@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
 from app.core.rate_limit import rate_limit
+from app.exceptions import AppError
 from app.models.pack_category import PackCategory, PackCategoryAssignment
 from app.models.user import User, UserRole, UserStatus
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -197,16 +198,42 @@ async def update_pack_category(
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    # Validate parent if being changed
-    if body.parent_id is not None:
-        if body.parent_id == category_id:
+    # exclude_unset (not exclude_none): an explicit `"parent_id": null` must
+    # clear the parent (move to root), while an absent field leaves it
+    # unchanged — exclude_none made the two indistinguishable, so a child
+    # category could never be moved back to root (same for clearing icon).
+    update_data = body.model_dump(exclude_unset=True)
+
+    # Validate parent if being changed to a non-null value
+    if update_data.get("parent_id") is not None:
+        new_parent_id = update_data["parent_id"]
+        if new_parent_id == category_id:
             raise HTTPException(status_code=422, detail="Category cannot be its own parent")
-        parent = await db.get(PackCategory, body.parent_id)
+        parent = await db.get(PackCategory, new_parent_id)
         if parent is None:
             raise HTTPException(status_code=404, detail="Parent category not found")
+        # Walk the proposed parent's ancestor chain (bounded): re-parenting
+        # under one's own descendant (A->B then B->A) creates a cycle that
+        # removes both nodes from the root listing and blocks deletion.
+        ancestor = parent
+        for _ in range(100):
+            if ancestor.parent_id is None:
+                break
+            if ancestor.parent_id == category_id:
+                raise AppError(
+                    "CATEGORY_CYCLE",
+                    "Cannot set parent: it is a descendant of this category",
+                    422,
+                )
+            ancestor = await db.get(PackCategory, ancestor.parent_id)
+            if ancestor is None:
+                break
 
-    update_data = body.model_dump(exclude_none=True)
     for field, value in update_data.items():
+        # Only parent_id and icon are nullable columns — an explicit null on
+        # name/slug/sort_order would 500 at flush, so treat it as "unchanged"
+        if value is None and field not in ("parent_id", "icon"):
+            continue
         setattr(category, field, value)
 
     try:

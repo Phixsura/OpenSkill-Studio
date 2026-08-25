@@ -12,7 +12,7 @@ SECTION placeholders (red line: no auto-install).
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -372,13 +372,61 @@ class LearningComposerService:
 
     # ── Confirm (materialize) ─────────────────────────────
 
+    async def claim_draft_for_confirm(self, draft_id: str, org_id: str) -> None:
+        """Atomically claim a draft for confirmation (race-safe).
+
+        A read-then-act status check lets two concurrent confirms both pass
+        and both materialize (orphaned duplicate entities). The conditional
+        UPDATE claims the row with a transient internal 'confirming' status —
+        never exposed via the API — so exactly ONE request wins; the loser's
+        rowcount is 0 → DRAFT_ALREADY_CONFIRMED 409.
+        """
+        result = await self.db.execute(
+            update(SolutionDraft)
+            .where(
+                SolutionDraft.id == draft_id,
+                SolutionDraft.org_id == org_id,
+                SolutionDraft.status == "draft",
+            )
+            .values(status="confirming")
+        )
+        if result.rowcount == 0:
+            raise AppError(
+                "DRAFT_ALREADY_CONFIRMED", "Draft was already confirmed or discarded", 409
+            )
+
+    async def release_draft_claim(self, draft_id: str) -> None:
+        """Revert a claimed draft to 'draft' after a failed materialization
+        so the draft isn't stuck in the transient 'confirming' status."""
+        await self.db.execute(
+            update(SolutionDraft)
+            .where(SolutionDraft.id == draft_id, SolutionDraft.status == "confirming")
+            .values(status="draft")
+        )
+
     async def confirm(self, draft_id: str, org_id: str, confirmed_by: str) -> LearningPath:
         draft = await self.get_draft(draft_id, org_id)
         if draft.draft_type != "learning_path":
             raise AppError("WRONG_DRAFT_TYPE", "Draft is not a learning-path draft", 422)
-        if draft.status != "draft":
-            raise AppError("DRAFT_ALREADY_CONFIRMED", "Draft was already confirmed or discarded", 422)
+        # Conditional-UPDATE claim BEFORE materialization (race-safe: the
+        # loser of two concurrent confirms gets rowcount 0 → 409)
+        await self.claim_draft_for_confirm(draft_id, org_id)
+        try:
+            return await self._materialize(draft, org_id, confirmed_by)
+        except BaseException:
+            # Revert the claim so the draft isn't stuck in 'confirming'
+            try:
+                await self.release_draft_claim(draft_id)
+            except Exception:
+                # Session unusable (aborted transaction) — rolling back also
+                # discards the uncommitted claim, so the draft stays 'draft'.
+                await self.db.rollback()
+            raise
 
+    async def _materialize(
+        self, draft: SolutionDraft, org_id: str, confirmed_by: str
+    ) -> LearningPath:
+        draft_id = draft.id
         # Name from the profile goal when available
         name = f"Composed Path {datetime.now(UTC).strftime('%Y-%m-%d')}"
         if draft.requirement_profile_id:

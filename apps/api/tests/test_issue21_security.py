@@ -123,14 +123,24 @@ async def test_credential_never_leaks_anywhere(c):
 
 @pytest.mark.asyncio
 async def test_match_results_exclude_inaccessible_entities(c):
-    """Org2's match must not surface org1's private packs even as excluded."""
+    """Org2's match must not surface org1's private packs even as excluded.
+
+    Airtight variant: the requirement is scoped so the hidden pack would be
+    the TOP candidate were it eligible (required capability + an exclusive
+    scenario tag no other pack can have) — an empty-requirement query would
+    let a leaked pack hide below the top-50 truncation on a shared DB and
+    the assertion would pass without exercising the S1 filter at all."""
     h1, _ = await _auth(c)
     o1 = await _org(c, h1)
+    scenario = f"exclusive-scenario-{uuid.uuid4().hex}"
     r = await c.post(
-        f"/api/v1/orgs/{o1}/workflow-packs", json={"name": "Hidden Pack"}, headers=h1
+        f"/api/v1/orgs/{o1}/workflow-packs",
+        json={"name": f"Hidden Pack {uuid.uuid4().hex[:8]}"},
+        headers=h1,
     )
     hidden_id = r.json()["data"]["id"]
-    # Publish but PRIVATE
+    # Publish but PRIVATE, with a capability + exclusive scenario that make it
+    # score strictly above every other pack for the query below
     from app.core.database import AsyncSessionLocal
     from app.models.skill_pack import PackStatus
     from app.models.workflow_pack import WorkflowPack
@@ -138,13 +148,40 @@ async def test_match_results_exclude_inaccessible_entities(c):
     async with AsyncSessionLocal() as db:
         pack = await db.get(WorkflowPack, hidden_id)
         pack.status = PackStatus.PUBLISHED
+        pack.capability_tags = ["multimodal_review"]
+        pack.scenario_tags = [scenario]
         await db.commit()
+
+    structured = {
+        "required_capabilities": ["multimodal_review"],
+        "scenario": scenario,
+    }
+
+    # Sanity (self-validating test): the OWNER org's match ranks the pack #1 —
+    # capability 1.0 + exclusive scenario 1.0 beat any rival's best possible
+    # score. So if the S1 org-visibility filter leaked, org2's run below
+    # would rank it #1 too and the absence assertions would fail.
+    rp1 = await c.post(
+        f"/api/v1/orgs/{o1}/requirement-profiles",
+        json={"context_type": "production", "structured_requirements": structured},
+        headers=h1,
+    )
+    pid1 = rp1.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{o1}/requirement-profiles/{pid1}/confirm", headers=h1)
+    rm1 = await c.post(
+        f"/api/v1/orgs/{o1}/match",
+        json={"requirement_profile_id": pid1, "target_entity_type": "workflow_pack", "limit": 50},
+        headers=h1,
+    )
+    assert rm1.status_code == 200, rm1.text
+    own_ranked = [x["entity_id"] for x in rm1.json()["data"]["results"]]
+    assert own_ranked and own_ranked[0] == hidden_id
 
     h2, _ = await _auth(c)
     o2 = await _org(c, h2)
     rp = await c.post(
         f"/api/v1/orgs/{o2}/requirement-profiles",
-        json={"context_type": "production", "structured_requirements": {}},
+        json={"context_type": "production", "structured_requirements": structured},
         headers=h2,
     )
     pid = rp.json()["data"]["id"]
@@ -160,6 +197,23 @@ async def test_match_results_exclude_inaccessible_entities(c):
         x["entity_id"] for x in data["excluded"]
     ]
     assert hidden_id not in all_ids
+
+    # S1 exclusion means it never becomes a candidate at all — it must appear
+    # NOWHERE: not in the persisted result rows either. And because the pack
+    # SATISFIES every hard constraint of this query, a leaked candidate could
+    # only land in ranked results (rank #1) — it cannot hide inside
+    # excluded_count, so the absence above also proves excluded_count does
+    # not include it.
+    from sqlalchemy import select
+
+    from app.models.matching import MatchResult
+
+    async with AsyncSessionLocal() as db:
+        rows_r = await db.execute(
+            select(MatchResult.entity_id).where(MatchResult.match_run_id == data["id"])
+        )
+        persisted_ids = {row[0] for row in rows_r.all()}
+    assert hidden_id not in persisted_ids
 
 
 @pytest.mark.asyncio

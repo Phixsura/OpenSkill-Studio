@@ -80,10 +80,19 @@ class PortfolioService:
         await self.db.flush()
         return profile
 
+    # Nullable profile columns where an explicit null means "clear the field".
+    # Non-nullable columns (visibility, theme, social_links) still ignore None.
+    _NULLABLE_PROFILE_FIELDS = frozenset({"headline", "bio", "location", "website_url"})
+
     async def update_profile(self, user_id: str, **fields) -> UserProfile:
         profile = await self.get_or_create_profile(user_id)
         for k, v in fields.items():
-            if v is not None and hasattr(profile, k):
+            if not hasattr(profile, k):
+                continue
+            # The endpoint dumps with exclude_unset, so a None here is an
+            # EXPLICIT null from the client — clear nullable fields instead
+            # of silently dropping the update.
+            if v is not None or k in self._NULLABLE_PROFILE_FIELDS:
                 setattr(profile, k, v)
         await self.db.flush()
         return profile

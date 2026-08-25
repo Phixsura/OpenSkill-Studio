@@ -482,6 +482,86 @@ async def test_time_budget_type_validation(c):
 
 
 @pytest.mark.asyncio
+async def test_nul_in_structured_requirements_rejected_as_422(c):
+    """NUL / control chars inside structured_requirements (or PATCH edits)
+    dicts would be stored raw into JSONB and crash asyncpg → 500. The
+    recursive control-char scan must reject them as 422 (only raw_request
+    was previously sanitized)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={
+            "context_type": "learning",
+            "structured_requirements": {"goal": "a\x00b"},
+        },
+        headers=h,
+    )
+    assert r.status_code == 422, f"{r.status_code} {r.text[:200]}"
+
+    # Nested values and keys are scanned too
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={
+            "context_type": "learning",
+            "structured_requirements": {"tool_constraints": ["ok", "bad\x00tool"]},
+        },
+        headers=h,
+    )
+    assert r2.status_code == 422
+
+    # PATCH edits path is guarded the same way
+    rp = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"goal": "clean"}},
+        headers=h,
+    )
+    pid = rp.json()["data"]["id"]
+    r3 = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}",
+        json={"edits": {"goal": "x\x00y"}},
+        headers=h,
+    )
+    assert r3.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_unhashable_values_rejected_as_422(c):
+    """Unhashable values (lists/dicts) in output_type / difficulty /
+    capability lists must be a clean 422, never a TypeError 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cases = [
+        ({"output_type": ["image"]}, "INVALID_OUTPUT_TYPE"),
+        ({"difficulty": ["beginner"]}, "INVALID_DIFFICULTY"),
+        ({"required_capabilities": [{"x": 1}]}, "INVALID_CAPABILITIES"),
+        ({"preferred_capabilities": [["nested"]]}, "INVALID_CAPABILITIES"),
+    ]
+    for structured, code in cases:
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/requirement-profiles",
+            json={"context_type": "learning", "structured_requirements": structured},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{structured}: {r.status_code} {r.text[:200]}"
+        assert r.json()["error"]["code"] == code
+    # Also reachable via PATCH edits
+    rp = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"goal": "g"}},
+        headers=h,
+    )
+    pid = rp.json()["data"]["id"]
+    r2 = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}",
+        json={"edits": {"output_type": ["image"]}},
+        headers=h,
+    )
+    assert r2.status_code == 422
+    assert r2.json()["error"]["code"] == "INVALID_OUTPUT_TYPE"
+
+
+@pytest.mark.asyncio
 async def test_tool_constraints_type_validation(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)

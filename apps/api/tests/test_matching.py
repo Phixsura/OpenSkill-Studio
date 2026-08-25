@@ -301,6 +301,26 @@ async def test_feedback_event_endpoint(c):
     assert r.status_code == 201
 
 
+@pytest.mark.asyncio
+async def test_feedback_event_bounds_rejected_as_422(c):
+    """Over-length entity_id (varchar(26) column) and out-of-range / negative
+    rank_position must be clean 422s — never asyncpg truncation/overflow 500s,
+    and never negative ranks polluting the position-bias dataset (R17)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    base = {"entity_type": "workflow_pack", "event_type": "opened"}
+    bad_bodies = [
+        {**base, "entity_id": "x" * 40},  # 40 chars > varchar(26)
+        {**base, "entity_id": ""},  # empty
+        {**base, "entity_id": "01AAAAAAAAAAAAAAAAAAAAAAAA", "rank_position": -1},
+        {**base, "entity_id": "01AAAAAAAAAAAAAAAAAAAAAAAA", "rank_position": 2**40},
+        {**base, "entity_id": "01AAAAAAAAAAAAAAAAAAAAAAAA", "match_run_id": "m" * 40},
+    ]
+    for body in bad_bodies:
+        r = await c.post(f"/api/v1/orgs/{oid}/feedback-events", json=body, headers=h)
+        assert r.status_code == 422, f"{body}: {r.status_code} {r.text[:200]}"
+
+
 # ── Guards ────────────────────────────────────────────────
 
 
@@ -344,7 +364,12 @@ async def test_match_cross_org_profile_rejected(c):
 
 @pytest.mark.asyncio
 async def test_creator_matching_requires_verified_evidence(c):
-    """Creators without evidence for required caps are excluded, not low-ranked."""
+    """Creators without evidence for required caps are excluded, not low-ranked.
+
+    Deterministic ranking + reason-provenance: A (3 strong verified rows →
+    capability_evidence 0.75, above reason_min 0.7) MUST outrank W (1 weak
+    row → 0.4), and A's reasons MUST carry the verified evidence chip — the
+    old `any(...) or top['score'] is not None` disjunction was always True."""
     from datetime import UTC, datetime
 
     from app.core.database import AsyncSessionLocal
@@ -354,24 +379,41 @@ async def test_creator_matching_requires_verified_evidence(c):
     oid = await _org(c, h_owner)
     h_a, u_a = await _auth(c)
     h_b, u_b = await _auth(c)
-    for u in (u_a, u_b):
+    h_w, u_w = await _auth(c)
+    for u in (u_a, u_b, u_w):
         await c.post(
             f"/api/v1/orgs/{oid}/members",
             json={"user_id": u["id"], "role": "student"},
             headers=h_owner,
         )
 
-    # Give creator A verified evidence for image_generation
     async with AsyncSessionLocal() as db:
+        # Creator A: 3 verified rows at 100 → Bayesian-shrunk
+        # capability_evidence = (3/6)*1.0 + (3/6)*0.5 = 0.75 ≥ reason_min 0.7
+        for i in range(3):
+            db.add(
+                CreatorCapabilityEvidence(
+                    org_id=oid,
+                    user_id=u_a["id"],
+                    capability_key="image_generation",
+                    evidence_type="skill_completed",
+                    evidence_id=f"01TESTEVIDENCE00000000000{i + 1}",
+                    weight=1.0,
+                    score=100,
+                    occurred_at=datetime.now(UTC),
+                )
+            )
+        # Creator W: 1 weak row at 10 → (1/4)*0.1 + (3/4)*0.5 = 0.4 — survives
+        # S2 (has evidence) but must rank strictly below A
         db.add(
             CreatorCapabilityEvidence(
                 org_id=oid,
-                user_id=u_a["id"],
+                user_id=u_w["id"],
                 capability_key="image_generation",
                 evidence_type="skill_completed",
-                evidence_id="01TESTEVIDENCE000000000001",
+                evidence_id="01TESTEVIDENCE0000000000W1",
                 weight=1.0,
-                score=90,
+                score=10,
                 occurred_at=datetime.now(UTC),
             )
         )
@@ -385,10 +427,17 @@ async def test_creator_matching_requires_verified_evidence(c):
     ranked_ids = [r["entity_id"] for r in data["results"]]
     excluded_ids = {e["entity_id"] for e in data["excluded"]}
     assert u_a["id"] in ranked_ids
+    assert u_w["id"] in ranked_ids
     assert u_b["id"] in excluded_ids
-    # Verified evidence appears as a reason for A
+    # Strong verified evidence MUST outrank weak evidence (0.45-weight signal
+    # difference 0.1575 dwarfs any recency jitter between fresh accounts)
+    assert ranked_ids.index(u_a["id"]) < ranked_ids.index(u_w["id"])
+    # Verified evidence appears as a reason chip for A — code AND provenance
     top = next(r for r in data["results"] if r["entity_id"] == u_a["id"])
-    assert any(rs["evidence"] == "verified" for rs in top["reasons"]) or top["score"] is not None
+    assert any(
+        rs["code"] == "CAPABILITY_EVIDENCE" and rs["evidence"] == "verified"
+        for rs in top["reasons"]
+    ), top["reasons"]
 
 
 @pytest.mark.asyncio
@@ -545,3 +594,37 @@ def test_soft_difficulty_feeds_skill_pack_scoring():
     soft = _entity_signals(entity, spec, {"_soft_difficulty": "beginner"})
     hard = _entity_signals(entity, spec, {"difficulty": "beginner"})
     assert soft["difficulty_fit"] == hard["difficulty_fit"]
+
+
+def test_skill_pack_teach_match_uses_soft_and_preferred_caps():
+    """R14 demotes extracted required caps to preferred/_soft — the skill_pack
+    capability_teach_match signal must fold those keys in, or it degenerates
+    to a constant 1.0 for every survivor in the common extraction flow
+    (0.35-weight signal + false 'Teaches the required capabilities' chip)."""
+    from types import SimpleNamespace
+
+    from app.services.matching.scoring import _entity_signals
+
+    spec = SimpleNamespace(target_entity_type="skill_pack")
+
+    def _pack(caps):
+        return SimpleNamespace(
+            capability_tags=caps,
+            scenario_tags=[],
+            difficulty="beginner",
+            estimated_minutes=30,
+            install_count=0,
+        )
+
+    teaching = _pack(["image_generation"])
+    not_teaching = _pack(["text_to_speech"])
+
+    for requirement in (
+        {"_soft_required_capabilities": ["image_generation"]},
+        {"preferred_capabilities": ["image_generation"]},  # R14 demotion target
+    ):
+        s_teach = _entity_signals(teaching, spec, requirement)
+        s_miss = _entity_signals(not_teaching, spec, requirement)
+        # Signal must DISCRIMINATE — not constant 1.0 for both
+        assert s_teach["capability_teach_match"] == 1.0, requirement
+        assert s_miss["capability_teach_match"] == 0.0, requirement

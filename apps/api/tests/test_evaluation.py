@@ -65,6 +65,49 @@ async def test_update_eval_settings_requires_auth(client):
     assert r.status_code == 401
 
 
+@pytest.mark.asyncio
+async def test_eval_settings_null_clears_budget(client):
+    """An explicit {"monthly_budget_usd": null} must CLEAR the budget
+    (→ unlimited), while an empty/absent-field update leaves it unchanged.
+    Regression for exclude_none dropping explicit nulls."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    # Fresh pool: earlier tests may leave pooled connections bound to their
+    # own (closed) event loops (same hygiene as test_auth.py)
+    await engine.dispose()
+
+    email = f"evalset-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "EvalSet"},
+    )
+    assert r.status_code == 201
+    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = await client.post("/api/v1/orgs", json={"name": f"E-{_uuid.uuid4().hex[:8]}"}, headers=h)
+    assert r.status_code == 201
+    oid = r.json()["data"]["id"]
+    url = f"/api/v1/orgs/{oid}/settings/evaluation"
+
+    # Set a budget
+    r = await client.put(url, json={"monthly_budget_usd": 50}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["monthly_budget_usd"] == 50
+
+    # Absent field → unchanged
+    r = await client.put(url, json={}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["monthly_budget_usd"] == 50
+
+    # Explicit null → cleared (unlimited)
+    r = await client.put(url, json={"monthly_budget_usd": None}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["data"]["monthly_budget_usd"] is None
+
+    await engine.dispose()
+
+
 # ── Schema validation ────────────────────────────────────────
 
 

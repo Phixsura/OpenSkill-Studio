@@ -79,6 +79,18 @@ class UpdateConnectionRequest(BaseModel):
     credentials: dict[str, str] | None = None
     status: str | None = None
 
+    # None-tolerant mirror of the create-request validator — updates must
+    # not bypass the bounds enforced at creation time
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v or len(v) > 100:
+            raise ValueError("Name must be 1-100 characters")
+        return v
+
     @field_validator("status")
     @classmethod
     def validate_status(cls, v: str | None) -> str | None:
@@ -176,8 +188,10 @@ class CreateOfferingRequest(BaseModel):
     @field_validator("cost_per_call_usd")
     @classmethod
     def validate_cost(cls, v: float | None) -> float | None:
-        if v is not None and (v < 0 or v > 10000):
-            raise ValueError("Cost must be between 0 and 10,000")
+        # Numeric(10, 6) column tops out at 9999.999999 — exactly 10000
+        # passes 4 integer digits and overflows at insert (500)
+        if v is not None and (v < 0 or v >= 10000):
+            raise ValueError("Cost must be between 0 and 9,999.999999")
         return v
 
 
@@ -230,8 +244,10 @@ class UpdateOfferingRequest(BaseModel):
     @field_validator("cost_per_call_usd")
     @classmethod
     def validate_cost(cls, v: float | None) -> float | None:
-        if v is not None and (v < 0 or v > 10000):
-            raise ValueError("Cost must be between 0 and 10,000")
+        # Numeric(10, 6) column tops out at 9999.999999 — exactly 10000
+        # passes 4 integer digits and overflows at insert (500)
+        if v is not None and (v < 0 or v >= 10000):
+            raise ValueError("Cost must be between 0 and 9,999.999999")
         return v
 
 

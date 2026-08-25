@@ -55,7 +55,9 @@ describe("NewRequirementPage", () => {
     mockApiWithAuth.mockReturnValue(new Promise(() => {}));
     render(<NewRequirementPage />, { wrapper: createWrapper() });
     expect(screen.getByText("New Requirement")).toBeDefined();
-    expect(document.getElementById("goal")).toBeDefined();
+    // not.toBeNull, NOT toBeDefined — getElementById returns null when the
+    // element is missing and toBeDefined passes for null (null !== undefined).
+    expect(document.getElementById("goal")).not.toBeNull();
   });
 
   it("renders capability checkboxes from the capabilities catalog", async () => {

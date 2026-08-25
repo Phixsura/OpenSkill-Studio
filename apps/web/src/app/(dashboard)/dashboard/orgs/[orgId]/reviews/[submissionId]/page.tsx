@@ -53,11 +53,21 @@ export default function ReviewDetailPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["review-submission", submissionId],
     queryFn: async () => {
-      // The submission endpoint requires project_id, so we search pending first
-      const pending = await apiWithAuth<{ data: { id: string; project_id: string }[] }>(
-        `/orgs/${orgId}/reviews/pending`,
-      );
-      const sub = pending.data.find((s) => s.id === submissionId);
+      // The submission endpoint requires project_id and there is no
+      // per-submission lookup, so we page through pending until we find it —
+      // bounded by meta.total so submissions beyond page 1 stay reachable.
+      const perPage = 100;
+      let sub: { id: string; project_id: string } | undefined;
+      let page = 1;
+      for (;;) {
+        const pending = await apiWithAuth<{
+          data: { id: string; project_id: string }[];
+          meta: { total: number };
+        }>(`/orgs/${orgId}/reviews/pending?page=${page}&per_page=${perPage}`);
+        sub = pending.data.find((s) => s.id === submissionId);
+        if (sub || pending.data.length === 0 || page * perPage >= pending.meta.total) break;
+        page += 1;
+      }
       if (!sub) return null;
       return apiWithAuth<{ data: SubmissionDetail }>(
         `/orgs/${orgId}/projects/${sub.project_id}/submissions/${submissionId}`,
