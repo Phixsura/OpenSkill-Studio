@@ -1,7 +1,7 @@
 """Matching endpoints (ADR-012) — audited, explainable recommendations."""
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -12,7 +12,7 @@ from app.models.project import ProjectTemplate
 from app.models.skill_pack import SkillPack
 from app.models.user import User
 from app.models.workflow_pack import WorkflowPack
-from app.schemas.base import DataResponse
+from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.matching import (
     ExcludedItem,
     FeedbackEventRequest,
@@ -147,7 +147,7 @@ async def run_match(
 
 @router.get(
     "/orgs/{org_id}/match-runs",
-    response_model=DataResponse[list[MatchRunResponse]],
+    response_model=ListResponse[MatchRunResponse],
     dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_match_runs(
@@ -158,6 +158,10 @@ async def list_match_runs(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
+    total_r = await db.execute(
+        select(func.count()).select_from(MatchRun).where(MatchRun.org_id == org_id)
+    )
+    total = total_r.scalar_one()
     result = await db.execute(
         select(MatchRun)
         .where(MatchRun.org_id == org_id)
@@ -180,7 +184,12 @@ async def list_match_runs(
                 created_at=run.created_at,
             )
         )
-    return DataResponse(data=responses)
+    return ListResponse(
+        data=responses,
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=page * per_page < total
+        ),
+    )
 
 
 @router.get(

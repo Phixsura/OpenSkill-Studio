@@ -488,5 +488,13 @@ class RequirementProfileService:
             if key in ALLOWED_FIELDS:
                 if isinstance(value, str):
                     value = sanitize_untrusted_text(value, 500)
+                elif isinstance(value, list):
+                    # Sanitize str items INSIDE lists too (tool_constraints,
+                    # capability lists) — top-level-only sanitization let
+                    # zero-width/bidi payloads through list values.
+                    value = [
+                        sanitize_untrusted_text(v, 500) if isinstance(v, str) else v
+                        for v in value
+                    ]
                 structured[key] = value
         return structured, unmatched

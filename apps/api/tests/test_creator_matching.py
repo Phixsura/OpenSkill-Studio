@@ -244,6 +244,7 @@ async def test_offer_accept_flow(c):
         headers=h_creator,
     )
     assert r3.status_code == 409
+    assert r3.json()["error"]["code"] == "ASSIGNMENT_ALREADY_RESPONDED"
 
 
 @pytest.mark.asyncio
@@ -571,3 +572,54 @@ async def test_offer_rejects_foreign_and_overlong_match_run(c):
         headers=h_owner,
     )
     assert r2.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_respond_race_loser_gets_409_not_double_write(c):
+    """The read-check-write in respond_assignment is guarded by a conditional
+    UPDATE (WHERE status='offered'): a session whose pre-read saw 'offered'
+    but whose UPDATE lands after another response must get
+    ASSIGNMENT_ALREADY_RESPONDED 409 — never silently overwrite the first
+    response (round-16 LOW)."""
+    h_owner, _ = await _auth(c, "Owner")
+    oid = await _org(c, h_owner)
+    _h_creator, creator = await _auth(c, "Race Target")
+    await _add_member(c, h_owner, oid, creator)
+    project_id = await _project(c, h_owner, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"]},
+        headers=h_owner,
+    )
+    aid = r.json()["data"]["id"]
+
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.composer import CreatorAssignment
+    from app.services.creator_matching import CreatorMatchingService
+
+    # Session A loads the offer while it is still 'offered' (stale read)
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(CreatorAssignment, aid)
+        assert stale.status == "offered"
+
+        # Session B wins the race: declines and commits first
+        async with AsyncSessionLocal() as db_b:
+            await CreatorMatchingService(db_b).respond_assignment(
+                aid, oid, creator["id"], accept=False
+            )
+            await db_b.commit()
+
+        # Session A's pre-read still says 'offered' (identity map) — the
+        # status-guarded UPDATE must catch the lost race with a clean 409
+        with pytest.raises(AppError) as exc:
+            await CreatorMatchingService(db_a).respond_assignment(
+                aid, oid, creator["id"], accept=True
+            )
+        assert exc.value.code == "ASSIGNMENT_ALREADY_RESPONDED"
+        assert exc.value.status_code == 409
+
+    # The first response (declined) is what persisted
+    async with AsyncSessionLocal() as db:
+        final = await db.get(CreatorAssignment, aid)
+        assert final.status == "declined"

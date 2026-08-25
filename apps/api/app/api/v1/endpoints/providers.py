@@ -136,14 +136,19 @@ async def update_connection(
 ):
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
     svc = ProviderService(db)
+    # exclude_unset (NOT exclude_none): an explicit `"credentials": null`
+    # detaches and deletes the credential, while an absent field leaves it
+    # unchanged — passing body.credentials directly made the two
+    # indistinguishable, so credentials could never be detached.
+    fields = body.model_dump(exclude_unset=True)
     conn = await svc.update_connection(
         connection_id,
         org_id,
-        name=body.name,
-        config=body.config,
-        credentials=body.credentials,
-        status=body.status,
+        name=fields.get("name"),
+        config=fields.get("config"),
+        status=fields.get("status"),
         updated_by=user.id,
+        **({"credentials": fields["credentials"]} if "credentials" in fields else {}),
     )
     await db.commit()
     return DataResponse(data=ConnectionResponse.model_validate(conn))
@@ -228,15 +233,14 @@ async def update_offering(
 ):
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
     svc = ProviderService(db)
+    # exclude_unset (NOT exclude_none): an explicit `"cost_per_call_usd": null`
+    # must clear the cost, while an absent field leaves it unchanged —
+    # passing every body attribute made the two indistinguishable, so a
+    # priced offering could never go back to unknown cost.
     offering = await svc.update_offering(
         offering_id,
         org_id,
-        model_name=body.model_name,
-        features=body.features,
-        limits=body.limits,
-        cost_per_call_usd=body.cost_per_call_usd,
-        quality_tier=body.quality_tier,
-        is_active=body.is_active,
+        **body.model_dump(exclude_unset=True),
     )
     await db.commit()
     return DataResponse(data=OfferingResponse.model_validate(offering))

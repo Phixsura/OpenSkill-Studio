@@ -248,7 +248,7 @@ test("providers: add offering via UI form; client + server validation", async ()
   });
   expect(neg.status).toBe(422);
   expect(neg.body.error.code).toBe("VALIDATION_ERROR");
-  expect(neg.body.error.message).toContain("Cost must be between 0 and 10,000");
+  expect(neg.body.error.message).toContain("Cost must be between 0 and 9,999.999999");
 
   // Remember the UI-created offering id for binding assertions later
   const offs = await api(admin, "GET", `/orgs/${orgId}/provider-offerings`);

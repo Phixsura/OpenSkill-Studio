@@ -542,6 +542,13 @@ async def test_sweep_exhausted_attempts_fails_step(c):
     step = next(s for s in data["step_runs"] if s["id"] == sr_id)
     assert step["status"] == "failed"
     assert step["error_code"] == "WF_RETRY_EXHAUSTED"
+    # The sweep must leave an audit trail, not silently mutate step state
+    assert any(
+        e["event_type"] == "step_failed"
+        and e["step_id"] == "poison"
+        and e["payload"] == {"error_code": "WF_RETRY_EXHAUSTED"}
+        for e in data["events"]
+    )
 
 
 @pytest.mark.asyncio
@@ -588,6 +595,15 @@ async def test_sweep_expired_review_fails_run(c):
     # The review row records the expiry, and no open review remains
     r2 = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h)
     assert not any(rv["step_run_id"] == qa["id"] for rv in r2.json()["data"])
+    # The sweep leaves an audit trail: review_expired + step_failed events
+    event_types = [(e["event_type"], e["step_id"]) for e in data["events"]]
+    assert ("review_expired", "qa") in event_types
+    assert any(
+        e["event_type"] == "step_failed"
+        and e["step_id"] == "qa"
+        and e["payload"] == {"error_code": "WF_REVIEW_TIMEOUT"}
+        for e in data["events"]
+    )
 
 
 @pytest.mark.asyncio
@@ -788,11 +804,23 @@ async def test_admin_sweep_endpoint(c):
         )
         await db.commit()
 
+        run_id = run.id
+
     r = await c.post("/api/v1/admin/workflows/sweep", headers=h)
     assert r.status_code == 200, r.text
     data = r.json()["data"]
     assert data["expired_leases"] >= 1
     assert data["runs_redispatched"] >= 1
+
+    # Lease expiry with attempts remaining leaves a step_lease_expired event
+    r2 = await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}", headers=h)
+    events = r2.json()["data"]["events"]
+    assert any(
+        e["event_type"] == "step_lease_expired"
+        and e["step_id"] == "ghost"
+        and e["payload"] == {"attempt": 1, "error_code": "WF_EXECUTOR_CRASHED"}
+        for e in events
+    )
 
 
 @pytest.mark.asyncio
@@ -1147,3 +1175,106 @@ async def test_template_ref_orders_execution_without_edge(c):
     # The referenced value must be REAL content, not the empty string an
     # unready ref would have rendered
     assert data["outputs"]["final"] == "Source said: value-ordering"
+
+
+# ── Audit round 16: cancel-race event, JSON template rendering ──
+
+
+@pytest.mark.asyncio
+async def test_cancel_lost_race_records_no_event(c):
+    """cancel_run losing the race to a concurrent completion (run UPDATE
+    rowcount 0) must NOT fabricate a run_cancelled event — the run was never
+    cancelled."""
+    import json as _json
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update as sa_update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import RunStatus, WorkflowRun
+    from app.services.workflow_runtime import WorkflowRuntimeService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    async with AsyncSessionLocal() as db:
+        run = WorkflowRun(
+            org_id=oid,
+            definition_snapshot={"steps": [], "edges": [], "inputs": [], "outputs": []},
+            inputs={},
+            status=RunStatus.RUNNING,
+        )
+        db.add(run)
+        await db.commit()
+        run_id = run.id
+
+    async with AsyncSessionLocal() as db:
+        svc = WorkflowRuntimeService(db)
+        # Pre-load into the identity map so cancel_run's terminal-state check
+        # sees the stale RUNNING status (the classic race window)
+        stale = await db.get(WorkflowRun, run_id)
+        assert stale.status == RunStatus.RUNNING
+
+        # A concurrent executor completes the run in its own session
+        async with AsyncSessionLocal() as db2:
+            await db2.execute(
+                sa_update(WorkflowRun)
+                .where(WorkflowRun.id == run_id)
+                .values(status=RunStatus.COMPLETED, finished_at=datetime.now(UTC))
+            )
+            await db2.commit()
+
+        run = await svc.cancel_run(run_id, oid)
+        await db.commit()
+        # The guarded UPDATE lost — the run stays completed
+        assert run.status == RunStatus.COMPLETED
+
+    async with AsyncSessionLocal() as db:
+        svc = WorkflowRuntimeService(db)
+        events = await svc.get_events(run_id)
+        assert not any(e.event_type == "run_cancelled" for e in events), _json.dumps(
+            [e.event_type for e in events]
+        )
+
+
+@pytest.mark.asyncio
+async def test_template_renders_json_input_as_valid_json(c):
+    """A json-typed input rendered into a prompt_template must produce valid
+    JSON text — str() would emit Python repr (single quotes, True/None) and
+    silently corrupt any JSON payload the template builds."""
+    import json as _json
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    definition = {
+        "schema_version": 1,
+        "inputs": [{"key": "cfg", "type": "json", "required": True}],
+        "outputs": [
+            {"key": "final", "type": "prompt", "from_step": "build", "from_port": "out"}
+        ],
+        "steps": [
+            {
+                "id": "build",
+                "type": "prompt_template",
+                "name": "Build",
+                "config": {"template": '{"payload": {{inputs.cfg}}}'},
+                "inputs": [],
+                "outputs": [{"port": "out", "type": "prompt"}],
+            }
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    install_id = await _install(c, h, oid, definition)
+    cfg = {"size": "1024", "tags": ["a", "b"], "hd": True, "note": None}
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"cfg": cfg}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    # The rendered template must parse as JSON and round-trip the input
+    assert _json.loads(data["outputs"]["final"]) == {"payload": cfg}

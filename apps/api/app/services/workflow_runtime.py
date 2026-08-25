@@ -526,7 +526,7 @@ class WorkflowRuntimeService:
                 .values(decision="expired", decided_at=_now())
             )
         # 3. Run row LAST (matches executor lock order)
-        await self.db.execute(
+        result = await self.db.execute(
             update(WorkflowRun)
             .where(
                 WorkflowRun.id == run_id,
@@ -536,7 +536,11 @@ class WorkflowRuntimeService:
             )
             .values(status=RunStatus.CANCELLED, error_code="WF_CANCELLED", finished_at=_now())
         )
-        self.db.add(WorkflowRunEvent(run_id=run_id, event_type="run_cancelled", payload={}))
+        # Only record the event when THIS request actually flipped the run —
+        # a lost race (concurrent completion) must not fabricate a
+        # run_cancelled event for a run that was never cancelled.
+        if result.rowcount:
+            self.db.add(WorkflowRunEvent(run_id=run_id, event_type="run_cancelled", payload={}))
         await self.db.flush()
         await self.db.refresh(run)
         return run
@@ -712,19 +716,36 @@ def _resolve_step_inputs(
     return resolved
 
 
+def _render_value(v) -> str:
+    """Render a resolved ref value as template text.
+
+    str(v) would emit Python repr for dicts/lists (single quotes, True/None)
+    — invalid JSON when the template builds a JSON payload. Render
+    dict/list as real JSON, None as '' (not 'None'), bool as JSON
+    'true'/'false'.
+    """
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (dict, list)):
+        return json.dumps(v, ensure_ascii=False)
+    return str(v)
+
+
 def _render_template(template: str, run: WorkflowRun, step_runs: dict) -> str:
     """Render closed moustache references. Unknown refs render empty (validated at publish)."""
 
     def _sub(m: re.Match) -> str:
         ref = m.group(1)
         if ref.startswith("inputs."):
-            return str(run.inputs.get(ref[len("inputs."):], ""))
+            return _render_value(run.inputs.get(ref[len("inputs."):]))
         if ref.startswith("steps."):
             parts = ref.split(".")
             if len(parts) == 4 and parts[2] == "outputs":
                 sr = step_runs.get(parts[1])
                 if sr and sr.output:
-                    return str(sr.output.get(parts[3], ""))
+                    return _render_value(sr.output.get(parts[3]))
         return ""
 
     return _EXPR_RE.sub(_sub, template)
@@ -1229,12 +1250,21 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
             error="Executor lease expired",
             lease_expires_at=None,
         )
-        .returning(WorkflowStepRun.run_id)
+        .returning(WorkflowStepRun.run_id, WorkflowStepRun.step_id, WorkflowStepRun.attempt)
     )
     retry_result = await db.execute(retry_q)
-    retry_runs = [row[0] for row in retry_result.all()]
-    affected_runs.update(retry_runs)
-    swept["expired_leases"] += len(retry_runs)
+    retry_rows = retry_result.all()
+    for run_id, step_id, attempt in retry_rows:
+        db.add(
+            WorkflowRunEvent(
+                run_id=run_id,
+                step_id=step_id,
+                event_type="step_lease_expired",
+                payload={"attempt": attempt, "error_code": "WF_EXECUTOR_CRASHED"},
+            )
+        )
+    affected_runs.update(row[0] for row in retry_rows)
+    swept["expired_leases"] += len(retry_rows)
 
     # Expired leases with attempts exhausted → FAILED (max_attempts must hold
     # on the crash-recovery path too — no unbounded poison-pill retries)
@@ -1253,12 +1283,21 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
             lease_expires_at=None,
             finished_at=now,
         )
-        .returning(WorkflowStepRun.run_id)
+        .returning(WorkflowStepRun.run_id, WorkflowStepRun.step_id)
     )
     exhausted_result = await db.execute(exhausted_q)
-    exhausted_runs = [row[0] for row in exhausted_result.all()]
-    affected_runs.update(exhausted_runs)
-    swept["expired_leases"] += len(exhausted_runs)
+    exhausted_rows = exhausted_result.all()
+    for run_id, step_id in exhausted_rows:
+        db.add(
+            WorkflowRunEvent(
+                run_id=run_id,
+                step_id=step_id,
+                event_type="step_failed",
+                payload={"error_code": "WF_RETRY_EXHAUSTED"},
+            )
+        )
+    affected_runs.update(row[0] for row in exhausted_rows)
+    swept["expired_leases"] += len(exhausted_rows)
 
     # Overdue reviews → expire review (guarded — never overwrite a decision
     # made concurrently by decide_review), fail step, resume the run so the
@@ -1288,7 +1327,7 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
         )
         if not expire_result.rowcount:
             continue
-        await db.execute(
+        fail_result = await db.execute(
             update(WorkflowStepRun)
             .where(
                 WorkflowStepRun.id == review.step_run_id,
@@ -1303,6 +1342,25 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
         )
         step_run = await db.get(WorkflowStepRun, review.step_run_id)
         if step_run is not None:
+            db.add(
+                WorkflowRunEvent(
+                    run_id=step_run.run_id,
+                    step_id=step_run.step_id,
+                    event_type="review_expired",
+                    payload={},
+                )
+            )
+            # Guarded like every settlement: only record step_failed when THIS
+            # sweep actually flipped the step (a concurrent cancel loses cleanly)
+            if fail_result.rowcount:
+                db.add(
+                    WorkflowRunEvent(
+                        run_id=step_run.run_id,
+                        step_id=step_run.step_id,
+                        event_type="step_failed",
+                        payload={"error_code": "WF_REVIEW_TIMEOUT"},
+                    )
+                )
             # Move the run out of WAITING_REVIEW so the advance loop (which
             # only progresses RUNNING runs) can settle it
             await db.execute(

@@ -109,4 +109,7 @@ class CreatorAssignment(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    __table_args__ = (Index("uq_creator_assignment", "project_id", "user_id", unique=True),)
+    __table_args__ = (
+        Index("uq_creator_assignment", "project_id", "user_id", unique=True),
+        Index("ix_creator_assignments_org", "org_id"),
+    )

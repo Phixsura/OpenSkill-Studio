@@ -23,6 +23,11 @@ log = structlog.get_logger()
 MAX_CONNECTIONS_PER_ORG = 25
 MAX_OFFERINGS_PER_CONNECTION = 50
 
+# update_connection sentinel: the endpoint dumps with exclude_unset, so an
+# absent `credentials` field never reaches the service — a None that DOES
+# arrive is an explicit null from the client (detach), not "unchanged".
+_UNSET: object = object()
+
 
 class ProviderService:
     def __init__(self, db: AsyncSession):
@@ -140,7 +145,7 @@ class ProviderService:
         org_id: str,
         name: str | None = None,
         config: dict | None = None,
-        credentials: dict[str, str] | None = None,
+        credentials: dict[str, str] | None | object = _UNSET,
         status: str | None = None,
         updated_by: str | None = None,
     ) -> ProviderConnection:
@@ -161,7 +166,22 @@ class ProviderService:
             conn.config = config
         if status is not None:
             conn.status = status
-        if credentials:
+        if credentials is None:
+            # Explicit null detaches the credential AND deletes the row —
+            # it belongs to this connection (same ownership as delete_connection),
+            # so leaving it orphaned would strand encrypted material.
+            if conn.credential_id:
+                cred = await self.db.get(OrgCredential, conn.credential_id)
+                if cred is not None:
+                    await self.db.delete(cred)
+                conn.credential_id = None
+        elif credentials is not _UNSET:
+            if not credentials:
+                raise AppError(
+                    "EMPTY_CREDENTIALS",
+                    "Credential dict must not be empty — send null to detach credentials",
+                    422,
+                )
             unknown = set(credentials.keys()) - cred_fields
             if unknown:
                 raise AppError(
@@ -276,10 +296,20 @@ class ProviderService:
             raise AppError("OFFERING_NOT_FOUND", "Provider offering not found", 404)
         return offering
 
+    # Nullable offering columns where an explicit null means "clear the field".
+    # Non-nullable columns (model_name, features, limits, quality_tier,
+    # is_active) still ignore None — an explicit null there would 500 at flush.
+    _NULLABLE_OFFERING_FIELDS = frozenset({"cost_per_call_usd"})
+
     async def update_offering(self, offering_id: str, org_id: str, **fields) -> ProviderModelOffering:
         offering = await self.get_offering(offering_id, org_id)
         for key, value in fields.items():
-            if value is not None and hasattr(offering, key):
+            if not hasattr(offering, key):
+                continue
+            # The endpoint dumps with exclude_unset, so a None here is an
+            # EXPLICIT null from the client — clear nullable fields instead
+            # of silently dropping the update.
+            if value is not None or key in self._NULLABLE_OFFERING_FIELDS:
                 setattr(offering, key, value)
         await self.db.flush()
         return offering

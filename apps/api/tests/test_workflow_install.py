@@ -851,3 +851,148 @@ async def test_preview_strips_pinned_binding_details(c):
         cfg = step.get("config") or {}
         assert "pinned_offering_id" not in cfg
         assert "binding_mode" not in cfg
+
+
+# ── Audit round 16: suggestion ordering, reactivation race, unlisted access ──
+
+
+@pytest.mark.asyncio
+async def test_binding_suggestion_prefers_null_cost_like_runtime(c):
+    """The install-time suggestion must sort NULL-cost offerings FIRST —
+    matching the runtime auto-resolver's nullsfirst() — so the suggested
+    offering is the one the auto rung would actually pick."""
+    from sqlalchemy import update as sa_update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.provider import ProviderModelOffering
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # Priced offering created FIRST (lower ULID) — under the old
+    # NULL-cost-last ordering it would win the suggestion
+    priced_id = await _mock_offering(c, h, oid)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == priced_id)
+            .values(cost_per_call_usd=5.0)
+        )
+        await db.commit()
+    free_id = await _mock_offering(c, h, oid)  # cost stays NULL
+
+    pid = await _public_pack(c, h, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
+    )
+    assert r.status_code == 201, r.text
+    install_id = r.json()["data"]["id"]
+
+    r2 = await c.get(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings", headers=h
+    )
+    binding = next(b for b in r2.json()["data"] if b["step_id"] == "generate")
+    assert binding["offering_id"] == free_id  # NULL cost first, like the runtime
+
+
+@pytest.mark.asyncio
+async def test_reinstall_race_lost_reactivation_maps_to_409(c):
+    """Two concurrent reinstalls of a REMOVED installation: the loser's
+    status-guarded reactivation UPDATE hits rowcount 0 and must surface a
+    clean 409 — never a double install_count bump."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.workflow_pack import WorkflowPack, WorkflowPackInstallation
+    from app.services.workflow_installation import WorkflowInstallationService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
+    )
+    install_id = r.json()["data"]["id"]
+    r2 = await c.delete(f"/api/v1/orgs/{oid}/workflow-installations/{install_id}", headers=h)
+    assert r2.status_code == 204
+
+    async with AsyncSessionLocal() as db_a:
+        # Session A loads the row while it is still REMOVED (identity map now
+        # holds the stale status — the classic pre-check race window)
+        stale = await db_a.get(WorkflowPackInstallation, install_id)
+        assert stale.status.value == "removed"
+
+        # Session B reactivates and commits first (the race winner)
+        async with AsyncSessionLocal() as db_b:
+            svc_b = WorkflowInstallationService(db_b)
+            won = await svc_b.install(oid, pid, None, u["id"])
+            await db_b.commit()
+            assert won.id == install_id
+
+        # Session A's pre-check sees the stale REMOVED row and takes the
+        # reactivation path — the guarded UPDATE must lose cleanly
+        svc_a = WorkflowInstallationService(db_a)
+        with pytest.raises(AppError) as exc_info:
+            await svc_a.install(oid, pid, None, u["id"])
+        assert exc_info.value.code == "ALREADY_INSTALLED"
+        assert exc_info.value.status_code == 409
+
+    # install_count bumped exactly once by the winner (1 install − 1 remove
+    # + 1 reactivation = 1)
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(WorkflowPack, pid)
+        assert pack.install_count == 1
+
+    # The winner's installation is intact and active
+    r3 = await c.get(f"/api/v1/orgs/{oid}/workflow-installations/{install_id}", headers=h)
+    assert r3.status_code == 200
+    assert r3.json()["data"]["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_unlisted_rejected_pack_still_upgradable_like_install(c):
+    """_check_pack_access must mirror install(): an UNLISTED pack is reachable
+    by anyone holding the id regardless of review_status (the approval gate
+    only guards PUBLIC registry discovery) — upgrade/diff must not 404 where
+    a fresh install would succeed."""
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    pid = await _public_pack(c, h1, o1, versions=("1.0.0", "2.0.0"))
+
+    # Owner goes unlisted, then a definition change resets approval and a
+    # re-review is rejected — review_status lands on "rejected"
+    r = await c.put(
+        f"/api/v1/orgs/{o1}/workflow-packs/{pid}",
+        json={"visibility": "unlisted"},
+        headers=h1,
+    )
+    assert r.status_code == 200
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_pack import WorkflowPack
+
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(WorkflowPack, pid)
+        pack.review_status = "rejected"
+        await db.commit()
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    # install() allows the unlisted pack cross-org…
+    r2 = await c.post(
+        f"/api/v1/orgs/{o2}/workflow-installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=h2,
+    )
+    assert r2.status_code == 201, r2.text
+    install_id = r2.json()["data"]["id"]
+
+    # …so upgrade and diff must apply the SAME rules (previously 404)
+    r3 = await c.get(
+        f"/api/v1/orgs/{o2}/workflow-installations/{install_id}/diff?to=2.0.0", headers=h2
+    )
+    assert r3.status_code == 200, r3.text
+    r4 = await c.post(
+        f"/api/v1/orgs/{o2}/workflow-installations/{install_id}/upgrade",
+        json={"version": "2.0.0"},
+        headers=h2,
+    )
+    assert r4.status_code == 200, r4.text
+    assert r4.json()["data"]["installed_version"] == "2.0.0"

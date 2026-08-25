@@ -510,9 +510,11 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             )
 
     # ── Required inputs satisfied ──
-    # A required input port must have an incoming edge OR be fed by a workflow
-    # input via moustache in the step config (checked below), OR belong to
-    # asset_input steps (fed from run inputs at execution).
+    # A required input port must have an incoming EDGE — moustache refs never
+    # feed input ports (they render inside the step config and are tracked
+    # separately as implicit ordering edges above), so the check is
+    # unconditional. asset_input steps are exempt: their ports are fed from
+    # run inputs at execution time.
     for i, step in enumerate(steps):
         if step.type == "asset_input":
             continue

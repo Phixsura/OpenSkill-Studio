@@ -666,3 +666,109 @@ async def test_extracted_time_budget_is_advisory_not_hard_cut(c):
     assert all(i["status"] != "cut_for_budget" for i in payload["items"])
     assert payload["estimated_total_minutes"] == 90
     assert any(g["code"] == "SOFT_TIME_BUDGET" for g in payload["gaps"])
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_prereq_slug_surfaces_gap(c):
+    """A prerequisite slug that resolves to no visible published pack must
+    emit a PREREQ_NOT_FOUND gap row — never a silent drop (round-16 LOW, R8:
+    nothing hidden)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pack_id = await _skill_pack(c, h, oid, "Orphan Dependent", ["upscale"])
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPack
+
+    missing_slug = f"ghost-prereq-{uuid.uuid4().hex[:8]}"
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(SkillPack, pack_id)
+        pack.prerequisite_packs = [missing_slug]
+        await db.commit()
+
+    profile_id = await _confirmed_profile(c, h, oid, {"required_capabilities": ["upscale"]})
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    assert {"code": "PREREQ_NOT_FOUND", "slug": missing_slug} in payload["gaps"]
+    # The dependent itself still composes normally
+    assert pack_id in [i["entity_id"] for i in payload["items"]]
+
+
+@pytest.mark.asyncio
+async def test_zero_minute_pack_contributes_zero_to_budget(c):
+    """estimated_minutes == 0 is a real duration — `or DEFAULT_PACK_MINUTES`
+    coerced it to 60, inflating totals and truncation (round-16 LOW). Only
+    None falls back to the default."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await _skill_pack(c, h, oid, "Zero Minute Pack", ["upscale"], minutes=0)
+    profile_id = await _confirmed_profile(c, h, oid, {"required_capabilities": ["upscale"]})
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    items = {i["name"]: i for i in payload["items"]}
+    assert items["Zero Minute Pack"]["status"] == "included"
+    assert payload["estimated_total_minutes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_update_draft_prereq_removal_guard(c):
+    """Removing an item that a REMAINING included item lists as prerequisite
+    → ITEM_HAS_DEPENDENTS 409; removing prereq AND dependent in the same
+    request is allowed (round-16 LOW)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    prereq_id = await _skill_pack(c, h, oid, "Guard Prereq", ["upscale"], minutes=30)
+    dep_id = await _skill_pack(c, h, oid, "Guard Dependent", ["background_removal"], minutes=30)
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPack
+
+    async with AsyncSessionLocal() as db:
+        prereq = await db.get(SkillPack, prereq_id)
+        dep = await db.get(SkillPack, dep_id)
+        dep.prerequisite_packs = [prereq.slug]
+        await db.commit()
+
+    profile_id = await _confirmed_profile(
+        c, h, oid, {"required_capabilities": ["background_removal"]}
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    draft_id = r.json()["data"]["id"]
+    # compose() persists per-item prereq slugs for the guard
+    items = {i["entity_id"]: i for i in r.json()["data"]["payload"]["items"]}
+    assert items[dep_id]["prereq_slugs"], items[dep_id]
+
+    # Removing ONLY the prerequisite while the dependent remains → 409
+    r2 = await c.patch(
+        f"/api/v1/orgs/{oid}/drafts/{draft_id}",
+        json={"remove_entity_ids": [prereq_id]},
+        headers=h,
+    )
+    assert r2.status_code == 409, r2.text
+    assert r2.json()["error"]["code"] == "ITEM_HAS_DEPENDENTS"
+
+    # Removing prereq + dependent in the SAME request is allowed
+    r3 = await c.patch(
+        f"/api/v1/orgs/{oid}/drafts/{draft_id}",
+        json={"remove_entity_ids": [prereq_id, dep_id]},
+        headers=h,
+    )
+    assert r3.status_code == 200, r3.text
+    statuses = {i["entity_id"]: i["status"] for i in r3.json()["data"]["payload"]["items"]}
+    assert statuses[prereq_id] == "removed_by_user"
+    assert statuses[dep_id] == "removed_by_user"

@@ -50,6 +50,15 @@ def check_draft_payload_size(payload: dict) -> None:
         )
 
 
+def _pack_minutes(value: int | None) -> int:
+    """0 is a real duration — only None falls back to the default.
+
+    `value or DEFAULT_PACK_MINUTES` silently coerced explicit 0-minute packs
+    to 60, inflating budgets and truncation decisions (round-16 LOW).
+    """
+    return DEFAULT_PACK_MINUTES if value is None else value
+
+
 class LearningComposerService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -108,7 +117,7 @@ class LearningComposerService:
                     cover = uncovered & set(pack.capability_tags or [])
                     if not cover:
                         continue
-                    minutes = pack.estimated_minutes or DEFAULT_PACK_MINUTES
+                    minutes = _pack_minutes(pack.estimated_minutes)
                     ratio = len(cover) / max(minutes, 1)
                     if ratio > best_ratio:
                         best, best_ratio, best_cover = pack, ratio, cover
@@ -124,9 +133,12 @@ class LearningComposerService:
             selected = ranked_packs[:5]
 
         # ── Prerequisite expansion (cycle-checked, depth-bounded) ──
-        ordered_entries, prereq_edges = await self._expand_prerequisites(
+        ordered_entries, prereq_edges, unresolved_prereqs = await self._expand_prerequisites(
             org_id, selected, profile.user_id
         )
+        # Unresolvable prereq slugs are surfaced, never silently dropped (R8)
+        for slug in unresolved_prereqs:
+            gaps.append({"code": "PREREQ_NOT_FOUND", "slug": slug})
 
         # ── Budget truncation (required-first is implicit: prereqs sort first) ──
         # Only a HUMAN-entered time_budget may drive hard cuts (R14):
@@ -152,7 +164,7 @@ class LearningComposerService:
             for entry in ordered_entries:
                 if entry["status"] != "included":
                     continue
-                minutes = entry["estimated_minutes"] or DEFAULT_PACK_MINUTES
+                minutes = _pack_minutes(entry["estimated_minutes"])
                 if running + minutes > budget:
                     entry["status"] = "cut_for_budget"
                     entry["reason_code"] = "cut_for_budget"
@@ -165,14 +177,14 @@ class LearningComposerService:
             total_minutes = running
             if running == 0 and any(e["status"] == "cut_for_budget" for e in ordered_entries):
                 minimum = min(
-                    (e["estimated_minutes"] or DEFAULT_PACK_MINUTES)
+                    _pack_minutes(e["estimated_minutes"])
                     for e in ordered_entries
                     if e["status"] == "cut_for_budget"
                 )
                 gaps.append({"code": "BUDGET_INFEASIBLE", "minimum_minutes": minimum})
         else:
             total_minutes = sum(
-                (e["estimated_minutes"] or DEFAULT_PACK_MINUTES)
+                _pack_minutes(e["estimated_minutes"])
                 for e in ordered_entries
                 if e["status"] == "included"
             )
@@ -228,21 +240,25 @@ class LearningComposerService:
                     dependent["reason_code"] = "cut_for_budget"
                     changed = True
         return sum(
-            (e["estimated_minutes"] or DEFAULT_PACK_MINUTES)
+            _pack_minutes(e["estimated_minutes"])
             for e in entries
             if e["status"] == "included"
         )
 
     async def _expand_prerequisites(
         self, org_id: str, selected: list[SkillPack], user_id: str | None
-    ) -> tuple[list[dict], list[tuple[str, str]]]:
+    ) -> tuple[list[dict], list[tuple[str, str]], list[str]]:
         """Expand prerequisite_packs recursively, topo-sort, mark waived items.
 
-        Returns (entries, prereq_edges) — edges as (prereq_id, dependent_id).
+        Returns (entries, prereq_edges, unresolved_slugs) — edges as
+        (prereq_id, dependent_id); unresolved_slugs are prereq slugs that
+        resolved to no visible published pack (surfaced as PREREQ_NOT_FOUND
+        gaps, never silently dropped — R8).
         """
         # Collect the full node set (selected + transitive prereqs)
         packs: dict[str, SkillPack] = {p.id: p for p in selected}
         prereq_edges: list[tuple[str, str]] = []  # (prereq_id, dependent_id)
+        unresolved: list[str] = []
         in_progress: set[str] = set()
 
         async def resolve_slug(slug: str) -> SkillPack | None:
@@ -274,6 +290,8 @@ class LearningComposerService:
                     continue
                 prereq = await resolve_slug(slug)
                 if prereq is None:
+                    if slug not in unresolved:
+                        unresolved.append(slug)
                     continue
                 if prereq.id in path:
                     raise AppError(
@@ -352,6 +370,16 @@ class LearningComposerService:
                 422,
             )
 
+        # Per-item prerequisite slugs (resolved edges only) — persisted in the
+        # payload so update_draft can protect dependents after the compose
+        # transaction is gone (round-16 LOW).
+        prereq_slugs_by_id: dict[str, list[str]] = {}
+        for prereq_id, dependent_id in prereq_edges:
+            slugs = prereq_slugs_by_id.setdefault(dependent_id, [])
+            slug = packs[prereq_id].slug
+            if slug not in slugs:
+                slugs.append(slug)
+
         entries: list[dict] = []
         for order, pack_id in enumerate(topo):
             pack = packs[pack_id]
@@ -359,16 +387,18 @@ class LearningComposerService:
                 "family": "skill_pack",
                 "entity_id": pack.id,
                 "name": pack.name,
+                "slug": pack.slug,
                 "order": order,
                 "required": True,
                 "status": "waived" if pack.id in waived_ids else "included",
                 "estimated_minutes": pack.estimated_minutes,
+                "prereq_slugs": prereq_slugs_by_id.get(pack.id, []),
             }
             if pack.id in waived_ids:
                 entry["reason_code"] = "waived"
                 entry["evidence"] = "Learner already completed this pack's skills"
             entries.append(entry)
-        return entries, prereq_edges
+        return entries, prereq_edges, unresolved
 
     # ── Confirm (materialize) ─────────────────────────────
 
@@ -559,8 +589,38 @@ class LearningComposerService:
             raise AppError("DRAFT_ALREADY_CONFIRMED", "Only open drafts can be edited", 422)
         payload = dict(draft.payload or {})
         remove = set(remove_entity_ids)
+
+        # Removing a prerequisite while a dependent REMAINS included would
+        # materialize the dependent without its prereq. compose() persists
+        # each item's prereq_slugs in the payload for exactly this check;
+        # removing prereq + dependent in the SAME request is allowed.
+        current_items = payload.get("items", [])
+        # Only removals that take effect matter (waived/cut items keep their
+        # status below, so "removing" them changes nothing for dependents)
+        removed_slugs = {
+            item.get("slug")
+            for item in current_items
+            if item.get("entity_id") in remove
+            and item.get("status") == "included"
+            and item.get("slug")
+        }
+        for item in current_items:
+            if item.get("entity_id") in remove or item.get("status") != "included":
+                continue  # the dependent is removed too / already inactive
+            blocking = removed_slugs & set(item.get("prereq_slugs") or [])
+            if blocking:
+                raise AppError(
+                    "ITEM_HAS_DEPENDENTS",
+                    (
+                        f"Cannot remove prerequisite pack(s) {', '.join(sorted(blocking))}: "
+                        f"'{item.get('name')}' still depends on them — remove the "
+                        "dependent in the same request or keep the prerequisite"
+                    ),
+                    409,
+                )
+
         items = []
-        for item in payload.get("items", []):
+        for item in current_items:
             entry = dict(item)
             if entry.get("entity_id") in remove and entry.get("status") == "included":
                 entry["status"] = "removed_by_user"
@@ -568,7 +628,7 @@ class LearningComposerService:
             items.append(entry)
         payload["items"] = items
         payload["estimated_total_minutes"] = sum(
-            (e.get("estimated_minutes") or DEFAULT_PACK_MINUTES)
+            _pack_minutes(e.get("estimated_minutes"))
             for e in items
             if e.get("status") == "included"
         )

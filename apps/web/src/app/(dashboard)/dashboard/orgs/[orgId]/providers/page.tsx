@@ -58,30 +58,49 @@ export default function ProvidersPage() {
   const [offTier, setOffTier] = useState("standard");
   const [offCost, setOffCost] = useState("");
 
-  const { data: adaptersData } = useQuery({
+  const {
+    data: adaptersData,
+    isLoading: adaptersLoading,
+    isError: adaptersError,
+  } = useQuery({
     queryKey: ["provider-adapters"],
     queryFn: () => apiWithAuth<{ data: Adapter[] }>("/providers/adapters"),
   });
   const adapters = adaptersData?.data ?? [];
   const selectedAdapter = adapters.find((a) => a.id === newAdapterId);
 
-  const { data: capsData } = useQuery({
+  const {
+    data: capsData,
+    isLoading: capsLoading,
+    isError: capsError,
+  } = useQuery({
     queryKey: ["capabilities"],
     queryFn: () => apiWithAuth<{ data: Capability[] }>("/capabilities"),
   });
   const capabilities = capsData?.data ?? [];
 
-  const { data: connectionsData } = useQuery({
+  const {
+    data: connectionsData,
+    isLoading: connectionsLoading,
+    isError: connectionsError,
+  } = useQuery({
     queryKey: ["provider-connections", orgId],
     queryFn: () => apiWithAuth<{ data: Connection[] }>(`/orgs/${orgId}/provider-connections`),
   });
   const connections = connectionsData?.data ?? [];
 
-  const { data: offeringsData } = useQuery({
+  const {
+    data: offeringsData,
+    isLoading: offeringsLoading,
+    isError: offeringsError,
+  } = useQuery({
     queryKey: ["provider-offerings", orgId],
     queryFn: () => apiWithAuth<{ data: Offering[] }>(`/orgs/${orgId}/provider-offerings`),
   });
   const offerings = offeringsData?.data ?? [];
+
+  const isLoading = adaptersLoading || capsLoading || connectionsLoading || offeringsLoading;
+  const isError = adaptersError || capsError || connectionsError || offeringsError;
 
   const createConnection = useMutation({
     mutationFn: () => {
@@ -157,6 +176,13 @@ export default function ProvidersPage() {
     onError: (err) =>
       toast.error(err instanceof ApiError ? err.message : "Failed to remove offering"),
   });
+
+  if (isLoading) {
+    return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  }
+  if (isError) {
+    return <p className="text-sm text-red-600">Failed to load providers. Please try again.</p>;
+  }
 
   return (
     <div className="space-y-8">

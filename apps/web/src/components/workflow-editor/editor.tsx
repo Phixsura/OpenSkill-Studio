@@ -82,6 +82,24 @@ export default function WorkflowEditor({ orgId, packId }: { orgId: string; packI
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
+  // beforeunload only covers hard navigation — client-side <Link> clicks
+  // bypass it entirely. Intercept anchor clicks within the editor (capture
+  // phase, before Next's router) and confirm when dirty. window.confirm
+  // matches how the app confirms elsewhere (fork/remove installation).
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement | null)?.closest?.("a[href]");
+      if (!anchor) return;
+      if (!window.confirm("You have unsaved changes. Leave without saving?")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, [dirty]);
+
   // Initialize once from server. DEEP-normalize instead of casting: the
   // backend validates with Pydantic (which fills defaults) but stores the
   // author's RAW dict — so a valid stored definition can omit per-step

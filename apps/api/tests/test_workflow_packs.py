@@ -393,6 +393,59 @@ async def test_releases_sorted_semver_desc(c):
     assert versions == ["1.10.0", "1.2.0", "1.0.0"]  # numeric semver, not lexicographic
 
 
+def test_parse_semver_prerelease_precedence():
+    """Semver 2.0 §11: numeric prerelease identifiers compare NUMERICALLY
+    (rc.10 > rc.9 — not lexicographic), numeric ranks below alphanumeric,
+    a longer identifier list wins a shared prefix, and a release outranks
+    every prerelease of the same X.Y.Z."""
+    from app.services.workflow_pack import _parse_semver
+
+    assert _parse_semver("1.0.0-rc.10") > _parse_semver("1.0.0-rc.9")
+    assert _parse_semver("1.0.0") > _parse_semver("1.0.0-rc.10")
+    # spec §11 example chain: alpha < alpha.1 < alpha.beta < beta < beta.2
+    # < beta.11 < rc.1 < release
+    ordered = [
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-alpha.beta",
+        "1.0.0-beta",
+        "1.0.0-beta.2",
+        "1.0.0-beta.11",
+        "1.0.0-rc.1",
+        "1.0.0",
+    ]
+    keys = [_parse_semver(v) for v in ordered]
+    assert keys == sorted(keys)
+    # numeric identifiers rank below alphanumeric ones (1 < alpha)
+    assert _parse_semver("1.0.0-1") < _parse_semver("1.0.0-alpha")
+    # higher base version beats any prerelease state
+    assert _parse_semver("1.0.1-alpha") > _parse_semver("1.0.0")
+
+
+@pytest.mark.asyncio
+async def test_releases_sorted_numeric_prerelease(c):
+    """rc.10 must sort above rc.9 in the releases list (semver identifier
+    comparison, not string comparison)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    for v in ["1.0.0-rc.9", "1.0.0-rc.10", "1.0.0"]:
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+            json={"version": v},
+            headers=h,
+        )
+        assert r.status_code == 201, r.text
+    r = await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", headers=h)
+    versions = [rel["version"] for rel in r.json()["data"]]
+    assert versions == ["1.0.0", "1.0.0-rc.10", "1.0.0-rc.9"]
+
+
 # ── Approval workflow ─────────────────────────────────────
 
 

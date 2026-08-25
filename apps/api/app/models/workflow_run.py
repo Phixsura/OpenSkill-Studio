@@ -81,6 +81,8 @@ class WorkflowRun(Base):
 
     __table_args__ = (
         Index("ix_wfruns_org_status", "org_id", "status"),
+        # Run history lists sort by created_at; the status index doesn't help
+        Index("ix_wfruns_org_created", "org_id", "created_at"),
         Index(
             "uq_wfrun_idem",
             "org_id",

@@ -9,7 +9,7 @@ auto-assignment path anywhere in this module (red line, R9).
 
 import structlog
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -404,7 +404,9 @@ class CreatorMatchingService:
         if assignment.user_id != user_id:
             raise AppError("NOT_YOUR_ASSIGNMENT", "Only the offered creator can respond", 403)
         if assignment.status != "offered":
-            raise AppError("ALREADY_RESPONDED", "This offer was already responded to", 409)
+            raise AppError(
+                "ASSIGNMENT_ALREADY_RESPONDED", "This offer was already responded to", 409
+            )
         if accept:
             # Projects are soft-deleted (status=ARCHIVED), so open offers
             # survive archival — a creator must not accept a dead project.
@@ -418,9 +420,26 @@ class CreatorMatchingService:
                     "The project for this offer is no longer available",
                     409,
                 )
-        assignment.status = "accepted" if accept else "declined"
-        assignment.responded_at = datetime.now(UTC)
-        await self.db.flush()
+        # Conditional UPDATE guards the read-check-write race: two concurrent
+        # responds both pass the status read above, but only ONE wins the
+        # status-guarded UPDATE — the loser's rowcount is 0 → 409 (same
+        # pattern as claim_draft_for_confirm).
+        result = await self.db.execute(
+            update(CreatorAssignment)
+            .where(
+                CreatorAssignment.id == assignment_id,
+                CreatorAssignment.status == "offered",
+            )
+            .values(
+                status="accepted" if accept else "declined",
+                responded_at=datetime.now(UTC),
+            )
+        )
+        if result.rowcount == 0:
+            raise AppError(
+                "ASSIGNMENT_ALREADY_RESPONDED", "This offer was already responded to", 409
+            )
+        await self.db.refresh(assignment)
         return assignment
 
     async def list_assignments(

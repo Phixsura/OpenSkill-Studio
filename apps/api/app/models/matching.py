@@ -142,7 +142,11 @@ class MatchResult(Base):
     # Server-computed presentation tier: great | good | fair (D9)
     tier: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    __table_args__ = (Index("ix_matchresults_run", "match_run_id", "rank"),)
+    __table_args__ = (
+        Index("ix_matchresults_run", "match_run_id", "rank"),
+        # The engine writes at most one row per (run, entity) — enforced
+        Index("uq_matchresult_run_entity", "match_run_id", "entity_id", unique=True),
+    )
 
 
 class FeedbackEvent(Base):

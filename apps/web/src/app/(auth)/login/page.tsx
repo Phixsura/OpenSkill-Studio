@@ -16,6 +16,16 @@ interface AuthResponse {
   user: AuthUser;
 }
 
+// Open-redirect guard: relative path only. Browsers treat "\" as "/" in
+// URLs, so "/\evil.com" (or any backslash) must be rejected too.
+function safeRedirect(target: string | null): string {
+  if (!target) return "/dashboard";
+  if (!target.startsWith("/") || target.startsWith("//") || target.includes("\\")) {
+    return "/dashboard";
+  }
+  return target;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -48,8 +58,7 @@ export default function LoginPage() {
         credentials: "include",
       });
       setAuth(data.access_token, data.user);
-      const redirect = searchParams.get("redirect") ?? "/dashboard";
-      router.push(redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/dashboard");
+      router.push(safeRedirect(searchParams.get("redirect")));
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Login failed. Please try again.",

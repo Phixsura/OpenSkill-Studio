@@ -493,6 +493,9 @@ def test_sanitize_empty_and_none_safe():
     from app.core.sanitize import sanitize_untrusted_text
 
     assert sanitize_untrusted_text("") == ""
+    # None is a valid falsy input at call sites (e.g. absent node titles) —
+    # the `if not s` guard must return "" instead of raising a TypeError
+    assert sanitize_untrusted_text(None) == ""
 
 
 @pytest.mark.asyncio
@@ -577,26 +580,56 @@ async def test_non_dict_api_inputs_no_crash(c):
 
 
 @pytest.mark.asyncio
-async def test_node_count_capped_before_normalization(c):
+async def test_node_count_capped_before_normalization(monkeypatch):
     """The MAX_NODES cap must fire BEFORE per-node normalization — a dense
     payload packs ~300k minimal nodes into the size cap and normalizing
-    them first burns seconds of CPU + ~80MB just to reject afterwards."""
-    import time
+    them first burns seconds of CPU + ~80MB just to reject afterwards.
+
+    Call-order proof (not a wall-clock bound): normalization is the only
+    stage that calls .get on a node dict (format detection uses `in`, the
+    NUL scan uses .items()), so nodes whose .get raises turn any
+    normalize-before-cap regression into a loud AssertionError instead of
+    the expected IMPORT_TOO_COMPLEX."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import app.services.comfyui_import as cui
+    from app.exceptions import AppError
+
+    class _NodeDict(dict):
+        def get(self, *args, **kwargs):
+            raise AssertionError("per-node normalization ran before the MAX_NODES cap")
+
+    payload = {
+        "nodes": [_NodeDict({"type": "a"}) for _ in range(cui.MAX_NODES + 1)],
+        "links": [],
+    }
+    # Patch the module's json binding so the tracked node dicts survive
+    # parsing (json.loads would flatten them back into plain dicts)
+    monkeypatch.setattr(cui, "json", SimpleNamespace(loads=lambda _text: payload))
+
+    svc = cui.ComfyUIImportService(MagicMock())
+    with pytest.raises(AppError) as exc_info:
+        await svc.parse_and_import("org1", b"{}", "user1")
+    assert exc_info.value.code == "IMPORT_TOO_COMPLEX"
+
+
+@pytest.mark.asyncio
+async def test_node_count_over_cap_rejected_422(c):
+    """One node over MAX_NODES surfaces as a clean 422 IMPORT_TOO_COMPLEX
+    through the endpoint (the call-order proof above is service-level)."""
+    from app.services.comfyui_import import MAX_NODES
 
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    payload = {"nodes": [{"type": "a"} for _ in range(100_000)], "links": []}
-    t0 = time.time()
+    payload = {"nodes": [{"type": "a"} for _ in range(MAX_NODES + 1)], "links": []}
     r = await c.post(
         f"/api/v1/orgs/{oid}/comfyui-imports",
         json={"data": json.dumps(payload), "encoding": "json"},
         headers=h,
     )
-    elapsed = time.time() - t0
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "IMPORT_TOO_COMPLEX"
-    # Generous bound: JSON transport dominates; normalization would add seconds
-    assert elapsed < 10, f"reject took {elapsed:.1f}s — cap likely after normalization"
 
 
 @pytest.mark.asyncio

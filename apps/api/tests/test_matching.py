@@ -523,14 +523,17 @@ async def test_s2_preferred_only_skill_pack_survives(c):
     )
     data = await _match(c, h, oid, profile_id, target="skill_pack", limit=50)
     ranked_ids = [r["entity_id"] for r in data["results"]]
-    excluded_ids = {e["entity_id"] for e in data["excluded"]}
     assert preferred_only in ranked_ids
     assert irrelevant not in ranked_ids
-    if irrelevant in excluded_ids:
-        failures = next(
-            e for e in data["excluded"] if e["entity_id"] == irrelevant
-        )["failures"]
-        assert failures[0]["code"] == "CAPABILITY_IRRELEVANT"
+    # The irrelevant pack MUST be in the excluded list with the right failure
+    # code — unconditionally. The returned exclusion window is capped at 50
+    # newest-first by ULID, and 'irrelevant' was created immediately before
+    # the match (newest ULID of any excludable pack on the shared dev DB), so
+    # it is deterministically inside the window; a guarded assert here would
+    # silently decay (the very bug this test was flagged for).
+    excluded_by_id = {e["entity_id"]: e for e in data["excluded"]}
+    assert irrelevant in excluded_by_id, data["excluded"]
+    assert excluded_by_id[irrelevant]["failures"][0]["code"] == "CAPABILITY_IRRELEVANT"
 
 
 @pytest.mark.asyncio
@@ -628,3 +631,87 @@ def test_skill_pack_teach_match_uses_soft_and_preferred_caps():
         # Signal must DISCRIMINATE — not constant 1.0 for both
         assert s_teach["capability_teach_match"] == 1.0, requirement
         assert s_miss["capability_teach_match"] == 0.0, requirement
+
+
+@pytest.mark.asyncio
+async def test_no_caps_profile_suppresses_vacuous_capability_chip(c):
+    """When the profile requests NO capabilities, the capability signal is a
+    1.0 DEFAULT — not evidence. The CAPABILITY_MATCH reason chip must be
+    suppressed while the signal keeps feeding the score unchanged (round-16
+    LOW: a default is not evidence)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _wf_pack(c, h, oid, "No Caps Requested", scenario="ecommerce")
+
+    profile_id = await _confirmed_profile(c, h, oid, {"scenario": "ecommerce"})
+    data = await _match(c, h, oid, profile_id, limit=50)
+
+    ours = next(r for r in data["results"] if r["entity_id"] == pid)
+    reason_codes = {r["code"] for r in ours["reasons"]}
+    assert "CAPABILITY_MATCH" not in reason_codes, ours["reasons"]
+    # Scenario chip (real evidence) still present — suppression is targeted
+    assert "SCENARIO_MATCH" in reason_codes
+
+
+def test_vacuous_teach_match_chip_suppressed_for_skill_packs():
+    """skill_pack counterpart: no requested caps anywhere (required, _soft,
+    preferred) → capability_teach_match defaults to 1.0 and its chip must be
+    dropped; any requested-cap key present → chip allowed again."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.services.matching.scoring import score
+
+    spec = SimpleNamespace(target_entity_type="skill_pack", org_id="o")
+    config = SimpleNamespace(
+        weights={"capability_teach_match": 0.35, "popularity": 0.1},
+        thresholds={"reason_min": 0.7, "gap_max": 0.4},
+    )
+    entity = SimpleNamespace(
+        id="01AAAAAAAAAAAAAAAAAAAAAAAA",
+        capability_tags=["upscale"],
+        scenario_tags=[],
+        difficulty="beginner",
+        estimated_minutes=30,
+        install_count=0,
+    )
+
+    no_caps = SimpleNamespace(**vars(spec), requirement={})
+    scored = asyncio.run(score(None, [entity], no_caps, config))
+    assert scored[0]["signals"]["capability_teach_match"] == 1.0  # math unchanged
+    assert all(r["code"] != "CAPABILITY_TEACH_MATCH" for r in scored[0]["reasons"])
+
+    with_caps = SimpleNamespace(**vars(spec), requirement={"preferred_capabilities": ["upscale"]})
+    scored2 = asyncio.run(score(None, [entity], with_caps, config))
+    assert any(r["code"] == "CAPABILITY_TEACH_MATCH" for r in scored2[0]["reasons"])
+
+
+@pytest.mark.asyncio
+async def test_list_match_runs_paginated_with_meta(c):
+    """GET /match-runs must follow the list convention: {data, meta} with
+    total/page/per_page/has_more (round-16 LOW — was DataResponse[list])."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    await _wf_pack(c, h, oid, "List Runs Pack")
+    profile_id = await _confirmed_profile(c, h, oid, {"goal": "list-runs"})
+    for _i in range(3):
+        await _match(c, h, oid, profile_id)
+
+    r = await c.get(f"/api/v1/orgs/{oid}/match-runs?page=1&per_page=2", headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["data"]) == 2
+    meta = body["meta"]
+    assert meta["total"] == 3
+    assert meta["page"] == 1
+    assert meta["per_page"] == 2
+    assert meta["has_more"] is True
+
+    r2 = await c.get(f"/api/v1/orgs/{oid}/match-runs?page=2&per_page=2", headers=h)
+    body2 = r2.json()
+    assert len(body2["data"]) == 1
+    assert body2["meta"]["has_more"] is False
+
+    # per_page is capped at 50 — over-cap → validation error, not a huge page
+    r3 = await c.get(f"/api/v1/orgs/{oid}/match-runs?per_page=500", headers=h)
+    assert r3.status_code == 422

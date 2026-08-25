@@ -34,11 +34,27 @@ _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")
 MAX_DEPENDENCIES = 20
 
 
-def _parse_semver(version: str) -> tuple[int, int, int, str]:
-    """Parse 'X.Y.Z' or 'X.Y.Z-prerelease' into a comparable tuple."""
+def _parse_semver(version: str) -> tuple:
+    """Parse 'X.Y.Z' or 'X.Y.Z-prerelease' into a comparable tuple.
+
+    Prerelease precedence follows semver 2.0 §11: identifiers are compared
+    dot-by-dot, numeric identifiers compare NUMERICALLY (rc.10 > rc.9 — a
+    plain string key would sort them lexicographically) and rank below any
+    alphanumeric identifier; a longer identifier list wins a shared prefix.
+    A release without prerelease ranks above every prerelease of the same
+    X.Y.Z, so the key's fourth element is (1,) for releases and
+    (0, *identifiers) for prereleases.
+    """
     base, _, prerelease = version.partition("-")
     parts = base.split(".")
-    pre_key = prerelease if prerelease else "~"  # '~' > all ASCII letters
+    if not prerelease:
+        pre_key: tuple = (1,)
+    else:
+        identifiers = tuple(
+            (0, int(ident), "") if ident.isdigit() else (1, 0, ident)
+            for ident in prerelease.split(".")
+        )
+        pre_key = (0, *identifiers)
     return (int(parts[0]), int(parts[1]), int(parts[2]), pre_key)
 
 

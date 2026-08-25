@@ -85,6 +85,7 @@ export default function ImportComfyUIPage() {
         const base64 = dataUrl.split(",")[1] ?? "";
         importMutation.mutate({ data: base64, encoding: "base64" });
       };
+      reader.onerror = () => toast.error("Could not read file");
       reader.readAsDataURL(file);
     } else {
       toast.error("Only .json and .png files are supported");

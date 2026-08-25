@@ -604,3 +604,96 @@ async def test_update_offering_validators_mirror_create(c):
     r3 = await c.put(url, json={"cost_per_call_usd": 0.05}, headers=h)
     assert r3.status_code == 200
     assert r3.json()["data"]["cost_per_call_usd"] == 0.05
+
+
+# ── Partial-update null semantics (R16 LOW batch) ─────────
+
+
+@pytest.mark.asyncio
+async def test_update_offering_explicit_null_clears_cost(c):
+    """exclude_unset semantics: explicit `"cost_per_call_usd": null` clears
+    the value, an absent field leaves it unchanged — the old
+    `if value is not None` guard made both a silent no-op."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    conn_id = await _connection(c, h, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "cost-null",
+            "cost_per_call_usd": 1.25,
+        },
+        headers=h,
+    )
+    offering_id = r.json()["data"]["id"]
+    url = f"/api/v1/orgs/{oid}/provider-offerings/{offering_id}"
+
+    # Absent field: cost unchanged
+    r2 = await c.put(url, json={}, headers=h)
+    assert r2.status_code == 200
+    assert r2.json()["data"]["cost_per_call_usd"] == 1.25
+
+    # Explicit null: cost cleared
+    r3 = await c.put(url, json={"cost_per_call_usd": None}, headers=h)
+    assert r3.status_code == 200
+    assert r3.json()["data"]["cost_per_call_usd"] is None
+
+    # Explicit null on a NON-nullable column is ignored, not a 500
+    r4 = await c.put(url, json={"model_name": None}, headers=h)
+    assert r4.status_code == 200
+    assert r4.json()["data"]["model_name"] == "cost-null"
+
+
+@pytest.mark.asyncio
+async def test_update_connection_credentials_null_detaches_and_deletes(c):
+    """Explicit `"credentials": null` detaches the credential AND deletes
+    the org credential row (it belongs to this connection); an absent field
+    leaves it unchanged; `{}` is a meaningless credential dict → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    aid = await _anthropic_adapter_id(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={
+            "adapter_id": aid,
+            "name": "Detach",
+            "credentials": {"api_key": "sk-detach-me"},
+        },
+        headers=h,
+    )
+    data = r.json()["data"]
+    conn_id = data["id"]
+    cred_id = data["credential_id"]
+    assert cred_id is not None
+    url = f"/api/v1/orgs/{oid}/provider-connections/{conn_id}"
+
+    # Absent field: credential untouched
+    r2 = await c.put(url, json={"name": "Detach 2"}, headers=h)
+    assert r2.status_code == 200
+    assert r2.json()["data"]["credential_id"] == cred_id
+
+    # Empty dict: 422 (meaningless — null is the detach spelling)
+    r3 = await c.put(url, json={"credentials": {}}, headers=h)
+    assert r3.status_code == 422
+    assert r3.json()["error"]["code"] == "EMPTY_CREDENTIALS"
+
+    # Explicit null: detached AND the credential row is gone
+    r4 = await c.put(url, json={"credentials": None}, headers=h)
+    assert r4.status_code == 200
+    assert r4.json()["data"]["credential_id"] is None
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.provider import OrgCredential
+
+    async with AsyncSessionLocal() as db:
+        row = await db.execute(select(OrgCredential).where(OrgCredential.id == cred_id))
+        assert row.scalar_one_or_none() is None
+
+    # Detaching an already-credential-less connection is an idempotent no-op
+    r5 = await c.put(url, json={"credentials": None}, headers=h)
+    assert r5.status_code == 200
+    assert r5.json()["data"]["credential_id"] is None

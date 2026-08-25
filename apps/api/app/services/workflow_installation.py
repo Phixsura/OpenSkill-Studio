@@ -78,19 +78,43 @@ class WorkflowInstallationService:
                 raise AppError(
                     "ALREADY_INSTALLED", "Workflow pack already installed in this organization", 409
                 )
-            # Reactivate the removed installation — a plain UPDATE on the
-            # existing row (cannot violate uq_wfinstall_org_pack, so no
-            # IntegrityError handling needed; the race guard lives on the
-            # new-install INSERT path below)
-            existing.release_id = release.id
-            existing.installed_version = release.version
-            existing.status = InstallStatus.ACTIVE
-            existing.local_definition = None
-            existing.locally_modified = False
-            existing.installed_by = installed_by
-            await self.db.flush()
-            await self._rebuild_bindings(existing, release)
-            await self._bump_install_count(pack_id, +1)
+            # Reactivate the removed installation — status-guarded UPDATE +
+            # nested transaction, the same race-safe pattern as the fresh
+            # INSERT below. rowcount 0 = a concurrent reinstall already
+            # reactivated the row: clean 409, never a double install_count
+            # bump; begin_nested keeps the session usable if the concurrent
+            # winner's binding rebuild trips uq_binding here.
+            try:
+                async with self.db.begin_nested():
+                    reactivated = await self.db.execute(
+                        update(WorkflowPackInstallation)
+                        .where(
+                            WorkflowPackInstallation.id == existing.id,
+                            WorkflowPackInstallation.status == InstallStatus.REMOVED,
+                        )
+                        .values(
+                            release_id=release.id,
+                            installed_version=release.version,
+                            status=InstallStatus.ACTIVE,
+                            local_definition=None,
+                            locally_modified=False,
+                            installed_by=installed_by,
+                        )
+                    )
+                    if not reactivated.rowcount:
+                        raise AppError(
+                            "ALREADY_INSTALLED",
+                            "Workflow pack already installed in this organization",
+                            409,
+                        )
+                    await self._rebuild_bindings(existing, release)
+                    await self._bump_install_count(pack_id, +1)
+            except IntegrityError:
+                raise AppError(
+                    "ALREADY_INSTALLED",
+                    "Workflow pack already installed in this organization",
+                    409,
+                ) from None
             await self.db.refresh(existing)
             log.info("workflow_pack_reinstalled", installation_id=existing.id, org_id=org_id)
             return existing
@@ -339,7 +363,9 @@ class WorkflowInstallationService:
 
     async def _check_pack_access(self, pack_id: str, org_id: str) -> WorkflowPack:
         """Same access rules as install() — owner org always, otherwise the
-        pack must be PUBLISHED, non-private, and approved. Uniform 404 to
+        pack must be PUBLISHED and non-private, and a PUBLIC pack must be
+        approved (unlisted is reachable by anyone holding the id — the
+        approval gate only guards registry discovery). Uniform 404 to
         prevent pack-id enumeration."""
         pack = await self.db.get(WorkflowPack, pack_id)
         if pack is None:
@@ -349,7 +375,10 @@ class WorkflowInstallationService:
         if (
             pack.status != PackStatus.PUBLISHED
             or pack.visibility == PackVisibility.PRIVATE
-            or pack.review_status not in (None, "approved")
+            or (
+                pack.visibility == PackVisibility.PUBLIC
+                and pack.review_status not in (None, "approved")
+            )
         ):
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
         return pack
@@ -484,9 +513,12 @@ class WorkflowInstallationService:
             required = set(config.get("required_features", []))
             offerings = await provider_svc.list_offerings(inst.org_id, capability_key=capability)
             best = None
+            # NULL cost sorts FIRST — must mirror the runtime auto-resolver's
+            # nullsfirst() ordering so the suggested offering is the one the
+            # auto rung would actually pick at execution time.
             for off in sorted(
                 offerings,
-                key=lambda o: (o.cost_per_call_usd is None, o.cost_per_call_usd or 0, o.id),
+                key=lambda o: (o.cost_per_call_usd is not None, o.cost_per_call_usd or 0, o.id),
             ):
                 if required <= set(off.features or []):
                     best = off

@@ -19,11 +19,11 @@ import unicodedata
 _INVISIBLE_RE = re.compile(
     "["
     "\U000e0000-\U000e007f"
-    "​-‍"
-    "﻿"
-    "⁠"
-    "‪-‮"
-    "⁦-⁩"
+    "\u200b-\u200d"
+    "\ufeff"
+    "\u2060"
+    "\u202a-\u202e"
+    "\u2066-\u2069"
     "]"
 )
 

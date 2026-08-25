@@ -683,3 +683,27 @@ async def test_student_can_edit_own_profile(c):
         f"/api/v1/orgs/{oid}/requirement-profiles/{pid}/confirm", headers=student_h
     )
     assert r_conf.status_code == 200
+
+
+def test_normalize_extracted_sanitizes_list_items():
+    """_normalize_extracted must sanitize strings INSIDE list values too —
+    top-level-only sanitization let zero-width/bidi payloads through
+    tool_constraints items (round-16 LOW)."""
+    from app.services.requirement_profile import (
+        ExtractedRequirements,
+        RequirementProfileService,
+    )
+
+    # Explicit escapes: ZWSP U+200B and RLO U+202E (invisible in editors)
+    extracted = ExtractedRequirements(
+        goal="clean\u200bgoal",
+        tool_constraints=["photo\u200bshop", "after\u202eeffects"],
+    )
+    svc = RequirementProfileService.__new__(RequirementProfileService)
+    structured, unmatched = svc._normalize_extracted(extracted, set())
+
+    # Top-level string sanitized (existing behavior)
+    assert structured["goal"] == "cleangoal"
+    # List items sanitized too: ZWSP and RLO stripped
+    assert structured["tool_constraints"] == ["photoshop", "aftereffects"]
+    assert unmatched == []

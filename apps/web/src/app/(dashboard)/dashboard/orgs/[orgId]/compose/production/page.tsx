@@ -60,10 +60,22 @@ function ProductionComposerInner() {
 
   const { data: profilesData } = useQuery({
     queryKey: ["requirement-profiles", orgId, "all"],
-    queryFn: () =>
-      apiWithAuth<{ data: Profile[] }>(
-        `/orgs/${orgId}/requirement-profiles?per_page=100`,
-      ),
+    queryFn: async () => {
+      // per_page=100 is the API cap — follow has_more so orgs with more
+      // than 100 profiles still see every confirmed one in the select.
+      const all: Profile[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore && page <= 10) {
+        const res = await apiWithAuth<{ data: Profile[]; meta: { has_more: boolean } }>(
+          `/orgs/${orgId}/requirement-profiles?page=${page}&per_page=100`,
+        );
+        all.push(...res.data);
+        hasMore = res.meta?.has_more ?? false;
+        page += 1;
+      }
+      return { data: all };
+    },
   });
   const confirmedProfiles = (profilesData?.data ?? []).filter(
     (p) => p.status === "confirmed",

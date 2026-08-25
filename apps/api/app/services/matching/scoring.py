@@ -106,6 +106,25 @@ async def score(db: AsyncSession, survivors: list, spec, config) -> list[dict]:
             (entity, _entity_signals(entity, spec, requirement)) for entity in survivors
         ]
 
+    # A DEFAULTED capability signal is not evidence: when the profile requests
+    # no capabilities, _fraction_present returns its 1.0 default and the chip
+    # would assert a match that was never tested. Scoring math is unchanged —
+    # only the reason row is suppressed. Mirrors the requested-cap folding in
+    # _entity_signals per target type.
+    if spec.target_entity_type == "skill_pack":
+        requested_caps = (
+            (requirement.get("required_capabilities") or [])
+            + (requirement.get("_soft_required_capabilities") or [])
+            + (requirement.get("preferred_capabilities") or [])
+        )
+    else:
+        requested_caps = (requirement.get("required_capabilities") or []) + (
+            requirement.get("preferred_capabilities") or []
+        )
+    vacuous_signals = (
+        set() if requested_caps else {"capability_match", "capability_teach_match"}
+    )
+
     scored: list[dict] = []
     for entity, signals in signal_rows:
         total = sum(weights.get(name, 0.0) * value for name, value in signals.items())
@@ -114,7 +133,7 @@ async def score(db: AsyncSession, survivors: list, spec, config) -> list[dict]:
         # SAME signal values drive both reasons and gaps (R5)
         for name, value in signals.items():
             weight = weights.get(name, 0.0)
-            if value >= reason_min and weight > 0:
+            if value >= reason_min and weight > 0 and name not in vacuous_signals:
                 reasons.append(
                     {
                         "code": name.upper(),

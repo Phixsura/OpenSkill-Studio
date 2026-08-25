@@ -6,16 +6,20 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { apiWithAuth } from "@/lib/api";
+import { api, apiWithAuth } from "@/lib/api";
 
 interface Installation {
   id: string;
   pack_id: string | null;
-  pack_name?: string | null;
   installed_version: string;
   status: string;
   locally_modified: boolean;
   installed_at: string;
+}
+
+interface PackName {
+  id: string;
+  name: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -40,6 +44,26 @@ export default function WorkflowInstallationsPage() {
   const installations = data?.data ?? [];
   const total = data?.meta?.total ?? 0;
   const hasMore = data?.meta?.has_more ?? false;
+
+  // The installation response carries only pack_id — resolve display names
+  // via the public registry (mirrors the detail page). Private packs 404
+  // there; fail silently per pack and fall back to the ULID.
+  const packIds = [...new Set(installations.flatMap((i) => (i.pack_id ? [i.pack_id] : [])))];
+  const { data: packNamesData } = useQuery({
+    queryKey: ["registry-workflow-pack-names", packIds],
+    enabled: packIds.length > 0,
+    queryFn: async () => {
+      const results = await Promise.all(
+        packIds.map((id) =>
+          api<{ data: PackName }>(`/registry/workflow-packs/${id}`).catch(() => null),
+        ),
+      );
+      return Object.fromEntries(
+        results.flatMap((r) => (r ? [[r.data.id, r.data.name]] : [])),
+      ) as Record<string, string>;
+    },
+  });
+  const packNames = packNamesData ?? {};
 
   return (
     <div className="space-y-6">
@@ -77,7 +101,9 @@ export default function WorkflowInstallationsPage() {
           >
             <div>
               <p className="font-medium">
-                {install.pack_name ?? install.pack_id ?? "(pack removed)"}
+                {(install.pack_id ? packNames[install.pack_id] : null) ??
+                  install.pack_id ??
+                  "(pack removed)"}
               </p>
               <p className="text-sm text-[hsl(var(--muted-foreground))]">
                 v{install.installed_version} · installed{" "}
