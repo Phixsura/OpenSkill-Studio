@@ -69,6 +69,10 @@ export default function WorkflowEditor({ orgId, packId }: { orgId: string; packI
   const markDirty = useCallback(() => {
     editCountRef.current += 1;
     setDirty(true);
+    // Any structural edit invalidates the last validation result — clear the
+    // stale error panel (its JSON-pointer indices may now point at the wrong
+    // or a deleted step) rather than leave it up until the next Save.
+    setErrors((prev) => (prev.length ? [] : prev));
   }, []);
 
   // Real navigation guard while dirty — the badge alone is cosmetic.

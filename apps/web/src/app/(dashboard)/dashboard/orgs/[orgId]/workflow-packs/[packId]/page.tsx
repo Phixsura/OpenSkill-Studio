@@ -83,6 +83,12 @@ export default function WorkflowPackDetailPage() {
         body: JSON.stringify(body),
       }),
     onSuccess: () => {
+      // Drop the local edit overrides so the fields fall back to the
+      // refetched server values (`summary ?? pack.summary`). Without this
+      // the inputs keep showing stale local state after a save — masking a
+      // partial/failed server write or a concurrent edit until a reload.
+      setSummary(null);
+      setVisibility(null);
       invalidate();
       toast.success("Pack updated");
     },
