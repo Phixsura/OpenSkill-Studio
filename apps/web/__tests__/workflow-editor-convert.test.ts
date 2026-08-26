@@ -200,30 +200,49 @@ describe("applyStepUpdate — positional rename detection", () => {
     expect(next.edges.find((e) => e.id === "e1")?.to_port).toBe("in");
   });
 
-  it("keeps the sibling's edges when a rename keystroke passes through its exact name", () => {
-    // Rename 'in2' → 'in3' by backspacing: transient state is ['in', 'in'],
-    // colliding with the sibling. Set-based detection collapsed the
-    // duplicate, saw no rename, and dropped e2 permanently — and a naive
-    // positional rewrite at the NEXT keystroke ('in' → 'in3' at index 1
-    // while 'in' persists at index 0) would drag the sibling's e1 along.
+  it("never misroutes the sibling's edge when a collision is committed directly", () => {
+    // Round 18: the old contract PARKED the renamed port's edge onto the
+    // colliding sibling name ('rename in2→in while in exists'), which
+    // MISROUTED data (both edges feeding one port — fan-in error on a port
+    // the user never touched, or silently wrong data). Collisions are now
+    // blocked upstream (PortNameInput holds the draft locally until unique),
+    // and detectPortRename's TO-collision guard is defense-in-depth for
+    // direct callers: no rename is applied, the sibling's edge is NEVER
+    // touched, and the vanished port's edge is visibly disconnected rather
+    // than silently rerouted.
     let def = twoPortDefinition();
     const sink = () => def.steps.find((s) => s.id === "sink") as StepDef;
-    for (const name of ["in", "in3"]) {
-      def = applyStepUpdate(def, {
-        ...sink(),
-        inputs: [
-          { port: "in", type: "text" },
-          { port: name, type: "text" },
-        ],
-      });
-    }
-    // No edge is ever dropped, and port 1's edge stays on 'in'
+    def = applyStepUpdate(def, {
+      ...sink(),
+      inputs: [
+        { port: "in", type: "text" },
+        { port: "in", type: "text" }, // direct collision commit
+      ],
+    });
+    // Sibling's edge intact and NOT duplicated onto the colliding port
+    expect(def.edges.filter((e) => e.to_port === "in")).toHaveLength(1);
+    expect(def.edges.find((e) => e.id === "e1")?.to_port).toBe("in");
+    // The renamed-away port's edge is dropped (visible disconnect), never
+    // misrouted onto the sibling
+    expect(def.edges.find((e) => e.id === "e2")).toBeUndefined();
+  });
+
+  it("rewrites the edge on a clean rename that the PortNameInput commits", () => {
+    // The REAL keystroke flow after round 18: 'in2' → (collision 'in' held
+    // locally, never committed) → 'in3' commits as one clean positional
+    // rename. The edge follows the rename; the sibling is untouched.
+    let def = twoPortDefinition();
+    const sink = () => def.steps.find((s) => s.id === "sink") as StepDef;
+    def = applyStepUpdate(def, {
+      ...sink(),
+      inputs: [
+        { port: "in", type: "text" },
+        { port: "in3", type: "text" },
+      ],
+    });
     expect(def.edges).toHaveLength(2);
     expect(def.edges.find((e) => e.id === "e1")?.to_port).toBe("in");
-    // e2 was rewritten onto 'in' at the collision keystroke; once the names
-    // duplicate, a name-based rewrite cannot tell the ports apart, so it
-    // parks on the surviving name rather than being destroyed.
-    expect(def.edges.find((e) => e.id === "e2")?.to_port).toBe("in");
+    expect(def.edges.find((e) => e.id === "e2")?.to_port).toBe("in3");
   });
 
   it("keeps an in-progress workflow output row (from_port: '') across step edits", () => {

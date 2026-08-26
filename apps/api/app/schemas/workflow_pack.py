@@ -11,8 +11,9 @@ from pydantic import BaseModel, ConfigDict, field_validator
 # definition and run-input paths already guard against).
 _CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
-# BCP-47-ish primary-subtag + optional one subtag ('en', 'pt-BR', 'zh-Hans')
-_LANGUAGE_RE = re.compile(r"^[a-z]{2}(-[A-Za-z]{2,8})?$")
+# BCP-47-ish primary subtag (2-3 letters: 'en', 'fil', 'yue') + optional
+# one subtag ('pt-BR', 'zh-Hans')
+_LANGUAGE_RE = re.compile(r"^[a-z]{2,3}(-[A-Za-z]{2,8})?$")
 
 
 def _reject_ctrl(v: str) -> str:
@@ -74,6 +75,7 @@ class CreateWorkflowPackRequest(BaseModel):
         for tag in v:
             if not isinstance(tag, str) or not tag.strip() or len(tag) > 50:
                 raise ValueError("Tags must be non-empty strings of max 50 chars")
+            _reject_ctrl(tag)
         return [t.strip() for t in v]
 
     @field_validator("difficulty")
@@ -163,6 +165,7 @@ class UpdateWorkflowPackRequest(BaseModel):
         for tag in v:
             if not isinstance(tag, str) or not tag.strip() or len(tag) > 50:
                 raise ValueError("Tags must be non-empty strings of max 50 chars")
+            _reject_ctrl(tag)
         return [t.strip() for t in v]
 
     @field_validator("difficulty")
@@ -225,6 +228,22 @@ class PublishWorkflowReleaseRequest(BaseModel):
     def validate_dependencies_size(cls, v: dict) -> dict:
         if len(str(v)) > 10000:
             raise ValueError("Dependencies too large")
+        # Stored verbatim into the manifest JSONB — control chars anywhere in
+        # the dict crash asyncpg the same way changelog/name would
+        def _scan(x, depth=0):
+            if depth > 20:
+                raise ValueError("Dependencies nested too deeply")
+            if isinstance(x, str):
+                _reject_ctrl(x)
+            elif isinstance(x, dict):
+                for k, val in x.items():
+                    _scan(k, depth + 1)
+                    _scan(val, depth + 1)
+            elif isinstance(x, list):
+                for item in x:
+                    _scan(item, depth + 1)
+
+        _scan(v)
         return v
 
 
@@ -487,4 +506,4 @@ class CreatePackFromImportRequest(BaseModel):
         v = v.strip()
         if not v or len(v) > 200:
             raise ValueError("Name must be 1-200 characters")
-        return v
+        return _reject_ctrl(v)

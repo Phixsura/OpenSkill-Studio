@@ -197,18 +197,33 @@ class ProductionComposerService:
                 gaps.append({"code": "NO_RELEASES", "entity_id": pack.id, "name": pack.name})
                 continue
             deps = (release.manifest or {}).get("dependencies", {})
-            for cap in deps.get("requires_capabilities", []):
+            # Manifest-tolerant like check_capabilities: a non-dict entry
+            # (str/int — pre-gate manifests or future write paths) must not
+            # AttributeError into a 500 before the hardened checker even runs
+            raw_caps = deps.get("requires_capabilities", [])
+            for cap in raw_caps if isinstance(raw_caps, list) else []:
+                if not isinstance(cap, dict):
+                    continue  # check_capabilities reports MALFORMED_REQUIREMENT
                 key = cap.get("capability", "")
-                if key and key not in seen_caps:
+                if isinstance(key, str) and key and key not in seen_caps:
                     seen_caps.add(key)
                     required_caps.append(cap)
-            for rec in deps.get("recommended_packs", []):
-                if rec.get("family") == "skill_pack":
+            raw_recs = deps.get("recommended_packs", [])
+            for rec in raw_recs if isinstance(raw_recs, list) else []:
+                if isinstance(rec, dict) and rec.get("family") == "skill_pack":
                     recommended_slugs.append(rec)
 
         provider_gaps = await ProviderService(self.db).check_capabilities(org_id, required_caps)
         for pg in provider_gaps:
-            gaps.append({**pg, "code": "NO_ELIGIBLE_PROVIDER"})
+            # CAPABILITY_UNSATISFIED maps to the composer's vocabulary
+            # (NO_ELIGIBLE_PROVIDER drives the frontend's connect-a-provider
+            # prompt); other checker codes (MALFORMED_REQUIREMENT) pass
+            # through — blanket-overwriting rendered a nonsense provider
+            # prompt for malformed manifests
+            if pg.get("code") == "CAPABILITY_UNSATISFIED":
+                gaps.append({**pg, "code": "NO_ELIGIBLE_PROVIDER"})
+            else:
+                gaps.append(pg)
 
         # ── Recommended skill packs (resolve by slug; skip unresolvable) ──
         items: list[dict] = []

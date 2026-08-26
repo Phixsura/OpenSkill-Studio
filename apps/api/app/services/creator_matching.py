@@ -21,7 +21,7 @@ from app.models.evaluation import EvalStatus, EvaluationTask
 from app.models.organization import MemberStatus, OrgMember
 from app.models.portfolio import SkillBadge
 from app.models.project import ReviewStatus, Submission, SubmissionReview
-from app.models.skill import Exercise, ProgressStatus, Skill, SkillProgress
+from app.models.skill import ContentStatus, Exercise, ProgressStatus, Skill, SkillProgress
 from app.models.workflow_run import RunStatus, WorkflowRun
 from app.services.matching import MatchingEngine, MatchSpec
 from app.services.requirement_profile import RequirementProfileService
@@ -96,26 +96,32 @@ class CreatorMatchingService:
         )
         progress_rows = sp_r.all()
         # SkillProgress.best_score is the SUM of best attempt scores across
-        # the skill's exercises (skill.py) — NOT a 0-100 value. Normalize by
-        # the exercise count (single grouped query) so a 3-exercise skill at
-        # 50/100 each (sum 150) stores ~50, not a clamped "perfect" 100.
-        # Stored evidence scores are on the 0-100 scale (column Numeric(5,2));
-        # scoring.py normalizes to 0-1 exactly once at read time.
+        # the skill's ACTIVE exercises (skill.py _update_skill_progress via
+        # list_exercises, which filters ARCHIVED), each on that exercise's
+        # own max_score scale (1..10000, API-settable). Correct normalization
+        # is sum(best) / sum(active max_score) — a count-based denominator
+        # would under-report skills with archived exercises and misprice any
+        # exercise whose max_score isn't 100. Stored evidence scores are on
+        # the 0-100 scale (Numeric(5,2)); scoring.py normalizes to 0-1 once
+        # at read time.
         skill_ids = {skill.id for _, skill in progress_rows}
-        exercise_counts: dict[str, int] = {}
+        max_score_sums: dict[str, int] = {}
         if skill_ids:
             ex_r = await self.db.execute(
-                select(Exercise.skill_id, func.count(Exercise.id))
-                .where(Exercise.skill_id.in_(skill_ids))
+                select(Exercise.skill_id, func.sum(Exercise.max_score))
+                .where(
+                    Exercise.skill_id.in_(skill_ids),
+                    Exercise.status != ContentStatus.ARCHIVED,
+                )
                 .group_by(Exercise.skill_id)
             )
-            exercise_counts = {row[0]: row[1] for row in ex_r.all()}
+            max_score_sums = {row[0]: int(row[1] or 0) for row in ex_r.all()}
         for progress, skill in progress_rows:
             score = None
             if progress.best_score is not None:
-                exercise_count = exercise_counts.get(skill.id, 0)
+                denom = max_score_sums.get(skill.id, 0)
                 score = min(
-                    float(progress.best_score) / max(1, exercise_count), 100.0
+                    float(progress.best_score) / max(1, denom) * 100.0, 100.0
                 )
             for cap in self._map_tags(list(skill.tags or []), keys):
                 add(cap, "skill_completed", progress.id, progress.completed_at or progress.started_at or skill.created_at, score)
@@ -241,33 +247,58 @@ class CreatorMatchingService:
 
         # Advisory lock FIRST (auto-released at transaction end), then the
         # staleness check — checking before the lock reintroduces the race.
+        # The lock must cover ONLY the staleness-check + delete/insert window:
+        # xact-scoped locks otherwise ride along to the endpoint's commit,
+        # serializing every same-org shortlist request behind the full
+        # matching-engine run. Committing here releases the lock the moment
+        # the rebuild (idempotent rows, safe to commit early) is durable —
+        # expire_on_commit=False keeps loaded objects usable.
         await self.db.execute(
             sa_text("SELECT pg_advisory_xact_lock(hashtext('evidence:' || :org_id))"),
             {"org_id": org_id},
         )
-        if not force:
-            from datetime import UTC, datetime, timedelta
+        try:
+            if not force:
+                from datetime import UTC, datetime, timedelta
 
-            newest_r = await self.db.execute(
-                select(func.max(CreatorCapabilityEvidence.created_at)).where(
-                    CreatorCapabilityEvidence.org_id == org_id
+                newest_r = await self.db.execute(
+                    select(func.max(CreatorCapabilityEvidence.created_at)).where(
+                        CreatorCapabilityEvidence.org_id == org_id
+                    )
+                )
+                newest = newest_r.scalar_one_or_none()
+                if newest is not None:
+                    ref = newest if newest.tzinfo else newest.replace(tzinfo=UTC)
+                    if datetime.now(UTC) - ref < timedelta(
+                        seconds=self.EVIDENCE_STALENESS_SECONDS
+                    ):
+                        # Fresh enough — release the lock before returning
+                        # (commit ends the lock-holding transaction; nothing
+                        # was written, so committing is a no-op data-wise)
+                        await self.db.commit()
+                        return 0
+
+            members_r = await self.db.execute(
+                select(OrgMember.user_id).where(
+                    OrgMember.org_id == org_id, OrgMember.status == MemberStatus.ACTIVE
                 )
             )
-            newest = newest_r.scalar_one_or_none()
-            if newest is not None:
-                ref = newest if newest.tzinfo else newest.replace(tzinfo=UTC)
-                if datetime.now(UTC) - ref < timedelta(seconds=self.EVIDENCE_STALENESS_SECONDS):
-                    return 0  # fresh enough — skip the rebuild
-
-        members_r = await self.db.execute(
-            select(OrgMember.user_id).where(
-                OrgMember.org_id == org_id, OrgMember.status == MemberStatus.ACTIVE
-            )
-        )
-        total = 0
-        for (user_id,) in members_r.all():
-            total += await self.rebuild_evidence(org_id, user_id)
-        return total
+            total = 0
+            for (user_id,) in members_r.all():
+                total += await self.rebuild_evidence(org_id, user_id)
+        except BaseException:
+            # Rollback discards the partial delete+insert AND releases the
+            # advisory lock (transaction end) — never commit half a rebuild.
+            await self.db.rollback()
+            raise
+        else:
+            # Commit releases the advisory lock the moment the rebuild is
+            # durable (fresh-skip path included via the return above — see
+            # the early-return commit below). Holding an xact lock through
+            # the endpoint's own commit would serialize every same-org
+            # shortlist behind the full matching-engine run.
+            await self.db.commit()
+            return total
 
     # ── Shortlist (offer, never assign) ───────────────────
 
@@ -350,6 +381,13 @@ class CreatorMatchingService:
         project = await self.db.get(_Project, project_id)
         if project is None or project.org_id != org_id:
             raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+        # Same guard as respond_assignment's accept branch: offering against
+        # an archived project manufactures a dead offer the creator can never
+        # accept (and the unique index then blocks any future re-offer)
+        if project.status == ContentStatus.ARCHIVED:
+            raise AppError(
+                "PROJECT_NOT_AVAILABLE", "Project is archived — offers are closed", 409
+            )
         # match_run_id is a loose (non-FK) reference — validate org ownership
         # the same way feedback-events does (ADR-012), or an over-length /
         # cross-org value 500s or silently attaches a foreign run.

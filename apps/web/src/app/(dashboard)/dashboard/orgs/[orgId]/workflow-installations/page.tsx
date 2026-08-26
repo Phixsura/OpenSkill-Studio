@@ -126,7 +126,7 @@ export default function WorkflowInstallationsPage() {
         ))}
       </div>
 
-      {total > perPage && (
+      {(total > perPage || page > 1) && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
             Showing {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} of {total}

@@ -17,13 +17,17 @@ interface AuthResponse {
 }
 
 // Open-redirect guard: relative path only. Browsers treat "\" as "/" in
-// URLs, so "/\evil.com" (or any backslash) must be rejected too.
+// URLs, so "/\evil.com" (or any backslash) must be rejected — and the
+// WHATWG URL parser strips tab/newline/CR before parsing, so "/%09/evil.com"
+// (decoded: "/\t/evil.com") would resolve external too. Strip those exactly
+// like the parser does BEFORE applying the shape checks.
 function safeRedirect(target: string | null): string {
   if (!target) return "/dashboard";
-  if (!target.startsWith("/") || target.startsWith("//") || target.includes("\\")) {
+  const t = target.replace(/[\t\n\r]/g, "");
+  if (!t.startsWith("/") || t.startsWith("//") || t.includes("\\")) {
     return "/dashboard";
   }
-  return target;
+  return t;
 }
 
 export default function LoginPage() {

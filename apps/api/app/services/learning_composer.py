@@ -175,7 +175,11 @@ class LearningComposerService:
             # dependent without its required prereq (R8: visible, not silent).
             running = self._propagate_budget_cuts(ordered_entries, prereq_edges)
             total_minutes = running
-            if running == 0 and any(e["status"] == "cut_for_budget" for e in ordered_entries):
+            # 'Nothing fits' means NO item is included — not running == 0,
+            # which a legitimately 0-minute included pack also satisfies
+            # (that would emit a contradictory gap alongside included items)
+            nothing_included = not any(e["status"] == "included" for e in ordered_entries)
+            if nothing_included and any(e["status"] == "cut_for_budget" for e in ordered_entries):
                 minimum = min(
                     _pack_minutes(e["estimated_minutes"])
                     for e in ordered_entries
@@ -370,15 +374,22 @@ class LearningComposerService:
                 422,
             )
 
-        # Per-item prerequisite slugs (resolved edges only) — persisted in the
-        # payload so update_draft can protect dependents after the compose
-        # transaction is gone (round-16 LOW).
+        # Per-item prerequisite references (resolved edges only) — persisted
+        # in the payload so update_draft can protect dependents after the
+        # compose transaction is gone. Entity IDs are the authoritative key:
+        # slugs are only unique per owner org, and a draft can hold an
+        # own-org fork and the public original under the SAME slug. Slugs
+        # stay in the payload for display.
         prereq_slugs_by_id: dict[str, list[str]] = {}
+        prereq_ids_by_id: dict[str, list[str]] = {}
         for prereq_id, dependent_id in prereq_edges:
             slugs = prereq_slugs_by_id.setdefault(dependent_id, [])
             slug = packs[prereq_id].slug
             if slug not in slugs:
                 slugs.append(slug)
+            ids = prereq_ids_by_id.setdefault(dependent_id, [])
+            if prereq_id not in ids:
+                ids.append(prereq_id)
 
         entries: list[dict] = []
         for order, pack_id in enumerate(topo):
@@ -393,6 +404,7 @@ class LearningComposerService:
                 "status": "waived" if pack.id in waived_ids else "included",
                 "estimated_minutes": pack.estimated_minutes,
                 "prereq_slugs": prereq_slugs_by_id.get(pack.id, []),
+                "prereq_ids": prereq_ids_by_id.get(pack.id, []),
             }
             if pack.id in waived_ids:
                 entry["reason_code"] = "waived"
@@ -586,7 +598,7 @@ class LearningComposerService:
     ) -> SolutionDraft:
         draft = await self.get_draft(draft_id, org_id)
         if draft.status != "draft":
-            raise AppError("DRAFT_ALREADY_CONFIRMED", "Only open drafts can be edited", 422)
+            raise AppError("DRAFT_ALREADY_CONFIRMED", "Only open drafts can be edited", 409)
         payload = dict(draft.payload or {})
         remove = set(remove_entity_ids)
 
@@ -597,6 +609,11 @@ class LearningComposerService:
         current_items = payload.get("items", [])
         # Only removals that take effect matter (waived/cut items keep their
         # status below, so "removing" them changes nothing for dependents)
+        removed_ids = {
+            item.get("entity_id")
+            for item in current_items
+            if item.get("entity_id") in remove and item.get("status") == "included"
+        }
         removed_slugs = {
             item.get("slug")
             for item in current_items
@@ -607,7 +624,19 @@ class LearningComposerService:
         for item in current_items:
             if item.get("entity_id") in remove or item.get("status") != "included":
                 continue  # the dependent is removed too / already inactive
-            blocking = removed_slugs & set(item.get("prereq_slugs") or [])
+            # Guard by entity_id (unambiguous — slugs can collide between an
+            # own-org fork and the public original in the same draft); fall
+            # back to slugs only for drafts composed before prereq_ids existed
+            prereq_ids = item.get("prereq_ids")
+            if prereq_ids is not None:
+                slug_by_id = {
+                    x.get("entity_id"): x.get("slug") for x in current_items if x.get("slug")
+                }
+                blocking = {
+                    slug_by_id.get(pid, pid) for pid in prereq_ids if pid in removed_ids
+                }
+            else:
+                blocking = removed_slugs & set(item.get("prereq_slugs") or [])
             if blocking:
                 raise AppError(
                     "ITEM_HAS_DEPENDENTS",
@@ -632,16 +661,38 @@ class LearningComposerService:
             for e in items
             if e.get("status") == "included"
         )
-        draft.payload = payload
-        await self.db.flush()
+        # Conditional write: a concurrent confirm may have claimed the draft
+        # after our read — the same read-check-blind-write race the confirm
+        # path closed. rowcount 0 = the draft is no longer editable.
+        result = await self.db.execute(
+            update(SolutionDraft)
+            .where(
+                SolutionDraft.id == draft_id,
+                SolutionDraft.org_id == org_id,
+                SolutionDraft.status == "draft",
+            )
+            .values(payload=payload)
+        )
+        if result.rowcount == 0:
+            raise AppError("DRAFT_ALREADY_CONFIRMED", "Only open drafts can be edited", 409)
         await self.db.refresh(draft)
         return draft
 
     async def discard(self, draft_id: str, org_id: str) -> SolutionDraft:
         draft = await self.get_draft(draft_id, org_id)
         if draft.status != "draft":
-            raise AppError("DRAFT_ALREADY_CONFIRMED", "Only open drafts can be discarded", 422)
-        draft.status = "discarded"
-        await self.db.flush()
+            raise AppError("DRAFT_ALREADY_CONFIRMED", "Only open drafts can be discarded", 409)
+        # Conditional: loses cleanly against a concurrent confirm's claim
+        result = await self.db.execute(
+            update(SolutionDraft)
+            .where(
+                SolutionDraft.id == draft_id,
+                SolutionDraft.org_id == org_id,
+                SolutionDraft.status == "draft",
+            )
+            .values(status="discarded")
+        )
+        if result.rowcount == 0:
+            raise AppError("DRAFT_ALREADY_CONFIRMED", "Only open drafts can be discarded", 409)
         await self.db.refresh(draft)
         return draft

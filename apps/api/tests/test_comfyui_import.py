@@ -221,7 +221,7 @@ async def test_json_escaped_nul_rejected(c):
         headers=h,
     )
     assert r.status_code == 422, r.text
-    assert r.json()["error"]["code"] == "COMFY_INVALID_CONTENT"
+    assert r.json()["error"]["code"] == "INVALID_CONTENT"
 
     # NUL in a dict KEY must be caught too
     payload_key = {"1": {"class_type": "KSampler", "inputs": {"se\x00ed": 1}}}
@@ -231,7 +231,7 @@ async def test_json_escaped_nul_rejected(c):
         headers=h,
     )
     assert r2.status_code == 422
-    assert r2.json()["error"]["code"] == "COMFY_INVALID_CONTENT"
+    assert r2.json()["error"]["code"] == "INVALID_CONTENT"
 
 
 @pytest.mark.asyncio
@@ -247,7 +247,7 @@ async def test_png_embedded_nul_rejected(c):
         headers=h,
     )
     assert r.status_code == 422, r.text
-    assert r.json()["error"]["code"] == "COMFY_INVALID_CONTENT"
+    assert r.json()["error"]["code"] == "INVALID_CONTENT"
 
 
 @pytest.mark.asyncio

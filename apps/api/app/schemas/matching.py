@@ -16,13 +16,22 @@ _CONTEXTS = ("learning", "production", "commercial_project", "talent_matching")
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
-def _has_ctrl(v) -> bool:
+_MAX_NESTING = 30  # deeper client payloads are hostile, not requirements
+
+
+def _has_ctrl(v, depth: int = 0) -> bool:
+    # Depth-capped: unbounded recursion on a deeply nested payload raises
+    # RecursionError → 500, the exact defect class this validator closes.
+    # Structures deeper than any legitimate requirement are rejected outright
+    # by treating them as invalid (True → 422).
+    if depth > _MAX_NESTING:
+        return True
     if isinstance(v, str):
         return bool(_CTRL_RE.search(v))
     if isinstance(v, dict):
-        return any(_has_ctrl(k) or _has_ctrl(val) for k, val in v.items())
+        return any(_has_ctrl(k, depth + 1) or _has_ctrl(val, depth + 1) for k, val in v.items())
     if isinstance(v, list):
-        return any(_has_ctrl(x) for x in v)
+        return any(_has_ctrl(x, depth + 1) for x in v)
     return False
 
 

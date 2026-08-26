@@ -90,6 +90,16 @@ class ProviderService:
             )
 
         credential_id = None
+        # {} is a client mistake, not "no credentials" — update_connection
+        # already 422s on it; the create path must match (same input, same
+        # contract) instead of silently creating a credential-less connection
+        if credentials is not None and len(credentials) == 0:
+            raise AppError(
+                "EMPTY_CREDENTIALS",
+                "Credentials must contain at least one field (omit the key entirely "
+                "to create the connection without credentials)",
+                422,
+            )
         if credentials:
             # Validate supplied fields against the adapter's declared fields
             unknown = set(credentials.keys()) - cred_fields
@@ -373,6 +383,24 @@ class ProviderService:
                     }
                 )
                 features = []
+            dropped = [f for f in features if not isinstance(f, str)]
+            if dropped:
+                # A type-broken entry INSIDE the list must not silently weaken
+                # the install gate (an int feature would vanish and the
+                # requirement pass against any offering) — flag like the
+                # non-list case above
+                gaps.append(
+                    {
+                        "code": "MALFORMED_REQUIREMENT",
+                        "capability": cap_key,
+                        "missing_features": [],
+                        "detail": (
+                            f"{len(dropped)} non-string feature entr"
+                            f"{'y' if len(dropped) == 1 else 'ies'} for "
+                            f"'{cap_key}' ignored"
+                        ),
+                    }
+                )
             req_features = {f for f in features if isinstance(f, str)}
             normalized.append((cap_key, req_features))
         # One query for all requested capabilities (was N+1: one list_offerings

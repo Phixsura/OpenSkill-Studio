@@ -697,3 +697,88 @@ async def test_update_connection_credentials_null_detaches_and_deletes(c):
     r5 = await c.put(url, json={"credentials": None}, headers=h)
     assert r5.status_code == 200
     assert r5.json()["data"]["credential_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_cost_rounding_boundary_and_nan_rejected(c):
+    """R18: [9999.9999995, 10000) ROUNDS to 10000.000000 in Numeric(10,6) and
+    still overflowed; NaN passed both comparisons and later crashed Decimal
+    sorts. Both must 422 at the schema."""
+    import pydantic
+
+    from app.schemas.provider import CreateOfferingRequest, UpdateOfferingRequest
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    conn_id = await _connection(c, h, oid)
+    # Rounding boundary over the wire (valid JSON):
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "boundary-model",
+            "cost_per_call_usd": 9999.9999999,
+        },
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    # NaN/inf are not valid JSON — standard clients cannot send them, but a
+    # non-standard serializer could; the validator itself must reject them
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(pydantic.ValidationError):
+            CreateOfferingRequest(
+                connection_id=conn_id,
+                capability_key="image_generation",
+                model_name="m",
+                cost_per_call_usd=bad,
+            )
+        with pytest.raises(pydantic.ValidationError):
+            UpdateOfferingRequest(cost_per_call_usd=bad)
+    # Exact max still accepted
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "max-cost-model",
+            "cost_per_call_usd": 9999.999999,
+        },
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_create_connection_empty_credentials_422(c):
+    """R18: {} was silently swallowed on create while update 422s — the
+    create path now matches (EMPTY_CREDENTIALS)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    aid = await _mock_adapter_id(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "EmptyCreds", "credentials": {}},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "EMPTY_CREDENTIALS"
+
+
+@pytest.mark.asyncio
+async def test_non_string_feature_entries_flagged_not_dropped(c):
+    """R18: non-string entries INSIDE a features list were silently dropped,
+    letting the requirement pass against any offering — now flagged as
+    MALFORMED_REQUIREMENT while still not crashing."""
+    from app.core.database import AsyncSessionLocal
+    from app.services.provider import ProviderService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    async with AsyncSessionLocal() as db:
+        svc = ProviderService(db)
+        gaps = await svc.check_capabilities(
+            oid, [{"capability": "image_generation", "features": [123, 456]}]
+        )
+    codes = [g["code"] for g in gaps]
+    assert "MALFORMED_REQUIREMENT" in codes, gaps

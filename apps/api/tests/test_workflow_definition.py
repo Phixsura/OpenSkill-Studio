@@ -558,3 +558,145 @@ def test_template_forward_ref_without_edge_is_valid_and_ordered():
     )
     _, errors = validate_definition(d)
     assert errors == []
+
+
+# ── Round-18 regressions: fixes of the round-15/16 fixes ──
+
+
+def test_newline_inside_moustache_still_creates_implicit_edge():
+    """A newline INSIDE {{ }} defeated the json.dumps-based scanner (dumps
+    escapes it to the 2-char \\n which \\s* never matches) while the renderer
+    resolved the ref on the raw template — ref rendered, no ordering edge.
+    The scanner now walks raw strings: a self-ref written with a newline must
+    be rejected exactly like the single-line form."""
+    d = _minimal_valid()
+    d["steps"][0]["config"]["template"] = (
+        "use {{\n  steps.write_prompt.outputs.prompt\n}}"
+    )
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_EXPR_SELF_REF" for e in errors), errors
+
+
+def test_newline_moustache_cycle_detected():
+    """Template cycle written with newlines inside the braces must still be
+    WF_GRAPH_CYCLE (implicit) — the raw-string scanner sees what the renderer
+    sees."""
+    d = _minimal_valid()
+    # write_prompt references generate's output; generate already consumes
+    # write_prompt via the explicit edge → cycle through the implicit edge
+    d["steps"][0]["config"]["template"] = "x {{\nsteps.generate.outputs.result\n}}"
+    _, errors = validate_definition(d)
+    cycle = next((e for e in errors if e["code"] == "WF_GRAPH_CYCLE"), None)
+    assert cycle is not None, errors
+    assert cycle["meta"].get("implicit") is True
+
+
+def test_output_step_port_count_mismatch_rejected():
+    """Output steps pair inputs[i] → outputs[i] positionally at runtime; a
+    count mismatch silently emitted None on unpaired output ports."""
+    d = _minimal_valid()
+    d["steps"].append(
+        {
+            "id": "deliver",
+            "type": "output",
+            "name": "Deliver",
+            "config": {},
+            "inputs": [
+                {"port": "a", "type": "image"},
+                {"port": "b", "type": "image", "required": False},
+            ],
+            "outputs": [
+                {"port": "x", "type": "image"},
+                {"port": "y", "type": "image"},
+                {"port": "z", "type": "image"},
+            ],
+        }
+    )
+    d["edges"].append(
+        {"id": "e_deliver", "from_step": "generate", "from_port": "result", "to_step": "deliver", "to_port": "a"}
+    )
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_OUTPUT_PORT_MISMATCH" for e in errors), errors
+
+
+def test_output_step_positional_type_mismatch_rejected():
+    """The positional pairing was the only data path skipping the COERCIBLE
+    matrix: image input paired with a text output validated clean and flowed
+    an image ref into a text-declared workflow output."""
+    d = _minimal_valid()
+    d["steps"].append(
+        {
+            "id": "deliver",
+            "type": "output",
+            "name": "Deliver",
+            "config": {},
+            "inputs": [{"port": "pic", "type": "image"}],
+            "outputs": [{"port": "txt", "type": "text"}],
+        }
+    )
+    d["edges"].append(
+        {"id": "e_deliver", "from_step": "generate", "from_port": "result", "to_step": "deliver", "to_port": "pic"}
+    )
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errors), errors
+
+
+def test_output_step_matched_ports_still_valid():
+    d = _minimal_valid()
+    d["steps"].append(
+        {
+            "id": "deliver",
+            "type": "output",
+            "name": "Deliver",
+            "config": {},
+            "inputs": [{"port": "pic", "type": "image"}],
+            "outputs": [{"port": "final", "type": "image"}],
+        }
+    )
+    d["edges"].append(
+        {"id": "e_deliver", "from_step": "generate", "from_port": "result", "to_step": "deliver", "to_port": "pic"}
+    )
+    _, errors = validate_definition(d)
+    assert errors == []
+
+
+def test_text_default_over_run_limit_rejected():
+    """Publish-time guard for the whole default class: a text default beyond
+    create_run's 8,000-char limit bricked every default-driven run."""
+    d = _minimal_valid()
+    d["inputs"].append(
+        {"key": "blurb", "type": "text", "required": False, "default": "word " * 1800}
+    )
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_INVALID_DEFAULT" for e in errors), errors
+
+
+def test_asset_default_over_ref_limit_rejected():
+    d = _minimal_valid()
+    d["inputs"].append(
+        {"key": "ref_img", "type": "image", "required": False, "default": "x" * 600}
+    )
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_INVALID_DEFAULT" for e in errors), errors
+
+
+def test_json_default_with_escaped_nul_rejected():
+    """An escaped \\u0000 in a json default contains no literal control char
+    (WF_INVALID_CHARACTER can't fire) and parses to a dict (the old check
+    passed) — but json.loads materializes a real NUL that create_run's ctrl
+    screen rejects on every default-driven run."""
+    d = _minimal_valid()
+    d["inputs"].append(
+        {"key": "cfg", "type": "json", "required": False, "default": '{"a": "\\u0000"}'}
+    )
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_INVALID_DEFAULT" for e in errors), errors
+
+
+def test_omitted_mediatype_data_uri_rejected():
+    """RFC 2397 allows 'data:;base64,' (mediatype defaults to text/plain) —
+    the type/subtype-requiring regex missed it."""
+    d = _minimal_valid()
+    d["steps"][0]["config"]["template"] = "data:;base64," + "A" * 64
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_DATA_URI_REJECTED" for e in errors), errors

@@ -107,14 +107,23 @@ function detectPortRename(
 ): { from: string; to: string } | null {
   if (prevPorts.length !== newPorts.length) return null;
   let rename: { from: string; to: string } | null = null;
+  let renameIdx = -1;
   for (let i = 0; i < prevPorts.length; i++) {
     const from = prevPorts[i];
     const to = newPorts[i];
     if (from === undefined || to === undefined || from === to) continue;
     if (rename) return null; // more than one index changed
     rename = { from, to };
+    renameIdx = i;
   }
   if (rename && newPorts.includes(rename.from)) return null;
+  // TO-collision guard: renaming INTO a name that already exists at another
+  // index would misroute the edge onto the sibling port (edges reference
+  // ports by NAME). The PortEditor refuses to commit collision names, so
+  // this is defense-in-depth for direct callers — treat as no-rename.
+  if (rename && newPorts.some((p, i) => i !== renameIdx && p === rename!.to)) {
+    return null;
+  }
   return rename;
 }
 

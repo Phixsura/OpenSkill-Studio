@@ -622,9 +622,12 @@ def test_skill_pack_teach_match_uses_soft_and_preferred_caps():
     teaching = _pack(["image_generation"])
     not_teaching = _pack(["text_to_speech"])
 
+    # R14 demotion MERGES extracted caps into preferred_capabilities — that
+    # is the only soft path (no _soft_required_capabilities key exists; a
+    # dead read of one was removed in round 18)
     for requirement in (
-        {"_soft_required_capabilities": ["image_generation"]},
         {"preferred_capabilities": ["image_generation"]},  # R14 demotion target
+        {"required_capabilities": ["image_generation"]},  # user-entered
     ):
         s_teach = _entity_signals(teaching, spec, requirement)
         s_miss = _entity_signals(not_teaching, spec, requirement)

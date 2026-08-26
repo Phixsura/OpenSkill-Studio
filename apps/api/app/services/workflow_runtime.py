@@ -64,14 +64,29 @@ _CTRL_CHAR_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 def _values_have_ctrl(v) -> bool:
     """True if any string ANYWHERE in a nested structure holds a control char.
     Must recurse over real values — json.dumps escapes NUL so a serialized
-    scan would miss it."""
+    scan would miss it. Tuples are included: json.dumps serializes them as
+    arrays, so a tuple-bearing adapter output would otherwise slip past."""
     if isinstance(v, str):
         return bool(_CTRL_CHAR_RE.search(v))
     if isinstance(v, dict):
         return any(_values_have_ctrl(k) or _values_have_ctrl(val) for k, val in v.items())
-    if isinstance(v, list):
+    if isinstance(v, (list, tuple)):
         return any(_values_have_ctrl(x) for x in v)
     return False
+
+
+def _iter_strings(v):
+    """Yield every raw string value in a nested structure (keys excluded).
+    Used by expression scanners that must see exactly what the renderer
+    sees — never a json.dumps serialization, whose escapes defeat \\s*."""
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for val in v.values():
+            yield from _iter_strings(val)
+    elif isinstance(v, (list, tuple)):
+        for x in v:
+            yield from _iter_strings(x)
 _EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 _STEP_REF_RE = re.compile(r"^steps\.([a-z0-9_]+)\.outputs\.[a-z0-9_]+$")
 
@@ -87,11 +102,15 @@ def _template_ref_upstreams(step: dict) -> set[str]:
     if step.get("type") != "prompt_template":
         return set()
     refs: set[str] = set()
-    cfg_text = json.dumps(step.get("config", {}), ensure_ascii=False)
-    for m in _EXPR_RE.finditer(cfg_text):
-        rm = _STEP_REF_RE.match(m.group(1))
-        if rm:
-            refs.add(rm.group(1))
+    # Scan the RAW string values, not json.dumps — dumps escapes a newline
+    # inside {{ }} to the 2-char \n sequence, which \s* never matches, while
+    # the renderer operates on the raw template where \s* DOES match it. The
+    # scanner must see exactly what the renderer sees.
+    for text in _iter_strings(step.get("config", {})):
+        for m in _EXPR_RE.finditer(text):
+            rm = _STEP_REF_RE.match(m.group(1))
+            if rm:
+                refs.add(rm.group(1))
     return refs
 
 

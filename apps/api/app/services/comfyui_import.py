@@ -155,18 +155,26 @@ def _parsed_has_nul(v) -> bool:
     json.loads turns the 6-char escape ``\\u0000`` into a real NUL inside the
     parsed dict, so scanning json_text for a literal NUL misses it — the NUL
     then reaches the original_json JSONB insert and crashes asyncpg with
-    UntranslatableCharacterError (a 500). Mirrors the recursion of
-    workflow_runtime._values_have_ctrl, restricted to NUL: unlike run inputs,
-    imports intentionally tolerate other control chars and strip them during
-    report sanitization (sanitize_untrusted_text), and NUL is the only
+    UntranslatableCharacterError (a 500). Restricted to NUL: unlike run
+    inputs, imports intentionally tolerate other control chars and strip them
+    during report sanitization (sanitize_untrusted_text), and NUL is the only
     character JSONB cannot store.
+
+    ITERATIVE, not recursive — json.loads succeeds at nesting depths far past
+    Python's recursion limit, so a recursive scan on a ~1000-deep hostile
+    import would RecursionError into the very 500 this guard closes.
     """
-    if isinstance(v, str):
-        return "\x00" in v
-    if isinstance(v, dict):
-        return any(_parsed_has_nul(k) or _parsed_has_nul(val) for k, val in v.items())
-    if isinstance(v, list):
-        return any(_parsed_has_nul(x) for x in v)
+    stack = [v]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            if "\x00" in cur:
+                return True
+        elif isinstance(cur, dict):
+            stack.extend(cur.keys())
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur)
     return False
 
 
@@ -258,7 +266,7 @@ class ComfyUIImportService:
         # the extracted chunk there.
         if "\x00" in json_text or _parsed_has_nul(parsed):
             raise AppError(
-                "COMFY_INVALID_CONTENT",
+                "INVALID_CONTENT",
                 "Import contains NUL characters that are not allowed",
                 422,
             )

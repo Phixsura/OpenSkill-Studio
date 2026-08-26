@@ -114,7 +114,9 @@ async def score(db: AsyncSession, survivors: list, spec, config) -> list[dict]:
     if spec.target_entity_type == "skill_pack":
         requested_caps = (
             (requirement.get("required_capabilities") or [])
-            + (requirement.get("_soft_required_capabilities") or [])
+            # Extracted (soft) caps arrive MERGED into preferred_capabilities
+            # (build_match_requirement demotes them there) — no _soft_* key
+            # for capabilities exists
             + (requirement.get("preferred_capabilities") or [])
         )
     else:
@@ -196,7 +198,9 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
         # scoring only.
         requested_caps = (
             (requirement.get("required_capabilities") or [])
-            + (requirement.get("_soft_required_capabilities") or [])
+            # Extracted (soft) caps arrive MERGED into preferred_capabilities
+            # (build_match_requirement demotes them there) — no _soft_* key
+            # for capabilities exists
             + (requirement.get("preferred_capabilities") or [])
         )
         caps = set(entity.capability_tags or [])

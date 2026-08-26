@@ -216,8 +216,10 @@ async def update_pack_category(
         # under one's own descendant (A->B then B->A) creates a cycle that
         # removes both nodes from the root listing and blocks deletion.
         ancestor = parent
+        chain_resolved = False
         for _ in range(100):
             if ancestor.parent_id is None:
+                chain_resolved = True
                 break
             if ancestor.parent_id == category_id:
                 raise AppError(
@@ -227,7 +229,18 @@ async def update_pack_category(
                 )
             ancestor = await db.get(PackCategory, ancestor.parent_id)
             if ancestor is None:
+                chain_resolved = True  # dangling parent = chain ends, no cycle
                 break
+        if not chain_resolved:
+            # Bound exceeded without reaching a root: either the chain is
+            # already cyclic or deeper than any legitimate taxonomy — REJECT,
+            # don't silently accept (a silent break resurrects the cycle bug
+            # through a >100-deep chain)
+            raise AppError(
+                "CATEGORY_CYCLE",
+                "Cannot set parent: ancestor chain is too deep to verify (max 100)",
+                422,
+            )
 
     for field, value in update_data.items():
         # Only parent_id and icon are nullable columns — an explicit null on

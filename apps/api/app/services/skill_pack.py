@@ -108,7 +108,11 @@ class SkillPackService:
     ) -> tuple[list[SkillPack], int]:
         base = select(SkillPack).where(SkillPack.owner_org_id == org_id)
         if status:
-            base = base.where(SkillPack.status == PackStatus(status))
+            try:
+                parsed_status = PackStatus(status)
+            except ValueError:
+                raise AppError("INVALID_STATUS", f"Unknown status '{status}'", 422) from None
+            base = base.where(SkillPack.status == parsed_status)
         else:
             base = base.where(SkillPack.status != PackStatus.ARCHIVED)
 

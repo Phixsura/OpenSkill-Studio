@@ -124,9 +124,30 @@ class WorkflowPackService:
             )
         if "name" in fields and fields["name"] and fields["name"] != pack.name:
             pack.slug = f"{self._generate_slug(fields['name'])[:190]}-{secrets.token_hex(3)}"
+        # Registry-facing card fields: changing any of them on an APPROVED
+        # pack voids the approval, same as a definition change — otherwise an
+        # innocuous pack gets approved and the public card content is swapped
+        # past the review gate (name/summary/tags rewrite with approved kept).
+        _card_fields = (
+            "name", "summary", "description", "scenario_tags",
+            "tool_tags", "difficulty", "workflow_type", "cover_image_key",
+        )
+        card_changed = any(
+            key in _card_fields and value is not None and getattr(pack, key, None) != value
+            for key, value in fields.items()
+        )
         for key, value in fields.items():
             if value is not None and hasattr(pack, key):
                 setattr(pack, key, value)
+        if card_changed and pack.review_status == "approved":
+            pack.review_status = None
+            if pack.visibility == PackVisibility.PUBLIC:
+                pack.visibility = PackVisibility.UNLISTED
+            log.info(
+                "workflow_pack_approval_reset_on_card_change",
+                pack_id=pack_id,
+                org_id=org_id,
+            )
         try:
             await self.db.flush()
         except IntegrityError:
@@ -375,11 +396,20 @@ class WorkflowPackService:
                     422,
                 )
             constraint = rec.get("version", "")
-            if constraint and not _VERSION_CONSTRAINT_RE.match(constraint):
+            # isinstance before .match — a non-string constraint (int, list)
+            # would TypeError into a 500, the exact class this gate closes
+            if constraint and (
+                not isinstance(constraint, str) or not _VERSION_CONSTRAINT_RE.match(constraint)
+            ):
                 raise AppError(
                     "INVALID_VERSION_CONSTRAINT",
                     f"Version constraint '{constraint}' must be X.Y.Z or >=X.Y.Z",
                     422,
+                )
+            slug = rec.get("slug", "")
+            if slug and (not isinstance(slug, str) or len(slug) > 200):
+                raise AppError(
+                    "INVALID_DEPENDENCY", "recommended_packs slug must be a string of max 200 chars", 422
                 )
 
     @staticmethod

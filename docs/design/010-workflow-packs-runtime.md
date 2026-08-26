@@ -56,10 +56,11 @@ Validation accumulates every error (Argo pattern), each with a JSON pointer and 
 | `WF_EXPR_SELF_REF` | Step's template references its own output (can never resolve) |
 | `WF_DUPLICATE_EDGE_ID` | Duplicate edge id |
 | `WF_INVALID_OUTPUT_KEY` / `WF_DUPLICATE_OUTPUT_KEY` | Workflow output key grammar violation / duplicate key |
-| `WF_INVALID_DEFAULT` | json-typed input default does not parse to a JSON object/array |
+| `WF_OUTPUT_PORT_MISMATCH` | Output step input/output port counts differ (positional pairing; single input may fan out) — pairwise types must also be coercible (`WF_EDGE_TYPE_MISMATCH`) |
+| `WF_INVALID_DEFAULT` | Input default would fail create_run's per-type checks: json default not an object/array, oversize text/asset default, or escaped control chars materializing after json.loads |
 | `WF_SELECTION_BAD_DEFAULT` | Selection input default outside its options |
 | `WF_TOO_LARGE` | Any size cap exceeded |
-| `WF_DATA_URI_REJECTED` | Inline data URI / base64 blob (media-type parameters do not evade the match) |
+| `WF_DATA_URI_REJECTED` | Inline data URI / base64 blob (media-type parameters and omitted mediatype do not evade the match) |
 | `WF_VALIDATION_FAILED` | Envelope code (422) carrying the details array |
 
 An inputless island step is deliberately **valid** — every node of an acyclic graph roots at an entry step, so a dedicated "unreachable step" check can never fire (cyclic graphs are already `WF_GRAPH_CYCLE`, input-starved steps are already `WF_INPUT_UNSATISFIED`).

@@ -831,3 +831,93 @@ async def test_latest_release_prefers_stable_over_prerelease(c):
         latest = await svc.get_latest_release(pid)
         assert latest is not None
         assert latest.version == "1.0.0"  # stable wins over 1.1.0-beta.1
+
+
+@pytest.mark.asyncio
+async def test_recommended_pack_version_and_slug_type_checked(c):
+    """R18: the R16 shape gate missed recommended_packs.version — a non-str
+    value reached _VERSION_CONSTRAINT_RE.match() and TypeError'd into a 500.
+    Same for non-str slug."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    for deps, expected_code in [
+        ({"recommended_packs": [{"family": "skill_pack", "version": 1}]}, "INVALID_VERSION_CONSTRAINT"),
+        ({"recommended_packs": [{"family": "skill_pack", "version": ["x"]}]}, "INVALID_VERSION_CONSTRAINT"),
+        ({"recommended_packs": [{"family": "skill_pack", "slug": 42}]}, "INVALID_DEPENDENCY"),
+    ]:
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+            json={"version": "1.0.0", "dependencies": deps},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{deps} → {r.status_code} {r.text}"
+        assert r.json()["error"]["code"] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_card_field_update_resets_approval(c):
+    """R18: the approval-reset invariant covered only the definition path —
+    update_pack let an approved PUBLIC pack rewrite every registry-facing
+    card field (name/summary/tags) while keeping approved+public."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
+    assert r.status_code == 200, r.text
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "public"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    # Rewriting the public card voids the approval and pulls the pack back
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"name": "Completely Different Product", "summary": "new pitch"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["review_status"] is None
+    assert data["visibility"] == "unlisted"
+    # And public is gated again
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "public"},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "APPROVAL_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_tags_and_import_name_and_idem_key_reject_ctrl(c):
+    """R18 sibling-gap closures: tags, ComfyUI import name, idempotency_key."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": "T", "scenario_tags": ["ok", "bad\x00tag"]},
+        headers=h,
+    )
+    assert r.status_code == 422
+    pid = await _pack(c, h, oid, name="Ctrl Pack")
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"tool_tags": ["x\x07y"]},
+        headers=h,
+    )
+    assert r.status_code == 422

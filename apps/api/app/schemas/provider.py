@@ -188,10 +188,18 @@ class CreateOfferingRequest(BaseModel):
     @field_validator("cost_per_call_usd")
     @classmethod
     def validate_cost(cls, v: float | None) -> float | None:
-        # Numeric(10, 6) column tops out at 9999.999999 — exactly 10000
-        # passes 4 integer digits and overflows at insert (500)
-        if v is not None and (v < 0 or v >= 10000):
-            raise ValueError("Cost must be between 0 and 9,999.999999")
+        # Numeric(10, 6) tops out at 9999.999999, and Postgres ROUNDS to
+        # 6 fraction digits at insert — so [9999.9999995, 10000) rounds to
+        # 10000.000000 and still overflows. Bound the ROUNDED value. NaN
+        # (which compares False everywhere and later crashes Decimal sorts)
+        # and infinities are rejected by the same round() guard.
+        if v is not None:
+            import math
+
+            if not math.isfinite(v):
+                raise ValueError("Cost must be a finite number")
+            if v < 0 or round(v, 6) >= 10000:
+                raise ValueError("Cost must be between 0 and 9,999.999999")
         return v
 
 
@@ -244,10 +252,18 @@ class UpdateOfferingRequest(BaseModel):
     @field_validator("cost_per_call_usd")
     @classmethod
     def validate_cost(cls, v: float | None) -> float | None:
-        # Numeric(10, 6) column tops out at 9999.999999 — exactly 10000
-        # passes 4 integer digits and overflows at insert (500)
-        if v is not None and (v < 0 or v >= 10000):
-            raise ValueError("Cost must be between 0 and 9,999.999999")
+        # Numeric(10, 6) tops out at 9999.999999, and Postgres ROUNDS to
+        # 6 fraction digits at insert — so [9999.9999995, 10000) rounds to
+        # 10000.000000 and still overflows. Bound the ROUNDED value. NaN
+        # (which compares False everywhere and later crashes Decimal sorts)
+        # and infinities are rejected by the same round() guard.
+        if v is not None:
+            import math
+
+            if not math.isfinite(v):
+                raise ValueError("Cost must be a finite number")
+            if v < 0 or round(v, 6) >= 10000:
+                raise ValueError("Cost must be between 0 and 9,999.999999")
         return v
 
 

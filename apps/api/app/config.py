@@ -109,6 +109,20 @@ class Settings(BaseSettings):
         app_env = (info.data.get("app_env") or "development") if info.data else "development"
         if app_env not in ("development", "test") and not v:
             raise ValueError("CREDENTIAL_ENCRYPTION_KEY must be set in production")
+        # Format check at BOOT, not first use: a malformed key otherwise
+        # boots cleanly and the first credential operation 500s hours later.
+        # Comma-separated Fernet keys (MultiFernet rotation) — validate each.
+        if v:
+            from cryptography.fernet import Fernet
+
+            for idx, key in enumerate(k.strip() for k in v.split(",")):
+                try:
+                    Fernet(key.encode())
+                except ValueError as exc:
+                    raise ValueError(
+                        f"CREDENTIAL_ENCRYPTION_KEY entry {idx + 1} is not a valid "
+                        "Fernet key (expected 32-byte urlsafe base64)"
+                    ) from exc
         return v
 
     model_config = {

@@ -50,7 +50,11 @@ EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 # data: URIs and large base64 blobs are rejected — assets are ULID references.
 # Media-type parameters (e.g. ;charset=utf-8) must not defeat the match, so
 # any run of ;param segments between the subtype and ;base64, is consumed.
-DATA_URI_RE = re.compile(r"data:[a-z0-9.+-]+/[a-z0-9.+-]+(;[^;,]{1,80})*;base64,", re.IGNORECASE)
+# The mediatype itself is optional per RFC 2397 ('data:;base64,' defaults to
+# text/plain), so the type/subtype segment is optional too.
+DATA_URI_RE = re.compile(
+    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^;,]{1,80})*;base64,", re.IGNORECASE
+)
 BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/=]{1024,}")
 # NUL + C0/C1 control chars except tab (\x09) and newline (\x0a) — these
 # crash asyncpg when stored into JSONB (UntranslatableCharacterError)
@@ -62,6 +66,43 @@ MAX_STEP_CONFIG_BYTES = 16 * 1024
 MAX_DEFINITION_BYTES = 256 * 1024
 MAX_INPUTS = 20
 MAX_OUTPUTS = 20
+
+
+def _default_has_ctrl(v) -> bool:
+    """True if any string in a parsed json default holds a control char.
+
+    A json default arrives as an ESCAPED string in the definition (no literal
+    control chars — WF_INVALID_CHARACTER cannot fire), but json.loads
+    materializes real NULs that create_run's run-input screen then rejects on
+    every default-driven run. Catch it at publish instead.
+    """
+    if isinstance(v, str):
+        return bool(_CTRL_RE.search(v))
+    if isinstance(v, dict):
+        return any(_default_has_ctrl(k) or _default_has_ctrl(val) for k, val in v.items())
+    if isinstance(v, list):
+        return any(_default_has_ctrl(x) for x in v)
+    return False
+
+
+def _iter_cfg_strings(v):
+    """Yield every raw string value in a nested config (keys excluded).
+
+    Expression scanners must operate on raw strings, never json.dumps
+    output: dumps escapes a newline inside {{ }} to the 2-char sequence
+    \\n, which \\s* in EXPR_RE never matches — while the runtime renderer
+    sees the raw newline and DOES resolve the reference. Scanner and
+    renderer must see the same text. Mirrors _iter_strings in
+    app/services/workflow_runtime.py.
+    """
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for val in v.values():
+            yield from _iter_cfg_strings(val)
+    elif isinstance(v, (list, tuple)):
+        for x in v:
+            yield from _iter_cfg_strings(x)
 
 
 # ── Port / edge / input / output shapes ───────────────────
@@ -315,6 +356,39 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                 )
             seen_ports.add(port.port)
 
+        # Output steps pair inputs[i] → outputs[i] POSITIONALLY at runtime
+        # (input/output names can never match — WF_DUPLICATE_PORT spans both
+        # lists). The pairing is the one data path that would otherwise skip
+        # the COERCIBLE matrix, and a count mismatch silently emits None on
+        # the unpaired output ports — both rejected here. Exception: a single
+        # input fans out to every output port, which is always type-checked
+        # pairwise below.
+        if step.type == "output" and step.inputs and step.outputs:
+            if len(step.inputs) != len(step.outputs) and len(step.inputs) != 1:
+                errors.append(
+                    _err(
+                        "WF_OUTPUT_PORT_MISMATCH",
+                        f"{ptr}/outputs",
+                        f"Output step '{step.id}' has {len(step.inputs)} input ports "
+                        f"and {len(step.outputs)} output ports — counts must match "
+                        f"(or declare exactly one input to fan out)",
+                    )
+                )
+            else:
+                for j, out_port in enumerate(step.outputs):
+                    in_port = step.inputs[j if len(step.inputs) > 1 else 0]
+                    if out_port.type not in COERCIBLE.get(in_port.type, set()):
+                        errors.append(
+                            _err(
+                                "WF_EDGE_TYPE_MISMATCH",
+                                f"{ptr}/outputs/{j}",
+                                f"Output step '{step.id}' pairs input "
+                                f"'{in_port.port}' ({in_port.type}) with output "
+                                f"'{out_port.port}' ({out_port.type}) — types are "
+                                f"not coercible",
+                            )
+                        )
+
     # ── Workflow input keys ──
     input_keys: set[str] = set()
     for i, inp in enumerate(definition.inputs):
@@ -348,20 +422,36 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                     f"Selection input '{inp.key}' default must be one of its options",
                 )
             )
-        # Same bug class for json inputs: defaults are strings (schema), so a
-        # json default must json.loads to an object/array or every
-        # default-driven run fails INVALID_INPUT_VALUE at create_run
-        if inp.type == "json" and inp.default is not None:
-            try:
-                parsed_default = _json.loads(inp.default)
-            except (ValueError, TypeError):
-                parsed_default = None
-            if not isinstance(parsed_default, (dict, list)):
+        # Same bug class for every other type: create_run applies the default
+        # then re-validates it, so a default that fails create_run's per-type
+        # checks bricks every default-driven run. Mirror those checks here —
+        # text/prompt ≤ 8000, asset refs ≤ 500, json parses to object/array,
+        # stays ≤ 8000 chars stringified, and materializes no control chars
+        # (an escaped \\u0000 in a json default becomes a REAL NUL after
+        # json.loads and is rejected by the run-input ctrl screen).
+        if inp.default is not None:
+            bad_default: str | None = None
+            if inp.type in ("text", "prompt") and len(inp.default) > 8000:
+                bad_default = "text default exceeds the 8,000-character run-input limit"
+            elif inp.type in ("image", "video", "audio", "reference_asset") and len(inp.default) > 500:
+                bad_default = "asset-reference default exceeds the 500-character run-input limit"
+            elif inp.type == "json":
+                try:
+                    parsed_default = _json.loads(inp.default)
+                except (ValueError, TypeError):
+                    parsed_default = None
+                if not isinstance(parsed_default, (dict, list)):
+                    bad_default = "json default must be a JSON object or array"
+                elif len(str(parsed_default)) > 8000:
+                    bad_default = "json default exceeds the 8,000-character run-input limit"
+                elif _default_has_ctrl(parsed_default):
+                    bad_default = "json default contains NUL or control characters"
+            if bad_default is not None:
                 errors.append(
                     _err(
                         "WF_INVALID_DEFAULT",
                         f"/inputs/{i}/default",
-                        f"Input '{inp.key}' is json-typed; its default must be a JSON object or array",
+                        f"Input '{inp.key}': {bad_default}",
                     )
                 )
 
@@ -449,23 +539,27 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
     for i, step in enumerate(steps):
         if step.type != "prompt_template":
             continue
-        cfg_text = _json.dumps(step.config, ensure_ascii=False)
-        for m in EXPR_RE.finditer(cfg_text):
-            ref_m = step_ref_re.match(m.group(1))
-            if ref_m is None:
-                continue
-            ref_step = ref_m.group(1)
-            if ref_step == step.id:
-                errors.append(
-                    _err(
-                        "WF_EXPR_SELF_REF",
-                        f"/steps/{i}/config",
-                        f"Step '{step.id}' references its own output "
-                        f"'{{{{{m.group(1)}}}}}' — self-references can never resolve",
+        # Scan RAW string values, not json.dumps — dumps escapes a newline
+        # inside {{ }} to \n (2 chars), which \s* never matches, while the
+        # runtime renderer sees the raw newline and DOES render the ref. The
+        # scanner and renderer must agree or ordering edges silently vanish.
+        for text in _iter_cfg_strings(step.config):
+            for m in EXPR_RE.finditer(text):
+                ref_m = step_ref_re.match(m.group(1))
+                if ref_m is None:
+                    continue
+                ref_step = ref_m.group(1)
+                if ref_step == step.id:
+                    errors.append(
+                        _err(
+                            "WF_EXPR_SELF_REF",
+                            f"/steps/{i}/config",
+                            f"Step '{step.id}' references its own output "
+                            f"'{{{{{m.group(1)}}}}}' — self-references can never resolve",
+                        )
                     )
-                )
-            elif ref_step in implicit_adjacency and step.id in implicit_adjacency:
-                implicit_adjacency[ref_step].add(step.id)
+                elif ref_step in implicit_adjacency and step.id in implicit_adjacency:
+                    implicit_adjacency[ref_step].add(step.id)
 
     # ── Cycle detection (Kahn) ──
     # Runs over explicit edges + implicit template-ref edges; a cycle only
@@ -534,18 +628,19 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
     }
     input_refs = {f"inputs.{k}" for k in input_keys}
     for i, step in enumerate(steps):
-        cfg_text = _json.dumps(step.config, ensure_ascii=False)
-        for m in EXPR_RE.finditer(cfg_text):
-            ref = m.group(1)
-            if ref in input_refs or ref in step_output_refs:
-                continue
-            errors.append(
-                _err(
-                    "WF_EXPR_INVALID",
-                    f"/steps/{i}/config",
-                    f"Expression '{{{{{ref}}}}}' references an unknown input or step output",
+        # Raw string values, not json.dumps — see the implicit-edge scanner.
+        for text in _iter_cfg_strings(step.config):
+            for m in EXPR_RE.finditer(text):
+                ref = m.group(1)
+                if ref in input_refs or ref in step_output_refs:
+                    continue
+                errors.append(
+                    _err(
+                        "WF_EXPR_INVALID",
+                        f"/steps/{i}/config",
+                        f"Expression '{{{{{ref}}}}}' references an unknown input or step output",
+                    )
                 )
-            )
 
     # ── Workflow outputs reference real ports ──
     # Output keys follow the port grammar and must be unique — the runtime

@@ -22,8 +22,10 @@ class CreateRunRequest(BaseModel):
     @field_validator("idempotency_key")
     @classmethod
     def validate_idem_key(cls, v: str | None) -> str | None:
-        if v is not None and (not v.strip() or len(v) > 100):
-            raise ValueError("Idempotency key must be 1-100 characters")
+        if v is not None:
+            if not v.strip() or len(v) > 100:
+                raise ValueError("Idempotency key must be 1-100 characters")
+            _reject_ctrl(v)
         return v
 
 

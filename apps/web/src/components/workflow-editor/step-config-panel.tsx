@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -326,15 +328,20 @@ function PortEditor({
       <div className="mt-2 space-y-2">
         {ports.map((port, i) => (
           <div key={i} className="flex items-center gap-1">
-            <input
+            <PortNameInput
               value={port.port}
-              onChange={(e) => update(i, { port: sanitizeKey(e.target.value) })}
-              aria-label={`${label} name ${i + 1}`}
-              aria-invalid={dupes.has(port.port) || undefined}
-              className={`w-24 rounded border bg-transparent px-2 py-1 text-xs ${
-                dupes.has(port.port) ? "border-red-500" : ""
-              }`}
-              title={dupes.has(port.port) ? "Duplicate port name on this step" : undefined}
+              // Colliding names are NEVER committed to the definition: a
+              // transient keystroke matching a sibling's exact name would
+              // make applyStepUpdate rewrite that sibling's edges onto the
+              // wrong port (edges reference ports by name). The input keeps
+              // a local draft until the name is unique on this step.
+              isTaken={(name) =>
+                ports.some((p, idx) => idx !== i && p.port === name) ||
+                siblingPorts.some((p) => p.port === name)
+              }
+              onCommit={(name) => update(i, { port: name })}
+              ariaLabel={`${label} name ${i + 1}`}
+              flagged={dupes.has(port.port)}
             />
             <select
               value={port.type}
@@ -370,5 +377,58 @@ function PortEditor({
         ))}
       </div>
     </div>
+  );
+}
+
+/** Port-name input that never commits a name colliding with a sibling port.
+ *
+ * Edges reference ports by NAME, so committing a transient keystroke that
+ * exactly matches another port's name makes applyStepUpdate rewrite the
+ * SIBLING's edges onto this port (e.g. renaming port_2 → port_10 passes
+ * through 'port_1'). The draft stays local until it is unique; the visible
+ * red border tells the user why the definition hasn't updated yet.
+ */
+function PortNameInput({
+  value,
+  isTaken,
+  onCommit,
+  ariaLabel,
+  flagged,
+}: {
+  value: string;
+  isTaken: (name: string) => boolean;
+  onCommit: (name: string) => void;
+  ariaLabel: string;
+  flagged: boolean;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value;
+  const blocked = draft !== null && isTaken(draft);
+  return (
+    <input
+      value={shown}
+      onChange={(e) => {
+        const name = sanitizeKey(e.target.value);
+        if (isTaken(name)) {
+          setDraft(name); // hold locally — do not touch the definition
+        } else {
+          setDraft(null);
+          onCommit(name);
+        }
+      }}
+      onBlur={() => setDraft(null)} // discard an uncommittable draft
+      aria-label={ariaLabel}
+      aria-invalid={flagged || blocked || undefined}
+      className={`w-24 rounded border bg-transparent px-2 py-1 text-xs ${
+        flagged || blocked ? "border-red-500" : ""
+      }`}
+      title={
+        blocked
+          ? "Name already used by another port on this step"
+          : flagged
+            ? "Duplicate port name on this step"
+            : undefined
+      }
+    />
   );
 }
