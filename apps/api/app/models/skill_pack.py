@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    Computed,
     DateTime,
     Enum,
     Float,
@@ -15,8 +16,8 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
+from sqlalchemy.orm import Mapped, deferred, mapped_column
 
 from app.models.base import Base, ulid_pk
 
@@ -50,6 +51,14 @@ class SkillPack(Base):
         Index("uq_pack_org_slug", "owner_org_id", "slug", unique=True),
         Index("ix_packs_visibility_status", "visibility", "status"),
         Index("ix_packs_owner", "owner_org_id"),
+        # GIN indexes created via raw op.execute (c3d4e5f60718 for the tag
+        # columns, b9ca3e445203 for search_tsv) — declared here so alembic
+        # autogenerate recognizes them instead of proposing DROPs on every
+        # drift check (issue #23)
+        Index("ix_skill_packs_scenario_tags", "scenario_tags", postgresql_using="gin"),
+        Index("ix_skill_packs_tool_tags", "tool_tags", postgresql_using="gin"),
+        Index("ix_skill_packs_capability_tags", "capability_tags", postgresql_using="gin"),
+        Index("ix_skill_packs_search_tsv", "search_tsv", postgresql_using="gin"),
     )
 
     id: Mapped[str] = ulid_pk()
@@ -79,6 +88,21 @@ class SkillPack(Base):
     difficulty: Mapped[str | None] = mapped_column(String(20))
     estimated_minutes: Mapped[int | None] = mapped_column(Integer)
     prerequisite_packs: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    # GENERATED ALWAYS STORED tsvector (migration b9ca3e445203) — declared so
+    # alembic autogenerate stops proposing DROP COLUMN on drift checks
+    # (issue #23). Computed → SQLAlchemy never writes it; deferred → never
+    # loaded on normal queries (registry search filters on it server-side).
+    search_tsv = deferred(
+        mapped_column(
+            TSVECTOR,
+            Computed(
+                "to_tsvector('simple', coalesce(name,'') || ' ' || "
+                "coalesce(summary,'') || ' ' || coalesce(description,''))",
+                persisted=True,
+            ),
+            nullable=True,
+        )
+    )
 
     # Counters
     install_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
