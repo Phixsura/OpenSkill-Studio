@@ -622,3 +622,93 @@ async def test_shortlist_exposes_no_protected_attributes(c):
     allowed = {"entity_id", "name", "rank", "score", "tier", "reasons", "gaps", "evidence"}
     for entry in r.json()["data"]["results"]:
         assert set(entry.keys()) <= allowed, set(entry.keys()) - allowed
+
+
+# ── R26: authorization correctness matrix (role enforcement, not just presence) ──
+
+
+async def _member(c, owner_h, oid, role):
+    """Register a fresh user and add them to the org at the given role."""
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={"email": _email(), "password": "TestPass123!", "display_name": f"Role{role[:3]}"},
+    )
+    d = r.json()
+    h = {"Authorization": f"Bearer {d['access_token']}"}
+    rr = await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": d["user"]["id"], "role": role},
+        headers=owner_h,
+    )
+    assert rr.status_code in (200, 201), rr.text
+    return h
+
+
+@pytest.mark.asyncio
+async def test_authz_matrix_write_endpoints_enforce_roles(c):
+    """R26: guards must enforce the RIGHT role, not merely be present.
+    WRITE_ROLES = owner/admin/instructor; provider connections = admin only;
+    a student must be 403 on write endpoints; a non-member always 403/404."""
+    owner, _ = await _auth(c)
+    oid = await _org(c, owner)
+    admin = await _member(c, owner, oid, "admin")
+    instructor = await _member(c, owner, oid, "instructor")
+    student = await _member(c, owner, oid, "student")
+    nonmember, _ = await _auth(c)
+
+    async def code(h, method, path, body=None):
+        r = await c.request(method, f"/api/v1/orgs/{oid}{path}", json=body, headers=h)
+        return r.status_code
+
+    # WRITE_ROLES endpoint: create workflow pack
+    assert await code(owner, "POST", "/workflow-packs", {"name": "Ap"}) == 201
+    assert await code(instructor, "POST", "/workflow-packs", {"name": "Bp"}) == 201
+    assert await code(student, "POST", "/workflow-packs", {"name": "Cp"}) == 403
+    assert await code(nonmember, "POST", "/workflow-packs", {"name": "Dp"}) in (403, 404)
+
+    # ADMIN-only endpoint: create provider connection (instructor must be 403)
+    assert await code(admin, "POST", "/provider-connections",
+                      {"adapter_id": "01JFAKE0000000000000000000", "name": "Cx"}) in (404, 422)  # passes authz, fails on fake adapter
+    assert await code(instructor, "POST", "/provider-connections",
+                      {"adapter_id": "01JFAKE0000000000000000000", "name": "Cy"}) == 403
+    assert await code(student, "POST", "/provider-connections",
+                      {"adapter_id": "01JFAKE0000000000000000000", "name": "Cz"}) == 403
+
+    # Any-member endpoint: create requirement profile (student allowed)
+    assert await code(student, "POST", "/requirement-profiles",
+                      {"context_type": "learning", "structured_requirements": {"goal": "g"}}) == 201
+    assert await code(nonmember, "POST", "/requirement-profiles",
+                      {"context_type": "learning", "structured_requirements": {"goal": "g"}}) in (403, 404)
+
+
+@pytest.mark.asyncio
+async def test_authz_profile_owner_isolation(c):
+    """R26: a member cannot confirm or edit ANOTHER member's requirement
+    profile (would turn their unconfirmed extractions into hard constraints
+    they never approved); an instructor may act on behalf."""
+    owner, _ = await _auth(c)
+    oid = await _org(c, owner)
+    s1 = await _member(c, owner, oid, "student")
+    s2 = await _member(c, owner, oid, "student")
+    instructor = await _member(c, owner, oid, "instructor")
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"goal": "mine"}},
+        headers=s1,
+    )
+    pid = r.json()["data"]["id"]
+
+    # s2 confirm/patch s1's profile → 403 PROFILE_FORBIDDEN
+    rc = await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{pid}/confirm", headers=s2)
+    assert rc.status_code == 403 and rc.json()["error"]["code"] == "PROFILE_FORBIDDEN"
+    rp = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}",
+        json={"edits": {"goal": "hijacked"}},
+        headers=s2,
+    )
+    assert rp.status_code == 403 and rp.json()["error"]["code"] == "PROFILE_FORBIDDEN"
+
+    # instructor may confirm on the learner's behalf
+    ri = await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{pid}/confirm", headers=instructor)
+    assert ri.status_code == 200, ri.text
