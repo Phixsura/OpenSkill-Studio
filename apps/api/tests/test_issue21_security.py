@@ -536,3 +536,89 @@ async def test_workflow_pack_path_item_progress_no_crash(c):
     # Both items count as required; neither is done
     assert data["total_required"] == 2
     assert data["completed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_shortlist_forbidden_to_plain_members(c):
+    """Part J: private learner evidence must not be exposed to unauthorized
+    users. The creator shortlist carries per-capability evidence details —
+    a plain MEMBER (student) must get 403, not the org's evidence graph."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # Create a project to shortlist against
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Sec Project",
+            "description": "d",
+            "instructions": "deliver",
+            "rubric": [{"criterion": "Quality", "max_score": 100}],
+            "project_type": "ai_visual",
+        },
+        headers=h,
+    )
+    project_id = r.json()["data"]["id"]
+    # A confirmed profile
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "talent_matching", "structured_requirements": {"goal": "match"}},
+        headers=h,
+    )
+    profile_id = r.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{profile_id}/confirm", headers=h)
+    # Student member (direct add — same pattern as test_creator_matching)
+    h2, user2 = await _auth(c)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": user2["id"], "role": "student"},
+        headers=h,
+    )
+    assert r.status_code in (200, 201), r.text[:200]
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/projects/{project_id}/creator-shortlist",
+        params={"profile_id": profile_id},
+        headers=h2,
+    )
+    assert r.status_code == 403, f"{r.status_code}: {r.text[:200]}"
+
+
+@pytest.mark.asyncio
+async def test_shortlist_exposes_no_protected_attributes(c):
+    """Part J: creator matching never uses or exposes protected/sensitive
+    personal attributes — the shortlist payload carries only entity_id,
+    display name, rank/score/tier, reasons/gaps, and evidence rows. No
+    email, no last_login, no role, no PII fields."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Attr Project",
+            "description": "d",
+            "instructions": "deliver",
+            "rubric": [{"criterion": "Quality", "max_score": 100}],
+            "project_type": "ai_visual",
+        },
+        headers=h,
+    )
+    project_id = r.json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "talent_matching", "structured_requirements": {"goal": "match"}},
+        headers=h,
+    )
+    profile_id = r.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{profile_id}/confirm", headers=h)
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/projects/{project_id}/creator-shortlist",
+        params={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text[:300]
+    body = r.text.lower()
+    for forbidden in ("email", "last_login", "password", "\"role\""):
+        assert forbidden not in body, f"shortlist response leaks '{forbidden}'"
+    # Structural check: every result carries only the declared fields
+    allowed = {"entity_id", "name", "rank", "score", "tier", "reasons", "gaps", "evidence"}
+    for entry in r.json()["data"]["results"]:
+        assert set(entry.keys()) <= allowed, set(entry.keys()) - allowed
