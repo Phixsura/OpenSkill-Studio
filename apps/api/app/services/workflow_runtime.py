@@ -85,6 +85,32 @@ def _values_have_ctrl(v) -> bool:
     return False
 
 
+# Max JSON nesting depth for a run input. A json-typed value can be a
+# dict/list under the 8,000-char size gate yet nested hundreds of levels
+# deep (`[[[...]]]` is ~2 chars/level); pydantic's response serializer
+# (which echoes inputs on the run response) blows its own recursion guard
+# around depth ~400 → a 500 the size/type checks never catch. Bound it here
+# as a clean 422, well below any serializer/parser limit (round-35).
+_MAX_INPUT_DEPTH = 64
+
+
+def _max_depth(v) -> int:
+    """Deepest nesting level of a JSON value (iterative — never recurses)."""
+    deepest = 0
+    stack = [(v, 1)]
+    while stack:
+        cur, d = stack.pop()
+        if d > deepest:
+            deepest = d
+        if isinstance(cur, dict):
+            for val in cur.values():
+                stack.append((val, d + 1))
+        elif isinstance(cur, (list, tuple)):
+            for x in cur:
+                stack.append((x, d + 1))
+    return deepest
+
+
 def _iter_strings(v):
     """Yield every raw string value in a nested structure (keys excluded).
     Used by expression scanners that must see exactly what the renderer
@@ -276,6 +302,15 @@ class WorkflowRuntimeService:
                     raise AppError(
                         "INVALID_INPUT_VALUE",
                         f"Input '{key}' must be a JSON object or array (max 8,000 chars)",
+                        422,
+                    )
+                # A small-but-deeply-nested json value passes the size gate
+                # but overflows the response serializer's recursion guard
+                # (~400) → 500 on run creation. Reject as a clean 422.
+                if _max_depth(value) > _MAX_INPUT_DEPTH:
+                    raise AppError(
+                        "INVALID_INPUT_VALUE",
+                        f"Input '{key}' is nested too deeply (max {_MAX_INPUT_DEPTH} levels)",
                         422,
                     )
         # Bound input payload + reject NUL/control chars (stored into JSONB;

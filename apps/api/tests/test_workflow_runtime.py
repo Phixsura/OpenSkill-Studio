@@ -1283,20 +1283,66 @@ async def test_template_renders_json_input_as_valid_json(c):
 @pytest.mark.asyncio
 async def test_deep_nested_run_input_no_recursion_error(c):
     """R20: the run-input ctrl screen (_values_have_ctrl) was still recursive
-    after R18 fixed its comfyui/matching siblings — a ~990-deep json input
-    (2KB, passes every size cap) RecursionError'd into a 500. Iterative now:
-    deep inputs get a clean 422/201, never a 500."""
+    after R18 fixed its comfyui/matching siblings — a deep JSON input
+    RecursionError'd into a 500. Iterative now: never a 500.
+
+    The input MUST be json-typed: the per-type check runs BEFORE the ctrl
+    scan, and a text/asset input rejects a non-str value at the type check
+    (422) so the scanner is never reached — the original test fed a
+    text-typed input and thus guarded NOTHING (reverting the fix left it
+    green). A json-typed value passes the type+size gate (dict/list,
+    len(str) <= 8000) and IS scanned, so depth ~3990 (str len ~7983) is the
+    reachable path the recursive version blew up on (R35)."""
     import json as _j
 
+    # A json input step so the value reaches _values_have_ctrl
+    defn = {
+        "schema_version": 1,
+        "inputs": [{"key": "cfg", "type": "json", "required": True}],
+        "outputs": [{"key": "out", "type": "json", "from_step": "echo", "from_port": "o"}],
+        "steps": [
+            {
+                "id": "take",
+                "type": "asset_input",
+                "name": "Take",
+                "config": {"accept_types": []},
+                "inputs": [],
+                "outputs": [{"port": "cfg", "type": "json"}],
+            },
+            {
+                "id": "echo",
+                "type": "output",
+                "name": "Echo",
+                "config": {},
+                "inputs": [{"port": "i", "type": "json"}],
+                "outputs": [{"port": "o", "type": "json"}],
+            },
+        ],
+        "edges": [{"id": "e1", "from_step": "take", "from_port": "cfg", "to_step": "echo", "to_port": "i"}],
+        "ui": {},
+    }
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    inst_id = await _install(c, h, oid, _definition())
+    inst_id = await _install(c, h, oid, defn)
+    # A json value under the 8000-char size gate but deeply nested. Two
+    # distinct 500 paths this must NOT hit: (a) the run-input ctrl scanner
+    # (recursive pre-R20 → RecursionError at depth ~500), and (b) the
+    # response serializer echoing inputs (pydantic recursion guard ~400).
+    # The R35 depth gate rejects both as a clean 422 well below either limit.
     deep = _j.loads("[" * 900 + '"x"' + "]" * 900)
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-runs",
-        json={"installation_id": inst_id, "inputs": {"topic": deep}},
+        json={"installation_id": inst_id, "inputs": {"cfg": deep}},
         headers=h,
     )
-    # topic is text-typed → deep list is INVALID_INPUT_VALUE (422).
-    # The regression under test: NOT a 500.
+    # Clean 422 (too deep) — the regression under test is: NEVER a 500.
     assert r.status_code == 422, f"{r.status_code}: {r.text[:200]}"
+    assert r.json()["error"]["code"] == "INVALID_INPUT_VALUE"
+
+    # And a shallow json value still runs cleanly (the gate isn't over-broad)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": inst_id, "inputs": {"cfg": {"width": 512}}},
+        headers=h,
+    )
+    assert r2.status_code == 201, f"{r2.status_code}: {r2.text[:200]}"
