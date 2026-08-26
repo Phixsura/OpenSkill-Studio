@@ -78,7 +78,7 @@ async def update_review(
 )
 async def list_reviews(
     pack_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     sort: SortOrder = Query(default="newest"),
     rating: int | None = Query(default=None, ge=1, le=5),

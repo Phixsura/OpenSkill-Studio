@@ -30,7 +30,7 @@ async def search_workflow_packs(
     input_type: str | None = Query(default=None, max_length=20),
     output_type: str | None = Query(default=None, max_length=20),
     sort: str = Query(default="newest", max_length=20),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):

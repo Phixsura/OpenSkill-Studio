@@ -121,7 +121,7 @@ async def list_projects(
     org_id: str,
     status: str | None = None,
     cohort_id: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -418,7 +418,7 @@ async def delete_deliverable(
 async def list_submissions(
     org_id: str,
     project_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -819,7 +819,7 @@ async def create_review(
 @router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[PendingReviewResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def pending_reviews(
     org_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

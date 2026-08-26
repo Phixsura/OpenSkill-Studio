@@ -42,7 +42,7 @@ async def create_path(
 
 @router.get("/orgs/{org_id}/paths", response_model=ListResponse[LearningPathResponse], dependencies=[Depends(rate_limit(20, 60))])
 async def list_paths(
-    org_id: str, page: int = Query(default=1, ge=1), per_page: int = Query(default=20, ge=1, le=100),
+    org_id: str, page: int = Query(default=1, ge=1, le=1_000_000), per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)

@@ -67,7 +67,7 @@ async def create_cohort(
 async def list_cohorts(
     org_id: str,
     status: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -234,7 +234,7 @@ async def list_members(
     org_id: str,
     cohort_id: str,
     role: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

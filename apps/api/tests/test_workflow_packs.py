@@ -921,3 +921,22 @@ async def test_tags_and_import_name_and_idem_key_reject_ctrl(c):
         headers=h,
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_oversized_page_param_422_not_500(c):
+    """R25 fuzz finding: page beyond int64 (or beyond the 1M bound) reached
+    the SQL OFFSET as a bigint overflow → asyncpg DataError → 500. Every
+    paginated list must reject an out-of-range page with 422, not 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for bad in ("999999999999999999999", "1000001", "-1", "0"):
+        r = await c.get(
+            f"/api/v1/orgs/{oid}/workflow-packs", params={"page": bad}, headers=h
+        )
+        assert r.status_code == 422, f"page={bad} -> {r.status_code}: {r.text[:150]}"
+    # Upper bound accepted
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/workflow-packs", params={"page": "1000000"}, headers=h
+    )
+    assert r.status_code == 200, r.text[:150]

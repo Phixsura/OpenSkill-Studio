@@ -241,7 +241,7 @@ async def update_org_settings(
 @router.get("/orgs/{org_id}/members", response_model=ListResponse[OrgMemberResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def list_members(
     org_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     role: str | None = None,
     user: User = Depends(get_current_user),

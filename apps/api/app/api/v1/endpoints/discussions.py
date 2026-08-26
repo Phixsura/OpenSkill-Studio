@@ -66,7 +66,7 @@ async def create_comment(
 )
 async def list_comments(
     pack_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):

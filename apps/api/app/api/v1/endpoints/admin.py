@@ -24,7 +24,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
     dependencies=[Depends(require_role(UserRole.ADMIN)), Depends(rate_limit(10, 60))],
 )
 async def list_users(
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
