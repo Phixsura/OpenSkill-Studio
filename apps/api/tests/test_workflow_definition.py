@@ -700,3 +700,36 @@ def test_omitted_mediatype_data_uri_rejected():
     d["steps"][0]["config"]["template"] = "data:;base64," + "A" * 64
     _, errors = validate_definition(d)
     assert any(e["code"] == "WF_DATA_URI_REJECTED" for e in errors), errors
+
+
+def test_deeply_nested_config_no_recursion_error():
+    """R20: json.loads accepts ~990-deep nesting (a 2KB payload passing every
+    size cap) where recursive scanners RecursionError into a 500 — every
+    walker on the definition path must be iterative. This exercises the ctrl
+    scan, expression scanners, and default validation in one pass."""
+    import json as _j
+
+    deep_list = _j.loads("[" * 900 + '"x"' + "]" * 900)
+    d = _minimal_valid()
+    d["steps"][0]["config"]["deep"] = deep_list  # rides along in config
+    # Must not raise — errors (if any) come back as structured entries
+    _, errors = validate_definition(d)
+    assert isinstance(errors, list)
+
+
+def test_deep_json_default_no_recursion_error():
+
+    d = _minimal_valid()
+    # A deep-but-clean json default: parses fine; the ctrl scan must survive
+    d["inputs"].append(
+        {
+            "key": "cfg",
+            "type": "json",
+            "required": False,
+            "default": "[" * 900 + '"x"' + "]" * 900,
+        }
+    )
+    _, errors = validate_definition(d)
+    # Deep default exceeds the 8000-char stringified bound → WF_INVALID_DEFAULT
+    # is acceptable; the point is NO RecursionError
+    assert isinstance(errors, list)

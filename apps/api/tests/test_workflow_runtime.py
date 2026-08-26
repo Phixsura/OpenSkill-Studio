@@ -1278,3 +1278,25 @@ async def test_template_renders_json_input_as_valid_json(c):
     assert data["status"] == "completed", data
     # The rendered template must parse as JSON and round-trip the input
     assert _json.loads(data["outputs"]["final"]) == {"payload": cfg}
+
+
+@pytest.mark.asyncio
+async def test_deep_nested_run_input_no_recursion_error(c):
+    """R20: the run-input ctrl screen (_values_have_ctrl) was still recursive
+    after R18 fixed its comfyui/matching siblings — a ~990-deep json input
+    (2KB, passes every size cap) RecursionError'd into a 500. Iterative now:
+    deep inputs get a clean 422/201, never a 500."""
+    import json as _j
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    inst_id = await _install(c, h, oid, _definition())
+    deep = _j.loads("[" * 900 + '"x"' + "]" * 900)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": inst_id, "inputs": {"topic": deep}},
+        headers=h,
+    )
+    # topic is text-typed → deep list is INVALID_INPUT_VALUE (422).
+    # The regression under test: NOT a 500.
+    assert r.status_code == 422, f"{r.status_code}: {r.text[:200]}"

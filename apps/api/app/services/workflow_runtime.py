@@ -63,30 +63,43 @@ _CTRL_CHAR_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 def _values_have_ctrl(v) -> bool:
     """True if any string ANYWHERE in a nested structure holds a control char.
-    Must recurse over real values — json.dumps escapes NUL so a serialized
-    scan would miss it. Tuples are included: json.dumps serializes them as
-    arrays, so a tuple-bearing adapter output would otherwise slip past."""
-    if isinstance(v, str):
-        return bool(_CTRL_CHAR_RE.search(v))
-    if isinstance(v, dict):
-        return any(_values_have_ctrl(k) or _values_have_ctrl(val) for k, val in v.items())
-    if isinstance(v, (list, tuple)):
-        return any(_values_have_ctrl(x) for x in v)
+    Must walk real values — json.dumps escapes NUL so a serialized scan would
+    miss it. Tuples are included: json.dumps serializes them as arrays, so a
+    tuple-bearing adapter output would otherwise slip past.
+
+    ITERATIVE — json.loads parses ~990 levels deep (a 2KB payload passing
+    every size cap), where a recursive scan RecursionErrors into the very
+    500 this guard exists to prevent (round-18 fixed the comfyui/matching
+    siblings; this one had the same defect)."""
+    stack = [v]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            if _CTRL_CHAR_RE.search(cur):
+                return True
+        elif isinstance(cur, dict):
+            stack.extend(cur.keys())
+            stack.extend(cur.values())
+        elif isinstance(cur, (list, tuple)):
+            stack.extend(cur)
     return False
 
 
 def _iter_strings(v):
     """Yield every raw string value in a nested structure (keys excluded).
     Used by expression scanners that must see exactly what the renderer
-    sees — never a json.dumps serialization, whose escapes defeat \\s*."""
-    if isinstance(v, str):
-        yield v
-    elif isinstance(v, dict):
-        for val in v.values():
-            yield from _iter_strings(val)
-    elif isinstance(v, (list, tuple)):
-        for x in v:
-            yield from _iter_strings(x)
+    sees — never a json.dumps serialization, whose escapes defeat \\s*.
+    Iterative — recursive generators blow the stack well before json.loads
+    stops accepting deeper input."""
+    stack = [v]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            yield cur
+        elif isinstance(cur, dict):
+            stack.extend(cur.values())
+        elif isinstance(cur, (list, tuple)):
+            stack.extend(cur)
 _EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 _STEP_REF_RE = re.compile(r"^steps\.([a-z0-9_]+)\.outputs\.[a-z0-9_]+$")
 

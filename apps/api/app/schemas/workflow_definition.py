@@ -75,13 +75,22 @@ def _default_has_ctrl(v) -> bool:
     control chars — WF_INVALID_CHARACTER cannot fire), but json.loads
     materializes real NULs that create_run's run-input screen then rejects on
     every default-driven run. Catch it at publish instead.
+
+    ITERATIVE — json.loads parses deeper than the recursion limit allows a
+    recursive scan to walk, so a deeply nested hostile default would
+    RecursionError into a 500 at publish.
     """
-    if isinstance(v, str):
-        return bool(_CTRL_RE.search(v))
-    if isinstance(v, dict):
-        return any(_default_has_ctrl(k) or _default_has_ctrl(val) for k, val in v.items())
-    if isinstance(v, list):
-        return any(_default_has_ctrl(x) for x in v)
+    stack = [v]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            if _CTRL_RE.search(cur):
+                return True
+        elif isinstance(cur, dict):
+            stack.extend(cur.keys())
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur)
     return False
 
 
@@ -95,14 +104,15 @@ def _iter_cfg_strings(v):
     renderer must see the same text. Mirrors _iter_strings in
     app/services/workflow_runtime.py.
     """
-    if isinstance(v, str):
-        yield v
-    elif isinstance(v, dict):
-        for val in v.values():
-            yield from _iter_cfg_strings(val)
-    elif isinstance(v, (list, tuple)):
-        for x in v:
-            yield from _iter_cfg_strings(x)
+    stack = [v]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            yield cur
+        elif isinstance(cur, dict):
+            stack.extend(cur.values())
+        elif isinstance(cur, (list, tuple)):
+            stack.extend(cur)
 
 
 # ── Port / edge / input / output shapes ───────────────────
@@ -267,13 +277,19 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
     # Reject as 422 (tab/newline allowed). Must scan the ACTUAL string values,
     # not json.dumps(raw): dumps escapes a NUL to a 6-char backslash sequence,
     # regex would never match. Same class of bug create_run/ComfyUI also guard.
+    # Iterative — json.loads parses deeper than a recursive walk survives.
     def _has_ctrl(v) -> bool:
-        if isinstance(v, str):
-            return bool(_CTRL_RE.search(v))
-        if isinstance(v, dict):
-            return any(_has_ctrl(k) or _has_ctrl(val) for k, val in v.items())
-        if isinstance(v, list):
-            return any(_has_ctrl(x) for x in v)
+        stack = [v]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, str):
+                if _CTRL_RE.search(cur):
+                    return True
+            elif isinstance(cur, dict):
+                stack.extend(cur.keys())
+                stack.extend(cur.values())
+            elif isinstance(cur, list):
+                stack.extend(cur)
         return False
 
     if _has_ctrl(raw):
