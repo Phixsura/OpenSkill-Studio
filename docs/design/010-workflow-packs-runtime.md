@@ -100,6 +100,20 @@ Concurrency discipline (R11): **every transition is a conditional UPDATE with an
 - **Lazy sweeper** (`sweep_stale`): triggered on run-detail reads; recovers crashed executors (expired lease → `WAITING_RETRY`, `WF_EXECUTOR_CRASHED`; attempts exhausted → `WF_RETRY_EXHAUSTED` — `max_attempts` holds on the crash path too) and expires overdue reviews (`WF_REVIEW_TIMEOUT`) with a guarded UPDATE that can never overwrite a concurrently committed decision. The sweep returns every touched `run_id` and callers re-dispatch each one — repairing step state without resuming the loop would strand the run. No resident scheduler process.
 - Every lifecycle change appends a `WorkflowRunEvent` row (append-only audit trail).
 
+**Runtime error codes** (step/run `error_code`, distinct from the publish-time
+validation table above): `WF_STEP_FAILED` (run-level: some step exhausted its
+attempts), `WF_STEP_ERROR` (unexpected executor exception, retryable),
+`WF_PROVIDER_ERROR` / `WF_PROVIDER_TIMEOUT` (adapter call failed / exceeded
+`workflow_step_timeout_seconds`, retryable), `WF_OUTPUT_TOO_LARGE` (48 KB cap),
+`WF_OUTPUT_INVALID` (NUL/control chars in adapter output),
+`WF_UNKNOWN_STEP_TYPE` (defensive — validation should make it unreachable),
+`WF_EXECUTOR_CRASHED` / `WF_RETRY_EXHAUSTED` (sweeper), `WF_REVIEW_TIMEOUT`
+(review overdue), `WF_REVIEW_REJECTED` (reviewer rejected), `WF_CANCELLED`
+(run cancelled). Two additional request-level 422 codes:
+`WF_INVALID_CHARACTER` (NUL/control chars anywhere in a submitted definition)
+and `WF_SELECTION_NO_OPTIONS` (selection input declared without options —
+validation-table companion to `WF_SELECTION_BAD_DEFAULT`).
+
 ### ComfyUI import — parse-only, never execute
 
 Imports (JSON or PNG with embedded tEXt/iTXt `workflow`/`prompt` chunks, pure-Python chunk walker) are treated strictly as untrusted data:

@@ -43,11 +43,13 @@ ProviderModelOffering  the MATCHABLE unit: capability_key + model_name +
 OrgCredential          Fernet envelope-encrypted {field: value} JSON
 ```
 
-Rationale: matching operates on *offerings* (capability + features + cost), connections carry org configuration, adapters carry code, and credentials are an isolated write-only store. No entity mixes concerns. Offering create **and update** enforce the same value bounds (cost 0–10000, model name 1–200 chars, ≤20 features of ≤64 chars, limits ≤5 KB) — partial updates cannot bypass validation.
+Rationale: matching operates on *offerings* (capability + features + cost), connections carry org configuration, adapters carry code, and credentials are an isolated write-only store. No entity mixes concerns. Offering create **and update** enforce the same value bounds (cost 0–9999.999999 — the `Numeric(10,6)` column maximum, validated on the ROUNDED value since Postgres rounds to 6 fraction digits at insert; NaN/inf rejected; model name 1–200 chars, ≤20 features of ≤64 chars, limits ≤5 KB) — partial updates cannot bypass validation. Explicit `null` on a nullable field (e.g. `cost_per_call_usd`) CLEARS it; an absent field leaves it unchanged (`exclude_unset` semantics).
 
 ### Credential contract (write-only, late decryption)
 
 - Credential values are accepted on connection create/update, encrypted with Fernet (`CREDENTIAL_ENCRYPTION_KEY`, required in production; dev derives from the JWT secret), and **never returned by any endpoint** — responses carry only `credential_id`.
+- **Key rotation**: `CREDENTIAL_ENCRYPTION_KEY` accepts comma-separated Fernet keys — the FIRST encrypts, all decrypt (`MultiFernet`); rotate by prepending a new key and re-encrypting lazily. Key format is validated at **boot** (config validator), never silently substituted: a malformed key must fail startup, not brick every stored credential at first use.
+- An empty credentials dict (`{}`) is a client mistake, rejected 422 `EMPTY_CREDENTIALS` on create AND update (omit the key entirely to mean "no credentials"). Explicit `"credentials": null` on update detaches and deletes the connection's credential row.
 - Field names smuggled into non-sensitive `config` are rejected (`CREDENTIAL_IN_CONFIG` 422); fields the adapter did not declare are rejected (`UNKNOWN_CREDENTIAL_FIELD` 422).
 - Decryption happens in exactly one place: inside the workflow executor, immediately before the adapter call. Definitions, manifests, exports, and job rows carry references only.
 - Deleting a connection deletes its credential row.
