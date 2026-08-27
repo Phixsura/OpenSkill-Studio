@@ -233,7 +233,21 @@ class WorkflowInstallationService:
 
     async def remove(self, installation_id: str, org_id: str) -> None:
         inst = await self.get_installation(installation_id, org_id)
-        inst.status = InstallStatus.REMOVED
+        # Status-guarded UPDATE (same race-safe pattern as the reinstall
+        # path): two concurrent DELETEs both pass get_installation — the
+        # second session's identity map still says ACTIVE — and an unguarded
+        # write would decrement install_count TWICE. rowcount 0 = lost race
+        # = already removed.
+        claimed = await self.db.execute(
+            update(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status != InstallStatus.REMOVED,
+            )
+            .values(status=InstallStatus.REMOVED)
+        )
+        if not claimed.rowcount:
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
         await self.db.execute(
             sa_delete(WorkflowStepBinding).where(
                 WorkflowStepBinding.installation_id == installation_id
@@ -242,6 +256,7 @@ class WorkflowInstallationService:
         if inst.pack_id:
             await self._bump_install_count(inst.pack_id, -1)
         await self.db.flush()
+        self.db.expire(inst)
         log.info("workflow_installation_removed", installation_id=installation_id)
 
     # ── Bindings ──────────────────────────────────────────

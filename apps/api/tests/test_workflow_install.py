@@ -996,3 +996,53 @@ async def test_unlisted_rejected_pack_still_upgradable_like_install(c):
     )
     assert r4.status_code == 200, r4.text
     assert r4.json()["data"]["installed_version"] == "2.0.0"
+
+
+@pytest.mark.asyncio
+async def test_remove_race_double_delete_decrements_once(c):
+    """R42: two concurrent removes of the same installation — the loser's
+    status-guarded UPDATE hits rowcount 0 and 404s; install_count is
+    decremented exactly once (unguarded writes decremented twice, driving
+    the pack's install_count to -1/floor and skewing popularity scoring)."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.workflow_pack import WorkflowPack, WorkflowPackInstallation
+    from app.services.workflow_installation import WorkflowInstallationService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
+    )
+    install_id = r.json()["data"]["id"]
+    # Second install from another org so install_count starts at 2 — a double
+    # decrement would land at 0 and be indistinguishable from correct if it
+    # started at 1 (greatest(...,0) floor masks the bug).
+    h2, u2 = await _auth(c)
+    oid2 = await _org(c, h2)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid2}/workflow-installations", json={"pack_id": pid}, headers=h2
+    )
+    assert r2.status_code == 201, r2.text
+
+    async with AsyncSessionLocal() as db_a:
+        # Session A loads the row while it is still ACTIVE (stale identity map)
+        stale = await db_a.get(WorkflowPackInstallation, install_id)
+        assert stale.status.value == "active"
+
+        # Session B removes and commits first (race winner)
+        async with AsyncSessionLocal() as db_b:
+            await WorkflowInstallationService(db_b).remove(install_id, oid)
+            await db_b.commit()
+
+        # Session A's get_installation passes on the stale row — the guarded
+        # UPDATE must lose cleanly with 404, not decrement again
+        with pytest.raises(AppError) as exc_info:
+            await WorkflowInstallationService(db_a).remove(install_id, oid)
+        assert exc_info.value.code == "INSTALLATION_NOT_FOUND"
+
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(WorkflowPack, pid)
+        # 2 installs − exactly 1 remove = 1 (double decrement would give 0)
+        assert pack.install_count == 1

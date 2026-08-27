@@ -797,16 +797,36 @@ class InstallationService:
     async def remove(self, install_id: str, org_id: str) -> None:
         inst = await self.get_installation(install_id, org_id)
         was_forked = inst.status == InstallStatus.FORKED
-        inst.status = InstallStatus.REMOVED
+        # Capture before the guarded UPDATE expires the row (async lazy
+        # refresh on an expired object raises MissingGreenlet)
+        pack_id = inst.pack_id
+        inst_org_id = inst.org_id
+        # Status-guarded UPDATE: two concurrent DELETEs both pass
+        # get_installation (second session's identity map still says
+        # ACTIVE) — an unguarded write would decrement install_count twice
+        # and double-archive. rowcount 0 = lost race = already removed.
+        from sqlalchemy import update as _upd
+
+        claimed = await self.db.execute(
+            _upd(SkillPackInstallation)
+            .where(
+                SkillPackInstallation.id == install_id,
+                SkillPackInstallation.status != InstallStatus.REMOVED,
+            )
+            .values(status=InstallStatus.REMOVED)
+        )
+        if not claimed.rowcount:
+            raise InstallationNotFoundError()
+        self.db.expire(inst)
         await self.db.flush()
 
         # Decrement install_count atomically (floor at 0)
-        if inst.pack_id:
+        if pack_id:
             from sqlalchemy import update
 
             await self.db.execute(
                 update(SkillPack)
-                .where(SkillPack.id == inst.pack_id)
+                .where(SkillPack.id == pack_id)
                 .values(install_count=func.greatest(SkillPack.install_count - 1, 0))
             )
 
@@ -814,15 +834,15 @@ class InstallationService:
         # fork() nulls origin_pack_id (severing tracking), so the WHERE clause
         # wouldn't match anything. More importantly, fork is a deliberate choice
         # to keep the content independently, so archiving would be wrong.
-        if not was_forked and inst.pack_id:
+        if not was_forked and pack_id:
             from sqlalchemy import update as _update
 
             for model in [Skill, Exercise, SkillCategory]:
                 await self.db.execute(
                     _update(model)
                     .where(
-                        model.origin_pack_id == inst.pack_id,
-                        model.org_id == inst.org_id,
+                        model.origin_pack_id == pack_id,
+                        model.org_id == inst_org_id,
                         model.status != ContentStatus.ARCHIVED,
                     )
                     .values(status=ContentStatus.ARCHIVED)
@@ -830,8 +850,8 @@ class InstallationService:
             await self.db.execute(
                 _update(ProjectTemplate)
                 .where(
-                    ProjectTemplate.origin_pack_id == inst.pack_id,
-                    ProjectTemplate.org_id == inst.org_id,
+                    ProjectTemplate.origin_pack_id == pack_id,
+                    ProjectTemplate.org_id == inst_org_id,
                     ProjectTemplate.status != ContentStatus.ARCHIVED,
                 )
                 .values(status=ContentStatus.ARCHIVED)
@@ -842,8 +862,8 @@ class InstallationService:
 
             archived_skill_ids_r = await self.db.execute(
                 select(Skill.id).where(
-                    Skill.origin_pack_id == inst.pack_id,
-                    Skill.org_id == inst.org_id,
+                    Skill.origin_pack_id == pack_id,
+                    Skill.org_id == inst_org_id,
                     Skill.status == ContentStatus.ARCHIVED,
                 )
             )

@@ -1603,3 +1603,42 @@ async def test_list_installations_after_source_org_deleted(c):
     r = await c.get(f"/api/v1/orgs/{oid_target}/installations", headers=h2)
     assert r.status_code == 200
     assert r.json()["meta"]["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_skill_pack_remove_race_decrements_once(c):
+    """R42 (skill-pack family): two concurrent removes — the loser's
+    status-guarded UPDATE hits rowcount 0 and 404s; install_count is
+    decremented exactly once."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPack, SkillPackInstallation
+    from app.services.installation import InstallationNotFoundError, InstallationService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, f"RaceRm-{uuid.uuid4().hex[:6]}")
+    r = await c.post(f"/api/v1/orgs/{oid}/installations", json={"pack_id": pid}, headers=h)
+    assert r.status_code == 201, r.text
+    install_id = r.json()["data"]["id"]
+
+    # Second org installs too → count starts at 2 (the greatest(...,0) floor
+    # would mask a double decrement if the count started at 1)
+    h2, _ = await _auth(c)
+    oid2 = await _org(c, h2)
+    r2 = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    assert r2.status_code == 201, r2.text
+
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(SkillPackInstallation, install_id)
+        assert stale.status.value == "active"
+
+        async with AsyncSessionLocal() as db_b:
+            await InstallationService(db_b).remove(install_id, oid)
+            await db_b.commit()
+
+        with pytest.raises(InstallationNotFoundError):
+            await InstallationService(db_a).remove(install_id, oid)
+
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(SkillPack, pid)
+        assert pack.install_count == 1  # 2 installs − exactly 1 remove
