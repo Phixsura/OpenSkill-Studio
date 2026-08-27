@@ -328,6 +328,12 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_skill_packs_search_tsv")
     op.execute("ALTER TABLE skill_packs DROP COLUMN IF EXISTS search_tsv")
     op.drop_constraint("ck_path_item_type_ref", "learning_path_items", type_="check")
+    # WORKFLOW_PACK items reference a feature this downgrade removes — their
+    # rows must go BEFORE re-adding the old CHECK (whose arms don't cover the
+    # type: with any such row present the ALTER TABLE fails and the whole
+    # downgrade aborts mid-transaction). Their data (workflow_pack_id) is
+    # dropped by the next statement anyway.
+    op.execute("DELETE FROM learning_path_items WHERE item_type = 'WORKFLOW_PACK'")
     op.create_check_constraint(
         "ck_path_item_type_ref",
         "learning_path_items",
