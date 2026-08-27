@@ -1642,3 +1642,33 @@ async def test_skill_pack_remove_race_decrements_once(c):
     async with AsyncSessionLocal() as db:
         pack = await db.get(SkillPack, pid)
         assert pack.install_count == 1  # 2 installs − exactly 1 remove
+
+
+@pytest.mark.asyncio
+async def test_skill_pack_fork_remove_race_cannot_resurrect(c):
+    """R55 (skill-pack family): same fork-vs-remove resurrection race."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPackInstallation
+    from app.services.installation import InstallationNotFoundError, InstallationService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, f"ForkRace-{uuid.uuid4().hex[:6]}")
+    r = await c.post(f"/api/v1/orgs/{oid}/installations", json={"pack_id": pid}, headers=h)
+    install_id = r.json()["data"]["id"]
+
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(SkillPackInstallation, install_id)
+        assert stale.status.value == "active"
+
+        async with AsyncSessionLocal() as db_b:
+            await InstallationService(db_b).remove(install_id, oid)
+            await db_b.commit()
+
+        with pytest.raises(InstallationNotFoundError):
+            await InstallationService(db_a).fork(install_id, oid)
+        await db_a.rollback()
+
+    async with AsyncSessionLocal() as db:
+        final = await db.get(SkillPackInstallation, install_id)
+        assert final.status.value == "removed"

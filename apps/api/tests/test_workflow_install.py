@@ -1121,3 +1121,44 @@ async def test_capability_gate_cannot_be_bypassed_by_omitting_deps(c):
     reqs2 = r3.json()["data"]["requires_capabilities"]
     caps2 = {e["capability"] for e in reqs2}
     assert caps2 == {"multimodal_review", "voice_generation"}
+
+
+@pytest.mark.asyncio
+async def test_fork_remove_race_cannot_resurrect(c):
+    """R55: fork's unguarded ORM status write raced remove — fork reads
+    ACTIVE, remove's guarded UPDATE commits REMOVED, fork's flush then
+    overwrites REMOVED with FORKED: a zombie installation with deleted
+    bindings and an already-decremented install_count."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.services.workflow_installation import WorkflowInstallationService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid)
+    await _mock_offering(c, h, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
+    )
+    install_id = r.json()["data"]["id"]
+
+    async with AsyncSessionLocal() as db_a:
+        # Session A (fork) loads the row while it is ACTIVE
+        stale = await db_a.get(WorkflowPackInstallation, install_id)
+        assert stale.status.value == "active"
+
+        # Session B removes and commits first
+        async with AsyncSessionLocal() as db_b:
+            await WorkflowInstallationService(db_b).remove(install_id, oid)
+            await db_b.commit()
+
+        # Session A's fork must lose cleanly — 404, never a resurrection
+        with pytest.raises(AppError) as exc_info:
+            await WorkflowInstallationService(db_a).fork(install_id, oid)
+        assert exc_info.value.code == "INSTALLATION_NOT_FOUND"
+        await db_a.rollback()
+
+    async with AsyncSessionLocal() as db:
+        final = await db.get(WorkflowPackInstallation, install_id)
+        assert final.status.value == "removed"  # stayed dead

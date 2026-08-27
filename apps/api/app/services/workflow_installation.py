@@ -221,10 +221,31 @@ class WorkflowInstallationService:
         if inst.status == InstallStatus.FORKED:
             raise AppError("ALREADY_FORKED", "Installation is already forked", 409)
         definition = await self._effective_definition(inst)
-        inst.local_definition = definition
-        inst.status = InstallStatus.FORKED
-        inst.locally_modified = False
-        await self.db.flush()
+        # Status-guarded UPDATE (not an ORM attribute write): a concurrent
+        # remove() may flip the row to REMOVED between our read and this
+        # write — an unguarded flush would then overwrite REMOVED with
+        # FORKED, resurrecting a zombie installation whose bindings were
+        # deleted and whose install_count was already decremented.
+        claimed = await self.db.execute(
+            update(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(
+                status=InstallStatus.FORKED,
+                local_definition=definition,
+                locally_modified=False,
+            )
+        )
+        if not claimed.rowcount:
+            # Lost a race: either a concurrent fork won (409) or a concurrent
+            # remove killed the row (404) — re-read to report accurately
+            self.db.expire(inst)
+            fresh = await self.db.get(WorkflowPackInstallation, installation_id)
+            if fresh is not None and fresh.status == InstallStatus.FORKED:
+                raise AppError("ALREADY_FORKED", "Installation is already forked", 409)
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
         await self.db.refresh(inst)
         log.info("workflow_installation_forked", installation_id=installation_id)
         return inst

@@ -436,6 +436,29 @@ class InstallationService:
         if inst.status == InstallStatus.FORKED:
             raise AppError("ALREADY_FORKED", "Installation is already forked", 422)
 
+        # Claim FIRST with a status-guarded UPDATE (mirror of the
+        # workflow-family fork): a concurrent remove() may flip the row to
+        # REMOVED between our read and the flush — an unguarded attribute
+        # write would resurrect the removed installation as FORKED (with
+        # install_count already decremented), and this path would also sever
+        # origin tracking on components remove() had just archived.
+        from sqlalchemy import update as _upd
+
+        claimed = await self.db.execute(
+            _upd(SkillPackInstallation)
+            .where(
+                SkillPackInstallation.id == install_id,
+                SkillPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(status=InstallStatus.FORKED)
+        )
+        if not claimed.rowcount:
+            self.db.expire(inst)
+            fresh = await self.db.get(SkillPackInstallation, install_id)
+            if fresh is not None and fresh.status == InstallStatus.FORKED:
+                raise AppError("ALREADY_FORKED", "Installation is already forked", 422)
+            raise InstallationNotFoundError()
+
         # Remove origin tracking from all installed components
         for model in (Skill, Exercise, SkillCategory, ProjectTemplate):
             result = await self.db.execute(
@@ -450,8 +473,11 @@ class InstallationService:
                 component.origin_component_id = None
                 component.locally_modified = False
 
-        inst.status = InstallStatus.FORKED
         await self.db.flush()
+        # The guarded UPDATE bypassed the identity map — refresh so the
+        # returned object (and the response) carries FORKED, not the stale
+        # pre-claim status.
+        await self.db.refresh(inst)
 
         # Fire webhook event
         try:
