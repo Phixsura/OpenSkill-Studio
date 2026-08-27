@@ -116,13 +116,66 @@ class PackImportService:
                 422,
             )
 
-        # 8. Validate structure
-        pack_meta = manifest.get("pack", {})
+        # 6c. NUL scan: json.loads materializes a valid-JSON \u0000 escape into
+        # a real NUL, which Postgres rejects in a JSONB/text column (22P05) as
+        # an UntranslatableCharacterError → DBAPIError (not ValueError) → 500.
+        # Every other JSONB write path screens for this; the import path did
+        # not. Iterative walk (recursion-free — the manifest can nest deep).
+        _stack = [manifest]
+        while _stack:
+            _cur = _stack.pop()
+            if isinstance(_cur, str):
+                if "\x00" in _cur:
+                    raise AppError(
+                        "INVALID_MANIFEST",
+                        "Manifest contains NUL characters that are not allowed",
+                        422,
+                    )
+            elif isinstance(_cur, dict):
+                _stack.extend(_cur.keys())
+                _stack.extend(_cur.values())
+            elif isinstance(_cur, list):
+                _stack.extend(_cur)
+
+        # 8. Validate structure — the manifest is untrusted JSON, so every
+        # container accessed with .get()/len()/iteration must be TYPE-CHECKED
+        # first. A wrong-typed value (pack as a list, skills as strings, an
+        # int name) would otherwise AttributeError/TypeError into a 500 deep
+        # in create_pack instead of a clean 422 here.
+        pack_meta = manifest.get("pack")
+        if not isinstance(pack_meta, dict):
+            raise AppError("INVALID_MANIFEST", "Manifest 'pack' must be an object", 422)
         skills = manifest.get("skills", [])
         templates = manifest.get("project_templates", [])
+        if not isinstance(skills, list) or not isinstance(templates, list):
+            raise AppError(
+                "INVALID_MANIFEST", "Manifest 'skills'/'project_templates' must be arrays", 422
+            )
+        if any(not isinstance(s, dict) for s in skills) or any(
+            not isinstance(t, dict) for t in templates
+        ):
+            raise AppError(
+                "INVALID_MANIFEST", "Each skill/template entry must be an object", 422
+            )
 
-        if not pack_meta.get("name"):
+        pack_name = pack_meta.get("name")
+        if not pack_name or not isinstance(pack_name, str):
             raise AppError("INVALID_MANIFEST", "Manifest pack.name is required", 422)
+        # Length-cap manifest strings that flow into capped VARCHAR columns —
+        # create_pack writes them verbatim (only slug is truncated), so an
+        # over-length name/summary → StringDataRightTruncation 500. Mirror the
+        # publish-side bounds.
+        if len(pack_name) > 200:
+            raise AppError("INVALID_MANIFEST", "pack.name must be 200 characters or less", 422)
+        _summary = pack_meta.get("summary")
+        if _summary is not None and (not isinstance(_summary, str) or len(_summary) > 500):
+            raise AppError("INVALID_MANIFEST", "pack.summary must be a string ≤500 chars", 422)
+        _difficulty = pack_meta.get("metadata", {})
+        _difficulty = _difficulty.get("difficulty") if isinstance(_difficulty, dict) else None
+        if _difficulty is not None and (
+            not isinstance(_difficulty, str) or len(_difficulty) > 20
+        ):
+            raise AppError("INVALID_MANIFEST", "pack.metadata.difficulty invalid", 422)
 
         # 8a. Enforce component count limits (same as publish_release)
         from app.services.skill_pack import MAX_SKILLS_PER_PACK, MAX_TEMPLATES_PER_PACK
@@ -263,9 +316,16 @@ class PackImportService:
         pack_name = pack_meta["name"]
         version = manifest.get("version", "1.0.0")
 
-        # 12a. Validate version format (same semver regex as publish_release)
+        # 12a. Validate version format (same semver regex as publish_release).
+        # Length-cap FIRST: the bare regex has no length bound, so a
+        # 10k-char version passes it and then overflows the version VARCHAR
+        # (publish enforces len<=50) — cap to match.
         import re as _re
 
+        if not isinstance(version, str) or len(version) > 50:
+            raise AppError(
+                "INVALID_VERSION", "Version must be a string of 50 characters or less", 422
+            )
         if not _re.match(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$", version):
             raise AppError(
                 "INVALID_VERSION",

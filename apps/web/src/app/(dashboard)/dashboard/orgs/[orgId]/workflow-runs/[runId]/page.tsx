@@ -232,9 +232,20 @@ export default function WorkflowRunDetailPage() {
                         size="sm"
                         variant="secondary"
                         disabled={decideMutation.isPending}
-                        onClick={() =>
-                          decideMutation.mutate({ reviewId: review.id, decision: "rejected" })
-                        }
+                        onClick={() => {
+                          // Reject is irreversible: it fails the step and the
+                          // whole run (WF_REVIEW_REJECTED), and the decision
+                          // row is durable (no re-decide — 409). Confirm before
+                          // firing, matching how Cancel Run is guarded on this
+                          // same page.
+                          if (
+                            window.confirm(
+                              "Reject this review? This fails the step and cannot be undone — the run will end as failed.",
+                            )
+                          ) {
+                            decideMutation.mutate({ reviewId: review.id, decision: "rejected" });
+                          }
+                        }}
                       >
                         Reject
                       </Button>

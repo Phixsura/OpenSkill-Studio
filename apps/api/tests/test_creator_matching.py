@@ -1183,3 +1183,56 @@ async def test_creator_evidence_signal_folds_preferred_caps(c):
         # 5 rows (n=5) → (5/8)*1.0 + (3/8)*0.5 = 0.8125. The gap proves the
         # signal is requirement-scoped, not volume-blind.
         assert signals["capability_evidence"] == pytest.approx(0.625)
+
+
+@pytest.mark.asyncio
+async def test_reoffer_after_decline_supersedes(c):
+    """R62: uq_creator_assignment is unconditional on (project, user), so a
+    DECLINED offer permanently blocked re-offering. A resolved offer must be
+    supersedable — the instructor can revisit a creator who once declined."""
+    h_owner, _ = await _auth(c, "Owner")
+    oid = await _org(c, h_owner)
+    h_creator, creator = await _auth(c, "Creator")
+    await _add_member(c, h_owner, oid, creator)
+    project_id = await _project(c, h_owner, oid)
+
+    # Offer → creator declines
+    r1 = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"]},
+        headers=h_owner,
+    )
+    aid = r1.json()["data"]["id"]
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/respond",
+        json={"accept": False},
+        headers=h_creator,
+    )
+    assert r2.status_code == 200 and r2.json()["data"]["status"] == "declined"
+
+    # Re-offer must succeed (supersede), not 409
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"], "override_reason": "reconsidered"},
+        headers=h_owner,
+    )
+    assert r3.status_code == 201, r3.text
+    assert r3.json()["data"]["status"] == "offered"
+
+    # But an ACTIVE (offered) one still 409s on double-offer
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"]},
+        headers=h_owner,
+    )
+    assert r4.status_code == 409
+    assert r4.json()["error"]["code"] == "ASSIGNMENT_EXISTS"
+
+    # The creator can now accept the re-offer
+    aid2 = r3.json()["data"]["id"]
+    r5 = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid2}/respond",
+        json={"accept": True},
+        headers=h_creator,
+    )
+    assert r5.status_code == 200 and r5.json()["data"]["status"] == "accepted"

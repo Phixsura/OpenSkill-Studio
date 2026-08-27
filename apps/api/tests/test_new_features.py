@@ -1158,3 +1158,33 @@ async def test_upgrade_locally_modified_skipped(c):
         )
         desc = row.scalar_one()
         assert desc == "MY LOCAL EDIT", f"Expected 'MY LOCAL EDIT' but got '{desc}'"
+
+
+@pytest.mark.asyncio
+async def test_review_forbidden_for_owner_org_members(c):
+    """R62: pack ownership is org-level; blocking self-review only on
+    created_by let any OTHER member of the owning org rate the pack.
+    Every active owner-org member must be blocked."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    pid = await _published_public_pack(c, h_owner, oid)
+
+    # A second member of the SAME org
+    h_member, member = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": member["id"], "role": "student"},
+        headers=h_owner,
+    )
+    r = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 5}, headers=h_member
+    )
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "SELF_REVIEW_FORBIDDEN"
+
+    # An outsider can still review
+    h_out, _ = await _auth(c)
+    r2 = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=h_out
+    )
+    assert r2.status_code == 201, r2.text[:200]

@@ -495,6 +495,57 @@ class CreatorMatchingService:
         if member_r.scalar_one_or_none() is None:
             raise AppError("NOT_A_MEMBER", "User is not an active member of this organization", 422)
 
+        # uq_creator_assignment is unconditional on (project_id, user_id), so
+        # a prior DECLINED/WITHDRAWN offer would permanently block re-offering
+        # this creator — an instructor could never revisit someone who once
+        # declined (or was withdrawn). A resolved (non-active) prior offer is
+        # superseded IN PLACE with a fresh offer; only a still-'offered' or
+        # 'accepted' row is a real conflict (409).
+        existing_r = await self.db.execute(
+            select(CreatorAssignment).where(
+                CreatorAssignment.project_id == project_id,
+                CreatorAssignment.user_id == user_id,
+            )
+        )
+        existing = existing_r.scalar_one_or_none()
+        if existing is not None:
+            if existing.status in ("offered", "accepted"):
+                raise AppError(
+                    "ASSIGNMENT_EXISTS",
+                    "This creator already has an active offer for this project",
+                    409,
+                )
+            # declined/withdrawn → re-open the SAME row as a new offer
+            reopened = await self.db.execute(
+                update(CreatorAssignment)
+                .where(
+                    CreatorAssignment.id == existing.id,
+                    CreatorAssignment.status.in_(("declined", "withdrawn")),
+                )
+                .values(
+                    status="offered",
+                    match_run_id=match_run_id,
+                    assigned_by=assigned_by,
+                    override_reason=override_reason,
+                    responded_at=None,
+                )
+            )
+            if not reopened.rowcount:
+                # Lost a race to a concurrent re-offer/response
+                raise AppError(
+                    "ASSIGNMENT_EXISTS",
+                    "This creator already has an active offer for this project",
+                    409,
+                )
+            await self.db.refresh(existing)
+            log.info(
+                "creator_assignment_reoffered",
+                project_id=project_id,
+                user_id=user_id,
+                assigned_by=assigned_by,
+            )
+            return existing
+
         assignment = CreatorAssignment(
             org_id=org_id,
             project_id=project_id,

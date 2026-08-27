@@ -737,3 +737,88 @@ async def test_import_deep_manifest_rejected(c):
         headers=h,
     )
     assert r2.status_code == 422, r2.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_import_malformed_manifest_types_rejected_not_500(c):
+    """R62: wrong-typed manifest JSON must be a clean 422, not an
+    AttributeError/TypeError 500 deep in create_pack (the import path trusts
+    the manifest structure)."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    bad_pack = copy.deepcopy(VALID_MANIFEST)
+    bad_pack["pack"] = ["not", "an", "object"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(bad_pack), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+
+    bad_skills = copy.deepcopy(VALID_MANIFEST)
+    bad_skills["skills"] = ["skill1", "skill2"]
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(bad_skills), "application/zip")},
+        headers=h,
+    )
+    assert r2.status_code == 422, r2.text[:200]
+
+    bad_name = copy.deepcopy(VALID_MANIFEST)
+    bad_name["pack"]["name"] = 12345
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(bad_name), "application/zip")},
+        headers=h,
+    )
+    assert r3.status_code == 422, r3.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_import_overlong_manifest_strings_rejected(c):
+    """R62: manifest name/version flow into capped VARCHAR columns; an
+    over-length value must 422, not StringDataRightTruncation 500."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    long_name = copy.deepcopy(VALID_MANIFEST)
+    long_name["pack"]["name"] = "x" * 500
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(long_name), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+
+    long_ver = copy.deepcopy(VALID_MANIFEST)
+    long_ver["version"] = "1.0.0-" + "a" * 200
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(long_ver), "application/zip")},
+        headers=h,
+    )
+    assert r2.status_code == 422, r2.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_import_nul_in_manifest_rejected(c):
+    """R62: a NUL smuggled into a manifest string (valid JSON escape) must
+    422, not crash the JSONB/text write with UntranslatableCharacterError."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    m = copy.deepcopy(VALID_MANIFEST)
+    m["pack"]["summary"] = "a" + chr(0) + "b"
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(m), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"

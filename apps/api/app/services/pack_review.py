@@ -71,9 +71,27 @@ class PackReviewService:
     ) -> PackReview:
         pack = await self._get_public_pack(pack_id)
 
-        # Prevent self-reviews
+        # Prevent self-reviews. Pack ownership is ORG-level (owner_org_id),
+        # and created_by is nullable (SET NULL on user delete), so gating on
+        # created_by alone let any OTHER member of the owning org inflate
+        # their pack's rating. Block every active member of the owner org.
         if pack.created_by == user_id:
             raise AppError("SELF_REVIEW_FORBIDDEN", "You cannot review your own pack", 422)
+        from app.models.organization import MemberStatus, OrgMember
+
+        own_member = await self.db.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == pack.owner_org_id,
+                OrgMember.user_id == user_id,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
+        )
+        if own_member.scalar_one_or_none() is not None:
+            raise AppError(
+                "SELF_REVIEW_FORBIDDEN",
+                "Members of the owning organization cannot review its pack",
+                422,
+            )
 
         review = PackReview(
             pack_id=pack_id,
@@ -252,6 +270,10 @@ class PackReviewService:
             raise ReviewNotFoundError()
         if pack_id and review.pack_id != pack_id:
             raise ReviewNotFoundError()
+        # Every other review read/write gates on the pack being public+
+        # published (_get_public_pack); toggle_helpful skipped it, letting a
+        # vote land on a review of an archived/private pack. Apply the same gate.
+        await self._get_public_pack(review.pack_id)
 
         # Check if user already voted
         existing = await self.db.get(ReviewHelpfulVote, (user_id, review_id))

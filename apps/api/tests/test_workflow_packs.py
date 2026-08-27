@@ -1088,3 +1088,18 @@ def test_review_gate_passthrough_type_coercion_enforced():
     # text input → text passthrough: valid (identity coercion)
     _, errs_ok = validate_definition(_gate_def("text"))
     assert not any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errs_ok), [e["code"] for e in errs_ok]
+
+
+@pytest.mark.asyncio
+async def test_provenance_nul_rejected_not_500(c):
+    """R62: workflow_pack provenance was the one JSONB field missing the
+    control-char scan — a NUL smuggled into a provenance string 500'd the
+    JSONB write (UntranslatableCharacterError) instead of a clean 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": "NulProv", "provenance": {"source": "a" + chr(0) + "b"}},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]

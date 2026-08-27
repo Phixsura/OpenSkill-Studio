@@ -1,3 +1,4 @@
+import re as _re
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
@@ -64,4 +65,33 @@ def reject_deep_json(v, field_name: str, limit: int = 64):
     """Validator helper: raise ValueError when nesting exceeds `limit`."""
     if v is not None and max_json_depth(v, limit) > limit:
         raise ValueError(f"{field_name} is nested too deeply (max {limit} levels)")
+    return v
+
+
+_JSON_CTRL_RE = _re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def reject_ctrl_json(v, field_name: str):
+    """Validator helper: reject NUL/control chars in ANY string nested in an
+    open dict/list field. json.loads materializes a valid-JSON \\u0000 escape
+    into a real NUL, which Postgres rejects on a JSONB write (22P05) as an
+    UntranslatableCharacterError → DBAPIError (not ValueError) → 500. Scalar
+    string fields use _reject_ctrl; open dict/list fields need this walk.
+    Iterative (recursion-free) — the value may be deeply nested (already
+    depth-capped separately, but this must not itself blow the stack)."""
+    if v is None:
+        return v
+    stack = [v]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            if _JSON_CTRL_RE.search(cur):
+                raise ValueError(
+                    f"{field_name} contains NUL or control characters that are not allowed"
+                )
+        elif isinstance(cur, dict):
+            stack.extend(cur.keys())
+            stack.extend(cur.values())
+        elif isinstance(cur, (list, tuple)):
+            stack.extend(cur)
     return v
