@@ -271,6 +271,21 @@ class ComfyUIImportService:
                 422,
             )
 
+        # Depth cap: original_json is stored VERBATIM and echoed by the
+        # detail read (?include_original=true) — json.loads accepts ~900
+        # levels while pydantic's serializer dies around 400, so a deep
+        # block smuggled next to a valid nodes[] array would make the
+        # import row permanently unreadable (R51/R53 class). Real ComfyUI
+        # exports nest a handful of levels.
+        from app.schemas.base import max_json_depth
+
+        if max_json_depth(parsed) > 64:
+            raise AppError(
+                "IMPORT_TOO_DEEP",
+                "Import JSON is nested deeper than 64 levels",
+                422,
+            )
+
         # Lenient format detection (ingestion tolerance — C2)
         nodes: list[dict] = []
         links_count = 0

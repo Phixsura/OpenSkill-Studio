@@ -705,3 +705,40 @@ async def test_hostile_png_chunk_walker(c):
         )
         # Clean 422 (no workflow found / bad json) — never a 500
         assert r.status_code == 422, f"{name}: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.asyncio
+async def test_deep_import_rejected_not_bricked(c):
+    """R54: original_json is stored verbatim and echoed by the detail read
+    (?include_original=true). A 400-level block smuggled next to a valid
+    nodes[] array passed every guard, stored, then 500'd that read forever.
+    Depth-capped at parse time (IMPORT_TOO_DEEP)."""
+    import json as _json
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    deep = _json.loads("[" * 400 + "null" + "]" * 400)
+    payload = {"nodes": [{"type": "KSampler"}], "links": [], "junk": deep}
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": _json.dumps(payload), "encoding": "json"},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "IMPORT_TOO_DEEP"
+
+    # A normal import still works and its detail read (with original) is fine
+    ok = {"nodes": [{"type": "KSampler"}], "links": []}
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": _json.dumps(ok), "encoding": "json"},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text[:200]
+    imp_id = r2.json()["data"]["id"]
+    r3 = await c.get(
+        f"/api/v1/orgs/{oid}/comfyui-imports/{imp_id}?include_original=true", headers=h
+    )
+    assert r3.status_code == 200
+    assert r3.json()["data"]["original_json"] == ok
