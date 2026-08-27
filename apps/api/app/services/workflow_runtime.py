@@ -488,10 +488,19 @@ class WorkflowRuntimeService:
 
         step_def = self._step_def(run.definition_snapshot, step_run.step_id)
         if decision == "approved":
-            # Passthrough output: decision port + first-input passthrough
+            # Passthrough output: decision port + first-input passthrough.
+            # "First" = the step's first DECLARED input port with a resolved
+            # value — inputs_resolved is keyed in edge-array order, so bare
+            # next(iter(...)) would pass through whichever input's edge the
+            # author happened to draw first (same class as the R43 transform
+            # ordering fix).
             output: dict = {"decision": "approved"}
             inputs_resolved = step_run.inputs_resolved or {}
-            first_val = next(iter(inputs_resolved.values()), None)
+            declared_ports = [p["port"] for p in (step_def or {}).get("inputs", [])]
+            first_val = next(
+                (inputs_resolved[p] for p in declared_ports if p in inputs_resolved),
+                next(iter(inputs_resolved.values()), None),
+            )
             for port in (step_def or {}).get("outputs", []):
                 if port["port"] != "decision" and first_val is not None:
                     output[port["port"]] = first_val

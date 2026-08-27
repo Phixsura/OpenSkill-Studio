@@ -1387,3 +1387,86 @@ def test_transform_values_follow_declared_port_order():
         step,
     )
     assert out3["result"] == "only"
+
+
+@pytest.mark.asyncio
+async def test_review_gate_passthrough_uses_declared_first_port(c):
+    """R46: the approved-review passthrough must carry the step's FIRST
+    DECLARED input port (subject), not whichever input's edge appears first
+    in the persisted inputs_resolved JSONB. Postgres JSONB re-sorts keys by
+    LENGTH then bytewise, so the old next(iter(...)) passed through
+    whichever input port had the SHORTEST NAME ('ref' < 'subject') — the
+    passthrough silently switched on a port rename (same class as the
+    R43 transform fix)."""
+    definition = {
+        "schema_version": 1,
+        "inputs": [
+            {"key": "subject_text", "type": "text", "required": True},
+            {"key": "reference_text", "type": "text", "required": True},
+        ],
+        "outputs": [
+            {"key": "final", "type": "text", "from_step": "qa", "from_port": "passed"}
+        ],
+        "steps": [
+            {
+                "id": "take",
+                "type": "asset_input",
+                "name": "Take",
+                "config": {"accept_types": ["image"]},
+                "inputs": [],
+                "outputs": [
+                    {"port": "subject_text", "type": "text"},
+                    {"port": "reference_text", "type": "text"},
+                ],
+            },
+            {
+                "id": "qa",
+                "type": "review_gate",
+                "name": "QA",
+                "config": {"instructions": "Check", "due_days": 7},
+                # DECLARED order: subject first
+                "inputs": [
+                    {"port": "subject", "type": "text"},
+                    {"port": "ref", "type": "text", "required": False},
+                ],
+                "outputs": [
+                    {"port": "decision", "type": "selection"},
+                    {"port": "passed", "type": "text"},
+                ],
+            },
+        ],
+        # EDGE order: reference's edge drawn FIRST
+        "edges": [
+            {"id": "e_ref", "from_step": "take", "from_port": "reference_text", "to_step": "qa", "to_port": "ref"},
+            {"id": "e_subj", "from_step": "take", "from_port": "subject_text", "to_step": "qa", "to_port": "subject"},
+        ],
+        "ui": {},
+    }
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, definition)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={
+            "installation_id": install_id,
+            "inputs": {"subject_text": "THE SUBJECT", "reference_text": "the reference"},
+        },
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"waiting_review"})
+    qa = next(s for s in data["step_runs"] if s["step_id"] == "qa")
+
+    r2 = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h)
+    review = next(rv for rv in r2.json()["data"] if rv["step_run_id"] == qa["id"])
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/step-reviews/{review['id']}/decide",
+        json={"decision": "approved"},
+        headers=h,
+    )
+    assert r3.status_code == 200, r3.text
+
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data
+    # Passthrough = first DECLARED port (subject), not first-drawn edge (reference)
+    assert data["outputs"]["final"] == "THE SUBJECT"
