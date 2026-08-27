@@ -712,3 +712,84 @@ async def test_authz_profile_owner_isolation(c):
     # instructor may confirm on the learner's behalf
     ri = await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{pid}/confirm", headers=instructor)
     assert ri.status_code == 200, ri.text
+
+
+@pytest.mark.asyncio
+async def test_deep_nested_open_dict_fields_rejected(c):
+    """R53: open dict fields that are ECHOED on reads (pack provenance,
+    connection config, offering limits) accepted arbitrarily deep nesting —
+    a ~2KB 400-level payload passed every size cap, stored fine, then
+    PydanticSerializationError-500'd every subsequent read of the row
+    (permanently bricking the pack card / connection / offering). Same
+    class as the R51 definition depth gate, through the side doors."""
+    import json as _json
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    deep = _json.loads("[" * 400 + "null" + "]" * 400)
+
+    # Pack provenance (create + update)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": "DeepProv", "provenance": {"x": deep}},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "ShallowProv"}, headers=h
+    )
+    pid = r2.json()["data"]["id"]
+    r3 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"provenance": {"x": deep}},
+        headers=h,
+    )
+    assert r3.status_code == 422, r3.text[:200]
+
+    # Provider connection config
+    adapters = (await c.get("/api/v1/providers/adapters", headers=h)).json()["data"]
+    aid = next(a["id"] for a in adapters if a["key"] == "mock")
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "DeepCfg", "config": {"x": deep}},
+        headers=h,
+    )
+    assert r4.status_code == 422, r4.text[:200]
+
+    # Offering limits (create + update)
+    r5 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "OkConn"},
+        headers=h,
+    )
+    conn_id = r5.json()["data"]["id"]
+    r6 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "m1",
+            "limits": {"x": deep},
+        },
+        headers=h,
+    )
+    assert r6.status_code == 422, r6.text[:200]
+    r7 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={"connection_id": conn_id, "capability_key": "image_generation", "model_name": "m1"},
+        headers=h,
+    )
+    off_id = r7.json()["data"]["id"]
+    r8 = await c.put(
+        f"/api/v1/orgs/{oid}/provider-offerings/{off_id}",
+        json={"limits": {"x": deep}},
+        headers=h,
+    )
+    assert r8.status_code == 422, r8.text[:200]
+
+    # Everything created in this test remains readable
+    assert (await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)).status_code == 200
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/provider-connections", headers=h)
+    ).status_code == 200
+    assert (await c.get(f"/api/v1/orgs/{oid}/provider-offerings", headers=h)).status_code == 200
