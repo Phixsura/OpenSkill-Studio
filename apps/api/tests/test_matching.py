@@ -718,3 +718,57 @@ async def test_list_match_runs_paginated_with_meta(c):
     # per_page is capped at 50 — over-cap → validation error, not a huge page
     r3 = await c.get(f"/api/v1/orgs/{oid}/match-runs?per_page=500", headers=h)
     assert r3.status_code == 422
+
+
+# ── R41: scenario matching normalization + template tri-state ─────
+
+
+def test_scenario_match_normalizes_case_and_format():
+    """'Brand Campaign' (free-text profile) must match a pack tagged
+    'brand-campaign' or 'brand_campaign' — raw equality scored 0.0."""
+    from types import SimpleNamespace
+
+    from app.services.matching.scoring import _entity_signals
+
+    spec = SimpleNamespace(target_entity_type="workflow_pack")
+    entity = SimpleNamespace(
+        capability_tags=[],
+        scenario_tags=["brand-campaign"],
+        tool_tags=[],
+        output_schema=[],
+        install_count=0,
+        created_at=None,
+    )
+    signals = _entity_signals(entity, spec, {"scenario": "Brand Campaign"})
+    assert signals["scenario_match"] == 1.0
+    # Demonstrated mismatch still 0.0
+    assert _entity_signals(entity, spec, {"scenario": "ecommerce"})["scenario_match"] == 0.0
+
+
+def test_template_scenario_match_tri_state():
+    """R41: template scenario_match was structurally dead — free-text
+    scenario compared == against the closed {general, ai_visual} taxonomy
+    meant every real scenario scored 0.0 on a 0.60-weight signal (all
+    templates capped at 'fair' with a false LOW_SCENARIO_MATCH gap).
+    Tri-state: normalized match → 1.0; scenario IS a known project_type but
+    differs → 0.0; scenario outside the vocabulary → 0.5 (untestable)."""
+    from types import SimpleNamespace
+
+    from app.services.matching.scoring import _entity_signals
+
+    spec = SimpleNamespace(target_entity_type="project_template")
+    tmpl = SimpleNamespace(project_type="ai_visual", difficulty="intermediate")
+
+    # Normalized match (case/space-insensitive)
+    assert (
+        _entity_signals(tmpl, spec, {"scenario": "AI Visual"})["scenario_match"] == 1.0
+    )
+    # In-vocabulary mismatch is a real 0.0
+    assert _entity_signals(tmpl, spec, {"scenario": "general"})["scenario_match"] == 0.0
+    # Free-text scenario outside the taxonomy is UNTESTABLE, not a mismatch
+    assert (
+        _entity_signals(tmpl, spec, {"scenario": "brand campaign"})["scenario_match"]
+        == 0.5
+    )
+    # No scenario at all → neutral
+    assert _entity_signals(tmpl, spec, {})["scenario_match"] == 0.5

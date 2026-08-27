@@ -16,6 +16,11 @@ from app.models.project import ReviewStatus, Submission, SubmissionReview
 
 _DIFFICULTY_ORDINAL = {"beginner": 0, "intermediate": 1, "advanced": 2, "expert": 3}
 
+# Closed project_type taxonomy (schemas/project.VALID_PROJECT_TYPES) — used to
+# distinguish "demonstrated mismatch" (0.0) from "untestable" (0.5) when
+# comparing a free-text scenario against a template's project_type.
+_PROJECT_TYPE_VOCAB = frozenset({"general", "ai_visual"})
+
 _SIGNAL_LABELS = {
     "capability_match": "Provides the requested capabilities",
     "capability_teach_match": "Teaches the required capabilities",
@@ -54,6 +59,20 @@ _SIGNAL_EVIDENCE = {
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _norm_token(value) -> str:
+    """Snake-case normalize a scenario/tag for comparison ("Brand Campaign"
+    == "brand_campaign" == "brand-campaign"). Same normalization as creator
+    evidence capability mapping — profile scenarios arrive as free text
+    (brief.project_type passthrough) while tags/types are author-cased."""
+    return str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _scenario_tag_match(scenario, tags) -> float:
+    if not scenario:
+        return 0.5
+    return 1.0 if _norm_token(scenario) in {_norm_token(t) for t in (tags or [])} else 0.0
 
 
 def _fraction_present(requested: list[str], present: set[str], default: float = 1.0) -> float:
@@ -177,9 +196,7 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
         out_types = {o.get("type") for o in (entity.output_schema or [])}
         return {
             "capability_match": _fraction_present(requested_caps, caps),
-            "scenario_match": (
-                0.5 if not scenario else (1.0 if scenario in (entity.scenario_tags or []) else 0.0)
-            ),
+            "scenario_match": _scenario_tag_match(scenario, entity.scenario_tags),
             "output_type_match": (
                 0.5 if not output_type else (1.0 if output_type in out_types else 0.0)
             ),
@@ -218,9 +235,7 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
         return {
             "capability_teach_match": _fraction_present(requested_caps, caps),
             "difficulty_fit": _difficulty_fit(difficulty, entity.difficulty),
-            "scenario_match": (
-                0.5 if not scenario else (1.0 if scenario in (entity.scenario_tags or []) else 0.0)
-            ),
+            "scenario_match": _scenario_tag_match(scenario, entity.scenario_tags),
             "time_fit": time_fit,
             "popularity": _log_popularity(entity.install_count or 0),
         }
@@ -232,10 +247,27 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
             if hasattr(entity.difficulty, "value")
             else entity.difficulty
         )
+        # Template project_type is a closed 2-value taxonomy ({general,
+        # ai_visual}) while scenario is free text (brief.project_type
+        # passthrough, ≤500 chars). Bare equality was structurally dead:
+        # with any real-world scenario set, EVERY template scored 0.0 on a
+        # 0.60-weight signal — capping perfect matches at "fair" tier and
+        # emitting a false LOW_SCENARIO_MATCH gap per template. Semantics:
+        # 1.0 = demonstrated match (normalized), 0.0 = demonstrated mismatch
+        # (scenario IS a known project_type but differs), 0.5 = untestable
+        # (scenario outside the template vocabulary — neutral, like absent).
+        if not scenario:
+            scenario_match = 0.5
+        else:
+            norm_scenario = _norm_token(scenario)
+            if norm_scenario == _norm_token(entity.project_type):
+                scenario_match = 1.0
+            elif norm_scenario in _PROJECT_TYPE_VOCAB:
+                scenario_match = 0.0
+            else:
+                scenario_match = 0.5
         return {
-            "scenario_match": (
-                0.5 if not scenario else (1.0 if scenario == entity.project_type else 0.0)
-            ),
+            "scenario_match": scenario_match,
             "difficulty_fit": _difficulty_fit(
                 requirement.get("difficulty") or requirement.get("_soft_difficulty"),
                 difficulty_val,
