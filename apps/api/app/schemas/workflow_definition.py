@@ -66,6 +66,27 @@ MAX_STEP_CONFIG_BYTES = 16 * 1024
 MAX_DEFINITION_BYTES = 256 * 1024
 MAX_INPUTS = 20
 MAX_OUTPUTS = 20
+# json.loads parses far deeper than pydantic can serialize back (~400
+# recursion cap) — a deep-nested block (ui, config) passes every structural
+# check, stores fine, then PydanticSerializationError-500s EVERY subsequent
+# detail read: the pack becomes permanently unreadable. Same class as
+# create_run's run-input depth gate (_MAX_INPUT_DEPTH).
+MAX_DEFINITION_DEPTH = 64
+
+
+def _max_depth(v) -> int:
+    """Iterative max nesting depth (recursion-free — that's the point)."""
+    best = 1
+    stack = [(v, 1)]
+    while stack:
+        cur, d = stack.pop()
+        if d > best:
+            best = d
+        if isinstance(cur, dict):
+            stack.extend((x, d + 1) for x in cur.values())
+        elif isinstance(cur, (list, tuple)):
+            stack.extend((x, d + 1) for x in cur)
+    return best
 
 
 def _default_has_ctrl(v) -> bool:
@@ -258,6 +279,20 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                 "WF_TOO_LARGE",
                 "",
                 f"Definition is {raw_bytes} bytes; max {MAX_DEFINITION_BYTES}",
+            )
+        ]
+
+    # Depth cap BEFORE model parsing: a small-but-deep payload (900 nested
+    # arrays fits in ~2KB) passes the byte cap and every structural check,
+    # persists fine, then 500s every subsequent read when pydantic tries to
+    # serialize it back (~400 recursion cap) — the pack becomes permanently
+    # unreadable through the API.
+    if _max_depth(raw) > MAX_DEFINITION_DEPTH:
+        return None, [
+            _err(
+                "WF_TOO_DEEP",
+                "",
+                f"Definition is nested deeper than {MAX_DEFINITION_DEPTH} levels",
             )
         ]
 

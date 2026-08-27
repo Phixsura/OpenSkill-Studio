@@ -940,3 +940,48 @@ async def test_oversized_page_param_422_not_500(c):
         f"/api/v1/orgs/{oid}/workflow-packs", params={"page": "1000000"}, headers=h
     )
     assert r.status_code == 200, r.text[:150]
+
+
+@pytest.mark.asyncio
+async def test_deep_nested_definition_rejected_not_stored(c):
+    """R51: a small-but-deep payload (900 nested arrays ≈ 2KB) passed the
+    byte cap and every structural check, persisted fine, then
+    PydanticSerializationError-500'd EVERY subsequent detail read — the
+    pack became permanently unreadable through the API. Depth-capped at
+    publish-side validation now (WF_TOO_DEEP)."""
+    import json as _json
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+
+    deep = _json.loads("[" * 900 + "null" + "]" * 900)
+    definition = {
+        "schema_version": 1,
+        "inputs": [],
+        "outputs": [],
+        "steps": [
+            {
+                "id": "note",
+                "type": "instruction",
+                "name": "Note",
+                "config": {"content": "hello"},
+                "inputs": [],
+                "outputs": [],
+            }
+        ],
+        "edges": [],
+        "ui": {"x": deep},
+    }
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": definition},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    codes = [e["code"] for e in r.json()["error"]["details"]]
+    assert "WF_TOO_DEEP" in codes
+
+    # The pack detail must still be readable (nothing deep was stored)
+    r2 = await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)
+    assert r2.status_code == 200, r2.text[:200]
