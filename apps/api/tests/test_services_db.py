@@ -225,6 +225,37 @@ async def test_org_delete_by_owner(db):
 
 
 @pytest.mark.asyncio
+async def test_org_delete_invalidates_both_registry_caches(db, monkeypatch):
+    """R36: delete_org bulk-archives BOTH skill and workflow packs, bypassing
+    the per-pack service methods that normally clear the registry caches. It
+    must clear BOTH cache prefixes — clearing only wfregistry:* left the just-
+    archived PUBLIC skill packs contributing a stale meta.total on warm
+    registry:search pages for the ~5min TTL."""
+    from app.services import organization as org_mod
+    from app.services.organization import OrgService
+
+    cleared: list[str] = []
+
+    async def _spy(pattern: str):
+        cleared.append(pattern)
+
+    monkeypatch.setattr(org_mod, "cache_delete_pattern", _spy, raising=False)
+    # delete_org imports cache_delete_pattern locally, so patch the source too
+    import app.core.cache as cache_mod
+
+    monkeypatch.setattr(cache_mod, "cache_delete_pattern", _spy)
+
+    user = await _user(db)
+    svc = OrgService(db)
+    org = await svc.create("OrgCacheDel", None, None, user.id)
+    await db.flush()
+    await svc.delete_org(org.id, user.id)
+
+    assert "wfregistry:*" in cleared, cleared
+    assert "registry:*" in cleared, cleared
+
+
+@pytest.mark.asyncio
 async def test_org_add_remove_member(db):
     from app.models.organization import OrgRole
     from app.services.organization import OrgService

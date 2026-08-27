@@ -199,7 +199,15 @@ class OrgService:
         )
         from app.core.cache import cache_delete_pattern
 
+        # Both registries have their own cached search pages. This bulk-archive
+        # bypasses the per-pack service methods that normally invalidate, so
+        # clear BOTH prefixes — omitting registry:* left this org's just-
+        # archived PUBLIC skill packs contributing a stale meta.total (and,
+        # for the ~5min TTL, phantom rows on any warm search page) even though
+        # the cache-hit re-filter drops the archived bodies. wfregistry:* alone
+        # was the workflow half only.
         await cache_delete_pattern("wfregistry:*")
+        await cache_delete_pattern("registry:*")
 
         await self.db.flush()
         log.info("org_deleted", org_id=org_id, by=user_id)
