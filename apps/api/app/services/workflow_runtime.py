@@ -347,6 +347,17 @@ class WorkflowRuntimeService:
             )
             existing = existing_r.scalar_one_or_none()
             if existing is not None:
+                # The uniqueness index is (org_id, key): a DIFFERENT member
+                # reusing the same key must NOT receive this run — that would
+                # hand them its id/inputs/outputs, bypassing the run-read
+                # scoping (R58). A cross-member key collision is a conflict,
+                # not a retry.
+                if existing.started_by != started_by:
+                    raise AppError(
+                        "IDEMPOTENCY_KEY_CONFLICT",
+                        "This idempotency key is already in use in this organization",
+                        409,
+                    )
                 # Idempotency must be scoped to the SAME request — reusing a
                 # key with a different installation or inputs is a client bug,
                 # not a retry; returning the old run would silently ignore the
@@ -402,6 +413,15 @@ class WorkflowRuntimeService:
                 )
                 existing = existing_r.scalar_one_or_none()
                 if existing is not None:
+                    # Same cross-member guard as the pre-check path: a
+                    # concurrent create under this key by a DIFFERENT member
+                    # must not have its run handed back to this caller.
+                    if existing.started_by != started_by:
+                        raise AppError(
+                            "IDEMPOTENCY_KEY_CONFLICT",
+                            "This idempotency key is already in use in this organization",
+                            409,
+                        ) from None
                     return existing
             raise
 

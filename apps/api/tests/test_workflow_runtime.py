@@ -1725,3 +1725,60 @@ async def test_run_reads_scoped_to_owner_or_instructor(c):
     assert (
         await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_a}", headers=h_owner)
     ).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_scoped_per_member(c):
+    """R59: the idempotency uniqueness index is (org_id, key). A DIFFERENT
+    member reusing another member's key must get 409 — not be handed that
+    run's object (id/inputs/outputs), which would bypass the R58 run-read
+    scoping via the create response."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    h_a, ua = await _auth(c)
+    h_b, ub = await _auth(c)
+    for u in (ua, ub):
+        await c.post(
+            f"/api/v1/orgs/{oid}/members",
+            json={"user_id": u["id"], "role": "student"},
+            headers=h_owner,
+        )
+    install_id = await _install(c, h_owner, oid, _definition(with_review=True))
+
+    ra = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={
+            "installation_id": install_id,
+            "inputs": {"topic": "a-private"},
+            "idempotency_key": "shared-key",
+        },
+        headers=h_a,
+    )
+    assert ra.status_code == 201, ra.text
+    run_a = ra.json()["data"]["id"]
+
+    # Student B reuses A's key (even with identical inputs) → 409, NOT A's run
+    rb = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={
+            "installation_id": install_id,
+            "inputs": {"topic": "a-private"},
+            "idempotency_key": "shared-key",
+        },
+        headers=h_b,
+    )
+    assert rb.status_code == 409, rb.text
+    assert rb.json()["error"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+
+    # A's own retry with the same key still returns A's run (true idempotency)
+    ra2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={
+            "installation_id": install_id,
+            "inputs": {"topic": "a-private"},
+            "idempotency_key": "shared-key",
+        },
+        headers=h_a,
+    )
+    assert ra2.status_code == 201, ra2.text
+    assert ra2.json()["data"]["id"] == run_a
