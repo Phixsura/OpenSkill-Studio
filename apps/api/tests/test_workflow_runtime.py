@@ -1224,7 +1224,9 @@ async def test_cancel_lost_race_records_no_event(c):
             )
             await db2.commit()
 
-        run = await svc.cancel_run(run_id, oid)
+        # is_instructor=True: this test exercises the lost-race guard, not
+        # the R57 authz gate (the seeded run has started_by=None)
+        run = await svc.cancel_run(run_id, oid, acting_user_id="x", is_instructor=True)
         await db.commit()
         # The guarded UPDATE lost — the run stays completed
         assert run.status == RunStatus.COMPLETED
@@ -1607,3 +1609,75 @@ async def test_anthropic_adapter_sanitizes_and_wraps_untrusted_inputs(monkeypatc
     assert tokens, f"no boundary marker in user prompt: {user!r}"
     assert user.startswith(tokens[0]) and user.rstrip().endswith(tokens[0])
     assert tokens[0] in system
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_scoped_to_owner_or_instructor(c):
+    """R57: cancel_run was MEMBER-ONLY with no owner check — any student
+    could cancel a peer's (or teacher's) in-flight run mid-provider-call.
+    Only the initiator or an instructor+ may cancel."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    # The run initiator: a plain student member
+    h_student, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h_owner,
+    )
+    # A DIFFERENT student who must NOT be able to cancel
+    h_other, other = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": other["id"], "role": "student"},
+        headers=h_owner,
+    )
+
+    install_id = await _install(c, h_owner, oid, _definition(with_review=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "mine"}},
+        headers=h_student,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+
+    # A peer student cannot cancel someone else's run
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_other
+    )
+    assert r2.status_code == 403, r2.text
+    assert r2.json()["error"]["code"] == "RUN_CANCEL_FORBIDDEN"
+
+    # The owner can
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_student
+    )
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["data"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_instructor_can_cancel_any(c):
+    """An instructor+ may cancel a student's run (moderation / spend control)."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    h_student, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h_owner,
+    )
+    install_id = await _install(c, h_owner, oid, _definition(with_review=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "student run"}},
+        headers=h_student,
+    )
+    run_id = r.json()["data"]["id"]
+    # Owner (instructor+) cancels the student's run
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_owner
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["data"]["status"] == "cancelled"

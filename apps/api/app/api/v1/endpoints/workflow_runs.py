@@ -136,9 +136,11 @@ async def cancel_run(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = WorkflowRuntimeService(db)
-    run = await svc.cancel_run(run_id, org_id)
+    run = await svc.cancel_run(
+        run_id, org_id, acting_user_id=user.id, is_instructor=member.role in WRITE_ROLES
+    )
     await db.commit()
     return DataResponse(data=WorkflowRunResponse.model_validate(run))
 

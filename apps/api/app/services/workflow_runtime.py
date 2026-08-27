@@ -588,8 +588,21 @@ class WorkflowRuntimeService:
 
     # ── Cancellation ──────────────────────────────────────
 
-    async def cancel_run(self, run_id: str, org_id: str) -> WorkflowRun:
+    async def cancel_run(
+        self, run_id: str, org_id: str, acting_user_id: str, is_instructor: bool = False
+    ) -> WorkflowRun:
         run = await self.get_run(run_id, org_id)
+        # Only the run's initiator or an instructor+ may cancel it. Without
+        # this any org member could cancel a peer's — or a teacher's —
+        # in-flight run mid-provider-call (griefing + wasted spend). The run
+        # started_by is nullable (SET NULL on user delete): a run whose
+        # owner is gone is instructor-only to cancel.
+        if not is_instructor and run.started_by != acting_user_id:
+            raise AppError(
+                "RUN_CANCEL_FORBIDDEN",
+                "Only the run initiator or an instructor can cancel this run",
+                403,
+            )
         if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
             raise AppError("RUN_ALREADY_FINISHED", "Run is already in a terminal state", 409)
 
