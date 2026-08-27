@@ -63,6 +63,8 @@ All carry weight 1.0 (verified); the schema reserves lower weights for future se
 1. A human instructor **offers**: `creator_assignments` row with `assigned_by` (human FK with SET NULL — the column is nullable so deleting the assigning user preserves the assignment record), optional `match_run_id` + `override_reason` (assigning off-shortlist is allowed and recorded). Duplicate → 409 `ASSIGNMENT_EXISTS`. Offers against archived projects are rejected 409 `PROJECT_NOT_AVAILABLE` (a dead offer could never be accepted, and the unique index would block any future re-offer).
 2. The **creator responds**: accept/decline, self-only (403 otherwise). The response is a conditional UPDATE guarded on `status='offered'` — a repeat or concurrent response loses cleanly with 409 `ASSIGNMENT_ALREADY_RESPONDED`; accepting an offer whose project was archived mid-offer is rejected 409 `PROJECT_NOT_AVAILABLE`.
 
+Assignment listing is role-scoped: instructors+ see the org's assignments; every other member sees **only their own** — an unscoped list would expose every creator's offer/decline history and the assigner's `override_reason` (recorded discretion) to any student.
+
 **No auto-assignment code path exists** — there is no API surface or service method that creates an accepted assignment without both the human offer and the creator's response.
 
 ### GDPR Art 22 alignment

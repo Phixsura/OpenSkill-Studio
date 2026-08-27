@@ -310,7 +310,13 @@ async def list_assignments(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = CreatorMatchingService(db)
-    assignments = await svc.list_assignments(org_id, project_id=project_id)
+    # Instructors+ see the org's assignments; everyone else sees only their
+    # OWN offers — an unscoped list exposes every creator's offer/decline
+    # history and the assigner's override_reason to any student.
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    assignments = await svc.list_assignments(
+        org_id, project_id=project_id, only_user_id=only_user_id
+    )
     return DataResponse(data=[AssignmentResponse.model_validate(a) for a in assignments])

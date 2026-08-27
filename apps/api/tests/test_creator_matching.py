@@ -908,3 +908,45 @@ async def test_rubric_avg_normalized_per_project_max_score(c):
         _, signals = signal_rows[0]
         # 8/10 → 0.8 (old fixed-100 code produced 8/100 = 0.08)
         assert signals["rubric_avg"] == pytest.approx(0.8)
+
+
+@pytest.mark.asyncio
+async def test_assignment_list_scoped_for_students(c):
+    """R49: a student sees only THEIR OWN assignments — an unscoped list
+    exposed every creator's offer/decline history and the assigner's
+    override_reason (recorded discretion) to any org member."""
+    h_owner, _ = await _auth(c, "Owner")
+    oid = await _org(c, h_owner)
+    h_a, creator_a = await _auth(c, "Creator A")
+    h_b, creator_b = await _auth(c, "Creator B")
+    await _add_member(c, h_owner, oid, creator_a)
+    await _add_member(c, h_owner, oid, creator_b)
+    project_id = await _project(c, h_owner, oid)
+
+    for uid in (creator_a["id"], creator_b["id"]):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/creator-assignments",
+            json={
+                "project_id": project_id,
+                "user_id": uid,
+                "override_reason": "private assigner note",
+            },
+            headers=h_owner,
+        )
+        assert r.status_code == 201, r.text
+
+    # Owner (instructor+) sees both
+    r_owner = await c.get(f"/api/v1/orgs/{oid}/creator-assignments", headers=h_owner)
+    assert len(r_owner.json()["data"]) == 2
+
+    # Creator A sees ONLY their own — not B's offer or its override_reason
+    r_a = await c.get(f"/api/v1/orgs/{oid}/creator-assignments", headers=h_a)
+    rows_a = r_a.json()["data"]
+    assert len(rows_a) == 1, rows_a
+    assert rows_a[0]["user_id"] == creator_a["id"]
+
+    # Same with the project filter
+    r_a2 = await c.get(
+        f"/api/v1/orgs/{oid}/creator-assignments?project_id={project_id}", headers=h_a
+    )
+    assert [x["user_id"] for x in r_a2.json()["data"]] == [creator_a["id"]]

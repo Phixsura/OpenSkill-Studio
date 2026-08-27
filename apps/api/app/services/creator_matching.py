@@ -551,10 +551,22 @@ class CreatorMatchingService:
         return assignment
 
     async def list_assignments(
-        self, org_id: str, project_id: str | None = None
+        self,
+        org_id: str,
+        project_id: str | None = None,
+        only_user_id: str | None = None,
     ) -> list[CreatorAssignment]:
+        """List assignments; only_user_id scopes to one creator's own offers.
+
+        Non-instructor members must pass only_user_id=their id — an
+        unscoped list exposes every creator's offer/decline history and the
+        assigner's override_reason (recorded discretion, ADR-013) to any
+        student in the org.
+        """
         query = select(CreatorAssignment).where(CreatorAssignment.org_id == org_id)
         if project_id:
             query = query.where(CreatorAssignment.project_id == project_id)
+        if only_user_id:
+            query = query.where(CreatorAssignment.user_id == only_user_id)
         result = await self.db.execute(query.order_by(CreatorAssignment.created_at.desc()))
         return list(result.scalars().all())
