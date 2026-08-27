@@ -985,3 +985,60 @@ async def test_deep_nested_definition_rejected_not_stored(c):
     # The pack detail must still be readable (nothing deep was stored)
     r2 = await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)
     assert r2.status_code == 200, r2.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_publish_strips_org_local_pinned_binding(c):
+    """R60-#6: pinned_offering_id points at THIS org's offering row. Left in
+    the released manifest, it (a) bricks every cross-org install — the
+    installer's _resolve_offering rejects a foreign-org offering →
+    NO_ELIGIBLE_PROVIDER on every run — and (b) leaks the author's provider
+    setup. publish must strip pinned_offering_id and reset binding_mode to
+    auto in the manifest definition."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    definition = _valid_definition()
+    # Author pins the provider_action to a local offering id
+    gen = next(s for s in definition["steps"] if s["id"] == "generate")
+    gen["config"] = {
+        "capability": "image_generation",
+        "binding_mode": "pinned",
+        "pinned_offering_id": "01LOCALOFFERINGID000000000",
+    }
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": definition},
+        headers=h,
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+        json={"version": "1.0.0"},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+
+    # Inspect the stored release manifest
+    from sqlalchemy import select as _sel
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_pack import WorkflowPackRelease
+
+    async with AsyncSessionLocal() as db:
+        rel = (
+            await db.execute(_sel(WorkflowPackRelease).where(WorkflowPackRelease.pack_id == pid))
+        ).scalars().first()
+        cfg = next(
+            s["config"]
+            for s in rel.manifest["definition"]["steps"]
+            if s["id"] == "generate"
+        )
+        assert "pinned_offering_id" not in cfg
+        assert cfg.get("binding_mode") == "auto"
+        # capability preserved
+        assert cfg["capability"] == "image_generation"
+
+    # The author's WORKING definition is untouched (only the release is scrubbed)
+    d = (await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)).json()["data"]
+    working_gen = next(s for s in d["definition"]["steps"] if s["id"] == "generate")
+    assert working_gen["config"]["pinned_offering_id"] == "01LOCALOFFERINGID000000000"

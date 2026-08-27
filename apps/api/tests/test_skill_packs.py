@@ -130,12 +130,13 @@ async def test_update_pack(c):
     oid = await _org(c, h)
 
     pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Old Name"}, headers=h)).json()["data"]["id"]
+    # Non-visibility fields update freely. (Direct visibility=public is now
+    # gated behind approval — see test_update_pack_public_requires_approval.)
     r = await c.put(f"/api/v1/orgs/{oid}/packs/{pid}", json={
-        "name": "New Name", "visibility": "public",
+        "name": "New Name",
     }, headers=h)
     assert r.status_code == 200
     assert r.json()["data"]["name"] == "New Name"
-    assert r.json()["data"]["visibility"] == "public"
 
 
 @pytest.mark.asyncio
@@ -1031,3 +1032,48 @@ async def test_delete_skill_in_pack_still_listed(c):
     r = await c.get(f"/api/v1/orgs/{oid}/packs/{pid}/skills", headers=h)
     assert r.status_code == 200
     assert len(r.json()["data"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_update_pack_public_requires_approval(c):
+    """R60-#5: a direct PUT visibility=public on an unapproved skill pack
+    bypassed the review gate — the registry serves review_status IS NULL OR
+    approved, so the pack became publicly discoverable without review. Mirror
+    of the workflow-pack approval gate."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "GateMe"}, headers=h)).json()["data"]["id"]
+
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/packs/{pid}", json={"visibility": "public"}, headers=h
+    )
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "APPROVAL_REQUIRED"
+
+    # The documented path works: submit → approve → then it's public
+    assert (await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)).status_code == 200
+    assert (await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)).status_code == 200
+    detail = (await c.get(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)).json()["data"]
+    assert detail["visibility"] == "public"
+    assert detail["review_status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_update_approved_pack_card_field_voids_approval(c):
+    """R60-#5b: editing a registry card field on an APPROVED skill pack must
+    reset approval (else innocuous-approve then swap the public card past the
+    gate)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "CardSwap"}, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
+
+    # Rewrite the public-facing summary → approval voided, drops to unlisted
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/packs/{pid}", json={"summary": "swapped content"}, headers=h
+    )
+    assert r.status_code == 200, r.text[:200]
+    d = r.json()["data"]
+    assert d["review_status"] != "approved"
+    assert d["visibility"] != "public"

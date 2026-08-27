@@ -774,7 +774,8 @@ async def test_eval_result_evidence_via_confirmed_production_draft(c):
                 type=EvalType.SUBMISSION_REVIEW,
                 status=EvalStatus.COMPLETED,
                 config={},
-                result={"overall_score": 91},
+                # Real EvaluationService shape: total_score/max_score
+                result={"total_score": 91, "max_score": 100, "scores": []},
                 completed_at=datetime.now(UTC),
             )
         )
@@ -995,3 +996,190 @@ async def test_creator_match_gated_to_instructors(c):
     assert r4.status_code == 404  # uniform 404 — run ids stay non-enumerable
     r5 = await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=h_owner)
     assert r5.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_eval_result_evidence_scores_from_total_score(c):
+    """R60-#2: eval_result read task.result['overall_score'/'score'] which
+    EvaluationService never stores (it stores total_score/max_score) — score
+    was ALWAYS None, so every eval_result row scored as a bare 1.0 in
+    Bayesian shrinkage, discarding the real grade. Now rescales
+    total_score/max_score to 0-100."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    project_id = await _project(c, h, oid)
+
+    from datetime import UTC, datetime
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.composer import SolutionDraft
+    from app.models.evaluation import EvalStatus, EvalType, EvaluationTask
+    from app.models.project import Submission, SubmissionStatus
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            SolutionDraft(
+                org_id=oid,
+                draft_type="production_solution",
+                payload={"required_capabilities": [{"capability": "image_generation"}]},
+                engine_version="1.0.0",
+                status="confirmed",
+                materialized_entity_id=project_id,
+                created_by=owner["id"],
+            )
+        )
+        sub = Submission(
+            org_id=oid, project_id=project_id, user_id=owner["id"],
+            status=SubmissionStatus.APPROVED, submitted_at=datetime.now(UTC),
+        )
+        db.add(sub)
+        await db.flush()
+        db.add(
+            EvaluationTask(
+                org_id=oid, submission_id=sub.id, type=EvalType.SUBMISSION_REVIEW,
+                status=EvalStatus.COMPLETED, config={},
+                # The real shape EvaluationService stores
+                result={"total_score": 45, "max_score": 60, "scores": []},
+                completed_at=datetime.now(UTC),
+            )
+        )
+        await db.commit()
+
+    from sqlalchemy import select
+
+    from app.models.composer import CreatorCapabilityEvidence
+    from app.services.creator_matching import CreatorMatchingService
+
+    async with AsyncSessionLocal() as db:
+        await CreatorMatchingService(db).rebuild_evidence(oid, owner["id"])
+        await db.commit()
+        rows = list(
+            (
+                await db.execute(
+                    select(CreatorCapabilityEvidence).where(
+                        CreatorCapabilityEvidence.org_id == oid,
+                        CreatorCapabilityEvidence.evidence_type == "eval_result",
+                    )
+                )
+            ).scalars().all()
+        )
+        assert len(rows) == 1
+        # 45/60 * 100 = 75.0 — NOT None
+        assert rows[0].score is not None
+        assert float(rows[0].score) == pytest.approx(75.0)
+
+
+@pytest.mark.asyncio
+async def test_badge_evidence_requires_full_completion(c):
+    """R60-#1: a SkillBadge row exists at ANY progress (completion_pct =
+    done/total), so a 20% badge is not mastery. Only a 100% badge is
+    capability evidence."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"C-{uuid.uuid4().hex[:4]}"}, headers=h)
+    ).json()["data"]["id"]
+    skill_id = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={"name": f"S-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
+                  "difficulty": "beginner", "category_id": cat, "tags": ["image_generation"]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.portfolio import SkillBadge
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            SkillBadge(
+                user_id=owner["id"], skill_id=skill_id, org_id=oid,
+                skill_name="S", category_name="C", completion_pct=20,
+            )
+        )
+        await db.commit()
+
+    from sqlalchemy import select
+
+    from app.models.composer import CreatorCapabilityEvidence
+    from app.services.creator_matching import CreatorMatchingService
+
+    async with AsyncSessionLocal() as db:
+        await CreatorMatchingService(db).rebuild_evidence(oid, owner["id"])
+        await db.commit()
+        badge_rows = list(
+            (
+                await db.execute(
+                    select(CreatorCapabilityEvidence).where(
+                        CreatorCapabilityEvidence.org_id == oid,
+                        CreatorCapabilityEvidence.evidence_type == "badge",
+                    )
+                )
+            ).scalars().all()
+        )
+        assert badge_rows == []  # 20% badge is not evidence
+
+    # Bump to 100% → now it counts
+    async with AsyncSessionLocal() as db:
+        b = (await db.execute(select(SkillBadge).where(SkillBadge.skill_id == skill_id))).scalar_one()
+        b.completion_pct = 100
+        await db.commit()
+    async with AsyncSessionLocal() as db:
+        await CreatorMatchingService(db).rebuild_evidence(oid, owner["id"])
+        await db.commit()
+        badge_rows = list(
+            (
+                await db.execute(
+                    select(CreatorCapabilityEvidence).where(
+                        CreatorCapabilityEvidence.org_id == oid,
+                        CreatorCapabilityEvidence.evidence_type == "badge",
+                    )
+                )
+            ).scalars().all()
+        )
+        assert any(r.capability_key == "image_generation" for r in badge_rows)
+
+
+@pytest.mark.asyncio
+async def test_creator_evidence_signal_folds_preferred_caps(c):
+    """R60-#3: build_match_requirement demotes extracted required_caps to
+    preferred_capabilities (and confirm doesn't re-promote). _creator_signals
+    read required_capabilities ONLY → the 0.45-weight capability_evidence
+    signal fell into requirement-blind volume mode. It must fold preferred
+    caps like the skill_pack path, so a creator with ONLY the requested
+    capability's evidence scores on it (not on unrelated volume)."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    # owner has ONE image_generation evidence row + MANY irrelevant ones.
+    # Volume mode (the bug) averages ALL of them → high. Folded mode scores
+    # only the requested image_generation cap → the single-row shrinkage.
+    await _completed_skill(c, h, oid, owner["id"], tag="image_generation")
+    for tag in ("voice_generation", "video_editing", "upscale", "background_removal"):
+        await _completed_skill(c, h, oid, owner["id"], tag=tag)
+
+    from types import SimpleNamespace
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.creator_matching import CreatorMatchingService
+    from app.services.matching.scoring import _creator_signals
+
+    async with AsyncSessionLocal() as db:
+        await CreatorMatchingService(db).rebuild_evidence(oid, owner["id"])
+        await db.commit()
+        spec = SimpleNamespace(org_id=oid, target_entity_type="creator")
+        # Capability arrives ONLY under preferred_capabilities (the demoted
+        # extraction shape) — required_capabilities empty
+        rows = await _creator_signals(
+            db,
+            [{"id": owner["id"], "last_login_at": None}],
+            spec,
+            {"preferred_capabilities": ["image_generation"]},
+        )
+        _, signals = rows[0]
+        # Folded mode: only the 1 image_generation row counts → n=1, base 1.0,
+        # (1/4)*1.0 + (3/4)*0.5 = 0.625. Volume mode (bug) would average all
+        # 5 rows (n=5) → (5/8)*1.0 + (3/8)*0.5 = 0.8125. The gap proves the
+        # signal is requirement-scoped, not volume-blind.
+        assert signals["capability_evidence"] == pytest.approx(0.625)

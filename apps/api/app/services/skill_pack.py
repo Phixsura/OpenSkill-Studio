@@ -134,12 +134,42 @@ class SkillPackService:
 
     async def update_pack(self, pack_id: str, org_id: str, **fields) -> SkillPack:
         pack = await self.get_pack(pack_id, org_id)
+        # Approval gate (mirror of WorkflowPackService.update_pack): PUBLIC
+        # visibility is only reachable via submit-review → approve. A direct
+        # PUT visibility=public on an unapproved pack would list it in the
+        # registry (which serves review_status IS NULL OR approved),
+        # bypassing review entirely.
+        requested_visibility = fields.get("visibility")
+        if (
+            requested_visibility in ("public", PackVisibility.PUBLIC)
+            and pack.review_status != "approved"
+        ):
+            raise AppError(
+                "APPROVAL_REQUIRED",
+                "Public visibility requires approval — submit for review first",
+                422,
+            )
         if fields.get("name"):
             slug = self._generate_slug(fields["name"])
             pack.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
+        # Card fields drive the public registry card — editing any on an
+        # APPROVED pack voids approval (else innocuous-approve then swap the
+        # public card past the gate), same as WorkflowPackService.
+        _card_fields = (
+            "name", "summary", "description", "scenario_tags",
+            "tool_tags", "capability_tags", "difficulty", "cover_image_key",
+        )
+        card_changed = any(
+            key in _card_fields and value is not None and getattr(pack, key, None) != value
+            for key, value in fields.items()
+        )
         for k, v in fields.items():
             if v is not None and hasattr(pack, k):
                 setattr(pack, k, v)
+        if card_changed and pack.review_status == "approved":
+            pack.review_status = None
+            if pack.visibility == PackVisibility.PUBLIC:
+                pack.visibility = PackVisibility.UNLISTED
         try:
             await self.db.flush()
         except IntegrityError:

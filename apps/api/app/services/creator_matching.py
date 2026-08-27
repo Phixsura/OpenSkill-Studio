@@ -199,6 +199,13 @@ class CreatorMatchingService:
             .where(SkillBadge.org_id == org_id, SkillBadge.user_id == user_id)
         )
         for badge, skill in badge_r.all():
+            # A SkillBadge row is created/updated on ANY progress
+            # (completion_pct = exercises_done/total), so a badge at 20% —
+            # or one earned by auto-graded wrong MCQ attempts — exists long
+            # before the skill is mastered. Only a FULLY completed badge
+            # (100%) is capability evidence; a partial badge attests nothing.
+            if (badge.completion_pct or 0) < 100:
+                continue
             for cap in self._map_tags(list(skill.tags or []), keys):
                 add(cap, "badge", badge.id, badge.completed_at or badge.created_at)
 
@@ -284,9 +291,20 @@ class CreatorMatchingService:
         eval_caps = await self._project_capabilities(eval_projects_by_id, keys)
         for task, submission in eval_rows:
             for cap in eval_caps.get(submission.project_id, []):
-                raw = task.result.get("overall_score", task.result.get("score"))
+                # EvaluationService stores {total_score, max_score, scores,
+                # ...} (evaluation._parse_evaluation_response). The keys read
+                # before ("overall_score"/"score") never exist, so score was
+                # ALWAYS None → every eval_result row scored as bare 1.0*weight
+                # in Bayesian shrinkage, discarding the actual grade. Rescale
+                # total_score by its max_score to the 0-100 evidence scale
+                # (max_score varies with the rubric, like SubmissionReview).
+                raw = task.result.get("total_score")
+                raw_max = task.result.get("max_score")
                 score = None
-                if isinstance(raw, int | float):
+                if isinstance(raw, int | float) and isinstance(raw_max, int | float):
+                    score = min(float(raw) / max(float(raw_max), 1.0) * 100.0, 100.0)
+                elif isinstance(raw, int | float):
+                    # No max recorded — fall back to clamping the raw value
                     score = min(float(raw), 100.0)
                 add(cap, "eval_result", task.id, task.completed_at or task.created_at, score)
 

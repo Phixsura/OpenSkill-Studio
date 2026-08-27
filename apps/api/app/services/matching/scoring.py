@@ -284,7 +284,23 @@ async def _creator_signals(
     user_ids = [c["id"] for c in survivors]
     if not user_ids:
         return []
-    required_caps = requirement.get("required_capabilities") or []
+    # Fold preferred into the requested set — same R14 demotion the
+    # skill_pack path (and score()'s vacuous-signal computation) already
+    # account for: build_match_requirement moves extracted required_caps to
+    # preferred_capabilities, and confirm() does NOT re-promote them. Reading
+    # required_capabilities ALONE meant the normal extract→confirm flow left
+    # this empty, dropping capability_evidence (the 0.45-weight dominant
+    # creator signal) into requirement-blind volume mode — a creator with 50
+    # irrelevant evidence rows outranking one with 5 perfectly relevant, and
+    # a false "verified" CAPABILITY_EVIDENCE reason chip. S2 (constraints.py)
+    # still hard-filters on required_capabilities only; scoring ranks on the
+    # full requested set.
+    required_caps = list(
+        dict.fromkeys(
+            (requirement.get("required_capabilities") or [])
+            + (requirement.get("preferred_capabilities") or [])
+        )
+    )
 
     # Evidence rows in bulk
     evidence_r = await db.execute(

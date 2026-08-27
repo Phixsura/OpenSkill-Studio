@@ -271,10 +271,29 @@ class WorkflowPackService:
         if version in existing_versions:
             raise AppError("VERSION_EXISTS", f"Version {version} already released", 409)
 
-        # Build the immutable manifest — ui block excluded from content (R4)
-        definition_for_manifest = {
-            k: v for k, v in pack.definition.items() if k != "ui"
-        }
+        # Build the immutable manifest — ui block excluded from content (R4).
+        # Also strip ORG-LOCAL binding hints from every provider_action step:
+        # pinned_offering_id points at THIS org's offering row, so a pinned
+        # release would (a) fail every cross-org install — the installer's
+        # _resolve_offering rejects an offering whose connection.org_id !=
+        # run.org_id → NO_ELIGIBLE_PROVIDER on every run, and (b) leak the
+        # author org's provider setup (the registry preview strips these for
+        # exactly this reason, but the distributed manifest did not).
+        # Binding is an INSTALL-TIME per-org decision (workflow_step_bindings),
+        # never baked into the shared release.
+        import copy as _copy
+
+        definition_for_manifest = _copy.deepcopy(
+            {k: v for k, v in pack.definition.items() if k != "ui"}
+        )
+        for _step in definition_for_manifest.get("steps", []):
+            _cfg = _step.get("config")
+            if isinstance(_cfg, dict) and _step.get("type") == "provider_action":
+                _cfg.pop("pinned_offering_id", None)
+                # binding_mode resets to the default "auto" — a pinned/preferred
+                # mode without the org-local offering id is meaningless downstream
+                if _cfg.get("binding_mode") in ("pinned", "preferred"):
+                    _cfg["binding_mode"] = "auto"
         manifest = {
             "schema_version": 1,
             "version": version,
