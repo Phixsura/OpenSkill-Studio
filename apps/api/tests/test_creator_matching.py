@@ -623,3 +623,248 @@ async def test_respond_race_loser_gets_409_not_double_write(c):
     async with AsyncSessionLocal() as db:
         final = await db.get(CreatorAssignment, aid)
         assert final.status == "declined"
+
+
+# ── R39: project→capability resolution for evidence sources 3/4/6 ──
+# project.project_type is restricted to {general, ai_visual} (schemas/project
+# VALID_PROJECT_TYPES) which shares no member with capability keys — deriving
+# capability from it alone made approved_submission and eval_result evidence
+# structurally dead. Capability must resolve via the linked brief or the
+# confirmed production draft that materialized the project.
+
+
+async def _seed_project_with_brief(c, h, oid, brief_project_type):
+    """Brief (free-text project_type) → converted project (client_brief_id set)."""
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": f"Brief-{uuid.uuid4().hex[:4]}",
+                "client_name": "Client",
+                "project_type": brief_project_type,
+                "objective": "Deliver production-grade generated imagery",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/convert",
+        json={"rubric": [{"criterion": "Overall", "max_score": 100}]},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["data"]["id"], bid
+
+
+async def _seed_approved_review(oid, project_id, user_id, score=80):
+    from datetime import UTC, datetime
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.project import (
+        ReviewerType,
+        ReviewStatus,
+        Submission,
+        SubmissionReview,
+        SubmissionStatus,
+    )
+
+    async with AsyncSessionLocal() as db:
+        sub = Submission(
+            org_id=oid,
+            project_id=project_id,
+            user_id=user_id,
+            status=SubmissionStatus.APPROVED,
+            submitted_at=datetime.now(UTC),
+        )
+        db.add(sub)
+        await db.flush()
+        review = SubmissionReview(
+            submission_id=sub.id,
+            reviewer_type=ReviewerType.INSTRUCTOR,
+            status=ReviewStatus.APPROVED,
+            score=score,
+        )
+        db.add(review)
+        await db.commit()
+        return sub.id
+
+
+@pytest.mark.asyncio
+async def test_approved_submission_evidence_via_brief_project(c):
+    """Approved review on a brief-converted project attests the brief's
+    capability (project.project_type='ai_visual' alone never matches)."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    project_id, _ = await _seed_project_with_brief(c, h, oid, "image_generation")
+    await _seed_approved_review(oid, project_id, owner["id"], score=80)
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.composer import CreatorCapabilityEvidence
+    from app.services.creator_matching import CreatorMatchingService
+
+    async with AsyncSessionLocal() as db:
+        await CreatorMatchingService(db).rebuild_evidence(oid, owner["id"])
+        await db.commit()
+        rows = list(
+            (
+                await db.execute(
+                    select(CreatorCapabilityEvidence).where(
+                        CreatorCapabilityEvidence.org_id == oid,
+                        CreatorCapabilityEvidence.user_id == owner["id"],
+                        CreatorCapabilityEvidence.evidence_type == "approved_submission",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1, [r.capability_key for r in rows]
+        assert rows[0].capability_key == "image_generation"
+        # Review score 80 on a max_score-100 project → stored as 80.0
+        assert float(rows[0].score) == pytest.approx(80.0)
+
+
+@pytest.mark.asyncio
+async def test_eval_result_evidence_via_confirmed_production_draft(c):
+    """COMPLETED eval on a project materialized from a confirmed production
+    draft attests the draft's required_capabilities."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    project_id = await _project(c, h, oid)  # project_type=general, no brief
+
+    from datetime import UTC, datetime
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.composer import SolutionDraft
+    from app.models.evaluation import EvalStatus, EvalType, EvaluationTask
+    from app.models.project import Submission, SubmissionStatus
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            SolutionDraft(
+                org_id=oid,
+                draft_type="production_solution",
+                payload={
+                    "required_capabilities": [
+                        {"capability": "image_to_video", "features": []},
+                        {"capability": "voice_generation", "features": []},
+                    ]
+                },
+                engine_version="1.0.0",
+                status="confirmed",
+                materialized_entity_id=project_id,
+                created_by=owner["id"],
+            )
+        )
+        sub = Submission(
+            org_id=oid,
+            project_id=project_id,
+            user_id=owner["id"],
+            status=SubmissionStatus.APPROVED,
+            submitted_at=datetime.now(UTC),
+        )
+        db.add(sub)
+        await db.flush()
+        db.add(
+            EvaluationTask(
+                org_id=oid,
+                submission_id=sub.id,
+                type=EvalType.SUBMISSION_REVIEW,
+                status=EvalStatus.COMPLETED,
+                config={},
+                result={"overall_score": 91},
+                completed_at=datetime.now(UTC),
+            )
+        )
+        await db.commit()
+
+    from sqlalchemy import select
+
+    from app.models.composer import CreatorCapabilityEvidence
+    from app.services.creator_matching import CreatorMatchingService
+
+    async with AsyncSessionLocal() as db:
+        await CreatorMatchingService(db).rebuild_evidence(oid, owner["id"])
+        await db.commit()
+        rows = list(
+            (
+                await db.execute(
+                    select(CreatorCapabilityEvidence).where(
+                        CreatorCapabilityEvidence.org_id == oid,
+                        CreatorCapabilityEvidence.user_id == owner["id"],
+                        CreatorCapabilityEvidence.evidence_type == "eval_result",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        caps = sorted(r.capability_key for r in rows)
+        assert caps == ["image_to_video", "voice_generation"], caps
+        assert all(float(r.score) == pytest.approx(91.0) for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_commercial_project_evidence_normalizes_free_text(c):
+    """'Image Generation' typed in a brief's free-text project_type attests
+    image_generation (snake-case normalization, not bare lowercasing)."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    creator_h, creator = await _auth(c, name="FreeText")
+    await _add_member(c, h, oid, creator)
+
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Campaign visuals",
+                "client_name": "Client",
+                "project_type": "Image Generation",
+                "objective": "Deliver campaign hero imagery for the brand",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    # open → apply → accept
+    r = await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=h)
+    assert r.status_code == 200, r.text
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/apply",
+        json={"note": "I can deliver this"},
+        headers=creator_h,
+    )
+    assert r.status_code == 201, r.text
+    app_id = r.json()["data"]["id"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
+        json={"status": "accepted"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.composer import CreatorCapabilityEvidence
+    from app.services.creator_matching import CreatorMatchingService
+
+    async with AsyncSessionLocal() as db:
+        await CreatorMatchingService(db).rebuild_evidence(oid, creator["id"])
+        await db.commit()
+        rows = list(
+            (
+                await db.execute(
+                    select(CreatorCapabilityEvidence).where(
+                        CreatorCapabilityEvidence.org_id == oid,
+                        CreatorCapabilityEvidence.user_id == creator["id"],
+                        CreatorCapabilityEvidence.evidence_type == "commercial_project",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1, [r.capability_key for r in rows]
+        assert rows[0].capability_key == "image_generation"

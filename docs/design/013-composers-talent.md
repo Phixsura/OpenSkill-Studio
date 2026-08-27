@@ -41,14 +41,16 @@ Item statuses: `included | waived | cut_for_budget | removed_by_user` (the last 
 
 **Evidence, not declarations.** `creator_capability_evidence` is a derived decomposition table rebuilt idempotently (delete + rebuild per user) from six platform-verified sources:
 
-| evidence_type | Source | Score (stored 0–100) |
-|---|---|---|
-| `skill_completed` | SkillProgress COMPLETED (skill tags → capability) | best_score |
-| `badge` | SkillBadge | — |
-| `approved_submission` | SubmissionReview APPROVED | review score |
-| `commercial_project` | BriefApplication ACCEPTED | — |
-| `workflow_run` | WorkflowRun COMPLETED (capabilities from snapshot) | — |
-| `eval_result` | EvaluationTask COMPLETED | result score |
+| evidence_type | Source | Capability derivation | Score (stored 0–100) |
+|---|---|---|---|
+| `skill_completed` | SkillProgress COMPLETED | skill tags → capability (snake-cased exact match) | best_score |
+| `badge` | SkillBadge | skill tags → capability | — |
+| `approved_submission` | SubmissionReview APPROVED | project resolution (below) | review score |
+| `commercial_project` | BriefApplication ACCEPTED | brief.project_type, snake-cased exact match | — |
+| `workflow_run` | WorkflowRun COMPLETED | provider_action capabilities from snapshot | — |
+| `eval_result` | EvaluationTask COMPLETED | project resolution (below) | result score |
+
+**Project → capability resolution** (sources 3/6): `project.project_type` is a coarse UX taxonomy (`{general, ai_visual}`) that never intersects capability keys, so a submission's capability resolves through, in order: (1) the project's own `project_type` (future-proof), (2) the linked client brief's free-text `project_type` when it snake-cases to an exact capability key, (3) the confirmed production-solution draft that materialized the project (`payload.required_capabilities` — the platform-verified rollup from workflow release manifests). All matching capabilities are attested, deduplicated per project; both lookups are batched.
 
 Scores are stored on a single 0–100 scale and normalized to 0–1 exactly once, at scoring time — a mixed-scale store double-divides and inverts rankings.
 

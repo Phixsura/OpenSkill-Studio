@@ -50,14 +50,80 @@ class CreatorMatchingService:
         return {p.id: p for p in result.scalars().all()}
 
     @staticmethod
-    def _map_tags(tags: list[str] | None, keys: set[str]) -> list[str]:
+    def _norm_cap(value) -> str:
+        """Normalize free text toward a capability key (snake-casing)."""
+        return str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+    @classmethod
+    def _map_tags(cls, tags: list[str] | None, keys: set[str]) -> list[str]:
         """Map skill tags to capability keys (exact match after snake-casing)."""
         mapped = []
         for tag in tags or []:
-            candidate = str(tag).strip().lower().replace(" ", "_").replace("-", "_")
+            candidate = cls._norm_cap(tag)
             if candidate in keys:
                 mapped.append(candidate)
         return mapped
+
+    async def _project_capabilities(
+        self, projects_by_id: dict, keys: set[str]
+    ) -> dict[str, list[str]]:
+        """Resolve each project to the capability keys its work attests.
+
+        project.project_type is a coarse UX taxonomy ({general, ai_visual})
+        that never intersects capability keys, so on its own it can never
+        attest a capability. The real signals, checked in order per project:
+          1. project.project_type itself (future-proof, currently never hits),
+          2. the linked client brief's project_type (free text — counts only
+             when it normalizes to an exact capability key),
+          3. the confirmed production-solution draft that materialized the
+             project (payload.required_capabilities — the platform-verified
+             capability rollup from workflow release manifests).
+        Both lookups are batched (no per-project queries).
+        """
+        caps_by_project: dict[str, list[str]] = {}
+        if not projects_by_id:
+            return caps_by_project
+
+        brief_ids = {
+            p.client_brief_id for p in projects_by_id.values() if p.client_brief_id
+        }
+        briefs_by_id: dict[str, ClientBrief] = {}
+        if brief_ids:
+            brief_r = await self.db.execute(
+                select(ClientBrief).where(ClientBrief.id.in_(brief_ids))
+            )
+            briefs_by_id = {b.id: b for b in brief_r.scalars().all()}
+
+        from app.models.composer import SolutionDraft
+
+        draft_r = await self.db.execute(
+            select(SolutionDraft).where(
+                SolutionDraft.draft_type == "production_solution",
+                SolutionDraft.status == "confirmed",
+                SolutionDraft.materialized_entity_id.in_(set(projects_by_id)),
+            )
+        )
+        draft_caps: dict[str, list[str]] = {}
+        for draft in draft_r.scalars().all():
+            raw = (draft.payload or {}).get("required_capabilities", [])
+            for cap in raw if isinstance(raw, list) else []:
+                key = cap.get("capability", "") if isinstance(cap, dict) else ""
+                if isinstance(key, str) and key:
+                    draft_caps.setdefault(draft.materialized_entity_id, []).append(key)
+
+        for pid, project in projects_by_id.items():
+            ordered: list[str] = []
+            candidates = [project.project_type]
+            brief = briefs_by_id.get(project.client_brief_id or "")
+            if brief:
+                candidates.append(brief.project_type)
+            candidates.extend(draft_caps.get(pid, []))
+            for raw_cap in candidates:
+                cap = self._norm_cap(raw_cap)
+                if cap in keys and cap not in ordered:
+                    ordered.append(cap)
+            caps_by_project[pid] = ordered
+        return caps_by_project
 
     async def rebuild_evidence(self, org_id: str, user_id: str) -> int:
         """Idempotent per-user rebuild: delete + re-derive from verified sources."""
@@ -136,7 +202,9 @@ class CreatorMatchingService:
             for cap in self._map_tags(list(skill.tags or []), keys):
                 add(cap, "badge", badge.id, badge.completed_at or badge.created_at)
 
-        # 3. Approved submission reviews (capability from project_type)
+        # 3. Approved submission reviews (capability via project resolution:
+        # project_type → linked brief → confirmed production draft — see
+        # _project_capabilities; bare project_type never matches a key)
         rev_r = await self.db.execute(
             select(SubmissionReview, Submission)
             .join(Submission, Submission.id == SubmissionReview.submission_id)
@@ -150,10 +218,10 @@ class CreatorMatchingService:
         # Batch-load referenced projects (avoid per-row db.get N+1)
         review_project_ids = {submission.project_id for _, submission in review_rows}
         projects_by_id = await self._load_projects(review_project_ids)
+        review_caps = await self._project_capabilities(projects_by_id, keys)
         for review, submission in review_rows:
             project = projects_by_id.get(submission.project_id)
-            cap = (project.project_type or "").strip().lower() if project else ""
-            if cap in keys:
+            for cap in review_caps.get(submission.project_id, []):
                 # SubmissionReview.score is on the PROJECT's max_score scale
                 # (validated against project.max_score, which may be 10 or
                 # 10000) — rescale to 0-100 before storing so evidence scores
@@ -175,7 +243,9 @@ class CreatorMatchingService:
             )
         )
         for application, brief in app_r.all():
-            cap = (brief.project_type or "").strip().lower()
+            # Same snake-case normalization as skill tags — "Image Generation"
+            # in a free-text brief field should attest image_generation.
+            cap = self._norm_cap(brief.project_type)
             if cap in keys:
                 add(cap, "commercial_project", application.id, application.reviewed_at or application.applied_at)
 
@@ -196,7 +266,8 @@ class CreatorMatchingService:
             for cap in sorted(c for c in caps if c in keys):
                 add(cap, "workflow_run", run.id, run.finished_at or run.created_at)
 
-        # 6. Completed evaluation results (capability via submission's project_type)
+        # 6. Completed evaluation results (capability via the same project
+        # resolution as source 3)
         eval_r = await self.db.execute(
             select(EvaluationTask, Submission)
             .join(Submission, Submission.id == EvaluationTask.submission_id)
@@ -210,10 +281,9 @@ class CreatorMatchingService:
         eval_rows = eval_r.all()
         eval_project_ids = {submission.project_id for _, submission in eval_rows}
         eval_projects_by_id = await self._load_projects(eval_project_ids)
+        eval_caps = await self._project_capabilities(eval_projects_by_id, keys)
         for task, submission in eval_rows:
-            project = eval_projects_by_id.get(submission.project_id)
-            cap = (project.project_type or "").strip().lower() if project else ""
-            if cap in keys:
+            for cap in eval_caps.get(submission.project_id, []):
                 raw = task.result.get("overall_score", task.result.get("score"))
                 score = None
                 if isinstance(raw, int | float):
