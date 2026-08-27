@@ -706,3 +706,34 @@ async def test_import_student_cannot_import(c):
         headers=hs,
     )
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_import_deep_manifest_rejected(c):
+    """R56: a deep-nested manifest (400 levels ≈ 2KB) previously either
+    RecursionError-500'd at the canonical json.dumps, or — smuggled inside
+    pack.provenance — stored verbatim and bricked every pack read
+    (provenance is echoed by SkillPackResponse). Clean 422 now."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    deep = json.loads("[" * 400 + "null" + "]" * 400)
+    manifest = copy.deepcopy(VALID_MANIFEST)
+    manifest["pack"]["provenance"] = {"x": deep}
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("deep.zip", _make_zip(manifest), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+    # Direct create/update schema paths also reject deep provenance
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/packs",
+        json={"name": "DeepProvSkill", "provenance": {"x": deep}},
+        headers=h,
+    )
+    assert r2.status_code == 422, r2.text[:200]

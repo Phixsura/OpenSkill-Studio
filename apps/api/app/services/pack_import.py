@@ -83,6 +83,20 @@ class PackImportService:
                 422,
             ) from exc
 
+        # 6b0. Depth cap BEFORE the canonical dumps below: json.loads parses
+        # ~900 levels while the recursive json.dumps (and every later
+        # serializer — pydantic response echo of provenance, release
+        # manifest reads) dies far shallower. A deep manifest must be a
+        # clean 422 here, not a RecursionError 500 at the dumps call.
+        from app.schemas.base import max_json_depth
+
+        if max_json_depth(manifest) > 64:
+            raise AppError(
+                "INVALID_MANIFEST",
+                "Manifest JSON is nested deeper than 64 levels",
+                422,
+            )
+
         # 6b. Manifest size limit (same as publish_release)
         max_manifest = 10_000_000  # 10 MB
         canonical = json.dumps(manifest, sort_keys=True, ensure_ascii=True)

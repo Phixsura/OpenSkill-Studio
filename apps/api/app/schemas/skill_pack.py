@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, field_validator
 
+from app.schemas.base import reject_deep_json
+
 # ── Pack CRUD ────────────────────────────────────────────
 
 
@@ -100,7 +102,7 @@ class CreateSkillPackRequest(BaseModel):
     def validate_provenance_size(cls, v: dict | None) -> dict | None:
         if v is not None and len(str(v)) > 20000:
             raise ValueError("Provenance data too large (max 20,000 chars)")
-        return v
+        return reject_deep_json(v, "provenance")
 
 
 class UpdateSkillPackRequest(BaseModel):
@@ -200,7 +202,7 @@ class UpdateSkillPackRequest(BaseModel):
     def validate_provenance_size(cls, v: dict | None) -> dict | None:
         if v is not None and len(str(v)) > 20000:
             raise ValueError("Provenance data too large (max 20,000 chars)")
-        return v
+        return reject_deep_json(v, "provenance")
 
 
 class RejectPackRequest(BaseModel):
