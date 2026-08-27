@@ -130,6 +130,7 @@ async def test_install_public_pack_from_other_org(c):
 
     h2, _ = await _auth(c)
     o2 = await _org(c, h2)
+    await _mock_offering(c, h2, o2)
     r = await c.post(
         f"/api/v1/orgs/{o2}/workflow-installations",
         json={"pack_id": pid},
@@ -152,8 +153,11 @@ async def test_install_public_pack_from_other_org(c):
     assert len(bindings) == 1
     assert bindings[0]["step_id"] == "generate"
     assert bindings[0]["confirmed_by"] is None
-    # No offering in org2 → gap recorded
-    assert any(g["code"] == "NO_ELIGIBLE_PROVIDER" for g in bindings[0]["gaps"])
+    # org2 connected a mock offering (required to pass the install capability
+    # gate — R44 derives requires_capabilities from provider_action steps),
+    # so the suggestion resolves it rather than recording a gap
+    assert any(r["code"] == "AUTO_SUGGESTED" for r in bindings[0]["reasons"])
+    assert bindings[0]["gaps"] == []
 
 
 @pytest.mark.asyncio
@@ -214,6 +218,7 @@ async def test_double_install_conflict(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
+    await _mock_offering(c, h, oid)
     r1 = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
     )
@@ -251,6 +256,7 @@ async def test_private_pack_not_installable_cross_org(c):
     assert r2.status_code == 404  # information-hiding: same code as nonexistent
 
     # But the OWNER org can install its own private pack
+    await _mock_offering(c, h1, o1)
     r3 = await c.post(
         f"/api/v1/orgs/{o1}/workflow-installations", json={"pack_id": pid}, headers=h1
     )
@@ -265,6 +271,7 @@ async def test_upgrade_and_rollback(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid, versions=("1.0.0", "1.1.0"))
+    await _mock_offering(c, h, oid)
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations",
         json={"pack_id": pid, "version": "1.0.0"},
@@ -305,6 +312,7 @@ async def test_upgrade_forked_rejected(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid, versions=("1.0.0", "1.1.0"))
+    await _mock_offering(c, h, oid)
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations",
         json={"pack_id": pid, "version": "1.0.0"},
@@ -329,6 +337,7 @@ async def test_fork_and_remove_reinstall(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
+    await _mock_offering(c, h, oid)
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
     )
@@ -384,6 +393,7 @@ async def test_confirm_binding_capability_mismatch(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)  # step requires image_generation
+    await _mock_offering(c, h, oid)  # satisfies the install capability gate
     wrong_offering = await _mock_offering(c, h, oid, capability="voice_generation")
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
@@ -443,6 +453,7 @@ async def test_compute_diff(c):
         f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "2.0.0"}, headers=h
     )
 
+    await _mock_offering(c, h, oid)
     r2 = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations",
         json={"pack_id": pid, "version": "1.0.0"},
@@ -469,6 +480,7 @@ async def test_installation_cross_org_isolation(c):
     h1, _ = await _auth(c)
     o1 = await _org(c, h1)
     pid = await _public_pack(c, h1, o1)
+    await _mock_offering(c, h1, o1)
     r = await c.post(
         f"/api/v1/orgs/{o1}/workflow-installations", json={"pack_id": pid}, headers=h1
     )
@@ -650,6 +662,7 @@ async def test_install_without_version_prefers_stable(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid, versions=("1.0.0", "1.1.0-beta.1"))
+    await _mock_offering(c, h, oid)
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations",
         json={"pack_id": pid},
@@ -679,6 +692,7 @@ async def test_installation_detail_returns_input_schema(c):
     await c.post(
         f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
     )
+    await _mock_offering(c, h, oid)
     r2 = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
     )
@@ -712,6 +726,7 @@ async def test_install_race_integrity_error_maps_to_409(c):
     # will pass its own check only if we bypass it. Simplest determinis-
     # tic reproduction: two service calls on one session, second one's
     # pre-check sees nothing because we expunge the row from identity map.
+    await _mock_offering(c, h, oid)
     from app.core.database import AsyncSessionLocal
     from app.exceptions import AppError
     from app.models.workflow_pack import WorkflowPackInstallation
@@ -765,6 +780,7 @@ async def test_upgrade_and_diff_recheck_pack_access(c):
 
     h2, _ = await _auth(c)
     o2 = await _org(c, h2)
+    await _mock_offering(c, h2, o2)
     r = await c.post(
         f"/api/v1/orgs/{o2}/workflow-installations",
         json={"pack_id": pid, "version": "1.0.0"},
@@ -797,6 +813,7 @@ async def test_upgrade_and_diff_recheck_pack_access(c):
     assert r3.status_code == 404
 
     # The OWNER org can still upgrade its own private pack
+    await _mock_offering(c, h1, o1)
     r4 = await c.post(
         f"/api/v1/orgs/{o1}/workflow-installations", json={"pack_id": pid}, headers=h1
     )
@@ -907,6 +924,7 @@ async def test_reinstall_race_lost_reactivation_maps_to_409(c):
     h, u = await _auth(c)
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
+    await _mock_offering(c, h, oid)
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
     )
@@ -976,6 +994,7 @@ async def test_unlisted_rejected_pack_still_upgradable_like_install(c):
     h2, _ = await _auth(c)
     o2 = await _org(c, h2)
     # install() allows the unlisted pack cross-org…
+    await _mock_offering(c, h2, o2)
     r2 = await c.post(
         f"/api/v1/orgs/{o2}/workflow-installations",
         json={"pack_id": pid, "version": "1.0.0"},
@@ -1012,6 +1031,7 @@ async def test_remove_race_double_delete_decrements_once(c):
     h, u = await _auth(c)
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
+    await _mock_offering(c, h, oid)
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
     )
@@ -1021,6 +1041,7 @@ async def test_remove_race_double_delete_decrements_once(c):
     # started at 1 (greatest(...,0) floor masks the bug).
     h2, u2 = await _auth(c)
     oid2 = await _org(c, h2)
+    await _mock_offering(c, h2, oid2)
     r2 = await c.post(
         f"/api/v1/orgs/{oid2}/workflow-installations", json={"pack_id": pid}, headers=h2
     )
@@ -1046,3 +1067,57 @@ async def test_remove_race_double_delete_decrements_once(c):
         pack = await db.get(WorkflowPack, pid)
         # 2 installs − exactly 1 remove = 1 (double decrement would give 0)
         assert pack.install_count == 1
+
+
+@pytest.mark.asyncio
+async def test_capability_gate_cannot_be_bypassed_by_omitting_deps(c):
+    """R44: requires_capabilities is DERIVED from the definition's
+    provider_action steps at publish time. Publishing with NO dependencies
+    block (the default) must still produce a manifest whose install gate
+    fires for orgs lacking the capability — the old code put the caller's
+    (empty) list into the manifest verbatim, so the gate never ran and the
+    failure surfaced only mid-run as NO_ELIGIBLE_PROVIDER."""
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    # _public_pack publishes WITHOUT a dependencies body — the bypass shape
+    pid = await _public_pack(c, h1, o1)
+
+    # The manifest must carry the derived requirement
+    r = await c.get(f"/api/v1/registry/workflow-packs/{pid}/preview")
+    assert r.status_code == 200, r.text
+    reqs = r.json()["data"]["requires_capabilities"]
+    assert {"capability": "image_generation", "features": []} in reqs
+
+    # An org with no offerings is blocked at INSTALL time (not mid-run)
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    r2 = await c.post(
+        f"/api/v1/orgs/{o2}/workflow-installations", json={"pack_id": pid}, headers=h2
+    )
+    assert r2.status_code == 422, r2.text
+    assert r2.json()["error"]["code"] == "CAPABILITY_UNSATISFIED"
+    details = r2.json()["error"]["details"]
+    assert any(d["capability"] == "image_generation" for d in details)
+
+    # Declared features are UNIONED with step-derived ones, never replaced
+    h3, _ = await _auth(c)
+    o3 = await _org(c, h3)
+    definition = _definition(capability="voice_generation")
+    definition["outputs"] = [
+        {"key": "final", "type": "image", "from_step": "generate", "from_port": "result"}
+    ]
+    pid2 = await _public_pack(
+        c,
+        h3,
+        o3,
+        definition=definition,
+        dependencies={
+            "requires_capabilities": [
+                {"capability": "multimodal_review", "features": ["json_mode"]}
+            ]
+        },
+    )
+    r3 = await c.get(f"/api/v1/registry/workflow-packs/{pid2}/preview")
+    reqs2 = r3.json()["data"]["requires_capabilities"]
+    caps2 = {e["capability"] for e in reqs2}
+    assert caps2 == {"multimodal_review", "voice_generation"}

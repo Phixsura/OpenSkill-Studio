@@ -229,8 +229,39 @@ class WorkflowPackService:
         parsed = validate_or_raise(pack.definition)
 
         # Dependencies validation (R7: only exact or >= constraints)
-        deps = dependencies or {}
+        deps = dict(dependencies or {})
         self._validate_dependencies(deps)
+        # requires_capabilities is DERIVED from the definition's
+        # provider_action steps, merged with (never replaced by) the caller's
+        # declaration. Trusting the client list alone lets a publisher omit
+        # a capability → the install gate (ADR-011 CAPABILITY_UNSATISFIED)
+        # silently passes for orgs with no matching provider, and the
+        # failure surfaces only at run time as a mid-run
+        # NO_ELIGIBLE_PROVIDER step failure — exactly what the gate exists
+        # to catch before install. Features union per capability: the gate
+        # checks feature-superset offerings, so under-declaring features
+        # has the same bypass effect as omitting the capability.
+        declared: dict[str, set[str]] = {}
+        for cap in deps.get("requires_capabilities", []) or []:
+            key = cap.get("capability")
+            feats = {f for f in cap.get("features", []) if isinstance(f, str)}
+            declared.setdefault(key, set()).update(feats)
+        for step in parsed.steps:
+            if step.type != "provider_action":
+                continue
+            key = step.config.get("capability")
+            if not key:
+                continue
+            feats = {
+                f
+                for f in step.config.get("required_features", [])
+                if isinstance(f, str)
+            }
+            declared.setdefault(key, set()).update(feats)
+        deps["requires_capabilities"] = [
+            {"capability": key, "features": sorted(feats)}
+            for key, feats in sorted(declared.items())
+        ]
 
         # Version uniqueness + monotonicity guidance
         existing_r = await self.db.execute(
