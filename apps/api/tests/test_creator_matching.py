@@ -950,3 +950,48 @@ async def test_assignment_list_scoped_for_students(c):
         f"/api/v1/orgs/{oid}/creator-assignments?project_id={project_id}", headers=h_a
     )
     assert [x["user_id"] for x in r_a2.json()["data"]] == [creator_a["id"]]
+
+
+@pytest.mark.asyncio
+async def test_creator_match_gated_to_instructors(c):
+    """R50: the generic match surface must not be the student side door to
+    people-rankings. POST /match with target=creator and reading a persisted
+    creator match run are instructor+ (shortlist endpoint's gate)."""
+    h_owner, owner = await _auth(c, "Owner")
+    oid = await _org(c, h_owner)
+    h_student, student = await _auth(c, "Student")
+    await _add_member(c, h_owner, oid, student)
+    await _completed_skill(c, h_owner, oid, owner["id"], tag="image_generation")
+    profile_id = await _confirmed_profile(
+        c, h_owner, oid, {"required_capabilities": ["image_generation"]}
+    )
+
+    # Student cannot RUN a creator match
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/match",
+        json={"requirement_profile_id": profile_id, "target_entity_type": "creator"},
+        headers=h_student,
+    )
+    assert r.status_code == 403, r.text
+
+    # …but non-people targets stay member-open
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/match",
+        json={"requirement_profile_id": profile_id, "target_entity_type": "skill_pack"},
+        headers=h_student,
+    )
+    assert r2.status_code == 200, r2.text
+
+    # Owner runs a creator match; the student cannot READ it back
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/match",
+        json={"requirement_profile_id": profile_id, "target_entity_type": "creator"},
+        headers=h_owner,
+    )
+    assert r3.status_code == 200, r3.text
+    run_id = r3.json()["data"]["id"]
+
+    r4 = await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=h_student)
+    assert r4.status_code == 404  # uniform 404 — run ids stay non-enumerable
+    r5 = await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=h_owner)
+    assert r5.status_code == 200

@@ -8,6 +8,7 @@ from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.models.matching import FeedbackEvent, MatchResult, MatchRun
+from app.models.organization import OrgRole
 from app.models.project import ProjectTemplate
 from app.models.skill_pack import SkillPack
 from app.models.user import User
@@ -24,6 +25,8 @@ from app.services.matching import MatchingEngine, MatchSpec
 from app.services.requirement_profile import RequirementProfileService
 
 router = APIRouter(tags=["Matching"])
+
+_WRITE_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
 async def _resolve_names(db: AsyncSession, entity_type: str, entity_ids: list[str]) -> dict:
@@ -109,7 +112,14 @@ async def run_match(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    # Creator matching ranks PEOPLE (scores, evidence gaps, exclusion
+    # reasons) — instructor+ only, same gate as the shortlist endpoint.
+    # Leaving it member-open lets any student run talent rankings over
+    # the whole org through this generic surface.
+    if body.target_entity_type == "creator":
+        await require_org_member(org_id, user, db, *_WRITE_ROLES)
+    else:
+        await require_org_member(org_id, user, db)
     profile_svc = RequirementProfileService(db)
     profile = await profile_svc.get_profile(body.requirement_profile_id, org_id)
     if profile.status != "confirmed":
@@ -203,9 +213,15 @@ async def get_match_run(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     run = await db.get(MatchRun, run_id)
     if run is None or run.org_id != org_id:
+        raise AppError("MATCH_RUN_NOT_FOUND", "Match run not found", 404)
+    # Same instructor+ gate as run_match: a persisted creator run holds the
+    # full people-ranking (scores, exclusion reasons) — reading history must
+    # not be the student-accessible side door to it. Uniform 404 (not 403)
+    # so run ids stay non-enumerable.
+    if run.target_entity_type == "creator" and member.role not in _WRITE_ROLES:
         raise AppError("MATCH_RUN_NOT_FOUND", "Match run not found", 404)
     results_r = await db.execute(
         select(MatchResult).where(MatchResult.match_run_id == run_id)

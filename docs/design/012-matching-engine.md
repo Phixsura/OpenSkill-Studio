@@ -69,6 +69,8 @@ Both derive from the **same signal values used in the sum** — there is no para
 
 Every match persists a `match_runs` row stamped with `engine_version` (`"1.0.0"` constant) and `config_version` (snapshot of the immutable `matching_configs` row used) plus all ranked `match_results`. Hard-failed rows are persisted too, capped at the **50 newest** (S1 loads whole registries, so exclusions are unbounded) — `excluded_count` on the run always records the true total. A future weight change is a new config version; historical runs stay replayable and explainable.
 
+Creator-target runs are people-rankings (scores, `CAPABILITY_UNVERIFIED` exclusions), so both running one (`POST /match` with `target_entity_type=creator`) and reading one back (`GET /match-runs/{id}`) are **instructor+**, matching the shortlist endpoint's gate; the read path returns a uniform 404 for non-instructors so run ids stay non-enumerable. Pack/template targets remain member-open.
+
 `feedback_events` ships day one (R17): the engine writes a `shown` event per ranked result with its `rank_position`; a table CHECK (`event_type != 'shown' OR rank_position IS NOT NULL`) makes position-bias data loss impossible — it cannot be backfilled later. Composer-internal match runs set `record_impressions=False` — the user never sees those lists, so logging them would poison position-bias data. Client events (`opened/accepted/rejected/installed/added_to_path/used_in_project/human_override`) post through a dedicated endpoint that verifies `match_run_id` belongs to the caller's org (404 otherwise — the column is a loose reference, not an FK). Scoring code never reads feedback_events; weight tuning is a human-reviewed config-version bump.
 
 ### Requirement profiles and provenance gating (R14)
