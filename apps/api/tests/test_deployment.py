@@ -236,3 +236,11 @@ async def test_alembic_issue21_roundtrip_with_workflow_pack_items():
             sa_text("DELETE FROM learning_paths WHERE id = '01TESTPATHROUNDTRIP0000000'")
         )
         await db.commit()
+
+    # The subprocess DDL dropped/recreated tables while the app's global
+    # engine pool held connections — their asyncpg prepared-statement caches
+    # now reference dead OIDs and poison whichever test runs next (this test
+    # doesn't use the `c` fixture that normally disposes the engine).
+    from app.core.database import engine
+
+    await engine.dispose()
