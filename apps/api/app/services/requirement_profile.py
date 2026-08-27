@@ -285,18 +285,43 @@ class RequirementProfileService:
 
     # ── Reads ─────────────────────────────────────────────
 
-    async def get_profile(self, profile_id: str, org_id: str) -> RequirementProfile:
+    async def get_profile(
+        self, profile_id: str, org_id: str, only_user_id: str | None = None
+    ) -> RequirementProfile:
         profile = await self.db.get(RequirementProfile, profile_id)
         if profile is None or profile.org_id != org_id:
             raise AppError("PROFILE_NOT_FOUND", "Requirement profile not found", 404)
+        # only_user_id (non-instructor reads): a peer's profile exposes their
+        # raw_request; 404 (not 403) keeps ids opaque. Internal callers
+        # (match/compose/confirm) pass None — they enforce their own rules.
+        # Owner = user_id OR created_by, same boundary as _assert_can_write.
+        if only_user_id is not None:
+            owner = profile.user_id or profile.created_by
+            if owner is not None and owner != only_user_id:
+                raise AppError("PROFILE_NOT_FOUND", "Requirement profile not found", 404)
         return profile
 
     async def list_profiles(
-        self, org_id: str, page: int = 1, per_page: int = 20
+        self,
+        org_id: str,
+        page: int = 1,
+        per_page: int = 20,
+        only_user_id: str | None = None,
     ) -> tuple[list[RequirementProfile], int]:
-        from sqlalchemy import func
+        from sqlalchemy import func, or_
 
+        # only_user_id (non-instructors): a profile carries raw_request — the
+        # member's natural-language creative/commercial ask — so peers must
+        # not enumerate each other's. Owner is user_id OR created_by (the
+        # same boundary _assert_can_write uses for edits).
         base = select(RequirementProfile).where(RequirementProfile.org_id == org_id)
+        if only_user_id is not None:
+            base = base.where(
+                or_(
+                    RequirementProfile.user_id == only_user_id,
+                    RequirementProfile.created_by == only_user_id,
+                )
+            )
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
         result = await self.db.execute(

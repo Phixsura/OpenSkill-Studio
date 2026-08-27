@@ -108,9 +108,14 @@ async def list_profiles(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = RequirementProfileService(db)
-    profiles, total = await svc.list_profiles(org_id, page=page, per_page=per_page)
+    # Non-instructors see only their own profiles (raw_request is the
+    # member's natural-language ask) — mirrors the write boundary
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    profiles, total = await svc.list_profiles(
+        org_id, page=page, per_page=per_page, only_user_id=only_user_id
+    )
     return ListResponse(
         data=[ProfileResponse.model_validate(p) for p in profiles],
         meta=PaginationMeta(
@@ -130,9 +135,10 @@ async def get_profile(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = RequirementProfileService(db)
-    profile = await svc.get_profile(profile_id, org_id)
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    profile = await svc.get_profile(profile_id, org_id, only_user_id=only_user_id)
     return DataResponse(data=ProfileResponse.model_validate(profile))
 
 

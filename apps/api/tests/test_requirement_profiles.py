@@ -707,3 +707,51 @@ def test_normalize_extracted_sanitizes_list_items():
     # List items sanitized too: ZWSP and RLO stripped
     assert structured["tool_constraints"] == ["photoshop", "aftereffects"]
     assert unmatched == []
+
+
+@pytest.mark.asyncio
+async def test_profile_reads_scoped_to_owner_or_instructor(c):
+    """R58: profile list + detail expose raw_request — the member's
+    natural-language creative/commercial ask. A peer student must not read
+    another's; instructor+ and the owner can (mirrors the write boundary)."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    h_a, ua = await _auth(c)
+    h_b, ub = await _auth(c)
+    for u in (ua, ub):
+        await c.post(
+            f"/api/v1/orgs/{oid}/members",
+            json={"user_id": u["id"], "role": "student"},
+            headers=h_owner,
+        )
+
+    # Student A creates a profile with a private raw_request
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={
+            "context_type": "learning",
+            "structured_requirements": {"goal": "learn video editing"},
+            "raw_request": "my confidential business plan",
+        },
+        headers=h_a,
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["data"]["id"]
+
+    # Student B cannot list or read A's profile
+    lb = await c.get(f"/api/v1/orgs/{oid}/requirement-profiles", headers=h_b)
+    assert pid not in [p["id"] for p in lb.json()["data"]]
+    gb = await c.get(f"/api/v1/orgs/{oid}/requirement-profiles/{pid}", headers=h_b)
+    assert gb.status_code == 404
+
+    # A sees their own; instructor sees it too
+    la = await c.get(f"/api/v1/orgs/{oid}/requirement-profiles", headers=h_a)
+    assert pid in [p["id"] for p in la.json()["data"]]
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/requirement-profiles/{pid}", headers=h_a)
+    ).status_code == 200
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/requirement-profiles/{pid}", headers=h_owner)
+    ).status_code == 200
+    lo = await c.get(f"/api/v1/orgs/{oid}/requirement-profiles", headers=h_owner)
+    assert pid in [p["id"] for p in lo.json()["data"]]
