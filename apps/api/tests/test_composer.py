@@ -816,3 +816,48 @@ async def test_zero_minute_included_pack_no_contradictory_budget_gap(c):
     nothing_included = not any(e["status"] == "included" for e in entries)
     assert nothing_included is False  # gap must not fire
     _ = LearningComposerService  # imported to pin the module under test
+
+
+@pytest.mark.asyncio
+async def test_setcover_backfills_capability_below_match_limit(c):
+    """R37: the composer's match caps at limit=50 (relevance-ranked), but set
+    cover is a COVERAGE problem. A capability whose ONLY eligible pack ranks
+    beyond the top-50 window was falsely reported NO_CONTENT_AVAILABLE
+    ('content exists but the ranked window didn't reach it'). The composer now
+    backfills the cheapest eligible pack for each requested capability the
+    ranked window missed, so real coverage is always reachable."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # 55 high-relevance packs covering cap "A" (scenario match pushes them to
+    # the top of the ranked window), plus ONE low-relevance pack that uniquely
+    # covers cap "Z" (no scenario match → ranks past the 50-row cutoff).
+    for i in range(55):
+        await _skill_pack(c, h, oid, f"ACov{i}", ["image_generation"], minutes=10)
+    z_pid = await _skill_pack(c, h, oid, "ZOnlyPack", ["voice_generation"], minutes=10)
+    # give the A-packs a scenario so they outrank the Z pack
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPack
+
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(_select(SkillPack).where(SkillPack.name.like("ACov%")))).scalars().all()
+        for p in rows:
+            p.scenario_tags = ["ecommerce"]
+        await db.commit()
+
+    profile_id = await _confirmed_profile(
+        c, h, oid, {"required_capabilities": ["image_generation", "voice_generation"], "scenario": "ecommerce"}
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    selected_ids = {i["entity_id"] for i in payload["items"] if i["status"] in ("included", "waived")}
+    gap_caps = {g.get("capability") for g in payload["gaps"] if g["code"] == "NO_CONTENT_AVAILABLE"}
+    # Z's unique pack must be selected (backfilled), and Z must NOT be a false gap
+    assert z_pid in selected_ids, f"Z pack not selected: {selected_ids}"
+    assert "voice_generation" not in gap_caps, f"false NO_CONTENT_AVAILABLE: {payload['gaps']}"

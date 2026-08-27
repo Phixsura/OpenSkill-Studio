@@ -107,6 +107,41 @@ class LearningComposerService:
                 + (requirement.get("preferred_capabilities") or [])
             )
         )
+
+        # The match ranks by relevance and caps at limit=50, but SET COVER is a
+        # coverage problem: a capability whose ONLY eligible pack ranks 51st
+        # would be falsely reported NO_CONTENT_AVAILABLE ("content exists but
+        # you didn't look"). Backfill ranked_packs with the cheapest eligible
+        # pack for each requested capability the ranked window missed, so the
+        # greedy loop can always reach real coverage. Ranked packs keep their
+        # order (relevance-first); backfill packs append (coverage safety net).
+        if wanted_caps:
+            covered_by_ranked = {
+                cap
+                for p in ranked_packs
+                for cap in (p.capability_tags or [])
+                if cap in set(wanted_caps)
+            }
+            missing_caps = [c for c in wanted_caps if c not in covered_by_ranked]
+            if missing_caps:
+                from sqlalchemy import or_
+
+                from app.services.matching.candidates import _pack_eligibility_filter
+
+                have_ids = set(packs_by_id.keys())
+                backfill_r = await self.db.execute(
+                    select(SkillPack)
+                    .where(
+                        _pack_eligibility_filter(SkillPack, org_id),
+                        SkillPack.status != PackStatus.ARCHIVED,
+                        or_(*(SkillPack.capability_tags.contains([c]) for c in missing_caps)),
+                    )
+                    .order_by(SkillPack.estimated_minutes.asc().nullslast(), SkillPack.id.asc())
+                )
+                for p in backfill_r.scalars().all():
+                    if p.id not in have_ids:
+                        ranked_packs.append(p)
+                        have_ids.add(p.id)
         selected: list[SkillPack] = []
         if wanted_caps:
             uncovered = set(wanted_caps)
