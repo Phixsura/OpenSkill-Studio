@@ -1470,3 +1470,86 @@ async def test_review_gate_passthrough_uses_declared_first_port(c):
     assert data["status"] == "completed", data
     # Passthrough = first DECLARED port (subject), not first-drawn edge (reference)
     assert data["outputs"]["final"] == "THE SUBJECT"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_run_cap_enforced(c, monkeypatch):
+    """R47: workflow_max_concurrent_runs existed in config but was read by
+    nothing — any org member could fan out unbounded concurrent runs, each
+    potentially mid-provider-call spending money. At the cap, create_run
+    422s; a terminal run frees a slot; an idempotent RETRY of an existing
+    run still succeeds at the cap (it is not new spend)."""
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "workflow_max_concurrent_runs", 2)
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # No-provider definition: instruction-only workflow suspends nothing and
+    # completes instantly — so seed runs in artificial PENDING via the DB to
+    # hold slots deterministically.
+    install_id = await _install(c, h, oid, _definition())
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    async with AsyncSessionLocal() as db:
+        for _ in range(2):
+            db.add(
+                WorkflowRun(
+                    org_id=oid,
+                    definition_snapshot={"steps": [], "edges": [], "inputs": [], "outputs": []},
+                    inputs={},
+                    status=RunStatus.RUNNING,
+                )
+            )
+        await db.commit()
+
+    # At cap → 422
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "capped"}, "idempotency_key": "cap-1"},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "WF_TOO_MANY_ACTIVE_RUNS"
+
+    # A run reaching terminal state frees a slot
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select as sa_select
+
+        row = (
+            (await db.execute(sa_select(WorkflowRun).where(WorkflowRun.org_id == oid)))
+            .scalars()
+            .first()
+        )
+        row.status = RunStatus.COMPLETED
+        await db.commit()
+
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "fits"}, "idempotency_key": "cap-2"},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text
+    run_id = r2.json()["data"]["id"]
+    await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+
+    # Fill back to cap; an idempotent retry of cap-2 still succeeds
+    async with AsyncSessionLocal() as db:
+        db.add(
+            WorkflowRun(
+                org_id=oid,
+                definition_snapshot={"steps": [], "edges": [], "inputs": [], "outputs": []},
+                inputs={},
+                status=RunStatus.RUNNING,
+            )
+        )
+        await db.commit()
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "fits"}, "idempotency_key": "cap-2"},
+        headers=h,
+    )
+    assert r3.status_code == 201, r3.text
+    assert r3.json()["data"]["id"] == run_id

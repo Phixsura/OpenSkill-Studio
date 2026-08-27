@@ -65,7 +65,7 @@ Validation accumulates every error (Argo pattern), each with a JSON pointer and 
 
 An inputless island step is deliberately **valid** — every node of an acyclic graph roots at an entry step, so a dedicated "unreachable step" check can never fire (cyclic graphs are already `WF_GRAPH_CYCLE`, input-starved steps are already `WF_INPUT_UNSATISFIED`).
 
-Run-creation codes: `INSTALLATION_NOT_FOUND` (404, includes REMOVED installs), `MISSING_INPUT` / `UNKNOWN_INPUT` / `INVALID_INPUT_VALUE` / `WF_INPUT_TOO_LARGE` (422). Install codes: `ALREADY_INSTALLED` (409, also the loser of a concurrent-install race), `CAPABILITY_UNSATISFIED` (422, ADR-011).
+Run-creation codes: `INSTALLATION_NOT_FOUND` (404, includes REMOVED installs), `MISSING_INPUT` / `UNKNOWN_INPUT` / `INVALID_INPUT_VALUE` / `WF_INPUT_TOO_LARGE` (422), `WF_TOO_MANY_ACTIVE_RUNS` (422 — org-wide cap of `workflow_max_concurrent_runs` PENDING/RUNNING/WAITING_REVIEW runs; every active run can be mid-provider-call spending money, so creation is a spend gate. Soft limit, checked after the idempotency lookup so retries of an existing run still succeed at the cap). Install codes: `ALREADY_INSTALLED` (409, also the loser of a concurrent-install race), `CAPABILITY_UNSATISFIED` (422, ADR-011).
 
 ### Execution runtime
 

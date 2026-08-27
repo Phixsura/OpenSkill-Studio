@@ -31,7 +31,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -326,6 +326,17 @@ class WorkflowRuntimeService:
                 422,
             )
 
+        # Concurrency cap (config: workflow_max_concurrent_runs). Every
+        # active run can be mid-provider-call spending real money — without
+        # a cap, any org member can fan out unbounded concurrent runs (the
+        # per-user rate limit only bounds creations per minute, and multiple
+        # members compound). Checked BEFORE the idempotency lookup would be
+        # wrong: an idempotent retry of an existing run must still succeed
+        # at the cap, so the gate sits after it. Soft limit (no FOR UPDATE):
+        # a burst racing the count may overshoot by a few — acceptable for a
+        # spend guard, same trade-off as MAX_CONNECTIONS_PER_ORG.
+        active_statuses = (RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_REVIEW)
+
         # Idempotent creation
         if idempotency_key:
             existing_r = await self.db.execute(
@@ -347,6 +358,22 @@ class WorkflowRuntimeService:
                         409,
                     )
                 return existing
+
+        active_r = await self.db.execute(
+            select(func.count()).where(
+                WorkflowRun.org_id == org_id,
+                WorkflowRun.status.in_(active_statuses),
+            )
+        )
+        if active_r.scalar_one() >= settings.workflow_max_concurrent_runs:
+            raise AppError(
+                "WF_TOO_MANY_ACTIVE_RUNS",
+                (
+                    f"Organization already has {settings.workflow_max_concurrent_runs} "
+                    "active workflow runs — wait for one to finish or cancel it"
+                ),
+                422,
+            )
 
         run = WorkflowRun(
             org_id=org_id,
@@ -490,10 +517,11 @@ class WorkflowRuntimeService:
         if decision == "approved":
             # Passthrough output: decision port + first-input passthrough.
             # "First" = the step's first DECLARED input port with a resolved
-            # value — inputs_resolved is keyed in edge-array order, so bare
-            # next(iter(...)) would pass through whichever input's edge the
-            # author happened to draw first (same class as the R43 transform
-            # ordering fix).
+            # value. inputs_resolved here is read back from the persisted
+            # JSONB column, and Postgres jsonb re-sorts object keys by length
+            # then bytewise — bare next(iter(...)) would pass through the
+            # input with the SHORTEST PORT NAME, not the author's primary
+            # input (same class as the R43 transform ordering fix).
             output: dict = {"decision": "approved"}
             inputs_resolved = step_run.inputs_resolved or {}
             declared_ports = [p["port"] for p in (step_def or {}).get("inputs", [])]
