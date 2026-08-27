@@ -1042,3 +1042,49 @@ async def test_publish_strips_org_local_pinned_binding(c):
     d = (await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)).json()["data"]
     working_gen = next(s for s in d["definition"]["steps"] if s["id"] == "generate")
     assert working_gen["config"]["pinned_offering_id"] == "01LOCALOFFERINGID000000000"
+
+
+def test_review_gate_passthrough_type_coercion_enforced():
+    """R60-M: review_gate's approved passthrough copies the first input port
+    into every non-decision output at runtime, skipping the edge coercion
+    matrix. A gate declaring a text input and an image 'passed' output
+    validated while the runtime would feed text into a downstream image
+    consumer — publish must reject the type mismatch."""
+    from app.schemas.workflow_definition import validate_definition
+
+    def _gate_def(passed_type: str):
+        return {
+            "schema_version": 1,
+            "inputs": [{"key": "t", "type": "text", "required": True}],
+            "outputs": [
+                {"key": "out", "type": passed_type, "from_step": "qa", "from_port": "passed"}
+            ],
+            "steps": [
+                {
+                    "id": "src", "type": "asset_input", "name": "S",
+                    "config": {"accept_types": ["image"]},
+                    "inputs": [], "outputs": [{"port": "t", "type": "text"}],
+                },
+                {
+                    "id": "qa", "type": "review_gate", "name": "QA",
+                    "config": {"instructions": "x", "due_days": 7},
+                    "inputs": [{"port": "subject", "type": "text"}],
+                    "outputs": [
+                        {"port": "decision", "type": "selection"},
+                        {"port": "passed", "type": passed_type},
+                    ],
+                },
+            ],
+            "edges": [
+                {"id": "e1", "from_step": "src", "from_port": "t", "to_step": "qa", "to_port": "subject"}
+            ],
+            "ui": {},
+        }
+
+    # text input → image passthrough: rejected
+    _, errs = validate_definition(_gate_def("image"))
+    assert any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errs), [e["code"] for e in errs]
+
+    # text input → text passthrough: valid (identity coercion)
+    _, errs_ok = validate_definition(_gate_def("text"))
+    assert not any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errs_ok), [e["code"] for e in errs_ok]

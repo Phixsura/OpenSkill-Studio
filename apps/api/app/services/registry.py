@@ -68,13 +68,27 @@ class RegistryService:
         """
         effective_per_page = min(per_page, max_results) if max_results else per_page
         # ── Check cache ──
-        cache_key_src = f"{search}:{scenario}:{tool}:{difficulty}:{category}:{sort}:{page}:{effective_per_page}:{min_rating}:{max_results}"
-        cache_key = f"registry:search:{hashlib.md5(cache_key_src.encode()).hexdigest()}"
+        # Canonical JSON key, not a raw ':'-join: a ':'-join collides when a
+        # user-controlled value itself contains ':' (search='a:b' vs
+        # scenario='b' → same string), serving one query's results for
+        # another. JSON preserves field boundaries. (Mirrors
+        # workflow_registry._cache_key.)
+        import json as _json
+
+        cache_key_src = _json.dumps(
+            {
+                "search": search, "scenario": scenario, "tool": tool,
+                "difficulty": difficulty, "category": category, "sort": sort,
+                "page": page, "per_page": effective_per_page,
+                "min_rating": min_rating, "max_results": max_results,
+            },
+            sort_keys=True, default=str,
+        )
+        cache_key = f"registry:search:{hashlib.sha256(cache_key_src.encode()).hexdigest()}"
         cached = await cache_get(cache_key)
         if cached is not None:
             # Re-hydrate from cache: fetch packs by id list
             pack_ids = cached.get("ids", [])
-            total = cached.get("total", 0)
             if pack_ids:
                 # Re-apply access-control filters on cache hit to prevent
                 # serving archived/private/rejected packs from stale cache
@@ -91,8 +105,11 @@ class RegistryService:
                 )
                 packs_by_id = {p.id: p for p in result.scalars().all()}
                 filtered = [packs_by_id[pid] for pid in pack_ids if pid in packs_by_id]
-                return filtered, len(filtered)
-            return [], 0
+                # Return the cached catalog TOTAL (across all pages), not the
+                # page length — otherwise has_more computes False and
+                # pagination dead-ends at page 1 for the cache TTL.
+                return filtered, cached.get("total", len(filtered))
+            return [], cached.get("total", 0)
 
         # ── Build query ──
         base = select(SkillPack).where(
@@ -228,6 +245,15 @@ class RegistryService:
         if pack.status != PackStatus.PUBLISHED:
             raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
         if pack.visibility == PackVisibility.PRIVATE:
+            raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
+        # A PUBLIC pack whose review regressed to rejected/pending must 404
+        # by ID too — the list/search path already filters on review_status
+        # (NULL or approved), so serving it by direct id was an inconsistency
+        # that surfaced rejected content. Mirrors workflow_registry.
+        if pack.visibility == PackVisibility.PUBLIC and pack.review_status not in (
+            None,
+            "approved",
+        ):
             raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
         return pack
 

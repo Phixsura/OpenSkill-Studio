@@ -269,8 +269,24 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
     """
     errors: list[dict] = []
 
-    # Size cap first (cheap,防 DoS)
     import json as _json
+
+    # Depth cap FIRST — and before the size cap's json.dumps: json.loads
+    # admits ~9997 nesting levels while the recursive json.dumps used for the
+    # byte count dies ~1 level shallower, so a deep-but-parseable payload
+    # would RecursionError-500 at the size check itself. _max_depth is
+    # iterative (recursion-free), so it is the only safe first gate. Catches
+    # the same small-but-deep brick (a 2KB 900-array payload passes the byte
+    # cap, then 500s every subsequent read via pydantic's ~400 serializer
+    # limit) as a clean 422.
+    if _max_depth(raw) > MAX_DEFINITION_DEPTH:
+        return None, [
+            _err(
+                "WF_TOO_DEEP",
+                "",
+                f"Definition is nested deeper than {MAX_DEFINITION_DEPTH} levels",
+            )
+        ]
 
     raw_bytes = len(_json.dumps(raw, ensure_ascii=False).encode())
     if raw_bytes > MAX_DEFINITION_BYTES:
@@ -279,20 +295,6 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                 "WF_TOO_LARGE",
                 "",
                 f"Definition is {raw_bytes} bytes; max {MAX_DEFINITION_BYTES}",
-            )
-        ]
-
-    # Depth cap BEFORE model parsing: a small-but-deep payload (900 nested
-    # arrays fits in ~2KB) passes the byte cap and every structural check,
-    # persists fine, then 500s every subsequent read when pydantic tries to
-    # serialize it back (~400 recursion cap) — the pack becomes permanently
-    # unreadable through the API.
-    if _max_depth(raw) > MAX_DEFINITION_DEPTH:
-        return None, [
-            _err(
-                "WF_TOO_DEEP",
-                "",
-                f"Definition is nested deeper than {MAX_DEFINITION_DEPTH} levels",
             )
         ]
 
@@ -414,6 +416,29 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
         # the unpaired output ports — both rejected here. Exception: a single
         # input fans out to every output port, which is always type-checked
         # pairwise below.
+        # review_gate approved-decision passes the FIRST declared input port's
+        # value through to every non-`decision` output port (decide_review in
+        # workflow_runtime). That passthrough skips the edge coercion matrix
+        # exactly like an output step, so a gate declaring a text input and an
+        # image 'passed' output validates while the runtime feeds text into a
+        # downstream image consumer. Check each passthrough port pairwise.
+        if step.type == "review_gate" and step.inputs and step.outputs:
+            first_in = step.inputs[0]
+            for j, out_port in enumerate(step.outputs):
+                if out_port.port == "decision":
+                    continue  # decision is a synthesized selection, not passthrough
+                if out_port.type not in COERCIBLE.get(first_in.type, set()):
+                    errors.append(
+                        _err(
+                            "WF_EDGE_TYPE_MISMATCH",
+                            f"{ptr}/outputs/{j}",
+                            f"Review gate '{step.id}' passes input "
+                            f"'{first_in.port}' ({first_in.type}) through to output "
+                            f"'{out_port.port}' ({out_port.type}) — types are not "
+                            f"coercible",
+                        )
+                    )
+
         if step.type == "output" and step.inputs and step.outputs:
             if len(step.inputs) != len(step.outputs) and len(step.inputs) != 1:
                 errors.append(

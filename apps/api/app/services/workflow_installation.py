@@ -322,6 +322,19 @@ class WorkflowInstallationService:
                 f"Offering serves '{offering.capability_key}' but the step requires '{capability}'",
                 422,
             )
+        # …and provide every required_feature the step declares. Without this
+        # a human could confirm a binding to an offering missing a feature —
+        # the runtime's _resolve_offering then rejects it (feature-superset
+        # check) and the step fails NO_ELIGIBLE_PROVIDER mid-run, the exact
+        # late surprise binding confirmation is meant to prevent.
+        required_features = set(step.get("config", {}).get("required_features", []))
+        missing = required_features - set(offering.features or [])
+        if missing:
+            raise AppError(
+                "OFFERING_MISSING_FEATURES",
+                f"Offering lacks required features: {', '.join(sorted(missing))}",
+                422,
+            )
 
         binding_r = await self.db.execute(
             select(WorkflowStepBinding).where(

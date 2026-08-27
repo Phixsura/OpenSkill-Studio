@@ -1162,3 +1162,69 @@ async def test_fork_remove_race_cannot_resurrect(c):
     async with AsyncSessionLocal() as db:
         final = await db.get(WorkflowPackInstallation, install_id)
         assert final.status.value == "removed"  # stayed dead
+
+
+@pytest.mark.asyncio
+async def test_confirm_binding_rejects_offering_missing_required_features(c):
+    """R61: confirm_binding validated capability but ignored the step's
+    required_features. A human could confirm an offering missing a feature;
+    the runtime's _resolve_offering then rejects it (feature-superset) and
+    the step fails NO_ELIGIBLE_PROVIDER mid-run — the late surprise binding
+    confirmation exists to prevent."""
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+
+    # Pack whose provider_action step demands a feature
+    definition = _definition()
+    gen = next(s for s in definition["steps"] if s["id"] == "generate")
+    gen["config"] = {"capability": "image_generation", "required_features": ["hi_res"]}
+
+    pid = await _public_pack(c, h, oid, definition=definition)
+    # Offering WITH the feature (to pass the install gate)
+    r = await c.get("/api/v1/providers/adapters", headers=h)
+    aid = next(a for a in r.json()["data"] if a["key"] == "mock")["id"]
+    conn = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-connections",
+            json={"adapter_id": aid, "name": "Feat"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    good = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-offerings",
+            json={"connection_id": conn, "capability_key": "image_generation",
+                  "model_name": "hi", "features": ["hi_res"]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    # A second offering WITHOUT the feature
+    bad = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-offerings",
+            json={"connection_id": conn, "capability_key": "image_generation",
+                  "model_name": "lo", "features": []},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    inst = (
+        await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
+    ).json()["data"]["id"]
+
+    # Confirming the feature-less offering is rejected
+    rb = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-installations/{inst}/bindings/generate",
+        json={"offering_id": bad, "binding_mode": "pinned"},
+        headers=h,
+    )
+    assert rb.status_code == 422, rb.text[:200]
+    assert rb.json()["error"]["code"] == "OFFERING_MISSING_FEATURES"
+
+    # The feature-complete offering is accepted
+    rg = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-installations/{inst}/bindings/generate",
+        json={"offering_id": good, "binding_mode": "pinned"},
+        headers=h,
+    )
+    assert rg.status_code == 200, rg.text[:200]
