@@ -52,7 +52,7 @@ S5 LLM rerank    DEFERRED — when it ships it receives survivor ordinals only
 | install_popularity | .10 | popularity | .10 | | | | |
 | freshness | .05 | | | | | | |
 
-Signal normalizations: popularity = `log1p(count)/log1p(100)` capped at 1; freshness = Gaussian decay over 30 days; creator recency = exponential decay with **90-day half-life** on `last_login_at`; `capability_evidence` uses **Bayesian shrinkage** per required capability — `shrunk = (n/(n+3))·raw_mean + (3/(n+3))·0.5` — so a single lucky data point cannot dominate (zero evidence renders as a gap, never a 0.0 averaged in).
+Signal normalizations: popularity = `log1p(count)/log1p(100)` capped at 1; freshness = Gaussian decay over 30 days; creator recency = exponential decay with **90-day half-life** on `last_login_at`; `rubric_avg` normalizes each approved review by **its own project's max_score** before averaging (review scores live on the project's 1..10000 scale — averaging raw then dividing by a fixed 100 would underprice small-scale projects and clamp large-scale ones); `capability_evidence` uses **Bayesian shrinkage** per required capability — `shrunk = (n/(n+3))·raw_mean + (3/(n+3))·0.5` — so a single lucky data point cannot dominate (zero evidence renders as a gap, never a 0.0 averaged in).
 
 ### Reasons and gaps — one code path (R5)
 

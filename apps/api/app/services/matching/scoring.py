@@ -265,10 +265,24 @@ async def _creator_signals(
     for row in evidence_r.scalars().all():
         evidence_by_user.setdefault(row.user_id, []).append(row)
 
-    # Rubric averages (approved submission reviews) in bulk
+    # Rubric averages (approved submission reviews) in bulk.
+    # SubmissionReview.score is on the PROJECT's max_score scale (1..10000,
+    # API-settable) — normalize each review by its own project's max_score
+    # BEFORE averaging, so the result is a 0-1 ratio comparable across
+    # projects. Dividing a raw cross-project average by a fixed 100 would
+    # underprice max_score=10 projects 10x and ceiling-clamp max_score=10000
+    # ones (mixed-scale inversion, ADR-013).
+    from app.models.project import Project as _Project
+
     rubric_r = await db.execute(
-        select(Submission.user_id, func.avg(SubmissionReview.score))
+        select(
+            Submission.user_id,
+            func.avg(
+                SubmissionReview.score * 1.0 / func.greatest(_Project.max_score, 1)
+            ),
+        )
         .join(SubmissionReview, SubmissionReview.submission_id == Submission.id)
+        .join(_Project, _Project.id == Submission.project_id)
         .where(
             Submission.org_id == spec.org_id,
             Submission.user_id.in_(user_ids),
@@ -340,8 +354,8 @@ async def _creator_signals(
             days = max((_now() - ref).total_seconds() / 86400.0, 0.0)
             recency = math.pow(0.5, days / 90.0)
 
-        avg = rubric_avg.get(uid)
-        rubric = min(avg / 100.0, 1.0) if avg is not None else 0.5
+        avg = rubric_avg.get(uid)  # already a 0-1 ratio (per-project normalized)
+        rubric = min(avg, 1.0) if avg is not None else 0.5
 
         commercial = _log_popularity(commercial_count.get(uid, 0), ceiling=5)
 

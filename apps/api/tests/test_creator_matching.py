@@ -868,3 +868,43 @@ async def test_commercial_project_evidence_normalizes_free_text(c):
         )
         assert len(rows) == 1, [r.capability_key for r in rows]
         assert rows[0].capability_key == "image_generation"
+
+
+@pytest.mark.asyncio
+async def test_rubric_avg_normalized_per_project_max_score(c):
+    """R40: rubric_avg must normalize each review by ITS project's max_score.
+    A review scored 8 on a max_score=10 project is 80% work — the old code
+    averaged raw scores then divided by a fixed 100, pricing it as 0.08."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+
+    # Project on a 0-10 scale, review scored 8 (= 80%)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Ten-point project",
+            "description": "A commercial project scored on a 10-point scale",
+            "instructions": "Deliver the assets described in the brief",
+            "max_score": 10,
+            "rubric": [{"criterion": "Quality", "max_score": 10}],
+        },
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    project_id = r.json()["data"]["id"]
+    await _seed_approved_review(oid, project_id, owner["id"], score=8)
+
+    from types import SimpleNamespace
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.matching.scoring import _creator_signals
+
+    async with AsyncSessionLocal() as db:
+        spec = SimpleNamespace(org_id=oid, target_entity_type="creator")
+        signal_rows = await _creator_signals(
+            db, [{"id": owner["id"], "last_login_at": None}], spec, {}
+        )
+        assert len(signal_rows) == 1
+        _, signals = signal_rows[0]
+        # 8/10 → 0.8 (old fixed-100 code produced 8/100 = 0.08)
+        assert signals["rubric_avg"] == pytest.approx(0.8)
