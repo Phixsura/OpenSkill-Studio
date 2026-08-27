@@ -422,18 +422,36 @@ class WorkflowRuntimeService:
 
     # ── Reads ─────────────────────────────────────────────
 
-    async def get_run(self, run_id: str, org_id: str) -> WorkflowRun:
+    async def get_run(
+        self, run_id: str, org_id: str, only_user_id: str | None = None
+    ) -> WorkflowRun:
         run = await self.db.get(WorkflowRun, run_id)
         if run is None or run.org_id != org_id:
+            raise AppError("RUN_NOT_FOUND", "Workflow run not found", 404)
+        # only_user_id (non-instructors): a peer's run detail exposes their
+        # inputs/outputs — uniform 404 so run ids stay non-enumerable. The
+        # cancel/advance internals pass only_user_id=None (they enforce their
+        # own rules and must see any run).
+        if only_user_id is not None and run.started_by != only_user_id:
             raise AppError("RUN_NOT_FOUND", "Workflow run not found", 404)
         return run
 
     async def list_runs(
-        self, org_id: str, page: int = 1, per_page: int = 20
+        self,
+        org_id: str,
+        page: int = 1,
+        per_page: int = 20,
+        only_user_id: str | None = None,
     ) -> tuple[list[WorkflowRun], int]:
         from sqlalchemy import func
 
+        # only_user_id scopes to the caller's own runs (non-instructors) —
+        # run inputs/outputs carry the initiator's prompts and private asset
+        # references, so peers must not enumerate each other's work
+        # (mirrors project submission-list scoping).
         base = select(WorkflowRun).where(WorkflowRun.org_id == org_id)
+        if only_user_id is not None:
+            base = base.where(WorkflowRun.started_by == only_user_id)
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
         result = await self.db.execute(

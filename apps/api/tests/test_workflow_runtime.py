@@ -1681,3 +1681,47 @@ async def test_cancel_run_instructor_can_cancel_any(c):
     )
     assert r2.status_code == 200, r2.text
     assert r2.json()["data"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_run_reads_scoped_to_owner_or_instructor(c):
+    """R58: run list + detail expose the initiator's inputs/outputs (prompts,
+    private asset refs). A peer student must not enumerate or read another
+    student's runs; instructors see all (mirrors submission-list scoping)."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    h_a, ua = await _auth(c)
+    h_b, ub = await _auth(c)
+    for u in (ua, ub):
+        await c.post(
+            f"/api/v1/orgs/{oid}/members",
+            json={"user_id": u["id"], "role": "student"},
+            headers=h_owner,
+        )
+    install_id = await _install(c, h_owner, oid, _definition(with_review=True))
+
+    ra = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "a-secret"}},
+        headers=h_a,
+    )
+    run_a = ra.json()["data"]["id"]
+
+    # Student B's list does NOT include A's run
+    lb = await c.get(f"/api/v1/orgs/{oid}/workflow-runs", headers=h_b)
+    assert run_a not in [r["id"] for r in lb.json()["data"]]
+    # B cannot read A's run detail — uniform 404
+    gb = await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_a}", headers=h_b)
+    assert gb.status_code == 404
+
+    # A sees their own
+    la = await c.get(f"/api/v1/orgs/{oid}/workflow-runs", headers=h_a)
+    assert run_a in [r["id"] for r in la.json()["data"]]
+    assert (await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_a}", headers=h_a)).status_code == 200
+
+    # Instructor (owner) sees it too
+    lo = await c.get(f"/api/v1/orgs/{oid}/workflow-runs", headers=h_owner)
+    assert run_a in [r["id"] for r in lo.json()["data"]]
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_a}", headers=h_owner)
+    ).status_code == 200

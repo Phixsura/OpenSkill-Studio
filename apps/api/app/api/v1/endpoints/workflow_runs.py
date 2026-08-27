@@ -72,9 +72,14 @@ async def list_runs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = WorkflowRuntimeService(db)
-    runs, total = await svc.list_runs(org_id, page=page, per_page=per_page)
+    # Non-instructors see only their own runs (inputs/outputs carry private
+    # prompts + asset refs) — mirrors project submission-list scoping
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    runs, total = await svc.list_runs(
+        org_id, page=page, per_page=per_page, only_user_id=only_user_id
+    )
     return ListResponse(
         data=[WorkflowRunResponse.model_validate(r) for r in runs],
         meta=PaginationMeta(
@@ -94,9 +99,12 @@ async def get_run(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = WorkflowRuntimeService(db)
-    run = await svc.get_run(run_id, org_id)
+    # Non-instructors may read only their own run's detail (inputs/outputs
+    # carry private prompts + asset refs); uniform 404 keeps ids opaque
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    run = await svc.get_run(run_id, org_id, only_user_id=only_user_id)
 
     # Lazy sweep: recover crashed executors / expire overdue reviews (cheap)
     swept = await sweep_stale(db, org_id)
@@ -107,7 +115,7 @@ async def get_run(
         # this, a run swept while a different run was viewed would stall.
         for swept_run_id in swept["run_ids"]:
             dispatch_advance(swept_run_id)
-        run = await svc.get_run(run_id, org_id)
+        run = await svc.get_run(run_id, org_id, only_user_id=only_user_id)
 
     # Durable re-dispatch trigger: the advance loop is an in-memory
     # continuation over durable state — a crash/deploy between commit and
