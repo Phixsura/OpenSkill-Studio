@@ -1839,7 +1839,7 @@ async def test_review_approve_passthrough_bounded_at_48kb(c):
         )
         db.add(review)
         await db.commit()
-        run_id, review_id, sr_id = run.id, review.id, sr.id
+        review_id, sr_id = review.id, sr.id
 
     async with AsyncSessionLocal() as db:
         svc = WorkflowRuntimeService(db)
@@ -1847,9 +1847,7 @@ async def test_review_approve_passthrough_bounded_at_48kb(c):
         await db.commit()
 
     async with AsyncSessionLocal() as db:
-        from app.models.workflow_run import WorkflowStepRun as _SR
-
-        fresh = await db.get(_SR, sr_id)
+        fresh = await db.get(WorkflowStepRun, sr_id)
         # 8 ports × 7000 chars ≈ 56KB > 48KB → step fails, not an oversized write
         assert fresh.status.value == "failed"
         assert fresh.error_code == "WF_OUTPUT_TOO_LARGE"
