@@ -570,6 +570,42 @@ class WorkflowRuntimeService:
             for port in (step_def or {}).get("outputs", []):
                 if port["port"] != "decision" and first_val is not None:
                     output[port["port"]] = first_val
+            # This passthrough write bypasses _complete_step, so it must
+            # enforce the same MAX_STEP_OUTPUT_BYTES bound every executor
+            # settlement does — a review gate fanning a large upstream output
+            # into multiple 'passed' ports could otherwise persist an oversized
+            # JSONB row that no other step path would accept. Fail the step
+            # (WF_OUTPUT_TOO_LARGE → run FAILED via SKIPPED propagation)
+            # rather than write an over-limit row.
+            if len(json.dumps(output, ensure_ascii=False, default=str)) > MAX_STEP_OUTPUT_BYTES:
+                await self.db.execute(
+                    update(WorkflowStepRun)
+                    .where(
+                        WorkflowStepRun.id == step_run.id,
+                        WorkflowStepRun.status == StepRunStatus.WAITING_REVIEW,
+                    )
+                    .values(
+                        status=StepRunStatus.FAILED,
+                        error_code="WF_OUTPUT_TOO_LARGE",
+                        error="Review passthrough output exceeds 48KB",
+                        finished_at=_now(),
+                    )
+                )
+                self.db.add(
+                    WorkflowRunEvent(
+                        run_id=run.id,
+                        step_id=step_run.step_id,
+                        event_type="step_failed",
+                        payload={"error_code": "WF_OUTPUT_TOO_LARGE"},
+                    )
+                )
+                await self.db.execute(
+                    update(WorkflowRun)
+                    .where(WorkflowRun.id == run.id, WorkflowRun.status == RunStatus.WAITING_REVIEW)
+                    .values(status=RunStatus.RUNNING)
+                )
+                await self.db.flush()
+                return review
             await self.db.execute(
                 update(WorkflowStepRun)
                 .where(

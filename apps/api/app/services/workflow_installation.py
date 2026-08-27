@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
-from app.models.provider import ProviderModelOffering
+from app.models.provider import ProviderConnection, ProviderModelOffering
 from app.models.skill_pack import InstallStatus, PackStatus, PackVisibility
 from app.models.workflow_pack import (
     WorkflowPack,
@@ -201,9 +201,22 @@ class WorkflowInstallationService:
         # Re-run the capability gate against the target release
         await self._capability_gate(org_id, release)
 
-        inst.release_id = release.id
-        inst.installed_version = release.version
-        await self.db.flush()
+        # Status-guarded UPDATE (not a bare ORM write): a concurrent remove()
+        # may flip the row to REMOVED between get_installation and here — an
+        # unguarded flush would repoint a removed install at a new release
+        # (same resurrection class as the R55 fork race). Only an ACTIVE row
+        # upgrades; a lost race is a clean 404.
+        claimed = await self.db.execute(
+            update(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(release_id=release.id, installed_version=release.version)
+        )
+        if not claimed.rowcount:
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+        await self.db.refresh(inst)
         # Rebuild binding suggestions (unconfirmed) for the new definition
         await self._rebuild_bindings(inst, release)
         await self.db.refresh(inst)
@@ -320,6 +333,21 @@ class WorkflowInstallationService:
             raise AppError(
                 "CAPABILITY_MISMATCH",
                 f"Offering serves '{offering.capability_key}' but the step requires '{capability}'",
+                422,
+            )
+        # …and be usable: an inactive offering or a disabled connection is
+        # rejected by the runtime's _resolve_offering, so confirming one now
+        # would only defer a NO_ELIGIBLE_PROVIDER to run time. Match the
+        # runtime's usability check at confirm time.
+        if not offering.is_active:
+            raise AppError(
+                "OFFERING_INACTIVE", "The selected offering is not active", 422
+            )
+        conn = await self.db.get(ProviderConnection, offering.connection_id)
+        if conn is None or conn.status != "active":
+            raise AppError(
+                "OFFERING_INACTIVE",
+                "The selected offering's provider connection is not active",
                 422,
             )
         # …and provide every required_feature the step declares. Without this

@@ -24,6 +24,9 @@ const ACCEPT_TYPES = ["image", "video", "audio", "reference_asset"];
 const TRANSFORM_OPS = ["crop", "resize", "concat_text", "select_field"];
 
 export function StepConfigPanel({ step, onChange, onDelete, capabilities }: Props) {
+  // Transform params JSON parse error (surfaced inline; the panel remounts
+  // per step via key=, so this resets when switching steps).
+  const [paramsError, setParamsError] = useState(false);
   const setConfig = (key: string, value: unknown) =>
     onChange({ ...step, config: { ...step.config, [key]: value } });
 
@@ -149,15 +152,33 @@ export function StepConfigPanel({ step, onChange, onDelete, capabilities }: Prop
               id="cfg-params"
               defaultValue={JSON.stringify(step.config.params ?? {}, null, 2)}
               rows={3}
+              aria-invalid={paramsError || undefined}
+              onChange={() => {
+                // Clear the stale error while the user is fixing it
+                if (paramsError) setParamsError(false);
+              }}
               onBlur={(e) => {
+                // Invalid JSON must NOT silently vanish: previously a parse
+                // failure was swallowed, Save reported success against the OLD
+                // params, and navigating away lost the text with no dirty
+                // flag. Surface the error inline and keep the field's text so
+                // the user can fix it.
                 try {
                   setConfig("params", JSON.parse(e.target.value || "{}"));
+                  setParamsError(false);
                 } catch {
-                  /* keep previous params on invalid JSON */
+                  setParamsError(true);
                 }
               }}
-              className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+              className={`mt-1 block w-full rounded-md border bg-transparent px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] ${
+                paramsError ? "border-red-500" : ""
+              }`}
             />
+            {paramsError && (
+              <p className="mt-1 text-xs text-red-600" role="alert">
+                Invalid JSON — this edit was not applied. Fix it before saving.
+              </p>
+            )}
           </div>
         </>
       )}
@@ -186,20 +207,9 @@ export function StepConfigPanel({ step, onChange, onDelete, capabilities }: Prop
             <label htmlFor="cfg-features" className="block text-sm font-medium">
               Required features
             </label>
-            <Input
-              id="cfg-features"
-              value={((step.config.required_features as string[]) ?? []).join(", ")}
-              onChange={(e) =>
-                setConfig(
-                  "required_features",
-                  e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                )
-              }
-              placeholder="style_reference, hi_res"
-              className="mt-1"
+            <FeaturesInput
+              value={(step.config.required_features as string[]) ?? []}
+              onCommit={(features) => setConfig("required_features", features)}
             />
             <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Comma-separated</p>
           </div>
@@ -429,6 +439,44 @@ function PortNameInput({
             ? "Duplicate port name on this step"
             : undefined
       }
+    />
+  );
+}
+
+/** Comma-separated feature-list input that edits a local text draft and only
+ * splits/commits on blur. A controlled value={list.join(", ")} + split-on-
+ * change clobbered the separator the user just typed (the comma vanished,
+ * merging two features into one mangled key) — typing multiple values was
+ * impossible without pasting. */
+function FeaturesInput({
+  value,
+  onCommit,
+}: {
+  value: string[];
+  onCommit: (features: string[]) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value.join(", ");
+  return (
+    <Input
+      id="cfg-features"
+      value={shown}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft === null) return;
+        const parsed = draft
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        setDraft(null);
+        // Only commit when the parsed list actually differs, so a blur with
+        // no real change doesn't churn the definition / mark it dirty.
+        if (parsed.length !== value.length || parsed.some((f, i) => f !== value[i])) {
+          onCommit(parsed);
+        }
+      }}
+      placeholder="style_reference, hi_res"
+      className="mt-1"
     />
   );
 }

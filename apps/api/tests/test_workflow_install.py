@@ -1228,3 +1228,79 @@ async def test_confirm_binding_rejects_offering_missing_required_features(c):
         headers=h,
     )
     assert rg.status_code == 200, rg.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_upgrade_race_cannot_resurrect_removed(c):
+    """R63: upgrade() used a bare ORM status write — a concurrent remove()
+    could be overwritten, re-pointing a REMOVED install at a new release
+    (same resurrection class as the R55 fork race)."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.services.workflow_installation import WorkflowInstallationService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    await _mock_offering(c, h, oid)
+    pid = await _public_pack(c, h, oid, versions=("1.0.0", "2.0.0"))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid, "version": "1.0.0"},
+        headers=h,
+    )
+    install_id = r.json()["data"]["id"]
+
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(WorkflowPackInstallation, install_id)
+        assert stale.status.value == "active"
+        async with AsyncSessionLocal() as db_b:
+            await WorkflowInstallationService(db_b).remove(install_id, oid)
+            await db_b.commit()
+        with pytest.raises(AppError) as exc:
+            await WorkflowInstallationService(db_a).upgrade(install_id, oid, "2.0.0")
+        assert exc.value.code == "INSTALLATION_NOT_FOUND"
+        await db_a.rollback()
+
+    async with AsyncSessionLocal() as db:
+        final = await db.get(WorkflowPackInstallation, install_id)
+        assert final.status.value == "removed"
+
+
+@pytest.mark.asyncio
+async def test_confirm_binding_rejects_inactive_offering(c):
+    """R63: confirm_binding accepted an inactive offering / disabled
+    connection — the runtime rejects it, deferring NO_ELIGIBLE_PROVIDER to
+    run time. Reject at confirm."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid)
+    await _mock_offering(c, h, oid)  # active, satisfies install gate
+
+    # a SECOND, inactive offering for the same capability
+    r = await c.get("/api/v1/providers/adapters", headers=h)
+    aid = next(a for a in r.json()["data"] if a["key"] == "mock")["id"]
+    conn = (await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections", json={"adapter_id": aid, "name": "C2"},
+        headers=h,
+    )).json()["data"]["id"]
+    off = (await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={"connection_id": conn, "capability_key": "image_generation", "model_name": "off2"},
+        headers=h,
+    )).json()["data"]["id"]
+    # deactivate it
+    ru = await c.put(
+        f"/api/v1/orgs/{oid}/provider-offerings/{off}", json={"is_active": False}, headers=h
+    )
+    assert ru.status_code == 200, ru.text
+
+    inst = (await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
+    )).json()["data"]["id"]
+    rb = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-installations/{inst}/bindings/generate",
+        json={"offering_id": off, "binding_mode": "pinned"},
+        headers=h,
+    )
+    assert rb.status_code == 422, rb.text[:200]
+    assert rb.json()["error"]["code"] == "OFFERING_INACTIVE"

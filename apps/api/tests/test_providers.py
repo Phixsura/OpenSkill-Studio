@@ -782,3 +782,43 @@ async def test_non_string_feature_entries_flagged_not_dropped(c):
         )
     codes = [g["code"] for g in gaps]
     assert "MALFORMED_REQUIREMENT" in codes, gaps
+
+
+@pytest.mark.asyncio
+async def test_connection_and_offering_nul_rejected(c):
+    """R63: connection name / offering model_name (VARCHAR) and offering
+    features (JSONB) accepted NUL -> 500 at flush. All 422 now."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    aid = await _mock_adapter_id(c, h)
+
+    # connection name with NUL
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "conn" + chr(0) + "x"},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+
+    # a clean connection, then offering with NUL model_name / features
+    conn = (await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "clean"},
+        headers=h,
+    )).json()["data"]["id"]
+
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={"connection_id": conn, "capability_key": "image_generation",
+              "model_name": "m" + chr(0) + "v"},
+        headers=h,
+    )
+    assert r2.status_code == 422, r2.text[:200]
+
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={"connection_id": conn, "capability_key": "image_generation",
+              "model_name": "ok", "features": ["hi" + chr(0) + "res"]},
+        headers=h,
+    )
+    assert r3.status_code == 422, r3.text[:200]

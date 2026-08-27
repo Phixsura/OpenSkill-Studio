@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from app.schemas.base import reject_deep_json
+from app.schemas.base import reject_ctrl_str, reject_deep_json
 
 # ── Capability ────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ class CreateConnectionRequest(BaseModel):
         v = v.strip()
         if not v or len(v) > 100:
             raise ValueError("Name must be 1-100 characters")
-        return v
+        return reject_ctrl_str(v, "name")
 
     @field_validator("config")
     @classmethod
@@ -91,7 +91,7 @@ class UpdateConnectionRequest(BaseModel):
         v = v.strip()
         if not v or len(v) > 100:
             raise ValueError("Name must be 1-100 characters")
-        return v
+        return reject_ctrl_str(v, "name")
 
     @field_validator("status")
     @classmethod
@@ -161,7 +161,7 @@ class CreateOfferingRequest(BaseModel):
         v = v.strip()
         if not v or len(v) > 200:
             raise ValueError("Model name must be 1-200 characters")
-        return v
+        return reject_ctrl_str(v, "model_name")
 
     @field_validator("quality_tier")
     @classmethod
@@ -178,6 +178,7 @@ class CreateOfferingRequest(BaseModel):
         for f in v:
             if not isinstance(f, str) or len(f) > 64:
                 raise ValueError("Feature entries must be strings of max 64 chars")
+            reject_ctrl_str(f, "features")
         return v
 
     @field_validator("limits")
@@ -230,7 +231,7 @@ class UpdateOfferingRequest(BaseModel):
         v = v.strip()
         if not v or len(v) > 200:
             raise ValueError("Model name must be 1-200 characters")
-        return v
+        return reject_ctrl_str(v, "model_name")
 
     @field_validator("features")
     @classmethod
@@ -242,6 +243,7 @@ class UpdateOfferingRequest(BaseModel):
         for f in v:
             if not isinstance(f, str) or len(f) > 64:
                 raise ValueError("Feature entries must be strings of max 64 chars")
+            reject_ctrl_str(f, "features")
         return v
 
     @field_validator("limits")

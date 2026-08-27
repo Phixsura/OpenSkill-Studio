@@ -1782,3 +1782,74 @@ async def test_idempotency_key_scoped_per_member(c):
     )
     assert ra2.status_code == 201, ra2.text
     assert ra2.json()["data"]["id"] == run_a
+
+
+@pytest.mark.asyncio
+async def test_review_approve_passthrough_bounded_at_48kb(c):
+    """R63: the approved-review passthrough writes output via a raw UPDATE
+    that bypasses _complete_step's MAX_STEP_OUTPUT_BYTES guard. A gate
+    fanning a large subject into several 'passed' ports could persist an
+    oversized JSONB row no other step path would accept. Bounded now →
+    WF_OUTPUT_TOO_LARGE."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import (
+        RunStatus,
+        StepRunStatus,
+        WorkflowRun,
+        WorkflowStepReview,
+        WorkflowStepRun,
+    )
+    from app.services.workflow_runtime import WorkflowRuntimeService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+
+    # A gate with one big subject fanning out to 8 passed ports.
+    big = "x" * 7000  # under the 8000 input cap
+    step_def = {
+        "id": "qa",
+        "type": "review_gate",
+        "inputs": [{"port": "subject", "type": "text"}],
+        "outputs": [{"port": "decision", "type": "selection"}]
+        + [{"port": f"p{i}", "type": "text"} for i in range(8)],
+    }
+    async with AsyncSessionLocal() as db:
+        run = WorkflowRun(
+            org_id=oid,
+            definition_snapshot={"steps": [step_def], "edges": [], "inputs": [], "outputs": []},
+            inputs={},
+            status=RunStatus.WAITING_REVIEW,
+            started_by=u["id"],
+        )
+        db.add(run)
+        await db.flush()
+        sr = WorkflowStepRun(
+            run_id=run.id,
+            step_id="qa",
+            step_type="review_gate",
+            status=StepRunStatus.WAITING_REVIEW,
+            inputs_resolved={"subject": big},
+        )
+        db.add(sr)
+        await db.flush()
+        review = WorkflowStepReview(
+            step_run_id=sr.id, org_id=oid, due_at=datetime.now(UTC) + timedelta(days=1)
+        )
+        db.add(review)
+        await db.commit()
+        run_id, review_id, sr_id = run.id, review.id, sr.id
+
+    async with AsyncSessionLocal() as db:
+        svc = WorkflowRuntimeService(db)
+        await svc.decide_review(review_id, oid, decision="approved", note=None, decided_by=u["id"])
+        await db.commit()
+
+    async with AsyncSessionLocal() as db:
+        from app.models.workflow_run import WorkflowStepRun as _SR
+
+        fresh = await db.get(_SR, sr_id)
+        # 8 ports × 7000 chars ≈ 56KB > 48KB → step fails, not an oversized write
+        assert fresh.status.value == "failed"
+        assert fresh.error_code == "WF_OUTPUT_TOO_LARGE"

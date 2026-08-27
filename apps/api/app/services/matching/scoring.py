@@ -370,7 +370,12 @@ async def _creator_signals(
                 cap_rows = [r for r in rows if r.capability_key == cap]
                 n = len(cap_rows)
                 if n == 0:
-                    cap_scores.append(0.0)
+                    # ADR-012: "zero evidence renders as a gap, never a 0.0
+                    # averaged in." S2 hard-filters only on REQUIRED caps, so
+                    # after preferred caps are folded in (R60) a survivor can
+                    # legitimately lack evidence for a preferred cap — appending
+                    # 0.0 would drag the signal down against the ADR. Skip it
+                    # (it renders as absence, i.e. a gap), don't average a 0.0.
                     continue
                 vals = []
                 for r in cap_rows:
@@ -379,7 +384,10 @@ async def _creator_signals(
                 raw_mean = sum(vals) / n
                 shrunk = (n / (n + 3)) * raw_mean + (3 / (n + 3)) * 0.5
                 cap_scores.append(shrunk)
-            capability_evidence = sum(cap_scores) / len(cap_scores)
+            # All requested caps lacked evidence (only reachable when every
+            # requested cap is preferred — a required cap is S2-guaranteed):
+            # fall to the neutral prior, matching the no-requirement branch.
+            capability_evidence = sum(cap_scores) / len(cap_scores) if cap_scores else 0.5
         else:
             # No specific requirement: overall evidence volume, shrunk
             n = len(rows)

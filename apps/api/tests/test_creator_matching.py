@@ -1236,3 +1236,20 @@ async def test_reoffer_after_decline_supersedes(c):
         headers=h_creator,
     )
     assert r5.status_code == 200 and r5.json()["data"]["status"] == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_offer_override_reason_nul_rejected(c):
+    """R63: override_reason (Text col) accepted NUL -> 500 on write. 422 now."""
+    h_owner, _ = await _auth(c, "Owner")
+    oid = await _org(c, h_owner)
+    h_creator, creator = await _auth(c, "Creator")
+    await _add_member(c, h_owner, oid, creator)
+    project_id = await _project(c, h_owner, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"],
+              "override_reason": "a" + chr(0) + "b"},
+        headers=h_owner,
+    )
+    assert r.status_code == 422, r.text[:200]

@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.base import reject_ctrl_str
+
 
 class ComposeRequest(BaseModel):
     profile_id: str
@@ -55,7 +57,7 @@ class OfferAssignmentRequest(BaseModel):
     def validate_reason(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 2000:
             raise ValueError("Override reason must be 2,000 characters or less")
-        return v
+        return reject_ctrl_str(v, "override_reason")
 
 
 class RespondRequest(BaseModel):
