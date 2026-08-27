@@ -861,3 +861,60 @@ async def test_setcover_backfills_capability_below_match_limit(c):
     # Z's unique pack must be selected (backfilled), and Z must NOT be a false gap
     assert z_pid in selected_ids, f"Z pack not selected: {selected_ids}"
     assert "voice_generation" not in gap_caps, f"false NO_CONTENT_AVAILABLE: {payload['gaps']}"
+
+
+@pytest.mark.asyncio
+async def test_production_multipack_chain_with_output_type(c):
+    """R38: setting output_type must NOT collapse the multi-pack chain to a
+    single pack. S2 hard-excludes any workflow_pack not producing the target
+    output_type (OUTPUT_TYPE_MISMATCH), so passing output_type as a hard
+    constraint to the COMPOSER'S internal match removed every intermediate
+    producer — the chain walk then found no_producer for the head's asset
+    input and Part F's 'combine compatible Workflow Packs' was dead whenever
+    output_type was set. The composer now demotes output_type to a soft key
+    for its internal match (the /match endpoint keeps the hard filter)."""
+    import uuid as _uuid
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_pack import PackStatus, PackVisibility, WorkflowPack
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    scen = "pcchain" + _uuid.uuid4().hex[:8]  # unique scenario isolates from shared-DB packs
+
+    async def mk(name, inputs, outputs):
+        r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": name}, headers=h)
+        pid = r.json()["data"]["id"]
+        async with AsyncSessionLocal() as db:
+            p = await db.get(WorkflowPack, pid)
+            p.status = PackStatus.PUBLISHED
+            p.visibility = PackVisibility.PRIVATE
+            p.workflow_type = "production"
+            p.scenario_tags = [scen]
+            p.input_schema = [{"key": k, "type": t, "required": True} for k, t in inputs]
+            p.output_schema = [{"key": k, "type": t} for k, t in outputs]
+            await db.commit()
+        return pid
+
+    img = await mk("ImageMakerX", [("prompt", "prompt")], [("img", "image")])
+    vid = await mk("VideoMakerX", [("src", "image")], [("out", "video")])
+
+    profile_id = await _confirmed_profile(
+        c, h, oid, {"output_type": "video", "scenario": scen}, context="production"
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/production-solution",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    chain_ids = [w["entity_id"] for w in payload["workflow_chain"]]
+    # BOTH packs chained (was just [vid] before the fix), producer-first
+    assert chain_ids == [img, vid], f"chain not assembled: {chain_ids}"
+    # the video's image input is now RESOLVED by the image pack — no no_producer
+    assert not any(
+        p["reason"] == "no_producer" for p in payload["placeholders"]
+    ), payload["placeholders"]
+    # the image pack's prompt input is a user value
+    assert any(p["reason"] == "needs_user_value" for p in payload["placeholders"])

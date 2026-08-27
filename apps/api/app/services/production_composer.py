@@ -48,12 +48,27 @@ class ProductionComposerService:
             )
         requirement = RequirementProfileService.build_match_requirement(profile)
 
+        # Chain assembly needs INTERMEDIATE producers (e.g. an image pack that
+        # feeds a video pack), but S2 hard-excludes any workflow_pack not
+        # producing the target output_type (OUTPUT_TYPE_MISMATCH). Passing
+        # output_type as a hard constraint to the COMPOSER'S internal match
+        # therefore collapses every multi-pack chain to a single pack whenever
+        # output_type is set — killing Part F's core "combine compatible
+        # Workflow Packs". Demote output_type to a scoring-only soft key for
+        # this internal match so all eligible packs rank and the chain walk
+        # can reach intermediate producers; the direct /match endpoint keeps
+        # the hard filter. Head selection still uses the real output_type
+        # (target_type below reads the original requirement).
+        match_requirement = dict(requirement)
+        if "output_type" in match_requirement:
+            match_requirement["_soft_output_type"] = match_requirement.pop("output_type")
+
         engine = MatchingEngine(self.db)
         run, results, _ = await engine.run(
             MatchSpec(
                 org_id=org_id,
                 target_entity_type="workflow_pack",
-                requirement=requirement,
+                requirement=match_requirement,
                 context_type=profile.context_type.value,
                 requirement_profile_id=profile.id,
                 created_by=created_by,
