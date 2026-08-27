@@ -53,6 +53,7 @@ Rationale: matching operates on *offerings* (capability + features + cost), conn
 - Field names smuggled into non-sensitive `config` are rejected (`CREDENTIAL_IN_CONFIG` 422); fields the adapter did not declare are rejected (`UNKNOWN_CREDENTIAL_FIELD` 422).
 - Decryption happens in exactly one place: inside the workflow executor, immediately before the adapter call. Definitions, manifests, exports, and job rows carry references only.
 - Deleting a connection deletes its credential row.
+- LLM-backed adapters treat step inputs as **untrusted** (user run inputs, upstream step outputs, public-pack template text): values are sanitized (`sanitize_untrusted_text` — zero-width/bidi/ASCII-smuggling strip) and wrapped in per-call random boundary markers referenced by the system prompt, same discipline as the requirement-extraction prompt builder (D10).
 
 ### Binding ladder (auto / preferred / pinned)
 
