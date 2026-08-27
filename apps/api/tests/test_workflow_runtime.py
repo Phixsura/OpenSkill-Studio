@@ -1346,3 +1346,44 @@ async def test_deep_nested_run_input_no_recursion_error(c):
         headers=h,
     )
     assert r2.status_code == 201, f"{r2.status_code}: {r2.text[:200]}"
+
+
+def test_transform_values_follow_declared_port_order():
+    """R43: concat_text joins by the step's DECLARED input-port order, not
+    by edge-array insertion order. inputs_resolved is keyed in edge order —
+    the old list(inputs.values()) made "hello | world" vs "world | hello"
+    depend on which edge the author happened to draw first, and select_field
+    silently switched source ports on an unrelated edge reorder."""
+    from app.services.workflow_runtime import _run_transform
+
+    step = {
+        "id": "join",
+        "type": "transform",
+        "inputs": [{"port": "x", "type": "text"}, {"port": "y", "type": "text"}],
+        "outputs": [{"port": "result", "type": "text"}],
+    }
+    # Resolved dict keyed in REVERSED edge order (y's edge drawn first)
+    inputs_edge_order = {"y": "world", "x": "hello"}
+    out = _run_transform(
+        {"operation": "concat_text", "params": {"separator": " | "}},
+        inputs_edge_order,
+        step,
+    )
+    assert out["result"] == "hello | world"
+
+    # select_field's "first input" is the first DECLARED port (x), not the
+    # first-drawn edge (y)
+    out2 = _run_transform(
+        {"operation": "select_field", "params": {"field": "k"}},
+        {"y": '{"k": "from_y"}', "x": '{"k": "from_x"}'},
+        step,
+    )
+    assert out2["result"] == "from_x"
+
+    # Unconnected declared port injects no None padding
+    out3 = _run_transform(
+        {"operation": "concat_text", "params": {"separator": "+"}},
+        {"y": "only"},
+        step,
+    )
+    assert out3["result"] == "only"

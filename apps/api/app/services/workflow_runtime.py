@@ -911,7 +911,16 @@ def _run_transform(config: dict, inputs: dict, step: dict) -> dict:
     params = config.get("params", {})
     ports = step.get("outputs", [])
     out_port = ports[0]["port"] if ports else "result"
-    values = list(inputs.values())
+    # Order values by the step's DECLARED input ports, not dict insertion
+    # order. inputs_resolved is keyed in edge-array order — concat_text would
+    # otherwise join "a b" or "b a" depending on which edge the author drew
+    # first, and select_field's "first input" would silently switch source
+    # ports on an unrelated edge edit. Ports without a resolved value are
+    # skipped (unconnected optional inputs must not inject None padding);
+    # resolved keys not in the declaration (defensive) keep edge order after.
+    declared = [p["port"] for p in step.get("inputs", [])]
+    values = [inputs[p] for p in declared if p in inputs]
+    values += [v for k, v in inputs.items() if k not in declared]
     if op == "concat_text":
         sep = str(params.get("separator", " "))[:10]
         return {out_port: sep.join(str(v) for v in values if v is not None)[:8000]}
