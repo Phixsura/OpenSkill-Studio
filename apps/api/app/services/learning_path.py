@@ -101,6 +101,7 @@ class LearningPathService:
         skill_id: str | None = None,
         project_id: str | None = None,
         section_title: str | None = None,
+        workflow_pack_id: str | None = None,
         sort_order: int = 0,
         required: bool = True,
         unlock_rule: str = "previous_required",
@@ -112,7 +113,8 @@ class LearningPathService:
         except ValueError as exc:
             raise AppError(
                 "INVALID_ITEM_TYPE",
-                f"Invalid item_type '{item_type}'. Must be one of: skill, project, section",
+                f"Invalid item_type '{item_type}'. Must be one of: "
+                "skill, project, section, workflow_pack",
                 422,
             ) from exc
 
@@ -132,6 +134,32 @@ class LearningPathService:
         elif ptype == PathItemType.SECTION:
             if not section_title:
                 raise AppError("MISSING_TITLE", "section_title required for section items", 422)
+        elif ptype == PathItemType.WORKFLOW_PACK:
+            if not workflow_pack_id:
+                raise AppError(
+                    "MISSING_WORKFLOW_PACK_ID",
+                    "workflow_pack_id required for workflow_pack items",
+                    422,
+                )
+            # The pack must be INSTALLED in this org (an installation row is
+            # the org's claim to it — a bare pack id could reference any
+            # foreign private pack). Loose-coupled column, so check here.
+            from app.models.skill_pack import InstallStatus
+            from app.models.workflow_pack import WorkflowPackInstallation
+
+            install_r = await self.db.execute(
+                select(WorkflowPackInstallation).where(
+                    WorkflowPackInstallation.org_id == org_id,
+                    WorkflowPackInstallation.pack_id == workflow_pack_id,
+                    WorkflowPackInstallation.status != InstallStatus.REMOVED,
+                )
+            )
+            if install_r.scalar_one_or_none() is None:
+                raise AppError(
+                    "WORKFLOW_PACK_NOT_INSTALLED",
+                    "Workflow pack is not installed in this organization",
+                    404,
+                )
 
         item = LearningPathItem(
             path_id=path_id,
@@ -139,6 +167,9 @@ class LearningPathService:
             skill_id=skill_id if ptype == PathItemType.SKILL else None,
             project_id=project_id if ptype == PathItemType.PROJECT else None,
             section_title=section_title if ptype == PathItemType.SECTION else None,
+            workflow_pack_id=(
+                workflow_pack_id if ptype == PathItemType.WORKFLOW_PACK else None
+            ),
             sort_order=sort_order,
             required=required,
             unlock_rule=unlock_rule,
@@ -281,6 +312,33 @@ class LearningPathService:
             )
             approved_projects = {row[0] for row in sub_r.all()}
 
+        wf_pack_ids = [
+            i.workflow_pack_id
+            for i in items
+            if i.item_type == PathItemType.WORKFLOW_PACK and i.workflow_pack_id
+        ]
+        wf_packs_map: dict = {}
+        completed_wf_packs: set[str] = set()
+        if wf_pack_ids:
+            from app.models.workflow_pack import WorkflowPack
+            from app.models.workflow_run import RunStatus, WorkflowRun
+
+            wp_r = await self.db.execute(
+                select(WorkflowPack).where(WorkflowPack.id.in_(wf_pack_ids))
+            )
+            wf_packs_map = {p.id: p for p in wp_r.scalars().all()}
+            # Done = the learner completed at least one run of the pack in
+            # this org (runs reference the pack loosely via pack_id)
+            run_r = await self.db.execute(
+                select(WorkflowRun.pack_id).where(
+                    WorkflowRun.org_id == org_id,
+                    WorkflowRun.pack_id.in_(wf_pack_ids),
+                    WorkflowRun.started_by == user_id,
+                    WorkflowRun.status == RunStatus.COMPLETED,
+                )
+            )
+            completed_wf_packs = {row[0] for row in run_r.all()}
+
         for item in items:
             if item.item_type == PathItemType.SECTION:
                 result_items.append({
@@ -306,6 +364,11 @@ class LearningPathService:
                 project = projects_map.get(item.project_id)
                 name = project.title if project else "Unknown"
                 is_done = item.project_id in approved_projects
+
+            elif item.item_type == PathItemType.WORKFLOW_PACK and item.workflow_pack_id:
+                pack = wf_packs_map.get(item.workflow_pack_id)
+                name = pack.name if pack else "Unknown"
+                is_done = item.workflow_pack_id in completed_wf_packs
 
             # Unlock logic
             is_locked = False if item.unlock_rule == "immediate" else not all_prev_done
@@ -337,6 +400,7 @@ class LearningPathService:
                 "item_id": item.id,
                 "skill_id": item.skill_id,
                 "project_id": item.project_id,
+                "workflow_pack_id": item.workflow_pack_id,
                 "name": name,
                 "required": is_required,
                 "status": status,

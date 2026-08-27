@@ -763,3 +763,145 @@ async def test_update_path_invalid_status(c):
     pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "StatTest"}, headers=h)).json()["data"]["id"]
     r = await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"status": "active"}, headers=h)
     assert r.status_code == 422
+
+
+# ═══════════════ R45: workflow_pack items ═══════════════
+
+
+async def _installed_workflow_pack(c, h, oid):
+    """Create + publish a minimal (no provider_action) workflow pack in this
+    org and install it. Returns pack_id."""
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": f"WFP-{uuid.uuid4().hex[:6]}"},
+        headers=h,
+    )
+    pack_id = r.json()["data"]["id"]
+    definition = {
+        "schema_version": 1,
+        "inputs": [{"key": "topic", "type": "text", "required": True}],
+        "outputs": [
+            {"key": "text_out", "type": "prompt", "from_step": "build", "from_port": "prompt"}
+        ],
+        "steps": [
+            {
+                "id": "build",
+                "type": "prompt_template",
+                "name": "Build",
+                "config": {"template": "About {{inputs.topic}}"},
+                "inputs": [],
+                "outputs": [{"port": "prompt", "type": "prompt"}],
+            }
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pack_id}/definition",
+        json={"definition": definition},
+        headers=h,
+    )
+    assert r2.status_code == 200, r2.text
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pack_id}/releases",
+        json={"version": "1.0.0"},
+        headers=h,
+    )
+    assert r3.status_code == 201, r3.text
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations",
+        json={"pack_id": pack_id},
+        headers=h,
+    )
+    assert r4.status_code == 201, r4.text
+    return pack_id
+
+
+@pytest.mark.asyncio
+async def test_add_workflow_pack_item(c):
+    """R45: WORKFLOW_PACK path items are creatable end-to-end (the enum,
+    column, and CHECK constraint existed with no creation path anywhere)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "WF Items"}, headers=h)
+    ).json()["data"]["id"]
+    pack_id = await _installed_workflow_pack(c, h, oid)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/paths/{pid}/items",
+        json={"item_type": "workflow_pack", "workflow_pack_id": pack_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()["data"]
+    assert data["item_type"] == "workflow_pack"
+    assert data["workflow_pack_id"] == pack_id
+
+    # Missing id → 422 (schema-level)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/paths/{pid}/items",
+        json={"item_type": "workflow_pack"},
+        headers=h,
+    )
+    assert r2.status_code == 422
+
+    # Not installed in this org → 404 (foreign/unknown pack ids can't be added)
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/paths/{pid}/items",
+        json={"item_type": "workflow_pack", "workflow_pack_id": "01JUNKUNKNOWNPACKID000000X"},
+        headers=h,
+    )
+    assert r3.status_code == 404
+    assert r3.json()["error"]["code"] == "WORKFLOW_PACK_NOT_INSTALLED"
+
+
+@pytest.mark.asyncio
+async def test_workflow_pack_item_progress(c):
+    """A learner's progress marks the workflow_pack item done after a
+    COMPLETED run of that pack."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "WF Prog"}, headers=h)
+    ).json()["data"]["id"]
+    pack_id = await _installed_workflow_pack(c, h, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/paths/{pid}/items",
+        json={"item_type": "workflow_pack", "workflow_pack_id": pack_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+
+    # Publish the path so progress is viewable
+    await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"status": "published"}, headers=h)
+
+    r2 = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r2.status_code == 200, r2.text
+    items = r2.json()["data"]["items"]
+    wf_item = next(i for i in items if i["type"] == "workflow_pack")
+    assert wf_item["workflow_pack_id"] == pack_id
+    assert wf_item["status"] != "completed"
+
+    # Seed a COMPLETED run by this user for this pack
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            WorkflowRun(
+                org_id=oid,
+                pack_id=pack_id,
+                definition_snapshot={"steps": [], "edges": [], "inputs": [], "outputs": []},
+                inputs={},
+                status=RunStatus.COMPLETED,
+                started_by=owner["id"],
+            )
+        )
+        await db.commit()
+
+    r3 = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    items3 = r3.json()["data"]["items"]
+    wf_item3 = next(i for i in items3 if i["type"] == "workflow_pack")
+    assert wf_item3["status"] == "completed"
+    assert wf_item3["name"] != "Unknown"
