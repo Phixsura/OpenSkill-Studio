@@ -910,6 +910,53 @@ async def test_import_hostile_entry_types_rejected_not_500(c):
 
 
 @pytest.mark.asyncio
+async def test_import_accepts_platform_composed_exercise_logical_id(c):
+    """R78: the export path composes exercise logical_ids as
+    f"{skill.slug}/{title_slug[:50]}" — slug is legitimately up to 200 chars,
+    so the composed id reaches 251. R65's gate capped it at 200, rejecting the
+    platform's OWN export→import roundtrip for long-slugged skills. The cap is
+    now 251; anything longer stays a clean 422."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    slug = "a" * 200
+    composed = f"{slug}/{'b' * 50}"  # 251 chars — exactly what export produces
+    m = copy.deepcopy(VALID_MANIFEST)
+    m["skills"][0]["logical_id"] = slug
+    m["skills"][0]["slug"] = slug
+    m["skills"][0]["exercises"] = [
+        {
+            "logical_id": composed,
+            "title": "b" * 60,
+            "description": "d",
+            "type": "text_answer",
+            "config": {},
+            "max_score": 100,
+            "sort_order": 0,
+        }
+    ]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(m), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 201, f"{r.status_code}: {r.text[:250]}"
+
+    # 252+ chars is beyond anything the platform composes — still rejected
+    m2 = copy.deepcopy(m)
+    m2["skills"][0]["exercises"][0]["logical_id"] = composed + "x"
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(m2), "application/zip")},
+        headers=h,
+    )
+    assert r2.status_code == 422, r2.text[:200]
+    assert r2.json()["error"]["code"] == "INVALID_MANIFEST"
+
+
+@pytest.mark.asyncio
 async def test_import_bigint_literal_rejected_not_500(c):
     """R70: a JSON integer literal longer than CPython's 4300-digit int-string
     limit makes json.loads raise a BARE ValueError (not JSONDecodeError). The

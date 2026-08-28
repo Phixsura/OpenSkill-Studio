@@ -225,12 +225,17 @@ class PackImportService:
                 )
             for ex in exercises:
                 ex_lid = ex.get("logical_id")
+                # 251, not 200: the platform's own export composes exercise
+                # logical_ids as f"{skill.slug}/{title_slug[:50]}" (skill_pack.py)
+                # — slug is legitimately up to 200 chars, so the composed id
+                # reaches 200+1+50. A 200 cap rejected the platform's own
+                # export→import roundtrip for long-slugged skills (R78).
                 if ex_lid is not None and (
-                    not isinstance(ex_lid, str) or len(ex_lid) > 200
+                    not isinstance(ex_lid, str) or len(ex_lid) > 251
                 ):
                     raise AppError(
                         "INVALID_MANIFEST",
-                        f"Exercise logical_id in skill '{lid}' must be a string (max 200 chars)",
+                        f"Exercise logical_id in skill '{lid}' must be a string (max 251 chars)",
                         422,
                     )
                 if not isinstance(ex.get("config", {}), dict):

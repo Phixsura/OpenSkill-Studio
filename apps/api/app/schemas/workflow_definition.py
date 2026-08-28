@@ -9,6 +9,7 @@ moustache references, no data URIs, hard size caps, typed edges checked
 against an explicit coercion matrix.
 """
 
+import math
 import re
 from typing import Literal
 
@@ -334,6 +335,11 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
     # Reject as 422 (tab/newline allowed). Must scan the ACTUAL string values,
     # not json.dumps(raw): dumps escapes a NUL to a 6-char backslash sequence,
     # regex would never match. Same class of bug create_run/ComfyUI also guard.
+    # Also rejects non-finite floats (NaN/Infinity — R78): json.loads accepts
+    # the bare tokens, the JSONB serializer re-emits them (allow_nan=True),
+    # and Postgres rejects them (22P02) — a 500 through e.g. the ui block,
+    # the one definition surface R73's sweep missed. bool is an int, never
+    # a float, so True/False are unaffected.
     # Iterative — json.loads parses deeper than a recursive walk survives.
     def _has_ctrl(v) -> bool:
         stack = [v]
@@ -341,6 +347,9 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             cur = stack.pop()
             if isinstance(cur, str):
                 if _CTRL_RE.search(cur):
+                    return True
+            elif isinstance(cur, float):
+                if not math.isfinite(cur):
                     return True
             elif isinstance(cur, dict):
                 stack.extend(cur.keys())
@@ -354,7 +363,8 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             _err(
                 "WF_INVALID_CHARACTER",
                 "",
-                "Definition contains NUL or control characters that are not allowed",
+                "Definition contains NUL, control characters, or non-finite "
+                "numbers (NaN/Infinity) that are not allowed",
             )
         )
 

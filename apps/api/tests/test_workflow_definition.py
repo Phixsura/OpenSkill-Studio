@@ -394,6 +394,29 @@ def test_control_characters_rejected():
     assert "WF_INVALID_CHARACTER" not in _codes(errors2)
 
 
+def test_nonfinite_float_in_definition_body_rejected():
+    """R78: json.loads accepts bare NaN/Infinity tokens, the JSONB serializer
+    re-emits them (allow_nan=True), and Postgres rejects them (22P02 → 500).
+    R73 closed this class for provenance/config/limits/defaults but missed the
+    definition body itself — reachable through the free-form ui block."""
+    import json as _json
+
+    d = _minimal_valid()
+    d["ui"] = _json.loads('{"positions": {"a": [NaN, 0]}}')
+    _, errors = validate_definition(d)
+    assert "WF_INVALID_CHARACTER" in _codes(errors)
+    # Infinity likewise
+    d2 = _minimal_valid()
+    d2["ui"] = _json.loads('{"zoom": Infinity}')
+    _, errors2 = validate_definition(d2)
+    assert "WF_INVALID_CHARACTER" in _codes(errors2)
+    # ordinary finite floats and bools stay allowed
+    d3 = _minimal_valid()
+    d3["ui"] = {"positions": {"a": [1.5, 0]}, "snap": True}
+    _, errors3 = validate_definition(d3)
+    assert "WF_INVALID_CHARACTER" not in _codes(errors3)
+
+
 def test_selection_default_must_be_in_options():
     """A selection input whose default is outside its options bricks every
     default-driven run (create_run applies then rejects it)."""
