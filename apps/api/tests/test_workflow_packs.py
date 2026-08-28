@@ -1103,3 +1103,59 @@ async def test_provenance_nul_rejected_not_500(c):
         headers=h,
     )
     assert r.status_code == 422, r.text[:200]
+
+
+def test_review_gate_passthrough_sources_first_connected_port():
+    """R66: the runtime passthrough source is the first declared input WITH A
+    RESOLVED VALUE — not blindly inputs[0]. A gate declaring an optional
+    (unconnected) image port first and a connected text port second, with an
+    image 'passed' output, validated under the inputs[0] check (image→image)
+    while the runtime sourced the passthrough from the text port and fed text
+    into a downstream image consumer. The validator must model the runtime:
+    the source is the first input port that has an incoming edge."""
+    from app.schemas.workflow_definition import validate_definition
+
+    def _defn(passed_type: str):
+        return {
+            "schema_version": 1,
+            "inputs": [{"key": "t", "type": "text", "required": True}],
+            "outputs": [
+                {"key": "out", "type": passed_type, "from_step": "qa", "from_port": "passed"}
+            ],
+            "steps": [
+                {
+                    "id": "mk", "type": "prompt_template", "name": "Mk",
+                    "config": {"template": "x {{inputs.t}}"},
+                    "inputs": [], "outputs": [{"port": "p", "type": "prompt"}],
+                },
+                {
+                    "id": "qa", "type": "review_gate", "name": "QA",
+                    "config": {"instructions": "x", "due_days": 7},
+                    "inputs": [
+                        # optional image FIRST — never connected
+                        {"port": "ref", "type": "image", "required": False},
+                        # connected text SECOND — the runtime's actual source
+                        {"port": "subject", "type": "text", "required": True},
+                    ],
+                    "outputs": [
+                        {"port": "decision", "type": "selection"},
+                        {"port": "passed", "type": passed_type},
+                    ],
+                },
+            ],
+            "edges": [
+                {"id": "e1", "from_step": "mk", "from_port": "p",
+                 "to_step": "qa", "to_port": "subject"}
+            ],
+            "ui": {},
+        }
+
+    # Runtime feeds TEXT through — an image 'passed' output must be rejected
+    _, errs = validate_definition(_defn("image"))
+    assert any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errs), [e["code"] for e in errs]
+
+    # …and a text 'passed' output is exactly right (prompt→text coercible too)
+    _, errs_ok = validate_definition(_defn("text"))
+    assert not any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errs_ok), [
+        e["code"] for e in errs_ok
+    ]

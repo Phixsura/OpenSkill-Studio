@@ -733,3 +733,42 @@ def test_deep_json_default_no_recursion_error():
     # Deep default exceeds the 8000-char stringified bound → WF_INVALID_DEFAULT
     # is acceptable; the point is NO RecursionError
     assert isinstance(errors, list)
+
+
+def test_plain_data_uri_rejected():
+    """R66: RFC 2397 allows non-base64 (URL-encoded/plain) payloads —
+    'data:image/png,%89%50…' has no ';base64,' marker and '%' breaks the
+    base64-blob charset, so ~96KB of inline media smuggled through the
+    unbounded ui block. ADR-010's red line rejects data: URIs in any
+    encoding; payloads ≥64 chars after the comma are rejected."""
+    # URL-encoded payload in the ui block
+    d = _minimal_valid()
+    d["ui"]["note"] = "data:image/png," + "%89%50%4E%47" * 200
+    _, errors = validate_definition(d)
+    assert "WF_DATA_URI_REJECTED" in _codes(errors)
+
+    # plain-text payload in step config
+    d2 = _minimal_valid()
+    d2["steps"][0]["config"]["template"] = "data:text/html," + "A" * 100
+    _, errors2 = validate_definition(d2)
+    assert "WF_DATA_URI_REJECTED" in _codes(errors2)
+
+    # omitted mediatype does not evade the match
+    d3 = _minimal_valid()
+    d3["ui"]["note"] = "data:," + "z" * 100
+    _, errors3 = validate_definition(d3)
+    assert "WF_DATA_URI_REJECTED" in _codes(errors3)
+
+
+def test_short_data_uri_mention_still_valid():
+    """Prose that merely MENTIONS a small data: URI (docs, instructions)
+    must not be collateral damage of the plain-payload gate."""
+    d = _minimal_valid()
+    d["steps"][0]["config"]["template"] = "e.g. data:text/plain,hello {{inputs.topic}}"
+    _, errors = validate_definition(d)
+    assert "WF_DATA_URI_REJECTED" not in _codes(errors)
+
+    d2 = _minimal_valid()
+    d2["steps"][0]["config"]["template"] = "the data: URI scheme is rejected, use {{inputs.topic}}"
+    _, errors2 = validate_definition(d2)
+    assert "WF_DATA_URI_REJECTED" not in _codes(errors2)

@@ -55,6 +55,15 @@ EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 DATA_URI_RE = re.compile(
     r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^;,]{1,80})*;base64,", re.IGNORECASE
 )
+# Non-base64 data URIs (RFC 2397 allows URL-encoded payloads): '%89%50…'
+# breaks BASE64_BLOB_RE's charset and carries no ';base64,' marker, so a
+# percent-encoded payload smuggled ~96KB of inline media through the
+# unbounded ui block (live-confirmed R66) — ADR-010's red line rejects
+# data: URIs in ANY encoding. Require a ≥64-char payload after the comma
+# so prose that merely MENTIONS a tiny data: URI stays valid.
+DATA_URI_PLAIN_RE = re.compile(
+    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^;,]{1,80})*,[^\s\"'\\]{64,}", re.IGNORECASE
+)
 BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/=]{1024,}")
 # NUL + C0/C1 control chars except tab (\x09) and newline (\x0a) — these
 # crash asyncpg when stored into JSONB (UntranslatableCharacterError)
@@ -298,9 +307,10 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             )
         ]
 
-    # data: URI / base64 blob rejection anywhere in the payload (D4)
+    # data: URI / base64 blob rejection anywhere in the payload (D4).
+    # Both encodings: ';base64,' marked AND plain/URL-encoded payloads.
     flat = _json.dumps(raw, ensure_ascii=False)
-    if DATA_URI_RE.search(flat) or BASE64_BLOB_RE.search(flat):
+    if DATA_URI_RE.search(flat) or DATA_URI_PLAIN_RE.search(flat) or BASE64_BLOB_RE.search(flat):
         errors.append(
             _err(
                 "WF_DATA_URI_REJECTED",
@@ -416,28 +426,11 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
         # the unpaired output ports — both rejected here. Exception: a single
         # input fans out to every output port, which is always type-checked
         # pairwise below.
-        # review_gate approved-decision passes the FIRST declared input port's
-        # value through to every non-`decision` output port (decide_review in
-        # workflow_runtime). That passthrough skips the edge coercion matrix
-        # exactly like an output step, so a gate declaring a text input and an
-        # image 'passed' output validates while the runtime feeds text into a
-        # downstream image consumer. Check each passthrough port pairwise.
-        if step.type == "review_gate" and step.inputs and step.outputs:
-            first_in = step.inputs[0]
-            for j, out_port in enumerate(step.outputs):
-                if out_port.port == "decision":
-                    continue  # decision is a synthesized selection, not passthrough
-                if out_port.type not in COERCIBLE.get(first_in.type, set()):
-                    errors.append(
-                        _err(
-                            "WF_EDGE_TYPE_MISMATCH",
-                            f"{ptr}/outputs/{j}",
-                            f"Review gate '{step.id}' passes input "
-                            f"'{first_in.port}' ({first_in.type}) through to output "
-                            f"'{out_port.port}' ({out_port.type}) — types are not "
-                            f"coercible",
-                        )
-                    )
+        # (review_gate passthrough is checked AFTER edge processing — the
+        # runtime's passthrough source is the first declared input with a
+        # RESOLVED value, i.e. the first port fed by an edge, which is only
+        # known once the incoming map exists. See the section below the
+        # fan-in check.)
 
         if step.type == "output" and step.inputs and step.outputs:
             if len(step.inputs) != len(step.outputs) and len(step.inputs) != 1:
@@ -602,6 +595,39 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                     "each input port accepts exactly one",
                 )
             )
+
+    # ── Review-gate passthrough typing ──
+    # decide_review passes the FIRST declared input port WITH A RESOLVED
+    # VALUE through to every non-`decision` output port. That passthrough
+    # skips the edge coercion matrix exactly like an output step. Checking
+    # only inputs[0] is WRONG when inputs[0] is optional and unconnected —
+    # the runtime then sources the passthrough from the next CONNECTED port
+    # (live-confirmed R66: optional image first + connected text second +
+    # image 'passed' output validated, then fed text into an image
+    # consumer). Model the runtime exactly: the passthrough source is the
+    # first declared input that has an incoming edge (required ports always
+    # do — enforced below), falling back to inputs[0] when nothing connects.
+    for i, step in enumerate(steps):
+        if step.type != "review_gate" or not step.inputs or not step.outputs:
+            continue
+        src_in = next(
+            (p for p in step.inputs if (step.id, p.port) in incoming),
+            step.inputs[0],
+        )
+        for j, out_port in enumerate(step.outputs):
+            if out_port.port == "decision":
+                continue  # decision is a synthesized selection, not passthrough
+            if out_port.type not in COERCIBLE.get(src_in.type, set()):
+                errors.append(
+                    _err(
+                        "WF_EDGE_TYPE_MISMATCH",
+                        f"/steps/{i}/outputs/{j}",
+                        f"Review gate '{step.id}' passes input "
+                        f"'{src_in.port}' ({src_in.type}) through to output "
+                        f"'{out_port.port}' ({out_port.type}) — types are not "
+                        f"coercible",
+                    )
+                )
 
     # ── Moustache refs are DATA dependencies: derive implicit edges ──
     # A prompt_template referencing {{steps.X.outputs.Y}} must run after X —
