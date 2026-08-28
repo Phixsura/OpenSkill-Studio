@@ -319,6 +319,28 @@ class WorkflowInstallationService:
         if binding_mode not in ("auto", "preferred", "pinned"):
             raise AppError("INVALID_BINDING_MODE", "Binding mode must be auto, preferred, or pinned", 422)
 
+        # Row-lock the installation and re-check it is not REMOVED — a
+        # concurrent remove() commits status=REMOVED and DELETEs this
+        # installation's bindings, but get_installation reads this session's
+        # own (pre-remove) snapshot, so a blind insert below would land a
+        # fresh binding row AFTER remove's delete: an orphan binding on a
+        # removed install (live-confirmed R67, 6/8 races). remove() takes the
+        # install row lock first (its conditional UPDATE) then touches
+        # bindings — locking here in the same order serializes the two safely:
+        # if remove won, this SELECT (status != REMOVED) returns nothing → 404;
+        # if we win, remove blocks until our binding write commits, then
+        # deletes it as part of removal.
+        locked = await self.db.execute(
+            select(WorkflowPackInstallation.id)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status != InstallStatus.REMOVED,
+            )
+            .with_for_update()
+        )
+        if locked.scalar_one_or_none() is None:
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+
         # The step must exist in the effective definition and declare a capability
         definition = await self._effective_definition(inst)
         step = next((s for s in definition.get("steps", []) if s["id"] == step_id), None)

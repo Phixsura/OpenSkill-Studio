@@ -1304,3 +1304,66 @@ async def test_confirm_binding_rejects_inactive_offering(c):
     )
     assert rb.status_code == 422, rb.text[:200]
     assert rb.json()["error"]["code"] == "OFFERING_INACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_confirm_binding_race_cannot_orphan_on_removed_install(c):
+    """R67: confirm_binding raced remove — get_installation read this
+    session's pre-remove ACTIVE snapshot, so a blind binding insert landed
+    AFTER remove's binding DELETE, orphaning a binding row on a removed
+    installation (live-confirmed 6/8 races). confirm now row-locks the
+    installation with a status != REMOVED guard (same lock order as remove),
+    so a confirm losing the race cleanly 404s and writes nothing."""
+    from sqlalchemy import func, select
+
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.models.workflow_run import WorkflowStepBinding
+    from app.services.workflow_installation import WorkflowInstallationService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid)
+    offering_id = await _mock_offering(c, h, oid)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
+    )
+    install_id = r.json()["data"]["id"]
+
+    async with AsyncSessionLocal() as db_a:
+        # Prime session A's identity map with the ACTIVE row so
+        # confirm_binding's own get_installation returns the STALE cached
+        # object (db.get hits the identity map, not the DB) — exactly the
+        # live interleaving where confirm passed the ACTIVE check before
+        # remove committed. Without this, get_installation would re-query and
+        # see REMOVED on its own, masking whether the row-lock guard works.
+        stale = await db_a.get(WorkflowPackInstallation, install_id)
+        assert stale.status.value == "active"
+
+        # Session B removes and commits (deletes bindings + flips REMOVED)
+        async with AsyncSessionLocal() as db_b:
+            await WorkflowInstallationService(db_b).remove(install_id, oid)
+            await db_b.commit()
+
+        # confirm must lose cleanly on the fresh-query row lock — 404, no insert
+        with pytest.raises(AppError) as exc_info:
+            await WorkflowInstallationService(db_a).confirm_binding(
+                install_id,
+                oid,
+                step_id="generate",
+                offering_id=offering_id,
+                binding_mode="preferred",
+                confirmed_by="u",
+            )
+        assert exc_info.value.code == "INSTALLATION_NOT_FOUND"
+        await db_a.rollback()
+
+    # No binding row survives on the removed installation
+    async with AsyncSessionLocal() as db:
+        count = await db.execute(
+            select(func.count())
+            .select_from(WorkflowStepBinding)
+            .where(WorkflowStepBinding.installation_id == install_id)
+        )
+        assert count.scalar_one() == 0
