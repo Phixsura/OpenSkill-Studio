@@ -677,5 +677,5 @@ class CreatorMatchingService:
             query = query.where(CreatorAssignment.project_id == project_id)
         if only_user_id:
             query = query.where(CreatorAssignment.user_id == only_user_id)
-        result = await self.db.execute(query.order_by(CreatorAssignment.created_at.desc()))
+        result = await self.db.execute(query.order_by(CreatorAssignment.created_at.desc(), CreatorAssignment.id.desc()))
         return list(result.scalars().all())

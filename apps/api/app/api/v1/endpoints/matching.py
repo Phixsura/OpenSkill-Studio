@@ -175,7 +175,7 @@ async def list_match_runs(
     result = await db.execute(
         select(MatchRun)
         .where(MatchRun.org_id == org_id)
-        .order_by(MatchRun.created_at.desc())
+        .order_by(MatchRun.created_at.desc(), MatchRun.id.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
     )

@@ -94,7 +94,7 @@ class WorkflowPackService:
         total_r = await self.db.execute(select(func.count()).select_from(query.subquery()))
         total = total_r.scalar_one()
         result = await self.db.execute(
-            query.order_by(WorkflowPack.created_at.desc())
+            query.order_by(WorkflowPack.created_at.desc(), WorkflowPack.id.desc())
             .offset((page - 1) * per_page)
             .limit(per_page)
         )

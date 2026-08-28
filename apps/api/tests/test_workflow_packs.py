@@ -1323,3 +1323,35 @@ def test_json_default_nonfinite_rejected():
     ok = {**d, "inputs": [{"key": "cfg", "type": "json", "required": False, "default": '{"x": 1.5}'}]}
     _, ok_errs = validate_definition(ok)
     assert not any(e["code"] == "WF_INVALID_DEFAULT" for e in ok_errs), [e["code"] for e in ok_errs]
+
+
+def test_list_endpoints_have_unique_id_tiebreak():
+    """R75: list_packs / list_installations / list_runs / list_profiles /
+    list_assignments / list_drafts / match-runs all ordered by a NON-UNIQUE
+    key (created_at/installed_at .desc()) alone. Postgres OFFSET pagination
+    over a non-unique sort has NO stability guarantee, so rows sharing a
+    timestamp (same-tick creation) can be SKIPPED or DUPLICATED across pages.
+    Each ORDER BY now chains the ULID primary key as a unique tiebreak, making
+    the sort a total order. Guard every paginated list-query source (an OFFSET
+    union check can pass by luck without the fix; source inspection cannot)."""
+    import inspect as _inspect
+
+    from app.services.creator_matching import CreatorMatchingService
+    from app.services.learning_composer import LearningComposerService
+    from app.services.requirement_profile import RequirementProfileService
+    from app.services.workflow_installation import WorkflowInstallationService
+    from app.services.workflow_pack import WorkflowPackService
+    from app.services.workflow_runtime import WorkflowRuntimeService
+
+    for svc, method, tiebreak in [
+        (WorkflowPackService, "list_packs", "WorkflowPack.id.desc()"),
+        (WorkflowInstallationService, "list_installations", "WorkflowPackInstallation.id.desc()"),
+        (WorkflowRuntimeService, "list_runs", "WorkflowRun.id.desc()"),
+        (RequirementProfileService, "list_profiles", "RequirementProfile.id.desc()"),
+        (CreatorMatchingService, "list_assignments", "CreatorAssignment.id.desc()"),
+        (LearningComposerService, "list_drafts", "SolutionDraft.id.desc()"),
+    ]:
+        src = _inspect.getsource(getattr(svc, method))
+        assert tiebreak in src, f"{svc.__name__}.{method} ORDER BY lacks the unique id tiebreak"
+
+

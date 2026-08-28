@@ -622,7 +622,7 @@ class LearningComposerService:
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
         result = await self.db.execute(
-            base.order_by(SolutionDraft.created_at.desc())
+            base.order_by(SolutionDraft.created_at.desc(), SolutionDraft.id.desc())
             .offset((page - 1) * per_page)
             .limit(per_page)
         )
