@@ -1749,10 +1749,10 @@ async def test_anon_registry_omits_internal_fields(c):
 
     # Simulate the reject→resubmit→approve history that leaves a stale
     # rejection_reason on an approved, public pack.
-    SECRET = "INTERNAL: suspected asset theft from ClientCo"
+    secret = "INTERNAL: suspected asset theft from ClientCo"
     async with AsyncSessionLocal() as db:
         pack = await db.get(SkillPack, pid)
-        pack.rejection_reason = SECRET
+        pack.rejection_reason = secret
         pack.review_status = "approved"
         pack.visibility = PackVisibility.PUBLIC
         pack.status = PackStatus.PUBLISHED
