@@ -804,10 +804,31 @@ class InstallationService:
             if existing:
                 existing.status = ContentStatus.ARCHIVED
 
-        # Update installation record
-        inst.release_id = release.id
-        inst.installed_version = target_version
+        # Update installation record via a STATUS-GUARDED UPDATE (R70d —
+        # mirror of the workflow-family upgrade): the FORKED check above ran
+        # on this session's identity-map snapshot, so a concurrent fork()
+        # (guarded, commits FORKED) or remove() (commits REMOVED) between the
+        # read and this write would otherwise be silently overwritten — a
+        # detached fork repointed at a new release, or a removed installation
+        # resurrected with fresh version metadata. Only an ACTIVE row upgrades.
+        from sqlalchemy import update as _upd
+
+        claimed = await self.db.execute(
+            _upd(SkillPackInstallation)
+            .where(
+                SkillPackInstallation.id == install_id,
+                SkillPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(release_id=release.id, installed_version=target_version)
+        )
+        if not claimed.rowcount:
+            raise AppError(
+                "INSTALL_CONFLICT",
+                "Installation was forked or removed by a concurrent request",
+                409,
+            )
         await self.db.flush()
+        self.db.expire(inst)
 
         log.info(
             "pack_upgraded",
@@ -816,6 +837,7 @@ class InstallationService:
             from_version=current_release.version,
             to_version=target_version,
         )
+        await self.db.refresh(inst)
         return inst
 
     # ── Remove ──

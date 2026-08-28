@@ -1077,3 +1077,60 @@ async def test_update_approved_pack_card_field_voids_approval(c):
     d = r.json()["data"]
     assert d["review_status"] != "approved"
     assert d["visibility"] != "public"
+
+
+@pytest.mark.asyncio
+async def test_skill_pack_mutations_row_locked_no_approval_bypass(c):
+    """R70d: same stale-read-write class as the workflow-pack family (R70b) —
+    every SkillPack mutation was a db.get snapshot + unguarded ORM setattr
+    under READ COMMITTED. Reproduced the identical approval BYPASS:
+    update_pack(visibility=public) passing its stale 'approved' gate while a
+    concurrent card-change had already voided approval → an unapproved pack
+    published to the registry. get_pack(for_update=True) row-locks + refreshes
+    so the loser re-reads fresh state and its own gate fires."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.skill_pack import PackVisibility, SkillPack
+    from app.services.skill_pack import SkillPackService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+
+    # Seed an approved+unlisted pack (the legitimate reviewed state)
+    async with AsyncSessionLocal() as db:
+        pack = await SkillPackService(db).create_pack(oid, u["id"], name=f"SP-{uuid.uuid4().hex[:6]}")
+        pack.review_status = "approved"
+        pack.visibility = PackVisibility.UNLISTED
+        await db.commit()
+        pid = pack.id
+
+    # Session A locks the row (simulating a card-change that voids approval);
+    # session B's update_pack(visibility=public) must block, re-read fresh
+    # (review_status=None), and fail its own approval gate.
+    async with AsyncSessionLocal() as db_a:
+        svc_a = SkillPackService(db_a)
+        pack_a = await svc_a.get_pack(pid, oid, for_update=True)
+
+        async def b_go_public():
+            async with AsyncSessionLocal() as db_b:
+                try:
+                    await SkillPackService(db_b).update_pack(pid, oid, visibility="public")
+                    await db_b.commit()
+                    return "PUBLIC_WON"
+                except AppError as e:
+                    return e.code
+
+        bt = asyncio.create_task(b_go_public())
+        await asyncio.sleep(0.3)  # ensure B is blocked on the lock
+        pack_a.review_status = None  # approval voided (card change)
+        await db_a.commit()
+        b_result = await bt
+
+    async with AsyncSessionLocal() as db:
+        p = await db.get(SkillPack, pid)
+        assert not (
+            p.visibility == PackVisibility.PUBLIC and p.review_status is None
+        ), f"approval bypass: visibility={p.visibility.value} review_status={p.review_status}"
+        assert b_result == "APPROVAL_REQUIRED", b_result

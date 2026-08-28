@@ -124,8 +124,27 @@ class SkillPackService:
         )
         return list(result.scalars().all()), total
 
-    async def get_pack(self, pack_id: str, org_id: str) -> SkillPack:
-        pack = await self.db.get(SkillPack, pack_id)
+    async def get_pack(
+        self, pack_id: str, org_id: str, for_update: bool = False
+    ) -> SkillPack:
+        # for_update: row-lock + refresh to committed state (populate_existing)
+        # for mutators. Same stale-read-write class as the workflow-pack family
+        # (R70b): every mutation here was a db.get snapshot + unguarded ORM
+        # setattr under READ COMMITTED — reproduced the identical approval
+        # BYPASS (update_pack(visibility=public) passing its stale 'approved'
+        # gate while a concurrent card-change had already voided approval,
+        # publishing an unapproved pack to the registry). The lock serializes
+        # the writers; the loser re-reads fresh so its own gate fires.
+        if for_update:
+            result = await self.db.execute(
+                select(SkillPack)
+                .where(SkillPack.id == pack_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            pack = result.scalar_one_or_none()
+        else:
+            pack = await self.db.get(SkillPack, pack_id)
         if pack is None or pack.owner_org_id != org_id:
             raise PackNotFoundError()
         if pack.status == PackStatus.ARCHIVED:
@@ -133,7 +152,7 @@ class SkillPackService:
         return pack
 
     async def update_pack(self, pack_id: str, org_id: str, **fields) -> SkillPack:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         # Approval gate (mirror of WorkflowPackService.update_pack): PUBLIC
         # visibility is only reachable via submit-review → approve. A direct
         # PUT visibility=public on an unapproved pack would list it in the
@@ -181,7 +200,7 @@ class SkillPackService:
         return pack
 
     async def delete_pack(self, pack_id: str, org_id: str) -> None:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         pack.status = PackStatus.ARCHIVED
 
         # Clean up join-table references
@@ -294,7 +313,7 @@ class SkillPackService:
 
     async def approve_pack(self, pack_id: str, org_id: str, actor_id: str) -> SkillPack:
         """Approve a pack for public visibility."""
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status != "pending":
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
         pack.review_status = "approved"
@@ -312,7 +331,7 @@ class SkillPackService:
         self, pack_id: str, org_id: str, reason: str | None = None, actor_id: str | None = None
     ) -> SkillPack:
         """Reject a pack from public visibility."""
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status != "pending":
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
         pack.review_status = "rejected"
@@ -329,7 +348,7 @@ class SkillPackService:
 
     async def submit_for_review(self, pack_id: str, org_id: str, actor_id: str) -> SkillPack:
         """Submit a pack for approval review."""
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status == "pending":
             raise AppError("ALREADY_PENDING", "Pack is already pending review", 409)
         if pack.review_status == "approved":
@@ -382,7 +401,7 @@ class SkillPackService:
         changelog: str | None,
         released_by: str,
     ) -> SkillPackRelease:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
 
         # Validate semver
         if not re.match(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$", version):

@@ -260,9 +260,26 @@ class RequirementProfileService:
                     provenance[key] = "user_entered"
                 structured[key] = value
         meta["provenance"] = provenance
-        profile.structured_requirements = structured
-        profile.extraction_meta = meta
-        await self.db.flush()
+        # Status-guarded conditional UPDATE (R70d): the draft check above ran
+        # on this session's snapshot — a concurrent confirm() committing
+        # between the read and this write would otherwise receive
+        # POST-CONFIRMATION edits (including user_entered provenance
+        # promotion → S2 hard constraints) that nobody re-reviewed at confirm
+        # time. Only a still-draft row accepts edits; a lost race is a clean 422.
+        from sqlalchemy import update as _upd
+
+        result = await self.db.execute(
+            _upd(RequirementProfile)
+            .where(
+                RequirementProfile.id == profile_id,
+                RequirementProfile.status == "draft",
+            )
+            .values(structured_requirements=structured, extraction_meta=meta)
+        )
+        if result.rowcount == 0:
+            raise AppError(
+                "PROFILE_ALREADY_CONFIRMED", "Confirmed profiles cannot be edited", 422
+            )
         await self.db.refresh(profile)
         return profile
 
@@ -277,9 +294,20 @@ class RequirementProfileService:
         self._assert_can_write(profile, acting_user_id, is_instructor)
         if profile.status == "confirmed":
             raise AppError("PROFILE_ALREADY_CONFIRMED", "Profile is already confirmed", 422)
-        profile.status = "confirmed"
-        profile.confirmed_at = datetime.now(UTC)
-        await self.db.flush()
+        # Conditional UPDATE (R70d): two concurrent confirms both pass the
+        # stale read above — only one flips the row; the loser 422s cleanly.
+        from sqlalchemy import update as _upd
+
+        result = await self.db.execute(
+            _upd(RequirementProfile)
+            .where(
+                RequirementProfile.id == profile_id,
+                RequirementProfile.status == "draft",
+            )
+            .values(status="confirmed", confirmed_at=datetime.now(UTC))
+        )
+        if result.rowcount == 0:
+            raise AppError("PROFILE_ALREADY_CONFIRMED", "Profile is already confirmed", 422)
         await self.db.refresh(profile)
         return profile
 

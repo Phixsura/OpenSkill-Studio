@@ -1672,3 +1672,61 @@ async def test_skill_pack_fork_remove_race_cannot_resurrect(c):
     async with AsyncSessionLocal() as db:
         final = await db.get(SkillPackInstallation, install_id)
         assert final.status.value == "removed"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_race_cannot_repoint_forked_install(c):
+    """R70d: skill-pack upgrade() wrote release_id/installed_version via
+    unguarded ORM attr assignment after a stale ACTIVE read — a concurrent
+    fork() (guarded, commits FORKED) between the read and the write was
+    silently overwritten: a DETACHED fork repointed at a new release with
+    fresh version metadata. The write is now a status-guarded UPDATE
+    (WHERE status==ACTIVE); the loser gets 409 INSTALL_CONFLICT."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.skill_pack import InstallStatus, SkillPackInstallation
+    from app.services.installation import InstallationService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, f"Race-{uuid.uuid4().hex[:6]}")
+    # second release so upgrade has a target
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h
+    )
+    assert r.status_code == 201, r.text
+
+    # consumer org installs v1.0.0
+    h2, u2 = await _auth(c)
+    o2 = await _org(c, h2)
+    ri = await c.post(
+        f"/api/v1/orgs/{o2}/installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=h2,
+    )
+    assert ri.status_code == 201, ri.text
+    install_id = ri.json()["data"]["id"]
+
+    # Session A primes its identity map with the ACTIVE row; session B forks
+    # (guarded UPDATE → FORKED) and commits; A's upgrade then runs on the
+    # stale ACTIVE snapshot — its guarded write must lose (409), never
+    # repoint the forked install.
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(SkillPackInstallation, install_id)
+        assert stale.status == InstallStatus.ACTIVE
+
+        async with AsyncSessionLocal() as db_b:
+            await InstallationService(db_b).fork(install_id, o2)
+            await db_b.commit()
+
+        with pytest.raises(AppError) as exc_info:
+            await InstallationService(db_a).upgrade(install_id, o2, "2.0.0", u2["id"])
+        assert exc_info.value.code in ("INSTALL_CONFLICT", "INSTALL_FORKED"), exc_info.value.code
+        await db_a.rollback()
+
+    async with AsyncSessionLocal() as db:
+        p = await db.get(SkillPackInstallation, install_id)
+        assert p.status == InstallStatus.FORKED
+        assert p.installed_version == "1.0.0", (
+            f"forked install repointed to {p.installed_version}"
+        )

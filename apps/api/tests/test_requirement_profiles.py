@@ -755,3 +755,76 @@ async def test_profile_reads_scoped_to_owner_or_instructor(c):
     ).status_code == 200
     lo = await c.get(f"/api/v1/orgs/{oid}/requirement-profiles", headers=h_owner)
     assert pid in [p["id"] for p in lo.json()["data"]]
+
+
+@pytest.mark.asyncio
+async def test_profile_confirm_and_edit_race_guarded(c):
+    """R70d: confirm() and update_profile() both gated on a stale snapshot and
+    wrote via unguarded ORM assignment. Two concurrent confirms both passed
+    the 'already confirmed' read; worse, an edit racing a confirm landed
+    POST-CONFIRMATION edits (with user_entered provenance promotion → S2 hard
+    constraints) that nobody re-reviewed. Both writes are now status-guarded
+    conditional UPDATEs (WHERE status='draft'); the loser gets a clean 422."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.matching import RequirementProfile
+    from app.services.requirement_profile import RequirementProfileService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"goal": "learn"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["data"]["id"]
+
+    # Session A primes its identity map with the DRAFT row; session B
+    # confirms and commits; A's edit then runs on the stale draft snapshot —
+    # its guarded write must lose (422), never mutate a confirmed profile.
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(RequirementProfile, pid)
+        assert stale.status == "draft"
+
+        async with AsyncSessionLocal() as db_b:
+            await RequirementProfileService(db_b).confirm(
+                pid, oid, acting_user_id=u["id"], is_instructor=True
+            )
+            await db_b.commit()
+
+        with pytest.raises(AppError) as exc_info:
+            await RequirementProfileService(db_a).update_profile(
+                pid, oid, {"goal": "smuggled post-confirm edit"},
+                acting_user_id=u["id"], is_instructor=True,
+            )
+        assert exc_info.value.code == "PROFILE_ALREADY_CONFIRMED"
+        await db_a.rollback()
+
+    # And a second confirm on a stale draft snapshot loses cleanly too
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"goal": "x"}},
+        headers=h,
+    )
+    pid2 = r2.json()["data"]["id"]
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(RequirementProfile, pid2)
+        assert stale.status == "draft"
+        async with AsyncSessionLocal() as db_b:
+            await RequirementProfileService(db_b).confirm(
+                pid2, oid, acting_user_id=u["id"], is_instructor=True
+            )
+            await db_b.commit()
+        with pytest.raises(AppError) as exc_info:
+            await RequirementProfileService(db_a).confirm(
+                pid2, oid, acting_user_id=u["id"], is_instructor=True
+            )
+        assert exc_info.value.code == "PROFILE_ALREADY_CONFIRMED"
+        await db_a.rollback()
+
+    # Final state: goal unchanged by the losing edit
+    async with AsyncSessionLocal() as db:
+        p = await db.get(RequirementProfile, pid)
+        assert p.status == "confirmed"
+        assert p.structured_requirements.get("goal") == "learn"
