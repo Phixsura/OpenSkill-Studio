@@ -1730,3 +1730,45 @@ async def test_upgrade_race_cannot_repoint_forked_install(c):
         assert p.installed_version == "1.0.0", (
             f"forked install repointed to {p.installed_version}"
         )
+
+
+@pytest.mark.asyncio
+async def test_anon_registry_omits_internal_fields(c):
+    """R71: the anonymous /registry endpoints served SkillPackResponse, which
+    exposes rejection_reason (the moderator's PRIVATE review note), plus
+    review_status, owner_org_id and created_by, to unauthenticated callers. A
+    rejected-then-approved pack thus published the moderator's rejection note
+    to the world. The anon endpoints now use PublicSkillPackResponse, which
+    omits all four. Seed the leaky state directly, then read as anon."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import PackStatus, PackVisibility, SkillPack
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, "Leaky Pack")
+
+    # Simulate the reject→resubmit→approve history that leaves a stale
+    # rejection_reason on an approved, public pack.
+    SECRET = "INTERNAL: suspected asset theft from ClientCo"
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(SkillPack, pid)
+        pack.rejection_reason = SECRET
+        pack.review_status = "approved"
+        pack.visibility = PackVisibility.PUBLIC
+        pack.status = PackStatus.PUBLISHED
+        await db.commit()
+
+    # Anonymous detail read (no auth header)
+    r = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    for leaked in ("rejection_reason", "review_status", "owner_org_id", "created_by"):
+        assert leaked not in d, f"{leaked} leaked to anon registry: {d.get(leaked)!r}"
+    assert d["name"] == "Leaky Pack"  # discovery metadata still present
+
+    # Anonymous search must not leak either
+    rs = await c.get("/api/v1/registry/packs?search=Leaky")
+    assert rs.status_code == 200
+    for row in rs.json()["data"]:
+        assert "rejection_reason" not in row
+        assert "owner_org_id" not in row

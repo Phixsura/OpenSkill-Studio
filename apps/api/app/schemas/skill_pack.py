@@ -248,6 +248,38 @@ class SkillPackResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PublicSkillPackResponse(BaseModel):
+    """Anonymous registry card/detail — internal moderation + ownership fields
+    are OMITTED. SkillPackResponse (the authenticated org-scoped shape) leaked
+    rejection_reason (the moderator's PRIVATE review note), review_status,
+    owner_org_id, and created_by to unauthenticated /registry callers (R71).
+    The public registry serves only discovery metadata."""
+
+    id: str
+    name: str
+    slug: str
+    description: str | None = None
+    summary: str | None = None
+    visibility: str
+    language: str
+    difficulty: str | None = None
+    estimated_minutes: int | None = None
+    learning_outcomes: list = []
+    scenario_tags: list = []
+    tool_tags: list = []
+    capability_tags: list = []
+    install_count: int = 0
+    review_count: int = 0
+    average_rating: float | None = None
+    quality_score: int | None = None
+    badges: list[str] = []
+    provenance: dict = {}
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Pack Contents ────────────────────────────────────────
 
 

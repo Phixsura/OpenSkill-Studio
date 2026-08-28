@@ -176,8 +176,20 @@ class WorkflowRegistryService:
 
     async def get_public_releases(self, pack_id: str) -> list[WorkflowPackRelease]:
         await self.get_public_pack(pack_id)  # verify accessible
+        # defer(manifest): PublicWorkflowReleaseResponse serializes NO manifest
+        # body ("Release list entry — no manifest body"), so loading it is pure
+        # waste — each manifest embeds a definition up to 262,144 bytes
+        # (ck_wfpack_definition_size). On an anonymous endpoint an author can
+        # publish unbounded releases (only version uniqueness is enforced), so a
+        # single GET would materialize N × 256KB of JSONB into ORM objects that
+        # are immediately discarded (R71 amplification). The skill-pack twin
+        # (services/registry.py get_public_releases) already defers identically.
+        from sqlalchemy.orm import defer
+
         result = await self.db.execute(
-            select(WorkflowPackRelease).where(WorkflowPackRelease.pack_id == pack_id)
+            select(WorkflowPackRelease)
+            .where(WorkflowPackRelease.pack_id == pack_id)
+            .options(defer(WorkflowPackRelease.manifest))
         )
         releases = list(result.scalars().all())
         releases.sort(key=lambda r: _parse_semver(r.version), reverse=True)

@@ -7,7 +7,10 @@ from app.api.deps import get_db
 from app.core.rate_limit import rate_limit
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.registry import PackPreviewResponse
-from app.schemas.skill_pack import ReleaseResponse, SkillPackResponse
+from app.schemas.skill_pack import (
+    PublicSkillPackResponse,
+    ReleaseResponse,
+)
 from app.services.registry import RegistryService
 
 router = APIRouter(tags=["Registry"])
@@ -21,7 +24,7 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
     return DataResponse(data=tree)
 
 
-@router.get("/registry/packs", response_model=ListResponse[SkillPackResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get("/registry/packs", response_model=ListResponse[PublicSkillPackResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def search_registry(
     search: str | None = None,
     scenario: str | None = None,
@@ -47,17 +50,17 @@ async def search_registry(
     )
     effective_per_page = min(per_page, max_results or 50)
     return ListResponse(
-        data=[SkillPackResponse.model_validate(p) for p in packs],
+        data=[PublicSkillPackResponse.model_validate(p) for p in packs],
         meta=PaginationMeta(total=total, page=page, per_page=effective_per_page, has_more=(page * effective_per_page) < total),
     )
 
 
-@router.get("/registry/packs/{pack_id}", response_model=DataResponse[SkillPackResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get("/registry/packs/{pack_id}", response_model=DataResponse[PublicSkillPackResponse], dependencies=[Depends(rate_limit(30, 60))])
 async def get_registry_pack(pack_id: str, db: AsyncSession = Depends(get_db)):
     """Get a public/unlisted pack detail."""
     svc = RegistryService(db)
     pack = await svc.get_public_pack(pack_id)
-    return DataResponse(data=SkillPackResponse.model_validate(pack))
+    return DataResponse(data=PublicSkillPackResponse.model_validate(pack))
 
 
 @router.get(

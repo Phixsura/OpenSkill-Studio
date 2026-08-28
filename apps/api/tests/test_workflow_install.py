@@ -1444,3 +1444,31 @@ async def test_fork_snapshots_committed_definition_not_stale(c):
         # never a v1-frozen definition under a v2 version label.
         assert p.installed_version == "2.0.0", p.installed_version
         assert steps == ["v2step"], f"stale fork: version=2.0.0 but def={steps}"
+
+
+@pytest.mark.asyncio
+async def test_registry_releases_defers_manifest_load(c):
+    """R71: get_public_releases is an anonymous endpoint whose response model
+    carries NO manifest body, yet it loaded every release's full manifest JSONB
+    (each up to 262,144 bytes) — an author can publish unbounded releases, so a
+    single GET amplified into N × 256KB of wasted materialization. The query
+    now defer()s the manifest column. Assert it is NOT eagerly loaded."""
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.workflow_registry import WorkflowRegistryService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid, versions=("1.0.0", "1.1.0", "1.2.0"))
+
+    async with AsyncSessionLocal() as db:
+        releases = await WorkflowRegistryService(db).get_public_releases(pid)
+        assert len(releases) == 3
+        # 'manifest' must be an UNLOADED (deferred) attribute on each row —
+        # accessing it would trigger a lazy load, proving it wasn't fetched.
+        for rel in releases:
+            unloaded = sa_inspect(rel).unloaded
+            assert "manifest" in unloaded, (
+                f"manifest was eagerly loaded (unloaded={unloaded})"
+            )
