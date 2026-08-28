@@ -869,6 +869,16 @@ async def test_import_hostile_entry_types_rejected_not_500(c):
         "learning_content int": variant(
             lambda m: m["skills"][0].__setitem__("learning_content", 12345)
         ),
+        # R78: falsy non-strings bypassed the gate via `lc and ...` truthiness
+        "learning_content zero": variant(
+            lambda m: m["skills"][0].__setitem__("learning_content", 0)
+        ),
+        "learning_content false": variant(
+            lambda m: m["skills"][0].__setitem__("learning_content", False)
+        ),
+        "learning_content empty list": variant(
+            lambda m: m["skills"][0].__setitem__("learning_content", [])
+        ),
         "exercise config str": variant(
             lambda m: m["skills"][0].__setitem__(
                 "exercises",

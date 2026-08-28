@@ -66,6 +66,22 @@ DATA_URI_PLAIN_RE = re.compile(
     r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^;,]{1,80})*,[^\s\"'\\]{64,}", re.IGNORECASE
 )
 BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/=]{1024,}")
+# Whitespace-chunk evasion (R78): '{64,}' needs an UNBROKEN payload run, so
+# "data:image/png," + 60-char %-encoded chunks joined by \n/\t (both
+# JSONB-legal, exempt from _CTRL_RE) smuggled ~100KB past every matcher.
+# A second scan on a whitespace-stripped copy closes it. Two deltas vs the
+# unstripped regex: (1) threshold 256 not 64 — stripping glues prose too, and
+# a real media payload needs kilobytes anyway; (2) the payload charset is
+# encoded-data characters only (alnum % + / = . _ ~ -), so ordinary prose
+# after a harmless data:-URI mention breaks the run at its first comma,
+# apostrophe, paren, or non-ASCII character.
+DATA_URI_STRIPPED_RE = re.compile(
+    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^;,]{1,80})*,[A-Za-z0-9%+/=._~-]{256,}",
+    re.IGNORECASE,
+)
+# The scan input is json.dumps output: literal spaces survive as-is, but
+# newline/tab/CR appear as the 2-char escapes \n / \t / \r — strip both forms.
+_WS_RE = re.compile(r"\s|\\[ntr]")
 # NUL + C0/C1 control chars except tab (\x09) and newline (\x0a) — these
 # crash asyncpg when stored into JSONB (UntranslatableCharacterError)
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
@@ -320,8 +336,16 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
 
     # data: URI / base64 blob rejection anywhere in the payload (D4).
     # Both encodings: ';base64,' marked AND plain/URL-encoded payloads.
+    # ALSO scan a whitespace-stripped copy with DATA_URI_STRIPPED_RE (R78) —
+    # closes the whitespace-chunking evasion; see the regex's comment.
     flat = _json.dumps(raw, ensure_ascii=False)
-    if DATA_URI_RE.search(flat) or DATA_URI_PLAIN_RE.search(flat) or BASE64_BLOB_RE.search(flat):
+    flat_ws = _WS_RE.sub("", flat)
+    if (
+        DATA_URI_RE.search(flat)
+        or DATA_URI_PLAIN_RE.search(flat)
+        or DATA_URI_STRIPPED_RE.search(flat_ws)
+        or BASE64_BLOB_RE.search(flat)
+    ):
         errors.append(
             _err(
                 "WF_DATA_URI_REJECTED",

@@ -245,7 +245,10 @@ class PackImportService:
                         422,
                     )
             lc = s.get("learning_content", "")
-            if lc and not isinstance(lc, str):
+            # `is not None`, not truthiness (R78): falsy non-strings (0,
+            # False, [], {}) skipped the isinstance gate via `lc and ...`
+            # and 500'd downstream at the Text-column write.
+            if lc is not None and not isinstance(lc, str):
                 raise AppError(
                     "INVALID_MANIFEST",
                     f"Skill '{lid}' learning_content must be a string",

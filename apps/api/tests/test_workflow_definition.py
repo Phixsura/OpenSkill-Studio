@@ -817,6 +817,32 @@ def test_plain_data_uri_rejected():
     assert "WF_DATA_URI_REJECTED" in _codes(errors3)
 
 
+def test_whitespace_chunked_data_uri_rejected():
+    """R78: DATA_URI_PLAIN_RE's {64,} needs an UNBROKEN payload run, so
+    'data:image/png,' + 60-char %-encoded chunks joined by newlines/tabs
+    (both JSONB-legal, exempt from _CTRL_RE) smuggled ~100KB of inline
+    media past every matcher. A second scan on a whitespace-stripped copy
+    (DATA_URI_STRIPPED_RE) closes the chunking evasion."""
+    chunk = "%89%50%4E%47%0D%0A%1A%0A%00%00%00%0D%49%48%44%52%00%00%01%00"  # 60 chars
+    for joiner in ("\n", "\t", " "):
+        d = _minimal_valid()
+        d["ui"]["note"] = "data:image/png," + joiner.join([chunk] * 200)
+        _, errors = validate_definition(d)
+        assert "WF_DATA_URI_REJECTED" in _codes(errors), f"joiner {joiner!r} evaded"
+
+    # Prose containing a short data: mention followed by ordinary text keeps
+    # validating — the stripped-scan payload charset breaks at prose chars.
+    d2 = _minimal_valid()
+    d2["ui"]["note"] = (
+        "Reference assets by ID, e.g. data:text/plain,hello is rejected. "
+        "Use the asset picker instead; uploads are stored as ULID references "
+        "and resolved at run time by the executor, never inlined into the "
+        "definition payload (see ADR-010 for the full rationale and limits)."
+    )
+    _, errors2 = validate_definition(d2)
+    assert "WF_DATA_URI_REJECTED" not in _codes(errors2)
+
+
 def test_short_data_uri_mention_still_valid():
     """Prose that merely MENTIONS a small data: URI (docs, instructions)
     must not be collateral damage of the plain-payload gate."""
