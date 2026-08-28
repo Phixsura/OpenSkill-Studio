@@ -75,13 +75,24 @@ class PackImportService:
         try:
             manifest_bytes = zf.read("openskill-pack.json")
             manifest = json.loads(manifest_bytes)
-        except (json.JSONDecodeError, KeyError) as exc:
-            log.warning("manifest_parse_failed", error=str(exc))
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            # ValueError (not just JSONDecodeError): a JSON integer literal
+            # longer than CPython's 4300-digit int-string limit raises a bare
+            # ValueError from json.loads, NOT a JSONDecodeError — the narrower
+            # except let it escape to a 500 (R70). RecursionError too: a
+            # deeply nested manifest blows the C parser's recursion guard.
+            log.warning("manifest_parse_failed", error=str(exc)[:200])
             raise AppError(
                 "INVALID_MANIFEST",
                 "Manifest file openskill-pack.json is not valid JSON or missing required fields",
                 422,
             ) from exc
+        except RecursionError:
+            raise AppError(
+                "INVALID_MANIFEST",
+                "Manifest JSON is nested too deeply",
+                422,
+            ) from None
 
         # 6b0. Depth cap BEFORE the canonical dumps below: json.loads parses
         # ~900 levels while the recursive json.dumps (and every later

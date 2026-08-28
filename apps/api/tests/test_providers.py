@@ -822,3 +822,58 @@ async def test_connection_and_offering_nul_rejected(c):
         headers=h,
     )
     assert r3.status_code == 422, r3.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_connection_config_nul_rejected_not_500(c):
+    """R70: connection.config / offering.limits are open JSONB dicts whose
+    validators only ran reject_deep_json — never reject_ctrl_json. A NUL
+    smuggled into a value (valid-JSON \\u0000 escape → real NUL) reached the
+    JSONB write and crashed asyncpg (22P05 → 500). Must be a clean 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    aid = await _mock_adapter_id(c, h)
+    nul = chr(0)
+
+    # config NUL on create
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "x", "config": {"endpoint": "a" + nul + "b"}},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+
+    # config NUL on update
+    conn_id = await _connection(c, h, oid)
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/provider-connections/{conn_id}",
+        json={"config": {"endpoint": "a" + nul + "b"}},
+        headers=h,
+    )
+    assert r2.status_code == 422, r2.text[:200]
+
+    # limits NUL on offering create
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "ok",
+            "limits": {"note": "a" + nul + "b"},
+        },
+        headers=h,
+    )
+    assert r3.status_code == 422, r3.text[:200]
+
+    # Control: clean config/limits still accepted
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "ok2",
+            "limits": {"max_resolution": "2048x2048"},
+        },
+        headers=h,
+    )
+    assert r4.status_code == 201, r4.text[:200]

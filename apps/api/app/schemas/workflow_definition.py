@@ -505,12 +505,34 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             elif inp.type in ("image", "video", "audio", "reference_asset") and len(inp.default) > 500:
                 bad_default = "asset-reference default exceeds the 500-character run-input limit"
             elif inp.type == "json":
-                try:
-                    parsed_default = _json.loads(inp.default)
-                except (ValueError, TypeError):
-                    parsed_default = None
-                if not isinstance(parsed_default, (dict, list)):
+                # A flat json-default string dodges the raw-definition depth
+                # gate (it is one scalar in the raw dict), but its CONTENT can
+                # nest ~9997 levels. Two RecursionError doors, both → 500
+                # (R70): (a) json.loads itself — the C parser's recursion
+                # budget shrinks under FastAPI's deep middleware stack, so the
+                # parse blows up live even though it survives a shallow local
+                # call; (b) CPython's container repr in len(str(parsed)). Cap
+                # the RAW string length first (a legit ≤8000-char default can
+                # never nest past ~4000 levels, far under any parser limit),
+                # then parse — catching RecursionError defensively.
+                if len(inp.default) > 8000:
+                    bad_default = "json default exceeds the 8,000-character run-input limit"
+                else:
+                    try:
+                        parsed_default = _json.loads(inp.default)
+                    except (ValueError, TypeError, RecursionError):
+                        parsed_default = None
+                        bad_default = "json default is not valid JSON"
+                if bad_default is not None:
+                    pass
+                elif not isinstance(parsed_default, (dict, list)):
                     bad_default = "json default must be a JSON object or array"
+                # Depth gate mirrors create_run's _MAX_INPUT_DEPTH (64) on the
+                # PARSED value; _max_depth is iterative so it never recurses.
+                elif _max_depth(parsed_default) > MAX_DEFINITION_DEPTH:
+                    bad_default = (
+                        f"json default is nested deeper than {MAX_DEFINITION_DEPTH} levels"
+                    )
                 elif len(str(parsed_default)) > 8000:
                     bad_default = "json default exceeds the 8,000-character run-input limit"
                 elif _default_has_ctrl(parsed_default):

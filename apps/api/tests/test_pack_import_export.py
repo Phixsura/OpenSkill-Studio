@@ -907,3 +907,35 @@ async def test_import_hostile_entry_types_rejected_not_500(c):
         headers=h,
     )
     assert r.status_code == 201, r.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_import_bigint_literal_rejected_not_500(c):
+    """R70: a JSON integer literal longer than CPython's 4300-digit int-string
+    limit makes json.loads raise a BARE ValueError (not JSONDecodeError). The
+    manifest parse only caught (JSONDecodeError, KeyError), so the ValueError
+    escaped to a 500. Must be a clean 422 INVALID_MANIFEST."""
+    import io
+    import zipfile
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Build the zip with a RAW json string (json.dumps would render the int
+    # fine — the bug is only in PARSING the oversized literal back).
+    raw = (
+        '{"schema_version": "1", "version": "1.0.0", '
+        '"pack": {"name": "P"}, "skills": [{"logical_id": "a"}], '
+        '"n": ' + ("9" * 5000) + "}"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("openskill-pack.json", raw)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", buf.getvalue(), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, f"{r.status_code}: {r.text[:200]}"
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"

@@ -735,6 +735,40 @@ def test_deep_json_default_no_recursion_error():
     assert isinstance(errors, list)
 
 
+def test_pathologically_deep_json_default_rejected_not_500():
+    """R70: a FLAT json-default string ('['*9997+'1'+']'*9997) dodges the
+    raw-definition depth gate (it is one scalar in the raw dict) but json.loads
+    parses ~9997 levels deep. Two RecursionError doors → 500 at validate/publish:
+    json.loads itself (its C recursion budget shrinks under FastAPI's deep
+    middleware stack) and CPython's recursive container repr in len(str(...)).
+    The raw-string-length cap (8000) short-circuits before either, and the
+    parse catches RecursionError defensively — result is a clean
+    WF_INVALID_DEFAULT, never a 500."""
+    for depth in (9997, 2000, 500, 100):
+        d = _minimal_valid()
+        d["inputs"].append(
+            {
+                "key": "deep",
+                "type": "json",
+                "required": False,
+                "default": "[" * depth + "1" + "]" * depth,
+            }
+        )
+        # Must return structured errors, never raise RecursionError
+        _, errors = validate_definition(d)
+        assert any(e["code"] == "WF_INVALID_DEFAULT" for e in errors), (
+            f"depth={depth}: {_codes(errors)}"
+        )
+
+    # Control: a normal shallow json default is still accepted
+    ok = _minimal_valid()
+    ok["inputs"].append(
+        {"key": "cfg", "type": "json", "required": False, "default": '{"a": [1, 2, 3]}'}
+    )
+    _, ok_errors = validate_definition(ok)
+    assert "WF_INVALID_DEFAULT" not in _codes(ok_errors), _codes(ok_errors)
+
+
 def test_plain_data_uri_rejected():
     """R66: RFC 2397 allows non-base64 (URL-encoded/plain) payloads —
     'data:image/png,%89%50…' has no ';base64,' marker and '%' breaks the
