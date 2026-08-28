@@ -891,7 +891,7 @@ async def test_connection_config_and_limits_nonfinite_rejected_not_500(c):
 
     r = await c.post(
         f"/api/v1/orgs/{oid}/provider-connections",
-        content=('{"adapter_id":"%s","name":"x","config":{"rate": NaN}}' % aid).encode(),
+        content=(f'{{"adapter_id":"{aid}","name":"x","config":{{"rate": NaN}}}}').encode(),
         headers=hj,
     )
     assert r.status_code == 422, r.text[:150]
@@ -900,8 +900,8 @@ async def test_connection_config_and_limits_nonfinite_rejected_not_500(c):
     r2 = await c.post(
         f"/api/v1/orgs/{oid}/provider-offerings",
         content=(
-            '{"connection_id":"%s","capability_key":"image_generation",'
-            '"model_name":"m","limits":{"max": Infinity}}' % conn_id
+            f'{{"connection_id":"{conn_id}","capability_key":"image_generation",'
+            f'"model_name":"m","limits":{{"max": Infinity}}}}'
         ).encode(),
         headers=hj,
     )

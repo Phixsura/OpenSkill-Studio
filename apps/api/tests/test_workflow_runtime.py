@@ -1885,7 +1885,7 @@ async def test_create_run_nonfinite_json_input_rejected_not_500(c):
     # NaN inside the json input
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-runs",
-        content=('{"installation_id":"%s","inputs":{"cfg":{"x": NaN}}}' % install_id).encode(),
+        content=(f'{{"installation_id":"{install_id}","inputs":{{"cfg":{{"x": NaN}}}}}}').encode(),
         headers=hj,
     )
     assert r.status_code == 422, f"{r.status_code}: {r.text[:150]}"
@@ -1894,7 +1894,7 @@ async def test_create_run_nonfinite_json_input_rejected_not_500(c):
     r2 = await c.post(
         f"/api/v1/orgs/{oid}/workflow-runs",
         content=(
-            '{"installation_id":"%s","inputs":{"cfg":{"a":[1, Infinity]}}}' % install_id
+            f'{{"installation_id":"{install_id}","inputs":{{"cfg":{{"a":[1, Infinity]}}}}}}'
         ).encode(),
         headers=hj,
     )
