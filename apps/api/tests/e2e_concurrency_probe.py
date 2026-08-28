@@ -288,6 +288,76 @@ async def main() -> None:
         step_ids = [s["step_id"] for s in steps]
         check("no duplicated step_runs", len(step_ids) == len(set(step_ids)), f"{step_ids}")
 
+        # ── 6. fork/upgrade racing remove: no zombie install (R55/R63) ──
+        # These guards were proven only via seeded identity-map unit tests;
+        # fire them against the live server with real concurrent sessions.
+        print("⑥ fork / upgrade racing remove (no resurrection)")
+        pid_fr = await make_pack(c, h, oid, DEFINITION)
+        # publish a 2.0.0 so upgrade has a target
+        await c.post(
+            f"{BASE}/orgs/{oid}/workflow-packs/{pid_fr}/releases",
+            json={"version": "2.0.0"},
+            headers=h,
+        )
+        await c.post(f"{BASE}/orgs/{oid}/workflow-packs/{pid_fr}/submit-review", headers=h)
+        await c.post(f"{BASE}/orgs/{oid}/workflow-packs/{pid_fr}/approve", headers=h)
+
+        for label, mutate in (
+            (
+                "fork",
+                lambda iid: c.post(
+                    f"{BASE}/orgs/{oid}/workflow-installations/{iid}/fork", headers=h
+                ),
+            ),
+            (
+                "upgrade",
+                lambda iid: c.post(
+                    f"{BASE}/orgs/{oid}/workflow-installations/{iid}/upgrade",
+                    json={"version": "2.0.0"},
+                    headers=h,
+                ),
+            ),
+        ):
+            ri = await c.post(
+                f"{BASE}/orgs/{oid}/workflow-installations",
+                json={"pack_id": pid_fr, "version": "1.0.0"},
+                headers=h,
+            )
+            if ri.status_code != 201:
+                check(f"{label} setup install", False, f"{ri.status_code}: {ri.text[:200]}")
+                continue
+            iid = ri.json()["data"]["id"]
+            # fire remove + the mutation together
+            res = await asyncio.gather(
+                c.request("DELETE", f"{BASE}/orgs/{oid}/workflow-installations/{iid}", headers=h),
+                mutate(iid),
+                return_exceptions=True,
+            )
+            codes = [r0.status_code for r0 in res if hasattr(r0, "status_code")]
+            n5xx = sum(1 for x in codes if x >= 500)
+            check(f"{label} vs remove: no 500s", n5xx == 0, f"codes={codes}")
+            # After the race the install must be REMOVED — never resurrected
+            # to ACTIVE/FORKED by the losing mutation.
+            gi = await c.get(
+                f"{BASE}/orgs/{oid}/workflow-installations/{iid}", headers=h
+            )
+            # 404 (removed + hidden) OR body status removed — never active/forked
+            fstatus = gi.json()["data"]["status"] if gi.status_code == 200 else "gone"
+            resurrected = fstatus in ("active", "forked")
+            check(
+                f"{label} vs remove: no zombie install",
+                not resurrected,
+                f"get={gi.status_code} status={fstatus} race={codes}",
+            )
+            # Best-effort cleanup so the next sub-case's fresh install on the
+            # same (org, pack) doesn't collide with a leftover live row.
+            if gi.status_code == 200:
+                await c.request(
+                    "DELETE",
+                    f"{BASE}/orgs/{oid}/workflow-installations/{iid}",
+                    headers=h,
+                )
+
     print("\n" + "=" * 50)
     print(f"  {len(PASS)}/{len(PASS) + len(FAIL)} checks passed")
     print("=" * 50)
