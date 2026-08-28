@@ -233,12 +233,37 @@ class WorkflowInstallationService:
         inst = await self.get_installation(installation_id, org_id)
         if inst.status == InstallStatus.FORKED:
             raise AppError("ALREADY_FORKED", "Installation is already forked", 409)
+        # Row-lock + refresh to committed state BEFORE snapshotting the
+        # definition. Without the lock, fork snapshots inst's identity-map
+        # (possibly v1) definition, then a concurrent upgrade() repoints
+        # release_id to v2 while leaving status=ACTIVE — fork's status-guarded
+        # UPDATE (WHERE status==ACTIVE) still passes and writes a
+        # local_definition frozen at v1 onto a row whose installed_version now
+        # reads 2.0.0: a fork whose code and version label disagree (R70 #3).
+        # populate_existing refreshes release_id/local_definition so the
+        # _effective_definition read below sees the committed release; the lock
+        # serializes fork vs upgrade so one fully commits before the other reads.
+        locked = await self.db.execute(
+            select(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        inst = locked.scalar_one_or_none()
+        if inst is None:
+            # Not ACTIVE under the lock: already forked (409) or removed (404).
+            self.db.expire_all()
+            fresh = await self.db.get(WorkflowPackInstallation, installation_id)
+            if fresh is not None and fresh.status == InstallStatus.FORKED:
+                raise AppError("ALREADY_FORKED", "Installation is already forked", 409)
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
         definition = await self._effective_definition(inst)
-        # Status-guarded UPDATE (not an ORM attribute write): a concurrent
-        # remove() may flip the row to REMOVED between our read and this
-        # write — an unguarded flush would then overwrite REMOVED with
-        # FORKED, resurrecting a zombie installation whose bindings were
-        # deleted and whose install_count was already decremented.
+        # Status-guarded UPDATE (belt-and-braces alongside the row lock): a
+        # concurrent remove() cannot slip in between the locked SELECT and this
+        # write, but the guard keeps the transition intent explicit.
         claimed = await self.db.execute(
             update(WorkflowPackInstallation)
             .where(
@@ -252,8 +277,6 @@ class WorkflowInstallationService:
             )
         )
         if not claimed.rowcount:
-            # Lost a race: either a concurrent fork won (409) or a concurrent
-            # remove killed the row (404) — re-read to report accurately
             self.db.expire(inst)
             fresh = await self.db.get(WorkflowPackInstallation, installation_id)
             if fresh is not None and fresh.status == InstallStatus.FORKED:
@@ -330,18 +353,30 @@ class WorkflowInstallationService:
         # if remove won, this SELECT (status != REMOVED) returns nothing → 404;
         # if we win, remove blocks until our binding write commits, then
         # deletes it as part of removal.
+        # Lock AND refresh the row to committed state (populate_existing): a
+        # column-only lock would leave `inst`'s identity-map release_id /
+        # local_definition stale, so a concurrent upgrade() that repointed the
+        # release between get_installation and here would make the step check
+        # below validate against the OLD definition — confirming a binding for
+        # a step (or capability) that no longer exists in the effective release
+        # (R70 #1, same class as the fork stale-definition race). The lock also
+        # closes the R67 orphan-binding race: if remove() won, the guarded
+        # SELECT (status != REMOVED) returns nothing → 404 and no insert; if we
+        # win, remove blocks until our binding write commits.
         locked = await self.db.execute(
-            select(WorkflowPackInstallation.id)
+            select(WorkflowPackInstallation)
             .where(
                 WorkflowPackInstallation.id == installation_id,
                 WorkflowPackInstallation.status != InstallStatus.REMOVED,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        if locked.scalar_one_or_none() is None:
+        inst = locked.scalar_one_or_none()
+        if inst is None:
             raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
 
-        # The step must exist in the effective definition and declare a capability
+        # The step must exist in the effective (committed) definition and declare a capability
         definition = await self._effective_definition(inst)
         step = next((s for s in definition.get("steps", []) if s["id"] == step_id), None)
         if step is None or step.get("type") != "provider_action":

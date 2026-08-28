@@ -1367,3 +1367,80 @@ async def test_confirm_binding_race_cannot_orphan_on_removed_install(c):
             .where(WorkflowStepBinding.installation_id == install_id)
         )
         assert count.scalar_one() == 0
+
+
+@pytest.mark.asyncio
+async def test_fork_snapshots_committed_definition_not_stale(c):
+    """R70 #3: fork() snapshotted inst's identity-map definition, then a
+    concurrent upgrade() repointed release_id to a NEW version while leaving
+    status=ACTIVE — fork's status-guarded UPDATE still passed and froze the OLD
+    definition onto a row whose installed_version now read the new version: a
+    fork whose code and version label disagree. get_pack/get_installation now
+    row-locks + refreshes (populate_existing) before snapshotting, serializing
+    fork vs upgrade so the fork's local_definition matches its version."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.services.workflow_installation import WorkflowInstallationService
+    from app.services.workflow_pack import WorkflowPackService
+
+    def _defn(tag):
+        return {
+            "schema_version": 1,
+            "inputs": [{"key": "t", "type": "text", "required": True}],
+            "outputs": [{"key": "o", "type": "prompt", "from_step": tag, "from_port": "p"}],
+            "steps": [
+                {
+                    "id": tag,
+                    "type": "prompt_template",
+                    "name": tag,
+                    "config": {"template": "x {{inputs.t}}"},
+                    "inputs": [],
+                    "outputs": [{"port": "p", "type": "prompt"}],
+                }
+            ],
+            "edges": [],
+            "ui": {},
+        }
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+
+    # Build a pack with TWO releases carrying DIFFERENT definitions.
+    async with AsyncSessionLocal() as db:
+        svc = WorkflowPackService(db)
+        pack = await svc.create_pack(oid, u["id"], name=f"Fork-{uuid.uuid4().hex[:6]}")
+        await svc.update_definition(pack.id, oid, _defn("v1step"))
+        await svc.publish_release(pack.id, oid, version="1.0.0", changelog=None, released_by=u["id"])
+        await svc.update_definition(pack.id, oid, _defn("v2step"))
+        await svc.publish_release(pack.id, oid, version="2.0.0", changelog=None, released_by=u["id"])
+        pid = pack.id
+        inst = await WorkflowInstallationService(db).install(oid, pid, "1.0.0", u["id"])
+        install_id = inst.id
+        await db.commit()
+
+    # Force the exact interleave the fix closes: prime session A's identity
+    # map with the v1 install (db.get inside fork returns this STALE cached
+    # object in the unfixed code), commit an upgrade to v2 from session B,
+    # THEN call A.fork. Unfixed fork reads the v1 release_id off the stale
+    # object and freezes a v1 local_definition onto a row whose committed
+    # installed_version is now 2.0.0. The fixed fork re-reads under
+    # FOR UPDATE + populate_existing and snapshots the committed v2 definition.
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(WorkflowPackInstallation, install_id)
+        assert stale.installed_version == "1.0.0"
+
+        async with AsyncSessionLocal() as db_b:
+            await WorkflowInstallationService(db_b).upgrade(install_id, oid, "2.0.0")
+            await db_b.commit()
+
+        await WorkflowInstallationService(db_a).fork(install_id, oid)
+        await db_a.commit()
+
+    async with AsyncSessionLocal() as db:
+        p = await db.get(WorkflowPackInstallation, install_id)
+        steps = [s["id"] for s in (p.local_definition or {}).get("steps", [])]
+        # The forked definition MUST match the committed version — the fix
+        # snapshots v2 (matching installed_version 2.0.0 from the upgrade),
+        # never a v1-frozen definition under a v2 version label.
+        assert p.installed_version == "2.0.0", p.installed_version
+        assert steps == ["v2step"], f"stale fork: version=2.0.0 but def={steps}"
