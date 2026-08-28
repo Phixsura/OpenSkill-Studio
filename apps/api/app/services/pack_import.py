@@ -177,6 +177,118 @@ class PackImportService:
         ):
             raise AppError("INVALID_MANIFEST", "pack.metadata.difficulty invalid", 422)
 
+        # 8b. Per-entry structural typing. Everything below (uniqueness sets,
+        # Kahn's algorithm, size caps, create_pack kwargs) assumes hashable
+        # string ids, list-of-dict exercises, string content, and dict
+        # configs. Untrusted JSON violating any of those turned into
+        # TypeError/AttributeError 500s (unhashable logical_id, exercises as
+        # a string, int learning_content, string exercise config) — and an
+        # int logical_id sailed through to a 201 with a non-string id in the
+        # published manifest. Live-confirmed (R65): 10 hostile manifests →
+        # 10 distinct 500s before this gate.
+        for s in skills:
+            lid = s.get("logical_id")
+            if not isinstance(lid, str) or not lid or len(lid) > 200:
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    "Every skill logical_id must be a non-empty string (max 200 chars)",
+                    422,
+                )
+            prereqs = s.get("prerequisites", [])
+            if not isinstance(prereqs, list) or any(
+                not isinstance(p, str) for p in prereqs
+            ):
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Skill '{lid}' prerequisites must be a list of strings",
+                    422,
+                )
+            exercises = s.get("exercises", [])
+            if not isinstance(exercises, list) or any(
+                not isinstance(ex, dict) for ex in exercises
+            ):
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Skill '{lid}' exercises must be a list of objects",
+                    422,
+                )
+            for ex in exercises:
+                ex_lid = ex.get("logical_id")
+                if ex_lid is not None and (
+                    not isinstance(ex_lid, str) or len(ex_lid) > 200
+                ):
+                    raise AppError(
+                        "INVALID_MANIFEST",
+                        f"Exercise logical_id in skill '{lid}' must be a string (max 200 chars)",
+                        422,
+                    )
+                if not isinstance(ex.get("config", {}), dict):
+                    raise AppError(
+                        "INVALID_MANIFEST",
+                        f"Exercise config in skill '{lid}' must be an object",
+                        422,
+                    )
+            lc = s.get("learning_content", "")
+            if lc and not isinstance(lc, str):
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Skill '{lid}' learning_content must be a string",
+                    422,
+                )
+        for t in templates:
+            t_lid = t.get("logical_id")
+            if not isinstance(t_lid, str) or not t_lid or len(t_lid) > 200:
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    "Every template logical_id must be a non-empty string (max 200 chars)",
+                    422,
+                )
+
+        # 8c. pack.metadata fields flow verbatim into create_pack kwargs and
+        # then into typed columns/JSONB — type-gate them like the API schemas
+        # (CreatePackRequest) do, or a string estimated_minutes / dict
+        # learning_outcomes / int tag list 500s at flush.
+        _meta = pack_meta.get("metadata", {})
+        if not isinstance(_meta, dict):
+            raise AppError(
+                "INVALID_MANIFEST", "pack.metadata must be an object", 422
+            )
+        _est = _meta.get("estimated_minutes")
+        if _est is not None and (
+            not isinstance(_est, int)
+            or isinstance(_est, bool)
+            or not (0 <= _est <= 9999)
+        ):
+            raise AppError(
+                "INVALID_MANIFEST",
+                "pack.metadata.estimated_minutes must be an integer (0-9999)",
+                422,
+            )
+        _outcomes = _meta.get("learning_outcomes", [])
+        if not isinstance(_outcomes, list) or any(
+            not isinstance(o, str) or len(o) > 500 for o in _outcomes
+        ):
+            raise AppError(
+                "INVALID_MANIFEST",
+                "pack.metadata.learning_outcomes must be a list of strings (max 500 chars each)",
+                422,
+            )
+        for _tag_field in ("scenario_tags", "tool_tags", "capability_tags"):
+            _tags = _meta.get(_tag_field, [])
+            if not isinstance(_tags, list) or any(
+                not isinstance(x, str) or len(x) > 100 for x in _tags
+            ):
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"pack.metadata.{_tag_field} must be a list of strings",
+                    422,
+                )
+        _prov = pack_meta.get("provenance", {})
+        if _prov is not None and not isinstance(_prov, dict):
+            raise AppError(
+                "INVALID_MANIFEST", "pack.provenance must be an object", 422
+            )
+
         # 8a. Enforce component count limits (same as publish_release)
         from app.services.skill_pack import MAX_SKILLS_PER_PACK, MAX_TEMPLATES_PER_PACK
 
@@ -333,6 +445,8 @@ class PackImportService:
                 422,
             )
 
+        # All metadata reads go through the TYPE-GATED _meta/_prov from 8c —
+        # a non-dict pack.metadata must not AttributeError here.
         pack = await svc.create_pack(
             org_id=org_id,
             created_by=imported_by,
@@ -340,13 +454,13 @@ class PackImportService:
             description=pack_meta.get("summary", ""),
             summary=pack_meta.get("summary"),
             visibility=PackVisibility.PRIVATE.value,
-            difficulty=pack_meta.get("metadata", {}).get("difficulty"),
-            estimated_minutes=pack_meta.get("metadata", {}).get("estimated_minutes"),
-            learning_outcomes=pack_meta.get("metadata", {}).get("learning_outcomes", []),
-            scenario_tags=pack_meta.get("metadata", {}).get("scenario_tags", []),
-            tool_tags=pack_meta.get("metadata", {}).get("tool_tags", []),
-            capability_tags=pack_meta.get("metadata", {}).get("capability_tags", []),
-            provenance=pack_meta.get("provenance", {}),
+            difficulty=_difficulty,
+            estimated_minutes=_est,
+            learning_outcomes=_outcomes,
+            scenario_tags=_meta.get("scenario_tags", []),
+            tool_tags=_meta.get("tool_tags", []),
+            capability_tags=_meta.get("capability_tags", []),
+            provenance=_prov if _prov is not None else {},
         )
 
         # Create release directly from the manifest

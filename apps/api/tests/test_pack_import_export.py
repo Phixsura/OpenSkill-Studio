@@ -822,3 +822,88 @@ async def test_import_nul_in_manifest_rejected(c):
     )
     assert r.status_code == 422, r.text[:200]
     assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+
+@pytest.mark.asyncio
+async def test_import_hostile_entry_types_rejected_not_500(c):
+    """R65: per-entry structural typing. Unhashable/wrong-typed values in
+    skills entries, exercises, metadata, and provenance turned into
+    TypeError/AttributeError 500s (10 live-confirmed cases), and an int
+    logical_id sailed through to a 201 with a non-string id in the published
+    manifest. Every hostile case must be a clean 422 INVALID_MANIFEST."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    def variant(mutate):
+        m = copy.deepcopy(VALID_MANIFEST)
+        mutate(m)
+        return m
+
+    def set_meta(m, key, value):
+        m["pack"].setdefault("metadata", {})[key] = value
+
+    cases = {
+        "prereq unhashable": variant(
+            lambda m: m["skills"][0].__setitem__("prerequisites", [["x"]])
+        ),
+        "prereq int": variant(
+            lambda m: m["skills"][0].__setitem__("prerequisites", [1])
+        ),
+        "prereqs str": variant(
+            lambda m: m["skills"][0].__setitem__("prerequisites", "a")
+        ),
+        "exercises str": variant(
+            lambda m: m["skills"][0].__setitem__("exercises", "zzz")
+        ),
+        "exercise item str": variant(
+            lambda m: m["skills"][0].__setitem__("exercises", ["x"])
+        ),
+        "logical_id list": variant(
+            lambda m: m["skills"][0].__setitem__("logical_id", ["a"])
+        ),
+        "logical_id int": variant(
+            lambda m: m["skills"][0].__setitem__("logical_id", 7)
+        ),
+        "learning_content int": variant(
+            lambda m: m["skills"][0].__setitem__("learning_content", 12345)
+        ),
+        "exercise config str": variant(
+            lambda m: m["skills"][0].__setitem__(
+                "exercises",
+                [{"logical_id": "e1", "type": "multiple_choice", "config": "zz"}],
+            )
+        ),
+        "exercise logical_id dict": variant(
+            lambda m: m["skills"][0].__setitem__(
+                "exercises", [{"logical_id": {"x": 1}, "type": "text_answer"}]
+            )
+        ),
+        "est_minutes str": variant(lambda m: set_meta(m, "estimated_minutes", "NaN")),
+        "est_minutes bool": variant(lambda m: set_meta(m, "estimated_minutes", True)),
+        "outcomes dict": variant(
+            lambda m: set_meta(m, "learning_outcomes", {"x": 1})
+        ),
+        "tags int": variant(lambda m: set_meta(m, "scenario_tags", 7)),
+        "provenance list": variant(
+            lambda m: m["pack"].__setitem__("provenance", ["x"])
+        ),
+        "metadata str": variant(lambda m: m["pack"].__setitem__("metadata", "zz")),
+    }
+    for name, manifest in cases.items():
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/packs/import",
+            files={"file": ("m.zip", _make_zip(manifest), "application/zip")},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{name}: {r.status_code} {r.text[:150]}"
+        assert r.json()["error"]["code"] in ("INVALID_MANIFEST",), name
+
+    # Control: the unmodified valid manifest still imports
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("m.zip", _make_zip(VALID_MANIFEST), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text[:200]
