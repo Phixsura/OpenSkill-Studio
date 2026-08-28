@@ -1983,3 +1983,100 @@ async def test_sweep_recovers_stalled_pending_run(c):
         swept2 = await sweep_stale(db, org_id=oid)
         await db.commit()
     assert fresh_id not in swept2["run_ids"], "fresh run swept as stalled (grace window failed)"
+
+
+@pytest.mark.asyncio
+async def test_credentials_never_reach_run_snapshot_or_detail(c):
+    """ADR-011 red line (R74): a provider credential must NEVER appear in a run's
+    definition_snapshot, inputs/outputs, step outputs, events, or any run-detail
+    response — it is resolved late (in the executor, by reference) and only ever
+    lives encrypted in org_credentials. Runs a real provider_action bound to a
+    credentialed connection and asserts the secret is absent everywhere."""
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    secret = f"sk-secret-{uuid.uuid4().hex}"
+
+    # Connect a CREDENTIALED provider (the anthropic adapter declares an
+    # api_key credential field; mock declares none). The offering's capability
+    # is org-controlled, so declare image_generation to match the `generate`
+    # step. The provider call will fail at run time (the fake key is rejected)
+    # — irrelevant to this test: the invariant is that the credential never
+    # reaches the snapshot/inputs/events regardless of run outcome.
+    adapters = (await c.get("/api/v1/providers/adapters", headers=h)).json()["data"]
+    anth_id = next(a for a in adapters if a["key"] == "anthropic")["id"]
+    conn = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-connections",
+            json={"adapter_id": anth_id, "name": "anth", "credentials": {"api_key": secret}},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    off = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-offerings",
+            json={"connection_id": conn, "capability_key": "image_generation", "model_name": "claude-sonnet-5"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+    # Confirm the binding to the credentialed offering
+    cb = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings/generate",
+        json={"offering_id": off, "binding_mode": "pinned"},
+        headers=h,
+    )
+    assert cb.status_code == 200, cb.text
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "cats"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+
+    # Drive to terminal, then assert the secret is absent from the full detail
+    for _ in range(40):
+        await asyncio.sleep(0.15)
+        d = await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}", headers=h)
+        if d.json()["data"]["status"] in ("completed", "failed", "cancelled"):
+            break
+    assert secret not in d.text, "credential leaked into run-detail response"
+
+    # DB-level: the secret must not be in definition_snapshot / inputs / outputs
+    # / step outputs / events — only encrypted in org_credentials.
+    async with AsyncSessionLocal() as db:
+        pat = f"%{secret}%"
+        run_leak = (
+            await db.execute(
+                text(
+                    "SELECT count(*) FROM workflow_runs WHERE id=:r AND ("
+                    "definition_snapshot::text LIKE :p OR inputs::text LIKE :p "
+                    "OR coalesce(outputs::text,'') LIKE :p)"
+                ),
+                {"r": run_id, "p": pat},
+            )
+        ).scalar_one()
+        step_leak = (
+            await db.execute(
+                text(
+                    "SELECT count(*) FROM workflow_step_runs WHERE run_id=:r AND ("
+                    "coalesce(output::text,'') LIKE :p OR coalesce(inputs_resolved::text,'') LIKE :p)"
+                ),
+                {"r": run_id, "p": pat},
+            )
+        ).scalar_one()
+        event_leak = (
+            await db.execute(
+                text("SELECT count(*) FROM workflow_run_events WHERE run_id=:r AND payload::text LIKE :p"),
+                {"r": run_id, "p": pat},
+            )
+        ).scalar_one()
+        assert run_leak == 0, "credential in workflow_runs snapshot/inputs/outputs"
+        assert step_leak == 0, "credential in step output/inputs_resolved"
+        assert event_leak == 0, "credential in run events"
