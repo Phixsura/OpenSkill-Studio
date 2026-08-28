@@ -50,11 +50,16 @@ PORT_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 # data: URIs and large base64 blobs are rejected — assets are ULID references.
 # Media-type parameters (e.g. ;charset=utf-8) must not defeat the match, so
-# any run of ;param segments between the subtype and ;base64, is consumed.
+# the whole ;param section between the subtype and the ',' / ';base64,'
+# terminator is consumed as ONE bounded non-comma segment (params cannot
+# contain ',' per RFC 2397). One segment, not a repeated (;param)* group:
+# the repeated group backtracks quadratically on adversarial ';x;x;x…'
+# definitions — ~1.6s/request at the 256KB cap, a request-thread DoS (R78) —
+# while a single [^,]{0,700} scan is linear and admits the same real URIs.
 # The mediatype itself is optional per RFC 2397 ('data:;base64,' defaults to
 # text/plain), so the type/subtype segment is optional too.
 DATA_URI_RE = re.compile(
-    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^;,]{1,80})*;base64,", re.IGNORECASE
+    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^,]{0,700})?;base64,", re.IGNORECASE
 )
 # Non-base64 data URIs (RFC 2397 allows URL-encoded payloads): '%89%50…'
 # breaks BASE64_BLOB_RE's charset and carries no ';base64,' marker, so a
@@ -63,7 +68,7 @@ DATA_URI_RE = re.compile(
 # data: URIs in ANY encoding. Require a ≥64-char payload after the comma
 # so prose that merely MENTIONS a tiny data: URI stays valid.
 DATA_URI_PLAIN_RE = re.compile(
-    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^;,]{1,80})*,[^\s\"'\\]{64,}", re.IGNORECASE
+    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^,]{0,700})?,[^\s\"'\\]{64,}", re.IGNORECASE
 )
 BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/=]{1024,}")
 # Whitespace-chunk evasion (R78): '{64,}' needs an UNBROKEN payload run, so
@@ -76,7 +81,7 @@ BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/=]{1024,}")
 # after a harmless data:-URI mention breaks the run at its first comma,
 # apostrophe, paren, or non-ASCII character.
 DATA_URI_STRIPPED_RE = re.compile(
-    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^;,]{1,80})*,[A-Za-z0-9%+/=._~-]{256,}",
+    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^,]{0,700})?,[A-Za-z0-9%+/=._~-]{256,}",
     re.IGNORECASE,
 )
 # The scan input is json.dumps output: literal spaces survive as-is, but

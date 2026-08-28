@@ -817,6 +817,40 @@ def test_plain_data_uri_rejected():
     assert "WF_DATA_URI_REJECTED" in _codes(errors3)
 
 
+def test_data_uri_regex_linear_on_adversarial_params():
+    """R78: the (;[^;,]{1,80})* param group backtracked quadratically on
+    adversarial ';x;x;x…' runs — ~1.6s per validate call at the 256KB
+    definition cap, a request-thread DoS on an instructor-writable endpoint.
+    The param section is now ONE bounded non-comma segment (linear scan).
+    Regression guard: the worst-case payload must validate in well under a
+    second, and the tighter shape must not lose any detection."""
+    import time
+
+    # Worst case observed: many data: starts, each followed by a long ;x;x run
+    d = _minimal_valid()
+    d["ui"]["note"] = ("data:image/png" + ";x" * 300 + "Q") * 400
+    t0 = time.monotonic()
+    validate_definition(d)
+    elapsed = time.monotonic() - t0
+    assert elapsed < 0.5, f"data-URI regexes took {elapsed:.2f}s (quadratic backtracking)"
+
+    # Detection semantics preserved: many-param URIs still rejected
+    d2 = _minimal_valid()
+    d2["ui"]["note"] = "data:image/png;a;b;c;d;e;f;g;h;i," + "%41" * 40
+    _, errors2 = validate_definition(d2)
+    assert "WF_DATA_URI_REJECTED" in _codes(errors2)
+    d3 = _minimal_valid()
+    d3["steps"][0]["config"]["template"] = "data:text/plain;charset=utf-8;foo=bar;base64,SGVsbG8="
+    _, errors3 = validate_definition(d3)
+    assert "WF_DATA_URI_REJECTED" in _codes(errors3)
+    # Prose with commas after a data: mention stays valid (param segment
+    # cannot cross a comma)
+    d4 = _minimal_valid()
+    d4["steps"][0]["config"]["template"] = "see data:text/csv,name,age for docs {{inputs.topic}}"
+    _, errors4 = validate_definition(d4)
+    assert "WF_DATA_URI_REJECTED" not in _codes(errors4)
+
+
 def test_whitespace_chunked_data_uri_rejected():
     """R78: DATA_URI_PLAIN_RE's {64,} needs an UNBROKEN payload run, so
     'data:image/png,' + 60-char %-encoded chunks joined by newlines/tabs
