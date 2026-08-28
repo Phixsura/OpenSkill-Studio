@@ -8,6 +8,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 
+def _uuid():
+    return uuid.uuid4().hex[:6]
+
+
 @pytest_asyncio.fixture
 async def c():
     from app.core.database import engine
@@ -1159,3 +1163,107 @@ def test_review_gate_passthrough_sources_first_connected_port():
     assert not any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errs_ok), [
         e["code"] for e in errs_ok
     ]
+
+
+@pytest.mark.asyncio
+async def test_pack_mutations_row_locked_no_lost_update(c):
+    """R70: every WorkflowPack mutation was a stale db.get snapshot + unguarded
+    ORM setattr under READ COMMITTED — two concurrent writers each decided on
+    pre-mutation state and last-writer-won. Three reproduced failures, all
+    closed by get_pack(for_update=True) which row-locks + refreshes to
+    committed state so the loser re-reads fresh:
+      #2 approval BYPASS: update_pack(visibility=public) passing its stale
+         'approved' gate while a concurrent update_definition reset review_status
+         to None → an unapproved pack published to the registry.
+      #5 resurrection: publish_release flipping DRAFT→PUBLISHED on a stale read
+         while a concurrent delete_pack archived it → archived pack goes public.
+    Uses seeded two-session interleaving (session A holds the FOR UPDATE lock;
+    session B blocks until A commits, then re-reads and its own gate fires)."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.skill_pack import PackStatus, PackVisibility
+    from app.models.workflow_pack import WorkflowPack
+    from app.services.workflow_pack import WorkflowPackService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # ── #2 approval bypass ──
+    pid = await _pack(c, h, oid, name="Bypass " + _uuid())
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)  # approved + PUBLIC
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"visibility": "unlisted"},
+        headers=h,
+    )  # approved + UNLISTED
+
+    async with AsyncSessionLocal() as db_a:
+        svc_a = WorkflowPackService(db_a)
+        pack_a = await svc_a.get_pack(pid, oid, for_update=True)  # A LOCKS (approved+unlisted)
+
+        async def b_go_public():
+            async with AsyncSessionLocal() as db_b:
+                try:
+                    await WorkflowPackService(db_b).update_pack(pid, oid, visibility="public")
+                    await db_b.commit()
+                    return "PUBLIC_WON"
+                except AppError as e:
+                    return e.code
+
+        bt = asyncio.create_task(b_go_public())
+        await asyncio.sleep(0.3)  # ensure B is blocked on the lock
+        pack_a.review_status = None  # A: a definition change resets approval
+        await db_a.commit()
+        b_result = await bt
+
+    async with AsyncSessionLocal() as db:
+        p = await db.get(WorkflowPack, pid)
+        # B re-read fresh (review_status=None) → its public gate must have fired
+        assert not (
+            p.visibility == PackVisibility.PUBLIC and p.review_status is None
+        ), f"approval bypass: visibility={p.visibility.value} review_status={p.review_status} b={b_result}"
+        assert b_result == "APPROVAL_REQUIRED", b_result
+
+    # ── #5 publish resurrects an archived pack ──
+    pid2 = await _pack(c, h, oid, name="Resurrect " + _uuid())
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid2}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )  # DRAFT with a definition
+
+    async with AsyncSessionLocal() as db_a:
+        svc_a = WorkflowPackService(db_a)
+        pack_a = await svc_a.get_pack(pid2, oid, for_update=True)  # A LOCKS (DRAFT)
+
+        async def b_publish():
+            async with AsyncSessionLocal() as db_b:
+                try:
+                    await WorkflowPackService(db_b).publish_release(
+                        pid2, oid, version="1.0.0", changelog=None, released_by="u"
+                    )
+                    await db_b.commit()
+                    return "PUBLISH_WON"
+                except AppError as e:
+                    return e.code
+
+        bt = asyncio.create_task(b_publish())
+        await asyncio.sleep(0.3)
+        pack_a.status = PackStatus.ARCHIVED  # A archives
+        await db_a.commit()
+        b_result = await bt
+
+    async with AsyncSessionLocal() as db:
+        p = await db.get(WorkflowPack, pid2)
+        # B re-read fresh (ARCHIVED) → get_pack must 404, never resurrect
+        assert p.status == PackStatus.ARCHIVED, f"resurrected: status={p.status.value} b={b_result}"
+        assert b_result == "WORKFLOW_PACK_NOT_FOUND", b_result

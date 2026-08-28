@@ -100,14 +100,38 @@ class WorkflowPackService:
         )
         return list(result.scalars().all()), total
 
-    async def get_pack(self, pack_id: str, org_id: str) -> WorkflowPack:
-        pack = await self.db.get(WorkflowPack, pack_id)
+    async def get_pack(
+        self, pack_id: str, org_id: str, for_update: bool = False
+    ) -> WorkflowPack:
+        # for_update: take a row lock and REFRESH the in-memory attributes to
+        # committed state (populate_existing) for callers that then mutate on
+        # a read-check-write basis. Without it, every workflow_pack mutation
+        # (update_pack / approve / reject / delete / publish / update_definition)
+        # was a stale db.get snapshot + unguarded ORM setattr under READ
+        # COMMITTED — two concurrent writers each decided on pre-mutation state
+        # and last-writer-won. Reproduced (R70): approve overwrites a committed
+        # reject; publish resurrects a just-archived pack; and most seriously an
+        # approval BYPASS — update_pack(visibility=public) passing its stale
+        # 'approved' gate while a concurrent update_definition had already reset
+        # review_status to None, publishing an unapproved pack to the registry.
+        # FOR UPDATE serializes them: the loser blocks, then re-reads fresh
+        # state so its own gate/status checks see the committed value.
+        if for_update:
+            result = await self.db.execute(
+                select(WorkflowPack)
+                .where(WorkflowPack.id == pack_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            pack = result.scalar_one_or_none()
+        else:
+            pack = await self.db.get(WorkflowPack, pack_id)
         if pack is None or pack.owner_org_id != org_id or pack.status == PackStatus.ARCHIVED:
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
         return pack
 
     async def update_pack(self, pack_id: str, org_id: str, **fields) -> WorkflowPack:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         # Approval gate: public visibility is only reachable through the
         # review flow (submit-review → approve). Direct PUT visibility=public
         # on an unapproved pack would bypass the registry approval filter
@@ -157,7 +181,7 @@ class WorkflowPackService:
         return pack
 
     async def delete_pack(self, pack_id: str, org_id: str) -> None:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         pack.status = PackStatus.ARCHIVED
         await self.db.flush()
         await self._invalidate_registry_cache()
@@ -167,7 +191,7 @@ class WorkflowPackService:
 
     async def update_definition(self, pack_id: str, org_id: str, definition: dict) -> WorkflowPack:
         """Update the working definition. Draft-editable only; releases are immutable."""
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         parsed = validate_or_raise(definition)
         pack.definition = definition
         inputs, outputs = derive_io_schemas(parsed)
@@ -218,7 +242,7 @@ class WorkflowPackService:
         released_by: str,
         dependencies: dict | None = None,
     ) -> WorkflowPackRelease:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
 
         if not _SEMVER_RE.match(version):
             raise AppError("INVALID_VERSION", "Version must be semver (X.Y.Z)", 422)
@@ -368,7 +392,7 @@ class WorkflowPackService:
     # ── Approval workflow (mirror skill_pack) ─────────────
 
     async def submit_for_review(self, pack_id: str, org_id: str) -> WorkflowPack:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status == "pending":
             raise AppError("ALREADY_PENDING", "Pack is already pending review", 409)
         if pack.review_status == "approved":
@@ -379,7 +403,7 @@ class WorkflowPackService:
         return pack
 
     async def approve_pack(self, pack_id: str, org_id: str) -> WorkflowPack:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status != "pending":
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
         pack.review_status = "approved"
@@ -390,7 +414,7 @@ class WorkflowPackService:
         return pack
 
     async def reject_pack(self, pack_id: str, org_id: str, reason: str | None = None) -> WorkflowPack:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status != "pending":
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
         pack.review_status = "rejected"
