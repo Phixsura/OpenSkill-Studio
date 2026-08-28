@@ -299,6 +299,25 @@ async def respond_assignment(
     return DataResponse(data=AssignmentResponse.model_validate(assignment))
 
 
+@router.post(
+    "/orgs/{org_id}/creator-assignments/{assignment_id}/withdraw",
+    response_model=DataResponse[AssignmentResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
+async def withdraw_assignment(
+    org_id: str,
+    assignment_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The assigner side retracts a pending offer (only 'offered' rows)."""
+    await require_org_member(org_id, user, db, *WRITE_ROLES)
+    svc = CreatorMatchingService(db)
+    assignment = await svc.withdraw_assignment(assignment_id, org_id)
+    await db.commit()
+    return DataResponse(data=AssignmentResponse.model_validate(assignment))
+
+
 @router.get(
     "/orgs/{org_id}/creator-assignments",
     response_model=DataResponse[list[AssignmentResponse]],

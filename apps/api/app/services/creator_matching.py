@@ -619,6 +619,46 @@ class CreatorMatchingService:
         await self.db.refresh(assignment)
         return assignment
 
+    async def withdraw_assignment(
+        self, assignment_id: str, org_id: str
+    ) -> CreatorAssignment:
+        """Assigner-side retraction of a pending offer.
+
+        Completes the state machine offer_assignment already supersedes on
+        ('declined'/'withdrawn' rows are re-openable): without this, a
+        mis-directed offer is irrevocable by the instructor — it blocks any
+        re-offer via ASSIGNMENT_EXISTS until the creator happens to decline.
+        Only a still-pending 'offered' row can be withdrawn; an accepted or
+        declined offer already resolved (409).
+        """
+        from datetime import UTC, datetime
+
+        assignment = await self.db.get(CreatorAssignment, assignment_id)
+        if assignment is None or assignment.org_id != org_id:
+            raise AppError("ASSIGNMENT_NOT_FOUND", "Assignment not found", 404)
+        # Conditional UPDATE: a concurrent accept/decline may resolve the
+        # offer between the read and this write — the loser gets rowcount 0
+        # (same race guard as respond_assignment).
+        result = await self.db.execute(
+            update(CreatorAssignment)
+            .where(
+                CreatorAssignment.id == assignment_id,
+                CreatorAssignment.status == "offered",
+            )
+            .values(status="withdrawn", responded_at=datetime.now(UTC))
+        )
+        if result.rowcount == 0:
+            raise AppError(
+                "ASSIGNMENT_ALREADY_RESPONDED", "This offer was already responded to", 409
+            )
+        await self.db.refresh(assignment)
+        log.info(
+            "creator_assignment_withdrawn",
+            assignment_id=assignment_id,
+            org_id=org_id,
+        )
+        return assignment
+
     async def list_assignments(
         self,
         org_id: str,

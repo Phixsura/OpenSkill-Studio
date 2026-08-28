@@ -1253,3 +1253,67 @@ async def test_offer_override_reason_nul_rejected(c):
         headers=h_owner,
     )
     assert r.status_code == 422, r.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_withdraw_assignment_lifecycle(c):
+    """R64: the assigner can retract a pending offer. Without a withdraw
+    path a mis-directed offer was irrevocable (ASSIGNMENT_EXISTS blocks any
+    re-offer until the creator happens to decline) even though the state
+    machine already supersedes 'withdrawn' rows."""
+    h_owner, _ = await _auth(c, "Owner")
+    oid = await _org(c, h_owner)
+    h_creator, creator = await _auth(c, "Creator")
+    await _add_member(c, h_owner, oid, creator)
+    project_id = await _project(c, h_owner, oid)
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"]},
+        headers=h_owner,
+    )
+    assert r.status_code == 201, r.text
+    aid = r.json()["data"]["id"]
+
+    # Withdraw the pending offer
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_owner
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["status"] == "withdrawn"
+
+    # The creator can no longer accept a withdrawn offer
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/respond",
+        json={"accept": True},
+        headers=h_creator,
+    )
+    assert r.status_code == 409, r.text
+
+    # Re-offer supersedes the withdrawn row IN PLACE (no dup, 201)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments",
+        json={"project_id": project_id, "user_id": creator["id"]},
+        headers=h_owner,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["data"]["id"] == aid
+    assert r.json()["data"]["status"] == "offered"
+
+    # An ACCEPTED offer cannot be withdrawn
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/respond",
+        json={"accept": True},
+        headers=h_creator,
+    )
+    assert r.status_code == 200, r.text
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_owner
+    )
+    assert r.status_code == 409, r.text
+
+    # Students cannot withdraw (instructor+ surface)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_creator
+    )
+    assert r.status_code == 403, r.text
