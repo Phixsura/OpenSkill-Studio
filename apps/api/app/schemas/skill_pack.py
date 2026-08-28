@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, field_validator
 
-from app.schemas.base import reject_deep_json
+from app.schemas.base import reject_ctrl_json, reject_deep_json, reject_nonfinite_json
 
 # ── Pack CRUD ────────────────────────────────────────────
 
@@ -102,7 +102,11 @@ class CreateSkillPackRequest(BaseModel):
     def validate_provenance_size(cls, v: dict | None) -> dict | None:
         if v is not None and len(str(v)) > 20000:
             raise ValueError("Provenance data too large (max 20,000 chars)")
-        return reject_deep_json(v, "provenance")
+        # Mirror the workflow_pack twin (R78): NaN/Infinity and NUL/control
+        # chars in this open JSONB dict 500 at the write (22P02 / 22P05).
+        reject_deep_json(v, "provenance")
+        reject_nonfinite_json(v, "provenance")
+        return reject_ctrl_json(v, "provenance")
 
 
 class UpdateSkillPackRequest(BaseModel):
@@ -202,7 +206,11 @@ class UpdateSkillPackRequest(BaseModel):
     def validate_provenance_size(cls, v: dict | None) -> dict | None:
         if v is not None and len(str(v)) > 20000:
             raise ValueError("Provenance data too large (max 20,000 chars)")
-        return reject_deep_json(v, "provenance")
+        # Mirror the workflow_pack twin (R78): NaN/Infinity and NUL/control
+        # chars in this open JSONB dict 500 at the write (22P02 / 22P05).
+        reject_deep_json(v, "provenance")
+        reject_nonfinite_json(v, "provenance")
+        return reject_ctrl_json(v, "provenance")
 
 
 class RejectPackRequest(BaseModel):

@@ -1620,7 +1620,11 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
     if org_id:
         stalled_q = stalled_q.where(WorkflowRun.org_id == org_id)
     stalled_r = await db.execute(stalled_q)
-    stalled_ids = [row[0] for row in stalled_r.all()]
+    # Exclude runs the lease/review passes above already recovered THIS sweep
+    # (a review-expired run is flipped to RUNNING with no live lease, so the
+    # stalled predicate re-selects it) — else the same run inflates BOTH
+    # counters and operators can't trust stalled_runs as an orphan count (R78).
+    stalled_ids = [row[0] for row in stalled_r.all() if row[0] not in affected_runs]
     if stalled_ids:
         affected_runs.update(stalled_ids)
         swept["stalled_runs"] = len(stalled_ids)

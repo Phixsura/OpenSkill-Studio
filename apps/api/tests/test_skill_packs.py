@@ -1134,3 +1134,45 @@ async def test_skill_pack_mutations_row_locked_no_approval_bypass(c):
             p.visibility == PackVisibility.PUBLIC and p.review_status is None
         ), f"approval bypass: visibility={p.visibility.value} review_status={p.review_status}"
         assert b_result == "APPROVAL_REQUIRED", b_result
+
+
+@pytest.mark.asyncio
+async def test_skill_pack_provenance_nonfinite_and_nul_rejected_not_500(c):
+    """R78: R73's NaN/Infinity class sweep patched the workflow_pack twin but
+    missed skill_pack's provenance validators — {"v": NaN} (json.loads accepts
+    the bare token) or a NUL passed validation and 500'd at the JSONB write
+    (22P02 / 22P05). Both validators now chain reject_nonfinite_json +
+    reject_ctrl_json like the twin."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    hj = {**h, "Content-Type": "application/json"}
+    # NaN via raw JSON body (create)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs",
+        content=b'{"name":"PNaN","provenance":{"v": NaN}}',
+        headers=hj,
+    )
+    assert r.status_code == 422, r.text[:150]
+    # NUL escape (update)
+    r2 = await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "POk"}, headers=h)
+    pid = r2.json()["data"]["id"]
+    r3 = await c.put(
+        f"/api/v1/orgs/{oid}/packs/{pid}",
+        content=b'{"provenance":{"note":"a\\u0000b"}}',
+        headers=hj,
+    )
+    assert r3.status_code == 422, r3.text[:150]
+    # Infinity (update)
+    r4 = await c.put(
+        f"/api/v1/orgs/{oid}/packs/{pid}",
+        content=b'{"provenance":{"v": Infinity}}',
+        headers=hj,
+    )
+    assert r4.status_code == 422, r4.text[:150]
+    # Control: finite provenance still accepted
+    r5 = await c.put(
+        f"/api/v1/orgs/{oid}/packs/{pid}",
+        json={"provenance": {"weight": 0.5, "author": "a"}},
+        headers=h,
+    )
+    assert r5.status_code == 200, r5.text[:150]
