@@ -1772,3 +1772,24 @@ async def test_anon_registry_omits_internal_fields(c):
     for row in rs.json()["data"]:
         assert "rejection_reason" not in row
         assert "owner_org_id" not in row
+
+
+@pytest.mark.asyncio
+async def test_anon_registry_releases_omit_released_by(c):
+    """R72 (same class as R71 leak): the anonymous
+    /registry/packs/{id}/releases endpoint served ReleaseResponse, which
+    exposes released_by — the publisher's internal user id — to
+    unauthenticated callers. The workflow twin
+    (PublicWorkflowReleaseResponse) already omits it. The anon skill endpoint
+    now uses PublicReleaseResponse, which omits released_by."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, "ReleasesLeak")
+
+    r = await c.get(f"/api/v1/registry/packs/{pid}/releases")
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert len(data) >= 1
+    for rel in data:
+        assert "released_by" not in rel, f"released_by leaked to anon: {rel.get('released_by')!r}"
+        assert rel["version"] == "1.0.0"  # discovery metadata preserved

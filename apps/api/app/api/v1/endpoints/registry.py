@@ -8,8 +8,8 @@ from app.core.rate_limit import rate_limit
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.registry import PackPreviewResponse
 from app.schemas.skill_pack import (
+    PublicReleaseResponse,
     PublicSkillPackResponse,
-    ReleaseResponse,
 )
 from app.services.registry import RegistryService
 
@@ -87,9 +87,9 @@ async def get_installed_by(pack_id: str, db: AsyncSession = Depends(get_db)):
     return DataResponse(data=result)
 
 
-@router.get("/registry/packs/{pack_id}/releases", response_model=DataResponse[list[ReleaseResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get("/registry/packs/{pack_id}/releases", response_model=DataResponse[list[PublicReleaseResponse]], dependencies=[Depends(rate_limit(30, 60))])
 async def get_registry_releases(pack_id: str, db: AsyncSession = Depends(get_db)):
     """List releases for a public pack."""
     svc = RegistryService(db)
     releases = await svc.get_public_releases(pack_id)
-    return DataResponse(data=[ReleaseResponse.model_validate(r) for r in releases])
+    return DataResponse(data=[PublicReleaseResponse.model_validate(r) for r in releases])

@@ -375,3 +375,20 @@ class ReleaseDetailResponse(ReleaseResponse):
     manifest: dict
 
     model_config = {"from_attributes": True}
+
+
+class PublicReleaseResponse(BaseModel):
+    """Anonymous registry release entry — OMITS released_by (the publisher's
+    user id, an internal identifier the anon /registry/packs/{id}/releases
+    endpoint has no business exposing to the world — R72). Mirrors the
+    workflow twin PublicWorkflowReleaseResponse, which already omits it."""
+
+    id: str
+    pack_id: str
+    version: str
+    changelog: str | None = None
+    checksum: str
+    component_count: int
+    released_at: datetime
+
+    model_config = {"from_attributes": True}
