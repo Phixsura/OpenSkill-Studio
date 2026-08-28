@@ -1907,3 +1907,79 @@ async def test_create_run_nonfinite_json_input_rejected_not_500(c):
         headers=h,
     )
     assert r3.status_code == 201, r3.text[:150]
+
+
+@pytest.mark.asyncio
+async def test_sweep_recovers_stalled_pending_run(c):
+    """R73: a run left PENDING/RUNNING with NO live executor (no step RUNNING
+    under an unexpired lease) — crash/deploy between create_run's commit and
+    dispatch_advance, or a drained shutdown task — was invisible to sweep_stale
+    (which only queried lease-expired RUNNING steps + overdue reviews). Such
+    runs never recovered via cron and counted toward the concurrency cap
+    forever. sweep_stale now also surfaces stalled runs (past a grace window,
+    no live lease) in run_ids for re-dispatch."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import RunStatus, StepRunStatus, WorkflowRun, WorkflowStepRun
+    from app.services.workflow_runtime import sweep_stale
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition())
+
+    # Create a run via the API, then force it into a stalled PENDING state with
+    # an old created_at (past the grace window) and no live lease.
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "cats"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(WorkflowRun)
+            .where(WorkflowRun.id == run_id)
+            .values(
+                status=RunStatus.PENDING,
+                started_at=None,
+                created_at=datetime.now(UTC) - timedelta(hours=2),
+            )
+        )
+        await db.execute(
+            update(WorkflowStepRun)
+            .where(WorkflowStepRun.run_id == run_id)
+            .values(status=StepRunStatus.PENDING, lease_expires_at=None, output=None)
+        )
+        await db.commit()
+
+    # Org-scoped sweep must now include the stalled run in run_ids
+    async with AsyncSessionLocal() as db:
+        swept = await sweep_stale(db, org_id=oid)
+        await db.commit()
+    assert run_id in swept["run_ids"], swept
+    assert swept.get("stalled_runs", 0) >= 1
+
+    # A freshly-created run (within the grace window) must NOT be swept as stalled
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "dogs"}},
+        headers=h,
+    )
+    fresh_id = r2.json()["data"]["id"]
+    async with AsyncSessionLocal() as db:
+        # force it back to PENDING but keep created_at recent (default now())
+        await db.execute(
+            update(WorkflowRun)
+            .where(WorkflowRun.id == fresh_id)
+            .values(status=RunStatus.PENDING, started_at=None)
+        )
+        await db.commit()
+    async with AsyncSessionLocal() as db:
+        swept2 = await sweep_stale(db, org_id=oid)
+        await db.commit()
+    assert fresh_id not in swept2["run_ids"], "fresh run swept as stalled (grace window failed)"

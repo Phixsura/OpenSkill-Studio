@@ -1447,7 +1447,7 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
     only repairs step state, it does not resume the advance loop itself.
     """
     now = _now()
-    swept: dict = {"expired_leases": 0, "expired_reviews": 0, "run_ids": []}
+    swept: dict = {"expired_leases": 0, "expired_reviews": 0, "stalled_runs": 0, "run_ids": []}
     affected_runs: set[str] = set()
 
     # Expired leases with attempts remaining → WAITING_RETRY
@@ -1588,6 +1588,43 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
             )
             affected_runs.add(step_run.run_id)
         swept["expired_reviews"] += 1
+
+    # Stalled-run recovery (R73): a run left in PENDING/RUNNING with NO live
+    # executor — no step RUNNING under an unexpired lease — is never touched by
+    # the lease-expiry or review queries above. This happens on a crash/deploy
+    # between create_run's commit and dispatch_advance, or when a task is
+    # drained at shutdown, leaving the run PENDING (steps all PENDING) or
+    # RUNNING (a step committed WAITING_RETRY, whose lease was cleared to None).
+    # The lazy per-read redispatch recovers such a run only if someone VIEWS
+    # it; nobody's runs would otherwise recover via the cron/admin path, and
+    # they count toward workflow_max_concurrent_runs → permanent 422
+    # WF_TOO_MANY_ACTIVE_RUNS. Re-dispatch is idempotent (advance_run uses
+    # conditional status-guarded claims), so surfacing these run_ids is safe.
+    # A grace window avoids racing a just-created run whose dispatch is still
+    # in flight. No status write here — advance_run makes the transition.
+    grace = now - timedelta(seconds=settings.workflow_step_timeout_seconds)
+    live_lease = (
+        select(WorkflowStepRun.run_id)
+        .where(
+            WorkflowStepRun.status == StepRunStatus.RUNNING,
+            WorkflowStepRun.lease_expires_at.isnot(None),
+            WorkflowStepRun.lease_expires_at >= now,
+        )
+        .scalar_subquery()
+    )
+    stalled_q = select(WorkflowRun.id).where(
+        WorkflowRun.status.in_([RunStatus.PENDING, RunStatus.RUNNING]),
+        WorkflowRun.created_at < grace,
+        WorkflowRun.id.notin_(live_lease),
+    )
+    if org_id:
+        stalled_q = stalled_q.where(WorkflowRun.org_id == org_id)
+    stalled_r = await db.execute(stalled_q)
+    stalled_ids = [row[0] for row in stalled_r.all()]
+    if stalled_ids:
+        affected_runs.update(stalled_ids)
+        swept["stalled_runs"] = len(stalled_ids)
+
     await db.flush()
     swept["run_ids"] = sorted(affected_runs)
     return swept

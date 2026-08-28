@@ -504,6 +504,14 @@ class WorkflowInstallationService:
         pack = await self.db.get(WorkflowPack, pack_id)
         if pack is None:
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        # ARCHIVED is soft-delete: reject it FIRST, for the owner org too (R73).
+        # install() and WorkflowPackService.get_pack both 404 an archived pack
+        # even for its owner, but the owner-org early return here skipped the
+        # status check — so upgrade()/compute_diff() succeeded against a
+        # just-archived (soft-deleted) pack, resurrecting operations on content
+        # the owner had deleted. Uniform 404 keeps the three paths consistent.
+        if pack.status == PackStatus.ARCHIVED:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
         if pack.owner_org_id == org_id:
             return pack
         if (
@@ -517,16 +525,31 @@ class WorkflowInstallationService:
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
         return pack
 
-    async def _binding_capability_matches(
-        self, binding: WorkflowStepBinding, step_capability: str
+    async def _binding_still_valid(
+        self, binding: WorkflowStepBinding, org_id: str, step_config: dict
     ) -> bool:
-        """A confirmed binding stays valid only if its offering (when set)
-        still serves the step's capability in the new definition."""
+        """A confirmed binding survives an upgrade only if its offering STILL
+        satisfies the NEW step definition the same way confirm_binding checks
+        at confirmation time (R73): right capability, offering active,
+        connection active, AND every required_feature the (possibly-changed)
+        step now declares. Checking capability alone (the old
+        _binding_capability_matches) let an upgrade preserve a binding whose
+        offering no longer meets a newly-added required_features on the step —
+        or whose offering/connection went inactive — deferring the failure to a
+        mid-run NO_ELIGIBLE_PROVIDER, exactly what confirm-time validation
+        exists to prevent. An invalid binding is dropped and re-suggested."""
         if not binding.offering_id:
-            # Confirmed but offering gone (SET NULL) — re-suggest
-            return False
+            return False  # confirmed but offering gone (SET NULL) — re-suggest
         offering = await self.db.get(ProviderModelOffering, binding.offering_id)
-        return offering is not None and offering.capability_key == step_capability
+        if offering is None or not offering.is_active:
+            return False
+        if offering.capability_key != step_config.get("capability", ""):
+            return False
+        conn = await self.db.get(ProviderConnection, offering.connection_id)
+        if conn is None or conn.org_id != org_id or conn.status != "active":
+            return False
+        required = set(step_config.get("required_features", []))
+        return required <= set(offering.features or [])
 
     async def _resolve_release(
         self, pack_id: str, version: str | None
@@ -610,9 +633,10 @@ class WorkflowInstallationService:
         capability, are deleted and re-suggested.
         """
         definition = release.manifest.get("definition", {})
-        # Map of step_id → capability for provider_action steps in the NEW definition
-        new_caps: dict[str, str] = {
-            step["id"]: step.get("config", {}).get("capability", "")
+        # Map of step_id → full config for provider_action steps in the NEW
+        # definition (capability AND required_features both matter — R73).
+        new_configs: dict[str, dict] = {
+            step["id"]: step.get("config", {})
             for step in definition.get("steps", [])
             if step.get("type") == "provider_action"
         }
@@ -624,11 +648,11 @@ class WorkflowInstallationService:
         )
         preserved_step_ids: set[str] = set()
         for binding in existing_r.scalars().all():
-            step_capability = new_caps.get(binding.step_id)
+            step_config = new_configs.get(binding.step_id)
             keep = (
                 binding.confirmed_by is not None
-                and step_capability is not None
-                and await self._binding_capability_matches(binding, step_capability)
+                and step_config is not None
+                and await self._binding_still_valid(binding, inst.org_id, step_config)
             )
             if keep:
                 preserved_step_ids.add(binding.step_id)

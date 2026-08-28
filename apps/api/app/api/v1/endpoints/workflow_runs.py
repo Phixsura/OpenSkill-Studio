@@ -108,7 +108,7 @@ async def get_run(
 
     # Lazy sweep: recover crashed executors / expire overdue reviews (cheap)
     swept = await sweep_stale(db, org_id)
-    if swept["expired_leases"] or swept["expired_reviews"]:
+    if swept["expired_leases"] or swept["expired_reviews"] or swept.get("stalled_runs"):
         await db.commit()
         # Re-dispatch EVERY run the sweep touched — the sweep repairs step
         # state globally but does not resume advance loops itself; without

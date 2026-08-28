@@ -332,12 +332,14 @@ async def sweep_workflows(
         by=admin.id,
         expired_leases=swept["expired_leases"],
         expired_reviews=swept["expired_reviews"],
+        stalled_runs=swept.get("stalled_runs", 0),
         runs_redispatched=len(swept["run_ids"]),
     )
     return {
         "data": {
             "expired_leases": swept["expired_leases"],
             "expired_reviews": swept["expired_reviews"],
+            "stalled_runs": swept.get("stalled_runs", 0),
             "runs_redispatched": len(swept["run_ids"]),
         }
     }

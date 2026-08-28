@@ -1472,3 +1472,158 @@ async def test_registry_releases_defers_manifest_load(c):
             assert "manifest" in unloaded, (
                 f"manifest was eagerly loaded (unloaded={unloaded})"
             )
+
+
+@pytest.mark.asyncio
+async def test_upgrade_drops_binding_no_longer_satisfying_features(c):
+    """R73: _rebuild_bindings preserved a confirmed binding on upgrade based on
+    capability match ALONE — never re-checking required_features / offering
+    active / connection active (the three checks confirm_binding enforces).
+    A v2 step that ADDS a required_feature its confirmed offering lacks kept
+    the stale binding, deferring a NO_ELIGIBLE_PROVIDER to run time. The keep
+    predicate now revalidates like confirm-time; a stale binding is dropped
+    and re-suggested."""
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import WorkflowStepBinding
+    from app.services.workflow_pack import WorkflowPackService
+
+    def _defn(feats):
+        return {
+            "schema_version": 1,
+            "inputs": [{"key": "t", "type": "text", "required": True}],
+            "outputs": [{"key": "o", "type": "image", "from_step": "gen", "from_port": "result"}],
+            "steps": [
+                {
+                    "id": "mk", "type": "prompt_template", "name": "M",
+                    "config": {"template": "x {{inputs.t}}"},
+                    "inputs": [], "outputs": [{"port": "p", "type": "prompt"}],
+                },
+                {
+                    "id": "gen", "type": "provider_action", "name": "G",
+                    "config": {"capability": "image_generation", "required_features": feats},
+                    "inputs": [{"port": "prompt", "type": "prompt"}],
+                    "outputs": [{"port": "result", "type": "image"}],
+                },
+            ],
+            "edges": [
+                {"id": "e1", "from_step": "mk", "from_port": "p", "to_step": "gen", "to_port": "prompt"}
+            ],
+            "ui": {},
+        }
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    # mock connection + a featureless offering
+    _ad = await c.get("/api/v1/providers/adapters", headers=h)
+    aid = next(a for a in _ad.json()["data"] if a["key"] == "mock")["id"]
+    conn = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-connections",
+            json={"adapter_id": aid, "name": "mk"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    off_plain = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-offerings",
+            json={"connection_id": conn, "capability_key": "image_generation", "model_name": "plain", "features": []},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    # Build v1 (no required_features) + v2 (adds 'highres'); offering with highres exists so the manifest gate passes
+    async with AsyncSessionLocal() as db:
+        svc = WorkflowPackService(db)
+        pack = await svc.create_pack(oid, u["id"], name=f"RB-{uuid.uuid4().hex[:6]}")
+        await svc.update_definition(pack.id, oid, _defn([]))
+        await svc.publish_release(pack.id, oid, version="1.0.0", changelog=None, released_by=u["id"])
+        await svc.update_definition(pack.id, oid, _defn(["highres"]))
+        await svc.publish_release(pack.id, oid, version="2.0.0", changelog=None, released_by=u["id"])
+        pid = pack.id
+        await db.commit()
+
+    off_hr = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-offerings",
+            json={"connection_id": conn, "capability_key": "image_generation", "model_name": "hr", "features": ["highres"]},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=h,
+    )
+    install_id = r.json()["data"]["id"]
+    # Confirm a PINNED binding to the FEATURELESS offering (valid for v1)
+    cb = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings/gen",
+        json={"offering_id": off_plain, "binding_mode": "pinned"},
+        headers=h,
+    )
+    assert cb.status_code == 200, cb.text
+
+    # Upgrade to v2 (gen now needs 'highres', which off_plain lacks)
+    up = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/upgrade",
+        json={"version": "2.0.0"},
+        headers=h,
+    )
+    assert up.status_code == 200, up.text
+
+    async with AsyncSessionLocal() as db:
+        b = (
+            await db.execute(
+                _select(WorkflowStepBinding).where(
+                    WorkflowStepBinding.installation_id == install_id,
+                    WorkflowStepBinding.step_id == "gen",
+                )
+            )
+        ).scalar_one()
+        # The stale featureless PINNED binding must NOT survive: dropped + re-suggested
+        assert not (b.offering_id == off_plain and b.confirmed_by is not None), (
+            "stale binding lacking the new required feature was kept"
+        )
+        # Re-suggested to the feature-matching offering (unconfirmed)
+        assert b.confirmed_by is None
+        assert b.offering_id == off_hr
+
+
+@pytest.mark.asyncio
+async def test_upgrade_diff_rejected_after_owner_archives_pack(c):
+    """R73: _check_pack_access returned early for the owner org WITHOUT a status
+    check, so upgrade()/compute_diff() succeeded against a pack the owner had
+    soft-deleted (archived) — install() and get_pack both 404 an archived pack
+    even for its owner. ARCHIVED is now rejected first, uniformly 404."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid, versions=("1.0.0", "2.0.0"))
+    await _mock_offering(c, h, oid)  # satisfy the install capability gate FIRST
+    # install v1, then archive the pack (owner org)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    install_id = r.json()["data"]["id"]
+    da = await c.delete(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)
+    assert da.status_code == 204, da.text
+
+    up = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/upgrade",
+        json={"version": "2.0.0"},
+        headers=h,
+    )
+    assert up.status_code == 404, f"upgrade on archived pack: {up.status_code} {up.text[:150]}"
+    assert up.json()["error"]["code"] == "WORKFLOW_PACK_NOT_FOUND"
+
+    df = await c.get(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/diff?to=2.0.0",
+        headers=h,
+    )
+    assert df.status_code == 404, f"diff on archived pack: {df.status_code} {df.text[:150]}"
+    assert df.json()["error"]["code"] == "WORKFLOW_PACK_NOT_FOUND"
