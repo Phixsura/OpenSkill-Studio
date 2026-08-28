@@ -57,14 +57,32 @@ async def check_rate_limit(key: str, limit: int, window_seconds: int) -> tuple[b
 
 
 def rate_limit(limit: int, window: int):
-    """FastAPI dependency for rate limiting by client IP."""
+    """FastAPI dependency for rate limiting by client IP, keyed on the ROUTE
+    TEMPLATE (not the concrete URL).
+
+    Keying on ``request.url.path`` (the concrete path) let every distinct value
+    of a high-cardinality path parameter mint a fresh independent bucket, so an
+    endpoint with a ``{project_id}``/``{pack_id}`` in its path had effectively
+    no aggregate ceiling: the creator-shortlist (``/orgs/{org_id}/projects/
+    {project_id}/creator-shortlist``), which runs a full-org creator scoring
+    pass and persists a MatchRun + MatchResult rows PER CALL, could be hit
+    limit×(number of accessible projects) per window from one client — compute +
+    DB-write amplification (R75b). Using the route template collapses all
+    path-parameter values into a single bucket, so the limit is real per
+    (method, route, IP).
+    """
 
     async def checker(request: Request):
         if settings.app_env == "test":
             return limit  # Skip rate limiting in tests
 
         client_ip = request.client.host if request.client else "unknown"
-        key = f"{request.method}:{request.url.path}:{client_ip}"
+        # Route TEMPLATE, not the concrete URL — a path param must not shard the
+        # bucket. Fall back to the concrete path only if the route is somehow
+        # unresolved (defensive; every mounted route carries scope["route"]).
+        route = request.scope.get("route")
+        path_key = getattr(route, "path", None) or request.url.path
+        key = f"{request.method}:{path_key}:{client_ip}"
 
         allowed, remaining = await check_rate_limit(key, limit, window)
 

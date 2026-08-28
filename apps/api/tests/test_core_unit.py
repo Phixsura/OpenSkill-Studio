@@ -237,3 +237,53 @@ def test_refresh_token_is_revoked_true():
     token = MagicMock(spec=RefreshToken)
     token.revoked_at = datetime.now(UTC)
     assert RefreshToken.is_revoked.fget(token) is True  # type: ignore
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_keys_on_route_template_not_concrete_path():
+    """R75b: the bucket key must use the ROUTE TEMPLATE, not the concrete URL —
+    keying on request.url.path let each distinct high-cardinality path-param
+    value (e.g. {project_id}, {pack_id}) mint its own bucket, bypassing the
+    limit (an endpoint could be hit limit×N for N accessible resources). Two
+    requests to the SAME route template with DIFFERENT path-param values must
+    resolve to the SAME rate-limit key."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.core.rate_limit import rate_limit
+
+    captured_keys = []
+
+    async def _fake_check(key, limit, window):
+        captured_keys.append(key)
+        return True, limit
+
+    def _req(concrete_path, template):
+        r = MagicMock()
+        r.client = MagicMock()
+        r.client.host = "10.0.0.1"
+        r.method = "GET"
+        r.url = MagicMock()
+        r.url.path = concrete_path
+        route = MagicMock()
+        route.path = template
+        r.scope = {"route": route}
+        r.state = MagicMock()
+        return r
+
+    checker = rate_limit(10, 60)
+    template = "/orgs/{org_id}/projects/{project_id}/creator-shortlist"
+    with (
+        patch("app.core.rate_limit.settings") as mock_settings,
+        patch("app.core.rate_limit.check_rate_limit", new=AsyncMock(side_effect=_fake_check)),
+    ):
+        mock_settings.app_env = "production"
+        await checker(_req("/orgs/O1/projects/P1/creator-shortlist", template))
+        await checker(_req("/orgs/O1/projects/P2/creator-shortlist", template))
+
+    assert len(captured_keys) == 2
+    assert captured_keys[0] == captured_keys[1], (
+        f"different path-param values got different buckets: {captured_keys}"
+    )
+    # And the key uses the template, not either concrete path
+    assert "{project_id}" in captured_keys[0]
+    assert "/P1/" not in captured_keys[0] and "/P2/" not in captured_keys[0]

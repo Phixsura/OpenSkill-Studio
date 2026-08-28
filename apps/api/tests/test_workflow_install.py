@@ -1627,3 +1627,19 @@ async def test_upgrade_diff_rejected_after_owner_archives_pack(c):
     )
     assert df.status_code == 404, f"diff on archived pack: {df.status_code} {df.text[:150]}"
     assert df.json()["error"]["code"] == "WORKFLOW_PACK_NOT_FOUND"
+
+
+def test_workflow_registry_search_all_sorts_have_id_tiebreak():
+    """R75b: workflow_registry.search_packs is the WORST place to miss a
+    pagination tiebreak — it caches an ids-only page payload for 5 min, so
+    untiebroken ties reshuffle between the DB and cached pages, silently
+    skipping/duplicating packs across pages for the whole TTL. All three sort
+    modes (most_installed/name/newest) now chain the ULID id. Guard the source."""
+    import inspect as _inspect
+
+    from app.services.workflow_registry import WorkflowRegistryService
+
+    src = _inspect.getsource(WorkflowRegistryService.search_packs)
+    assert "WorkflowPack.install_count.desc(), WorkflowPack.id.desc()" in src, "most_installed sort lacks id tiebreak"
+    assert "WorkflowPack.name.asc(), WorkflowPack.id.asc()" in src, "name sort lacks id tiebreak"
+    assert "WorkflowPack.created_at.desc(), WorkflowPack.id.desc()" in src, "newest sort lacks id tiebreak"

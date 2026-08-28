@@ -120,12 +120,18 @@ class WorkflowRegistryService:
         if workflow_type:
             base = base.where(WorkflowPack.workflow_type == workflow_type)
 
+        # Every sort chains the ULID id as a unique tiebreak (R75): OFFSET
+        # pagination over a non-unique key has no stability guarantee, and this
+        # search caches an ids-only page payload for 5 min — untiebroken ties
+        # reshuffle between the DB and the cached pages, silently skipping or
+        # duplicating packs across pages for the WHOLE cache TTL (worse than a
+        # plain unstable list). install_count and name are especially tie-prone.
         if sort == "most_installed":
-            base = base.order_by(WorkflowPack.install_count.desc())
+            base = base.order_by(WorkflowPack.install_count.desc(), WorkflowPack.id.desc())
         elif sort == "name":
-            base = base.order_by(WorkflowPack.name.asc())
+            base = base.order_by(WorkflowPack.name.asc(), WorkflowPack.id.asc())
         else:  # newest
-            base = base.order_by(WorkflowPack.created_at.desc())
+            base = base.order_by(WorkflowPack.created_at.desc(), WorkflowPack.id.desc())
 
         # input/output type filters require inspecting the derived JSONB
         # schemas. The workflow catalog stays small (<1k packs for years) so
