@@ -656,6 +656,28 @@ class WorkflowInstallationService:
             )
             if keep:
                 preserved_step_ids.add(binding.step_id)
+            elif (
+                binding.confirmed_by is not None
+                and binding.binding_mode == "pinned"
+                and step_config is not None
+            ):
+                # A stale confirmed PIN must never be deleted and re-suggested:
+                # the replacement suggestion resets binding_mode to the step
+                # default and the runtime's auto rung then silently executes on
+                # a provider the org never chose — the exact "silent fallback
+                # to auto-selection" the pinned semantics forbid (R78; the
+                # runtime treats a stale pinned binding as a hard stop).
+                # Keep the pin (this offering or nothing) and surface the
+                # staleness as a gap so a human re-confirms or re-pins.
+                binding.reasons = []
+                binding.gaps = [
+                    {
+                        "code": "BINDING_STALE",
+                        "label": "Pinned offering no longer satisfies this step "
+                        "after upgrade — re-confirm or choose another offering",
+                    }
+                ]
+                preserved_step_ids.add(binding.step_id)
             else:
                 await self.db.delete(binding)
         await self.db.flush()

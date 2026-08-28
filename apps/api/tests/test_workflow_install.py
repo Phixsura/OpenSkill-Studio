@@ -1481,8 +1481,9 @@ async def test_upgrade_drops_binding_no_longer_satisfying_features(c):
     active / connection active (the three checks confirm_binding enforces).
     A v2 step that ADDS a required_feature its confirmed offering lacks kept
     the stale binding, deferring a NO_ELIGIBLE_PROVIDER to run time. The keep
-    predicate now revalidates like confirm-time; a stale binding is dropped
-    and re-suggested."""
+    predicate now revalidates like confirm-time; a stale PREFERRED binding is
+    dropped and re-suggested (preferred semantics allow fallback — a stale
+    PIN is instead kept + flagged, see the pinned test below, R78)."""
     from sqlalchemy import select as _select
 
     from app.core.database import AsyncSessionLocal
@@ -1558,10 +1559,10 @@ async def test_upgrade_drops_binding_no_longer_satisfying_features(c):
         headers=h,
     )
     install_id = r.json()["data"]["id"]
-    # Confirm a PINNED binding to the FEATURELESS offering (valid for v1)
+    # Confirm a PREFERRED binding to the FEATURELESS offering (valid for v1)
     cb = await c.put(
         f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings/gen",
-        json={"offering_id": off_plain, "binding_mode": "pinned"},
+        json={"offering_id": off_plain, "binding_mode": "preferred"},
         headers=h,
     )
     assert cb.status_code == 200, cb.text
@@ -1583,13 +1584,52 @@ async def test_upgrade_drops_binding_no_longer_satisfying_features(c):
                 )
             )
         ).scalar_one()
-        # The stale featureless PINNED binding must NOT survive: dropped + re-suggested
+        # The stale featureless PREFERRED binding must NOT survive: dropped + re-suggested
         assert not (b.offering_id == off_plain and b.confirmed_by is not None), (
             "stale binding lacking the new required feature was kept"
         )
         # Re-suggested to the feature-matching offering (unconfirmed)
         assert b.confirmed_by is None
         assert b.offering_id == off_hr
+
+    # ── R78: a stale confirmed PIN must be KEPT + flagged, never deleted ──
+    # Deleting it re-suggested with binding_mode reset to the step default
+    # ('auto'), so the runtime's auto rung silently executed on a provider the
+    # org never chose — the exact silent fallback pinned semantics forbid
+    # (the runtime treats a stale pin as a hard stop). Repin to off_plain as
+    # PINNED on v2 is impossible (confirm validates), so pin on v1 first.
+    dn = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/upgrade",
+        json={"version": "1.0.0"},
+        headers=h,
+    )
+    assert dn.status_code == 200, dn.text
+    cb2 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings/gen",
+        json={"offering_id": off_plain, "binding_mode": "pinned"},
+        headers=h,
+    )
+    assert cb2.status_code == 200, cb2.text
+    up2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/upgrade",
+        json={"version": "2.0.0"},
+        headers=h,
+    )
+    assert up2.status_code == 200, up2.text
+    async with AsyncSessionLocal() as db:
+        b2 = (
+            await db.execute(
+                _select(WorkflowStepBinding).where(
+                    WorkflowStepBinding.installation_id == install_id,
+                    WorkflowStepBinding.step_id == "gen",
+                )
+            )
+        ).scalar_one()
+        # Pin survives (this offering or nothing) with the staleness surfaced
+        assert b2.binding_mode == "pinned", b2.binding_mode
+        assert b2.confirmed_by is not None
+        assert b2.offering_id == off_plain
+        assert any(g.get("code") == "BINDING_STALE" for g in (b2.gaps or [])), b2.gaps
 
 
 @pytest.mark.asyncio
