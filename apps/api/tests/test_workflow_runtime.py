@@ -1851,3 +1851,59 @@ async def test_review_approve_passthrough_bounded_at_48kb(c):
         # 8 ports × 7000 chars ≈ 56KB > 48KB → step fails, not an oversized write
         assert fresh.status.value == "failed"
         assert fresh.error_code == "WF_OUTPUT_TOO_LARGE"
+
+
+@pytest.mark.asyncio
+async def test_create_run_nonfinite_json_input_rejected_not_500(c):
+    """R73: a json-typed run input carrying NaN/Infinity (stdlib json.loads
+    accepts the bare tokens) passed every isinstance/size/depth/ctrl check,
+    then the JSONB flush re-emitted the literal `NaN` token → Postgres 22P02
+    → 500. create_run's _values_have_ctrl now also screens non-finite floats
+    → clean 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    defn = {
+        "schema_version": 1,
+        "inputs": [{"key": "cfg", "type": "json", "required": True}],
+        "outputs": [{"key": "o", "type": "prompt", "from_step": "mk", "from_port": "p"}],
+        "steps": [
+            {
+                "id": "mk",
+                "type": "prompt_template",
+                "name": "M",
+                "config": {"template": "x"},
+                "inputs": [],
+                "outputs": [{"port": "p", "type": "prompt"}],
+            }
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    install_id = await _install(c, h, oid, defn)
+    hj = {**h, "Content-Type": "application/json"}
+
+    # NaN inside the json input
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        content=('{"installation_id":"%s","inputs":{"cfg":{"x": NaN}}}' % install_id).encode(),
+        headers=hj,
+    )
+    assert r.status_code == 422, f"{r.status_code}: {r.text[:150]}"
+
+    # Infinity nested in a list inside the json input
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        content=(
+            '{"installation_id":"%s","inputs":{"cfg":{"a":[1, Infinity]}}}' % install_id
+        ).encode(),
+        headers=hj,
+    )
+    assert r2.status_code == 422, r2.text[:150]
+
+    # Control: a finite json input still creates the run
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"cfg": {"x": 1.5, "y": [2, 3]}}},
+        headers=h,
+    )
+    assert r3.status_code == 201, r3.text[:150]

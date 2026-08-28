@@ -24,10 +24,19 @@ def _has_ctrl(v, depth: int = 0) -> bool:
     # RecursionError → 500, the exact defect class this validator closes.
     # Structures deeper than any legitimate requirement are rejected outright
     # by treating them as invalid (True → 422).
+    # Also screens non-finite floats (NaN/Infinity/-Infinity): stdlib
+    # json.loads accepts the bare tokens, they pass every str/size check, and
+    # SQLAlchemy's default JSONB serializer (allow_nan=True) re-emits `NaN`/
+    # `Infinity` which Postgres rejects (22P02 → DBAPIError → 500). bool is an
+    # int subclass, not float, so booleans are unaffected. (R73)
+    import math
+
     if depth > _MAX_NESTING:
         return True
     if isinstance(v, str):
         return bool(_CTRL_RE.search(v))
+    if isinstance(v, float):
+        return not math.isfinite(v)
     if isinstance(v, dict):
         return any(_has_ctrl(k, depth + 1) or _has_ctrl(val, depth + 1) for k, val in v.items())
     if isinstance(v, list):
@@ -54,7 +63,8 @@ class CreateProfileRequest(BaseModel):
             raise ValueError("Structured requirements too large")
         if _has_ctrl(v):
             raise ValueError(
-                "Structured requirements contain NUL or control characters that are not allowed"
+                "Structured requirements contain disallowed values "
+                "(NUL/control characters, NaN/Infinity, or excessive nesting)"
             )
         return v
 
@@ -83,7 +93,10 @@ class UpdateProfileRequest(BaseModel):
         if len(str(v)) > 10000:
             raise ValueError("Edits too large")
         if _has_ctrl(v):
-            raise ValueError("Edits contain NUL or control characters that are not allowed")
+            raise ValueError(
+                "Edits contain disallowed values "
+                "(NUL/control characters, NaN/Infinity, or excessive nesting)"
+            )
         return v
 
 

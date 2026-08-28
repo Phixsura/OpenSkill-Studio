@@ -99,22 +99,32 @@ def _max_depth(v) -> int:
 
 
 def _default_has_ctrl(v) -> bool:
-    """True if any string in a parsed json default holds a control char.
+    """True if any string in a parsed json default holds a control char, OR any
+    float is non-finite (NaN/Infinity/-Infinity).
 
     A json default arrives as an ESCAPED string in the definition (no literal
     control chars — WF_INVALID_CHARACTER cannot fire), but json.loads
     materializes real NULs that create_run's run-input screen then rejects on
-    every default-driven run. Catch it at publish instead.
+    every default-driven run. Catch it at publish instead. Same reasoning for
+    non-finite floats (R73): json.loads('{"x": NaN}') yields float('nan'), which
+    SQLAlchemy's default JSONB serializer re-emits as the literal `NaN` token
+    → Postgres 22P02 → 500 on every default-driven run. bool is an int
+    subclass, not float, so booleans are unaffected.
 
     ITERATIVE — json.loads parses deeper than the recursion limit allows a
     recursive scan to walk, so a deeply nested hostile default would
     RecursionError into a 500 at publish.
     """
+    import math
+
     stack = [v]
     while stack:
         cur = stack.pop()
         if isinstance(cur, str):
             if _CTRL_RE.search(cur):
+                return True
+        elif isinstance(cur, float):
+            if not math.isfinite(cur):
                 return True
         elif isinstance(cur, dict):
             stack.extend(cur.keys())
@@ -536,7 +546,10 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                 elif len(str(parsed_default)) > 8000:
                     bad_default = "json default exceeds the 8,000-character run-input limit"
                 elif _default_has_ctrl(parsed_default):
-                    bad_default = "json default contains NUL or control characters"
+                    bad_default = (
+                        "json default contains NUL/control characters or "
+                        "NaN/Infinity values"
+                    )
             if bad_default is not None:
                 errors.append(
                     _err(

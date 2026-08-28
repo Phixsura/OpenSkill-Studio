@@ -106,3 +106,34 @@ def reject_ctrl_json(v, field_name: str):
         elif isinstance(cur, (list, tuple)):
             stack.extend(cur)
     return v
+
+
+def reject_nonfinite_json(v, field_name: str):
+    """Validator helper: reject NaN / Infinity / -Infinity floats anywhere in
+    an open dict/list field. Stdlib json.loads (used by FastAPI request
+    parsing) accepts the bare JSON tokens NaN/Infinity/-Infinity and yields
+    real float('nan')/float('inf'), which pass every string/size/depth/ctrl
+    check (those inspect str, not float). SQLAlchemy's default JSONB serializer
+    is json.dumps with allow_nan=True, so it re-emits the literal `NaN`/
+    `Infinity` token — which Postgres's jsonb parser rejects with 22P02
+    (InvalidTextRepresentation → DBAPIError, not ValueError) → 500. bool is a
+    subclass of int (not float) so it is unaffected; ints cannot be non-finite.
+    Iterative (recursion-free) to match the depth-capped nested payloads."""
+    import math
+
+    if v is None:
+        return v
+    stack = [v]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, float):
+            if not math.isfinite(cur):
+                raise ValueError(
+                    f"{field_name} contains NaN or Infinity values that are not allowed"
+                )
+        elif isinstance(cur, dict):
+            stack.extend(cur.keys())
+            stack.extend(cur.values())
+        elif isinstance(cur, (list, tuple)):
+            stack.extend(cur)
+    return v

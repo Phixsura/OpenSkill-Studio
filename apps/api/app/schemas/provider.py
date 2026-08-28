@@ -4,7 +4,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from app.schemas.base import reject_ctrl_json, reject_ctrl_str, reject_deep_json
+from app.schemas.base import (
+    reject_ctrl_json,
+    reject_ctrl_str,
+    reject_deep_json,
+    reject_nonfinite_json,
+)
 
 # ── Capability ────────────────────────────────────────────
 
@@ -62,6 +67,7 @@ class CreateConnectionRequest(BaseModel):
         if len(str(v)) > 10000:
             raise ValueError("Config too large (max 10,000 chars)")
         reject_deep_json(v, "config")
+        reject_nonfinite_json(v, "config")
         return reject_ctrl_json(v, "config")
 
     @field_validator("credentials")
@@ -107,6 +113,7 @@ class UpdateConnectionRequest(BaseModel):
         if v is not None and len(str(v)) > 10000:
             raise ValueError("Config too large (max 10,000 chars)")
         reject_deep_json(v, "config")
+        reject_nonfinite_json(v, "config")
         return reject_ctrl_json(v, "config")
 
     @field_validator("credentials")
@@ -189,6 +196,7 @@ class CreateOfferingRequest(BaseModel):
         if len(str(v)) > 5000:
             raise ValueError("Limits too large (max 5,000 chars)")
         reject_deep_json(v, "limits")
+        reject_nonfinite_json(v, "limits")
         return reject_ctrl_json(v, "limits")
 
     @field_validator("cost_per_call_usd")
@@ -255,6 +263,7 @@ class UpdateOfferingRequest(BaseModel):
         if v is not None and len(str(v)) > 5000:
             raise ValueError("Limits too large (max 5,000 chars)")
         reject_deep_json(v, "limits")
+        reject_nonfinite_json(v, "limits")
         return reject_ctrl_json(v, "limits")
 
     @field_validator("cost_per_call_usd")

@@ -62,20 +62,34 @@ _CTRL_CHAR_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 def _values_have_ctrl(v) -> bool:
-    """True if any string ANYWHERE in a nested structure holds a control char.
+    """True if any string ANYWHERE in a nested structure holds a control char,
+    OR any float is non-finite (NaN/Infinity/-Infinity).
     Must walk real values — json.dumps escapes NUL so a serialized scan would
     miss it. Tuples are included: json.dumps serializes them as arrays, so a
     tuple-bearing adapter output would otherwise slip past.
+
+    Non-finite floats (R73): stdlib json.loads accepts bare NaN/Infinity tokens
+    (so run inputs carry real float('nan')), and adapter outputs may compute
+    one; SQLAlchemy's default JSONB serializer (allow_nan=True) re-emits the
+    literal `NaN`/`Infinity` token, which Postgres rejects with 22P02
+    (InvalidTextRepresentation → DBAPIError → 500). Screening here covers BOTH
+    the create_run input path and the adapter-output settlement path (bool is
+    an int subclass, not float, so booleans are unaffected).
 
     ITERATIVE — json.loads parses ~990 levels deep (a 2KB payload passing
     every size cap), where a recursive scan RecursionErrors into the very
     500 this guard exists to prevent (round-18 fixed the comfyui/matching
     siblings; this one had the same defect)."""
+    import math
+
     stack = [v]
     while stack:
         cur = stack.pop()
         if isinstance(cur, str):
             if _CTRL_CHAR_RE.search(cur):
+                return True
+        elif isinstance(cur, float):
+            if not math.isfinite(cur):
                 return True
         elif isinstance(cur, dict):
             stack.extend(cur.keys())
@@ -322,7 +336,8 @@ class WorkflowRuntimeService:
         if _values_have_ctrl(effective_inputs):
             raise AppError(
                 "INVALID_INPUT_VALUE",
-                "Inputs contain NUL or control characters that are not allowed",
+                "Inputs contain NUL/control characters or NaN/Infinity values "
+                "that are not allowed",
                 422,
             )
 

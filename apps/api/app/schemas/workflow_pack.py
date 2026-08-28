@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from app.schemas.base import reject_ctrl_json, reject_deep_json
+from app.schemas.base import reject_ctrl_json, reject_deep_json, reject_nonfinite_json
 
 # Control chars other than \t \n \r — asyncpg raises
 # UntranslatableCharacterError (→ 500) on NUL and friends, so plain-text
@@ -102,6 +102,7 @@ class CreateWorkflowPackRequest(BaseModel):
         if len(str(v)) > 20000:
             raise ValueError("Provenance too large (max 20,000 chars)")
         reject_deep_json(v, "provenance")
+        reject_nonfinite_json(v, "provenance")
         return reject_ctrl_json(v, "provenance")
 
 
@@ -184,6 +185,7 @@ class UpdateWorkflowPackRequest(BaseModel):
         if v is not None and len(str(v)) > 20000:
             raise ValueError("Provenance too large (max 20,000 chars)")
         reject_deep_json(v, "provenance")
+        reject_nonfinite_json(v, "provenance")
         return reject_ctrl_json(v, "provenance")
 
 

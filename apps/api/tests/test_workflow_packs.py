@@ -1267,3 +1267,59 @@ async def test_pack_mutations_row_locked_no_lost_update(c):
         # B re-read fresh (ARCHIVED) → get_pack must 404, never resurrect
         assert p.status == PackStatus.ARCHIVED, f"resurrected: status={p.status.value} b={b_result}"
         assert b_result == "WORKFLOW_PACK_NOT_FOUND", b_result
+
+
+@pytest.mark.asyncio
+async def test_workflow_pack_provenance_nonfinite_rejected_not_500(c):
+    """R73: provenance is an open JSONB dict — a NaN/Infinity float 500'd at
+    the write (22P02). The validator now screens non-finite floats → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    hj = {**h, "Content-Type": "application/json"}
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        content=b'{"name":"PNaN","provenance":{"v": NaN}}',
+        headers=hj,
+    )
+    assert r.status_code == 422, r.text[:150]
+    # Control: finite provenance value accepted
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": f"Pok-{_uuid()}", "provenance": {"weight": 0.5}},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text[:150]
+
+
+def test_json_default_nonfinite_rejected():
+    """R73: a json input default whose parsed value contains NaN/Infinity
+    (json.loads accepts the token) would 500 every default-driven run. The
+    publish-time validator now flags it as WF_INVALID_DEFAULT."""
+    from app.schemas.workflow_definition import validate_definition
+
+    d = {
+        "schema_version": 1,
+        "inputs": [
+            {"key": "cfg", "type": "json", "required": False, "default": '{"x": NaN}'}
+        ],
+        "outputs": [],
+        "steps": [
+            {
+                "id": "a",
+                "type": "instruction",
+                "name": "A",
+                "config": {"content": "x"},
+                "inputs": [],
+                "outputs": [],
+            }
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_INVALID_DEFAULT" for e in errors), [e["code"] for e in errors]
+
+    # Control: a finite json default is accepted
+    ok = {**d, "inputs": [{"key": "cfg", "type": "json", "required": False, "default": '{"x": 1.5}'}]}
+    _, ok_errs = validate_definition(ok)
+    assert not any(e["code"] == "WF_INVALID_DEFAULT" for e in ok_errs), [e["code"] for e in ok_errs]

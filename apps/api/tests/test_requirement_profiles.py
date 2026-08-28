@@ -828,3 +828,55 @@ async def test_profile_confirm_and_edit_race_guarded(c):
         p = await db.get(RequirementProfile, pid)
         assert p.status == "confirmed"
         assert p.structured_requirements.get("goal") == "learn"
+
+
+@pytest.mark.asyncio
+async def test_profile_nonfinite_float_rejected_not_500(c):
+    """R73: stdlib json.loads (FastAPI request parsing) accepts bare NaN/
+    Infinity JSON tokens → real float('nan'), which passes every str/size/
+    depth/ctrl check. SQLAlchemy's default JSONB serializer (allow_nan=True)
+    re-emits the literal `NaN`/`Infinity` token, which Postgres rejects with
+    22P02 → DBAPIError → 500. structured_requirements / edits now screen
+    non-finite floats → clean 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    hj = {**h, "Content-Type": "application/json"}
+
+    # NaN in a free structured field (raw JSON NaN token)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        content=b'{"context_type":"learning","structured_requirements":{"goal": NaN}}',
+        headers=hj,
+    )
+    assert r.status_code == 422, f"{r.status_code}: {r.text[:150]}"
+
+    # Infinity nested in a list
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        content=b'{"context_type":"learning","structured_requirements":{"x":[1, Infinity]}}',
+        headers=hj,
+    )
+    assert r2.status_code == 422, r2.text[:150]
+
+    # PATCH edits path
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/requirement-profiles",
+            json={"context_type": "learning", "structured_requirements": {"goal": "ok"}},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r3 = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}",
+        content=b'{"edits":{"industry": -Infinity}}',
+        headers=hj,
+    )
+    assert r3.status_code == 422, r3.text[:150]
+
+    # Control: a finite number is still accepted
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"time_budget": 120}},
+        headers=h,
+    )
+    assert r4.status_code == 201, r4.text[:150]

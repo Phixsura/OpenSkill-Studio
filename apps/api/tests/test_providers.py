@@ -877,3 +877,45 @@ async def test_connection_config_nul_rejected_not_500(c):
         headers=h,
     )
     assert r4.status_code == 201, r4.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_connection_config_and_limits_nonfinite_rejected_not_500(c):
+    """R73: config/limits are open JSONB dicts — a NaN/Infinity float (stdlib
+    json.loads accepts the token) passed the size/depth/ctrl checks and 500'd
+    at the JSONB write (22P02). Validators now screen non-finite floats → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    aid = await _mock_adapter_id(c, h)
+    hj = {**h, "Content-Type": "application/json"}
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        content=('{"adapter_id":"%s","name":"x","config":{"rate": NaN}}' % aid).encode(),
+        headers=hj,
+    )
+    assert r.status_code == 422, r.text[:150]
+
+    conn_id = await _connection(c, h, oid)
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        content=(
+            '{"connection_id":"%s","capability_key":"image_generation",'
+            '"model_name":"m","limits":{"max": Infinity}}' % conn_id
+        ).encode(),
+        headers=hj,
+    )
+    assert r2.status_code == 422, r2.text[:150]
+
+    # Control: finite limits still accepted
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "ok",
+            "limits": {"max_resolution": "2048x2048", "throughput": 12.5},
+        },
+        headers=h,
+    )
+    assert r3.status_code == 201, r3.text[:150]
