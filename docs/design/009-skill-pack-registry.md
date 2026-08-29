@@ -115,6 +115,26 @@ Manifest import applies 11 validation steps in order:
 10. **Logical ID uniqueness** -- reject duplicate logical_ids within the manifest
 11. **Prerequisite references** -- verify all prerequisite refs point to existing logical_ids
 
+**Install-time invariants validated at import (R86).** Some manifest fields are
+not consumed by the import writer itself but by the *install* writer that
+materializes the manifest into org content later. A malformed value passes
+import, reaches PUBLISHED, and then crashes **every** install — an
+unrecoverable published-but-uninstallable pack. Import therefore also enforces:
+
+- **Non-finite floats** -- `json.loads` accepts the bare tokens
+  `NaN`/`Infinity`/`-Infinity` and yields real `float('nan')`/`float('inf')`;
+  the default JSONB serializer re-emits them verbatim and Postgres rejects them
+  (22P02) at the manifest insert. The NUL-scan walk over the parsed manifest
+  also rejects non-finite floats (parity with every other JSONB write surface).
+- **Category references** -- a skill's `category_logical_id` is resolved against
+  the manifest `categories[]` at install (`CATEGORY_NOT_FOUND`). Import
+  type-gates `categories[]` and rejects any skill referencing a category the
+  manifest never defined, so the dangling reference is caught at import time.
+- **Integer-column fields** -- exercise `max_score` / `sort_order` and skill
+  `sort_order` flow verbatim into INTEGER columns at install with only a
+  `.get(default)`. Import type-gates them (bool excluded, an int subclass) and
+  bounds `max_score` to 1–10000.
+
 Runtime-only fields (database IDs, timestamps, internal FKs) are stripped from the manifest before processing.
 
 ### Registry Visibility
