@@ -91,9 +91,9 @@ test.beforeAll(async ({ browser }) => {
     instructions: "do this",
     rubric: [{ criterion: "Quality", max_score: 100 }],
   });
+  // Create private; approved → public after publish (R79 gate)
   const pack = await api(admin, "POST", `/orgs/${orgId}/packs`, {
     name: "EveryButton Pack",
-    visibility: "public",
     difficulty: "beginner",
     scenario_tags: ["ecommerce"],
     tool_tags: ["midjourney"],
@@ -110,6 +110,9 @@ test.beforeAll(async ({ browser }) => {
     template_id: tmpl.data.id,
   });
   await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/releases`, { version: "1.0.0" });
+  // Public via review flow (R79): registry detail (test 15) + cross-org install need it
+  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/submit-for-review`);
+  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/approve`);
   // Publish v1.1.0 for diff testing
   const cat2 = await api(admin, "POST", `/orgs/${orgId}/categories`, {
     name: `EvCat2-${Date.now()}`,
@@ -292,9 +295,10 @@ test("7. Installation detail: Remove → confirm → redirect", async () => {
   const packs = await api(admin, "GET", `/orgs/${orgId}/packs`);
   const packId = packs.data.find((p: any) => p.name === "EveryButton Pack")?.id;
   // Create second install to remove
+  // Unlisted: cross-org installable by pack_id without approval (R79)
   const p2 = await api(admin, "POST", `/orgs/${orgId}/packs`, {
     name: "RemoveTest Pack",
-    visibility: "public",
+    visibility: "unlisted",
   });
   const s = await api(admin, "GET", `/orgs/${orgId}/skills?per_page=100`);
   await api(admin, "POST", `/orgs/${orgId}/packs/${p2.data.id}/skills`, { skill_id: s.data[0].id });

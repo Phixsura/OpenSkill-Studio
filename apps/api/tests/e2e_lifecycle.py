@@ -80,9 +80,11 @@ async def main():
 
         # ═══ 3. Pack CRUD ═══
         print("\n📦 Phase 2: Skill Pack CRUD")
+        # visibility=public at create is rejected (R79 approval gate) — create
+        # default-private; public is reached via submit-review → approve below.
         pk = await c.post(f"/orgs/{o1}/packs", json={
             "name": f"AI Photo Pack {uid()}", "summary": "AI photography training",
-            "visibility": "public", "difficulty": "beginner",
+            "difficulty": "beginner",
             "scenario_tags": ["ecommerce"], "tool_tags": ["midjourney"],
             "learning_outcomes": ["Create hero images"],
             "provenance": {"author_name": "Test Author"},
@@ -123,6 +125,12 @@ async def main():
         # Pack auto-published
         pk2 = await c.get(f"/orgs/{o1}/packs/{pack_id}", headers=h1)
         check("Pack auto-published", pk2.json()["data"]["status"] == "published")
+
+        # Take public via review flow (R79: public requires approval)
+        sub = await c.post(f"/orgs/{o1}/packs/{pack_id}/submit-for-review", headers=h1)
+        check("Submit for review", sub.status_code == 200, f"{sub.status_code}")
+        apr = await c.post(f"/orgs/{o1}/packs/{pack_id}/approve", headers=h1)
+        check("Approve → public", apr.status_code == 200 and apr.json()["data"]["visibility"] == "public")
 
         # ═══ 5. Public Registry ═══
         print("\n🌐 Phase 4: Public Registry")

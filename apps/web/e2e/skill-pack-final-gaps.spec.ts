@@ -36,13 +36,16 @@ test.beforeAll(async ({ browser }) => {
   await api(admin, "POST", `/orgs/${orgId}/projects/${proj.data.id}/publish`);
 
   // Create pack with skills for multi-release test
+  // Create private; approve after publish (R79) — registry detail test needs it
   const pack = await api(admin, "POST", `/orgs/${orgId}/packs`, {
-    name: "MultiRelease Pack", visibility: "public", difficulty: "expert",
+    name: "MultiRelease Pack", difficulty: "expert",
     capability_tags: ["product_photography", "storyboard"],
   });
   const skills = await api(admin, "GET", `/orgs/${orgId}/skills?per_page=100`);
   await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/skills`, { skill_id: skills.data[0].id });
   await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/releases`, { version: "1.0.0" });
+  await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/submit-for-review`);
+  await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/approve`);
 
   ctx = await browser.newContext();
   p = await ctx.newPage();
@@ -152,11 +155,12 @@ test("6. Registry detail: description text shown", async () => {
   // Create a pack with description
   const pack = await api(admin, "POST", `/orgs/${orgId}/packs`, {
     name: "DescPack", description: "This is a detailed pack description for testing.",
-    visibility: "public",
   });
   const skills = await api(admin, "GET", `/orgs/${orgId}/skills?per_page=100`);
   await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/skills`, { skill_id: skills.data[0].id });
   await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/releases`, { version: "1.0.0" });
+  await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/submit-for-review`);
+  await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/approve`);
 
   await p.goto(`/registry/${pack.data.id}`);
   await p.waitForLoadState("networkidle");
