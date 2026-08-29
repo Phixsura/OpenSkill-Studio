@@ -2132,3 +2132,170 @@ async def test_credentials_never_reach_run_snapshot_or_detail(c):
         assert run_leak == 0, "credential in workflow_runs snapshot/inputs/outputs"
         assert step_leak == 0, "credential in step output/inputs_resolved"
         assert event_leak == 0, "credential in run events"
+
+
+@pytest.mark.asyncio
+async def test_crash_retry_pins_recorded_offering_never_switches_account(c):
+    """R85: once a prior attempt's write-ahead persisted provider_request_id +
+    offering_id, the provider may already have charged the work on THAT
+    account. A crash-retry must execute on the SAME offering — re-running the
+    binding ladder could pick a cheaper offering on a DIFFERENT connection
+    (account) added between attempts, and the reused idempotency key only
+    dedupes within one account → double charge. If the recorded offering is
+    gone/stale, the step must hard-stop BINDING_STALE, never silently switch."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+    from sqlalchemy import update as sa_update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.provider import ProviderModelOffering
+    from app.models.workflow_run import StepRunStatus, WorkflowStepRun
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    off_a = await _mock_offering(c, h, oid)  # offering A (its own connection)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "cats"}},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed"})
+    assert data["status"] == "completed"
+
+    # Capture the write-ahead state of attempt 1
+    async with AsyncSessionLocal() as db:
+        sr_r = await db.execute(
+            select(WorkflowStepRun).where(
+                WorkflowStepRun.run_id == run_id, WorkflowStepRun.step_id == "generate"
+            )
+        )
+        sr = sr_r.scalar_one()
+        sr_id, key1, off_used = sr.id, sr.provider_request_id, sr.offering_id
+    assert off_used == off_a
+    assert key1
+
+    # Simulate the crash window: step rewound to RUNNING with an expired
+    # lease AFTER the write-ahead committed (provider may have been charged).
+    # Meanwhile a CHEAPER offering B appears on a DIFFERENT connection —
+    # the auto rung would now prefer it.
+    off_b = await _mock_offering(c, h, oid)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == off_a)
+            .values(cost_per_call_usd=9.99)
+        )
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == off_b)
+            .values(cost_per_call_usd=0.01)
+        )
+        await db.execute(
+            sa_update(WorkflowStepRun)
+            .where(WorkflowStepRun.id == sr_id)
+            .values(
+                status=StepRunStatus.RUNNING,
+                output=None,
+                finished_at=None,
+                lease_expires_at=datetime.now(UTC) - timedelta(minutes=5),
+            )
+        )
+        from app.models.workflow_run import RunStatus, WorkflowRun
+
+        await db.execute(
+            sa_update(WorkflowRun)
+            .where(WorkflowRun.id == run_id)
+            .values(status=RunStatus.RUNNING, finished_at=None)
+        )
+        await db.commit()
+
+    # Run-detail GET triggers lazy sweep → WAITING_RETRY → redispatch
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "completed", data["status"]
+
+    # The retry must have reused key AND offering A — never switched to B
+    async with AsyncSessionLocal() as db:
+        sr2 = (
+            await db.execute(select(WorkflowStepRun).where(WorkflowStepRun.id == sr_id))
+        ).scalar_one()
+        assert sr2.provider_request_id == key1, "idempotency key changed across retry"
+        assert sr2.offering_id == off_a, (
+            f"retry switched offering {off_a} -> {sr2.offering_id} (double-charge risk)"
+        )
+
+
+@pytest.mark.asyncio
+async def test_crash_retry_hard_stops_when_recorded_offering_gone(c):
+    """R85 companion: if the offering recorded by the prior attempt is no
+    longer usable (deactivated), the retry must fail BINDING_STALE — the
+    no-silent-fallback red line — rather than re-resolve onto another
+    account with the reused (account-scoped) idempotency key."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+    from sqlalchemy import update as sa_update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.provider import ProviderModelOffering
+    from app.models.workflow_run import StepRunStatus, WorkflowStepRun
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    off_a = await _mock_offering(c, h, oid)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "cats"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"completed"})
+    assert data["status"] == "completed"
+
+    async with AsyncSessionLocal() as db:
+        sr = (
+            await db.execute(
+                select(WorkflowStepRun).where(
+                    WorkflowStepRun.run_id == run_id, WorkflowStepRun.step_id == "generate"
+                )
+            )
+        ).scalar_one()
+        sr_id = sr.id
+
+    # Replacement offering B exists, but recorded offering A is deactivated
+    await _mock_offering(c, h, oid)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == off_a)
+            .values(is_active=False)
+        )
+        await db.execute(
+            sa_update(WorkflowStepRun)
+            .where(WorkflowStepRun.id == sr_id)
+            .values(
+                status=StepRunStatus.RUNNING,
+                output=None,
+                finished_at=None,
+                lease_expires_at=datetime.now(UTC) - timedelta(minutes=5),
+            )
+        )
+        from app.models.workflow_run import RunStatus, WorkflowRun
+
+        await db.execute(
+            sa_update(WorkflowRun)
+            .where(WorkflowRun.id == run_id)
+            .values(status=RunStatus.RUNNING, finished_at=None)
+        )
+        await db.commit()
+
+    data = await _wait_run(c, h, oid, run_id, {"completed", "failed"})
+    assert data["status"] == "failed", data["status"]
+    step = next(s for s in data["step_runs"] if s["id"] == sr_id)
+    assert step["error_code"] == "BINDING_STALE", step

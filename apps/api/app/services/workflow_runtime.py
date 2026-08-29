@@ -1249,8 +1249,43 @@ async def _execute_provider_action(
     config = step.get("config", {})
     capability = config.get("capability", "")
 
-    # Resolve the offering: confirmed binding → pinned → auto (first active)
-    offering = await _resolve_offering(db, run, step["id"], config)
+    # Retry pin (R85): once a prior attempt's write-ahead persisted
+    # provider_request_id + offering_id, the provider may already have
+    # executed (and charged) the work on THAT account — the reused
+    # idempotency key only dedupes within a single provider account, so
+    # re-running the binding ladder here could silently switch accounts
+    # (e.g. a cheaper offering added, or the old connection replaced,
+    # between attempts) and re-charge work that already succeeded. Pin the
+    # retry to the recorded offering; if it is gone/stale, hard-stop
+    # BINDING_STALE — the same no-silent-fallback red line as pinned
+    # bindings — never re-resolve onto a different account mid-step.
+    if sr.provider_request_id and sr.offering_id:
+        offering = await db.get(ProviderModelOffering, sr.offering_id)
+        pinned_ok = False
+        if offering is not None and offering.is_active:
+            conn = await db.get(ProviderConnection, offering.connection_id)
+            required = set(config.get("required_features", []))
+            pinned_ok = (
+                conn is not None
+                and conn.org_id == run.org_id
+                and conn.status == "active"
+                and offering.capability_key == capability
+                and required <= set(offering.features or [])
+            )
+        if not pinned_ok:
+            await _fail_step(
+                db,
+                run,
+                sr,
+                "BINDING_STALE",
+                "Offering recorded by a prior attempt is no longer available; "
+                "refusing to switch provider accounts mid-step (idempotency)",
+                claimed_attempt,
+            )
+            return
+    else:
+        # First attempt: confirmed binding → pinned → auto (first active)
+        offering = await _resolve_offering(db, run, step["id"], config)
     if offering is None:
         await _fail_step(
             db,

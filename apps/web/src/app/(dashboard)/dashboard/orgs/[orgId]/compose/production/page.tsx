@@ -28,7 +28,13 @@ interface Draft {
     template: { entity_id: string; name: string } | null;
     items: { entity_id: string; name: string; family: string }[];
     placeholders: { input_key: string; type: string; reason: string }[];
-    gaps: { code: string; capability?: string; detail?: string; missing_features?: string[] }[];
+    gaps: {
+      code: string;
+      capability?: string;
+      detail?: string;
+      missing_features?: string[];
+      slug?: string;
+    }[];
     required_capabilities: { capability: string; features?: string[] }[] | string[];
   };
 }
@@ -41,12 +47,19 @@ function placeholderLabel(p: { input_key: string; type: string; reason: string }
   return `Input "${p.input_key}" (${p.type}): ${p.reason}`;
 }
 
-function gapLabel(gap: { code: string; capability?: string; detail?: string }): string {
+function gapLabel(gap: {
+  code: string;
+  capability?: string;
+  detail?: string;
+  slug?: string;
+}): string {
   if (gap.code === "NO_ELIGIBLE_PROVIDER")
     return `No provider connected for "${gap.capability}" — connect one in Providers`;
   if (gap.code === "NO_TEMPLATE_AVAILABLE")
     return "No matching project template found";
   if (gap.code === "NO_RELEASES") return gap.detail ?? "A workflow has no releases";
+  if (gap.code === "RECOMMENDED_PACK_UNAVAILABLE")
+    return `Recommended pack "${gap.slug}" is not available (unpublished or removed) — skipped`;
   return gap.detail ?? gap.code;
 }
 

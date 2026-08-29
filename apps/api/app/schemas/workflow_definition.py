@@ -13,7 +13,7 @@ import math
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.exceptions import AppError
 
@@ -218,28 +218,43 @@ class WorkflowOutputDef(BaseModel):
 
 
 # ── Step configs (discriminated by step type) ─────────────
+#
+# extra="forbid" on EVERY config (R85): step config is stored verbatim in
+# pack.definition → release.manifest → run.definition_snapshot AND served in
+# the UNAUTHENTICATED registry preview. Without forbidding unknown keys, an
+# author could smuggle a provider credential (e.g. {"capability": "...",
+# "api_key": "sk-..."}) into a provider_action config — the same
+# CREDENTIAL_IN_CONFIG footgun the ProviderConnection create path screens —
+# and it would persist and leak publicly. Forbidding extras rejects any key
+# outside the declared schema (WF_CONFIG_INVALID) at save/publish, so config
+# can only ever hold the whitelisted non-sensitive fields.
 
 
 class InstructionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     content: str = Field(max_length=4000)
 
 
 class PromptTemplateConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     template: str = Field(max_length=4000)
 
 
 class AssetInputConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     accept_types: list[
         Literal["image", "video", "audio", "reference_asset"]
     ] = ["image"]
 
 
 class TransformConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     operation: Literal["crop", "resize", "concat_text", "select_field"]
     params: dict = {}
 
 
 class ProviderActionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     # min_length=1 (R83): an empty capability passed validation, then the
     # publish derivation skipped it (`if not key: continue`) so the install
     # capability gate saw no requirement and passed even with zero providers —
@@ -256,12 +271,13 @@ class ProviderActionConfig(BaseModel):
 
 
 class ReviewGateConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     instructions: str | None = Field(default=None, max_length=2000)
     due_days: int = Field(default=7, ge=1, le=30)
 
 
 class OutputConfig(BaseModel):
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 _CONFIG_SCHEMAS = {

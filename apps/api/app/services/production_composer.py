@@ -288,6 +288,11 @@ class ProductionComposerService:
                         "status": "included",
                     }
                 )
+            else:
+                # R85: a recommended pack whose slug resolves to nothing
+                # visible/published must be a VISIBLE gap, not a silent drop —
+                # ADR-013's "every omission is a first-class row with a reason".
+                gaps.append({"code": "RECOMMENDED_PACK_UNAVAILABLE", "slug": slug})
 
         payload = {
             "workflow_chain": [
@@ -342,6 +347,11 @@ class ProductionComposerService:
         # Conditional-UPDATE claim BEFORE materialization (race-safe: the
         # loser of two concurrent confirms gets rowcount 0 → 409)
         await composer_svc.claim_draft_for_confirm(draft_id, org_id)
+        # Re-read after the claim (R85): a PATCH between get_draft and the claim
+        # mutated the committed payload; materializing the pre-claim snapshot
+        # would use stale content. The claim freezes the row (update_draft only
+        # edits 'draft' status), so refresh now picks up any committed edit.
+        await self.db.refresh(draft)
         try:
             return await self._materialize(draft, org_id, confirmed_by)
         except BaseException:

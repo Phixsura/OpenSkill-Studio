@@ -488,6 +488,14 @@ class LearningComposerService:
         # Conditional-UPDATE claim BEFORE materialization (race-safe: the
         # loser of two concurrent confirms gets rowcount 0 → 409)
         await self.claim_draft_for_confirm(draft_id, org_id)
+        # Re-read AFTER winning the claim (R85): the ORM object read above is a
+        # pre-claim snapshot. A PATCH (update_draft) that landed between the
+        # read and the claim mutated the committed payload, so materializing the
+        # stale object would confirm content the user just edited away (e.g. a
+        # removed_by_user item). update_draft only touches 'draft'-status rows,
+        # so once our claim flipped it to 'confirming' the payload is frozen —
+        # refresh to pick up any edit that committed before the claim.
+        await self.db.refresh(draft)
         try:
             return await self._materialize(draft, org_id, confirmed_by)
         except BaseException:
@@ -605,8 +613,24 @@ class LearningComposerService:
 
     # ── Draft management ──────────────────────────────────
 
-    async def get_draft(self, draft_id: str, org_id: str) -> SolutionDraft:
-        draft = await self.db.get(SolutionDraft, draft_id)
+    async def get_draft(
+        self, draft_id: str, org_id: str, for_update: bool = False
+    ) -> SolutionDraft:
+        # for_update: row-lock + refresh to committed state for read-modify-write
+        # callers (update_draft, R85). Without it, two concurrent PATCHes each
+        # read the same payload, each drops a different item, and last-writer-won
+        # silently loses one removal (blind full-payload overwrite). The lock
+        # serializes them; the loser re-reads the first's committed payload.
+        if for_update:
+            result = await self.db.execute(
+                select(SolutionDraft)
+                .where(SolutionDraft.id == draft_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            draft = result.scalar_one_or_none()
+        else:
+            draft = await self.db.get(SolutionDraft, draft_id)
         if draft is None or draft.org_id != org_id:
             raise AppError("DRAFT_NOT_FOUND", "Solution draft not found", 404)
         return draft
@@ -631,7 +655,9 @@ class LearningComposerService:
     async def update_draft(
         self, draft_id: str, org_id: str, remove_entity_ids: list[str]
     ) -> SolutionDraft:
-        draft = await self.get_draft(draft_id, org_id)
+        # Row-lock so concurrent PATCHes serialize (R85 — else last-writer-won
+        # silently loses one removal).
+        draft = await self.get_draft(draft_id, org_id, for_update=True)
         if draft.status != "draft":
             raise AppError("DRAFT_ALREADY_CONFIRMED", "Only open drafts can be edited", 409)
         payload = dict(draft.payload or {})

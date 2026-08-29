@@ -277,6 +277,50 @@ def test_step_config_size_cap():
     assert any(e["code"] == "WF_TOO_LARGE" and "/config" in e["pointer"] for e in errors)
 
 
+def test_credential_field_in_provider_config_rejected():
+    """R85: step config is stored in the definition/manifest/snapshot AND
+    served in the unauthenticated registry preview, so a credential smuggled
+    into a provider_action config (e.g. api_key) would persist and leak
+    publicly — the same footgun the ProviderConnection create path screens as
+    CREDENTIAL_IN_CONFIG. extra='forbid' on the config schemas rejects any key
+    outside the declared whitelist."""
+    d = _minimal_valid()
+    d["steps"][1]["config"] = {"capability": "image_generation", "api_key": "sk-secret"}
+    _, errors = validate_definition(d)
+    assert any(e["code"] == "WF_CONFIG_INVALID" for e in errors), _codes(errors)
+    # a clean provider_action config still validates
+    d2 = _minimal_valid()
+    d2["steps"][1]["config"] = {"capability": "image_generation"}
+    _, errors2 = validate_definition(d2)
+    assert "WF_CONFIG_INVALID" not in _codes(errors2)
+
+
+def test_unknown_config_key_rejected_every_step_type():
+    """R85: extra='forbid' covers all seven config schemas, not just
+    provider_action."""
+    cases = [
+        ("instruction", {"content": "hi", "evil": 1}),
+        ("prompt_template", {"template": "x", "evil": 1}),
+        ("transform", {"operation": "crop", "params": {}, "evil": 1}),
+        ("review_gate", {"instructions": "check", "evil": 1}),
+    ]
+    for stype, cfg in cases:
+        d = _minimal_valid()
+        d["steps"][1] = {
+            "id": "generate",
+            "type": stype,
+            "name": "S",
+            "config": cfg,
+            "inputs": [{"port": "prompt", "type": "prompt"}] if stype != "instruction" else [],
+            "outputs": [],
+        }
+        # keep the edge valid only where an input exists; simplest: drop edges/outputs
+        d["edges"] = []
+        d["outputs"] = []
+        _, errors = validate_definition(d)
+        assert any(e["code"] == "WF_CONFIG_INVALID" for e in errors), f"{stype}: {_codes(errors)}"
+
+
 # ── Data URI rejection (D4) ───────────────────────────────
 
 

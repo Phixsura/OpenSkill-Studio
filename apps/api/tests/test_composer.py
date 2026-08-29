@@ -327,6 +327,117 @@ async def test_update_draft_remove_items(c):
     assert all(i["status"] == "removed_by_user" for i in items if i["entity_id"] == p1)
 
 
+@pytest.mark.asyncio
+async def test_confirm_honors_patch_landing_before_claim(c, monkeypatch):
+    """R85 confirm-vs-PATCH TOCTOU: confirm read the draft, THEN a PATCH
+    committed a removal, THEN confirm claimed the row. Without the post-claim
+    refresh, confirm materializes the pre-claim snapshot — the removed item
+    reappears in the LearningPath. Deterministic: a hook on
+    claim_draft_for_confirm injects the PATCH into the exact race window."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    p1 = await _skill_pack(c, h, oid, "Remove Me R85", ["upscale"])
+    await _skill_pack(c, h, oid, "Keep Me R85", ["background_removal"])
+    profile_id = await _confirmed_profile(
+        c, h, oid, {"required_capabilities": ["upscale", "background_removal"]}
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path", json={"profile_id": profile_id}, headers=h
+    )
+    draft_id = r.json()["data"]["id"]
+
+    from app.services.learning_composer import LearningComposerService
+
+    orig_claim = LearningComposerService.claim_draft_for_confirm
+    fired = {"done": False}
+
+    async def claim_after_patch(self, d_id, o_id):
+        # Inject the PATCH between confirm's read and its claim (the window)
+        if not fired["done"] and d_id == draft_id:
+            fired["done"] = True
+            rr = await c.patch(
+                f"/api/v1/orgs/{oid}/drafts/{draft_id}",
+                json={"remove_entity_ids": [p1]},
+                headers=h,
+            )
+            assert rr.status_code == 200, rr.text
+        return await orig_claim(self, d_id, o_id)
+
+    monkeypatch.setattr(LearningComposerService, "claim_draft_for_confirm", claim_after_patch)
+    r2 = await c.post(f"/api/v1/orgs/{oid}/drafts/{draft_id}/confirm", headers=h)
+    assert r2.status_code == 200, r2.text
+    assert fired["done"]
+    path_id = r2.json()["data"]["materialized_entity_id"]
+
+    # The removed pack must NOT have materialized (both packs are uninstalled →
+    # placeholder sections; the removed one's section must be absent)
+    r3 = await c.get(f"/api/v1/orgs/{oid}/paths/{path_id}/items", headers=h)
+    titles = [i.get("section_title") or "" for i in r3.json()["data"]]
+    assert any("Keep Me R85" in t for t in titles), titles
+    assert not any("Remove Me R85" in t for t in titles), titles
+
+
+@pytest.mark.asyncio
+async def test_concurrent_patch_no_lost_removal(c, monkeypatch):
+    """R85 PATCH+PATCH lost update: two PATCHes each removing a DIFFERENT item.
+    Without the update_draft row lock, both read the same payload snapshot and
+    the second full-payload write silently reverts the first's removal.
+    Deterministic: a barrier in get_draft holds each PATCH after its read until
+    both have read (row lock → the second blocks in the DB and times out the
+    barrier instead, then re-reads the first's committed payload)."""
+    import asyncio
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    p1 = await _skill_pack(c, h, oid, "Item One", ["upscale"])
+    p2 = await _skill_pack(c, h, oid, "Item Two", ["background_removal"])
+    profile_id = await _confirmed_profile(
+        c, h, oid, {"required_capabilities": ["upscale", "background_removal"]}
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path", json={"profile_id": profile_id}, headers=h
+    )
+    draft_id = r.json()["data"]["id"]
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.learning_composer import LearningComposerService
+
+    orig_get = LearningComposerService.get_draft
+    reads = {"n": 0}
+    both_read = asyncio.Event()
+
+    async def barrier_get_draft(self, d_id, o_id, for_update=False):
+        draft = await orig_get(self, d_id, o_id, for_update=for_update)
+        reads["n"] += 1
+        if reads["n"] >= 2:
+            both_read.set()
+        # Hold this PATCH's snapshot until the other has read too. With the
+        # row lock the second reader is blocked in the DB, so the first times
+        # out and proceeds — the interleave the lock exists to prevent simply
+        # cannot form.
+        import contextlib
+
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(both_read.wait(), timeout=2)
+        return draft
+
+    monkeypatch.setattr(LearningComposerService, "get_draft", barrier_get_draft)
+
+    async def patch_one(pack_id):
+        async with AsyncSessionLocal() as db:
+            svc = LearningComposerService(db)
+            await svc.update_draft(draft_id, oid, [pack_id])
+            await db.commit()
+
+    await asyncio.gather(patch_one(p1), patch_one(p2))
+    monkeypatch.setattr(LearningComposerService, "get_draft", orig_get)
+
+    d = (await c.get(f"/api/v1/orgs/{oid}/drafts/{draft_id}", headers=h)).json()["data"]
+    removed = {i["entity_id"] for i in d["payload"]["items"] if i["status"] == "removed_by_user"}
+    # BOTH removals must survive (neither lost to last-writer-won)
+    assert p1 in removed and p2 in removed, removed
+
+
 # ── Production composer ───────────────────────────────────
 
 
@@ -368,6 +479,45 @@ async def test_production_compose_chain_and_gaps(c):
     assert any(g["code"] == "NO_ELIGIBLE_PROVIDER" for g in payload["gaps"])
     # Text input the user provides directly → needs_user_value placeholder
     assert any(p["reason"] == "needs_user_value" for p in payload["placeholders"])
+
+
+@pytest.mark.asyncio
+async def test_production_compose_unresolvable_recommended_pack_is_gap(c):
+    """R85: a recommended pack whose slug resolves to nothing published/visible
+    must surface as a RECOMMENDED_PACK_UNAVAILABLE gap row — silently dropping
+    it violates ADR-013's 'every omission is a first-class row with a reason'."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    ghost = f"ghost-{uuid.uuid4().hex[:10]}"  # slug that exists nowhere
+    wf = await _wf_pack(
+        c,
+        h,
+        oid,
+        "Rec Gap Gen",
+        capability="image_editing",
+        output_type="video",
+        deps={"recommended_packs": [{"family": "skill_pack", "slug": ghost}]},
+    )
+    profile_id = await _confirmed_profile(
+        c,
+        h,
+        oid,
+        {"output_type": "video", "required_capabilities": ["image_editing"]},
+        context="production",
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/production-solution",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    assert wf in [w["entity_id"] for w in payload["workflow_chain"]]
+    # The ghost recommendation is a visible gap, not a silent drop
+    rec_gaps = [g for g in payload["gaps"] if g["code"] == "RECOMMENDED_PACK_UNAVAILABLE"]
+    assert any(g.get("slug") == ghost for g in rec_gaps), payload["gaps"]
+    # And it did NOT sneak into items either
+    assert not any(i.get("slug") == ghost for i in payload["items"])
 
 
 @pytest.mark.asyncio
