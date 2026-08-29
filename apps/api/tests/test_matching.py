@@ -772,3 +772,75 @@ def test_template_scenario_match_tri_state():
     )
     # No scenario at all → neutral
     assert _entity_signals(tmpl, spec, {})["scenario_match"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_match_run_history_redacts_foreign_pack_name(c):
+    """R86: MatchResult persists entity_id only (no name snapshot), so
+    _resolve_names re-resolves names live on every historical read. A foreign
+    pack captured in org A's run while PUBLIC+approved could later be renamed
+    (voids approval → unlisted) / archived / made private by its owner — a bare
+    name lookup would then leak the pack's CURRENT (possibly secret) name and
+    continued existence to an org that can no longer see it. Names must be
+    resolved only for entities the requesting org can currently see; others
+    redact to null."""
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+
+    # Org B owns a PRIVATE workflow pack with a secret name (never A-visible)
+    hb, _ = await _auth(c)
+    oidb = await _org(c, hb)
+    rb = await c.post(
+        f"/api/v1/orgs/{oidb}/workflow-packs",
+        json={"name": "SECRET-CODENAME-XYZZY", "workflow_type": "production"},
+        headers=hb,
+    )
+    wfb = rb.json()["data"]["id"]
+
+    # Org A owns its own pack, runs a match, then we seed TWO result rows into
+    # A's run — one for A's own pack, one for B's private pack (simulating B's
+    # pack having been captured while it was public then made private). Seeding
+    # both with high ranks makes the assertion independent of shared-DB ranking.
+    ha, _ = await _auth(c)
+    oida = await _org(c, ha)
+    wfa = await _wf_pack(c, ha, oida, "A Own Pack")
+    profile_id = await _confirmed_profile(
+        c, ha, oida, {"required_capabilities": ["image_generation"], "output_type": "image"}
+    )
+    data = await _match(c, ha, oida, profile_id)
+    run_id = data["id"]
+
+    async with AsyncSessionLocal() as db:
+        for eid in (wfa, wfb):
+            # A's own pack may already be a result row from the live match;
+            # delete any existing row for these ids in this run, then re-seed
+            # deterministically so both are present with a known rank.
+            await db.execute(
+                text(
+                    "DELETE FROM match_results WHERE match_run_id = :run AND entity_id = :eid"
+                ),
+                {"run": run_id, "eid": eid},
+            )
+        for rank, eid in ((98, wfa), (99, wfb)):
+            await db.execute(
+                text(
+                    "INSERT INTO match_results "
+                    "(id, match_run_id, entity_type, entity_id, rank, score, reasons, gaps, hard_failures, tier) "
+                    "VALUES (:id, :run, 'workflow_pack', :eid, :rank, 0.1, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 'fair')"
+                ),
+                {"id": ("01M" + uuid.uuid4().hex[:23]).upper(), "run": run_id, "eid": eid, "rank": rank},
+            )
+        await db.commit()
+
+    r = await c.get(f"/api/v1/orgs/{oida}/match-runs/{run_id}", headers=ha)
+    assert r.status_code == 200, r.text
+    results = r.json()["data"]["results"]
+    b_rows = [i for i in results if i["entity_id"] == wfb]
+    a_rows = [i for i in results if i["entity_id"] == wfa]
+    assert b_rows, "seeded foreign-pack row missing from history"
+    assert a_rows, "seeded own-pack row missing from history"
+    # The foreign private pack's name MUST be redacted (null), never leaked
+    assert b_rows[0]["name"] is None, b_rows[0]
+    # A's own pack name still resolves normally in its own run
+    assert a_rows[0]["name"] == "A Own Pack", a_rows[0]

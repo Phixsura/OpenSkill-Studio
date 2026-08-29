@@ -1,7 +1,7 @@
 """Matching endpoints (ADR-012) — audited, explainable recommendations."""
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -29,26 +29,57 @@ router = APIRouter(tags=["Matching"])
 _WRITE_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
-async def _resolve_names(db: AsyncSession, entity_type: str, entity_ids: list[str]) -> dict:
+async def _resolve_names(
+    db: AsyncSession, entity_type: str, entity_ids: list[str], org_id: str
+) -> dict:
+    """Resolve entity_id → name, but ONLY for entities the requesting org can
+    CURRENTLY see (R86). MatchResult rows persist entity_id only (no name
+    snapshot), so names are re-resolved live on every historical read. A
+    foreign pack legitimately captured in a run while it was PUBLIC+approved
+    can later be renamed (which voids approval → UNLISTED), archived, or made
+    private — a bare `SELECT name WHERE id IN (...)` would then leak the pack's
+    CURRENT (possibly secret) name and continued existence to an org that can
+    no longer see it. Mirror the S1 eligibility rule (candidates.py): own-org
+    packs (any visibility) OR public+published+approved; anything else resolves
+    to None (rendered as a redacted row, not a name leak)."""
     if not entity_ids:
         return {}
-    if entity_type == "workflow_pack":
-        rows = await db.execute(
-            select(WorkflowPack.id, WorkflowPack.name).where(WorkflowPack.id.in_(entity_ids))
+    if entity_type in ("workflow_pack", "skill_pack"):
+        from app.models.skill_pack import PackStatus, PackVisibility
+
+        model = WorkflowPack if entity_type == "workflow_pack" else SkillPack
+        visible = or_(
+            model.owner_org_id == org_id,
+            (model.visibility == PackVisibility.PUBLIC)
+            & (model.status == PackStatus.PUBLISHED)
+            & (or_(model.review_status.is_(None), model.review_status == "approved")),
         )
-    elif entity_type == "skill_pack":
         rows = await db.execute(
-            select(SkillPack.id, SkillPack.name).where(SkillPack.id.in_(entity_ids))
+            select(model.id, model.name).where(model.id.in_(entity_ids), visible)
         )
     elif entity_type == "project_template":
+        # Templates are org-scoped — only this org's templates were ever
+        # eligible; still filter defensively so a stale foreign id can't leak.
         rows = await db.execute(
             select(ProjectTemplate.id, ProjectTemplate.name).where(
-                ProjectTemplate.id.in_(entity_ids)
+                ProjectTemplate.id.in_(entity_ids),
+                ProjectTemplate.org_id == org_id,
             )
         )
     elif entity_type == "creator":
+        # Creators are ranked from the org's own ACTIVE members — resolve only
+        # names of users who are currently active members of THIS org, so a
+        # user who has since left does not leak their display_name.
+        from app.models.organization import MemberStatus, OrgMember
+
         rows = await db.execute(
-            select(User.id, User.display_name).where(User.id.in_(entity_ids))
+            select(User.id, User.display_name)
+            .join(OrgMember, OrgMember.user_id == User.id)
+            .where(
+                User.id.in_(entity_ids),
+                OrgMember.org_id == org_id,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
         )
     else:
         return {}
@@ -148,7 +179,7 @@ async def run_match(
     await db.commit()
 
     names = await _resolve_names(
-        db, body.target_entity_type, [r.entity_id for r in results]
+        db, body.target_entity_type, [r.entity_id for r in results], org_id
     )
     return DataResponse(
         data=_build_run_response(run, results, names, explain_trees if body.explain else None)
@@ -227,7 +258,9 @@ async def get_match_run(
         select(MatchResult).where(MatchResult.match_run_id == run_id)
     )
     results = list(results_r.scalars().all())
-    names = await _resolve_names(db, run.target_entity_type, [r.entity_id for r in results])
+    names = await _resolve_names(
+        db, run.target_entity_type, [r.entity_id for r in results], org_id
+    )
     return DataResponse(data=_build_run_response(run, results, names))
 
 
