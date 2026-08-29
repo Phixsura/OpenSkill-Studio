@@ -28,8 +28,8 @@ interface Draft {
     template: { entity_id: string; name: string } | null;
     items: { entity_id: string; name: string; family: string }[];
     placeholders: { input_key: string; type: string; reason: string }[];
-    gaps: { code: string; capability?: string; detail?: string }[];
-    required_capabilities: { capability: string }[] | string[];
+    gaps: { code: string; capability?: string; detail?: string; missing_features?: string[] }[];
+    required_capabilities: { capability: string; features?: string[] }[] | string[];
   };
 }
 
@@ -107,14 +107,23 @@ function ProductionComposerInner() {
   });
 
   const confirmedDraft = draft?.status === "confirmed";
+  // Preserve the (capability, features) pair — R83/R84: the same capability
+  // can appear with distinct feature-sets, so collapsing to bare strings
+  // yields duplicate React keys and merges two independent ready/gap pills.
   const requiredCaps = (draft?.payload.required_capabilities ?? []).map((c) =>
-    typeof c === "string" ? c : c.capability,
+    typeof c === "string"
+      ? { capability: c, features: [] as string[] }
+      : { capability: c.capability, features: c.features ?? [] },
   );
-  const gapCaps = new Set(
+  // A (capability, features) pair is unsatisfied iff a NO_ELIGIBLE_PROVIDER gap
+  // names that capability with the same missing feature-set.
+  const gapKeys = new Set(
     (draft?.payload.gaps ?? [])
       .filter((g) => g.code === "NO_ELIGIBLE_PROVIDER" && g.capability)
-      .map((g) => g.capability as string),
+      .map((g) => `${g.capability}:${(g.missing_features ?? []).slice().sort().join(",")}`),
   );
+  const capKey = (cap: { capability: string; features: string[] }) =>
+    `${cap.capability}:${cap.features.slice().sort().join(",")}`;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -220,18 +229,24 @@ function ProductionComposerInner() {
             <section className="space-y-2 rounded-lg border p-4">
               <h2 className="font-semibold">Required capabilities</h2>
               <div className="flex flex-wrap gap-2">
-                {requiredCaps.map((cap) => (
-                  <span
-                    key={cap}
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                      gapCaps.has(cap)
-                        ? "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
-                        : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                    }`}
-                  >
-                    {cap} {gapCaps.has(cap) ? "· no provider" : "· ready"}
-                  </span>
-                ))}
+                {requiredCaps.map((cap) => {
+                  const unmet = gapKeys.has(capKey(cap));
+                  const label =
+                    cap.capability +
+                    (cap.features.length > 0 ? ` (${cap.features.join(", ")})` : "");
+                  return (
+                    <span
+                      key={capKey(cap)}
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        unmet
+                          ? "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+                          : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                      }`}
+                    >
+                      {label} {unmet ? "· no provider" : "· ready"}
+                    </span>
+                  );
+                })}
               </div>
             </section>
           )}

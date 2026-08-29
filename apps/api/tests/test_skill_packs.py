@@ -1187,6 +1187,54 @@ async def test_publish_new_release_after_approval_voids_approval(c):
 
 
 @pytest.mark.asyncio
+async def test_edit_while_pending_resets_review(c):
+    """R84: a card edit (or new release) WHILE review_status='pending' must
+    reset the pack to draft — else the author swaps content after submitting
+    and the reviewer approves stale content they never saw."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = await _category(c, h, oid)
+    sk = await _skill_in_cat(c, h, oid, cat, "Clean")
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "PendSwap", "summary": "clean"}, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sk}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    sub = (await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)).json()["data"]
+    assert sub["review_status"] == "pending"
+
+    # Card edit while pending → back to draft
+    r = await c.put(f"/api/v1/orgs/{oid}/packs/{pid}", json={"summary": "SWAPPED after submit"}, headers=h)
+    assert r.json()["data"]["review_status"] is None, "edit-while-pending kept the review pending"
+
+    # New release while pending also resets
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    sk2 = await _skill_in_cat(c, h, oid, cat, "Extra")
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sk2}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h)
+    pk = (await c.get(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)).json()["data"]
+    assert pk["review_status"] is None, "release-while-pending kept the review pending"
+
+
+@pytest.mark.asyncio
+async def test_approve_clears_stale_rejection_reason(c):
+    """R84: reject sets rejection_reason; a later re-submit + approve must
+    clear it — an approved pack showing a rejection note is misleading (and
+    after a card-edit void it looks 'rejected with reason')."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = await _category(c, h, oid)
+    sk = await _skill_in_cat(c, h, oid, cat, "Clean")
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "RejThenApprove"}, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sk}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/reject", json={"reason": "bad content"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    appr = (await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)).json()["data"]
+    assert appr["review_status"] == "approved"
+    assert appr["rejection_reason"] is None, "stale rejection_reason survived approve"
+
+
+@pytest.mark.asyncio
 async def test_skill_pack_mutations_row_locked_no_approval_bypass(c):
     """R70d: same stale-read-write class as the workflow-pack family (R70b) —
     every SkillPack mutation was a db.get snapshot + unguarded ORM setattr

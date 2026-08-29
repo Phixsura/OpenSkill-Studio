@@ -204,7 +204,15 @@ class ProductionComposerService:
 
         wf_svc = WorkflowPackService(self.db)
         required_caps: list[dict] = []
-        seen_caps: set[str] = set()
+        # Dedup by (capability, feature-set), NOT capability alone (R84): a
+        # manifest now carries one entry per distinct (capability, features)
+        # (R83 — the runtime resolves each step against its own features), so
+        # {image_generation:[feat_a]} and {image_generation:[feat_b]} are
+        # DISTINCT requirements. Keying on the bare capability collapsed them
+        # and dropped one feature-set's provider gap from the rollup, so the
+        # composer under-reported NO_ELIGIBLE_PROVIDER for a chain the runtime
+        # would fail.
+        seen_caps: set[tuple[str, frozenset]] = set()
         recommended_slugs: list[dict] = []
         for pack in chain:
             release = await wf_svc.get_latest_release(pack.id)
@@ -220,8 +228,11 @@ class ProductionComposerService:
                 if not isinstance(cap, dict):
                     continue  # check_capabilities reports MALFORMED_REQUIREMENT
                 key = cap.get("capability", "")
-                if isinstance(key, str) and key and key not in seen_caps:
-                    seen_caps.add(key)
+                feats = cap.get("features", [])
+                feat_key = frozenset(f for f in feats if isinstance(f, str)) if isinstance(feats, list) else frozenset()
+                dedup_key = (key, feat_key)
+                if isinstance(key, str) and key and dedup_key not in seen_caps:
+                    seen_caps.add(dedup_key)
                     required_caps.append(cap)
             raw_recs = deps.get("recommended_packs", [])
             for rec in raw_recs if isinstance(raw_recs, list) else []:

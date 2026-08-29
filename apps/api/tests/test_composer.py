@@ -334,22 +334,25 @@ async def test_update_draft_remove_items(c):
 async def test_production_compose_chain_and_gaps(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    # text_to_video scopes S2 so foreign PUBLIC packs from other test runs
-    # are hard-excluded (shared dev DB)
+    # (image_editing → video) has ZERO foreign public packs in the shared dev
+    # DB, so the org's own pack is the sole chain-head candidate. Earlier this
+    # used text_to_video→video, which became flaky once R83/R84 live probes
+    # left a public+approved text_to_video video pack that outranked the test's
+    # own pack as the chain head (shared-DB pollution, R84).
     wf = await _wf_pack(
         c,
         h,
         oid,
         "Hero Gen",
-        capability="text_to_video",
+        capability="image_editing",
         output_type="video",
-        deps={"requires_capabilities": [{"capability": "text_to_video", "features": []}]},
+        deps={"requires_capabilities": [{"capability": "image_editing", "features": []}]},
     )
     profile_id = await _confirmed_profile(
         c,
         h,
         oid,
-        {"output_type": "video", "required_capabilities": ["text_to_video"]},
+        {"output_type": "video", "required_capabilities": ["image_editing"]},
         context="production",
     )
     r = await c.post(
@@ -369,6 +372,91 @@ async def test_production_compose_chain_and_gaps(c):
 
 @pytest.mark.asyncio
 async def test_production_compose_no_eligible_workflows_gap(c):
+    """R82: deterministic coverage of the empty-survivor branch. The browser
+    test (sweep-matching) had to relax to NO_WORKFLOWS_AVAILABLE|
+    NO_WORKFLOW_FOR_OUTPUT because the shared dev DB holds foreign public
+    packs for common capabilities. Use a required capability + output type
+    that NO pack (own-org or foreign-public) can satisfy in this DB, so S2
+    survivors are empty → NO_WORKFLOWS_AVAILABLE exactly, no template, no chain.
+    'video_editing' → 'reference_asset' output has no producer anywhere."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    profile_id = await _confirmed_profile(
+        c,
+        h,
+        oid,
+        {"output_type": "reference_asset", "required_capabilities": ["video_editing"]},
+        context="production",
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/production-solution",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    assert payload["workflow_chain"] == []
+    codes = {g["code"] for g in payload["gaps"]}
+    assert "NO_WORKFLOWS_AVAILABLE" in codes, codes
+    assert "NO_TEMPLATE_AVAILABLE" in codes, codes
+
+
+@pytest.mark.asyncio
+async def test_production_compose_rollup_keeps_distinct_feature_sets(c):
+    """R84: R83 made a manifest carry one requires_capabilities entry per
+    distinct (capability, feature-set). The composer's provider-gap rollup
+    must dedup by (capability, features), not capability alone — else a chain
+    whose pack declares the same capability with two different feature-sets
+    drops one gap and under-reports NO_ELIGIBLE_PROVIDER. Build a pack whose
+    manifest carries two text_to_video entries with different features and
+    assert BOTH surface as gaps."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # A two-provider-step definition: both text_to_video, different features.
+    two_step = {
+        "schema_version": 1,
+        "inputs": [{"key": "prompt_text", "type": "text", "required": True}],
+        "outputs": [{"key": "result", "type": "video", "from_step": "g2", "from_port": "out"}],
+        "steps": [
+            {"id": "take", "type": "asset_input", "name": "T",
+             "config": {"accept_types": ["image"]}, "inputs": [],
+             "outputs": [{"port": "prompt_text", "type": "text"}]},
+            {"id": "g1", "type": "provider_action", "name": "G1",
+             "config": {"capability": "text_to_video", "required_features": ["hd"]},
+             "inputs": [{"port": "p", "type": "prompt"}], "outputs": [{"port": "mid", "type": "video"}]},
+            {"id": "g2", "type": "provider_action", "name": "G2",
+             "config": {"capability": "text_to_video", "required_features": ["slowmo"]},
+             "inputs": [{"port": "src", "type": "video"}], "outputs": [{"port": "out", "type": "video"}]},
+        ],
+        "edges": [
+            {"id": "e1", "from_step": "take", "from_port": "prompt_text", "to_step": "g1", "to_port": "p"},
+            {"id": "e2", "from_step": "g1", "from_port": "mid", "to_step": "g2", "to_port": "src"},
+        ],
+        "ui": {},
+    }
+    pid = (await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "TwoFeat"}, headers=h)).json()["data"]["id"]
+    assert (await c.put(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+                        json={"definition": two_step}, headers=h)).status_code == 200
+    assert (await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+                         json={"version": "1.0.0"}, headers=h)).status_code == 201
+
+    profile_id = await _confirmed_profile(
+        c, h, oid,
+        {"output_type": "video", "required_capabilities": ["text_to_video"]},
+        context="production",
+    )
+    r = await c.post(f"/api/v1/orgs/{oid}/drafts/production-solution",
+                     json={"profile_id": profile_id}, headers=h)
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    # No org offerings → each distinct feature-set is its own NO_ELIGIBLE_PROVIDER gap
+    missing = {
+        tuple(sorted(g.get("missing_features", [])))
+        for g in payload["gaps"]
+        if g["code"] == "NO_ELIGIBLE_PROVIDER"
+    }
+    assert ("hd",) in missing, missing
+    assert ("slowmo",) in missing, missing
     """R82: deterministic coverage of the empty-survivor branch. The browser
     test (sweep-matching) had to relax to NO_WORKFLOWS_AVAILABLE|
     NO_WORKFLOW_FOR_OUTPUT because the shared dev DB holds foreign public

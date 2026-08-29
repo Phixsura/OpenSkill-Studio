@@ -976,6 +976,62 @@ async def test_publish_new_release_after_approval_voids_approval(c):
 
 
 @pytest.mark.asyncio
+async def test_edit_while_pending_resets_review(c):
+    """R84: a card/definition edit or new release WHILE review_status='pending'
+    must reset the pack to draft — else the author swaps content after
+    submitting and the reviewer approves stale content they never examined."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    sub = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    assert sub.json()["data"]["review_status"] == "pending"
+
+    # Card edit while pending → draft
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"summary": "swapped after submit"},
+        headers=h,
+    )
+    assert r.json()["data"]["review_status"] is None, "card edit while pending kept pending"
+
+    # Definition edit while pending → draft
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    assert r.json()["data"]["review_status"] is None, "definition edit while pending kept pending"
+
+
+@pytest.mark.asyncio
+async def test_approve_clears_stale_rejection_reason(c):
+    """R84: reject sets rejection_reason; a later re-submit + approve must clear
+    it — an approved pack must not carry a prior rejection note."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/reject", json={"reason": "bad"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    appr = (await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)).json()["data"]
+    assert appr["review_status"] == "approved"
+    assert appr["rejection_reason"] is None, "stale rejection_reason survived approve"
+
+
+@pytest.mark.asyncio
 async def test_provider_action_empty_capability_rejected(c):
     """R83: an empty provider_action capability passed validation, then the
     publish derivation skipped it so the install capability gate saw no

@@ -170,7 +170,7 @@ class WorkflowPackService:
         for key, value in fields.items():
             if value is not None and hasattr(pack, key):
                 setattr(pack, key, value)
-        if card_changed and pack.review_status == "approved":
+        if card_changed and pack.review_status in ("approved", "pending"):
             pack.review_status = None
             if pack.visibility == PackVisibility.PUBLIC:
                 pack.visibility = PackVisibility.UNLISTED
@@ -219,7 +219,7 @@ class WorkflowPackService:
         # the public card can never drift from what was approved — REGARDLESS
         # of current visibility, or an unlisted detour (public → unlisted →
         # edit definition → public) would carry 'approved' past the gate.
-        if pack.review_status == "approved":
+        if pack.review_status in ("approved", "pending"):
             pack.review_status = None
             if pack.visibility == PackVisibility.PUBLIC:
                 pack.visibility = PackVisibility.UNLISTED
@@ -365,8 +365,10 @@ class WorkflowPackService:
         # anon registry serves (get_pack_preview reads the latest stable
         # release: definition, dependencies, recommended_packs). Publishing v2
         # would otherwise carry 'approved' onto never-reviewed content — void
-        # approval, matching update_definition's reset (R83).
-        if pack.review_status == "approved":
+        # approval, matching update_definition's reset (R83). Also reset a
+        # 'pending' review (R84) so a post-submit release isn't approved as if
+        # it were the reviewed content.
+        if pack.review_status in ("approved", "pending"):
             pack.review_status = None
             if pack.visibility == PackVisibility.PUBLIC:
                 pack.visibility = PackVisibility.UNLISTED
@@ -434,6 +436,7 @@ class WorkflowPackService:
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
         pack.review_status = "approved"
         pack.visibility = PackVisibility.PUBLIC
+        pack.rejection_reason = None  # R84: clear a stale prior-rejection note
         await self.db.flush()
         await self.db.refresh(pack)
         await self._invalidate_registry_cache()

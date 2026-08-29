@@ -224,11 +224,18 @@ export default function PublicWorkflowPackPage() {
                 <h3 className="text-sm font-semibold">Required provider capabilities</h3>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {preview.requires_capabilities.map((req) => (
+                    // key by capability + features: R83 emits one entry per
+                    // distinct (capability, feature-set), so the same
+                    // capability can appear twice (React duplicate-key warning
+                    // + a dropped badge if keyed by capability alone, R84)
                     <span
-                      key={req.capability}
+                      key={`${req.capability}:${(req.features ?? []).join(",")}`}
                       className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200"
                     >
                       {req.capability.replace(/_/g, " ")}
+                      {req.features && req.features.length > 0
+                        ? ` (${req.features.join(", ")})`
+                        : ""}
                     </span>
                   ))}
                 </div>

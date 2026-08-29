@@ -207,7 +207,12 @@ class SkillPackService:
         for k, v in fields.items():
             if v is not None and hasattr(pack, k):
                 setattr(pack, k, v)
-        if card_changed and pack.review_status == "approved":
+        # Void on approved OR pending (R84): a card edit while the pack is
+        # under review ('pending') would otherwise leave the reviewer approving
+        # stale content the author swapped after submitting — reset to draft so
+        # the swapped card must be re-submitted. (Public→unlisted only matters
+        # for the approved case; a pending pack is not yet public.)
+        if card_changed and pack.review_status in ("approved", "pending"):
             pack.review_status = None
             if pack.visibility == PackVisibility.PUBLIC:
                 pack.visibility = PackVisibility.UNLISTED
@@ -340,6 +345,7 @@ class SkillPackService:
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
         pack.review_status = "approved"
         pack.visibility = PackVisibility.PUBLIC
+        pack.rejection_reason = None  # R84: clear a stale prior-rejection note
         await self.db.flush()
         await self.db.refresh(pack)
 
@@ -659,13 +665,13 @@ class SkillPackService:
         if pack.status == PackStatus.DRAFT:
             pack.status = PackStatus.PUBLISHED
 
-        # Publishing a NEW release on an already-approved pack changes the
-        # content the anon registry serves — the preview/curriculum reads the
-        # LATEST release manifest (registry.get_pack_preview), so a new release
-        # swaps public, never-reviewed skills/exercises past the gate. Void
-        # approval exactly as update_definition does on the workflow side (R83):
-        # a new release must re-enter review before it is publicly discoverable.
-        if pack.review_status == "approved":
+        # Publishing a NEW release on an already-approved OR pending pack
+        # changes the content the anon registry serves / the reviewer is
+        # examining — the preview/curriculum reads the LATEST release manifest
+        # (registry.get_pack_preview). Void approval (R83) and also reset a
+        # pending review (R84) so a post-submit release can't be approved as if
+        # it were the reviewed content.
+        if pack.review_status in ("approved", "pending"):
             pack.review_status = None
             if pack.visibility == PackVisibility.PUBLIC:
                 pack.visibility = PackVisibility.UNLISTED
