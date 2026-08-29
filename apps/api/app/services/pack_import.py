@@ -132,6 +132,15 @@ class PackImportService:
         # an UntranslatableCharacterError → DBAPIError (not ValueError) → 500.
         # Every other JSONB write path screens for this; the import path did
         # not. Iterative walk (recursion-free — the manifest can nest deep).
+        # R86: also reject non-finite floats in the SAME walk. json.loads
+        # accepts the bare tokens NaN/Infinity/-Infinity and yields real
+        # float('nan')/float('inf'); the default JSONB serializer re-emits them
+        # verbatim for Postgres to reject with 22P02 (DBAPIError → 500) at the
+        # manifest insert — parity with every other JSONB write surface, all of
+        # which screen non-finite (reject_nonfinite_json). bool is an int, never
+        # a float, so it needs no special-case.
+        import math as _math
+
         _stack = [manifest]
         while _stack:
             _cur = _stack.pop()
@@ -140,6 +149,13 @@ class PackImportService:
                     raise AppError(
                         "INVALID_MANIFEST",
                         "Manifest contains NUL characters that are not allowed",
+                        422,
+                    )
+            elif isinstance(_cur, float):
+                if not _math.isfinite(_cur):
+                    raise AppError(
+                        "INVALID_MANIFEST",
+                        "Manifest contains NaN or Infinity values that are not allowed",
                         422,
                     )
             elif isinstance(_cur, dict):
@@ -244,6 +260,38 @@ class PackImportService:
                         f"Exercise config in skill '{lid}' must be an object",
                         422,
                     )
+                # R86: max_score / sort_order flow verbatim into the Exercise
+                # INTEGER columns at INSTALL time (installation.py) with only a
+                # .get(..., default) — no type gate. A string/float/list value
+                # imports fine (reaches PUBLISHED) then crashes every install
+                # with a 500 (DataError at the integer column write). Type-gate
+                # here so a malformed manifest is a clean 422 at import, never a
+                # latent install-time 500. bool is an int subclass — exclude it
+                # so a JSON true/false is not silently coerced to 1/0.
+                _ms = ex.get("max_score")
+                if _ms is not None and (
+                    not isinstance(_ms, int) or isinstance(_ms, bool) or not (1 <= _ms <= 10000)
+                ):
+                    raise AppError(
+                        "INVALID_MANIFEST",
+                        f"Exercise max_score in skill '{lid}' must be an integer (1-10000)",
+                        422,
+                    )
+                _so = ex.get("sort_order")
+                if _so is not None and (not isinstance(_so, int) or isinstance(_so, bool)):
+                    raise AppError(
+                        "INVALID_MANIFEST",
+                        f"Exercise sort_order in skill '{lid}' must be an integer",
+                        422,
+                    )
+            # Skill sort_order lands in the Skill INTEGER column the same way.
+            _s_so = s.get("sort_order")
+            if _s_so is not None and (not isinstance(_s_so, int) or isinstance(_s_so, bool)):
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Skill '{lid}' sort_order must be an integer",
+                    422,
+                )
             lc = s.get("learning_content", "")
             # `is not None`, not truthiness (R78): falsy non-strings (0,
             # False, [], {}) skipped the isinstance gate via `lc and ...`
@@ -355,6 +403,50 @@ class PackImportService:
                         f"Prerequisite '{prereq}' not found in manifest skills",
                         422,
                     )
+
+        # 10a. Validate category references (R86). A skill's
+        # category_logical_id is resolved against the manifest's categories[]
+        # at INSTALL time; installation.py raises CATEGORY_NOT_FOUND 422 when a
+        # skill points at a category the manifest never defined. Import did not
+        # check this, so a dangling reference imported fine and reached
+        # PUBLISHED — then EVERY install (own org and any consumer) failed at
+        # that gate, an unrecoverable published-but-uninstallable pack. Validate
+        # here so the dangling reference is a clean 422 at import time. categories
+        # is untrusted JSON — type-gate it (like skills/templates) before use.
+        categories = manifest.get("categories", [])
+        if not isinstance(categories, list) or any(
+            not isinstance(cat, dict) for cat in categories
+        ):
+            raise AppError(
+                "INVALID_MANIFEST", "Manifest 'categories' must be a list of objects", 422
+            )
+        category_lids: set[str] = set()
+        for cat in categories:
+            c_lid = cat.get("logical_id")
+            if not isinstance(c_lid, str) or not c_lid or len(c_lid) > 200:
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    "Every category logical_id must be a non-empty string (max 200 chars)",
+                    422,
+                )
+            for _field in ("name", "slug"):
+                _v = cat.get(_field)
+                if not isinstance(_v, str) or not _v or len(_v) > 200:
+                    raise AppError(
+                        "INVALID_MANIFEST",
+                        f"Category '{c_lid}' {_field} must be a non-empty string (max 200 chars)",
+                        422,
+                    )
+            category_lids.add(c_lid)
+        for s in skills:
+            cat_ref = s.get("category_logical_id")
+            if cat_ref is not None and cat_ref not in category_lids:
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Skill '{s['logical_id']}' references category '{cat_ref}' "
+                    "not defined in manifest categories",
+                    422,
+                )
 
         # 10b. Cycle detection using Kahn's algorithm (topological sort)
         in_degree: dict[str, int] = {lid: 0 for lid in skill_lids}

@@ -996,3 +996,92 @@ async def test_import_bigint_literal_rejected_not_500(c):
     )
     assert r.status_code == 422, f"{r.status_code}: {r.text[:200]}"
     assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+
+@pytest.mark.asyncio
+async def test_import_nonfinite_float_rejected_not_500(c):
+    """R86: json.loads accepts bare NaN/Infinity/-Infinity tokens and yields
+    real float('nan')/float('inf'), which pass the NUL/type/size checks but the
+    default JSONB serializer re-emits verbatim → Postgres 22P02 → 500 at the
+    manifest insert. Must be a clean 422 INVALID_MANIFEST (parity with every
+    other JSONB write surface, all of which screen non-finite)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for token in ("NaN", "Infinity", "-Infinity"):
+        raw = (
+            '{"schema_version": "1", "version": "1.0.0", '
+            '"pack": {"name": "NF"}, "categories": [], '
+            '"skills": [{"logical_id": "s1", "name": "S", "exercises": ['
+            '{"logical_id": "s1/e1", "title": "E", "config": {"t": ' + token + "}}]}], "
+            '"project_templates": []}'
+        )
+        assert token in raw
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("openskill-pack.json", raw)
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/packs/import",
+            files={"file": ("nf.zip", buf.getvalue(), "application/zip")},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{token}: {r.status_code} {r.text[:200]}"
+        assert r.json()["error"]["code"] == "INVALID_MANIFEST", r.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_import_dangling_category_ref_rejected_at_import(c):
+    """R86: a skill's category_logical_id is resolved against manifest
+    categories[] at INSTALL time (installation.py CATEGORY_NOT_FOUND). Import
+    never validated it, so a dangling reference imported to PUBLISHED and then
+    EVERY install failed — an unrecoverable published-but-uninstallable pack.
+    The dangling reference must be a clean 422 at IMPORT time."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    m = copy.deepcopy(VALID_MANIFEST)
+    m["categories"] = []  # define no categories...
+    m["skills"][0]["category_logical_id"] = "ghost-cat"  # ...but reference one
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("cat.zip", _make_zip(m), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST", r.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_import_nonint_exercise_max_score_rejected_not_500(c):
+    """R86: exercise max_score / sort_order (and skill sort_order) flow verbatim
+    into INTEGER columns at INSTALL time with only .get(default). A non-int
+    value imported to PUBLISHED and then crashed every install with a 500
+    (DataError). Must be a clean 422 at import."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for field, bad in (
+        ("max_score", "NOTANINT"),
+        ("max_score", 3.5),
+        ("sort_order", "x"),
+    ):
+        m = copy.deepcopy(VALID_MANIFEST)
+        m["skills"][0]["exercises"][0][field] = bad
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/packs/import",
+            files={"file": ("ms.zip", _make_zip(m), "application/zip")},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{field}={bad!r}: {r.status_code} {r.text[:200]}"
+        assert r.json()["error"]["code"] == "INVALID_MANIFEST", r.text[:200]
+
+    # skill-level sort_order too
+    m = copy.deepcopy(VALID_MANIFEST)
+    m["skills"][0]["sort_order"] = "first"
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("ss.zip", _make_zip(m), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
