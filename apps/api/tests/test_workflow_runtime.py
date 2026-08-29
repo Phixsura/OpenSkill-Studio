@@ -1065,6 +1065,58 @@ async def test_confirmed_binding_with_stale_features_falls_through(c):
 
 
 @pytest.mark.asyncio
+async def test_confirmed_binding_wrong_capability_hard_stops(c):
+    """R82: an upgrade can change a step's capability while keeping its id;
+    R78b intentionally KEEPS the stale confirmed PIN (as a BINDING_STALE gap)
+    rather than deleting it. The runtime resolver must therefore re-verify the
+    pinned offering serves the step's CURRENT capability — otherwise it executes
+    a wrong-capability offering on the credential path (an image_generation
+    offering running a text_to_video step). _resolve_offering now checks
+    offering.capability_key == capability."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import WorkflowStepBinding
+
+    h, user = await _auth(c)
+    oid = await _org(c, h)
+    # Offering serves image_generation; the step below requires text_to_video.
+    wrong_id = await _mock_offering(c, h, oid, capability="image_generation")
+    definition = _definition(with_provider=True)
+    definition["steps"][2]["config"]["capability"] = "text_to_video"
+    definition["steps"][2]["outputs"] = [{"port": "result", "type": "video"}]
+    definition["outputs"] = [
+        {"key": "final", "type": "video", "from_step": "generate", "from_port": "result"}
+    ]
+    install_id = await _install(c, h, oid, definition)
+
+    # A human-confirmed PINNED binding to the wrong-capability offering
+    async with AsyncSessionLocal() as db:
+        db.add(
+            WorkflowStepBinding(
+                org_id=oid,
+                installation_id=install_id,
+                step_id="generate",
+                binding_mode="pinned",
+                offering_id=wrong_id,
+                confirmed_by=user["id"],
+            )
+        )
+        await db.commit()
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "wrong cap"}},
+        headers=h,
+    )
+    run_id = r.json()["data"]["id"]
+    data = await _wait_run(c, h, oid, run_id, {"failed"})
+    assert data["status"] == "failed"
+    gen = next(s for s in data["step_runs"] if s["step_id"] == "generate")
+    # Hard stop — never executed on the wrong-capability offering
+    assert gen["error_code"] == "NO_ELIGIBLE_PROVIDER"
+    assert gen.get("offering_id") != wrong_id
+
+
+@pytest.mark.asyncio
 async def test_step_output_with_nul_fails_step_cleanly(c):
     """Adapter output containing NUL must fail the step WF_OUTPUT_INVALID and
     settle the run FAILED — never crash the JSONB write (500 / stranded

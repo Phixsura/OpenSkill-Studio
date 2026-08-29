@@ -190,9 +190,15 @@ class SkillPackService:
         # Card fields drive the public registry card — editing any on an
         # APPROVED pack voids approval (else innocuous-approve then swap the
         # public card past the gate), same as WorkflowPackService.
+        # MUST cover every field PublicSkillPackResponse serializes to the anon
+        # registry (R82): a hand-picked subset let estimated_minutes / language
+        # / learning_outcomes / provenance be swapped past the gate — all shown
+        # on the public card, all editable via UpdateSkillPackRequest, none
+        # previously void-triggering. Keep in sync with PublicSkillPackResponse.
         _card_fields = (
             "name", "summary", "description", "scenario_tags",
             "tool_tags", "capability_tags", "difficulty", "cover_image_key",
+            "estimated_minutes", "language", "learning_outcomes", "provenance",
         )
         card_changed = any(
             key in _card_fields and value is not None and getattr(pack, key, None) != value

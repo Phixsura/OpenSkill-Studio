@@ -152,9 +152,16 @@ class WorkflowPackService:
         # pack voids the approval, same as a definition change — otherwise an
         # innocuous pack gets approved and the public card content is swapped
         # past the review gate (name/summary/tags rewrite with approved kept).
+        # Must cover every UpdateWorkflowPackRequest field that
+        # PublicWorkflowPackResponse serializes to the anon registry (R82):
+        # provenance is shown on the public card and editable here, so it must
+        # void approval too. (capability_tags/language/input_schema/
+        # output_schema are re-derived only via update_definition, which has
+        # its own approval reset.)
         _card_fields = (
             "name", "summary", "description", "scenario_tags",
             "tool_tags", "difficulty", "workflow_type", "cover_image_key",
+            "provenance",
         )
         card_changed = any(
             key in _card_fields and value is not None and getattr(pack, key, None) != value

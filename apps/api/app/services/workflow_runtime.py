@@ -1396,14 +1396,20 @@ async def _resolve_offering(
                 if offering is not None and offering.is_active:
                     conn = await db.get(ProviderConnection, offering.connection_id)
                     # Defense-in-depth on the credential path: the binding's
-                    # offering must belong to THIS org (R3), and features are
-                    # mutable — a confirmed offering that no longer satisfies
-                    # required_features is stale, not silently good enough.
+                    # offering must belong to THIS org (R3), serve the step's
+                    # CURRENT capability (R82 — an upgrade can change a step's
+                    # capability while keeping its id; R78b intentionally KEEPS
+                    # the stale confirmed pin as a BINDING_STALE gap, so the
+                    # runtime must re-verify capability here or it executes the
+                    # wrong-capability offering on the credential path), and
+                    # features are mutable — a confirmed offering that no longer
+                    # satisfies required_features is stale, not silently good.
                     required = set(config.get("required_features", []))
                     if (
                         conn is not None
                         and conn.org_id == run.org_id
                         and conn.status == "active"
+                        and offering.capability_key == capability
                         and required <= set(offering.features or [])
                     ):
                         return offering

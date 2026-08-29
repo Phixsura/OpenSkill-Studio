@@ -368,6 +368,37 @@ async def test_production_compose_chain_and_gaps(c):
 
 
 @pytest.mark.asyncio
+async def test_production_compose_no_eligible_workflows_gap(c):
+    """R82: deterministic coverage of the empty-survivor branch. The browser
+    test (sweep-matching) had to relax to NO_WORKFLOWS_AVAILABLE|
+    NO_WORKFLOW_FOR_OUTPUT because the shared dev DB holds foreign public
+    packs for common capabilities. Use a required capability + output type
+    that NO pack (own-org or foreign-public) can satisfy in this DB, so S2
+    survivors are empty → NO_WORKFLOWS_AVAILABLE exactly, no template, no chain.
+    'video_editing' → 'reference_asset' output has no producer anywhere."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    profile_id = await _confirmed_profile(
+        c,
+        h,
+        oid,
+        {"output_type": "reference_asset", "required_capabilities": ["video_editing"]},
+        context="production",
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/production-solution",
+        json={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    payload = r.json()["data"]["payload"]
+    assert payload["workflow_chain"] == []
+    codes = {g["code"] for g in payload["gaps"]}
+    assert "NO_WORKFLOWS_AVAILABLE" in codes, codes
+    assert "NO_TEMPLATE_AVAILABLE" in codes, codes
+
+
+@pytest.mark.asyncio
 async def test_production_confirm_creates_project(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)

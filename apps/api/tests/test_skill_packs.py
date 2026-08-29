@@ -1121,6 +1121,39 @@ async def test_update_approved_pack_card_field_voids_approval(c):
 
 
 @pytest.mark.asyncio
+async def test_every_anon_card_field_voids_approval(c):
+    """R82: _card_fields must cover EVERY field PublicSkillPackResponse shows
+    on the anon registry card — a hand-picked subset let estimated_minutes /
+    language / learning_outcomes / provenance be swapped past the review gate
+    (approve innocuous content, then rewrite these while keeping approved+public,
+    surfacing unreviewed content in the public registry). Each must void
+    approval and drop the pack out of public."""
+    swaps = [
+        {"estimated_minutes": 9999},
+        {"language": "zz"},
+        {"learning_outcomes": ["swapped unreviewed outcome"]},
+        {"provenance": {"author_name": "injected after approval"}},
+    ]
+    for swap in swaps:
+        h, _ = await _auth(c)
+        oid = await _org(c, h)
+        pid = (
+            await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "AnonCardSwap"}, headers=h)
+        ).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+        await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
+        r = await c.put(f"/api/v1/orgs/{oid}/packs/{pid}", json=swap, headers=h)
+        assert r.status_code == 200, r.text[:200]
+        d = r.json()["data"]
+        field = next(iter(swap))
+        assert d["review_status"] != "approved", f"{field} did not void approval"
+        assert d["visibility"] != "public", f"{field} left pack public"
+        # and it's gone from the anon registry detail
+        det = await c.get(f"/api/v1/registry/packs/{pid}")
+        assert det.status_code == 404, f"{field}: swapped pack still served publicly"
+
+
+@pytest.mark.asyncio
 async def test_skill_pack_mutations_row_locked_no_approval_bypass(c):
     """R70d: same stale-read-write class as the workflow-pack family (R70b) —
     every SkillPack mutation was a db.get snapshot + unguarded ORM setattr

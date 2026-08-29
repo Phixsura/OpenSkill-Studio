@@ -429,9 +429,14 @@ test("unhappy: install gate blocks a pack whose capability has no offering", asy
   await expect(page.getByText("vid", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByLabel("Offering for vid")).toHaveValue(t2vOff.body.data.id);
 
-  // Deactivate the offering: a run now fails at the provider step because the
-  // resolver only picks ACTIVE offerings — NO_ELIGIBLE_PROVIDER → WF_STEP_FAILED.
-  // (This installation is reused by the runs-list test below as the failing run.)
+  // Deactivate the offering: the stored binding still points at it (no rebuild
+  // is triggered by deactivation, and an upgrade-to-rebuild is itself
+  // capability-gated), but the RUNTIME resolver only selects ACTIVE offerings,
+  // so a run of this installation fails NO_ELIGIBLE_PROVIDER → WF_STEP_FAILED.
+  // The runs-list test below reuses installBId as its FAILING run and asserts
+  // that terminal failure end-to-end (WF_STEP_FAILED in the row) — that's the
+  // R82 enforcement coverage; we don't seed a run here so the runs-list test's
+  // "empty state" precondition still holds.
   const deact = await api(
     admin,
     "PUT",

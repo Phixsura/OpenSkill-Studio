@@ -908,6 +908,36 @@ async def test_card_field_update_resets_approval(c):
 
 
 @pytest.mark.asyncio
+async def test_provenance_update_voids_approval(c):
+    """R82: provenance is shown on the anon workflow registry card
+    (PublicWorkflowPackResponse) and editable via UpdateWorkflowPackRequest,
+    but was absent from _card_fields — so an approved+public pack could have
+    its provenance swapped past the review gate. It now voids approval."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["visibility"] == "public"
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"provenance": {"author_name": "injected after approval"}},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["review_status"] is None, "provenance swap kept approval"
+    assert data["visibility"] == "unlisted", "provenance swap left pack public"
+
+
+@pytest.mark.asyncio
 async def test_tags_and_import_name_and_idem_key_reject_ctrl(c):
     """R18 sibling-gap closures: tags, ComfyUI import name, idempotency_key."""
     h, _ = await _auth(c)

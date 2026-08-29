@@ -110,9 +110,17 @@ async def test_registry_excludes_private(c):
 async def test_registry_excludes_draft(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    # Create pack but DON'T publish — stays draft (visibility irrelevant to the
-    # assertion; create private since public-at-create needs approval, R79)
-    await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Draft Pack"}, headers=h)
+    # Reach PUBLIC + DRAFT (approve without ever publishing a release) so the
+    # registry's status==PUBLISHED filter is the ONLY thing excluding it —
+    # otherwise the assertion is vacuous (a private pack is excluded by
+    # visibility regardless, R82). public+draft is a reachable product state.
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Draft Pack"}, headers=h)
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    appr = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
+    d = appr.json()["data"]
+    assert d["visibility"] == "public" and d["status"] == "draft"
 
     r = await c.get("/api/v1/registry/packs?search=Draft")
     assert not any("Draft" in p["name"] for p in r.json()["data"])
@@ -1093,12 +1101,18 @@ async def test_registry_archived_pack_detail_rejected(c):
 
 @pytest.mark.asyncio
 async def test_registry_draft_pack_detail_rejected(c):
-    """Draft pack (no release) returns 404 on registry detail."""
+    """PUBLIC + DRAFT pack (approved but never released) 404s on registry
+    detail — the status==PUBLISHED gate must reject it. Reaching public+draft
+    (not just private) is what makes this exercise the status filter rather
+    than the visibility filter (R82)."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
     pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
         "name": "Draft Detail Pack",
     }, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    d = (await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)).json()["data"]
+    assert d["visibility"] == "public" and d["status"] == "draft"
 
     r = await c.get(f"/api/v1/registry/packs/{pid}")
     assert r.status_code == 404

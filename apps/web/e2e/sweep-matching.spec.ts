@@ -224,13 +224,19 @@ test("learning composer: no teaching content → NO_CONTENT_AVAILABLE gap, confi
 });
 
 test("production composer: no eligible workflows → NO_WORKFLOWS_AVAILABLE + template gap, confirm disabled", async () => {
-  // Confirmed production profile whose hard constraints no pack satisfies
+  // Confirmed production profile whose hard constraints NO pack satisfies —
+  // even on the shared dev DB. video_editing → reference_asset has no producer
+  // anywhere (own-org or foreign-public), so S2 survivors are truly empty and
+  // the exact empty-chain branch renders (NO_WORKFLOWS_AVAILABLE + the "No
+  // matching workflows found." copy). R82: restores the precise assertion the
+  // R79 relaxation dropped (deterministic unit coverage also added in
+  // test_composer.test_production_compose_no_eligible_workflows_gap).
   const res = await api(admin, "POST", `/orgs/${orgId}/requirement-profiles`, {
     context_type: "production",
     structured_requirements: {
-      goal: "Generate audiobook narration",
-      output_type: "audio",
-      required_capabilities: ["voice_generation"],
+      goal: "Edit raw footage into a reference asset",
+      output_type: "reference_asset",
+      required_capabilities: ["video_editing"],
     },
   });
   const pid = res.data.id;
@@ -240,15 +246,8 @@ test("production composer: no eligible workflows → NO_WORKFLOWS_AVAILABLE + te
   await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: /Compose Solution/i }).click();
 
-  // Shared-DB-robust: the dev DB may already hold public voice_generation
-  // packs (S2 survivors), none of which produce `audio`. So the composer
-  // correctly reports "no usable workflow" via EITHER gap family —
-  // NO_WORKFLOWS_AVAILABLE (zero survivors) or NO_WORKFLOW_FOR_OUTPUT
-  // (survivors can't produce the requested output). Assert on the gap, not
-  // on the empty-chain branch which only shows when survivors are literally 0.
-  await expect(
-    page.getByText(/NO_WORKFLOWS_AVAILABLE|NO_WORKFLOW_FOR_OUTPUT/),
-  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("No matching workflows found.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("NO_WORKFLOWS_AVAILABLE")).toBeVisible();
   // No org template exists in this fresh org — the inline note + the gate both hold
   await expect(page.getByText(/No project template matched/)).toBeVisible();
   await expect(page.getByRole("button", { name: /Confirm & Create Project/i })).toBeDisabled();

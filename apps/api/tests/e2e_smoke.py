@@ -464,10 +464,13 @@ check("badges list", isinstance(r.get("data"), list))
 # ════════════════════════════════════════════════════════
 section("10. Public Profile")
 r = api("GET", f"/u/{username}")
-check("public profile", r.get("data", {}).get("display_name") == "Smoke Updated")
-check("public skills", isinstance(r.get("data", {}).get("skills", []), list))
-check("public featured", isinstance(r.get("data", {}).get("featured_items", []), list))
-check("no email exposed", r.get("data", {}).get("email") is None)
+_pub = r.get("data", {})
+check("public profile", _pub.get("display_name") == "Smoke Updated")
+# assert the keys are PRESENT and lists — a missing key must FAIL (no []
+# default, which would make this a tautology that passes on any response, R82)
+check("public skills", isinstance(_pub.get("skills"), list))
+check("public featured", isinstance(_pub.get("featured_items"), list))
+check("no email exposed", _pub.get("email") is None)
 
 r = api("GET", f"/u/{username}/items")
 check("public items list", isinstance(r.get("data"), list))
