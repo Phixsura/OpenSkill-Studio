@@ -390,3 +390,49 @@ async def test_brief_with_all_fields(c):
     assert d["budget_range"] == "$1000-$5000"
     assert len(d["deliverable_specs"]) == 1
     assert len(d["evaluation_criteria"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_cannot_accept_or_reject_own_application(c):
+    """R86: an ACCEPTED BriefApplication is a platform-verified creator-evidence
+    source (commercial_project, weight 1.0, keyed on the applicant — ADR-013),
+    and brief.project_type is free text that snake-cases to a capability key.
+    Any user can create an org (becoming an INSTRUCTOR_ROLE owner), apply to
+    their own brief, and self-accept — minting fabricated 'verified' capability
+    evidence with no second party. Self-accept/reject must be 403; the applicant
+    may still WITHDRAW their own application, and a distinct instructor may
+    accept a different user's application."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(project_type="voice_generation"), headers=h)).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=h)
+    assert r.status_code == 200, r.text
+
+    # Owner self-applies
+    r = await c.post(f"/api/v1/orgs/{oid}/briefs/{bid}/apply", json={"note": "self apply"}, headers=h)
+    assert r.status_code == 201, r.text
+    app_id = r.json()["data"]["id"]
+
+    # Self-ACCEPT → 403
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
+        json={"status": "accepted"},
+        headers=h,
+    )
+    assert r.status_code == 403, r.text
+
+    # Self-REJECT → 403 too
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
+        json={"status": "rejected"},
+        headers=h,
+    )
+    assert r.status_code == 403, r.text
+
+    # Self-WITHDRAW → allowed (an applicant may retract their own bid)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
+        json={"status": "withdrawn"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text

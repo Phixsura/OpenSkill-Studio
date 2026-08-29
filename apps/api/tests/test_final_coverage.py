@@ -291,8 +291,14 @@ async def test_project_late_penalty_applied(db):
     await svc.submit_draft(sub.id, user.id)
     await db.flush()
 
+    # Distinct reviewer — no self-review (R86)
+    from app.models.organization import OrgRole as _OrgRole
+
+    reviewer = await _user(db)
+    await org_svc.add_member(org.id, reviewer.id, _OrgRole.INSTRUCTOR, invited_by=user.id)
+    await db.flush()
     # Review with 100 score, 25% penalty
-    await svc.create_review(sub.id, user.id, "approved", 100, None, "Late but good")
+    await svc.create_review(sub.id, reviewer.id, "approved", 100, None, "Late but good")
     # Final score should be 100 - 25% = 75
     final = await svc.get_submission(sub.id)
     assert final.final_score == 75

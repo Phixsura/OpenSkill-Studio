@@ -446,7 +446,13 @@ async def test_portfolio_create_from_submission_with_project(db):
     )
     sub = await proj_svc.create_submission(org.id, proj.id, u.id)
     await proj_svc.submit_draft(sub.id, u.id)
-    await proj_svc.create_review(sub.id, u.id, "approved", 95, None, "Great")
+    # Distinct reviewer — no self-review (R86)
+    from app.models.organization import OrgRole as _OrgRole
+
+    rev = await _u(db)
+    await org_svc.add_member(org.id, rev.id, _OrgRole.INSTRUCTOR, invited_by=u.id)
+    await db.flush()
+    await proj_svc.create_review(sub.id, rev.id, "approved", 95, None, "Great")
     await db.flush()
 
     port_svc = PortfolioService(db)

@@ -345,6 +345,22 @@ async def review_application(
     if body.status not in ("accepted", "rejected", "withdrawn"):
         raise HTTPException(status_code=422, detail="Status must be 'accepted', 'rejected', or 'withdrawn'")
 
+    # No self-dealing (R86). Any registered user can create an org and become
+    # its owner (an INSTRUCTOR_ROLE), then apply to their own brief and accept
+    # their own application. An ACCEPTED BriefApplication is a platform-VERIFIED
+    # creator-evidence source (`commercial_project`, weight 1.0, keyed on the
+    # applicant — ADR-013 "evidence, not declarations"), and brief.project_type
+    # is free text that snake-cases straight to a capability key. So self-accept
+    # mints fabricated "verified" capability evidence with no second party and
+    # no real work, flipping a hard S2 exclusion into a ranked shortlist entry.
+    # An applicant may withdraw their OWN application; they may never accept or
+    # reject it.
+    if app_obj.user_id == user.id and body.status in ("accepted", "rejected"):
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot accept or reject your own application",
+        )
+
     app_obj.status = ApplicationStatus(body.status)
     app_obj.reviewed_at = datetime.now(UTC)
     app_obj.reviewed_by = user.id

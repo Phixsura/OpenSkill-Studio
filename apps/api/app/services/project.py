@@ -1003,6 +1003,21 @@ class ProjectService:
         sub = await self.get_submission(submission_id)
         project = await self.get_project(sub.project_id)
 
+        # No self-review (R86). An instructor can submit to their own project;
+        # letting them then review+APPROVE that submission is a self-grade. An
+        # APPROVED review is a platform-VERIFIED creator-evidence source
+        # (`approved_submission`, keyed on the submission author — ADR-013
+        # "evidence, not declarations"), so a self-approval self-inflates
+        # capability evidence used in creator matching/shortlists. The
+        # peer-review module already excludes self-review pairs; the instructor
+        # review path must mirror that.
+        if sub.user_id == reviewer_id:
+            raise AppError(
+                "SELF_REVIEW_FORBIDDEN",
+                "You cannot review your own submission",
+                403,
+            )
+
         # Only submitted work can be reviewed — a draft hasn't been handed in
         if sub.status in (SubmissionStatus.DRAFT,):
             raise InvalidStateError("Cannot review a draft submission")
