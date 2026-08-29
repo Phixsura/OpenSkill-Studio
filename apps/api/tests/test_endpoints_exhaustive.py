@@ -544,6 +544,11 @@ async def test_projects_all_handlers(c):
     # Submit
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{subid}/submit", headers=h)
 
+    # Distinct reviewer — no self-review (R86)
+    hr, ur = await _reg(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": ur["id"], "role": "instructor"}, headers=h
+    )
     # Reviews
     r4 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{subid}/reviews",
@@ -552,7 +557,7 @@ async def test_projects_all_handlers(c):
             "score": 90,
             "feedback": "Good",
         },
-        headers=h,
+        headers=hr,
     )
     assert r4.status_code == 201
     await c.get(f"/api/v1/orgs/{oid}/submissions/{subid}/reviews", headers=h)

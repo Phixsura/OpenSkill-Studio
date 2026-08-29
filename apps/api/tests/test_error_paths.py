@@ -312,6 +312,11 @@ async def test_review_revision_requested(c):
     sub_id = r2.json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}/submit", headers=h)
 
+    # Distinct reviewer — no self-review (R86)
+    hr, ur = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": ur["id"], "role": "instructor"}, headers=h
+    )
     # Review: request revision
     r3 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
@@ -319,7 +324,7 @@ async def test_review_revision_requested(c):
             "status": "revision_requested",
             "feedback": "Needs work",
         },
-        headers=h,
+        headers=hr,
     )
     assert r3.status_code == 201
 
@@ -349,6 +354,11 @@ async def test_review_rejected(c):
     sub_id = r2.json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}/submit", headers=h)
 
+    # Distinct reviewer — no self-review (R86)
+    hr, ur = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": ur["id"], "role": "instructor"}, headers=h
+    )
     r3 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
         json={
@@ -356,7 +366,7 @@ async def test_review_rejected(c):
             "score": 20,
             "feedback": "Poor",
         },
-        headers=h,
+        headers=hr,
     )
     assert r3.status_code == 201
 

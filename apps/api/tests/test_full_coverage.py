@@ -637,6 +637,11 @@ async def test_projects_full_flow(c):
     r16 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{subid}/submit", headers=h)
     assert r16.status_code == 200
 
+    # Distinct reviewer — no self-review (R86)
+    hr, ur = await _reg(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": ur["id"], "role": "instructor"}, headers=h
+    )
     # Reviews
     r17 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{subid}/reviews",
@@ -645,7 +650,7 @@ async def test_projects_full_flow(c):
             "score": 85,
             "feedback": "Well done!",
         },
-        headers=h,
+        headers=hr,
     )
     assert r17.status_code == 201
 

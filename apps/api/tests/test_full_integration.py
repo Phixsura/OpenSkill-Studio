@@ -55,6 +55,21 @@ async def _org(c, h):
     return r.json()["data"]["id"]
 
 
+async def _reviewer(c, oid, owner_h):
+    """Register a SECOND instructor in org `oid` and return their headers.
+    Reviews of a submission must come from someone other than the author
+    (R86 self-review guard), so tests where the owner both submits and reviews
+    need a distinct reviewer."""
+    rh, ru = await _auth(c)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": ru["id"], "role": "instructor"},
+        headers=owner_h,
+    )
+    assert r.status_code in (200, 201), f"add reviewer failed: {r.text}"
+    return rh
+
+
 # ── Auth: forgot/reset password, sessions, change-password, verify ──
 
 
@@ -468,7 +483,8 @@ async def test_projects_full_flow(c):
     # Get submission detail
     await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}", headers=h)
 
-    # Review (approve)
+    # Review (approve) — distinct reviewer (no self-review, R86)
+    rh = await _reviewer(c, oid, h)
     r5 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
         json={
@@ -477,7 +493,7 @@ async def test_projects_full_flow(c):
             "feedback": "Well done",
             "score_breakdown": {"Quality": 50, "Design": 35},
         },
-        headers=h,
+        headers=rh,
     )
     assert r5.status_code == 201
 
@@ -887,12 +903,13 @@ async def test_review_rejects_draft_and_over_max(c):
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
     rs = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
     sid = rs.json()["data"]["id"]
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
 
     # review a draft → 422
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 80},
-        headers=h,
+        headers=rh,
     )
     assert r.status_code == 422
 
@@ -901,7 +918,7 @@ async def test_review_rejects_draft_and_over_max(c):
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 150},
-        headers=h,
+        headers=rh,
     )
     assert r.status_code == 422
 
@@ -1814,12 +1831,13 @@ async def test_revision_requested_edit_and_resubmit(c):
         "data"
     ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
 
     # instructor requests revision
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "revision_requested", "feedback": "add more"},
-        headers=h,
+        headers=rh,
     )
     assert r.status_code == 201
 
@@ -1838,7 +1856,7 @@ async def test_revision_requested_edit_and_resubmit(c):
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 90},
-        headers=h,
+        headers=rh,
     )
     assert r.status_code == 201
     r = await c.put(
@@ -2515,11 +2533,12 @@ async def test_revision_clears_stale_final_score(c):
         "data"
     ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
 
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 80},
-        headers=h,
+        headers=rh,
     )
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
         "data"
@@ -2529,7 +2548,7 @@ async def test_revision_clears_stale_final_score(c):
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "revision_requested", "feedback": "redo"},
-        headers=h,
+        headers=rh,
     )
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
         "data"
@@ -2570,12 +2589,13 @@ async def test_review_lifecycle_queue_and_history(c):
     assert await pending_count() == 0  # draft not pending
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert await pending_count() == 1
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
 
     # revision → resubmit → back in queue
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "revision_requested", "feedback": "redo"},
-        headers=h,
+        headers=rh,
     )
     assert await pending_count() == 0
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
@@ -2585,7 +2605,7 @@ async def test_review_lifecycle_queue_and_history(c):
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 90},
-        headers=h,
+        headers=rh,
     )
     assert await pending_count() == 0
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
@@ -3184,10 +3204,11 @@ async def test_late_penalty_and_max_submissions(c):
     ]["id"]
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert r.json()["data"]["is_late"] is True
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 100},
-        headers=h,
+        headers=rh,
     )
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
         "data"
@@ -3753,10 +3774,11 @@ async def test_show_score_masks_public_score(c):
         "data"
     ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}/submit", headers=h)
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 92},
-        headers=h,
+        headers=rh,
     )
     item = (
         await c.post(
