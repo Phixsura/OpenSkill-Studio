@@ -271,6 +271,22 @@ class ComfyUIImportService:
                 422,
             )
 
+        # Non-finite floats: json.loads accepts the bare tokens NaN/Infinity/
+        # -Infinity and yields real float('nan')/float('inf'), which pass the
+        # NUL/depth/size checks (those inspect str, not float) but crash the
+        # asyncpg JSONB write of original_json with 22P02 (a 500). Every other
+        # JSONB write surface screens for this (R73); the import path did not.
+        from app.schemas.base import reject_nonfinite_json
+
+        try:
+            reject_nonfinite_json(parsed, "Import")
+        except ValueError as exc:
+            raise AppError(
+                "INVALID_CONTENT",
+                "Import contains NaN or Infinity values that are not allowed",
+                422,
+            ) from exc
+
         # Depth cap: original_json is stored VERBATIM and echoed by the
         # detail read (?include_original=true) — json.loads accepts ~900
         # levels while pydantic's serializer dies around 400, so a deep
@@ -390,17 +406,26 @@ class ComfyUIImportService:
         capabilities: set[str] = set()
 
         for node in nodes:
-            ct = sanitize_untrusted_text(str(node.get("class_type") or ""), 120)
+            # Classify on the RAW class_type; sanitize ONLY for the stored/
+            # displayed label (R86). sanitize_untrusted_text runs NFKC, which
+            # folds a crafted fullwidth "ＫSampler" to the core name "KSampler"
+            # — so classifying on the sanitized form counts a disguised custom
+            # node as a trusted core node and ERASES it from the custom-node
+            # dependency warning (the report lies about what the workflow needs).
+            # Real ComfyUI class_types are plain ASCII identifiers, so NFKC is a
+            # no-op on legitimate input and this changes nothing for them.
+            raw_ct = str(node.get("class_type") or "")
+            ct = sanitize_untrusted_text(raw_ct, 120)
             class_counts[ct] = class_counts.get(ct, 0) + 1
-            if ct not in COMFYUI_CORE_NODES:
+            if raw_ct not in COMFYUI_CORE_NODES:
                 custom_counts[ct] = custom_counts.get(ct, 0) + 1
-            if ct in INPUT_NODE_TYPES:
+            if raw_ct in INPUT_NODE_TYPES:
                 input_nodes.append(ct)
-            if ct in OUTPUT_NODE_TYPES:
+            if raw_ct in OUTPUT_NODE_TYPES:
                 output_nodes.append(ct)
-            if ct in NODE_CAPABILITY_MAP:
-                capabilities.add(NODE_CAPABILITY_MAP[ct])
-            confidence = "whitelist" if ct in MODEL_LOADER_NODES else "structural"
+            if raw_ct in NODE_CAPABILITY_MAP:
+                capabilities.add(NODE_CAPABILITY_MAP[raw_ct])
+            confidence = "whitelist" if raw_ct in MODEL_LOADER_NODES else "structural"
             for val in node.get("widgets_values") or []:
                 if isinstance(val, str) and val.lower().endswith(MODEL_EXTENSIONS):
                     models.append(
@@ -411,9 +436,9 @@ class ComfyUIImportService:
                         }
                     )
 
-        core_count = sum(
-            count for ct, count in class_counts.items() if ct in COMFYUI_CORE_NODES
-        )
+        # Every node is core or custom; derive core from the raw-based custom
+        # tally so a fold-disguised node can never inflate the core count.
+        core_count = len(nodes) - sum(custom_counts.values())
         return {
             # Cap listed types (true totals preserved in custom_node_count):
             # 2000 nodes x 120-char class_types is a ~300KB JSONB row otherwise

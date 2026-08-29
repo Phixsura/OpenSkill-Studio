@@ -742,3 +742,78 @@ async def test_deep_import_rejected_not_bricked(c):
     )
     assert r3.status_code == 200
     assert r3.json()["data"]["original_json"] == ok
+
+
+@pytest.mark.asyncio
+async def test_nonfinite_floats_rejected(c):
+    """R86: json.loads accepts bare NaN/Infinity/-Infinity tokens and yields
+    real float('nan')/float('inf'), which pass the NUL/depth/size checks but
+    crash the asyncpg JSONB write of original_json (22P02) as a 500. Must be a
+    clean 422 INVALID_CONTENT — the same non-finite screen every other JSONB
+    write surface applies (R73)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for token in ("NaN", "Infinity", "-Infinity"):
+        # API format with a non-finite widget/input value
+        data = '{"1": {"class_type": "KSampler", "inputs": {"seed": ' + token + "}}}"
+        assert token in data  # bare token, not a quoted string
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/comfyui-imports",
+            json={"data": data, "encoding": "json"},
+            headers=h,
+        )
+        assert r.status_code == 422, f"{token}: {r.status_code} {r.text[:200]}"
+        assert r.json()["error"]["code"] == "INVALID_CONTENT", r.text[:200]
+    # Non-finite nested inside a UI-format widgets_values list too
+    data = '{"nodes": [{"type": "KSampler", "widgets_values": [Infinity]}], "links": []}'
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": data, "encoding": "json"},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    # Control: a genuine finite value still imports
+    r_ok = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": '{"1": {"class_type": "KSampler", "inputs": {"seed": 42}}}', "encoding": "json"},
+        headers=h,
+    )
+    assert r_ok.status_code == 201, r_ok.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_unicode_fold_cannot_disguise_custom_node_as_core(c):
+    """R86: the dependency report classified nodes on the SANITIZED class_type,
+    which runs NFKC — folding a crafted fullwidth 'ＫSampler' to the core name
+    'KSampler'. A disguised custom node was thus counted as core and ERASED
+    from the custom-node dependency warning (the report lied about what the
+    workflow needs). Classification must use the RAW class_type; sanitize only
+    the stored/displayed label."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # 'ＫSampler' (fullwidth K) is NOT a genuine ComfyUI core class; it must be
+    # reported as a custom-node dependency, not silently folded to core.
+    data = '{"1": {"class_type": "ＫSampler", "inputs": {}}, "2": {"class_type": "RealCustom", "inputs": {}}}'
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": data, "encoding": "json"},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text[:200]
+    dr = r.json()["data"]["dependency_report"]
+    # BOTH nodes are custom; none is core (the disguise must not inflate core)
+    assert dr["custom_node_count"] == 2, dr
+    assert dr["core_node_count"] == 0, dr
+    listed = [n["class_type"] for n in dr["custom_nodes"]]
+    assert any("Sampler" in x for x in listed), listed
+
+    # Control: a genuine ASCII core node IS core, and a real custom node shows
+    data_ok = '{"1": {"class_type": "KSampler", "inputs": {}}, "2": {"class_type": "RealCustom", "inputs": {}}}'
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/comfyui-imports",
+        json={"data": data_ok, "encoding": "json"},
+        headers=h,
+    )
+    dr2 = r2.json()["data"]["dependency_report"]
+    assert dr2["core_node_count"] == 1, dr2
+    assert dr2["custom_node_count"] == 1, dr2
