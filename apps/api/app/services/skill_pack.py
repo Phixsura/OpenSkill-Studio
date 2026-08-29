@@ -82,6 +82,22 @@ class SkillPackService:
         created_by: str,
         **fields,
     ) -> SkillPack:
+        # Approval gate at CREATE, completing R60's class (which gated PUT only,
+        # update_pack below). A newly-created pack can never be pre-approved
+        # (review_status starts None), and the anon registry serves
+        # review_status IS NULL as grandfathered-approved (registry.py), so a
+        # direct POST visibility=public + publish listed an unapproved pack in
+        # the public registry — the identical bypass R60 closed for update.
+        # PUBLIC is reachable only via submit-review → approve. The workflow
+        # twin is already safe (CreateWorkflowPackRequest has no visibility
+        # field); this brings skill-pack create to parity.
+        requested_visibility = fields.get("visibility")
+        if requested_visibility in ("public", PackVisibility.PUBLIC):
+            raise AppError(
+                "APPROVAL_REQUIRED",
+                "Public visibility requires approval — create the pack, then submit for review",
+                422,
+            )
         name = fields.get("name", "Untitled Pack")
         slug = self._generate_slug(name)
 

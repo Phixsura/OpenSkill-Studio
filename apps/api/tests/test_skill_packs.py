@@ -1059,6 +1059,47 @@ async def test_update_pack_public_requires_approval(c):
 
 
 @pytest.mark.asyncio
+async def test_create_pack_public_visibility_requires_approval(c):
+    """R79: R60 gated PUT visibility=public but POST create still accepted it,
+    persisting review_status=None. The anon registry serves review_status IS
+    NULL as grandfathered-approved, so create-public + publish listed an
+    unapproved pack publicly — the same bypass R60 closed for update, left open
+    for create. Completing R60's class: create rejects visibility=public too."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Direct create-public is rejected
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs", json={"name": "CreatePub", "visibility": "public"}, headers=h
+    )
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "APPROVAL_REQUIRED"
+
+    # Private/unlisted create still works
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "CreatePriv"}, headers=h)
+    ).status_code == 201
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={"name": "CreateUnl", "visibility": "unlisted"},
+            headers=h,
+        )
+    ).status_code == 201
+
+    # The documented path reaches public: create private → submit → approve
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "CreateThenApprove"}, headers=h)
+    ).json()["data"]["id"]
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    ).status_code == 200
+    assert (await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)).status_code == 200
+    detail = (await c.get(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)).json()["data"]
+    assert detail["visibility"] == "public" and detail["review_status"] == "approved"
+
+
+@pytest.mark.asyncio
 async def test_update_approved_pack_card_field_voids_approval(c):
     """R60-#5b: editing a registry card field on an APPROVED skill pack must
     reset approval (else innocuous-approve then swap the public card past the

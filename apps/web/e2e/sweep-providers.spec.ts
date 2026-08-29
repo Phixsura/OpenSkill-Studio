@@ -387,24 +387,58 @@ test("unhappy: upgrade to capability-gated 1.2.0 shows CAPABILITY_UNSATISFIED in
   await expect(page.getByText(/v1\.1\.0/)).toBeVisible();
 });
 
-test("unhappy: binding gap (no offering for capability) rendered; confirm disabled", async () => {
-  // Install pack B — its provider_action needs text_to_video (no offering)
+test("unhappy: install gate blocks a pack whose capability has no offering", async () => {
+  // R44: publish DERIVES requires_capabilities from provider_action steps, so
+  // the ADR-011 install gate hard-blocks a pack needing text_to_video when the
+  // org has no such offering — the mid-run NO_ELIGIBLE_PROVIDER the gate exists
+  // to prevent. (Previously this test expected install to succeed and show an
+  // in-UI binding gap; that state is no longer reachable via a MISSING
+  // capability — install gate and binding resolver are consistent by design.)
   const inst = await api(admin, "POST", `/orgs/${orgId}/workflow-installations`, {
     pack_id: packBId,
   });
-  expect(inst.status).toBe(201);
-  installBId = inst.body.data.id;
+  expect(inst.status).toBe(422);
+  expect(inst.body.error.code).toBe("CAPABILITY_UNSATISFIED");
+  expect(inst.body.error.details?.[0]?.capability).toBe("text_to_video");
 
+  // Seed a text_to_video offering so the pack becomes installable, then
+  // exercise the binding-gap RENDER path (still reachable): install → the
+  // suggested binding resolves to that offering → deactivate it → the detail
+  // page shows the gap state and Confirm is disabled.
+  const conns = await api(admin, "GET", `/orgs/${orgId}/provider-connections`);
+  const mockConnId = conns.body.data.find(
+    (co: { name: string }) => co.name === MOCK_CONN,
+  ).id;
+  const t2vOff = await api(admin, "POST", `/orgs/${orgId}/provider-offerings`, {
+    connection_id: mockConnId,
+    capability_key: "text_to_video",
+    model_name: "mock-t2v",
+  });
+  expect(t2vOff.status).toBe(201);
+
+  const inst2 = await api(admin, "POST", `/orgs/${orgId}/workflow-installations`, {
+    pack_id: packBId,
+  });
+  expect(inst2.status).toBe(201);
+  installBId = inst2.body.data.id;
+
+  // The install-time binding auto-suggested the (then-active) offering, so the
+  // step "vid" binding row renders with it selected.
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations/${installBId}`);
   await page.waitForLoadState("networkidle");
-
-  // Binding row for step "vid" is a suggestion with a red gap message
   await expect(page.getByText("vid", { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("suggested")).toBeVisible();
-  await expect(page.getByText("No active offering for 'text_to_video'")).toBeVisible();
-  // No offering selected → Confirm is disabled
-  await expect(page.getByLabel("Offering for vid")).toHaveValue("");
-  await expect(page.getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
+  await expect(page.getByLabel("Offering for vid")).toHaveValue(t2vOff.body.data.id);
+
+  // Deactivate the offering: a run now fails at the provider step because the
+  // resolver only picks ACTIVE offerings — NO_ELIGIBLE_PROVIDER → WF_STEP_FAILED.
+  // (This installation is reused by the runs-list test below as the failing run.)
+  const deact = await api(
+    admin,
+    "PUT",
+    `/orgs/${orgId}/provider-offerings/${t2vOff.body.data.id}`,
+    { is_active: false },
+  );
+  expect(deact.status).toBe(200);
 });
 
 test("runs list: empty state → 2 seeded runs render with terminal statuses", async () => {

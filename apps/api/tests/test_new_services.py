@@ -77,12 +77,16 @@ async def _project(c, h, oid, title="Test Project"):
 
 async def _published_public_pack(c, h, oid, pack_name="Pub Pack", skill_name="Pub Skill"):
     """Create a published, public pack and return its id."""
+    # Create private (create no longer accepts visibility=public — R79 gate),
+    # publish, then reach public via submit-review → approve.
     pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": pack_name, "visibility": "public",
+        "name": pack_name,
     }, headers=h)).json()["data"]["id"]
     sid = await _skill(c, h, oid, skill_name)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
     return pid
 
 
@@ -429,9 +433,10 @@ async def test_share_unpublished_pack(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    # Create a draft pack (no release)
+    # Create a draft pack (no release; visibility irrelevant — create-public
+    # needs approval per R79, and the assertion is about the unpublished state)
     pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": "Draft Pack", "visibility": "public",
+        "name": "Draft Pack",
     }, headers=h)).json()["data"]["id"]
 
     h2, _ = await _auth(c)
@@ -484,7 +489,13 @@ async def test_submit_for_review_lifecycle(c):
     """submit_for_review: happy path, already-pending (409), already-approved (422)."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    pid = await _published_public_pack(c, h, oid, "ReviewLifecyclePack")
+    # A private+published pack that has NOT been through review yet (the shared
+    # _published_public_pack helper now auto-approves, which would make the
+    # first submit-for-review a 422 already-approved — R79). Build inline.
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "ReviewLifecyclePack"}, headers=h)).json()["data"]["id"]
+    sid = await _skill(c, h, oid, "ReviewLifecycleSkill")
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
 
     # Happy path: submit for review
     r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)

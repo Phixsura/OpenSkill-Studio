@@ -57,12 +57,16 @@ async def _skill(c, h, oid, name="Test Skill"):
 
 async def _published_public_pack(c, h, oid, pack_name="Pub Pack", skill_name="Pub Skill"):
     """Create a published, public pack and return its id."""
+    # Create private (create no longer accepts visibility=public — R79 gate),
+    # publish, then reach public via submit-review → approve.
     pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": pack_name, "visibility": "public",
+        "name": pack_name,
     }, headers=h)).json()["data"]["id"]
     sid = await _skill(c, h, oid, skill_name)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
     return pid
 
 
@@ -217,7 +221,7 @@ async def test_publish_creates_notification(c):
     h1, _ = await _auth(c)
     oid1 = await _org(c, h1)
     pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
-        "name": "Notif Pack", "visibility": "public",
+        "name": "Notif Pack", "visibility": "unlisted",
     }, headers=h1)).json()["data"]["id"]
     sid = await _skill(c, h1, oid1, "Notif Skill")
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
@@ -1005,7 +1009,7 @@ async def test_upgrade_clean(c):
     sid1 = await _skill(c, h, oid_pub, "Upgrade Skill A")
     pack_r = await c.post(
         f"/api/v1/orgs/{oid_pub}/packs",
-        json={"name": f"UpgPack-{uuid.uuid4().hex[:6]}", "visibility": "public"},
+        json={"name": f"UpgPack-{uuid.uuid4().hex[:6]}", "visibility": "unlisted"},
         headers=h,
     )
     assert pack_r.status_code == 201
@@ -1067,7 +1071,7 @@ async def test_upgrade_locally_modified_skipped(c):
     sid = await _skill(c, h, oid_pub, "LM Upgrade Skill")
     pack_r = await c.post(
         f"/api/v1/orgs/{oid_pub}/packs",
-        json={"name": f"LMPack-{uuid.uuid4().hex[:6]}", "visibility": "public"},
+        json={"name": f"LMPack-{uuid.uuid4().hex[:6]}", "visibility": "unlisted"},
         headers=h,
     )
     assert pack_r.status_code == 201

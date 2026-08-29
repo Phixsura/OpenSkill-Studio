@@ -155,8 +155,10 @@ export default function NewPackPage() {
             >
               <option value="private">Private</option>
               <option value="unlisted">Unlisted</option>
-              <option value="public">Public</option>
             </select>
+            <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+              Public listing requires review — publish, then submit for approval.
+            </p>
           </div>
 
           <div>

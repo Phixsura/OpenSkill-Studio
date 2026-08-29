@@ -119,7 +119,9 @@ test("1. Fill pack creation form with all fields and submit", async () => {
   await adminPage
     .locator("#description")
     .fill("Master AI-powered product photography from beginner to expert level");
-  await adminPage.locator("#visibility").selectOption("Public");
+  // Create form no longer offers Public (R79 approval gate: public requires
+  // publish → submit-review → approve). Default is Private.
+  await adminPage.locator("#visibility").selectOption("Unlisted");
   await adminPage.locator("#difficulty").selectOption("Beginner");
   await adminPage.locator("#minutes").fill("480");
   await adminPage.locator("#scenarioTags").fill("ecommerce, product-ads");
@@ -142,8 +144,8 @@ test("1. Fill pack creation form with all fields and submit", async () => {
   await expect(adminPage.locator("text=AI Photography Masterclass")).toBeVisible();
   // Assert: status = draft
   await expect(adminPage.locator("text=draft")).toBeVisible();
-  // Assert: visibility = public
-  await expect(adminPage.locator("text=public")).toBeVisible();
+  // Assert: visibility = unlisted (public at create is gated, R79)
+  await expect(adminPage.locator("text=unlisted")).toBeVisible();
 
   await adminPage.screenshot({ path: "e2e/screenshots/pack-created.png" });
 });
@@ -154,9 +156,10 @@ test("1. Fill pack creation form with all fields and submit", async () => {
 
 test("2. Add skill to pack via dropdown and Add button", async () => {
   // Create a separate pack via API for this test (UI-created pack from test 1 may not have reloaded skills)
+  // Create private — public at create is gated (R79); the pack is taken public
+  // via submit-review → approve after publishing (test 3).
   const apiPack = await api(admin, "POST", `/orgs/${orgId}/packs`, {
     name: "API Detail Pack",
-    visibility: "public",
   });
   const apiPackId = apiPack.data.id;
 
@@ -229,6 +232,14 @@ test("3. Publish release: fill version, changelog, click Publish", async () => {
   // Assert: pack status changed to published (badge may render in more
   // than one place — status chip + release row)
   await expect(adminPage.locator("text=published").first()).toBeVisible();
+
+  // Take the pack public via the review flow (R79: public requires approval).
+  // Registry visibility (test 6/7) and cross-org install (test 8) depend on it.
+  // This spec's api() returns the parsed envelope directly (no .status).
+  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/submit-for-review`);
+  const appr = await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/approve`);
+  expect(appr.data?.review_status).toBe("approved");
+  expect(appr.data?.visibility).toBe("public");
 
   await adminPage.screenshot({ path: "e2e/screenshots/pack-published.png" });
 });
