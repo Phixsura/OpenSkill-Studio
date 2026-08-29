@@ -294,6 +294,28 @@ def test_large_base64_blob_rejected():
     assert "WF_DATA_URI_REJECTED" in _codes(errors)
 
 
+def test_whitespace_chunked_base64_blob_rejected():
+    """R83: R78 added a whitespace-stripped scan but wired it only to the
+    data:-prefixed matcher. A bare base64 blob (no 'data:' prefix) chunked with
+    JSONB-legal newlines evaded BASE64_BLOB_RE (which needs an unbroken 1024
+    run) because that matcher ran only on the unstripped copy. Now it runs on
+    the stripped copy too."""
+    import base64
+    import os
+
+    blob = base64.b64encode(os.urandom(3000)).decode()  # >>1024 chars
+    chunked = "\n".join(blob[i : i + 100] for i in range(0, len(blob), 100))
+    d = _minimal_valid()
+    d["ui"]["blob"] = chunked
+    _, errors = validate_definition(d)
+    assert "WF_DATA_URI_REJECTED" in _codes(errors)
+    # a short prose string with newlines is NOT a blob — stays valid
+    d2 = _minimal_valid()
+    d2["ui"]["note"] = "line one\nline two\nline three"
+    _, errors2 = validate_definition(d2)
+    assert "WF_DATA_URI_REJECTED" not in _codes(errors2)
+
+
 # ── Config type validation ────────────────────────────────
 
 

@@ -269,29 +269,39 @@ class WorkflowPackService:
         # silently passes for orgs with no matching provider, and the
         # failure surfaces only at run time as a mid-run
         # NO_ELIGIBLE_PROVIDER step failure — exactly what the gate exists
-        # to catch before install. Features union per capability: the gate
-        # checks feature-superset offerings, so under-declaring features
-        # has the same bypass effect as omitting the capability.
-        declared: dict[str, set[str]] = {}
+        # to catch before install.
+        #
+        # One entry per DISTINCT (capability, feature-set), NOT a per-capability
+        # UNION (R83): the runtime resolves each step against ITS OWN
+        # required_features (a single offering per step), so unioning two steps'
+        # features into one requirement demanded a single offering superseting
+        # BOTH — falsely blocking a pack whose two image_generation steps need
+        # feat_a and feat_b when the org has separate offerings for each. The
+        # gate checks each entry independently (any offering satisfies it), which
+        # exactly matches per-step resolution. Under-declaring is still caught:
+        # a step's real feature-set becomes its own entry.
+        declared: set[tuple[str, frozenset]] = set()
         for cap in deps.get("requires_capabilities", []) or []:
             key = cap.get("capability")
-            feats = {f for f in cap.get("features", []) if isinstance(f, str)}
-            declared.setdefault(key, set()).update(feats)
+            if not key:
+                continue
+            feats = frozenset(f for f in cap.get("features", []) if isinstance(f, str))
+            declared.add((key, feats))
         for step in parsed.steps:
             if step.type != "provider_action":
                 continue
             key = step.config.get("capability")
             if not key:
                 continue
-            feats = {
+            feats = frozenset(
                 f
                 for f in step.config.get("required_features", [])
                 if isinstance(f, str)
-            }
-            declared.setdefault(key, set()).update(feats)
+            )
+            declared.add((key, feats))
         deps["requires_capabilities"] = [
             {"capability": key, "features": sorted(feats)}
-            for key, feats in sorted(declared.items())
+            for key, feats in sorted(declared, key=lambda kv: (kv[0], sorted(kv[1])))
         ]
 
         # Version uniqueness + monotonicity guidance
@@ -351,6 +361,15 @@ class WorkflowPackService:
         # First release publishes the pack
         if pack.status == PackStatus.DRAFT:
             pack.status = PackStatus.PUBLISHED
+        # A new release on an already-approved pack changes the manifest the
+        # anon registry serves (get_pack_preview reads the latest stable
+        # release: definition, dependencies, recommended_packs). Publishing v2
+        # would otherwise carry 'approved' onto never-reviewed content — void
+        # approval, matching update_definition's reset (R83).
+        if pack.review_status == "approved":
+            pack.review_status = None
+            if pack.visibility == PackVisibility.PUBLIC:
+                pack.visibility = PackVisibility.UNLISTED
         try:
             await self.db.flush()
         except IntegrityError:

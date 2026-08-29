@@ -472,6 +472,31 @@ function IOSection({
               >
                 ✕
               </button>
+              {/* selection inputs need options, else the backend 422s
+                  WF_SELECTION_NO_OPTIONS with no way to fix in-UI (R83) */}
+              {input.type === "selection" && (
+                <input
+                  aria-label={`Input options ${i + 1}`}
+                  placeholder="options (comma-separated)"
+                  value={(input.options ?? []).join(", ")}
+                  onChange={(e) =>
+                    setInputs(
+                      definition.inputs.map((inp, idx) =>
+                        idx === i
+                          ? {
+                              ...inp,
+                              options: e.target.value
+                                .split(",")
+                                .map((o) => o.trim())
+                                .filter(Boolean),
+                            }
+                          : inp,
+                      ),
+                    )
+                  }
+                  className="w-52 rounded border bg-transparent px-2 py-1.5 text-sm"
+                />
+              )}
             </div>
           ))}
           {definition.inputs.length === 0 && (

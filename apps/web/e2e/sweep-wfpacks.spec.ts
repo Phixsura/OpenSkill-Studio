@@ -251,6 +251,14 @@ test("delete a step: its edges disappear from the list view", async () => {
 });
 
 test("declare workflow output, save → reload: definition round-trips with positions", async () => {
+  // Set generate_image's capability — a provider_action with an empty
+  // capability now fails validation on save (R83 min_length=1), so the test
+  // must pick one before it can save a valid definition.
+  await stepLi("Generate Image")
+    .getByRole("button", { name: /Generate Image/ })
+    .click();
+  await page.locator("#cfg-capability").selectOption("image_generation");
+
   // Declare a workflow output through the IOSection selects
   await page.getByRole("button", { name: "Add output" }).click();
   await page.getByLabel("Output source step 1").selectOption("generate_image");

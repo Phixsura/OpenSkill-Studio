@@ -214,6 +214,66 @@ async def test_install_capability_gate_satisfied(c):
 
 
 @pytest.mark.asyncio
+async def test_install_gate_per_step_features_not_union(c):
+    """R83: two same-capability steps needing DIFFERENT features must install
+    when the org has a SEPARATE offering for each. The derivation used to UNION
+    features per capability, demanding one offering superseting BOTH — falsely
+    blocking a pack the runtime (which resolves each step independently) can
+    run. Now one requirement entry per distinct (capability, feature-set)."""
+    two_step = {
+        "schema_version": 1,
+        "inputs": [{"key": "topic", "type": "text", "required": True}],
+        "outputs": [{"key": "final", "type": "image", "from_step": "gen2", "from_port": "result"}],
+        "steps": [
+            {"id": "prep", "type": "prompt_template", "name": "P",
+             "config": {"template": "About {{inputs.topic}}"},
+             "inputs": [], "outputs": [{"port": "prompt", "type": "prompt"}]},
+            {"id": "gen1", "type": "provider_action", "name": "G1",
+             "config": {"capability": "image_generation", "required_features": ["feat_a"]},
+             "inputs": [{"port": "prompt", "type": "prompt"}], "outputs": [{"port": "img", "type": "image"}]},
+            {"id": "gen2", "type": "provider_action", "name": "G2",
+             "config": {"capability": "image_generation", "required_features": ["feat_b"]},
+             "inputs": [{"port": "src", "type": "image"}], "outputs": [{"port": "result", "type": "image"}]},
+        ],
+        "edges": [
+            {"id": "e1", "from_step": "prep", "from_port": "prompt", "to_step": "gen1", "to_port": "prompt"},
+            {"id": "e2", "from_step": "gen1", "from_port": "img", "to_step": "gen2", "to_port": "src"},
+        ],
+        "ui": {},
+    }
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    pid = await _public_pack(c, h1, o1, definition=two_step)
+
+    # Consumer org has TWO offerings — one per feature, none with both.
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    adapters = await c.get("/api/v1/providers/adapters", headers=h2)
+    aid = next(a for a in adapters.json()["data"] if a["key"] == "mock")["id"]
+    conn = (await c.post(f"/api/v1/orgs/{o2}/provider-connections",
+                         json={"adapter_id": aid, "name": f"mc-{uuid.uuid4().hex[:4]}"}, headers=h2)).json()["data"]["id"]
+    for model, feat in (("A", "feat_a"), ("B", "feat_b")):
+        await c.post(f"/api/v1/orgs/{o2}/provider-offerings",
+                     json={"connection_id": conn, "capability_key": "image_generation",
+                           "model_name": model, "features": [feat]}, headers=h2)
+
+    r = await c.post(f"/api/v1/orgs/{o2}/workflow-installations", json={"pack_id": pid}, headers=h2)
+    assert r.status_code == 201, r.text[:300]
+
+    # Negative control: an org with only feat_a still can't satisfy gen2.
+    h3, _ = await _auth(c)
+    o3 = await _org(c, h3)
+    conn3 = (await c.post(f"/api/v1/orgs/{o3}/provider-connections",
+                          json={"adapter_id": aid, "name": f"mc-{uuid.uuid4().hex[:4]}"}, headers=h3)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{o3}/provider-offerings",
+                 json={"connection_id": conn3, "capability_key": "image_generation",
+                       "model_name": "AOnly", "features": ["feat_a"]}, headers=h3)
+    r3 = await c.post(f"/api/v1/orgs/{o3}/workflow-installations", json={"pack_id": pid}, headers=h3)
+    assert r3.status_code == 422
+    assert r3.json()["error"]["code"] == "CAPABILITY_UNSATISFIED"
+
+
+@pytest.mark.asyncio
 async def test_double_install_conflict(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)

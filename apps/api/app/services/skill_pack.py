@@ -659,6 +659,17 @@ class SkillPackService:
         if pack.status == PackStatus.DRAFT:
             pack.status = PackStatus.PUBLISHED
 
+        # Publishing a NEW release on an already-approved pack changes the
+        # content the anon registry serves — the preview/curriculum reads the
+        # LATEST release manifest (registry.get_pack_preview), so a new release
+        # swaps public, never-reviewed skills/exercises past the gate. Void
+        # approval exactly as update_definition does on the workflow side (R83):
+        # a new release must re-enter review before it is publicly discoverable.
+        if pack.review_status == "approved":
+            pack.review_status = None
+            if pack.visibility == PackVisibility.PUBLIC:
+                pack.visibility = PackVisibility.UNLISTED
+
         try:
             await self.db.flush()
         except IntegrityError:

@@ -240,7 +240,16 @@ class TransformConfig(BaseModel):
 
 
 class ProviderActionConfig(BaseModel):
-    capability: str = Field(max_length=64)
+    # min_length=1 (R83): an empty capability passed validation, then the
+    # publish derivation skipped it (`if not key: continue`) so the install
+    # capability gate saw no requirement and passed even with zero providers —
+    # yet the runtime resolver matches capability_key == "" (never) and the
+    # install binding-suggest read "" as "all capabilities". Three copies of
+    # the rule disagreed on empty; forbidding it at the source (a definition
+    # with an unset capability is WF_VALIDATION_FAILED at save/publish) is the
+    # single fix. The editor's default provider_action seeds capability="", so
+    # this also forces the author to pick one before saving.
+    capability: str = Field(min_length=1, max_length=64)
     required_features: list[str] = []
     binding_mode: Literal["auto", "preferred", "pinned"] = "auto"
     pinned_offering_id: str | None = None
@@ -341,8 +350,13 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
 
     # data: URI / base64 blob rejection anywhere in the payload (D4).
     # Both encodings: ';base64,' marked AND plain/URL-encoded payloads.
-    # ALSO scan a whitespace-stripped copy with DATA_URI_STRIPPED_RE (R78) —
-    # closes the whitespace-chunking evasion; see the regex's comment.
+    # ALSO scan a whitespace-stripped copy (R78) — closes the whitespace-
+    # chunking evasion. BASE64_BLOB_RE (bare 1024-char run) must run against
+    # BOTH flat AND flat_ws (R83): R78 wired the stripped scan to the data:-
+    # prefixed matcher only, so a bare base64 blob chunked with JSONB-legal
+    # newlines (no 'data:' prefix → DATA_URI_STRIPPED_RE never anchors) sailed
+    # through. A blob is only inert-data, but ADR-010's inline-blob red line
+    # rejects it in any framing.
     flat = _json.dumps(raw, ensure_ascii=False)
     flat_ws = _WS_RE.sub("", flat)
     if (
@@ -350,6 +364,7 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
         or DATA_URI_PLAIN_RE.search(flat)
         or DATA_URI_STRIPPED_RE.search(flat_ws)
         or BASE64_BLOB_RE.search(flat)
+        or BASE64_BLOB_RE.search(flat_ws)
     ):
         errors.append(
             _err(

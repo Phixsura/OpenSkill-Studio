@@ -1154,6 +1154,39 @@ async def test_every_anon_card_field_voids_approval(c):
 
 
 @pytest.mark.asyncio
+async def test_publish_new_release_after_approval_voids_approval(c):
+    """R83: the anon registry preview reads the LATEST release manifest, so
+    publishing a new release on an approved public pack swaps public,
+    never-reviewed skills/exercises past the review gate. A new release must
+    void approval (public→unlisted, review_status→None), mirroring the
+    workflow definition-change reset."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = await _category(c, h, oid)
+    sk1 = await _skill_in_cat(c, h, oid, cat, "Clean Skill")
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "PubVoid"}, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sk1}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    appr = (await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)).json()["data"]
+    assert appr["visibility"] == "public" and appr["review_status"] == "approved"
+
+    # Add a skill and publish v2 — approval must reset
+    sk2 = await _skill_in_cat(c, h, oid, cat, "EVIL Injected Skill")
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sk2}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h)
+
+    pk = (await c.get(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)).json()["data"]
+    assert pk["review_status"] is None, "new release kept approval"
+    assert pk["visibility"] == "unlisted", "new release left pack public"
+    # dropped from the anon registry LISTING — no longer publicly discoverable
+    # (unlisted stays reachable by direct id by design, but the injected v2
+    # content is not surfaced through public discovery/search)
+    search = await c.get("/api/v1/registry/packs?search=PubVoid")
+    assert not any(p["id"] == pid for p in search.json()["data"])
+
+
+@pytest.mark.asyncio
 async def test_skill_pack_mutations_row_locked_no_approval_bypass(c):
     """R70d: same stale-read-write class as the workflow-pack family (R70b) —
     every SkillPack mutation was a db.get snapshot + unguarded ORM setattr

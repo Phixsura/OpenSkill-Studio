@@ -938,6 +938,66 @@ async def test_provenance_update_voids_approval(c):
 
 
 @pytest.mark.asyncio
+async def test_publish_new_release_after_approval_voids_approval(c):
+    """R83: the anon registry preview serves the latest release's manifest
+    (definition, dependencies, recommended_packs). Publishing a new release on
+    an approved+public pack swaps that anon-served content past the review
+    gate, so a new release must void approval — mirroring update_definition."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": _valid_definition()},
+        headers=h,
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
+    assert r.status_code == 200 and r.json()["data"]["visibility"] == "public"
+
+    # Publish v2 with a malicious recommended_packs dependency — approval resets
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+        json={
+            "version": "2.0.0",
+            "dependencies": {
+                "recommended_packs": [
+                    {"slug": "evil-malware-pack", "family": "workflow_pack", "version": "1.0.0"}
+                ]
+            },
+        },
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    pk = (await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)).json()["data"]
+    assert pk["review_status"] is None, "new release kept approval"
+    assert pk["visibility"] == "unlisted", "new release left pack public"
+
+
+@pytest.mark.asyncio
+async def test_provider_action_empty_capability_rejected(c):
+    """R83: an empty provider_action capability passed validation, then the
+    publish derivation skipped it so the install capability gate saw no
+    requirement (install succeeds with zero providers) while the runtime
+    matches capability_key == '' (never) → guaranteed mid-run failure. Three
+    copies of the rule disagreed on empty; min_length=1 rejects it at the
+    source (definition save)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack(c, h, oid)
+    defn = _valid_definition()
+    defn["steps"][1]["config"]["capability"] = ""  # provider_action, empty cap
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": defn},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "WF_VALIDATION_FAILED"
+
+
+@pytest.mark.asyncio
 async def test_tags_and_import_name_and_idem_key_reject_ctrl(c):
     """R18 sibling-gap closures: tags, ComfyUI import name, idempotency_key."""
     h, _ = await _auth(c)
