@@ -669,3 +669,43 @@ async def test_points_award_idempotent_per_action(c):
 
     r = await c.get(f"/api/v1/orgs/{oid}/points/me", headers=sh)
     assert r.json()["data"]["total_points"] == 40
+
+
+# ═══════════════ R88e: ctrl-char screens on review/discussion/webhook ═══════════════
+
+
+def test_review_discussion_webhook_schemas_reject_control_chars():
+    """R88e guard: NUL and other C0 control chars must be rejected at the schema
+    boundary for pack review title/body/reply, discussion comment body, and
+    webhook URL. NUL previously 500'd on the Postgres write; other C0 chars
+    were stored raw (stored injection). Reverting the reject_ctrl_str calls
+    makes this fail."""
+    import pydantic
+
+    from app.api.v1.endpoints.discussions import CreateCommentRequest
+    from app.api.v1.endpoints.webhooks import CreateWebhookRequest
+    from app.schemas.pack_review import CreateReviewRequest, ReplyRequest, UpdateReviewRequest
+
+    nul = chr(0)
+    soh = chr(1)
+
+    cases = [
+        (CreateReviewRequest, {"rating": 5, "title": "T" + nul, "body": "b" * 20}),
+        (CreateReviewRequest, {"rating": 5, "title": "T", "body": "b" * 20 + soh}),
+        (UpdateReviewRequest, {"title": "T" + nul}),
+        (UpdateReviewRequest, {"body": "b" * 20 + soh}),
+        (ReplyRequest, {"reply_text": "r" + nul}),
+        (CreateCommentRequest, {"body": "c" + nul}),
+        (CreateCommentRequest, {"body": "c" + soh + "x"}),
+        (CreateWebhookRequest, {"url": "http://example.com/a" + nul + "b", "events": []}),
+        (CreateWebhookRequest, {"url": "http://example.com/a" + soh + "b", "events": []}),
+    ]
+    for model, payload in cases:
+        with pytest.raises(pydantic.ValidationError):
+            model(**payload)
+
+    # Clean values must still pass
+    CreateReviewRequest(rating=5, title="Good", body="b" * 20)
+    ReplyRequest(reply_text="thanks")
+    CreateCommentRequest(body="nice pack")
+    CreateWebhookRequest(url="http://example.com/hook", events=[])

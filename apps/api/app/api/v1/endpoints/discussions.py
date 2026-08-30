@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.core.rate_limit import rate_limit
 from app.models.user import User
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta
+from app.schemas.base import DataResponse, ListResponse, PaginationMeta, reject_ctrl_str
 from app.services.discussion import DiscussionService
 
 router = APIRouter(tags=["Discussions"])
@@ -22,6 +22,8 @@ class CreateCommentRequest(BaseModel):
     @field_validator("body")
     @classmethod
     def validate_body(cls, v: str) -> str:
+        # R88e: NUL -> Postgres 22021 -> 500; other C0 chars would store raw
+        reject_ctrl_str(v, "body")
         v = v.strip()
         if len(v) < 1 or len(v) > 5000:
             raise ValueError("Comment body must be 1-5000 characters")

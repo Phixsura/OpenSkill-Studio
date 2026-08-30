@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.base import reject_ctrl_str
+
 
 class CreateReviewRequest(BaseModel):
     rating: int = Field(..., ge=1, le=5)
@@ -13,6 +15,7 @@ class CreateReviewRequest(BaseModel):
     @field_validator("title")
     @classmethod
     def validate_title(cls, v: str | None) -> str | None:
+        reject_ctrl_str(v, "title")  # R88e: NUL -> Postgres 22021 -> 500
         if v is not None:
             v = v.strip()
             if len(v) > 200:
@@ -24,6 +27,7 @@ class CreateReviewRequest(BaseModel):
     @field_validator("body")
     @classmethod
     def validate_body(cls, v: str | None) -> str | None:
+        reject_ctrl_str(v, "body")  # R88e: NUL -> Postgres 22021 -> 500
         if v is not None:
             v = v.strip()
             if len(v) > 5000:
@@ -50,6 +54,7 @@ class UpdateReviewRequest(BaseModel):
     @field_validator("title")
     @classmethod
     def validate_title(cls, v: str | None) -> str | None:
+        reject_ctrl_str(v, "title")  # R88e: NUL -> Postgres 22021 -> 500
         if v is not None:
             v = v.strip()
             if len(v) > 200:
@@ -61,6 +66,7 @@ class UpdateReviewRequest(BaseModel):
     @field_validator("body")
     @classmethod
     def validate_body(cls, v: str | None) -> str | None:
+        reject_ctrl_str(v, "body")  # R88e: NUL -> Postgres 22021 -> 500
         if v is not None:
             v = v.strip()
             if len(v) > 5000:
@@ -94,6 +100,7 @@ class ReplyRequest(BaseModel):
     @field_validator("reply_text")
     @classmethod
     def validate_reply_text(cls, v: str) -> str:
+        reject_ctrl_str(v, "reply_text")  # R88e: NUL -> Postgres 22021 -> 500
         v = v.strip()
         if len(v) == 0:
             raise ValueError("Reply text cannot be empty")

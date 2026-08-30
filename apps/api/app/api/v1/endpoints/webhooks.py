@@ -10,7 +10,7 @@ from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
-from app.schemas.base import DataResponse
+from app.schemas.base import DataResponse, reject_ctrl_str
 from app.services.webhook import MAX_EVENTS_PER_WEBHOOK, VALID_EVENT_TYPES, WebhookService
 
 router = APIRouter(tags=["Webhooks"])
@@ -25,6 +25,10 @@ class CreateWebhookRequest(BaseModel):
     @field_validator("url")
     @classmethod
     def validate_url(cls, v: str) -> str:
+        # R88e: a NUL in the URL *path* passes the prefix/length checks and the
+        # SSRF host gate (host is clean), then 500s on the VARCHAR write; other
+        # C0 chars would store raw. Reject the whole control range up front.
+        reject_ctrl_str(v, "url")
         v = v.strip()
         if not v.startswith(("https://", "http://")):
             raise ValueError("URL must start with https:// or http://")
