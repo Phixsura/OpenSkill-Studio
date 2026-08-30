@@ -215,11 +215,11 @@ async def test_project_deadline_closed(db):
         None,
         user.id,
     )
-    sub = await svc.create_submission(org.id, project.id, user.id, is_instructor=True)
+    sub = await svc.create_submission(org.id, project.id, user.id)
     await db.flush()
 
     with pytest.raises(DeadlinePassedError):
-        await svc.submit_draft(sub.id, user.id, is_instructor=True)
+        await svc.submit_draft(sub.id, user.id)
 
 
 @pytest.mark.asyncio
@@ -249,10 +249,10 @@ async def test_project_late_submission(db):
         None,
         user.id,
     )
-    sub = await svc.create_submission(org.id, project.id, user.id, is_instructor=True)
+    sub = await svc.create_submission(org.id, project.id, user.id)
     await db.flush()
 
-    submitted = await svc.submit_draft(sub.id, user.id, is_instructor=True)
+    submitted = await svc.submit_draft(sub.id, user.id)
     assert submitted.is_late is True
 
 
@@ -286,9 +286,9 @@ async def test_project_late_penalty_applied(db):
         None,
         user.id,
     )
-    sub = await svc.create_submission(org.id, project.id, user.id, is_instructor=True)
+    sub = await svc.create_submission(org.id, project.id, user.id)
     await db.flush()
-    await svc.submit_draft(sub.id, user.id, is_instructor=True)
+    await svc.submit_draft(sub.id, user.id)
     await db.flush()
 
     # Distinct reviewer — no self-review (R86)

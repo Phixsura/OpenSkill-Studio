@@ -444,8 +444,8 @@ async def test_portfolio_create_from_submission_with_project(db):
         None,
         u.id,
     )
-    sub = await proj_svc.create_submission(org.id, proj.id, u.id, is_instructor=True)
-    await proj_svc.submit_draft(sub.id, u.id, is_instructor=True)
+    sub = await proj_svc.create_submission(org.id, proj.id, u.id)
+    await proj_svc.submit_draft(sub.id, u.id)
     # Distinct reviewer — no self-review (R86)
     from app.models.organization import OrgRole as _OrgRole
 

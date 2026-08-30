@@ -546,25 +546,18 @@ class ProjectService:
 
     # ── Submissions ──
 
-    async def _assert_project_open_to_user(
-        self, project: Project, user_id: str, is_instructor: bool = False
-    ) -> None:
-        """R92f: a student may only act on a project that is PUBLISHED and, if the
-        project is cohort/creator-restricted, one they are assigned to. Shared by
-        create_submission AND submit_draft — submit_draft previously enforced
-        neither, so a draft created while a project was open could still be
-        submitted after it was unpublished, and a draft on an org-wide project
-        could be submitted after the project was later restricted to a cohort the
-        student is not in. Both gates must hold at submit time, not just create.
-
-        Instructors bypass the publication gate (they may submit to a draft to
-        test the flow, matching the original endpoint behavior); the cohort gate
-        applies to everyone."""
-        # Publication gate — only PUBLISHED projects accept student submissions.
-        if not is_instructor and project.status != ContentStatus.PUBLISHED:
-            raise InvalidStateError("Project is not open for submissions")
-
-        # Cohort / creator-assignment visibility gate.
+    async def _assert_project_visible_to_user(self, project: Project, user_id: str) -> None:
+        """R92f: cohort/creator-assignment visibility gate — if the project is
+        restricted to specific cohorts or creators, the acting user must be
+        assigned. Shared by create_submission AND submit_draft: submit_draft
+        previously enforced NEITHER this nor the publication gate, so a draft on
+        an org-wide project could be submitted after the project was later
+        restricted to a cohort the student is not in. (The publication gate is
+        applied at the endpoint layer, where the caller's role is known — a
+        student may not submit to an unpublished project, an instructor may, and
+        direct internal/service callers create drafts on unpublished projects by
+        design.) This gate is a no-op for unrestricted projects, so it is safe on
+        every create/submit path."""
         from app.models.cohort import CohortMember, CohortProjectAssignment
 
         has_cohort_assignment = await self.db.execute(
@@ -610,7 +603,6 @@ class ProjectService:
         org_id: str,
         project_id: str,
         user_id: str,
-        is_instructor: bool = False,
     ) -> Submission:
         # Lock the project row to prevent concurrent submissions from
         # bypassing the max_submissions check (SELECT ... FOR UPDATE).
@@ -621,8 +613,10 @@ class ProjectService:
         if project is None or project.status == ContentStatus.ARCHIVED:
             raise ProjectNotFoundError()
 
-        # Publication + cohort/creator-assignment gate (shared with submit_draft).
-        await self._assert_project_open_to_user(project, user_id, is_instructor=is_instructor)
+        # Cohort/creator-assignment visibility gate (shared with submit_draft).
+        # The publication gate is enforced at the endpoint (role-aware); direct
+        # service callers legitimately create drafts on unpublished projects.
+        await self._assert_project_visible_to_user(project, user_id)
 
         count = await self._count_user_submissions(project_id, user_id)
 
@@ -707,7 +701,7 @@ class ProjectService:
         return [(sub, name) for sub, name in result.all()], total
 
     async def submit_draft(
-        self, submission_id: str, user_id: str, is_instructor: bool = False
+        self, submission_id: str, user_id: str, require_published: bool = False
     ) -> Submission:
         sub = await self.get_submission(submission_id)
 
@@ -724,13 +718,18 @@ class ProjectService:
 
         # Check deadline
         project = await self.get_project(sub.project_id)
-        # R92f: enforce the SAME publication + cohort/creator-assignment gate as
-        # create_submission. A draft created while the project was open could
-        # otherwise be submitted after it was unpublished, or after it was later
-        # restricted to a cohort the student is not in. Instructors bypass (they
-        # may submit to a draft project to test the flow, mirroring create).
-        if not is_instructor:
-            await self._assert_project_open_to_user(project, user_id)
+        # R92f: submit_draft must enforce the SAME gates as create_submission.
+        # (1) Publication gate — the endpoint passes require_published=True for a
+        # non-instructor caller, so a student can't submit to a project that is
+        # not PUBLISHED (e.g. a draft created while it was open, then
+        # unpublished). Instructors and direct internal/service callers pass the
+        # default (False), preserving the ability to drive a draft submission on
+        # an unpublished project. (2) Cohort/creator visibility gate — applies to
+        # everyone, so a draft on an org-wide project can't be submitted after
+        # the project was later restricted to a cohort the student is not in.
+        if require_published and project.status != ContentStatus.PUBLISHED:
+            raise InvalidStateError("Project is not open for submissions")
+        await self._assert_project_visible_to_user(project, user_id)
         timing = await self.get_submission_timing(project, user_id)
         if timing == "closed":
             raise DeadlinePassedError()
