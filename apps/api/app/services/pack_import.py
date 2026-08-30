@@ -95,6 +95,17 @@ class PackImportService:
                 422,
             ) from None
 
+        # R92e: valid JSON whose TOP LEVEL is not an object (a bare list / string
+        # / int / null / bool) parsed fine, then every downstream manifest.get()
+        # / max_json_depth walk did `.get` on it → AttributeError 500. Require an
+        # object here so the rest of validation can assume dict access.
+        if not isinstance(manifest, dict):
+            raise AppError(
+                "INVALID_MANIFEST",
+                "Manifest openskill-pack.json must be a JSON object",
+                422,
+            )
+
         # 6b0. Depth cap BEFORE the canonical dumps below: json.loads parses
         # ~900 levels while the recursive json.dumps (and every later
         # serializer — pydantic response echo of provenance, release

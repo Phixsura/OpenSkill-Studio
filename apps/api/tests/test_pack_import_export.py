@@ -1246,3 +1246,24 @@ async def test_import_rejects_noninteger_install_fields(c):
         headers=h,
     )
     assert r.status_code == 422, r.text
+
+
+# ── R92e: manifest whose top level is not a JSON object → 422, not 500 ──
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_non_object_manifest(c):
+    """R92e: valid JSON whose TOP LEVEL is a list/string/int/null/bool parsed
+    fine, then every downstream manifest.get()/depth walk did `.get` on it →
+    AttributeError 500. Import must reject a non-object manifest with 422.
+    Reverting the isinstance(manifest, dict) guard makes these 500."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    for bad in ([1, 2, 3], "hello", 12345, None, True):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/packs/import",
+            files={"file": ("m.zip", _make_zip(bad), "application/zip")},
+            headers=h,
+        )
+        assert r.status_code == 422, f"top-level {type(bad).__name__}: {r.status_code} {r.text}"
+        assert r.json()["error"]["code"] == "INVALID_MANIFEST"
