@@ -2,6 +2,23 @@ from datetime import datetime
 
 from pydantic import BaseModel, field_validator, model_validator
 
+from app.schemas.base import reject_ctrl_json, reject_ctrl_str
+
+# R88: skill/category free-text fields (name/description/learning_content) write
+# to Postgres text columns and tags to JSONB. A NUL/control char (a valid-JSON
+# backslash-u0000 escape) crashes the write with asyncpg 22P05 -> DBAPIError
+# (NOT ValueError, so the ValueError handler never fires) -> unhandled 500.
+# Screen every field that reaches the DB. (exercise fields already screen.)
+
+
+def _screen_skill_ctrl(obj, str_fields, json_fields=()):
+    for name in str_fields:
+        reject_ctrl_str(getattr(obj, name, None), name)
+    for name in json_fields:
+        reject_ctrl_json(getattr(obj, name, None), name)
+    return obj
+
+
 # ── Category ──────────────────────────────────────────────
 
 
@@ -41,6 +58,10 @@ class CreateCategoryRequest(BaseModel):
             raise ValueError("Icon must not exceed 50 characters")
         return v
 
+    @model_validator(mode="after")
+    def _screen_ctrl(self):
+        return _screen_skill_ctrl(self, ("name", "slug", "description", "icon"))
+
 
 class UpdateCategoryRequest(BaseModel):
     name: str | None = None
@@ -76,6 +97,10 @@ class UpdateCategoryRequest(BaseModel):
         if v is not None and isinstance(v, int) and (v < 0 or v > 100000):
             raise ValueError("sort_order must be between 0 and 100000")
         return v
+
+    @model_validator(mode="after")
+    def _screen_ctrl(self):
+        return _screen_skill_ctrl(self, ("name", "description", "icon"))
 
 
 class CategoryResponse(BaseModel):
@@ -156,6 +181,12 @@ class CreateSkillRequest(BaseModel):
             raise ValueError("estimated_minutes must be between 0 and 9999")
         return v
 
+    @model_validator(mode="after")
+    def _screen_ctrl(self):
+        return _screen_skill_ctrl(
+            self, ("name", "slug", "description", "learning_content"), ("tags",)
+        )
+
 
 class UpdateSkillRequest(BaseModel):
     category_id: str | None = None
@@ -224,6 +255,12 @@ class UpdateSkillRequest(BaseModel):
         if v is not None and isinstance(v, int) and (v < 0 or v > 9999):
             raise ValueError("estimated_minutes must be between 0 and 9999")
         return v
+
+    @model_validator(mode="after")
+    def _screen_ctrl(self):
+        return _screen_skill_ctrl(
+            self, ("name", "description", "learning_content", "sandbox_url"), ("tags",)
+        )
 
 
 class SkillResponse(BaseModel):

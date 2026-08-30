@@ -194,3 +194,45 @@ def test_progress_status_values():
     assert ProgressStatus.NOT_STARTED.value == "not_started"
     assert ProgressStatus.IN_PROGRESS.value == "in_progress"
     assert ProgressStatus.COMPLETED.value == "completed"
+
+
+def test_skill_and_category_schemas_reject_control_chars():
+    """R88: skill/category free-text fields (name/description/learning_content)
+    write to Postgres text columns and tags to JSONB. A NUL char crashed the
+    write with asyncpg 22P05 → DBAPIError (not ValueError) → unhandled 500
+    (exercise fields already screened; skill/category did not). The schemas now
+    screen NUL/control chars → clean 422."""
+    from pydantic import ValidationError
+
+    from app.schemas.skill import (
+        CreateCategoryRequest,
+        CreateSkillRequest,
+        UpdateCategoryRequest,
+        UpdateSkillRequest,
+    )
+
+    nul = "\x00"
+    # skill create: name / description / learning_content / tags
+    with pytest.raises(ValidationError):
+        CreateSkillRequest(category_id="c1", name="N" + nul, description="d")
+    with pytest.raises(ValidationError):
+        CreateSkillRequest(category_id="c1", name="OK", description="d" + nul)
+    with pytest.raises(ValidationError):
+        CreateSkillRequest(category_id="c1", name="OK", description="d", learning_content="x" + nul)
+    with pytest.raises(ValidationError):
+        CreateSkillRequest(category_id="c1", name="OK", description="d", tags=["ok" + nul])
+    # skill update
+    with pytest.raises(ValidationError):
+        UpdateSkillRequest(name="N" + nul)
+    with pytest.raises(ValidationError):
+        UpdateSkillRequest(tags=["a" + nul])
+    # category create/update
+    with pytest.raises(ValidationError):
+        CreateCategoryRequest(name="C" + nul)
+    with pytest.raises(ValidationError):
+        UpdateCategoryRequest(description="d" + nul)
+    # control: clean values validate fine
+    ok = CreateSkillRequest(
+        category_id="c1", name="Clean Skill", description="clean", tags=["python", "ai"]
+    )
+    assert ok.name == "Clean Skill"
