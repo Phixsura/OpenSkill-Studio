@@ -305,3 +305,69 @@ def test_format_submission_with_content():
 def test_format_submission_empty():
     result = EvaluationService._format_submission([])
     assert "No content" in result
+
+
+@pytest.mark.asyncio
+async def test_multimodal_eval_types_persist_not_500(client):
+    """R86: SQLAlchemy persists the enum MEMBER NAME (IMAGE_REVIEW), but
+    migration 65cf240e added the four multimodal labels to the Postgres
+    eval_type enum as lowercase VALUES (image_review). Triggering any of them
+    hit InvalidTextRepresentationError → unhandled 500. Migration
+    a1b2c3d4e5f6 renames the labels to uppercase names. With AI eval enabled,
+    each multimodal type must create the task (201), never 500."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"mm-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "MM"},
+    )
+    assert r.status_code == 201
+    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    oid = (
+        await client.post("/api/v1/orgs", json={"name": f"MM-{_uuid.uuid4().hex[:8]}"}, headers=h)
+    ).json()["data"]["id"]
+
+    # Enable AI eval so the trigger reaches the DB write (past EVAL_NOT_ENABLED)
+    r = await client.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={"enabled": True, "monthly_budget_usd": 100},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+
+    proj = (
+        await client.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "MM Proj",
+                "description": "d" * 20,
+                "instructions": "do it",
+                "project_type": "general",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await client.post(f"/api/v1/orgs/{oid}/projects/{proj}/publish", headers=h)
+    sub = (
+        await client.post(f"/api/v1/orgs/{oid}/projects/{proj}/submissions", json={"content": "w"}, headers=h)
+    ).json()["data"]["id"]
+    await client.post(f"/api/v1/orgs/{oid}/projects/{proj}/submissions/{sub}/submit", headers=h)
+
+    for t in ("image_review", "video_review", "prompt_review", "commercial_submission_review"):
+        r = await client.post(
+            f"/api/v1/orgs/{oid}/evaluation/trigger",
+            json={"submission_id": sub, "type": t},
+            headers=h,
+        )
+        # The enum write must succeed (task created). Never a 500 (the bug).
+        assert r.status_code != 500, f"{t}: 500 — eval_type enum label mismatch: {r.text[:200]}"
+        assert r.status_code == 201, f"{t}: {r.status_code} {r.text[:200]}"
+        assert r.json()["data"]["type"] == t
+
+    await engine.dispose()
