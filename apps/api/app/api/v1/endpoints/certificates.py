@@ -53,6 +53,14 @@ async def verify_certificate(
     db: AsyncSession = Depends(get_db),
 ):
     """Public certificate verification — no authentication required."""
+    # R88: this anon endpoint takes a user-controlled path param straight into
+    # a parameterized query. A NUL byte (%00) in the value is a valid str after
+    # URL-decoding but crashes the asyncpg bind with 22P05
+    # (CharacterNotInRepertoireError, a DBAPIError not ValueError) → unhandled
+    # 500. A NUL can never match a real certificate_number, so treat it (and any
+    # control char) as a clean not-found rather than letting it reach the DB.
+    if "\x00" in certificate_number or any(ord(ch) < 32 for ch in certificate_number):
+        raise AppError("CERTIFICATE_NOT_FOUND", "Certificate not found", 404)
     result = await db.execute(
         select(Certificate).where(Certificate.certificate_number == certificate_number)
     )

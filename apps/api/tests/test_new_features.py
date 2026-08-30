@@ -423,6 +423,22 @@ async def test_certificate_public_verification(c):
     assert d["certificate_number"] == cert_number
 
 
+@pytest.mark.asyncio
+async def test_certificate_verify_nul_in_number_is_404_not_500(c):
+    """R88: the anon /certificates/{number} endpoint takes the path param
+    straight into a parameterized query. A NUL byte (%00) URL-decodes to a
+    valid str but crashes the asyncpg bind (22P05 CharacterNotInRepertoireError
+    → DBAPIError, not ValueError) → unhandled 500. A NUL can never match a real
+    certificate number, so it must be a clean 404, never a 500."""
+    # %00 in the path → NUL after decode
+    r = await c.get("/api/v1/certificates/abc%00def")
+    assert r.status_code == 404, r.text
+    assert r.json()["error"]["code"] == "CERTIFICATE_NOT_FOUND"
+    # a normal miss is still a 404
+    r2 = await c.get("/api/v1/certificates/definitely-not-a-real-cert-xyz")
+    assert r2.status_code == 404, r2.text
+
+
 # ═══════════════ Approval (3 tests) ═══════════════
 
 
