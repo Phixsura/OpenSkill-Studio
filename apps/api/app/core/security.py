@@ -14,12 +14,30 @@ ALGORITHM = "HS256"
 # ── Password ─────────────────────────────────────────────────
 
 
+# bcrypt only ever consumes the first 72 BYTES of the password; bcrypt >=4.1
+# (we run 5.0.0) RAISES ValueError on longer input instead of silently
+# truncating. Our password policy allows up to 128 CHARACTERS
+# (schemas/auth.py), and any multi-byte char pushes the byte count past 72
+# well before that — so a policy-compliant password (e.g. 93 ASCII chars, or
+# ~30 emoji) crashed hashpw/checkpw with an unhandled 500 on register / login /
+# change-password / reset. Truncate to 72 bytes ourselves (the classic bcrypt
+# pre-hash-length handling) so hashing is total over every accepted password.
+# Truncation is on the ENCODED bytes and applied identically in hash + verify,
+# so verification stays consistent; we slice bytes then drop any partial
+# trailing multibyte char to keep .encode()/.decode() round-trips clean.
+_BCRYPT_MAX_BYTES = 72
+
+
+def _bcrypt_bytes(password: str) -> bytes:
+    return password.encode()[:_BCRYPT_MAX_BYTES]
+
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(_bcrypt_bytes(password), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    return bcrypt.checkpw(_bcrypt_bytes(plain), hashed.encode())
 
 
 # ── JWT ──────────────────────────────────────────────────────

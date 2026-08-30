@@ -243,6 +243,59 @@ def test_password_hash_and_verify():
     assert not verify_password("WrongPassword1!", hashed)
 
 
+def test_password_over_72_bytes_hashes_and_verifies():
+    """R87: bcrypt 5.0.0 RAISES on passwords >72 bytes (it only consumes the
+    first 72), but the password policy allows up to 128 characters — so a
+    policy-compliant long password crashed hash_password/verify_password with
+    an unhandled 500 on register / login / change-password / reset. We
+    pre-truncate to 72 bytes so hashing is total and verification is
+    consistent."""
+    from app.core.security import hash_password, verify_password
+
+    # 93 chars, policy-valid (<=128, has upper+digit), > 72 bytes
+    longpw = "Aa1" + "x" * 90
+    assert len(longpw.encode()) > 72
+    hashed = hash_password(longpw)  # must not raise
+    assert verify_password(longpw, hashed)
+    # a password differing WITHIN the first 72 bytes must not verify
+    assert not verify_password("Aa1" + "y" * 90, hashed)
+    # multibyte (emoji) password past 72 bytes also hashes without raising
+    emoji_pw = "Aa1" + "😀" * 30  # 3 + 30*4 = 123 bytes
+    assert len(emoji_pw.encode()) > 72
+    h2 = hash_password(emoji_pw)
+    assert verify_password(emoji_pw, h2)
+
+
+@pytest.mark.asyncio
+async def test_register_and_login_long_password_not_500(client):
+    """R87 end-to-end: register + login with a >72-byte password must succeed
+    (201 / 200), never 500."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    # Fresh pool: pooled connections may be bound to a prior test's (closed)
+    # event loop — same hygiene the other client-fixture tests in this file use.
+    await engine.dispose()
+
+    email = f"pw72-{_uuid.uuid4().hex[:8]}@test.com"
+    longpw = "Aa1" + "x" * 90
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": longpw, "display_name": "PW72"},
+    )
+    assert r.status_code == 201, r.text
+    r = await client.post("/api/v1/auth/login", json={"email": email, "password": longpw})
+    assert r.status_code == 200, r.text
+    # wrong password (differs in first 72 bytes) → 401, not 500
+    r = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "Aa1" + "y" * 90}
+    )
+    assert r.status_code == 401, r.text
+
+    await engine.dispose()
+
+
 def test_access_token_roundtrip():
     from app.core.security import decode_token
 
