@@ -360,7 +360,25 @@ r = api("POST", f"/orgs/{oid}/projects/{pid}/submissions/{subid}/submit", header
 check("submit draft", r.get("data", {}).get("status") == "submitted")
 check("not late", r.get("data", {}).get("is_late") is False)
 
-# Review: approve
+# A submission's author cannot review it (R86 self-review guard) — register a
+# distinct instructor to review the owner's submission.
+rev_email = f"smoke-rev-{uuid.uuid4().hex[:10]}@example.com"
+rr = api(
+    "POST",
+    "/auth/register",
+    {"email": rev_email, "password": "Smoke123!", "display_name": "Smoke Reviewer"},
+    expect=201,
+)
+REV_AUTH = {"Authorization": f"Bearer {rr.get('access_token', '')}"}
+api(
+    "POST",
+    f"/orgs/{oid}/members",
+    {"user_id": rr["user"]["id"], "role": "instructor"},
+    headers=AUTH,
+    expect=201,
+)
+
+# Review: approve (by the distinct reviewer)
 r = api(
     "POST",
     f"/orgs/{oid}/submissions/{subid}/reviews",
@@ -370,7 +388,7 @@ r = api(
         "feedback": "Excellent chatbot!",
         "score_breakdown": {"Functionality": 38, "Code Quality": 28, "Innovation": 26},
     },
-    headers=AUTH,
+    headers=REV_AUTH,
     expect=201,
 )
 check("review approved", r.get("data", {}).get("status") == "approved")
