@@ -582,3 +582,27 @@ async def test_change_password_kills_rotation_predecessor_within_grace(client):
     assert r3.status_code == 401, r3.text
 
     await engine.dispose()
+
+
+# ── R91: validly-signed token with bad/missing `sub` must 401, not 500 ──
+
+
+@pytest.mark.asyncio
+async def test_me_token_missing_sub_is_401_not_500(client):
+    """R91: get_current_user read payload["sub"] with a hard subscript. A
+    validly-signed access token missing `sub` (or with a non-str sub) KeyError-
+    500'd /auth/me instead of returning 401. Reverting the guard fails this."""
+    import jwt
+
+    from app.config import settings
+    from app.core.security import ALGORITHM
+
+    for label, payload in (
+        ("no-sub", {"type": "access"}),
+        ("int-sub", {"type": "access", "sub": 12345}),
+        ("empty-sub", {"type": "access", "sub": ""}),
+        ("null-sub", {"type": "access", "sub": None}),
+    ):
+        tok = jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
+        r = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 401, f"{label}: expected 401, got {r.status_code}"
