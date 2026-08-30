@@ -751,3 +751,45 @@ async def test_duplicate_project_maxlen_title_no_500(c):
     assert len(d1["title"]) <= 200
     assert d1["title"].endswith("(Copy)")
     assert d1["slug"] != d2["slug"]
+
+
+# ── R92h: shared-with-me must not leak owner-org moderation/ownership fields ──
+
+
+@pytest.mark.asyncio
+async def test_shared_with_me_does_not_leak_moderation_fields(c):
+    """R92h: list_shared_packs serialized the internal SkillPackResponse to the
+    GRANTEE (a different tenant), leaking the owner org's rejection_reason
+    (moderator's private note), review_status, owner_org_id and created_by —
+    the exact R71 leak, fixed for anon /registry but missed on shared-with-me.
+    It must serialize the sanitized PublicSkillPackResponse. Reverting fails."""
+    ha, owner_a = await _auth(c)
+    oid_a = await _org(c, ha)
+    hb, _ = await _auth(c)
+    oid_b = await _org(c, hb)
+    pid = await _published_public_pack(c, ha, oid_a)
+
+    # Enable sharing + set a private rejection note, then share A→B (no API for
+    # sharing_enabled/review_status, so set them + the share row directly).
+    from app.core.database import AsyncSessionLocal
+    from app.models.pack_share import PackShare
+    from app.models.skill_pack import SkillPack
+
+    async with AsyncSessionLocal() as db:
+        p = await db.get(SkillPack, pid)
+        p.sharing_enabled = True
+        p.review_status = "rejected"
+        p.rejection_reason = "SECRET moderator note"
+        db.add(PackShare(pack_id=pid, target_org_id=oid_b, shared_by=owner_a["id"]))
+        await db.commit()
+
+    r = await c.get(f"/api/v1/orgs/{oid_b}/shared-with-me", headers=hb)
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert len(data) == 1
+    item = data[0]
+    # The pack is still discoverable by the grantee…
+    assert item["name"] == "Pub Pack"
+    # …but none of the owner-org internal fields are present.
+    for leaked in ("rejection_reason", "review_status", "owner_org_id", "created_by"):
+        assert leaked not in item, f"{leaked} leaked cross-tenant: {item.get(leaked)!r}"
