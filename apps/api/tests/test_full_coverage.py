@@ -487,12 +487,22 @@ async def test_skills_full_crud(c):
     )
     teid = r26.json()["data"]["id"]
 
+    # R88g forbids self-grading — a separate student submits the attempt.
+    # The skill was left in draft above (unpublish); a student can only attempt
+    # a published skill's exercises, so republish before the student submits.
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/publish", headers=h)
+    sh, student = await _reg(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h,
+    )
     r27 = await c.post(
         f"/api/v1/orgs/{oid}/exercises/{teid}/attempts",
         json={
             "answer": {"text": "My long answer here that is sufficient"},
         },
-        headers=h,
+        headers=sh,
     )
     aid = r27.json()["data"]["id"]
 
