@@ -545,8 +545,26 @@ class OrgService:
 
     # ── Settings ──
 
+    # Settings namespaces that have their own typed endpoint + schema and whose
+    # shape other code relies on (e.g. ai_evaluation is read into a typed
+    # EvalSettings/Usage response and used in budget arithmetic). The generic
+    # settings blob must NOT be a back door to write untyped/wrong-typed values
+    # into them — a string monthly_budget_usd here 500s every eval read (R90b).
+    _RESERVED_SETTINGS_KEYS = frozenset({"ai_evaluation"})
+
     async def update_settings(self, org_id: str, settings: dict) -> Organization:
         org = await self.get_org(org_id)
+        # R90b: reject writes that target a reserved, separately-typed namespace.
+        # Those have dedicated endpoints (PUT /settings/evaluation) that validate
+        # types; letting the generic blob overwrite them poisons the JSONB.
+        reserved = self._RESERVED_SETTINGS_KEYS & settings.keys()
+        if reserved:
+            raise AppError(
+                "RESERVED_SETTINGS_KEY",
+                "These settings must be changed through their dedicated endpoint: "
+                + ", ".join(sorted(reserved)),
+                422,
+            )
         # New dict so SQLAlchemy detects the change — mutating org.settings in
         # place leaves the reference identical and the update is not persisted.
         current = {**(org.settings or {}), **settings}

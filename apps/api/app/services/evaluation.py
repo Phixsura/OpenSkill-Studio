@@ -29,6 +29,21 @@ log = structlog.get_logger()
 
 DEFAULT_PASS_THRESHOLD = 0.6
 
+
+def _coerce_budget(v: object) -> float | None:
+    """R90b: monthly_budget_usd is read into typed responses and used in budget
+    arithmetic. If the stored JSONB value is not a finite number (e.g. a string
+    that leaked in through some write path), treat it as unset rather than
+    letting float()/comparison 500 every eval read. bool is excluded (a bool is
+    an int but never a valid budget)."""
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        import math
+
+        return float(v) if math.isfinite(v) else None
+    return None
+
 SYSTEM_PROMPT = """You are an expert evaluator for an AI training platform called OpenSkill Studio.
 Your task is to evaluate a student's submission against a specific rubric.
 
@@ -460,7 +475,7 @@ class EvaluationService:
 
         org = await self.db.get(Organization, org_id)
         eval_settings = (org.settings or {}).get("ai_evaluation", {}) if org else {}
-        budget = eval_settings.get("monthly_budget_usd")
+        budget = _coerce_budget(eval_settings.get("monthly_budget_usd"))
 
         if usage is None:
             return {
@@ -495,7 +510,7 @@ class EvaluationService:
             return False
 
         eval_settings = (org.settings or {}).get("ai_evaluation", {})
-        budget = eval_settings.get("monthly_budget_usd")
+        budget = _coerce_budget(eval_settings.get("monthly_budget_usd"))
         if budget is None:
             return True
 
@@ -529,7 +544,12 @@ class EvaluationService:
         if org is None:
             return defaults
         stored = (org.settings or {}).get("ai_evaluation", {})
-        return {**defaults, **stored}
+        merged = {**defaults, **stored}
+        # R90b defense-in-depth: a value poisoned by some other write path must
+        # not 500 the typed EvalSettingsResponse. Coerce the numeric field back
+        # to a safe shape; the response schema validates the rest.
+        merged["monthly_budget_usd"] = _coerce_budget(merged.get("monthly_budget_usd"))
+        return merged
 
     async def update_eval_settings(self, org_id: str, updates: dict) -> dict:
         from app.models.organization import Organization

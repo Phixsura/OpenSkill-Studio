@@ -614,7 +614,7 @@ class LearningComposerService:
     # ── Draft management ──────────────────────────────────
 
     async def get_draft(
-        self, draft_id: str, org_id: str, for_update: bool = False
+        self, draft_id: str, org_id: str, for_update: bool = False, only_user_id: str | None = None
     ) -> SolutionDraft:
         # for_update: row-lock + refresh to committed state for read-modify-write
         # callers (update_draft, R85). Without it, two concurrent PATCHes each
@@ -633,16 +633,32 @@ class LearningComposerService:
             draft = await self.db.get(SolutionDraft, draft_id)
         if draft is None or draft.org_id != org_id:
             raise AppError("DRAFT_NOT_FOUND", "Solution draft not found", 404)
+        # R90a: a draft is composed from a confidential requirement profile
+        # (raw_request = a client's private commercial ask) and carries its
+        # derived constraints. Reads are org-member-open, but a non-instructor
+        # must only see their own drafts — otherwise this is a side door around
+        # the profile owner gate (same class as R89e). Uniform 404 keeps ids
+        # opaque. Internal callers (confirm/update) pass None.
+        if only_user_id is not None and draft.created_by != only_user_id:
+            raise AppError("DRAFT_NOT_FOUND", "Solution draft not found", 404)
         return draft
 
     async def list_drafts(
-        self, org_id: str, draft_type: str | None = None, page: int = 1, per_page: int = 20
+        self,
+        org_id: str,
+        draft_type: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+        only_user_id: str | None = None,
     ) -> tuple[list[SolutionDraft], int]:
         from sqlalchemy import func
 
         base = select(SolutionDraft).where(SolutionDraft.org_id == org_id)
         if draft_type:
             base = base.where(SolutionDraft.draft_type == draft_type)
+        # R90a: non-instructors see only their own drafts (see get_draft).
+        if only_user_id is not None:
+            base = base.where(SolutionDraft.created_by == only_user_id)
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
         result = await self.db.execute(

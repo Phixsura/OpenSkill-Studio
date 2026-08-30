@@ -3,7 +3,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,9 +29,14 @@ class CertificateResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    def __init__(self, **kwargs: object) -> None:
-        super().__init__(**kwargs)
-        # Spread data dict fields to top level
+    @model_validator(mode="after")
+    def _flatten_data(self) -> "CertificateResponse":
+        # R90c: the endpoint builds this via model_validate(orm_obj), which does
+        # NOT call __init__ — so the previous __init__-based flattening silently
+        # left user_name/path_name/org_name/skills_completed as None for every
+        # verified certificate (the public page reads these top-level fields).
+        # A model_validator(after) runs on BOTH model_validate and direct
+        # construction, so the flattening always applies.
         data = self.data or {}
         if self.user_name is None:
             self.user_name = data.get("user_name")
@@ -41,6 +46,7 @@ class CertificateResponse(BaseModel):
             self.org_name = data.get("org_name")
         if self.skills_completed is None:
             self.skills_completed = data.get("skills_completed")
+        return self
 
 
 @router.get(

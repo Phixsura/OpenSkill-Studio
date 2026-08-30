@@ -897,3 +897,89 @@ async def test_match_run_and_history_respect_profile_owner(c):
     # student cannot GET the instructor's run; instructor can
     assert (await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=sh)).status_code == 404
     assert (await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=ih)).status_code == 200
+
+
+# ── R90a: composer drafts must not leak a peer's confidential profile ──
+
+
+@pytest.mark.asyncio
+async def test_composer_drafts_respect_owner(c):
+    """R90a: a solution draft is composed (WRITE_ROLES only) from a confidential
+    requirement profile and carries its derived constraints. list/get drafts
+    were org-member-open, so a student could read an instructor's draft — a
+    side door around the R89e profile owner gate. Now non-instructors see only
+    their own drafts; instructors see all. Reverting the only_user_id gate fails
+    this."""
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+    sh = await _member(c, ih, oid, "student")
+
+    prof = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/requirement-profiles",
+            json={"raw_request": "CONFIDENTIAL client ask", "context_type": "production"},
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{prof}/confirm", json={}, headers=ih)
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/drafts/production-solution",
+            json={"profile_id": prof},
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+
+    # student: list excludes it, get 404s
+    s_list = await c.get(f"/api/v1/orgs/{oid}/drafts", headers=sh)
+    assert s_list.status_code == 200
+    assert all(d["id"] != did for d in s_list.json()["data"])
+    assert (await c.get(f"/api/v1/orgs/{oid}/drafts/{did}", headers=sh)).status_code == 404
+
+    # instructor: sees it
+    i_list = await c.get(f"/api/v1/orgs/{oid}/drafts", headers=ih)
+    assert any(d["id"] == did for d in i_list.json()["data"])
+    assert (await c.get(f"/api/v1/orgs/{oid}/drafts/{did}", headers=ih)).status_code == 200
+
+
+# ── R90b: generic org-settings write must not poison typed namespaces ──
+
+
+@pytest.mark.asyncio
+async def test_org_settings_reject_reserved_namespace(c):
+    """R90b: PUT /settings shallow-merged an arbitrary dict into org.settings.
+    Writing ai_evaluation with a wrong-typed value (monthly_budget_usd:'abc')
+    persisted and then 500'd every eval usage/settings read. The generic
+    endpoint must reject reserved, separately-typed namespaces; the dedicated
+    typed endpoint still works. Reverting the guard fails this."""
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+
+    # reserved namespace rejected 422
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/settings",
+        json={"settings": {"ai_evaluation": {"enabled": True, "monthly_budget_usd": "abc"}}},
+        headers=ih,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "RESERVED_SETTINGS_KEY"
+
+    # eval reads stay healthy (not poisoned)
+    assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/usage", headers=ih)).status_code == 200
+    assert (await c.get(f"/api/v1/orgs/{oid}/settings/evaluation", headers=ih)).status_code == 200
+
+    # a non-reserved setting still writes
+    assert (
+        await c.put(
+            f"/api/v1/orgs/{oid}/settings", json={"settings": {"theme": "dark"}}, headers=ih
+        )
+    ).status_code == 200
+
+    # the typed eval endpoint validates + persists
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={"enabled": True, "monthly_budget_usd": 500},
+        headers=ih,
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["monthly_budget_usd"] == 500

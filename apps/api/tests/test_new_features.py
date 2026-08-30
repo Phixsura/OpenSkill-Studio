@@ -421,6 +421,13 @@ async def test_certificate_public_verification(c):
     assert r2.status_code == 200
     d = r2.json()["data"]
     assert d["certificate_number"] == cert_number
+    # R90c: the endpoint builds the response via model_validate (bypasses
+    # __init__), so the top-level flattened fields the public page reads must be
+    # populated by the model_validator, not left None. Reverting to the
+    # __init__-only flatten makes these assertions fail.
+    assert d["user_name"] == "Tester"
+    assert d["path_name"] == "Verify Path"
+    assert d["org_name"] == "TestOrg"
 
 
 @pytest.mark.asyncio

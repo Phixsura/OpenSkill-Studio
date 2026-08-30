@@ -90,9 +90,14 @@ async def list_drafts(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = LearningComposerService(db)
-    drafts, total = await svc.list_drafts(org_id, draft_type=draft_type, page=page, per_page=per_page)
+    # R90a: drafts derive from confidential requirement profiles — a
+    # non-instructor sees only their own (mirrors the R89e profile/match gate).
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    drafts, total = await svc.list_drafts(
+        org_id, draft_type=draft_type, page=page, per_page=per_page, only_user_id=only_user_id
+    )
     return ListResponse(
         data=[DraftResponse.model_validate(d) for d in drafts],
         meta=PaginationMeta(
@@ -112,9 +117,10 @@ async def get_draft(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = LearningComposerService(db)
-    draft = await svc.get_draft(draft_id, org_id)
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    draft = await svc.get_draft(draft_id, org_id, only_user_id=only_user_id)
     return DataResponse(data=DraftResponse.model_validate(draft))
 
 
