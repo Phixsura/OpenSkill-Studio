@@ -793,3 +793,86 @@ async def test_shared_with_me_does_not_leak_moderation_fields(c):
     # …but none of the owner-org internal fields are present.
     for leaked in ("rejection_reason", "review_status", "owner_org_id", "created_by"):
         assert leaked not in item, f"{leaked} leaked cross-tenant: {item.get(leaked)!r}"
+
+
+# ── R92i: cross-org sharing wired end-to-end (schema setter + install grant) ──
+
+
+@pytest.mark.asyncio
+async def test_sharing_enabled_settable_and_not_a_card_field(c):
+    """R92i: sharing_enabled is exposed on the pack write schemas so an owner can
+    actually enable sharing (previously no API setter → share_pack was dead).
+    It is NOT a public-registry card field, so toggling it on an APPROVED pack
+    must not void approval. Reverting the schema field makes the PUT a no-op."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid)  # ends approved + public
+
+    # toggle sharing on — persists, and approval survives (not a card field)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/packs/{pid}", json={"sharing_enabled": True}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["sharing_enabled"] is True
+
+    got = (await c.get(f"/api/v1/orgs/{oid}/packs/{pid}", headers=h)).json()["data"]
+    assert got["sharing_enabled"] is True
+    assert got["review_status"] == "approved"  # sharing toggle did NOT void approval
+    assert got["visibility"] == "public"
+
+
+@pytest.mark.asyncio
+async def test_share_then_install_end_to_end(c):
+    """R92i: the full previously-impossible path — owner enables sharing, shares a
+    PRIVATE pack with org B, B installs it; a third org C with no grant is 404;
+    revoking the share removes B's install access. Reverting the install-gate
+    PackShare lookup makes B's install 404 (feature dead)."""
+    ha, _ = await _auth(c)
+    oid_a = await _org(c, ha)
+    hb, _ = await _auth(c)
+    oid_b = await _org(c, hb)
+    hc, _ = await _auth(c)
+    oid_c = await _org(c, hc)
+
+    # A: pack + skill + release, enable sharing, make it PRIVATE
+    pid = (await c.post(f"/api/v1/orgs/{oid_a}/packs", json={"name": "Share E2E"}, headers=ha)).json()["data"]["id"]
+    sid = await _skill(c, ha, oid_a, "Share Skill")
+    await c.post(f"/api/v1/orgs/{oid_a}/packs/{pid}/skills", json={"skill_id": sid}, headers=ha)
+    await c.post(f"/api/v1/orgs/{oid_a}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=ha)
+    r = await c.put(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}",
+        json={"sharing_enabled": True, "visibility": "private"},
+        headers=ha,
+    )
+    assert r.status_code == 200, r.text
+
+    # share A→B works now (was always 422 SHARING_DISABLED before R92i)
+    r = await c.post(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}/share", json={"target_org_id": oid_b}, headers=ha
+    )
+    assert r.status_code == 201, r.text
+
+    # B sees it and can install it
+    shared = (await c.get(f"/api/v1/orgs/{oid_b}/shared-with-me", headers=hb)).json()["data"]
+    assert any(p["id"] == pid for p in shared)
+    r = await c.post(
+        f"/api/v1/orgs/{oid_b}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=hb
+    )
+    assert r.status_code == 201, r.text
+
+    # C, with no grant, cannot install (uniform 404)
+    r = await c.post(
+        f"/api/v1/orgs/{oid_c}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=hc
+    )
+    assert r.status_code == 404, r.text
+
+    # revoke → a fresh grantee org can no longer install
+    assert (
+        await c.delete(f"/api/v1/orgs/{oid_a}/packs/{pid}/share/{oid_b}", headers=ha)
+    ).status_code == 204
+    hd_, _ = await _auth(c)
+    oid_d = await _org(c, hd_)
+    r = await c.post(
+        f"/api/v1/orgs/{oid_d}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=hd_
+    )
+    assert r.status_code == 404, r.text

@@ -77,9 +77,24 @@ class InstallationService:
         if pack.status != PackStatus.PUBLISHED:
             raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
-        # Visibility check
+        # Visibility check. R92i: a PRIVATE pack owned by another org is normally
+        # invisible (404), but the cross-org sharing feature lets the owner grant
+        # a specific target org access via a PackShare row. Honor that grant here
+        # so a shared pack is installable ("anyone who can see it can install it"
+        # — the same grant that surfaces it in /shared-with-me), and revoking the
+        # share immediately removes install access. Only PRIVATE+non-owner needs
+        # the grant lookup; PUBLIC/UNLISTED and own-org packs are unaffected.
         if pack.visibility == PackVisibility.PRIVATE and pack.owner_org_id != org_id:
-            raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
+            from app.models.pack_share import PackShare
+
+            grant = await self.db.execute(
+                select(PackShare.id).where(
+                    PackShare.pack_id == pack_id,
+                    PackShare.target_org_id == org_id,
+                ).limit(1)
+            )
+            if grant.scalar_one_or_none() is None:
+                raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
         # Get release (latest if no version specified)
         if version:

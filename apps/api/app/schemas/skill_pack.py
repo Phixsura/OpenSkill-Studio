@@ -22,6 +22,9 @@ class CreateSkillPackRequest(BaseModel):
     tool_tags: list[str] = []
     capability_tags: list[str] = []
     provenance: dict | None = None
+    # R92i: opt-in flag for cross-org sharing (share_pack requires it True).
+    # Not a public-registry card field, so toggling it never voids approval.
+    sharing_enabled: bool = False
 
     @field_validator("name")
     @classmethod
@@ -122,6 +125,9 @@ class UpdateSkillPackRequest(BaseModel):
     tool_tags: list[str] | None = None
     capability_tags: list[str] | None = None
     provenance: dict | None = None
+    # R92i: cross-org sharing toggle. Not a _card_fields entry (update_pack), so
+    # enabling/disabling sharing on an approved pack does not void its approval.
+    sharing_enabled: bool | None = None
 
     @field_validator("name")
     @classmethod
