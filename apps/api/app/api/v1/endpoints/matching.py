@@ -148,11 +148,20 @@ async def run_match(
     # Leaving it member-open lets any student run talent rankings over
     # the whole org through this generic surface.
     if body.target_entity_type == "creator":
-        await require_org_member(org_id, user, db, *_WRITE_ROLES)
+        member = await require_org_member(org_id, user, db, *_WRITE_ROLES)
     else:
-        await require_org_member(org_id, user, db)
+        member = await require_org_member(org_id, user, db)
     profile_svc = RequirementProfileService(db)
-    profile = await profile_svc.get_profile(body.requirement_profile_id, org_id)
+    # R89e: a requirement profile carries a confidential raw_request/brief. The
+    # GET/list profile routes hide a peer's profile from non-instructors
+    # (only_user_id), but run_match fetched it with only_user_id=None — so a
+    # student who guessed/enumerated a profile id could run a match against an
+    # instructor's confidential profile (and read its derived constraints in the
+    # explain tree) through this side door. Apply the same owner gate here.
+    only_user_id = None if member.role in _WRITE_ROLES else user.id
+    profile = await profile_svc.get_profile(
+        body.requirement_profile_id, org_id, only_user_id=only_user_id
+    )
     if profile.status != "confirmed":
         raise AppError(
             "PROFILE_NOT_CONFIRMED",
@@ -198,14 +207,22 @@ async def list_match_runs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
+    # R89e: a match run references a requirement profile whose constraints are
+    # confidential to its owner. Instructors+ see all org runs (moderation);
+    # a non-instructor sees only their own — otherwise the history list is a
+    # side door to peers'/instructors' runs (and their creator rankings).
+    own_only = member.role not in _WRITE_ROLES
+    base_filter = [MatchRun.org_id == org_id]
+    if own_only:
+        base_filter.append(MatchRun.created_by == user.id)
     total_r = await db.execute(
-        select(func.count()).select_from(MatchRun).where(MatchRun.org_id == org_id)
+        select(func.count()).select_from(MatchRun).where(*base_filter)
     )
     total = total_r.scalar_one()
     result = await db.execute(
         select(MatchRun)
-        .where(MatchRun.org_id == org_id)
+        .where(*base_filter)
         .order_by(MatchRun.created_at.desc(), MatchRun.id.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
@@ -248,11 +265,14 @@ async def get_match_run(
     run = await db.get(MatchRun, run_id)
     if run is None or run.org_id != org_id:
         raise AppError("MATCH_RUN_NOT_FOUND", "Match run not found", 404)
-    # Same instructor+ gate as run_match: a persisted creator run holds the
-    # full people-ranking (scores, exclusion reasons) — reading history must
-    # not be the student-accessible side door to it. Uniform 404 (not 403)
-    # so run ids stay non-enumerable.
-    if run.target_entity_type == "creator" and member.role not in _WRITE_ROLES:
+    # R89e: a persisted run holds a full ranking derived from a confidential
+    # requirement profile (and, for creator runs, people scores + exclusion
+    # reasons). Reading history must not be a side door around the profile's
+    # owner gate. Instructors+ may read any org run (moderation); a
+    # non-instructor may read only their own. Uniform 404 (not 403) keeps run
+    # ids non-enumerable. (Previously only creator runs were gated, so a
+    # student could read any workflow_pack/skill_pack/template run in the org.)
+    if member.role not in _WRITE_ROLES and run.created_by != user.id:
         raise AppError("MATCH_RUN_NOT_FOUND", "Match run not found", 404)
     results_r = await db.execute(
         select(MatchResult).where(MatchResult.match_run_id == run_id)

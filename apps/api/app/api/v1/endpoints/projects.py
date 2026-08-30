@@ -1064,9 +1064,13 @@ async def download_asset(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await _verify_project_org(svc, project_id, org_id)
+    # R89d: a DRAFT project's assets (e.g. a confidential client brief) must not
+    # leak before publication. list_assets/get_asset use _verify_project_visible
+    # (draft -> 404 for non-instructors); download used org-only _verify_project_org,
+    # so a student could pull the asset's signed URL directly. Gate identically.
+    await _verify_project_visible(svc, project_id, org_id, member)
     asset = await svc.get_asset(asset_id, org_id)
     if asset.project_id != project_id:
         raise HTTPException(status_code=404, detail="Asset not found")

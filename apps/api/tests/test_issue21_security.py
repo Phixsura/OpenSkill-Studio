@@ -793,3 +793,107 @@ async def test_deep_nested_open_dict_fields_rejected(c):
         await c.get(f"/api/v1/orgs/{oid}/provider-connections", headers=h)
     ).status_code == 200
     assert (await c.get(f"/api/v1/orgs/{oid}/provider-offerings", headers=h)).status_code == 200
+
+
+# ── R89d: draft project asset download must honor draft-visibility ──
+
+
+@pytest.mark.asyncio
+async def test_draft_project_asset_download_hidden_from_students(c):
+    """R89d: download_asset used org-only _verify_project_org while list/get use
+    _verify_project_visible, so a student could pull a DRAFT project's asset
+    (e.g. a confidential brief) signed URL directly. It must 404 until publish;
+    the instructor can always download. Reverting the fix makes the student
+    draft download return 200."""
+    # 1x1 png (assets enforce an image content-type)
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000d49444154789c62000100000500010d0a2db40000000049454e44ae426082"
+    )
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+    sh = await _member(c, ih, oid, "student")
+
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Draft Brief Project",
+                "description": "d" * 20,
+                "instructions": "confidential",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+    aid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/assets",
+            files={"file": ("brief.png", png, "image/png")},
+            data={"name": "Secret Brief"},
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+
+    dl = f"/api/v1/orgs/{oid}/projects/{pid}/assets/{aid}/download"
+    # student blocked while draft; instructor allowed
+    assert (await c.get(dl, headers=sh)).status_code == 404
+    assert (await c.get(dl, headers=ih)).status_code == 200
+    # after publish the student can download
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)
+    ).status_code == 200
+    assert (await c.get(dl, headers=sh)).status_code == 200
+
+
+# ── R89e: match run/history must not leak a peer's confidential profile ──
+
+
+@pytest.mark.asyncio
+async def test_match_run_and_history_respect_profile_owner(c):
+    """R89e: run_match fetched the requirement profile with only_user_id=None,
+    and match-run list/get were org-wide (only creator runs were gated). A
+    student could run a match against an instructor's confidential profile and
+    read any run in the org. Now: student match on a peer profile -> 404;
+    history list excludes others' runs; GET a peer's run -> 404. Instructor
+    keeps full access. Reverting any of the three fixes fails this."""
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+    sh = await _member(c, ih, oid, "student")
+
+    prof = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/requirement-profiles",
+            json={"raw_request": "SECRET client ACME", "context_type": "production"},
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{prof}/confirm", json={}, headers=ih)
+
+    # student cannot run a match against the instructor's profile
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/match",
+        json={"requirement_profile_id": prof, "target_entity_type": "workflow_pack", "limit": 5},
+        headers=sh,
+    )
+    assert r.status_code == 404, r.text
+
+    # instructor runs their own match
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/match",
+        json={"requirement_profile_id": prof, "target_entity_type": "workflow_pack", "limit": 5},
+        headers=ih,
+    )
+    assert r.status_code == 200, r.text
+    run_id = r.json()["data"]["id"]
+
+    # student history excludes the instructor's run; instructor sees it
+    s_list = await c.get(f"/api/v1/orgs/{oid}/match-runs", headers=sh)
+    assert s_list.status_code == 200
+    assert all(run["id"] != run_id for run in s_list.json()["data"])
+    i_list = await c.get(f"/api/v1/orgs/{oid}/match-runs", headers=ih)
+    assert any(run["id"] == run_id for run in i_list.json()["data"])
+
+    # student cannot GET the instructor's run; instructor can
+    assert (await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=sh)).status_code == 404
+    assert (await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=ih)).status_code == 200

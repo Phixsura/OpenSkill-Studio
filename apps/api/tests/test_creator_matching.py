@@ -975,10 +975,16 @@ async def test_creator_match_gated_to_instructors(c):
     )
     assert r.status_code == 403, r.text
 
-    # …but non-people targets stay member-open
+    # …but non-people targets stay member-open — for the student's OWN profile.
+    # (R89e: a student may not run a match against a peer/instructor's
+    # confidential profile; the member-open property is about the target type,
+    # not a licence to borrow someone else's profile id.)
+    student_profile_id = await _confirmed_profile(
+        c, h_student, oid, {"required_capabilities": ["image_generation"]}
+    )
     r2 = await c.post(
         f"/api/v1/orgs/{oid}/match",
-        json={"requirement_profile_id": profile_id, "target_entity_type": "skill_pack"},
+        json={"requirement_profile_id": student_profile_id, "target_entity_type": "skill_pack"},
         headers=h_student,
     )
     assert r2.status_code == 200, r2.text
