@@ -2,9 +2,27 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 log = structlog.get_logger()
+
+# Postgres SQLSTATEs produced by client-controllable INPUT (not server faults):
+# a NUL/control char in a text/JSONB write, or a NaN/Infinity float. asyncpg
+# raises these as CharacterNotInRepertoireError / UntranslatableCharacterError /
+# InvalidTextRepresentation, wrapped by SQLAlchemy in DBAPIError — which is a
+# SQLAlchemyError, NOT a ValueError, so the ValueError handler never caught them
+# and every such request 500'd (R73/R86/R87/R88 kept finding these per-endpoint).
+# This is the single global backstop: map them to a clean 422 regardless of which
+# endpoint/column produced them. Per-schema screens remain (defense in depth +
+# better field-level messages), but no unscreened surface can 500 on bad input.
+_INPUT_SQLSTATES = frozenset(
+    {
+        "22021",  # character_not_in_repertoire (NUL byte in UTF-8)
+        "22P05",  # untranslatable_character ( escape materialized)
+        "22P02",  # invalid_text_representation (NaN/Infinity in JSONB)
+    }
+)
 
 
 class AppError(Exception):
@@ -78,6 +96,31 @@ def register_exception_handlers(app: FastAPI) -> None:
             return JSONResponse(
                 status_code=422,
                 content=_error_body("INVALID_VALUE", "Request contains invalid characters or values", request),
+            )
+        raise exc
+
+    @app.exception_handler(DBAPIError)
+    async def dbapi_error_handler(request: Request, exc: DBAPIError):
+        """Global backstop for input-driven Postgres write failures (R88).
+        A NUL/control char or NaN/Infinity in any text/JSONB column raises an
+        asyncpg error wrapped in DBAPIError (a SQLAlchemyError, not ValueError),
+        which every per-endpoint screen kept missing → 500. Map the known
+        input-fault SQLSTATEs to a clean 422; anything else is a genuine server
+        fault and re-raises to the 500 handler."""
+        sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+        if sqlstate in _INPUT_SQLSTATES:
+            log.warning(
+                "db_input_rejected",
+                sqlstate=sqlstate,
+                request_id=getattr(request.state, "request_id", None),
+            )
+            return JSONResponse(
+                status_code=422,
+                content=_error_body(
+                    "INVALID_VALUE",
+                    "Request contains invalid characters or values",
+                    request,
+                ),
             )
         raise exc
 
