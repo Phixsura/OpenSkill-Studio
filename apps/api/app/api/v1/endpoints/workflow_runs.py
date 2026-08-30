@@ -166,7 +166,13 @@ async def list_open_reviews(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    # R90d: the open-review queue exposes each waiting run's step_run_id, gate
+    # instructions and due date. get_run/list_runs scope non-instructors to
+    # their own runs (private prompts/asset refs), and only WRITE_ROLES may
+    # /decide a review — so a student reading the org-wide queue is a pure leak
+    # around the run-read privacy model with no legitimate use. Gate to
+    # WRITE_ROLES, matching the sibling decide_review endpoint.
+    await require_org_member(org_id, user, db, *WRITE_ROLES)
     svc = WorkflowRuntimeService(db)
     reviews = await svc.get_open_reviews(org_id)
     return DataResponse(data=[StepReviewResponse.model_validate(r) for r in reviews])

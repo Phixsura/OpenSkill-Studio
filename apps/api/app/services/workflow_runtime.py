@@ -680,12 +680,18 @@ class WorkflowRuntimeService:
     async def cancel_run(
         self, run_id: str, org_id: str, acting_user_id: str, is_instructor: bool = False
     ) -> WorkflowRun:
-        run = await self.get_run(run_id, org_id)
-        # Only the run's initiator or an instructor+ may cancel it. Without
-        # this any org member could cancel a peer's — or a teacher's —
-        # in-flight run mid-provider-call (griefing + wasted spend). The run
-        # started_by is nullable (SET NULL on user delete): a run whose
-        # owner is gone is instructor-only to cancel.
+        # R90e: scope the lookup for non-instructors to their own runs, so a
+        # peer's (or instructor's) run id resolves to 404 here just as it does
+        # in get_run. Otherwise cancel_run was an existence oracle — 403
+        # RUN_CANCEL_FORBIDDEN for an existing peer run vs 404 for a nonexistent
+        # id — defeating get_run's uniform-404 non-enumerability. Instructors
+        # keep org-wide reach (only_user_id=None).
+        run = await self.get_run(
+            run_id, org_id, only_user_id=None if is_instructor else acting_user_id
+        )
+        # Belt-and-suspenders: the run's initiator or an instructor+ may cancel.
+        # (For a non-instructor the get_run scope already guarantees ownership;
+        # this also covers the started_by-is-NULL orphan case → instructor-only.)
         if not is_instructor and run.started_by != acting_user_id:
             raise AppError(
                 "RUN_CANCEL_FORBIDDEN",

@@ -1694,12 +1694,22 @@ async def test_cancel_run_scoped_to_owner_or_instructor(c):
     assert r.status_code == 201, r.text
     run_id = r.json()["data"]["id"]
 
-    # A peer student cannot cancel someone else's run
+    # A peer student cannot cancel someone else's run. R90e: this must be a
+    # uniform 404 (not 403) — a 403 for an existing peer run vs 404 for a
+    # nonexistent id turned cancel_run into an existence oracle that defeated
+    # get_run's non-enumerability. A nonexistent id also 404s.
     r2 = await c.post(
         f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_other
     )
-    assert r2.status_code == 403, r2.text
-    assert r2.json()["error"]["code"] == "RUN_CANCEL_FORBIDDEN"
+    assert r2.status_code == 404, r2.text
+    assert r2.json()["error"]["code"] == "RUN_NOT_FOUND"
+    r_missing = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs/01MISSINGRUNID0000000000AA/cancel", headers=h_other
+    )
+    assert r_missing.status_code == 404
+    # …and the peer sees the SAME code for a real-but-not-theirs run and a
+    # nonexistent one (no oracle).
+    assert r_missing.json()["error"]["code"] == r2.json()["error"]["code"]
 
     # The owner can
     r3 = await c.post(
@@ -2299,3 +2309,37 @@ async def test_crash_retry_hard_stops_when_recorded_offering_gone(c):
     assert data["status"] == "failed", data["status"]
     step = next(s for s in data["step_runs"] if s["id"] == sr_id)
     assert step["error_code"] == "BINDING_STALE", step
+
+
+@pytest.mark.asyncio
+async def test_open_review_queue_instructor_only(c):
+    """R90d: the open step-review queue exposes each waiting run's step_run_id,
+    gate instructions and due date. get_run/list_runs scope non-instructors to
+    their own runs and only WRITE_ROLES may /decide — so a student reading the
+    org-wide queue is a pure leak. list_open_reviews must be instructor-gated.
+    Reverting to require_org_member (any member) fails this."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    h_student, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h_owner,
+    )
+    install_id = await _install(c, h_owner, oid, _definition(with_review=True))
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "gate"}},
+        headers=h_owner,
+    )
+    run_id = r.json()["data"]["id"]
+    await _wait_run(c, h_owner, oid, run_id, {"waiting_review"})
+
+    # instructor/owner sees the queue
+    r_owner = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h_owner)
+    assert r_owner.status_code == 200
+    assert len(r_owner.json()["data"]) >= 1
+
+    # a student is forbidden from the queue entirely
+    r_student = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h_student)
+    assert r_student.status_code == 403, r_student.text
