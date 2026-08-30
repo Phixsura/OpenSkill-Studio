@@ -109,6 +109,67 @@ async def test_registry_preview_pack_with_template_rubric(c):
     assert tmpls[0]["rubric_criteria_count"] == 2, tmpls[0]
 
 
+@pytest.mark.asyncio
+async def test_registry_preview_tolerates_hostile_manifest_shapes(c):
+    """R87 fix-of-fix on R86e: the preview shaper runs over release manifests
+    that, via the import path, are untrusted JSON. The R86e dict-branch
+    `len(rubric.get("criteria", []))` re-introduced a 500 when criteria was a
+    non-list (int/null), and a non-dict skill/template/category entry would
+    AttributeError. Drive get_pack_preview directly over hostile shapes — it
+    must never raise, and rubric_criteria_count defaults to 0 for unsized
+    shapes."""
+    import uuid as _uuid
+
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.registry import RegistryService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # Create a real pack + release, then overwrite the release manifest with a
+    # hostile shape directly (simulating any producer of a malformed manifest).
+    pid = await _published_public_pack(c, h, oid, pack_name=f"Hostile {_uuid.uuid4().hex[:6]}")
+
+    hostile = {
+        "skills": [
+            {"name": "ok", "exercises": [{"title": "e"}]},
+            "STRING_SKILL",  # non-dict skill
+            {"exercises": "NOT_A_LIST"},  # non-list exercises
+        ],
+        "project_templates": [
+            {"name": "t1", "rubric": {"criteria": 5}},  # criteria non-list (int)
+            {"name": "t2", "rubric": {"criteria": None}},  # criteria None
+            {"name": "t3", "rubric": [{"criterion": "Q", "max_score": 100}]},  # list form
+            "STRING_TEMPLATE",  # non-dict template
+        ],
+        "categories": ["STRING_CAT", {"name": "realcat"}],
+    }
+    import json as _json
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            text("UPDATE skill_pack_releases SET manifest = CAST(:m AS jsonb) WHERE pack_id = :p"),
+            {"m": _json.dumps(hostile), "p": pid},
+        )
+        await db.commit()
+
+    # Anonymous preview must 200, not 500
+    r = await c.get(f"/api/v1/registry/packs/{pid}/preview")
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    # non-dict skill/template/category entries skipped; unsized rubric → 0
+    counts = {t["name"]: t["rubric_criteria_count"] for t in d["templates"]}
+    assert counts.get("t1") == 0, counts  # criteria=int → 0, not a crash
+    assert counts.get("t2") == 0, counts  # criteria=None → 0
+    assert counts.get("t3") == 1, counts  # list form counted
+    # service-level call is also total (no raise)
+    async with AsyncSessionLocal() as db:
+        preview = await RegistryService(db).get_pack_preview(pid)
+        assert isinstance(preview["skills"], list)
+        assert isinstance(preview["categories"], list)
+
+
 # ═══════════════ Pack Reviews (5 tests) ═══════════════
 
 

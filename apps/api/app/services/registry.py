@@ -413,19 +413,28 @@ class RegistryService:
 
         manifest = release.manifest or {}
 
-        # Extract skills
+        # Extract skills. Every entry from the import path is untrusted JSON —
+        # a non-dict skill, or a non-list exercises value, must be skipped, not
+        # crash the anon preview with AttributeError/TypeError (R87 hardening,
+        # same class as the R86e rubric 500).
         raw_skills = manifest.get("skills", [])
         skills = []
         total_exercises = 0
         for s in raw_skills:
-            exercises = s.get("exercises", [])
+            if not isinstance(s, dict):
+                continue
+            exercises = s.get("exercises")
+            if not isinstance(exercises, list):
+                exercises = []
             total_exercises += len(exercises)
             skills.append({
                 "name": s.get("name", ""),
                 "description": s.get("description"),
                 "difficulty": s.get("difficulty"),
                 "exercise_count": len(exercises),
-                "exercises": [{"title": e.get("title", "")} for e in exercises],
+                "exercises": [
+                    {"title": e.get("title", "")} for e in exercises if isinstance(e, dict)
+                ],
                 "prerequisites": s.get("prerequisites", []),
             })
 
@@ -433,17 +442,25 @@ class RegistryService:
         raw_templates = manifest.get("project_templates", [])
         templates = []
         for t in raw_templates:
+            # A template entry from the import path is untrusted JSON — it may
+            # not even be a dict. Skip anything that is not a dict rather than
+            # AttributeError on t.get (R87 fix-of-fix on R86e).
+            if not isinstance(t, dict):
+                continue
             # ProjectTemplate.rubric is a LIST of {criterion, max_score} dicts
             # (models/project.py:425, JSONB list), and the published manifest
             # stores it verbatim (skill_pack.py). Treating it as a dict with a
             # "criteria" key raised AttributeError ('list' has no .get) →
-            # anon-registry preview 500 for ANY pack whose template has a rubric.
-            # Count the list directly; tolerate a legacy/hand-authored dict shape.
+            # anon-registry preview 500 for ANY pack whose template has a rubric
+            # (R86e). Count only when the shape is genuinely sized: a legacy
+            # dict form {criteria: [...]} counts its list, but criteria of a
+            # non-list type (int/None/str via the untrusted import path) must
+            # NOT reach len() — that re-introduced the 500 (R87). Default 0.
             rubric = t.get("rubric")
             if isinstance(rubric, list):
                 criteria_count = len(rubric)
-            elif isinstance(rubric, dict):
-                criteria_count = len(rubric.get("criteria", []))
+            elif isinstance(rubric, dict) and isinstance(rubric.get("criteria"), list):
+                criteria_count = len(rubric["criteria"])
             else:
                 criteria_count = 0
             templates.append({
@@ -452,9 +469,13 @@ class RegistryService:
                 "rubric_criteria_count": criteria_count,
             })
 
-        # Extract categories
+        # Extract categories (skip non-dict entries — untrusted import shape)
         raw_categories = manifest.get("categories", [])
-        categories = [{"name": c.get("name", "")} for c in raw_categories]
+        categories = [
+            {"name": c.get("name", "")}
+            for c in raw_categories
+            if isinstance(c, dict)
+        ]
 
         return {
             "skills": skills,

@@ -659,6 +659,7 @@ async def refresh_tokens(self, old_refresh_token: str) -> TokenPair:
 | 复杂度 | ≥1 大写 + ≥1 数字 | 平衡安全性与用户体验 |
 | 常见密码检查 | 前 10,000 常见密码黑名单 | OWASP 建议 |
 | 存储 | 仅存 hash，原文不落盘不日志 | 标准实践 |
+| bcrypt 72 字节预截断 | hash + verify 均先取前 72 字节 | R87: bcrypt 仅消费前 72 **字节**，bcrypt≥4.1 (本项目 5.0.0) 对超长输入 **抛 ValueError** 而非截断。策略允许 128 **字符**，任一多字节字符都会早于 128 字符越过 72 字节 —— 合规的长密码/emoji 密码会让 register/login/change/reset 崩成 500。hash 与 verify 用相同的 72 字节切片，验证保持一致，不引入认证绕过（前 72 字节内不同的密码仍 401）。|
 
 ### 7.2 密码变更
 
