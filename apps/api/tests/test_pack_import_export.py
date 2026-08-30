@@ -1155,3 +1155,50 @@ async def test_import_valid_pack_installs_cleanly(c):
         headers=h,
     )
     assert r.status_code == 201, r.text
+
+
+# ── R89c: manifest fields overflow install-time columns (VARCHAR(20)/(100)) ──
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_oversized_install_columns(c):
+    """R89c guard: install writes tmpl.project_type (VARCHAR(20)) and category
+    name/slug (VARCHAR(100)) verbatim. Import validated names at 200 and did not
+    check project_type, so an over-long/bogus value imported 201 then 500'd at
+    install (StringDataRightTruncation, 22001). Import must reject at 422.
+    Reverting the import checks fails this."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # template project_type longer than 20 (and not a known type)
+    m1 = copy.deepcopy(VALID_MANIFEST)
+    m1["project_templates"][0]["project_type"] = "X" * 48
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("pt.zip", _make_zip(m1), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+    # category name longer than 100
+    m2 = copy.deepcopy(VALID_MANIFEST)
+    m2["categories"][0]["name"] = "C" * 150
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("cn.zip", _make_zip(m2), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+
+@pytest.mark.asyncio
+async def test_dbapi_string_truncation_maps_to_422():
+    """R89c: SQLSTATE 22001 (value too long) is now in the global input-fault
+    backstop set, so any un-screened over-length write returns 422 not 500."""
+    from app.exceptions import _INPUT_SQLSTATES
+
+    assert "22001" in _INPUT_SQLSTATES

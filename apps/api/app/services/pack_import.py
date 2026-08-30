@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
 from app.models.skill_pack import PackStatus, PackVisibility, SkillPack, SkillPackRelease
+from app.schemas.project import VALID_PROJECT_TYPES
 from app.services.skill_pack import SkillPackService
 
 log = structlog.get_logger()
@@ -341,6 +342,18 @@ class PackImportService:
                     f"Template '{t_lid}' name must be a non-empty string (max 200 chars)",
                     422,
                 )
+            # R89c: project_type flows verbatim into ProjectTemplate.project_type
+            # which is VARCHAR(20). Import accepted any string, so a >20-char
+            # value (or a bogus one) 500'd at install (StringDataRightTruncation).
+            # Match the API schema: only the known project types are allowed.
+            _t_ptype = t.get("project_type", "general")
+            if _t_ptype is not None and _t_ptype not in VALID_PROJECT_TYPES:
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Template '{t_lid}' project_type must be one of: "
+                    f"{', '.join(sorted(VALID_PROJECT_TYPES))}",
+                    422,
+                )
 
         # 8c. pack.metadata fields flow verbatim into create_pack kwargs and
         # then into typed columns/JSONB — type-gate them like the API schemas
@@ -460,12 +473,16 @@ class PackImportService:
                     "Every category logical_id must be a non-empty string (max 200 chars)",
                     422,
                 )
+            # R89c: SkillCategory.name and .slug are VARCHAR(100), not 200 —
+            # install (installation.py) writes cat_def["name"]/["slug"] verbatim,
+            # so a 100<len<=200 value passed import then 500'd at install
+            # (StringDataRightTruncation). Cap at the real column bound.
             for _field in ("name", "slug"):
                 _v = cat.get(_field)
-                if not isinstance(_v, str) or not _v or len(_v) > 200:
+                if not isinstance(_v, str) or not _v or len(_v) > 100:
                     raise AppError(
                         "INVALID_MANIFEST",
-                        f"Category '{c_lid}' {_field} must be a non-empty string (max 200 chars)",
+                        f"Category '{c_lid}' {_field} must be a non-empty string (max 100 chars)",
                         422,
                     )
             category_lids.add(c_lid)

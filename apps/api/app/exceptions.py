@@ -21,6 +21,7 @@ _INPUT_SQLSTATES = frozenset(
         "22021",  # character_not_in_repertoire (NUL byte in UTF-8)
         "22P05",  # untranslatable_character ( escape materialized)
         "22P02",  # invalid_text_representation (NaN/Infinity in JSONB)
+        "22001",  # string_data_right_truncation (value too long for VARCHAR(N))
     }
 )
 
