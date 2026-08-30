@@ -258,6 +258,34 @@ def test_definition_size_cap():
     assert errors[0]["code"] == "WF_TOO_LARGE"
 
 
+def test_definition_size_cap_counts_pg_jsonb_number_width():
+    """R92d: the DB stores definition as JSONB with a CHECK on
+    octet_length(definition::text). Postgres normalizes numbers, so a float with
+    a large-magnitude exponent (1e-300 → ~302-char decimal) is far wider on disk
+    than in Python json.dumps. A payload small under json.dumps but huge under
+    jsonb::text passed the byte cap and then blew the DB CHECK
+    (CheckViolationError / 23514 — not backstopped) → 500. The validator must
+    measure at the DB's worst-case width and reject 422. Reverting the
+    _pg_jsonb_text_len gate makes this pass validation (result is not None)."""
+    import json as _json
+
+    d = _minimal_valid()
+    # ~1100 tiny-exponent floats: ~9 KB under json.dumps, ~330 KB as jsonb text.
+    d["metadata"] = {"ui": {"z": [1e-300] * 1100}}
+    app_bytes = len(_json.dumps(d, ensure_ascii=False).encode())
+    assert app_bytes < 256 * 1024, "precondition: small under python json.dumps"
+    result, errors = validate_definition(d)
+    assert result is None
+    assert errors[0]["code"] == "WF_TOO_LARGE"
+    assert "stored" in errors[0]["message"]
+
+    # A handful of such floats is fine — the gate is size, not the value itself.
+    d2 = _minimal_valid()
+    d2["metadata"] = {"ui": {"z": [1e-300] * 10}}
+    result2, errors2 = validate_definition(d2)
+    assert result2 is not None, errors2
+
+
 def test_step_config_size_cap():
     d = _minimal_valid()
     d["edges"] = []

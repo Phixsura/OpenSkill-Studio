@@ -105,6 +105,55 @@ MAX_OUTPUTS = 20
 MAX_DEFINITION_DEPTH = 64
 
 
+def _pg_jsonb_text_len(raw) -> int:
+    """Estimate octet_length(value::jsonb::text) — the size the DB CHECK sees.
+
+    R92d: Postgres jsonb normalizes numbers when rendering to text, expanding a
+    float with a large-magnitude exponent (1e-300, 1e300) to its full decimal
+    form (~300+ chars), so a payload can be small under Python json.dumps yet
+    exceed the column's octet_length CHECK. Walk the structure counting each
+    number at its worst-case jsonb::text width; structural characters and
+    strings match json.dumps closely enough for a conservative bound.
+    """
+    import json as _json
+    from decimal import Decimal
+
+    def num_len(v) -> int:
+        if isinstance(v, bool):
+            return 4 if v else 5
+        if isinstance(v, int):
+            return len(str(v))
+        # float: jsonb emits the shortest exact decimal, which for tiny/huge
+        # magnitudes is the full non-exponent expansion. format(Decimal, 'f')
+        # reproduces that; finite-ness is already enforced upstream.
+        try:
+            return len(format(Decimal(repr(v)), "f"))
+        except Exception:
+            return len(repr(v))
+
+    total = 0
+    stack = [raw]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, (bool, int, float)):
+            total += num_len(cur)
+        elif isinstance(cur, str):
+            total += len(_json.dumps(cur, ensure_ascii=False).encode())
+        elif cur is None:
+            total += 4  # "null"
+        elif isinstance(cur, dict):
+            total += 2 + max(0, len(cur) - 1)
+            for k, v in cur.items():
+                total += len(_json.dumps(str(k), ensure_ascii=False).encode()) + 1
+                stack.append(v)
+        elif isinstance(cur, list):
+            total += 2 + max(0, len(cur) - 1)
+            stack.extend(cur)
+        else:
+            total += len(str(cur))
+    return total
+
+
 def _max_depth(v) -> int:
     """Iterative max nesting depth (recursion-free — that's the point)."""
     best = 1
@@ -361,6 +410,24 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                 "WF_TOO_LARGE",
                 "",
                 f"Definition is {raw_bytes} bytes; max {MAX_DEFINITION_BYTES}",
+            )
+        ]
+
+    # R92d: the DB stores definition as JSONB with a CHECK on octet_length(
+    # definition::text). Postgres normalizes numbers when rendering jsonb::text,
+    # so a float with a large-magnitude exponent (e.g. 1e-300 → a ~302-char full
+    # decimal expansion) is far wider on disk than in the Python json.dumps used
+    # above. A payload that passes the byte cap here could therefore still blow
+    # the DB CHECK (CheckViolationError / SQLSTATE 23514 — not an input-fault the
+    # backstop maps) → unhandled 500. Re-measure with each number widened to its
+    # worst-case jsonb::text form and gate on the SAME limit the column enforces.
+    pg_bytes = _pg_jsonb_text_len(raw)
+    if pg_bytes > MAX_DEFINITION_BYTES:
+        return None, [
+            _err(
+                "WF_TOO_LARGE",
+                "",
+                f"Definition is {pg_bytes} bytes once stored; max {MAX_DEFINITION_BYTES}",
             )
         ]
 
