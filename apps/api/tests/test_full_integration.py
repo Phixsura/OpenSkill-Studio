@@ -378,13 +378,20 @@ async def test_skills_full_flow(c):
 
     # Grading
     await c.get(f"/api/v1/orgs/{oid}/grading/pending", headers=h)
-    # Grade text answer (submit first)
+    # Grade text answer — R88g forbids self-grading, so a separate student
+    # submits the attempt and the owner grades it.
+    sh, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h,
+    )
     r8 = await c.post(
         f"/api/v1/orgs/{oid}/exercises/{eid2}/attempts",
         json={
             "answer": {"text": "My answer"},
         },
-        headers=h,
+        headers=sh,
     )
     attempt_id = r8.json()["data"]["id"]
     r9 = await c.post(
@@ -3290,11 +3297,18 @@ async def test_grading_queue_routing_and_scoping(c):
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
 
+    # R88g forbids self-grading — attempts come from a separate student
+    sh, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h,
+    )
     mcq_att = (
         await c.post(
             f"/api/v1/orgs/{oid}/exercises/{mcq}/attempts",
             json={"answer": {"selected": ["a"]}},
-            headers=h,
+            headers=sh,
         )
     ).json()["data"]
     assert mcq_att["graded_by"] == "auto"
@@ -3302,7 +3316,7 @@ async def test_grading_queue_routing_and_scoping(c):
         await c.post(
             f"/api/v1/orgs/{oid}/exercises/{txt}/attempts",
             json={"answer": {"text": "ans"}},
-            headers=h,
+            headers=sh,
         )
     ).json()["data"]
     assert txt_att["graded_by"] is None
@@ -5161,3 +5175,157 @@ async def test_draft_skill_exercises_hidden_from_students(c):
     r = await c.get(f"/api/v1/orgs/{oid}/exercises/{ex}", headers=hs)
     assert r.status_code == 200
     assert "correct" not in r.json()["data"]["config"]
+
+
+# ── R88g/R88h: self-grading gate + MCQ dict-correct rejection ──
+
+
+@pytest.mark.asyncio
+async def test_self_grading_forbidden(c):
+    """R88g guard: an instructor who submitted their OWN attempt must not be
+    able to grade it (self-grade minted completion + points + badge with no
+    second party — same class as the R86 self-review gate). A different
+    instructor CAN grade it. Reverting the grader check fails this."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "SG"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "SelfGrade Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Text",
+                "description": "d",
+                "type": "text_answer",
+                "config": {},
+                "max_score": 100,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    att = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+            json={"answer": {"text": "my own work"}},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    # Self-grade -> 403 SELF_GRADING_FORBIDDEN
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/grading/attempts/{att}",
+        json={"score": 100, "feedback": "perfect (self)"},
+        headers=h,
+    )
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "SELF_GRADING_FORBIDDEN"
+
+    # A second instructor grades it fine
+    h2, other = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": other["id"], "role": "instructor"},
+        headers=h,
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/grading/attempts/{att}",
+        json={"score": 80, "feedback": "ok"},
+        headers=h2,
+    )
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_mcq_dict_correct_rejected_and_blank_never_correct(c):
+    """R88h guard: `correct` of dict type passed the old None/[]/"" check but
+    coerces to [] in the grader, so a BLANK answer graded as full marks.
+    Create and update must both reject non-list/non-scalar `correct`; the
+    grader must never mark an empty correct-set as correct. Reverting either
+    the schema check or the update gate fails this."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "MC"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "MCQ Dict Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    # create with dict correct -> 422 (both non-empty and empty dict)
+    for bad_correct in ({"a": 1}, {}, True):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Bad MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"choices": ["A", "B"], "correct": bad_correct},
+                "max_score": 100,
+            },
+            headers=h,
+        )
+        assert r.status_code == 422, f"correct={bad_correct!r} accepted: {r.text}"
+
+    # valid create, then update to dict correct -> 422
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Good MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"choices": ["A", "B"], "correct": ["A"]},
+                "max_score": 100,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/exercises/{ex}",
+        json={"config": {"choices": ["A", "B"], "correct": {"a": 1}}},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # normal grading still works: correct answer full marks, wrong answer 0
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
+    sh, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h,
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": ["A"]}},
+        headers=sh,
+    )
+    assert r.json()["data"]["is_correct"] is True
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": []}},
+        headers=sh,
+    )
+    assert r.json()["data"]["is_correct"] is False

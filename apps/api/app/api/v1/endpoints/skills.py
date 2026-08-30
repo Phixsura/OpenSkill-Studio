@@ -565,7 +565,7 @@ async def grade_attempt(
     svc = SkillService(db)
     attempt = await svc.get_attempt(attempt_id)
     _verify_org(attempt, org_id, "Attempt")
-    attempt = await svc.grade_attempt(attempt_id, body.score, body.feedback)
+    attempt = await svc.grade_attempt(attempt_id, body.score, body.feedback, grader_id=user.id)
     await db.commit()
     return DataResponse(data=AttemptResponse.model_validate(attempt))
 

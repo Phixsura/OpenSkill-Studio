@@ -339,13 +339,26 @@ class CreateExerciseRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mcq_has_correct(self):
-        # An MCQ without a non-empty `correct` list auto-grades every blank
-        # answer as full marks ([] == [] in the grader) — completing skills
-        # and minting badges for nothing.
+        # An MCQ without a usable `correct` auto-grades every blank answer as
+        # full marks ([] == [] in the grader) — completing skills and minting
+        # badges for nothing. R88h: a dict (e.g. {} or {"a":1}) passed the old
+        # None/[]/"" check but coerces to [] in the grader — reject any type
+        # the grader can't use (only a non-empty list or a scalar counts).
         if self.type == "multiple_choice":
             correct = self.config.get("correct")
-            if correct is None or correct == [] or correct == "":
-                raise ValueError("multiple_choice config must include a non-empty 'correct'")
+            if isinstance(correct, list):
+                usable = len(correct) > 0
+            elif isinstance(correct, bool):
+                usable = False
+            elif isinstance(correct, (str, int, float)):
+                usable = correct != ""
+            else:
+                usable = False
+            if not usable:
+                raise ValueError(
+                    "multiple_choice config must include a non-empty 'correct' "
+                    "(a list of choices or a single choice value)"
+                )
         return self
 
 
