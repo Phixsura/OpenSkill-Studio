@@ -272,9 +272,25 @@ class ConvertBriefToProjectRequest(BaseModel):
             raise ValueError("Rubric must have at least one criterion")
         if len(v) > 20:
             raise ValueError("Rubric must have at most 20 criteria")
+        # R92b: convert_to_project sums each item's max_score into the project's
+        # max_score INTEGER column. Without a type+range gate here, a string
+        # max_score raised `int + str` TypeError, and a huge value overflowed
+        # int32 at the INSERT (DataError) — both unhandled 500s. Mirror the
+        # CreateProjectRequest rubric gate: criterion a bounded str, max_score a
+        # non-negative number within the column range, and the SUM in range too.
+        total = 0
         for item in v:
             if not isinstance(item, dict) or "criterion" not in item or "max_score" not in item:
                 raise ValueError("Each rubric item must have 'criterion' and 'max_score'")
+            if not isinstance(item["criterion"], str) or not (1 <= len(item["criterion"]) <= 200):
+                raise ValueError("Criterion name must be a string of 1-200 chars")
+            ms = item["max_score"]
+            if isinstance(ms, bool) or not isinstance(ms, (int, float)) or not (0 <= ms <= 10000):
+                raise ValueError("Criterion max_score must be a number between 0 and 10000")
+            total += ms
+        # Project.max_score is a 32-bit INTEGER; the derived sum must fit.
+        if total > 1_000_000:
+            raise ValueError("Sum of criterion max_scores must not exceed 1,000,000")
         return v
 
     @field_validator("deadline", "late_deadline")

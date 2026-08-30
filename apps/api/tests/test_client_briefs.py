@@ -436,3 +436,42 @@ async def test_cannot_accept_or_reject_own_application(c):
         headers=h,
     )
     assert r.status_code == 200, r.text
+
+
+# ── R92b: convert rubric max_score must be a bounded number (no 500) ──
+
+
+@pytest.mark.asyncio
+async def test_convert_rubric_bad_max_score_is_422_not_500(c):
+    """R92b: convert_to_project sums rubric max_score into the project's INTEGER
+    max_score column. A string max_score raised `int + str` TypeError, and a
+    huge value overflowed int32 at the INSERT (DataError) — both unhandled 500s.
+    The convert rubric validator must reject them 422. Reverting the gate fails."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    async def _convert(rubric):
+        bid = (
+            await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)
+        ).json()["data"]["id"]
+        return await c.post(
+            f"/api/v1/orgs/{oid}/briefs/{bid}/convert", json={"rubric": rubric}, headers=h
+        )
+
+    # string max_score -> 422 (was: int+str TypeError 500)
+    r = await _convert([{"criterion": "Quality", "max_score": "lots"}])
+    assert r.status_code == 422, r.text
+    # int32-overflowing max_score -> 422 (was: asyncpg DataError 500)
+    r = await _convert([{"criterion": "Quality", "max_score": 99999999999}])
+    assert r.status_code == 422, r.text
+    # sum across items overflowing the project column -> 422
+    r = await _convert(
+        [{"criterion": f"C{i}", "max_score": 9000} for i in range(20)]
+        + [{"criterion": "extra", "max_score": 9000}]
+    )
+    assert r.status_code == 422, r.text  # 21 items also trips the >20 cap; still 422
+
+    # a normal rubric still converts
+    r = await _convert([{"criterion": "Quality", "max_score": 100}])
+    assert r.status_code == 201, r.text
+    assert r.json()["data"]["max_score"] == 100
