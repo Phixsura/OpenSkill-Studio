@@ -215,3 +215,44 @@ def test_slug_generation():
 
     assert PortfolioService._generate_slug("AI Chatbot v2") == "ai-chatbot-v2"
     assert len(PortfolioService._generate_slug("AB")) >= 3
+
+
+def test_profile_and_item_reject_control_chars():
+    """R87: profile (headline/bio/location + social_links) and portfolio-item
+    (title/description + tags) free-text/JSONB fields write to Postgres. A NUL
+    (a valid-JSON \\u0000 escape) crashed the write with asyncpg 22P05 →
+    DBAPIError (not ValueError) → unhandled 500. The schemas now screen NUL /
+    control chars → clean 422 (ValidationError)."""
+    from pydantic import ValidationError
+
+    from app.schemas.portfolio import (
+        CreatePortfolioItemRequest,
+        UpdatePortfolioItemRequest,
+        UpdateProfileRequest,
+    )
+
+    nul = "\x00"
+    # profile string fields
+    for field in ("headline", "bio", "location"):
+        with pytest.raises(ValidationError):
+            UpdateProfileRequest(**{field: "x" + nul})
+    # profile JSONB (social_links) — NUL in a value
+    with pytest.raises(ValidationError):
+        UpdateProfileRequest(social_links={"tw": "https://x" + nul})
+    # item create: title + description + tags
+    with pytest.raises(ValidationError):
+        CreatePortfolioItemRequest(title="Good" + nul)
+    with pytest.raises(ValidationError):
+        CreatePortfolioItemRequest(title="Good Title", description="d" + nul)
+    with pytest.raises(ValidationError):
+        CreatePortfolioItemRequest(title="Good Title", tags=["ok" + nul])
+    # item update: same fields
+    with pytest.raises(ValidationError):
+        UpdatePortfolioItemRequest(title="t" + nul)
+    with pytest.raises(ValidationError):
+        UpdatePortfolioItemRequest(tags=["a" + nul])
+    # control: clean values validate fine
+    ok = CreatePortfolioItemRequest(title="Clean Title", description="clean", tags=["python", "ai"])
+    assert ok.title == "Clean Title"
+    prof = UpdateProfileRequest(headline="Clean", bio="clean bio", location="Earth")
+    assert prof.headline == "Clean"

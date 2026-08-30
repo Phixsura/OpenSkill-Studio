@@ -1,7 +1,26 @@
 import re
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
+
+from app.schemas.base import reject_ctrl_json, reject_ctrl_str
+
+# R87: profile/item free-text fields (headline/bio/location/title/description)
+# write to Postgres text columns and tags/social_links to JSONB. A NUL/control
+# char (a valid-JSON backslash-u0000 escape) crashes the write with asyncpg
+# 22P05 -> DBAPIError (a SQLAlchemyError, NOT ValueError, so the ValueError
+# handler never fires) -> unhandled 500. Every field reaching the DB must screen.
+
+
+def _screen_ctrl_fields(obj, str_fields: tuple[str, ...], json_fields: tuple[str, ...] = ()):
+    """Reject NUL/control chars in the named string fields and any string
+    nested in the named dict/list (JSONB) fields (R87). Raises ValueError so
+    pydantic surfaces a clean 422 instead of a DB-write 500."""
+    for name in str_fields:
+        reject_ctrl_str(getattr(obj, name, None), name)
+    for name in json_fields:
+        reject_ctrl_json(getattr(obj, name, None), name)
+    return obj
 
 RESERVED_USERNAMES = frozenset(
     {
@@ -109,6 +128,12 @@ class UpdateProfileRequest(BaseModel):
                     raise ValueError(f"Social link '{key}' must be a valid http/https URL")
         return v
 
+    @model_validator(mode="after")
+    def _screen_ctrl(self):
+        return _screen_ctrl_fields(
+            self, ("headline", "bio", "location"), ("social_links",)
+        )
+
 
 class UsernameRequest(BaseModel):
     username: str
@@ -212,6 +237,10 @@ class CreatePortfolioItemRequest(BaseModel):
             raise ValueError("visibility must be one of: public, unlisted, private")
         return v
 
+    @model_validator(mode="after")
+    def _screen_ctrl(self):
+        return _screen_ctrl_fields(self, ("title", "description"), ("tags",))
+
 
 class UpdatePortfolioItemRequest(BaseModel):
     title: str | None = None
@@ -267,6 +296,10 @@ class UpdatePortfolioItemRequest(BaseModel):
         if v is not None and v not in {"public", "unlisted", "private"}:
             raise ValueError("visibility must be one of: public, unlisted, private")
         return v
+
+    @model_validator(mode="after")
+    def _screen_ctrl(self):
+        return _screen_ctrl_fields(self, ("title", "description"), ("tags",))
 
 
 class PortfolioItemResponse(BaseModel):
