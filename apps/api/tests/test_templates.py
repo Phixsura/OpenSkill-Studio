@@ -720,6 +720,19 @@ def test_peer_assessment_schema():
         SubmitAssessmentRequest(score=-1)
     with pytest.raises(ValidationError):
         SubmitAssessmentRequest(score=50, score_breakdown=[{"no_criterion": True}])
+    # R87: feedback / score_breakdown flow into a text + JSONB column. A NUL in
+    # feedback (22P05), or a NUL / non-finite float in score_breakdown (22P05 /
+    # 22P02), crashed the write → 500. They must be rejected at the schema.
+    with pytest.raises(ValidationError):
+        SubmitAssessmentRequest(score=50, feedback="bad\x00null")
+    with pytest.raises(ValidationError):
+        SubmitAssessmentRequest(
+            score=50, score_breakdown=[{"criterion": "Q", "score": 80, "note": "x\x00y"}]
+        )
+    with pytest.raises(ValidationError):
+        SubmitAssessmentRequest(
+            score=50, score_breakdown=[{"criterion": "Q", "score": float("inf")}]
+        )
 
 
 def test_peer_assessment_response_hides_reviewer():
