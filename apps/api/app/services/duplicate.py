@@ -15,9 +15,27 @@ log = structlog.get_logger()
 
 
 def _dup_slug(slug: str) -> str:
-    """Generate a copy slug: append '-copy-<hex>'."""
+    """Generate a copy slug: append '-copy-<hex>'.
+    R89: slug is VARCHAR(200). The old `f"{base}-copy-{hex}"[:200]` truncated
+    the WHOLE string, so a base already at 200 chars lost the random suffix
+    entirely — every duplicate produced the identical slug and collided on
+    uq_skill_org_slug (UniqueViolation -> 500). Trim the base first so the
+    '-copy-<hex>' suffix (which provides uniqueness) always survives."""
     base = re.sub(r"-copy-[a-f0-9]+$", "", slug)
-    return f"{base}-copy-{secrets.token_hex(3)}"[:200]
+    suffix = f"-copy-{secrets.token_hex(3)}"
+    return base[: 200 - len(suffix)] + suffix
+
+
+def _copy_name(name: str, limit: int) -> str:
+    """Append ' (Copy)' to a name, keeping the result within the column limit.
+    R89: a name already at the column max (skill/project name is VARCHAR(200))
+    plus ' (Copy)' overflows the write -> asyncpg StringDataRightTruncationError
+    (SQLSTATE 22001) -> DBAPIError (not in the input-fault backstop set) -> 500.
+    Trim the base so the suffix always fits."""
+    suffix = " (Copy)"
+    if len(name) + len(suffix) <= limit:
+        return name + suffix
+    return name[: max(0, limit - len(suffix))] + suffix
 
 
 class DuplicateService:
@@ -38,7 +56,7 @@ class DuplicateService:
         new_skill = Skill(
             org_id=org_id,
             category_id=skill.category_id,
-            name=f"{skill.name} (Copy)",
+            name=_copy_name(skill.name, 200),
             slug=_dup_slug(skill.slug),
             description=skill.description,
             learning_content=skill.learning_content,
@@ -90,7 +108,7 @@ class DuplicateService:
 
         new_project = Project(
             org_id=org_id,
-            title=f"{project.title} (Copy)",
+            title=_copy_name(project.title, 200),
             slug=_dup_slug(project.slug),
             description=project.description,
             instructions=project.instructions,

@@ -709,3 +709,45 @@ def test_review_discussion_webhook_schemas_reject_control_chars():
     ReplyRequest(reply_text="thanks")
     CreateCommentRequest(body="nice pack")
     CreateWebhookRequest(url="http://example.com/hook", events=[])
+
+
+# ═══════════════ R89a: duplicate name/slug length safety ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_duplicate_skill_maxlen_name_no_500(c):
+    """R89a guard: a skill whose name is already at the VARCHAR(200) max, when
+    duplicated, appended ' (Copy)' and overflowed the column (StringDataRight
+    Truncation -> 500). Worse, the slug's whole-string [:200] truncation
+    dropped the uniqueness suffix so a second duplicate collided on
+    uq_skill_org_slug (UniqueViolation -> 500). Duplicating twice must both
+    succeed, name stays within 200, slugs differ. Reverting either fix fails."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    sid = await _skill(c, h, oid, "A" * 200)
+
+    r1 = await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/duplicate", headers=h)
+    assert r1.status_code == 201, r1.text
+    r2 = await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/duplicate", headers=h)
+    assert r2.status_code == 201, r2.text  # slug uniqueness held
+    d1, d2 = r1.json()["data"], r2.json()["data"]
+    assert len(d1["name"]) <= 200
+    assert d1["name"].endswith("(Copy)")
+    assert d1["slug"] != d2["slug"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_project_maxlen_title_no_500(c):
+    """R89a guard: same class for projects (title/slug VARCHAR(200))."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _project(c, h, oid, "P" * 200)
+
+    r1 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/duplicate", headers=h)
+    assert r1.status_code == 201, r1.text
+    r2 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/duplicate", headers=h)
+    assert r2.status_code == 201, r2.text
+    d1, d2 = r1.json()["data"], r2.json()["data"]
+    assert len(d1["title"]) <= 200
+    assert d1["title"].endswith("(Copy)")
+    assert d1["slug"] != d2["slug"]
