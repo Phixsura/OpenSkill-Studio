@@ -20,7 +20,7 @@ from app.models.composer import CreatorAssignment, CreatorCapabilityEvidence
 from app.models.evaluation import EvalStatus, EvaluationTask
 from app.models.organization import MemberStatus, OrgMember
 from app.models.portfolio import SkillBadge
-from app.models.project import ReviewStatus, Submission, SubmissionReview
+from app.models.project import ReviewStatus, Submission, SubmissionReview, SubmissionStatus
 from app.models.skill import ContentStatus, Exercise, ProgressStatus, Skill, SkillProgress
 from app.models.workflow_run import RunStatus, WorkflowRun
 from app.services.matching import MatchingEngine, MatchSpec
@@ -212,6 +212,12 @@ class CreatorMatchingService:
         # 3. Approved submission reviews (capability via project resolution:
         # project_type → linked brief → confirmed production draft — see
         # _project_capabilities; bare project_type never matches a key)
+        # R92g: also require the SUBMISSION's FINAL status to be APPROVED, not
+        # just that some review row is APPROVED. A submission can be approved and
+        # then reopened (revision_requested) or flipped to rejected — a stale
+        # APPROVED review row lingers, and counting it kept crediting verified
+        # creator evidence for work whose current state is NOT approved. Gate on
+        # the live submission status so evidence tracks the settled outcome.
         rev_r = await self.db.execute(
             select(SubmissionReview, Submission)
             .join(Submission, Submission.id == SubmissionReview.submission_id)
@@ -219,6 +225,7 @@ class CreatorMatchingService:
                 Submission.org_id == org_id,
                 Submission.user_id == user_id,
                 SubmissionReview.status == ReviewStatus.APPROVED,
+                Submission.status == SubmissionStatus.APPROVED,
             )
         )
         review_rows = rev_r.all()

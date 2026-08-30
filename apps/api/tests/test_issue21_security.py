@@ -1056,3 +1056,67 @@ async def test_portfolio_write_no_existence_oracle(c):
     assert (
         await c.put(f"/api/v1/portfolio/items/{priv}", json={"title": "legit"}, headers=ha)
     ).status_code == 200
+
+
+# ── R92f: submit_draft must enforce the same publication/cohort gate as create ──
+
+
+@pytest.mark.asyncio
+async def test_submit_draft_enforces_publication_and_cohort_gate(c):
+    """R92f: create_submission gates on project PUBLISHED + cohort/creator
+    assignment, but submit_draft enforced neither. A draft created while a
+    project was open could be submitted after it was unpublished, or after it
+    was restricted to a cohort the student is not in. Both gates now hold at
+    submit time; instructor test-flow and normal student flow still work.
+    Reverting the submit_draft gate makes these submits succeed."""
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+    sh = await _member(c, ih, oid, "student")
+
+    async def _proj():
+        pid = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/projects",
+                json={
+                    "title": "SM Gate",
+                    "description": "d" * 20,
+                    "instructions": "i",
+                    "rubric": [{"criterion": "Q", "max_score": 100}],
+                },
+                headers=ih,
+            )
+        ).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)
+        return pid
+
+    # (1) publication gate: draft while published → unpublish → submit 422
+    pid = await _proj()
+    sub = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/submissions", json={"content": {"text": "w"}}, headers=sh
+        )
+    ).json()["data"]["id"]
+    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/unpublish", headers=ih)).status_code == 200
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub}/submit", headers=sh)
+    assert r.status_code == 422, r.text
+    # republish → the same draft submits fine
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub}/submit", headers=sh)
+    ).status_code == 200
+
+    # (2) cohort gate: draft org-wide → restrict project to a cohort student not in → submit 404
+    p2 = await _proj()
+    ds = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{p2}/submissions", json={"content": {"text": "w"}}, headers=sh
+        )
+    ).json()["data"]["id"]
+    cid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts", json={"name": "NoStud", "description": "x"}, headers=ih
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": p2}, headers=ih)
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{p2}/submissions/{ds}/submit", headers=sh)
+    assert r.status_code == 404, r.text

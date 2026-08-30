@@ -1417,3 +1417,88 @@ async def test_approved_submission_evidence_deduped_per_submission(c):
         # And it carries the LATEST review's score (82 on a max_score-100 scale).
         assert rows[0].evidence_id == sub.id
         assert float(rows[0].score) == 82.0
+
+
+# ── R92g: a flipped/reopened submission drops its stale APPROVED evidence ──
+
+
+@pytest.mark.asyncio
+async def test_approved_evidence_dropped_when_submission_not_finally_approved(c):
+    """R92g: rebuild_evidence filtered on SubmissionReview.status == APPROVED but
+    never the submission's FINAL status. A submission approved then reopened
+    (revision_requested) or flipped to rejected leaves a stale APPROVED review
+    row that kept crediting verified creator evidence for non-approved work.
+    Evidence must track the submission's live status. Reverting the
+    Submission.status == APPROVED filter makes this credit the rejected work."""
+    import uuid as _uuid
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.composer import CreatorCapabilityEvidence
+    from app.models.project import (
+        ContentStatus,
+        Project,
+        ReviewerType,
+        ReviewStatus,
+        Submission,
+        SubmissionReview,
+        SubmissionStatus,
+    )
+    from app.services.creator_matching import CreatorMatchingService
+
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+
+    async with AsyncSessionLocal() as db:
+        svc = CreatorMatchingService(db)
+        cap = sorted(await svc._capability_keys())[0]
+        proj = Project(
+            org_id=oid,
+            title="Flip Proj",
+            slug=f"flip-{_uuid.uuid4().hex[:8]}",
+            description="d",
+            instructions="i",
+            project_type=cap,
+            max_score=100,
+            rubric=[{"criterion": "Q", "max_score": 100}],
+            status=ContentStatus.PUBLISHED,
+            created_by=owner["id"],
+        )
+        db.add(proj)
+        await db.flush()
+        # Final status REJECTED, but a stale APPROVED review row lingers.
+        sub = Submission(
+            org_id=oid,
+            project_id=proj.id,
+            user_id=owner["id"],
+            status=SubmissionStatus.REJECTED,
+            version=1,
+        )
+        db.add(sub)
+        await db.flush()
+        db.add(
+            SubmissionReview(
+                submission_id=sub.id,
+                reviewer_id=owner["id"],
+                reviewer_type=ReviewerType.INSTRUCTOR,
+                status=ReviewStatus.APPROVED,
+                score=90,
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+        )
+        await db.flush()
+
+        await svc.rebuild_evidence(oid, owner["id"])
+        await db.commit()
+
+        rows = (
+            await db.execute(
+                select(CreatorCapabilityEvidence).where(
+                    CreatorCapabilityEvidence.user_id == owner["id"],
+                    CreatorCapabilityEvidence.evidence_type == "approved_submission",
+                )
+            )
+        ).scalars().all()
+        assert rows == [], f"stale approved review credited evidence for rejected work: {rows}"

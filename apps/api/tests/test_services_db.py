@@ -550,14 +550,14 @@ async def test_project_full_flow(db):
     await db.flush()
 
     # Submission
-    sub = await svc.create_submission(org.id, project.id, user.id)
+    sub = await svc.create_submission(org.id, project.id, user.id, is_instructor=True)
     assert sub.version == 1
     await svc.get_submission(sub.id)
     subs, stotal = await svc.list_submissions(project.id, user_id=user.id)
     assert stotal >= 1
 
     # Submit
-    submitted = await svc.submit_draft(sub.id, user.id)
+    submitted = await svc.submit_draft(sub.id, user.id, is_instructor=True)
     assert submitted.status.value == "submitted"
 
     # Timing
@@ -578,7 +578,7 @@ async def test_project_full_flow(db):
     assert final.final_score == 85
 
     # Second submission
-    sub2 = await svc.create_submission(org.id, project.id, user.id)
+    sub2 = await svc.create_submission(org.id, project.id, user.id, is_instructor=True)
     assert sub2.version == 2
     await svc.delete_submission(sub2.id, user.id)
 
@@ -637,14 +637,14 @@ async def test_project_review_revision_and_reject(db):
     await db.flush()
 
     # Submission 1: revision requested
-    sub1 = await svc.create_submission(org.id, project.id, user.id)
-    await svc.submit_draft(sub1.id, user.id)
+    sub1 = await svc.create_submission(org.id, project.id, user.id, is_instructor=True)
+    await svc.submit_draft(sub1.id, user.id, is_instructor=True)
     r1 = await svc.create_review(sub1.id, reviewer.id, "revision_requested", None, None, "Fix this")
     assert r1.status.value == "revision_requested"
 
     # Submission 2: rejected
-    sub2 = await svc.create_submission(org.id, project.id, user.id)
-    await svc.submit_draft(sub2.id, user.id)
+    sub2 = await svc.create_submission(org.id, project.id, user.id, is_instructor=True)
+    await svc.submit_draft(sub2.id, user.id, is_instructor=True)
     r2 = await svc.create_review(sub2.id, reviewer.id, "rejected", 20, None, "Poor")
     assert r2.status.value == "rejected"
 
@@ -675,8 +675,8 @@ async def test_create_review_rejects_self_review(db):
         [{"criterion": "Q", "max_score": 100}], None, None, 0, 0, None, author.id,
     )
     await db.flush()
-    sub = await svc.create_submission(org.id, project.id, author.id)
-    await svc.submit_draft(sub.id, author.id)
+    sub = await svc.create_submission(org.id, project.id, author.id, is_instructor=True)
+    await svc.submit_draft(sub.id, author.id, is_instructor=True)
 
     # Author reviewing their own submission → 403 SELF_REVIEW_FORBIDDEN
     with pytest.raises(AppError) as ei:

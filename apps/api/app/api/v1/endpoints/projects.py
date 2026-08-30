@@ -459,14 +459,13 @@ async def create_submission(
 ):
     member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    project = await _verify_project_org(svc, project_id, org_id)
-    # Students may only submit to a published project; instructors can submit
-    # to a draft to test the flow before publishing.
-    from app.models.skill import ContentStatus
-
-    if project.status != ContentStatus.PUBLISHED and member.role not in INSTRUCTOR_ROLES:
-        raise HTTPException(status_code=422, detail="Project is not open for submissions")
-    sub = await svc.create_submission(org_id, project_id, user.id)
+    await _verify_project_org(svc, project_id, org_id)
+    # Publication + cohort/creator-assignment gates are enforced in the service
+    # (shared with submit_draft, R92f). Instructors may submit to a draft to
+    # test the flow before publishing.
+    sub = await svc.create_submission(
+        org_id, project_id, user.id, is_instructor=member.role in INSTRUCTOR_ROLES
+    )
     await db.commit()
     return DataResponse(data=SubmissionResponse.model_validate(sub))
 
@@ -636,12 +635,14 @@ async def submit_draft(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
     sub = await _verify_submission_org(svc, submission_id, org_id)
     if sub.project_id != project_id:
         raise HTTPException(status_code=404, detail="Submission not found in this project")
-    sub = await svc.submit_draft(submission_id, user.id)
+    sub = await svc.submit_draft(
+        submission_id, user.id, is_instructor=member.role in INSTRUCTOR_ROLES
+    )
     await db.commit()
 
     # Auto-evaluate on submission when the org has enabled it — otherwise the

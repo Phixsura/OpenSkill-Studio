@@ -283,7 +283,7 @@ async def test_project_file_operations(db):
         u.id,
     )
     deliv = await svc.create_deliverable(proj.id, "File", None, "file", False, {}, 0)
-    sub = await svc.create_submission(org.id, proj.id, u.id)
+    sub = await svc.create_submission(org.id, proj.id, u.id, is_instructor=True)
     await db.flush()
 
     # Mock S3 client
@@ -394,8 +394,8 @@ async def test_eval_trigger_with_mock_llm(db):
         None,
         u.id,
     )
-    sub = await proj_svc.create_submission(org.id, proj.id, u.id)
-    await proj_svc.submit_draft(sub.id, u.id)
+    sub = await proj_svc.create_submission(org.id, proj.id, u.id, is_instructor=True)
+    await proj_svc.submit_draft(sub.id, u.id, is_instructor=True)
     await db.flush()
 
     # Mock the LLM
@@ -452,8 +452,8 @@ async def test_eval_trigger_llm_parse_failure(db):
         None,
         u.id,
     )
-    sub = await proj_svc.create_submission(org.id, proj.id, u.id)
-    await proj_svc.submit_draft(sub.id, u.id)
+    sub = await proj_svc.create_submission(org.id, proj.id, u.id, is_instructor=True)
+    await proj_svc.submit_draft(sub.id, u.id, is_instructor=True)
     await db.flush()
 
     # Mock LLM to return invalid JSON

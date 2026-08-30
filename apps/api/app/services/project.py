@@ -546,11 +546,71 @@ class ProjectService:
 
     # ── Submissions ──
 
+    async def _assert_project_open_to_user(
+        self, project: Project, user_id: str, is_instructor: bool = False
+    ) -> None:
+        """R92f: a student may only act on a project that is PUBLISHED and, if the
+        project is cohort/creator-restricted, one they are assigned to. Shared by
+        create_submission AND submit_draft — submit_draft previously enforced
+        neither, so a draft created while a project was open could still be
+        submitted after it was unpublished, and a draft on an org-wide project
+        could be submitted after the project was later restricted to a cohort the
+        student is not in. Both gates must hold at submit time, not just create.
+
+        Instructors bypass the publication gate (they may submit to a draft to
+        test the flow, matching the original endpoint behavior); the cohort gate
+        applies to everyone."""
+        # Publication gate — only PUBLISHED projects accept student submissions.
+        if not is_instructor and project.status != ContentStatus.PUBLISHED:
+            raise InvalidStateError("Project is not open for submissions")
+
+        # Cohort / creator-assignment visibility gate.
+        from app.models.cohort import CohortMember, CohortProjectAssignment
+
+        has_cohort_assignment = await self.db.execute(
+            select(CohortProjectAssignment.id)
+            .where(CohortProjectAssignment.project_id == project.id)
+            .limit(1)
+        )
+        has_creator_assignment = await self.db.execute(
+            select(ProjectCreatorAssignment.id)
+            .where(ProjectCreatorAssignment.project_id == project.id)
+            .limit(1)
+        )
+        is_restricted = (
+            has_cohort_assignment.scalar_one_or_none() is not None
+            or has_creator_assignment.scalar_one_or_none() is not None
+        )
+        if is_restricted:
+            in_cohort = await self.db.execute(
+                select(CohortProjectAssignment.id)
+                .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
+                .where(
+                    CohortProjectAssignment.project_id == project.id,
+                    CohortMember.user_id == user_id,
+                )
+                .limit(1)
+            )
+            individually_assigned = await self.db.execute(
+                select(ProjectCreatorAssignment.id)
+                .where(
+                    ProjectCreatorAssignment.project_id == project.id,
+                    ProjectCreatorAssignment.user_id == user_id,
+                )
+                .limit(1)
+            )
+            if (
+                in_cohort.scalar_one_or_none() is None
+                and individually_assigned.scalar_one_or_none() is None
+            ):
+                raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+
     async def create_submission(
         self,
         org_id: str,
         project_id: str,
         user_id: str,
+        is_instructor: bool = False,
     ) -> Submission:
         # Lock the project row to prevent concurrent submissions from
         # bypassing the max_submissions check (SELECT ... FOR UPDATE).
@@ -561,61 +621,15 @@ class ProjectService:
         if project is None or project.status == ContentStatus.ARCHIVED:
             raise ProjectNotFoundError()
 
-        # ── Cohort visibility gate ──
-        # If this project is assigned to specific cohorts or individual creators,
-        # the submitting user must be in at least one of them. Without this check
-        # a student who guesses the project ID can submit even though the project
-        # doesn't appear in their listing.
-        from app.models.cohort import CohortMember, CohortProjectAssignment
-
-        has_cohort_assignment = await self.db.execute(
-            select(CohortProjectAssignment.id)
-            .where(CohortProjectAssignment.project_id == project_id)
-            .limit(1)
-        )
-        has_creator_assignment = await self.db.execute(
-            select(ProjectCreatorAssignment.id)
-            .where(ProjectCreatorAssignment.project_id == project_id)
-            .limit(1)
-        )
-        is_restricted = (
-            has_cohort_assignment.scalar_one_or_none() is not None
-            or has_creator_assignment.scalar_one_or_none() is not None
-        )
-        if is_restricted:
-            # Check if user is in a cohort that has this project assigned
-            in_cohort = await self.db.execute(
-                select(CohortProjectAssignment.id)
-                .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
-                .where(
-                    CohortProjectAssignment.project_id == project_id,
-                    CohortMember.user_id == user_id,
-                )
-                .limit(1)
-            )
-            # Check if user is individually assigned
-            individually_assigned = await self.db.execute(
-                select(ProjectCreatorAssignment.id)
-                .where(
-                    ProjectCreatorAssignment.project_id == project_id,
-                    ProjectCreatorAssignment.user_id == user_id,
-                )
-                .limit(1)
-            )
-            if (
-                in_cohort.scalar_one_or_none() is None
-                and individually_assigned.scalar_one_or_none() is None
-            ):
-                raise AppError(
-                    "PROJECT_NOT_FOUND",
-                    "Project not found",
-                    404,
-                )
+        # Publication + cohort/creator-assignment gate (shared with submit_draft).
+        await self._assert_project_open_to_user(project, user_id, is_instructor=is_instructor)
 
         count = await self._count_user_submissions(project_id, user_id)
 
         # Cohort override takes precedence over project default
         effective_max = project.max_submissions
+
+        from app.models.cohort import CohortMember, CohortProjectAssignment
 
         # Find the most generous max_submissions_override across ALL cohorts
         # the student belongs to (same rationale as deadline: benefit of most generous).
@@ -692,7 +706,9 @@ class ProjectService:
         )
         return [(sub, name) for sub, name in result.all()], total
 
-    async def submit_draft(self, submission_id: str, user_id: str) -> Submission:
+    async def submit_draft(
+        self, submission_id: str, user_id: str, is_instructor: bool = False
+    ) -> Submission:
         sub = await self.get_submission(submission_id)
 
         if sub.user_id != user_id:
@@ -708,6 +724,13 @@ class ProjectService:
 
         # Check deadline
         project = await self.get_project(sub.project_id)
+        # R92f: enforce the SAME publication + cohort/creator-assignment gate as
+        # create_submission. A draft created while the project was open could
+        # otherwise be submitted after it was unpublished, or after it was later
+        # restricted to a cohort the student is not in. Instructors bypass (they
+        # may submit to a draft project to test the flow, mirroring create).
+        if not is_instructor:
+            await self._assert_project_open_to_user(project, user_id)
         timing = await self.get_submission_timing(project, user_id)
         if timing == "closed":
             raise DeadlinePassedError()
