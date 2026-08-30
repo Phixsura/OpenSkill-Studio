@@ -492,3 +492,93 @@ async def test_refresh_reuse_after_grace_window_rejected(client):
 
     # Leave a fresh pool for the next test file (loop hygiene)
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_logout_kills_rotation_predecessor_within_grace(client):
+    """R87 session-revival: rotating tok1→tok2 leaves tok1 revoked-by-rotation
+    but still inside the grace window. Logging out with the CURRENT token
+    (tok2) must also finalize tok1 — otherwise replaying tok1 is graced and
+    revives the just-logged-out session. Logout must be final for the whole
+    within-grace chain, while other devices' live sessions stay alive."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"revive-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Revive"},
+    )
+    tok1 = r.cookies.get("refresh_token")
+
+    # Second device — its own live session must survive the first's logout
+    r_b = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "TestPass123!"}
+    )
+    tok_b = r_b.cookies.get("refresh_token")
+
+    # Device 1 rotates tok1 → tok2
+    client.cookies.set("refresh_token", tok1)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+    tok2 = r1.cookies.get("refresh_token")
+
+    # Device 1 logs out with the CURRENT token (tok2)
+    client.cookies.set("refresh_token", tok2)
+    rlo = await client.post("/api/v1/auth/logout")
+    assert rlo.status_code == 204
+
+    # Replaying the rotation-predecessor tok1 (still within grace) must NOT be
+    # graced back into a session — the revival the fix closes.
+    client.cookies.set("refresh_token", tok1)
+    rrev = await client.post("/api/v1/auth/refresh")
+    assert rrev.status_code == 401, rrev.text
+
+    # Device 2's independent session is untouched.
+    client.cookies.set("refresh_token", tok_b)
+    rb = await client.post("/api/v1/auth/refresh")
+    assert rb.status_code == 200, rb.text
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_change_password_kills_rotation_predecessor_within_grace(client):
+    """R87: change-password revokes all sessions, but a rotation-predecessor
+    token revoked seconds ago would still be graced on replay → session
+    survives the password change. _revoke_all_user_tokens must finalize
+    within-grace tokens too."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"cpwd-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Cpwd"},
+    )
+    tok1 = r.cookies.get("refresh_token")
+    access = r.json()["access_token"]
+
+    client.cookies.set("refresh_token", tok1)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+
+    r2 = await client.post(
+        "/api/v1/auth/change-password",
+        json={"old_password": "TestPass123!", "new_password": "NewValid456!"},
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r2.status_code == 204, r2.text
+
+    # Replaying the rotation-revoked tok1 after the password change must 401.
+    client.cookies.set("refresh_token", tok1)
+    r3 = await client.post("/api/v1/auth/refresh")
+    assert r3.status_code == 401, r3.text
+
+    await engine.dispose()

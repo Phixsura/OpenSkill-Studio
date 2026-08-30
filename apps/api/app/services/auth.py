@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -237,7 +237,11 @@ class AuthService:
         try:
             payload = decode_token(raw_refresh_token)
             jti = payload.get("jti")
+            user_id = payload.get("sub")
             if jti:
+                final = datetime.now(UTC) - timedelta(
+                    seconds=settings.refresh_reuse_grace_seconds + 1
+                )
                 token_hash = sha256(jti.encode()).hexdigest()
                 stmt_result = await self.db.execute(
                     select(RefreshToken).where(RefreshToken.token_hash == token_hash)
@@ -248,10 +252,26 @@ class AuthService:
                     # grace exists ONLY for rotation races — an explicit
                     # logout must be immediately final, or anyone holding the
                     # cookie could revive the session within the window.
-                    token_record.revoked_at = datetime.now(UTC) - timedelta(
-                        seconds=settings.refresh_reuse_grace_seconds + 1
+                    token_record.revoked_at = final
+                # R87: the presented token may already be revoked-BY-ROTATION
+                # (client logs out with the current token while an older token
+                # in the chain, revoked seconds ago by rotation, is still
+                # within the grace window). Replaying that predecessor would be
+                # graced → session revival. Backdate EVERY within-grace token of
+                # this user so no superseded token can revive the session. Live
+                # tokens (revoked_at IS NULL) on other devices are untouched, so
+                # this stays per-user-safe: other sessions remain logged in.
+                if user_id:
+                    stale = await self.db.execute(
+                        select(RefreshToken).where(
+                            RefreshToken.user_id == user_id,
+                            RefreshToken.revoked_at.is_not(None),
+                            RefreshToken.revoked_at > final,
+                        )
                     )
-                    await self.db.flush()
+                    for t in stale.scalars():
+                        t.revoked_at = final
+                await self.db.flush()
         except Exception as exc:
             log.debug("logout_cleanup_failed", error=str(exc))
 
@@ -458,12 +478,20 @@ class AuthService:
 
     async def _revoke_all_user_tokens(self, user_id: str) -> None:
         # Backdated past the rotation-race grace window: password changes and
-        # bulk revocations must be immediately final (see logout)
+        # bulk revocations must be immediately final (see logout).
         final = datetime.now(UTC) - timedelta(seconds=settings.refresh_reuse_grace_seconds + 1)
+        # Cover BOTH live tokens (revoked_at IS NULL) AND tokens revoked-by-
+        # rotation within the grace window (R87): after a password change, a
+        # predecessor token whose revoked_at is only seconds old would still be
+        # graced on replay → session revival. Backdate every such token so no
+        # superseded token in any chain can revive the session.
         stmt_result = await self.db.execute(
             select(RefreshToken).where(
                 RefreshToken.user_id == user_id,
-                RefreshToken.revoked_at.is_(None),
+                or_(
+                    RefreshToken.revoked_at.is_(None),
+                    RefreshToken.revoked_at > final,
+                ),
             )
         )
         for token in stmt_result.scalars():
