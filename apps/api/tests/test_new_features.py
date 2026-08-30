@@ -136,14 +136,25 @@ async def test_registry_preview_tolerates_hostile_manifest_shapes(c):
             {"name": "ok", "exercises": [{"title": "e"}]},
             "STRING_SKILL",  # non-dict skill
             {"exercises": "NOT_A_LIST"},  # non-list exercises
+            # R92c: non-STRING field values. PackPreviewResponse types
+            # name/description/difficulty/title as str|None; an int/list here
+            # raised a pydantic ValidationError at serialization → preview 500.
+            {
+                "name": 999,  # non-str required field
+                "description": 12345,  # non-str optional field
+                "difficulty": ["x"],  # non-str optional field
+                "exercises": [{"title": 777}],  # non-str exercise title
+                "prerequisites": [1, "keep", {"bad": 1}],  # non-str prereqs dropped
+            },
         ],
         "project_templates": [
             {"name": "t1", "rubric": {"criteria": 5}},  # criteria non-list (int)
             {"name": "t2", "rubric": {"criteria": None}},  # criteria None
             {"name": "t3", "rubric": [{"criterion": "Q", "max_score": 100}]},  # list form
             "STRING_TEMPLATE",  # non-dict template
+            {"name": 42, "description": [], "rubric": []},  # R92c non-str name/desc
         ],
-        "categories": ["STRING_CAT", {"name": "realcat"}],
+        "categories": ["STRING_CAT", {"name": "realcat"}, {"name": 123}],  # R92c non-str name
     }
     import json as _json
 
@@ -163,6 +174,20 @@ async def test_registry_preview_tolerates_hostile_manifest_shapes(c):
     assert counts.get("t1") == 0, counts  # criteria=int → 0, not a crash
     assert counts.get("t2") == 0, counts  # criteria=None → 0
     assert counts.get("t3") == 1, counts  # list form counted
+    # R92c: the non-string-valued skill/template/category entries serialized
+    # cleanly (coerced), so the whole preview is a 200 and every string field
+    # in the response is a str-or-None per the schema.
+    for sk in d["skills"]:
+        assert isinstance(sk["name"], str)
+        assert sk["description"] is None or isinstance(sk["description"], str)
+        assert sk["difficulty"] is None or isinstance(sk["difficulty"], str)
+        assert all(isinstance(ex["title"], str) for ex in sk["exercises"])
+        assert all(isinstance(p, str) for p in sk["prerequisites"])
+    for t in d["templates"]:
+        assert isinstance(t["name"], str)
+        assert t["description"] is None or isinstance(t["description"], str)
+    for cat in d["categories"]:
+        assert isinstance(cat["name"], str)
     # service-level call is also total (no raise)
     async with AsyncSessionLocal() as db:
         preview = await RegistryService(db).get_pack_preview(pid)

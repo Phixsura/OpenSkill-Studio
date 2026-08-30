@@ -417,6 +417,19 @@ class RegistryService:
         # a non-dict skill, or a non-list exercises value, must be skipped, not
         # crash the anon preview with AttributeError/TypeError (R87 hardening,
         # same class as the R86e rubric 500).
+        # R92c: the manifest is untrusted JSON (import path). PackPreviewResponse
+        # types name/description/difficulty/title as str|None, so a NON-string
+        # value (e.g. an int description) that reached the response model raised
+        # a pydantic ValidationError at serialization — an anon-registry preview
+        # 500 with no sqlstate (not caught by the DBAPIError backstop). R86e/R87d
+        # hardened the rubric SHAPE; this hardens the string FIELD TYPES too.
+        # Coerce: a required str field → "" when not a str, optional → None.
+        def _s(v):
+            return v if isinstance(v, str) else None
+
+        def _req_s(v):
+            return v if isinstance(v, str) else ""
+
         raw_skills = manifest.get("skills", [])
         skills = []
         total_exercises = 0
@@ -427,15 +440,19 @@ class RegistryService:
             if not isinstance(exercises, list):
                 exercises = []
             total_exercises += len(exercises)
+            prereqs = s.get("prerequisites", [])
+            if not isinstance(prereqs, list):
+                prereqs = []
             skills.append({
-                "name": s.get("name", ""),
-                "description": s.get("description"),
-                "difficulty": s.get("difficulty"),
+                "name": _req_s(s.get("name")),
+                "description": _s(s.get("description")),
+                "difficulty": _s(s.get("difficulty")),
                 "exercise_count": len(exercises),
                 "exercises": [
-                    {"title": e.get("title", "")} for e in exercises if isinstance(e, dict)
+                    {"title": _req_s(e.get("title"))} for e in exercises if isinstance(e, dict)
                 ],
-                "prerequisites": s.get("prerequisites", []),
+                # prerequisites is list[str] in the schema — drop non-str entries.
+                "prerequisites": [p for p in prereqs if isinstance(p, str)],
             })
 
         # Extract templates
@@ -464,15 +481,15 @@ class RegistryService:
             else:
                 criteria_count = 0
             templates.append({
-                "name": t.get("name", ""),
-                "description": t.get("description"),
+                "name": _req_s(t.get("name")),
+                "description": _s(t.get("description")),
                 "rubric_criteria_count": criteria_count,
             })
 
         # Extract categories (skip non-dict entries — untrusted import shape)
         raw_categories = manifest.get("categories", [])
         categories = [
-            {"name": c.get("name", "")}
+            {"name": _req_s(c.get("name"))}
             for c in raw_categories
             if isinstance(c, dict)
         ]
