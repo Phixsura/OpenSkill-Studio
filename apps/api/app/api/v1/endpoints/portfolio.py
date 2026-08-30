@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.core.rate_limit import rate_limit
+from app.models.portfolio import PortfolioItem
 from app.models.user import User
 from app.schemas.base import DataResponse
 from app.schemas.portfolio import (
@@ -160,11 +161,14 @@ async def reorder_my_items(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    svc = PortfolioService(db)
     item_ids = body.item_ids
+    # R91: reorder only ever touches the caller's own items. Fetch directly and
+    # skip anything missing OR not-owned identically — get_item raised 404 for a
+    # missing id but the not-owned branch silently 200'd, an existence oracle
+    # over other users' item ids. Treating both as no-ops removes the signal.
     for i, iid in enumerate(item_ids):
-        item = await svc.get_item(iid)
-        if item.user_id == user.id:
+        item = await db.get(PortfolioItem, iid)
+        if item is not None and item.user_id == user.id:
             item.sort_order = i
     await db.commit()
     return {"message": "Items reordered"}

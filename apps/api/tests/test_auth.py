@@ -606,3 +606,57 @@ async def test_me_token_missing_sub_is_401_not_500(client):
         tok = jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
         r = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {tok}"})
         assert r.status_code == 401, f"{label}: expected 401, got {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_revoke_session_kills_rotation_predecessor_within_grace(client):
+    """R91b: DELETE /auth/sessions/{id} ("revoke this device") backdated only
+    the one row it was handed. If that session had rotated within the grace
+    window, the rotation-predecessor (revoked-by-rotation, still graced) could
+    replay and revive the just-revoked session — defeating the exact remediation
+    flow. revoke_session must sweep the within-grace chain like logout (R87e),
+    while other devices' live sessions survive. Reverting the sweep fails this."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"revrevive-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "RevRevive"},
+    )
+    tok1 = r.cookies.get("refresh_token")
+
+    # Second device — its own live session must survive.
+    r_b = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "TestPass123!"}
+    )
+    tok_b = r_b.cookies.get("refresh_token")
+
+    # Device 1 rotates tok1 → tok2.
+    client.cookies.set("refresh_token", tok1)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+    tok2 = r1.cookies.get("refresh_token")
+    headers2 = {"Authorization": f"Bearer {r1.json()['access_token']}"}
+
+    # Device 1 explicitly revokes its CURRENT session (the tok2 row).
+    sessions = (await client.get("/api/v1/auth/sessions", headers=headers2)).json()["data"]
+    current_id = sessions[0]["id"]
+    client.cookies.set("refresh_token", tok2)
+    rdel = await client.delete(f"/api/v1/auth/sessions/{current_id}", headers=headers2)
+    assert rdel.status_code == 204
+
+    # Replaying the rotation-predecessor tok1 (within grace) must NOT revive it.
+    client.cookies.set("refresh_token", tok1)
+    rrev = await client.post("/api/v1/auth/refresh")
+    assert rrev.status_code == 401, rrev.text
+
+    # Device 2's independent session is untouched.
+    client.cookies.set("refresh_token", tok_b)
+    rb = await client.post("/api/v1/auth/refresh")
+    assert rb.status_code == 200, rb.text
+
+    await engine.dispose()

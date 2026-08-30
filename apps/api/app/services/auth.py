@@ -444,9 +444,25 @@ class AuthService:
 
         # Backdate past the rotation-race grace window — explicit revocation
         # must be immediately final (see logout)
-        token.revoked_at = datetime.now(UTC) - timedelta(
-            seconds=settings.refresh_reuse_grace_seconds + 1
+        final = datetime.now(UTC) - timedelta(seconds=settings.refresh_reuse_grace_seconds + 1)
+        token.revoked_at = final
+        # R91: mirror logout()/R87e — the revoked session may have rotated
+        # within the last grace window, leaving a predecessor whose revoked_at
+        # is only seconds old (revoked-by-rotation, still graced on replay).
+        # Without sweeping it, an attacker holding that predecessor cookie
+        # revives the explicitly-killed session — defeating the exact "revoke
+        # this device" remediation flow. Backdate every within-grace token of
+        # this user; live tokens (revoked_at IS NULL) on OTHER devices are
+        # untouched, so other sessions stay logged in (per-user-safe).
+        stale = await self.db.execute(
+            select(RefreshToken).where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_not(None),
+                RefreshToken.revoked_at > final,
+            )
         )
+        for t in stale.scalars():
+            t.revoked_at = final
         await self.db.flush()
         return token
 

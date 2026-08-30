@@ -983,3 +983,76 @@ async def test_org_settings_reject_reserved_namespace(c):
     )
     assert r.status_code == 200
     assert r.json()["data"]["monthly_budget_usd"] == 500
+
+
+# ── R91c: role-mint gate must block a role AT OR ABOVE the actor's own ──
+
+
+@pytest.mark.asyncio
+async def test_non_owner_cannot_mint_equal_role(c):
+    """R91c: the three role-mint paths (add member, invite-link, email invite)
+    used `< actor.role`, blocking only a STRICTLY higher role — so an admin
+    could grant its own admin role (incl. re-adding a removed student as admin,
+    an escalation around the owner-only PUT gate). Must be `<=`. Reverting fails."""
+    oh, _ = await _auth(c)
+    oid = await _org(c, oh)
+    ah = await _member(c, oh, oid, "admin")
+    sh, stan = await _auth(c)
+    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "student"}, headers=oh)
+
+    # admin removes the student, then tries to re-add as admin -> 403
+    assert (await c.delete(f"/api/v1/orgs/{oid}/members/{stan['id']}", headers=ah)).status_code == 204
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "admin"}, headers=ah
+    )
+    assert r.status_code == 403, r.text
+
+    # admin cannot mint an admin invite-link
+    r = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "admin"}, headers=ah)
+    assert r.status_code == 403, r.text
+
+    # admin CAN still add a lower role; owner CAN add an admin
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "student"}, headers=ah
+        )
+    ).status_code == 201
+    bh, bob = await _auth(c)
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/members", json={"user_id": bob["id"], "role": "admin"}, headers=oh
+        )
+    ).status_code == 201
+
+
+# ── R91d: portfolio write endpoints must be a uniform 404 (no existence oracle) ──
+
+
+@pytest.mark.asyncio
+async def test_portfolio_write_no_existence_oracle(c):
+    """R91d: PUT/DELETE /portfolio/items/{id} returned 403 for an existing
+    not-owned item vs 404 for a nonexistent id — an existence oracle over other
+    users' private item ids. Both must be a uniform 404. Reverting fails this."""
+    ha, _ = await _auth(c)
+    hb, _ = await _auth(c)
+    priv = (
+        await c.post(
+            "/api/v1/portfolio/items",
+            json={"title": "Secret A", "visibility": "private"},
+            headers=ha,
+        )
+    ).json()["data"]["id"]
+
+    missing = "01NONEXISTENT000000000000"
+    for method in ("put", "delete"):
+        call = getattr(c, method)
+        kw = {"json": {"title": "hax"}} if method == "put" else {}
+        r_exists = await call(f"/api/v1/portfolio/items/{priv}", headers=hb, **kw)
+        r_missing = await call(f"/api/v1/portfolio/items/{missing}", headers=hb, **kw)
+        assert r_exists.status_code == 404, f"{method} not-owned: {r_exists.status_code}"
+        assert r_missing.status_code == 404, f"{method} missing: {r_missing.status_code}"
+
+    # owner can still edit their own
+    assert (
+        await c.put(f"/api/v1/portfolio/items/{priv}", json={"title": "legit"}, headers=ha)
+    ).status_code == 200

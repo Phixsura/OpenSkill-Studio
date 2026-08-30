@@ -314,9 +314,9 @@ async def invite_members(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
 
-    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+    if ROLE_HIERARCHY.get(role, 99) <= ROLE_HIERARCHY.get(actor.role, 99):
         raise HTTPException(
-            status_code=403, detail="Cannot invite a member at a role higher than your own"
+            status_code=403, detail="Cannot invite a member at a role at or above your own"
         )
 
     service = OrgService(db)
@@ -383,10 +383,13 @@ async def add_member_directly(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
 
-    # Cannot add a member at a role higher than your own (admin adding an owner)
-    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+    # R91: cannot add a member at a role AT OR ABOVE your own. Strict `<` let an
+    # admin re-add a removed student as another admin (equal role) — a non-owner
+    # escalation path around the owner-only PUT role gate. Only OWNER (rank 0)
+    # can grant OWNER/ADMIN via any of the three mint paths.
+    if ROLE_HIERARCHY.get(role, 99) <= ROLE_HIERARCHY.get(actor.role, 99):
         raise HTTPException(
-            status_code=403, detail="Cannot add a member at a role higher than your own"
+            status_code=403, detail="Cannot add a member at a role at or above your own"
         )
 
     service = OrgService(db)
@@ -421,9 +424,9 @@ async def create_invite_link(
 
     # An inviter cannot mint a link that grants a role at or above their own —
     # otherwise an instructor could create an admin/owner link and escalate.
-    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+    if ROLE_HIERARCHY.get(role, 99) <= ROLE_HIERARCHY.get(actor.role, 99):
         raise HTTPException(
-            status_code=403, detail="Cannot create an invite for a role higher than your own"
+            status_code=403, detail="Cannot create an invite for a role at or above your own"
         )
 
     service = OrgService(db)
