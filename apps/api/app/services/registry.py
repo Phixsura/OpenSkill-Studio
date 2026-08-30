@@ -433,12 +433,23 @@ class RegistryService:
         raw_templates = manifest.get("project_templates", [])
         templates = []
         for t in raw_templates:
-            rubric = t.get("rubric") or {}
-            criteria = rubric.get("criteria", [])
+            # ProjectTemplate.rubric is a LIST of {criterion, max_score} dicts
+            # (models/project.py:425, JSONB list), and the published manifest
+            # stores it verbatim (skill_pack.py). Treating it as a dict with a
+            # "criteria" key raised AttributeError ('list' has no .get) →
+            # anon-registry preview 500 for ANY pack whose template has a rubric.
+            # Count the list directly; tolerate a legacy/hand-authored dict shape.
+            rubric = t.get("rubric")
+            if isinstance(rubric, list):
+                criteria_count = len(rubric)
+            elif isinstance(rubric, dict):
+                criteria_count = len(rubric.get("criteria", []))
+            else:
+                criteria_count = 0
             templates.append({
                 "name": t.get("name", ""),
                 "description": t.get("description"),
-                "rubric_criteria_count": len(criteria),
+                "rubric_criteria_count": criteria_count,
             })
 
         # Extract categories

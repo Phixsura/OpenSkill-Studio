@@ -70,6 +70,45 @@ async def _published_public_pack(c, h, oid, pack_name="Pub Pack", skill_name="Pu
     return pid
 
 
+# ═══════════════ Registry preview (R86) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_registry_preview_pack_with_template_rubric(c):
+    """R86: ProjectTemplate.rubric is a LIST of {criterion, max_score} dicts,
+    and the published manifest stores it verbatim. get_pack_preview treated it
+    as a dict (`rubric.get("criteria")`) → AttributeError('list' has no .get)
+    → anon-registry preview 500 for ANY approved pack whose template has a
+    rubric (642 packs in the shared dev DB). Preview must 200 and count the
+    rubric criteria correctly. Endpoint is UNAUTHENTICATED."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # A published+approved public pack with a skill AND a project template
+    # whose rubric is a real 2-entry list.
+    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Preview Pack"}, headers=h)).json()["data"]["id"]
+    sid = await _skill(c, h, oid, "Preview Skill")
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
+    tmpl = (await c.post(f"/api/v1/orgs/{oid}/project-templates", json={
+        "name": "Rubric Tmpl",
+        "description": "d",
+        "instructions": "do it",
+        "rubric": [{"criterion": "Quality", "max_score": 100}, {"criterion": "Design", "max_score": 50}],
+    }, headers=h)).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/templates", json={"template_id": tmpl}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
+
+    # Anonymous preview (no auth header) must 200, not 500
+    r = await c.get(f"/api/v1/registry/packs/{pid}/preview")
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    tmpls = d["templates"]
+    assert len(tmpls) == 1, tmpls
+    # rubric criteria counted from the LIST (2 entries), not dict-.get
+    assert tmpls[0]["rubric_criteria_count"] == 2, tmpls[0]
+
+
 # ═══════════════ Pack Reviews (5 tests) ═══════════════
 
 
