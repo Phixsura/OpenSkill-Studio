@@ -314,6 +314,20 @@ class PackImportService:
                     f"Skill '{lid}' sort_order must be an integer",
                     422,
                 )
+            # R89f: estimated_minutes flows verbatim into Skill.estimated_minutes
+            # (INTEGER). A non-int (e.g. "soon") is NOT a NUL/text fault — asyncpg
+            # raises a client-side bind DataError with NO sqlstate at install, so
+            # the R88 backstop can't catch it and every install 500s. Gate here
+            # like the adjacent sort_order/max_score checks.
+            _s_est = s.get("estimated_minutes")
+            if _s_est is not None and (
+                not isinstance(_s_est, int) or isinstance(_s_est, bool) or not (0 <= _s_est <= 9999)
+            ):
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Skill '{lid}' estimated_minutes must be an integer (0-9999)",
+                    422,
+                )
             lc = s.get("learning_content", "")
             # `is not None`, not truthiness (R78): falsy non-strings (0,
             # False, [], {}) skipped the isinstance gate via `lc and ...`
@@ -352,6 +366,28 @@ class PackImportService:
                     "INVALID_MANIFEST",
                     f"Template '{t_lid}' project_type must be one of: "
                     f"{', '.join(sorted(VALID_PROJECT_TYPES))}",
+                    422,
+                )
+            # R89f: max_score / suggested_minutes flow verbatim into the
+            # ProjectTemplate INTEGER columns at install. A non-int value is a
+            # client-side bind DataError (no sqlstate) that the backstop misses,
+            # so the pack imports PUBLISHED then 500s every install. Gate both.
+            _t_ms = t.get("max_score")
+            if _t_ms is not None and (
+                not isinstance(_t_ms, int) or isinstance(_t_ms, bool) or not (1 <= _t_ms <= 10000)
+            ):
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Template '{t_lid}' max_score must be an integer (1-10000)",
+                    422,
+                )
+            _t_sm = t.get("suggested_minutes")
+            if _t_sm is not None and (
+                not isinstance(_t_sm, int) or isinstance(_t_sm, bool) or not (0 <= _t_sm <= 100000)
+            ):
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Template '{t_lid}' suggested_minutes must be an integer (0-100000)",
                     422,
                 )
 

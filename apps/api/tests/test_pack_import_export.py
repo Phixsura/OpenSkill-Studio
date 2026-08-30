@@ -1202,3 +1202,47 @@ async def test_dbapi_string_truncation_maps_to_422():
     from app.exceptions import _INPUT_SQLSTATES
 
     assert "22001" in _INPUT_SQLSTATES
+
+
+# ── R89f: import type-gates integer fields written verbatim at install ──
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_noninteger_install_fields(c):
+    """R89f guard: skill.estimated_minutes and template.max_score/
+    suggested_minutes flow verbatim into INTEGER columns at install. A
+    non-integer is a client-side asyncpg bind DataError with NO sqlstate, so the
+    global backstop can't map it — the pack imported PUBLISHED then 500'd every
+    install. Import must reject them 422. Reverting the gates fails this."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    m1 = copy.deepcopy(VALID_MANIFEST)
+    m1["skills"][0]["estimated_minutes"] = "soon"
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("em.zip", _make_zip(m1), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+    m2 = copy.deepcopy(VALID_MANIFEST)
+    m2["project_templates"][0]["max_score"] = "lots"
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("ms.zip", _make_zip(m2), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+
+    m3 = copy.deepcopy(VALID_MANIFEST)
+    m3["project_templates"][0]["suggested_minutes"] = "soon"
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("sm.zip", _make_zip(m3), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
