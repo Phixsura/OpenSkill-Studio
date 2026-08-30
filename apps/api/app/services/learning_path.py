@@ -411,9 +411,12 @@ class LearningPathService:
 
         pct = round(completed * 100 / total_required) if total_required > 0 else 0
 
-        # Issue certificate on 100% completion
+        # Issue certificate on ACTUAL completion, not the display percentage.
+        # R88f: pct is rounded for display — with >=200 required items,
+        # 199/200 rounds to 100 and `pct == 100` minted a real certificate
+        # (+ path-completion points) with a required item still incomplete.
         certificate_number = None
-        if pct == 100:
+        if total_required > 0 and completed >= total_required:
             certificate_number, was_new = await self._maybe_issue_certificate(
                 path_id, user_id, org_id, completed
             )

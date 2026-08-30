@@ -905,3 +905,96 @@ async def test_workflow_pack_item_progress(c):
     wf_item3 = next(i for i in items3 if i["type"] == "workflow_pack")
     assert wf_item3["status"] == "completed"
     assert wf_item3["name"] != "Unknown"
+
+
+# ═══════════════ R88f: certificate gate must use exact completion ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_certificate_not_issued_at_rounded_100_pct(c):
+    """R88f guard: pct is round()ed for display — 199/200 required items gives
+    round(99.5) = 100. The old gate `if pct == 100` minted a real certificate
+    (+ path-completion points) with a required item still incomplete. The gate
+    must use exact completion (completed >= total_required). Reverting the fix
+    makes this fail (a certificate_number appears at 199/200)."""
+    h, user = await _auth(c)
+    oid = await _org(c, h)
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "Round Cert"}, headers=h)
+    ).json()["data"]["id"]
+
+    # Build 200 required skill items directly in the DB (HTTP would be 400+ calls)
+    from app.core.database import AsyncSessionLocal
+    from app.models.learning_path import LearningPathItem, PathItemType
+    from app.models.skill import (
+        ProgressStatus,
+        Skill,
+        SkillCategory,
+        SkillProgress,
+    )
+
+    async with AsyncSessionLocal() as db:
+        cat = SkillCategory(org_id=oid, name="RC", slug=f"rc-{uuid.uuid4().hex[:6]}")
+        db.add(cat)
+        await db.flush()
+        skill_ids = []
+        for i in range(200):
+            s = Skill(
+                org_id=oid,
+                category_id=cat.id,
+                name=f"RC Skill {i}",
+                slug=f"rc-skill-{uuid.uuid4().hex[:8]}",
+                description="d" * 10,
+            )
+            db.add(s)
+            await db.flush()
+            skill_ids.append(s.id)
+            db.add(
+                LearningPathItem(
+                    path_id=pid,
+                    item_type=PathItemType.SKILL,
+                    skill_id=s.id,
+                    sort_order=i,
+                    required=True,
+                    unlock_rule="immediate",
+                )
+            )
+        # Complete 199 of 200
+        for sid in skill_ids[:199]:
+            db.add(
+                SkillProgress(
+                    org_id=oid,
+                    skill_id=sid,
+                    user_id=user["id"],
+                    status=ProgressStatus.COMPLETED,
+                )
+            )
+        await db.commit()
+
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["completed"] == 199
+    assert data["total_required"] == 200
+    assert data["pct"] == 100  # display rounds up — that's fine
+    # ...but NO certificate until the last required item is done
+    assert "certificate_number" not in data, (
+        f"certificate minted at 199/200: {data.get('certificate_number')}"
+    )
+
+    # Complete the last item -> certificate issues
+    async with AsyncSessionLocal() as db:
+        db.add(
+            SkillProgress(
+                org_id=oid,
+                skill_id=skill_ids[199],
+                user_id=user["id"],
+                status=ProgressStatus.COMPLETED,
+            )
+        )
+        await db.commit()
+
+    r2 = await c.get(f"/api/v1/orgs/{oid}/paths/{pid}/my-progress", headers=h)
+    data2 = r2.json()["data"]
+    assert data2["completed"] == 200
+    assert data2.get("certificate_number"), "certificate missing at true 100%"
