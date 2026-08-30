@@ -1068,12 +1068,15 @@ class ProjectService:
                 from app.services.gamification import POINTS_REVIEW_POSTED, GamificationService
 
                 gam = GamificationService(self.db)
+                # R88d: dedupe by submission_id, not review.id — every review is
+                # a fresh row with a fresh id, so keying on review.id would let a
+                # reviewer re-review the same submission for repeated points.
                 await gam.award_points(
                     reviewer_id,
                     sub.org_id,
                     POINTS_REVIEW_POSTED,
                     "review_posted",
-                    reference_id=review.id,
+                    reference_id=submission_id,
                     description=f"Reviewed submission {submission_id}",
                 )
             except Exception:

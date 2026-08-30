@@ -584,3 +584,88 @@ async def test_import_oversized_archive_rejected(c):
         pack_io_mod.MAX_ARCHIVE_SIZE = orig_ep
         pack_import_mod.MAX_ARCHIVE_SIZE = orig_svc
     assert r.status_code in (413, 422), f"Expected 413 or 422, got {r.status_code}: {r.text}"
+
+
+# ═══════════════ R88d: points idempotency guard ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_points_award_idempotent_per_action(c):
+    """R88d guard: resubmitting the same submission (after revision_requested)
+    and re-reviewing the same submission must NOT re-award points. Without the
+    per-(user, org, reason, reference_id) dedup in award_points, two colluding
+    accounts could ping-pong review/resubmit for unbounded leaderboard points.
+    Reverting the dedup makes this fail (student 80 pts / instructor 15 pts)."""
+    ih, _ = await _auth(c)  # instructor / org owner
+    sh, student = await _auth(c)
+    oid = await _org(c, ih)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=ih,
+    )
+    assert r.status_code == 201
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Idem Proj",
+            "description": "d" * 20,
+            "instructions": "do it",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=ih,
+    )
+    pid = r.json()["data"]["id"]
+    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)).status_code == 200
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{pid}/submissions",
+        json={"content": {"text": "work"}},
+        headers=sh,
+    )
+    subid = r.json()["data"]["id"]
+    submit_url = f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{subid}/submit"
+    assert (await c.post(submit_url, headers=sh)).status_code == 200
+
+    # 3 rounds of revision_requested -> resubmit on the SAME submission
+    for _ in range(3):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/submissions/{subid}/reviews",
+            json={"status": "revision_requested", "feedback": "redo"},
+            headers=ih,
+        )
+        assert r.status_code == 201
+        assert (await c.post(submit_url, headers=sh)).status_code == 200
+
+    r = await c.get(f"/api/v1/orgs/{oid}/points/me", headers=sh)
+    assert r.json()["data"]["total_points"] == 20  # one award despite 4 submits
+
+    r = await c.get(f"/api/v1/orgs/{oid}/points/me", headers=ih)
+    assert r.json()["data"]["total_points"] == 5  # one award despite 3 reviews
+
+    # A DIFFERENT project must still award fresh points
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Idem Proj 2",
+            "description": "d" * 20,
+            "instructions": "do it",
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=ih,
+    )
+    p2 = r.json()["data"]["id"]
+    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{p2}/publish", headers=ih)).status_code == 200
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects/{p2}/submissions",
+        json={"content": {"text": "w2"}},
+        headers=sh,
+    )
+    s2 = r.json()["data"]["id"]
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{p2}/submissions/{s2}/submit", headers=sh)
+    ).status_code == 200
+
+    r = await c.get(f"/api/v1/orgs/{oid}/points/me", headers=sh)
+    assert r.json()["data"]["total_points"] == 40
