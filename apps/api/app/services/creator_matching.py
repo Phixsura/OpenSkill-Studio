@@ -84,9 +84,7 @@ class CreatorMatchingService:
         if not projects_by_id:
             return caps_by_project
 
-        brief_ids = {
-            p.client_brief_id for p in projects_by_id.values() if p.client_brief_id
-        }
+        brief_ids = {p.client_brief_id for p in projects_by_id.values() if p.client_brief_id}
         briefs_by_id: dict[str, ClientBrief] = {}
         if brief_ids:
             brief_r = await self.db.execute(
@@ -186,11 +184,15 @@ class CreatorMatchingService:
             score = None
             if progress.best_score is not None:
                 denom = max_score_sums.get(skill.id, 0)
-                score = min(
-                    float(progress.best_score) / max(1, denom) * 100.0, 100.0
-                )
+                score = min(float(progress.best_score) / max(1, denom) * 100.0, 100.0)
             for cap in self._map_tags(list(skill.tags or []), keys):
-                add(cap, "skill_completed", progress.id, progress.completed_at or progress.started_at or skill.created_at, score)
+                add(
+                    cap,
+                    "skill_completed",
+                    progress.id,
+                    progress.completed_at or progress.started_at or skill.created_at,
+                    score,
+                )
 
         # 2. Skill badges
         badge_r = await self.db.execute(
@@ -278,7 +280,12 @@ class CreatorMatchingService:
             # in a free-text brief field should attest image_generation.
             cap = self._norm_cap(brief.project_type)
             if cap in keys:
-                add(cap, "commercial_project", application.id, application.reviewed_at or application.applied_at)
+                add(
+                    cap,
+                    "commercial_project",
+                    application.id,
+                    application.reviewed_at or application.applied_at,
+                )
 
         # 5. Completed workflow runs (capabilities from provider_action steps)
         run_r = await self.db.execute(
@@ -381,9 +388,7 @@ class CreatorMatchingService:
                 newest = newest_r.scalar_one_or_none()
                 if newest is not None:
                     ref = newest if newest.tzinfo else newest.replace(tzinfo=UTC)
-                    if datetime.now(UTC) - ref < timedelta(
-                        seconds=self.EVIDENCE_STALENESS_SECONDS
-                    ):
+                    if datetime.now(UTC) - ref < timedelta(seconds=self.EVIDENCE_STALENESS_SECONDS):
                         # Fresh enough — release the lock before returning
                         # (commit ends the lock-holding transaction; nothing
                         # was written, so committing is a no-op data-wise)
@@ -497,9 +502,7 @@ class CreatorMatchingService:
         # an archived project manufactures a dead offer the creator can never
         # accept (and the unique index then blocks any future re-offer)
         if project.status == ContentStatus.ARCHIVED:
-            raise AppError(
-                "PROJECT_NOT_AVAILABLE", "Project is archived — offers are closed", 409
-            )
+            raise AppError("PROJECT_NOT_AVAILABLE", "Project is archived — offers are closed", 409)
         # match_run_id is a loose (non-FK) reference — validate org ownership
         # the same way feedback-events does (ADR-012), or an over-length /
         # cross-org value 500s or silently attaches a foreign run.
@@ -643,9 +646,7 @@ class CreatorMatchingService:
         await self.db.refresh(assignment)
         return assignment
 
-    async def withdraw_assignment(
-        self, assignment_id: str, org_id: str
-    ) -> CreatorAssignment:
+    async def withdraw_assignment(self, assignment_id: str, org_id: str) -> CreatorAssignment:
         """Assigner-side retraction of a pending offer.
 
         Completes the state machine offer_assignment already supersedes on
@@ -701,5 +702,7 @@ class CreatorMatchingService:
             query = query.where(CreatorAssignment.project_id == project_id)
         if only_user_id:
             query = query.where(CreatorAssignment.user_id == only_user_id)
-        result = await self.db.execute(query.order_by(CreatorAssignment.created_at.desc(), CreatorAssignment.id.desc()))
+        result = await self.db.execute(
+            query.order_by(CreatorAssignment.created_at.desc(), CreatorAssignment.id.desc())
+        )
         return list(result.scalars().all())

@@ -35,7 +35,11 @@ def _public_item(item) -> PortfolioItemResponse:
     return resp
 
 
-@router.get("/u/{username}", response_model=DataResponse[PublicProfileResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/u/{username}",
+    response_model=DataResponse[PublicProfileResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
     svc = PortfolioService(db)
     profile = await svc.get_public_profile(username)
@@ -47,14 +51,22 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
     return DataResponse(data=PublicProfileResponse(**profile))
 
 
-@router.get("/u/{username}/items", response_model=DataResponse[list[PortfolioItemResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/u/{username}/items",
+    response_model=DataResponse[list[PortfolioItemResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def get_public_items(username: str, db: AsyncSession = Depends(get_db)):
     svc = PortfolioService(db)
     items = await svc.get_public_items(username)
     return DataResponse(data=[_public_item(i) for i in items])
 
 
-@router.get("/u/{username}/items/{slug}", response_model=DataResponse[PortfolioItemResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/u/{username}/items/{slug}",
+    response_model=DataResponse[PortfolioItemResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def get_public_item(username: str, slug: str, db: AsyncSession = Depends(get_db)):
     svc = PortfolioService(db)
     item = await svc.get_public_item(username, slug)
@@ -66,7 +78,11 @@ async def get_public_item(username: str, slug: str, db: AsyncSession = Depends(g
 # ── Profile Management ───────────────────────────────────
 
 
-@router.get("/portfolio/profile", response_model=DataResponse[ProfileResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/portfolio/profile",
+    response_model=DataResponse[ProfileResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def get_my_profile(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -77,7 +93,11 @@ async def get_my_profile(
     return DataResponse(data=ProfileResponse.model_validate(profile))
 
 
-@router.put("/portfolio/profile", response_model=DataResponse[ProfileResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.put(
+    "/portfolio/profile",
+    response_model=DataResponse[ProfileResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def update_my_profile(
     body: UpdateProfileRequest,
     user: User = Depends(get_current_user),
@@ -92,7 +112,11 @@ async def update_my_profile(
     return DataResponse(data=ProfileResponse.model_validate(profile))
 
 
-@router.put("/portfolio/username", response_model=DataResponse[ProfileResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.put(
+    "/portfolio/username",
+    response_model=DataResponse[ProfileResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def change_username(
     body: UsernameRequest,
     user: User = Depends(get_current_user),
@@ -107,7 +131,11 @@ async def change_username(
 # ── Portfolio Items ──────────────────────────────────────
 
 
-@router.get("/portfolio/items", response_model=DataResponse[list[PortfolioItemResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/portfolio/items",
+    response_model=DataResponse[list[PortfolioItemResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_my_items(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -118,7 +146,9 @@ async def list_my_items(
 
 
 @router.post(
-    "/portfolio/items", response_model=DataResponse[PortfolioItemResponse], status_code=201,
+    "/portfolio/items",
+    response_model=DataResponse[PortfolioItemResponse],
+    status_code=201,
     dependencies=[Depends(rate_limit(30, 60))],
 )
 async def create_item(
@@ -142,7 +172,11 @@ async def create_item(
     return DataResponse(data=PortfolioItemResponse.model_validate(item))
 
 
-@router.get("/portfolio/items/{item_id}", response_model=DataResponse[PortfolioItemResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/portfolio/items/{item_id}",
+    response_model=DataResponse[PortfolioItemResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def get_my_item(
     item_id: str,
     user: User = Depends(get_current_user),
@@ -174,7 +208,11 @@ async def reorder_my_items(
     return {"message": "Items reordered"}
 
 
-@router.put("/portfolio/items/{item_id}", response_model=DataResponse[PortfolioItemResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.put(
+    "/portfolio/items/{item_id}",
+    response_model=DataResponse[PortfolioItemResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def update_my_item(
     item_id: str,
     body: UpdatePortfolioItemRequest,
@@ -187,7 +225,9 @@ async def update_my_item(
     return DataResponse(data=PortfolioItemResponse.model_validate(item))
 
 
-@router.delete("/portfolio/items/{item_id}", status_code=204, dependencies=[Depends(rate_limit(30, 60))])
+@router.delete(
+    "/portfolio/items/{item_id}", status_code=204, dependencies=[Depends(rate_limit(30, 60))]
+)
 async def delete_my_item(
     item_id: str,
     user: User = Depends(get_current_user),
@@ -198,7 +238,11 @@ async def delete_my_item(
     await db.commit()
 
 
-@router.post("/portfolio/upload-cover", response_model=DataResponse[dict], dependencies=[Depends(rate_limit(10, 60))])
+@router.post(
+    "/portfolio/upload-cover",
+    response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def upload_cover_image(
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
@@ -264,7 +308,11 @@ async def upload_cover_image(
 # ── Badges ───────────────────────────────────────────────
 
 
-@router.get("/portfolio/badges", response_model=DataResponse[list[SkillBadgeResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/portfolio/badges",
+    response_model=DataResponse[list[SkillBadgeResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_my_badges(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -286,7 +334,11 @@ async def list_my_badges(
     )
 
 
-@router.put("/portfolio/badges/{badge_id}", response_model=DataResponse[SkillBadgeResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.put(
+    "/portfolio/badges/{badge_id}",
+    response_model=DataResponse[SkillBadgeResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def toggle_badge(
     badge_id: str,
     body: ToggleBadgeRequest,

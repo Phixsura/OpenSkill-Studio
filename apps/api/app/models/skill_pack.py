@@ -105,8 +105,12 @@ class SkillPack(Base):
     )
 
     # Counters
-    install_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    install_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    review_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     average_rating: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
 
     # Automated quality score (0-100), computed on publish_release
@@ -129,7 +133,9 @@ class SkillPack(Base):
     # Provenance (author, license, attribution)
     provenance: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
 
-    created_by: Mapped[str | None] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -188,8 +194,12 @@ class SkillPackRelease(Base):
     changelog: Mapped[str | None] = mapped_column(Text)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     component_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    released_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
-    released_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    released_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
+    released_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 # ── Installation Tracking ────────────────────────────────
@@ -219,8 +229,12 @@ class SkillPackInstallation(Base):
         Enum(InstallStatus, name="install_status", create_constraint=True),
         default=InstallStatus.ACTIVE,
     )
-    installed_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
-    installed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    installed_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
+    installed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

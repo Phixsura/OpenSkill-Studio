@@ -159,9 +159,7 @@ async def test_profile_null_clears_nullable_fields(client):
     assert d["website_url"] is None
 
     # Partial null: clear only bio, headline untouched
-    r = await client.put(
-        "/api/v1/portfolio/profile", json={"headline": "Back again"}, headers=h
-    )
+    r = await client.put("/api/v1/portfolio/profile", json={"headline": "Back again"}, headers=h)
     assert r.status_code == 200
     r = await client.put("/api/v1/portfolio/profile", json={"bio": None}, headers=h)
     assert r.status_code == 200

@@ -288,9 +288,7 @@ async def test_register_and_login_long_password_not_500(client):
     r = await client.post("/api/v1/auth/login", json={"email": email, "password": longpw})
     assert r.status_code == 200, r.text
     # wrong password (differs in first 72 bytes) → 401, not 500
-    r = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "Aa1" + "y" * 90}
-    )
+    r = await client.post("/api/v1/auth/login", json={"email": email, "password": "Aa1" + "y" * 90})
     assert r.status_code == 401, r.text
 
     await engine.dispose()
@@ -430,9 +428,7 @@ async def test_revoke_other_session_keeps_cookie(client):
     old_id = old_sessions[0]["id"]
 
     # Second login → second session, new cookie (the "current" one)
-    r_b = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "TestPass123!"}
-    )
+    r_b = await client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
     assert r_b.status_code == 200
     cookie_b = r_b.cookies.get("refresh_token")
     headers_b = {"Authorization": f"Bearer {r_b.json()['access_token']}"}
@@ -515,9 +511,7 @@ async def test_logout_kills_rotation_predecessor_within_grace(client):
     tok1 = r.cookies.get("refresh_token")
 
     # Second device — its own live session must survive the first's logout
-    r_b = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "TestPass123!"}
-    )
+    r_b = await client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
     tok_b = r_b.cookies.get("refresh_token")
 
     # Device 1 rotates tok1 → tok2
@@ -630,9 +624,7 @@ async def test_revoke_session_kills_rotation_predecessor_within_grace(client):
     tok1 = r.cookies.get("refresh_token")
 
     # Second device — its own live session must survive.
-    r_b = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "TestPass123!"}
-    )
+    r_b = await client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
     tok_b = r_b.cookies.get("refresh_token")
 
     # Device 1 rotates tok1 → tok2.

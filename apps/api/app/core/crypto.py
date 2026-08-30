@@ -31,9 +31,7 @@ def _fernet() -> MultiFernet:
         # Dev/test fallback: derive a stable key from the JWT secret so local
         # development works without extra setup. config.py rejects an empty
         # CREDENTIAL_ENCRYPTION_KEY outside development/test.
-        derived = base64.urlsafe_b64encode(
-            hashlib.sha256(settings.jwt_secret.encode()).digest()
-        )
+        derived = base64.urlsafe_b64encode(hashlib.sha256(settings.jwt_secret.encode()).digest())
         return MultiFernet([Fernet(derived)])
 
     fernets: list[Fernet] = []

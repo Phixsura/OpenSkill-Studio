@@ -51,9 +51,7 @@ class RequirementProfile(Base):
     raw_request: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Loose ref to a ClientBrief this profile was derived from
     source_brief_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
-    structured_requirements: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default="{}"
-    )
+    structured_requirements: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     # {"provenance": {field: "extracted"|"user_entered"|"inferred"}, "model": ..., "unmatched_mentions": [...]}
     extraction_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft", server_default="draft")
@@ -61,9 +59,7 @@ class RequirementProfile(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -84,13 +80,9 @@ class MatchingConfig(Base):
     # {"reason_min": 0.7, "gap_max": 0.4, "tier_great": 0.75, "tier_good": 0.5}
     thresholds: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (
-        Index("uq_matching_config", "target_entity_type", "version", unique=True),
-    )
+    __table_args__ = (Index("uq_matching_config", "target_entity_type", "version", unique=True),)
 
 
 class MatchRun(Base):
@@ -115,9 +107,7 @@ class MatchRun(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_match_runs_org", "org_id", "created_at"),)
 
@@ -169,9 +159,7 @@ class FeedbackEvent(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("ix_feedback_org_entity", "org_id", "entity_type", "entity_id"),

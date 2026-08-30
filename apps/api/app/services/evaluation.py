@@ -44,6 +44,7 @@ def _coerce_budget(v: object) -> float | None:
         return float(v) if math.isfinite(v) else None
     return None
 
+
 SYSTEM_PROMPT = """You are an expert evaluator for an AI training platform called OpenSkill Studio.
 Your task is to evaluate a student's submission against a specific rubric.
 
@@ -661,7 +662,10 @@ Please evaluate the submission against the rubric above."""
                 if item.file_key and is_image_mime(item.mime_type):
                     if image_count >= max_images:
                         blocks.append(
-                            {"type": "text", "text": f"[{len(items) - image_count} additional images omitted]"}
+                            {
+                                "type": "text",
+                                "text": f"[{len(items) - image_count} additional images omitted]",
+                            }
                         )
                         break
                     image_count += 1
@@ -874,7 +878,8 @@ Please evaluate the submission against the rubric above."""
             .values(
                 total_tasks=EvalUsageMonthly.total_tasks + 1,
                 total_input_tokens=EvalUsageMonthly.total_input_tokens + (task.input_tokens or 0),
-                total_output_tokens=EvalUsageMonthly.total_output_tokens + (task.output_tokens or 0),
+                total_output_tokens=EvalUsageMonthly.total_output_tokens
+                + (task.output_tokens or 0),
                 total_cost_usd=EvalUsageMonthly.total_cost_usd + (task.cost_usd or Decimal("0")),
             )
         )

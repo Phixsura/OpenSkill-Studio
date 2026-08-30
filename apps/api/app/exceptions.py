@@ -83,7 +83,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         for err in exc.errors():
             field = ".".join(str(loc) for loc in err.get("loc", []) if loc != "body")
             details.append({"field": field, "message": err.get("msg", "Validation error")})
-        message = details[0]["message"] if len(details) == 1 else f"{len(details)} validation errors"
+        message = (
+            details[0]["message"] if len(details) == 1 else f"{len(details)} validation errors"
+        )
         return JSONResponse(
             status_code=422,
             content=_error_body("VALIDATION_ERROR", message, request, details),
@@ -96,7 +98,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         if "null" in msg.lower() or "overflow" in msg.lower() or "out of range" in msg.lower():
             return JSONResponse(
                 status_code=422,
-                content=_error_body("INVALID_VALUE", "Request contains invalid characters or values", request),
+                content=_error_body(
+                    "INVALID_VALUE", "Request contains invalid characters or values", request
+                ),
             )
         raise exc
 

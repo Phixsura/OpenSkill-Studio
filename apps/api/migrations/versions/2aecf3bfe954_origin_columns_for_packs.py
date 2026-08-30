@@ -19,7 +19,10 @@ def upgrade() -> None:
         op.add_column(table, sa.Column("origin_pack_id", sa.String(26), nullable=True))
         op.add_column(table, sa.Column("origin_release_id", sa.String(26), nullable=True))
         op.add_column(table, sa.Column("origin_component_id", sa.String(100), nullable=True))
-        op.add_column(table, sa.Column("locally_modified", sa.Boolean(), nullable=False, server_default="false"))
+        op.add_column(
+            table,
+            sa.Column("locally_modified", sa.Boolean(), nullable=False, server_default="false"),
+        )
 
 
 def downgrade() -> None:

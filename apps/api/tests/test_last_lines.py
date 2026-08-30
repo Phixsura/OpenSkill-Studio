@@ -180,7 +180,9 @@ async def test_unhandled_exception_triggers():
 
     register_exception_handlers(test_app)
 
-    async with AsyncClient(transport=ASGITransport(app=test_app, raise_app_exceptions=False), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app, raise_app_exceptions=False), base_url="http://test"
+    ) as ac:
         r = await ac.get("/crash")
         assert r.status_code == 500
 

@@ -14,12 +14,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "CREATE INDEX ix_skill_packs_scenario_tags ON skill_packs USING GIN (scenario_tags)"
-    )
-    op.execute(
-        "CREATE INDEX ix_skill_packs_tool_tags ON skill_packs USING GIN (tool_tags)"
-    )
+    op.execute("CREATE INDEX ix_skill_packs_scenario_tags ON skill_packs USING GIN (scenario_tags)")
+    op.execute("CREATE INDEX ix_skill_packs_tool_tags ON skill_packs USING GIN (tool_tags)")
     op.execute(
         "CREATE INDEX ix_skill_packs_capability_tags ON skill_packs USING GIN (capability_tags)"
     )

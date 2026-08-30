@@ -85,9 +85,13 @@ class LearningPathService:
         # Clean up path items and cohort assignments
         from sqlalchemy import delete as sa_delete
 
-        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.path_id == path_id))
         await self.db.execute(
-            sa_delete(CohortLearningPathAssignment).where(CohortLearningPathAssignment.path_id == path_id)
+            sa_delete(LearningPathItem).where(LearningPathItem.path_id == path_id)
+        )
+        await self.db.execute(
+            sa_delete(CohortLearningPathAssignment).where(
+                CohortLearningPathAssignment.path_id == path_id
+            )
         )
         await self.db.flush()
 
@@ -167,9 +171,7 @@ class LearningPathService:
             skill_id=skill_id if ptype == PathItemType.SKILL else None,
             project_id=project_id if ptype == PathItemType.PROJECT else None,
             section_title=section_title if ptype == PathItemType.SECTION else None,
-            workflow_pack_id=(
-                workflow_pack_id if ptype == PathItemType.WORKFLOW_PACK else None
-            ),
+            workflow_pack_id=(workflow_pack_id if ptype == PathItemType.WORKFLOW_PACK else None),
             sort_order=sort_order,
             required=required,
             unlock_rule=unlock_rule,
@@ -179,7 +181,9 @@ class LearningPathService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
-            raise AppError("REFERENCE_NOT_FOUND", "Referenced skill or project no longer exists", 404) from None
+            raise AppError(
+                "REFERENCE_NOT_FOUND", "Referenced skill or project no longer exists", 404
+            ) from None
         return item
 
     async def remove_item(self, item_id: str, path_id: str, org_id: str) -> None:
@@ -226,7 +230,9 @@ class LearningPathService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
-            raise AppError("ALREADY_ASSIGNED", "Path already assigned to this cohort", 409) from None
+            raise AppError(
+                "ALREADY_ASSIGNED", "Path already assigned to this cohort", 409
+            ) from None
         return assignment
 
     async def unassign_from_cohort(self, path_id: str, cohort_id: str, org_id: str) -> None:
@@ -244,7 +250,9 @@ class LearningPathService:
         await self.db.delete(assignment)
         await self.db.flush()
 
-    async def list_cohort_paths(self, cohort_id: str, org_id: str) -> list[tuple[CohortLearningPathAssignment, str]]:
+    async def list_cohort_paths(
+        self, cohort_id: str, org_id: str
+    ) -> list[tuple[CohortLearningPathAssignment, str]]:
         await self._verify_cohort_org(cohort_id, org_id)
         result = await self.db.execute(
             select(CohortLearningPathAssignment, LearningPath.name)
@@ -282,7 +290,9 @@ class LearningPathService:
 
         # Batch-load all referenced skills and projects (avoid N+1)
         skill_ids = [i.skill_id for i in items if i.item_type == PathItemType.SKILL and i.skill_id]
-        project_ids = [i.project_id for i in items if i.item_type == PathItemType.PROJECT and i.project_id]
+        project_ids = [
+            i.project_id for i in items if i.item_type == PathItemType.PROJECT and i.project_id
+        ]
 
         skills_map: dict[str, Skill] = {}
         progress_map: dict[str, SkillProgress] = {}
@@ -341,10 +351,12 @@ class LearningPathService:
 
         for item in items:
             if item.item_type == PathItemType.SECTION:
-                result_items.append({
-                    "type": "section",
-                    "title": item.section_title,
-                })
+                result_items.append(
+                    {
+                        "type": "section",
+                        "title": item.section_title,
+                    }
+                )
                 continue
 
             is_required = item.required
@@ -395,16 +407,18 @@ class LearningPathService:
             else:
                 status = "available"
 
-            result_items.append({
-                "type": item.item_type.value,
-                "item_id": item.id,
-                "skill_id": item.skill_id,
-                "project_id": item.project_id,
-                "workflow_pack_id": item.workflow_pack_id,
-                "name": name,
-                "required": is_required,
-                "status": status,
-            })
+            result_items.append(
+                {
+                    "type": item.item_type.value,
+                    "item_id": item.id,
+                    "skill_id": item.skill_id,
+                    "project_id": item.project_id,
+                    "workflow_pack_id": item.workflow_pack_id,
+                    "name": name,
+                    "required": is_required,
+                    "status": status,
+                }
+            )
 
             if is_required:
                 all_prev_done = all_prev_done and is_done
@@ -438,7 +452,9 @@ class LearningPathService:
                         description=f"Completed learning path {path_id}",
                     )
                 except Exception:
-                    log.warning("gamification_award_failed", user_id=user_id, reason="path_completion")
+                    log.warning(
+                        "gamification_award_failed", user_id=user_id, reason="path_completion"
+                    )
 
         result = {
             "path_id": path_id,
@@ -493,17 +509,21 @@ class LearningPathService:
             if item.item_type == PathItemType.SKILL and item.skill_id:
                 skill = await self.db.get(Skill, item.skill_id)
                 if skill:
-                    skills_data.append({
-                        "skill_id": skill.id,
-                        "name": skill.name,
-                    })
+                    skills_data.append(
+                        {
+                            "skill_id": skill.id,
+                            "name": skill.name,
+                        }
+                    )
             elif item.item_type == PathItemType.PROJECT and item.project_id:
                 project = await self.db.get(Project, item.project_id)
                 if project:
-                    projects_data.append({
-                        "project_id": project.id,
-                        "name": project.title,
-                    })
+                    projects_data.append(
+                        {
+                            "project_id": project.id,
+                            "name": project.title,
+                        }
+                    )
 
         cert_number = str(uuid.uuid4())
         cert = Certificate(
@@ -611,12 +631,14 @@ class LearningPathService:
         results: list[dict] = []
         for member in learners:
             progress = await self.get_path_progress(path_id, member.user_id, org_id)
-            results.append({
-                "user_id": member.user_id,
-                "completed": progress["completed"],
-                "total_required": progress["total_required"],
-                "pct": progress["pct"],
-            })
+            results.append(
+                {
+                    "user_id": member.user_id,
+                    "completed": progress["completed"],
+                    "total_required": progress["total_required"],
+                    "pct": progress["pct"],
+                }
+            )
 
         return results
 

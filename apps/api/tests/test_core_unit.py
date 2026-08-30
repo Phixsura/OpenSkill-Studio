@@ -153,9 +153,7 @@ async def test_ensure_bucket_creates():
 
     client = AsyncMock()
     error_response = {"Error": {"Code": "404", "Message": "Not Found"}}
-    client.head_bucket = AsyncMock(
-        side_effect=ClientError(error_response, "HeadBucket")
-    )
+    client.head_bucket = AsyncMock(side_effect=ClientError(error_response, "HeadBucket"))
     client.create_bucket = AsyncMock()
     await ensure_bucket(client)
     client.create_bucket.assert_called_once()

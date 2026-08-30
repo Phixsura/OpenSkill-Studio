@@ -671,8 +671,20 @@ async def test_create_review_rejects_self_review(db):
     await db.flush()
     svc = ProjectService(db)
     project = await svc.create_project(
-        org.id, "SR", None, "D", "I", "beginner", 100,
-        [{"criterion": "Q", "max_score": 100}], None, None, 0, 0, None, author.id,
+        org.id,
+        "SR",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        author.id,
     )
     await db.flush()
     sub = await svc.create_submission(org.id, project.id, author.id)

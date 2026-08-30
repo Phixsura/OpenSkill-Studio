@@ -80,10 +80,7 @@ class Settings(BaseSettings):
         # propagate them to os.environ, so os.environ.get("APP_ENV") can
         # return None even when APP_ENV=production is set in .env.
         app_env = (info.data.get("app_env") or "development") if info.data else "development"
-        if (
-            app_env not in ("development", "test")
-            and v == "dev-secret-change-me-in-production"
-        ):
+        if app_env not in ("development", "test") and v == "dev-secret-change-me-in-production":
             raise ValueError("JWT_SECRET must be set to a unique value in production")
         return v
 
@@ -100,7 +97,9 @@ class Settings(BaseSettings):
     def validate_database_url(cls, v: str, info: Any) -> str:
         app_env = (info.data.get("app_env") or "development") if info.data else "development"
         if app_env not in ("development", "test") and "postgres:postgres@" in v:
-            raise ValueError("DATABASE_URL must not use default postgres:postgres credentials in production")
+            raise ValueError(
+                "DATABASE_URL must not use default postgres:postgres credentials in production"
+            )
         return v
 
     @field_validator("credential_encryption_key")

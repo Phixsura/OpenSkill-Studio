@@ -52,7 +52,11 @@ async def _org(c, h):
 async def _pack(c, h, oid, name="Hero Image Workflow"):
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-packs",
-        json={"name": name, "summary": "E-commerce hero image production", "workflow_type": "production"},
+        json={
+            "name": name,
+            "summary": "E-commerce hero image production",
+            "workflow_type": "production",
+        },
         headers=h,
     )
     assert r.status_code == 201, r.text
@@ -198,7 +202,13 @@ async def test_update_definition_cycle_rejected_with_details(c):
     d = _valid_definition()
     d["steps"][0]["inputs"] = [{"port": "loop", "type": "prompt", "required": False}]
     d["edges"].append(
-        {"id": "e2", "from_step": "generate", "from_port": "result", "to_step": "write_prompt", "to_port": "loop"}
+        {
+            "id": "e2",
+            "from_step": "generate",
+            "from_port": "result",
+            "to_step": "write_prompt",
+            "to_port": "loop",
+        }
     )
     r = await c.put(
         f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
@@ -366,7 +376,11 @@ async def test_invalid_version_constraint_rejected(c):
             "version": "1.0.0",
             "dependencies": {
                 "recommended_packs": [
-                    {"family": "skill_pack", "slug": "x", "version": "^1.0.0"}  # npm caret — rejected
+                    {
+                        "family": "skill_pack",
+                        "slug": "x",
+                        "version": "^1.0.0",
+                    }  # npm caret — rejected
                 ]
             },
         },
@@ -733,8 +747,12 @@ async def test_publish_release_non_list_dependencies_422(c):
         {"requires_capabilities": "nope"},  # non-list value
         {"requires_capabilities": 5},  # int → len() TypeError before fix
         {"requires_capabilities": [{"capability": {}}]},  # non-str capability
-        {"requires_capabilities": [{"capability": "image_generation", "features": 5}]},  # non-list features
-        {"requires_capabilities": [{"capability": "image_generation", "features": [7]}]},  # non-str feature
+        {
+            "requires_capabilities": [{"capability": "image_generation", "features": 5}]
+        },  # non-list features
+        {
+            "requires_capabilities": [{"capability": "image_generation", "features": [7]}]
+        },  # non-str feature
         {"recommended_packs": "nope"},  # non-list value
     ]
     for deps in bad_dependencies:
@@ -851,8 +869,14 @@ async def test_recommended_pack_version_and_slug_type_checked(c):
         headers=h,
     )
     for deps, expected_code in [
-        ({"recommended_packs": [{"family": "skill_pack", "version": 1}]}, "INVALID_VERSION_CONSTRAINT"),
-        ({"recommended_packs": [{"family": "skill_pack", "version": ["x"]}]}, "INVALID_VERSION_CONSTRAINT"),
+        (
+            {"recommended_packs": [{"family": "skill_pack", "version": 1}]},
+            "INVALID_VERSION_CONSTRAINT",
+        ),
+        (
+            {"recommended_packs": [{"family": "skill_pack", "version": ["x"]}]},
+            "INVALID_VERSION_CONSTRAINT",
+        ),
         ({"recommended_packs": [{"family": "skill_pack", "slug": 42}]}, "INVALID_DEPENDENCY"),
     ]:
         r = await c.post(
@@ -877,7 +901,9 @@ async def test_card_field_update_resets_approval(c):
         json={"definition": _valid_definition()},
         headers=h,
     )
-    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
     await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
     r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
     assert r.status_code == 200, r.text
@@ -921,7 +947,9 @@ async def test_provenance_update_voids_approval(c):
         json={"definition": _valid_definition()},
         headers=h,
     )
-    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
     await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
     r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
     assert r.status_code == 200, r.text
@@ -951,7 +979,9 @@ async def test_publish_new_release_after_approval_voids_approval(c):
         json={"definition": _valid_definition()},
         headers=h,
     )
-    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
     await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
     r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
     assert r.status_code == 200 and r.json()["data"]["visibility"] == "public"
@@ -988,7 +1018,9 @@ async def test_edit_while_pending_resets_review(c):
         json={"definition": _valid_definition()},
         headers=h,
     )
-    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
     sub = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
     assert sub.json()["data"]["review_status"] == "pending"
 
@@ -1022,11 +1054,17 @@ async def test_approve_clears_stale_rejection_reason(c):
         json={"definition": _valid_definition()},
         headers=h,
     )
-    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
     await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
-    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/reject", json={"reason": "bad"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/reject", json={"reason": "bad"}, headers=h
+    )
     await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
-    appr = (await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)).json()["data"]
+    appr = (await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)).json()[
+        "data"
+    ]
     assert appr["review_status"] == "approved"
     assert appr["rejection_reason"] is None, "stale rejection_reason survived approve"
 
@@ -1081,14 +1119,10 @@ async def test_oversized_page_param_422_not_500(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     for bad in ("999999999999999999999", "1000001", "-1", "0"):
-        r = await c.get(
-            f"/api/v1/orgs/{oid}/workflow-packs", params={"page": bad}, headers=h
-        )
+        r = await c.get(f"/api/v1/orgs/{oid}/workflow-packs", params={"page": bad}, headers=h)
         assert r.status_code == 422, f"page={bad} -> {r.status_code}: {r.text[:150]}"
     # Upper bound accepted
-    r = await c.get(
-        f"/api/v1/orgs/{oid}/workflow-packs", params={"page": "1000000"}, headers=h
-    )
+    r = await c.get(f"/api/v1/orgs/{oid}/workflow-packs", params={"page": "1000000"}, headers=h)
     assert r.status_code == 200, r.text[:150]
 
 
@@ -1176,12 +1210,12 @@ async def test_publish_strips_org_local_pinned_binding(c):
 
     async with AsyncSessionLocal() as db:
         rel = (
-            await db.execute(_sel(WorkflowPackRelease).where(WorkflowPackRelease.pack_id == pid))
-        ).scalars().first()
+            (await db.execute(_sel(WorkflowPackRelease).where(WorkflowPackRelease.pack_id == pid)))
+            .scalars()
+            .first()
+        )
         cfg = next(
-            s["config"]
-            for s in rel.manifest["definition"]["steps"]
-            if s["id"] == "generate"
+            s["config"] for s in rel.manifest["definition"]["steps"] if s["id"] == "generate"
         )
         assert "pinned_offering_id" not in cfg
         assert cfg.get("binding_mode") == "auto"
@@ -1211,12 +1245,17 @@ def test_review_gate_passthrough_type_coercion_enforced():
             ],
             "steps": [
                 {
-                    "id": "src", "type": "asset_input", "name": "S",
+                    "id": "src",
+                    "type": "asset_input",
+                    "name": "S",
                     "config": {"accept_types": ["image"]},
-                    "inputs": [], "outputs": [{"port": "t", "type": "text"}],
+                    "inputs": [],
+                    "outputs": [{"port": "t", "type": "text"}],
                 },
                 {
-                    "id": "qa", "type": "review_gate", "name": "QA",
+                    "id": "qa",
+                    "type": "review_gate",
+                    "name": "QA",
                     "config": {"instructions": "x", "due_days": 7},
                     "inputs": [{"port": "subject", "type": "text"}],
                     "outputs": [
@@ -1226,7 +1265,13 @@ def test_review_gate_passthrough_type_coercion_enforced():
                 },
             ],
             "edges": [
-                {"id": "e1", "from_step": "src", "from_port": "t", "to_step": "qa", "to_port": "subject"}
+                {
+                    "id": "e1",
+                    "from_step": "src",
+                    "from_port": "t",
+                    "to_step": "qa",
+                    "to_port": "subject",
+                }
             ],
             "ui": {},
         }
@@ -1237,7 +1282,9 @@ def test_review_gate_passthrough_type_coercion_enforced():
 
     # text input → text passthrough: valid (identity coercion)
     _, errs_ok = validate_definition(_gate_def("text"))
-    assert not any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errs_ok), [e["code"] for e in errs_ok]
+    assert not any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errs_ok), [
+        e["code"] for e in errs_ok
+    ]
 
 
 @pytest.mark.asyncio
@@ -1274,12 +1321,17 @@ def test_review_gate_passthrough_sources_first_connected_port():
             ],
             "steps": [
                 {
-                    "id": "mk", "type": "prompt_template", "name": "Mk",
+                    "id": "mk",
+                    "type": "prompt_template",
+                    "name": "Mk",
                     "config": {"template": "x {{inputs.t}}"},
-                    "inputs": [], "outputs": [{"port": "p", "type": "prompt"}],
+                    "inputs": [],
+                    "outputs": [{"port": "p", "type": "prompt"}],
                 },
                 {
-                    "id": "qa", "type": "review_gate", "name": "QA",
+                    "id": "qa",
+                    "type": "review_gate",
+                    "name": "QA",
                     "config": {"instructions": "x", "due_days": 7},
                     "inputs": [
                         # optional image FIRST — never connected
@@ -1294,8 +1346,13 @@ def test_review_gate_passthrough_sources_first_connected_port():
                 },
             ],
             "edges": [
-                {"id": "e1", "from_step": "mk", "from_port": "p",
-                 "to_step": "qa", "to_port": "subject"}
+                {
+                    "id": "e1",
+                    "from_step": "mk",
+                    "from_port": "p",
+                    "to_step": "qa",
+                    "to_port": "subject",
+                }
             ],
             "ui": {},
         }
@@ -1343,7 +1400,9 @@ async def test_pack_mutations_row_locked_no_lost_update(c):
         json={"definition": _valid_definition()},
         headers=h,
     )
-    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
     await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
     await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)  # approved + PUBLIC
     await c.put(
@@ -1374,9 +1433,9 @@ async def test_pack_mutations_row_locked_no_lost_update(c):
     async with AsyncSessionLocal() as db:
         p = await db.get(WorkflowPack, pid)
         # B re-read fresh (review_status=None) → its public gate must have fired
-        assert not (
-            p.visibility == PackVisibility.PUBLIC and p.review_status is None
-        ), f"approval bypass: visibility={p.visibility.value} review_status={p.review_status} b={b_result}"
+        assert not (p.visibility == PackVisibility.PUBLIC and p.review_status is None), (
+            f"approval bypass: visibility={p.visibility.value} review_status={p.review_status} b={b_result}"
+        )
         assert b_result == "APPROVAL_REQUIRED", b_result
 
     # ── #5 publish resurrects an archived pack ──
@@ -1445,9 +1504,7 @@ def test_json_default_nonfinite_rejected():
 
     d = {
         "schema_version": 1,
-        "inputs": [
-            {"key": "cfg", "type": "json", "required": False, "default": '{"x": NaN}'}
-        ],
+        "inputs": [{"key": "cfg", "type": "json", "required": False, "default": '{"x": NaN}'}],
         "outputs": [],
         "steps": [
             {
@@ -1466,7 +1523,10 @@ def test_json_default_nonfinite_rejected():
     assert any(e["code"] == "WF_INVALID_DEFAULT" for e in errors), [e["code"] for e in errors]
 
     # Control: a finite json default is accepted
-    ok = {**d, "inputs": [{"key": "cfg", "type": "json", "required": False, "default": '{"x": 1.5}'}]}
+    ok = {
+        **d,
+        "inputs": [{"key": "cfg", "type": "json", "required": False, "default": '{"x": 1.5}'}],
+    }
     _, ok_errs = validate_definition(ok)
     assert not any(e["code"] == "WF_INVALID_DEFAULT" for e in ok_errs), [e["code"] for e in ok_errs]
 
@@ -1499,5 +1559,3 @@ def test_list_endpoints_have_unique_id_tiebreak():
     ]:
         src = _inspect.getsource(getattr(svc, method))
         assert tiebreak in src, f"{svc.__name__}.{method} ORDER BY lacks the unique id tiebreak"
-
-

@@ -57,9 +57,7 @@ class PackApprovalEvent(Base):
     """Audit trail for pack approval workflow actions."""
 
     __tablename__ = "pack_approval_events"
-    __table_args__ = (
-        Index("ix_pack_approval_events_pack", "pack_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_pack_approval_events_pack", "pack_id", "created_at"),)
 
     id: Mapped[str] = ulid_pk()
     pack_id: Mapped[str] = mapped_column(

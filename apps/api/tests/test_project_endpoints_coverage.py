@@ -47,10 +47,16 @@ async def _org(c, h):
 
 
 async def _project(c, h, oid):
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "PCov Project", "description": "d" * 10, "instructions": "i" * 10,
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "PCov Project",
+            "description": "d" * 10,
+            "instructions": "i" * 10,
+            "rubric": [{"criterion": "Q", "max_score": 100}],
+        },
+        headers=h,
+    )
     return r.json()["data"]["id"]
 
 
@@ -64,12 +70,16 @@ async def test_template_crud(c):
     oid = await _org(c, h)
 
     # Create template
-    r = await c.post(f"/api/v1/orgs/{oid}/project-templates", json={
-        "name": "Test Template",
-        "description": "A reusable project template",
-        "instructions": "Follow the rubric",
-        "rubric": [{"criterion": "Quality", "max_score": 100}],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/project-templates",
+        json={
+            "name": "Test Template",
+            "description": "A reusable project template",
+            "instructions": "Follow the rubric",
+            "rubric": [{"criterion": "Quality", "max_score": 100}],
+        },
+        headers=h,
+    )
     assert r.status_code == 201
     tid = r.json()["data"]["id"]
 
@@ -109,7 +119,8 @@ async def test_update_nonexistent_deliverable(c):
 
     r = await c.put(
         f"/api/v1/orgs/{oid}/projects/{pid}/deliverables/01NONEXISTENT000000000000",
-        json={"name": "X"}, headers=h,
+        json={"name": "X"},
+        headers=h,
     )
     assert r.status_code == 404
 
@@ -137,21 +148,29 @@ async def test_comment_crud(c):
     h, u = await _auth(c)
     hs, us = await _auth(c)
     oid = await _org(c, h)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h
+    )
 
     pid = await _project(c, h, oid)
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()["data"]["id"]
+    sid = (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=hs)).json()[
+        "data"
+    ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=hs)
 
     # Need a submission item to attach comment to — create one via upload
     # For now, use a fake item_id — the comment should still be created
     # or we test with the submission ID directly
     # Actually let's just check the endpoint requires proper input
-    r = await c.post(f"/api/v1/orgs/{oid}/submissions/{sid}/comments", json={
-        "item_id": sid,  # Use submission ID as item placeholder
-        "text": "Please revise the color scheme.",
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/submissions/{sid}/comments",
+        json={
+            "item_id": sid,  # Use submission ID as item placeholder
+            "text": "Please revise the color scheme.",
+        },
+        headers=h,
+    )
     # May be 201 or 404 (if item_id validation is strict)
     if r.status_code not in (201, 404):
         pytest.skip(f"Comment create returned {r.status_code}")
@@ -171,7 +190,8 @@ async def test_comment_crud(c):
     # Set completed
     r = await c.put(
         f"/api/v1/orgs/{oid}/comments/{cid}/completed",
-        json={"completed": True}, headers=hs,
+        json={"completed": True},
+        headers=hs,
     )
     assert r.status_code == 200
 
@@ -233,5 +253,7 @@ async def test_unassign_nonexistent_creator(c):
     oid = await _org(c, h)
     pid = await _project(c, h, oid)
 
-    r = await c.delete(f"/api/v1/orgs/{oid}/projects/{pid}/creators/01NONEXISTENT000000000000", headers=h)
+    r = await c.delete(
+        f"/api/v1/orgs/{oid}/projects/{pid}/creators/01NONEXISTENT000000000000", headers=h
+    )
     assert r.status_code == 404

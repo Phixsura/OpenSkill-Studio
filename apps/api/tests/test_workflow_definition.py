@@ -26,7 +26,12 @@ def _minimal_valid() -> dict:
             {"key": "product_name", "type": "text", "required": True},
         ],
         "outputs": [
-            {"key": "result_image", "type": "image", "from_step": "generate", "from_port": "result"},
+            {
+                "key": "result_image",
+                "type": "image",
+                "from_step": "generate",
+                "from_port": "result",
+            },
         ],
         "steps": [
             {
@@ -516,7 +521,13 @@ def test_selection_default_must_be_in_options():
     default-driven run (create_run applies then rejects it)."""
     d = _minimal_valid()
     d["inputs"].append(
-        {"key": "pick", "type": "selection", "required": True, "options": ["a", "b"], "default": "z"}
+        {
+            "key": "pick",
+            "type": "selection",
+            "required": True,
+            "options": ["a", "b"],
+            "default": "z",
+        }
     )
     _, errors = validate_definition(d)
     assert "WF_SELECTION_BAD_DEFAULT" in _codes(errors)
@@ -603,7 +614,12 @@ def test_output_key_grammar_and_duplicates():
 
     d2 = _minimal_valid()
     d2["outputs"].append(
-        {"key": "result_image", "type": "prompt", "from_step": "write_prompt", "from_port": "prompt"}
+        {
+            "key": "result_image",
+            "type": "prompt",
+            "from_step": "write_prompt",
+            "from_port": "prompt",
+        }
     )
     _, errors2 = validate_definition(d2)
     assert "WF_DUPLICATE_OUTPUT_KEY" in _codes(errors2)
@@ -687,9 +703,7 @@ def test_newline_inside_moustache_still_creates_implicit_edge():
     The scanner now walks raw strings: a self-ref written with a newline must
     be rejected exactly like the single-line form."""
     d = _minimal_valid()
-    d["steps"][0]["config"]["template"] = (
-        "use {{\n  steps.write_prompt.outputs.prompt\n}}"
-    )
+    d["steps"][0]["config"]["template"] = "use {{\n  steps.write_prompt.outputs.prompt\n}}"
     _, errors = validate_definition(d)
     assert any(e["code"] == "WF_EXPR_SELF_REF" for e in errors), errors
 
@@ -730,7 +744,13 @@ def test_output_step_port_count_mismatch_rejected():
         }
     )
     d["edges"].append(
-        {"id": "e_deliver", "from_step": "generate", "from_port": "result", "to_step": "deliver", "to_port": "a"}
+        {
+            "id": "e_deliver",
+            "from_step": "generate",
+            "from_port": "result",
+            "to_step": "deliver",
+            "to_port": "a",
+        }
     )
     _, errors = validate_definition(d)
     assert any(e["code"] == "WF_OUTPUT_PORT_MISMATCH" for e in errors), errors
@@ -752,7 +772,13 @@ def test_output_step_positional_type_mismatch_rejected():
         }
     )
     d["edges"].append(
-        {"id": "e_deliver", "from_step": "generate", "from_port": "result", "to_step": "deliver", "to_port": "pic"}
+        {
+            "id": "e_deliver",
+            "from_step": "generate",
+            "from_port": "result",
+            "to_step": "deliver",
+            "to_port": "pic",
+        }
     )
     _, errors = validate_definition(d)
     assert any(e["code"] == "WF_EDGE_TYPE_MISMATCH" for e in errors), errors
@@ -771,7 +797,13 @@ def test_output_step_matched_ports_still_valid():
         }
     )
     d["edges"].append(
-        {"id": "e_deliver", "from_step": "generate", "from_port": "result", "to_step": "deliver", "to_port": "pic"}
+        {
+            "id": "e_deliver",
+            "from_step": "generate",
+            "from_port": "result",
+            "to_step": "deliver",
+            "to_port": "pic",
+        }
     )
     _, errors = validate_definition(d)
     assert errors == []
@@ -790,9 +822,7 @@ def test_text_default_over_run_limit_rejected():
 
 def test_asset_default_over_ref_limit_rejected():
     d = _minimal_valid()
-    d["inputs"].append(
-        {"key": "ref_img", "type": "image", "required": False, "default": "x" * 600}
-    )
+    d["inputs"].append({"key": "ref_img", "type": "image", "required": False, "default": "x" * 600})
     _, errors = validate_definition(d)
     assert any(e["code"] == "WF_INVALID_DEFAULT" for e in errors), errors
 

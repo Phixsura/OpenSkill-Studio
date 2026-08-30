@@ -51,7 +51,9 @@ class PackImportService:
         # 3. File count check
         entries = zf.namelist()
         if len(entries) > MAX_FILE_COUNT:
-            raise AppError("TOO_MANY_FILES", f"Archive contains more than {MAX_FILE_COUNT} files", 422)
+            raise AppError(
+                "TOO_MANY_FILES", f"Archive contains more than {MAX_FILE_COUNT} files", 422
+            )
 
         # 4. Path traversal check
         for entry in entries:
@@ -71,7 +73,9 @@ class PackImportService:
 
         # 6. Find and parse manifest
         if "openskill-pack.json" not in entries:
-            raise AppError("INVALID_MANIFEST", "Archive must contain manifest file openskill-pack.json", 422)
+            raise AppError(
+                "INVALID_MANIFEST", "Archive must contain manifest file openskill-pack.json", 422
+            )
 
         try:
             manifest_bytes = zf.read("openskill-pack.json")
@@ -193,9 +197,7 @@ class PackImportService:
         if any(not isinstance(s, dict) for s in skills) or any(
             not isinstance(t, dict) for t in templates
         ):
-            raise AppError(
-                "INVALID_MANIFEST", "Each skill/template entry must be an object", 422
-            )
+            raise AppError("INVALID_MANIFEST", "Each skill/template entry must be an object", 422)
 
         pack_name = pack_meta.get("name")
         if not pack_name or not isinstance(pack_name, str):
@@ -211,9 +213,7 @@ class PackImportService:
             raise AppError("INVALID_MANIFEST", "pack.summary must be a string ≤500 chars", 422)
         _difficulty = pack_meta.get("metadata", {})
         _difficulty = _difficulty.get("difficulty") if isinstance(_difficulty, dict) else None
-        if _difficulty is not None and (
-            not isinstance(_difficulty, str) or len(_difficulty) > 20
-        ):
+        if _difficulty is not None and (not isinstance(_difficulty, str) or len(_difficulty) > 20):
             raise AppError("INVALID_MANIFEST", "pack.metadata.difficulty invalid", 422)
 
         # 8b. Per-entry structural typing. Everything below (uniqueness sets,
@@ -245,18 +245,14 @@ class PackImportService:
                     422,
                 )
             prereqs = s.get("prerequisites", [])
-            if not isinstance(prereqs, list) or any(
-                not isinstance(p, str) for p in prereqs
-            ):
+            if not isinstance(prereqs, list) or any(not isinstance(p, str) for p in prereqs):
                 raise AppError(
                     "INVALID_MANIFEST",
                     f"Skill '{lid}' prerequisites must be a list of strings",
                     422,
                 )
             exercises = s.get("exercises", [])
-            if not isinstance(exercises, list) or any(
-                not isinstance(ex, dict) for ex in exercises
-            ):
+            if not isinstance(exercises, list) or any(not isinstance(ex, dict) for ex in exercises):
                 raise AppError(
                     "INVALID_MANIFEST",
                     f"Skill '{lid}' exercises must be a list of objects",
@@ -269,9 +265,7 @@ class PackImportService:
                 # — slug is legitimately up to 200 chars, so the composed id
                 # reaches 200+1+50. A 200 cap rejected the platform's own
                 # export→import roundtrip for long-slugged skills (R78).
-                if ex_lid is not None and (
-                    not isinstance(ex_lid, str) or len(ex_lid) > 251
-                ):
+                if ex_lid is not None and (not isinstance(ex_lid, str) or len(ex_lid) > 251):
                     raise AppError(
                         "INVALID_MANIFEST",
                         f"Exercise logical_id in skill '{lid}' must be a string (max 251 chars)",
@@ -408,14 +402,10 @@ class PackImportService:
         # learning_outcomes / int tag list 500s at flush.
         _meta = pack_meta.get("metadata", {})
         if not isinstance(_meta, dict):
-            raise AppError(
-                "INVALID_MANIFEST", "pack.metadata must be an object", 422
-            )
+            raise AppError("INVALID_MANIFEST", "pack.metadata must be an object", 422)
         _est = _meta.get("estimated_minutes")
         if _est is not None and (
-            not isinstance(_est, int)
-            or isinstance(_est, bool)
-            or not (0 <= _est <= 9999)
+            not isinstance(_est, int) or isinstance(_est, bool) or not (0 <= _est <= 9999)
         ):
             raise AppError(
                 "INVALID_MANIFEST",
@@ -443,9 +433,7 @@ class PackImportService:
                 )
         _prov = pack_meta.get("provenance", {})
         if _prov is not None and not isinstance(_prov, dict):
-            raise AppError(
-                "INVALID_MANIFEST", "pack.provenance must be an object", 422
-            )
+            raise AppError("INVALID_MANIFEST", "pack.provenance must be an object", 422)
 
         # 8a. Enforce component count limits (same as publish_release)
         from app.services.skill_pack import MAX_SKILLS_PER_PACK, MAX_TEMPLATES_PER_PACK
@@ -505,9 +493,7 @@ class PackImportService:
         # here so the dangling reference is a clean 422 at import time. categories
         # is untrusted JSON — type-gate it (like skills/templates) before use.
         categories = manifest.get("categories", [])
-        if not isinstance(categories, list) or any(
-            not isinstance(cat, dict) for cat in categories
-        ):
+        if not isinstance(categories, list) or any(not isinstance(cat, dict) for cat in categories):
             raise AppError(
                 "INVALID_MANIFEST", "Manifest 'categories' must be a list of objects", 422
             )

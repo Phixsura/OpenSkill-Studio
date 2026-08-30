@@ -27,22 +27,48 @@ install_status = ENUM("ACTIVE", "FORKED", "REMOVED", name="install_status", crea
 def upgrade() -> None:
     # Create the new enum types once, then reference with create_type=False
     ENUM(
-        "PENDING", "RUNNING", "WAITING_REVIEW", "COMPLETED", "FAILED", "CANCELLED",
+        "PENDING",
+        "RUNNING",
+        "WAITING_REVIEW",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED",
         name="workflow_run_status",
     ).create(op.get_bind(), checkfirst=True)
     ENUM(
-        "PENDING", "READY", "RUNNING", "WAITING_REVIEW", "WAITING_RETRY",
-        "COMPLETED", "FAILED", "SKIPPED", "CANCELLED",
+        "PENDING",
+        "READY",
+        "RUNNING",
+        "WAITING_REVIEW",
+        "WAITING_RETRY",
+        "COMPLETED",
+        "FAILED",
+        "SKIPPED",
+        "CANCELLED",
         name="workflow_step_run_status",
     ).create(op.get_bind(), checkfirst=True)
     run_status = ENUM(
-        "PENDING", "RUNNING", "WAITING_REVIEW", "COMPLETED", "FAILED", "CANCELLED",
-        name="workflow_run_status", create_type=False,
+        "PENDING",
+        "RUNNING",
+        "WAITING_REVIEW",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED",
+        name="workflow_run_status",
+        create_type=False,
     )
     step_run_status = ENUM(
-        "PENDING", "READY", "RUNNING", "WAITING_REVIEW", "WAITING_RETRY",
-        "COMPLETED", "FAILED", "SKIPPED", "CANCELLED",
-        name="workflow_step_run_status", create_type=False,
+        "PENDING",
+        "READY",
+        "RUNNING",
+        "WAITING_REVIEW",
+        "WAITING_RETRY",
+        "COMPLETED",
+        "FAILED",
+        "SKIPPED",
+        "CANCELLED",
+        name="workflow_step_run_status",
+        create_type=False,
     )
 
     # ── workflow_packs ──
@@ -83,10 +109,16 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.CheckConstraint(
             "octet_length(definition::text) <= 262144", name="ck_wfpack_definition_size"
@@ -118,10 +150,15 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column(
-            "released_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "released_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
-    op.create_index("uq_wfrelease_version", "workflow_pack_releases", ["pack_id", "version"], unique=True)
+    op.create_index(
+        "uq_wfrelease_version", "workflow_pack_releases", ["pack_id", "version"], unique=True
+    )
     op.create_index("ix_wfreleases_pack_date", "workflow_pack_releases", ["pack_id", "released_at"])
 
     # ── workflow_pack_installations ──
@@ -157,10 +194,16 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column(
-            "installed_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "installed_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index(
@@ -191,7 +234,10 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index("ix_comfyui_imports_org", "comfyui_imports", ["org_id"])
@@ -228,7 +274,10 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
@@ -267,7 +316,10 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index("uq_steprun", "workflow_step_runs", ["run_id", "step_id"], unique=True)
@@ -301,7 +353,10 @@ def upgrade() -> None:
         ),
         sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index(
@@ -327,7 +382,10 @@ def upgrade() -> None:
         sa.Column("event_type", sa.String(30), nullable=False),
         sa.Column("payload", JSONB(), nullable=False, server_default="{}"),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index("ix_runevents_run", "workflow_run_events", ["run_id", "created_at"])
@@ -365,13 +423,21 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
-    op.create_index("uq_binding", "workflow_step_bindings", ["installation_id", "step_id"], unique=True)
+    op.create_index(
+        "uq_binding", "workflow_step_bindings", ["installation_id", "step_id"], unique=True
+    )
 
 
 def downgrade() -> None:

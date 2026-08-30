@@ -119,7 +119,10 @@ class GamificationService:
                     .where(UserPoints.user_id == user_id, UserPoints.org_id == org_id)
                     .values(
                         total_points=UserPoints.total_points + points,
-                        level=func.floor(cast(UserPoints.total_points + points, Float) / _LEVEL_STEP) + 1,
+                        level=func.floor(
+                            cast(UserPoints.total_points + points, Float) / _LEVEL_STEP
+                        )
+                        + 1,
                     )
                 )
                 await self.db.flush()
@@ -134,7 +137,8 @@ class GamificationService:
                 )
                 .values(
                     total_points=UserPoints.total_points + points,
-                    level=func.floor(cast(UserPoints.total_points + points, Float) / _LEVEL_STEP) + 1,
+                    level=func.floor(cast(UserPoints.total_points + points, Float) / _LEVEL_STEP)
+                    + 1,
                 )
             )
             await self.db.flush()
@@ -150,9 +154,7 @@ class GamificationService:
         )
         return user_points
 
-    async def get_leaderboard(
-        self, org_id: str, limit: int = 20
-    ) -> list[dict]:
+    async def get_leaderboard(self, org_id: str, limit: int = 20) -> list[dict]:
         """Top N users by total points in an org."""
         result = await self.db.execute(
             select(

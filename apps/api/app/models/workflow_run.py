@@ -33,14 +33,14 @@ class RunStatus(str, enum.Enum):
 
 
 class StepRunStatus(str, enum.Enum):
-    PENDING = "pending"          # upstream not finished
-    READY = "ready"              # all inputs satisfied, awaiting execution
-    RUNNING = "running"          # executing (lease held)
+    PENDING = "pending"  # upstream not finished
+    READY = "ready"  # all inputs satisfied, awaiting execution
+    RUNNING = "running"  # executing (lease held)
     WAITING_REVIEW = "waiting_review"  # review_gate suspended
-    WAITING_RETRY = "waiting_retry"    # failed attempt, will retry
+    WAITING_RETRY = "waiting_retry"  # failed attempt, will retry
     COMPLETED = "completed"
     FAILED = "failed"
-    SKIPPED = "skipped"          # upstream failed
+    SKIPPED = "skipped"  # upstream failed
     CANCELLED = "cancelled"
 
 
@@ -73,9 +73,7 @@ class WorkflowRun(Base):
     started_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -124,9 +122,7 @@ class WorkflowStepRun(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("uq_steprun", "run_id", "step_id", unique=True),
@@ -159,9 +155,7 @@ class WorkflowStepReview(Base):
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         # One OPEN review per step run — concurrent decisions get a deterministic 409
@@ -187,9 +181,7 @@ class WorkflowRunEvent(Base):
     step_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     event_type: Mapped[str] = mapped_column(String(30))
     payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_runevents_run", "run_id", "created_at"),)
 
@@ -223,9 +215,7 @@ class WorkflowStepBinding(Base):
     confirmed_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

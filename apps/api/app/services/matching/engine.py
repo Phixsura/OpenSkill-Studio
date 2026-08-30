@@ -67,9 +67,7 @@ class MatchingEngine:
         eligible = await candidates_mod.get_candidates(self.db, spec)
 
         # S2 — hard constraints (visible exclusions)
-        survivors, excluded = await constraints_mod.apply_hard_constraints(
-            self.db, eligible, spec
-        )
+        survivors, excluded = await constraints_mod.apply_hard_constraints(self.db, eligible, spec)
 
         # S3 — deterministic linear scoring
         scored = await scoring_mod.score(self.db, survivors, spec, config)
@@ -100,7 +98,11 @@ class MatchingEngine:
         explain_trees: list[dict] = []
         for rank, item in enumerate(scored, start=1):
             score_val = item["score"]
-            tier = "great" if score_val >= tier_great else ("good" if score_val >= tier_good else "fair")
+            tier = (
+                "great"
+                if score_val >= tier_great
+                else ("good" if score_val >= tier_good else "fair")
+            )
             result = MatchResult(
                 match_run_id=run.id,
                 entity_type=spec.target_entity_type,

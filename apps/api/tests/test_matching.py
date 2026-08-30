@@ -66,7 +66,9 @@ def _wf_definition(capability="image_generation", output_type="image"):
     }
 
 
-async def _wf_pack(c, h, oid, name, capability="image_generation", output_type="image", scenario=None):
+async def _wf_pack(
+    c, h, oid, name, capability="image_generation", output_type="image", scenario=None
+):
     body = {"name": name, "workflow_type": "production"}
     if scenario:
         body["scenario_tags"] = [scenario]
@@ -125,9 +127,7 @@ async def test_s1_excludes_other_org_private_packs(c):
     own_pid = await _wf_pack(c, h2, o2, "Org2 Own Pack", capability="upscale")
 
     # Require a capability only these packs provide, so ranked stays small
-    profile_id = await _confirmed_profile(
-        c, h2, o2, {"required_capabilities": ["upscale"]}
-    )
+    profile_id = await _confirmed_profile(c, h2, o2, {"required_capabilities": ["upscale"]})
     data = await _match(c, h2, o2, profile_id, limit=50)
 
     ranked_ids = [r["entity_id"] for r in data["results"]]
@@ -147,9 +147,7 @@ async def test_s2_hard_failure_distinguishable(c):
     good = await _wf_pack(c, h, oid, "Video Pack", capability="image_to_video", output_type="video")
     bad = await _wf_pack(c, h, oid, "Image Only Pack", capability="image_generation")
 
-    profile_id = await _confirmed_profile(
-        c, h, oid, {"required_capabilities": ["image_to_video"]}
-    )
+    profile_id = await _confirmed_profile(c, h, oid, {"required_capabilities": ["image_to_video"]})
     data = await _match(c, h, oid, profile_id)
 
     ranked_ids = [r["entity_id"] for r in data["results"]]
@@ -420,7 +418,11 @@ async def test_creator_matching_requires_verified_evidence(c):
         await db.commit()
 
     profile_id = await _confirmed_profile(
-        c, h_owner, oid, {"required_capabilities": ["image_generation"]}, context="commercial_project"
+        c,
+        h_owner,
+        oid,
+        {"required_capabilities": ["image_generation"]},
+        context="commercial_project",
     )
     data = await _match(c, h_owner, oid, profile_id, target="creator")
 
@@ -545,9 +547,7 @@ async def test_excluded_rows_capped_at_50(c):
     # One matching pack; the shared registry supplies plenty of non-matching
     # public packs from other tests, all excluded on CAPABILITY_MISSING.
     good = await _wf_pack(c, h, oid, "Cap Match", capability="image_to_video", output_type="video")
-    profile_id = await _confirmed_profile(
-        c, h, oid, {"required_capabilities": ["image_to_video"]}
-    )
+    profile_id = await _confirmed_profile(c, h, oid, {"required_capabilities": ["image_to_video"]})
     data = await _match(c, h, oid, profile_id, limit=50)
     assert good in [r["entity_id"] for r in data["results"]]
     assert len(data["excluded"]) <= 50
@@ -760,16 +760,11 @@ def test_template_scenario_match_tri_state():
     tmpl = SimpleNamespace(project_type="ai_visual", difficulty="intermediate")
 
     # Normalized match (case/space-insensitive)
-    assert (
-        _entity_signals(tmpl, spec, {"scenario": "AI Visual"})["scenario_match"] == 1.0
-    )
+    assert _entity_signals(tmpl, spec, {"scenario": "AI Visual"})["scenario_match"] == 1.0
     # In-vocabulary mismatch is a real 0.0
     assert _entity_signals(tmpl, spec, {"scenario": "general"})["scenario_match"] == 0.0
     # Free-text scenario outside the taxonomy is UNTESTABLE, not a mismatch
-    assert (
-        _entity_signals(tmpl, spec, {"scenario": "brand campaign"})["scenario_match"]
-        == 0.5
-    )
+    assert _entity_signals(tmpl, spec, {"scenario": "brand campaign"})["scenario_match"] == 0.5
     # No scenario at all → neutral
     assert _entity_signals(tmpl, spec, {})["scenario_match"] == 0.5
 
@@ -817,9 +812,7 @@ async def test_match_run_history_redacts_foreign_pack_name(c):
             # delete any existing row for these ids in this run, then re-seed
             # deterministically so both are present with a known rank.
             await db.execute(
-                text(
-                    "DELETE FROM match_results WHERE match_run_id = :run AND entity_id = :eid"
-                ),
+                text("DELETE FROM match_results WHERE match_run_id = :run AND entity_id = :eid"),
                 {"run": run_id, "eid": eid},
             )
         for rank, eid in ((98, wfa), (99, wfb)):
@@ -829,7 +822,12 @@ async def test_match_run_history_redacts_foreign_pack_name(c):
                     "(id, match_run_id, entity_type, entity_id, rank, score, reasons, gaps, hard_failures, tier) "
                     "VALUES (:id, :run, 'workflow_pack', :eid, :rank, 0.1, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 'fair')"
                 ),
-                {"id": ("01M" + uuid.uuid4().hex[:23]).upper(), "run": run_id, "eid": eid, "rank": rank},
+                {
+                    "id": ("01M" + uuid.uuid4().hex[:23]).upper(),
+                    "run": run_id,
+                    "eid": eid,
+                    "rank": rank,
+                },
             )
         await db.commit()
 

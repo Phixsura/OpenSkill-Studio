@@ -47,7 +47,13 @@ DEFINITION = {
         },
     ],
     "edges": [
-        {"id": "e1", "from_step": "take", "from_port": "topic", "to_step": "build", "to_port": "topic"}
+        {
+            "id": "e1",
+            "from_step": "take",
+            "from_port": "topic",
+            "to_step": "build",
+            "to_port": "topic",
+        }
     ],
     "ui": {},
 }
@@ -78,7 +84,13 @@ REVIEW_DEFINITION = {
         },
     ],
     "edges": [
-        {"id": "e1", "from_step": "take", "from_port": "topic", "to_step": "gate", "to_port": "subject"}
+        {
+            "id": "e1",
+            "from_step": "take",
+            "from_port": "topic",
+            "to_step": "gate",
+            "to_port": "subject",
+        }
     ],
     "ui": {},
 }
@@ -123,7 +135,9 @@ async def make_pack(c: httpx.AsyncClient, h: dict, oid: str, definition: dict) -
 async def main() -> None:
     async with httpx.AsyncClient(timeout=30) as c:
         h = await register(c)
-        r = await c.post(f"{BASE}/orgs", json={"name": f"ConcOrg-{uuid.uuid4().hex[:6]}"}, headers=h)
+        r = await c.post(
+            f"{BASE}/orgs", json={"name": f"ConcOrg-{uuid.uuid4().hex[:6]}"}, headers=h
+        )
         oid = r.json()["data"]["id"]
 
         # ── 1. Parallel install of the same pack: exactly one 201, rest 409 ──
@@ -227,9 +241,9 @@ async def main() -> None:
             check("losers get 409, never 500", n409 == 5 and n5xx == 0, f"codes={codes}")
             # The winning decision is the persisted one
             rr = await c.get(f"{BASE}/orgs/{oid}/step-reviews", headers=h)
-            winner = next(
-                (r0.request, r0) for r0 in results if r0.status_code == 200
-            )[1].json()["data"]["decision"]
+            winner = next((r0.request, r0) for r0 in results if r0.status_code == 200)[1].json()[
+                "data"
+            ]["decision"]
             check("persisted decision == winner's", winner in ("approved", "rejected"))
 
         # ── 4. Cancel racing the advance loop ──
@@ -338,9 +352,7 @@ async def main() -> None:
             check(f"{label} vs remove: no 500s", n5xx == 0, f"codes={codes}")
             # After the race the install must be REMOVED — never resurrected
             # to ACTIVE/FORKED by the losing mutation.
-            gi = await c.get(
-                f"{BASE}/orgs/{oid}/workflow-installations/{iid}", headers=h
-            )
+            gi = await c.get(f"{BASE}/orgs/{oid}/workflow-installations/{iid}", headers=h)
             # 404 (removed + hidden) OR body status removed — never active/forked
             fstatus = gi.json()["data"]["status"] if gi.status_code == 200 else "gone"
             resurrected = fstatus in ("active", "forked")

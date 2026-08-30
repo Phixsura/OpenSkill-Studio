@@ -76,9 +76,7 @@ def reject_ctrl_str(v, field_name: str):
     A NUL in a str written to a Postgres text/varchar column raises 22P05
     (UntranslatableCharacterError → DBAPIError, not ValueError) → 500."""
     if v is not None and _JSON_CTRL_RE.search(v):
-        raise ValueError(
-            f"{field_name} contains NUL or control characters that are not allowed"
-        )
+        raise ValueError(f"{field_name} contains NUL or control characters that are not allowed")
     return v
 
 

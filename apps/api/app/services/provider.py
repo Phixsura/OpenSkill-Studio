@@ -37,7 +37,9 @@ class ProviderService:
 
     async def list_capabilities(self) -> list[CapabilityTag]:
         result = await self.db.execute(
-            select(CapabilityTag).where(CapabilityTag.is_platform.is_(True)).order_by(CapabilityTag.key)
+            select(CapabilityTag)
+            .where(CapabilityTag.is_platform.is_(True))
+            .order_by(CapabilityTag.key)
         )
         return list(result.scalars().all())
 
@@ -49,7 +51,9 @@ class ProviderService:
 
     async def list_adapters(self) -> list[ProviderAdapter]:
         result = await self.db.execute(
-            select(ProviderAdapter).where(ProviderAdapter.is_active.is_(True)).order_by(ProviderAdapter.key)
+            select(ProviderAdapter)
+            .where(ProviderAdapter.is_active.is_(True))
+            .order_by(ProviderAdapter.key)
         )
         return list(result.scalars().all())
 
@@ -132,7 +136,9 @@ class ProviderService:
         )
         self.db.add(conn)
         await self.db.flush()
-        log.info("provider_connection_created", connection_id=conn.id, org_id=org_id, adapter=adapter.key)
+        log.info(
+            "provider_connection_created", connection_id=conn.id, org_id=org_id, adapter=adapter.key
+        )
         return conn
 
     async def list_connections(self, org_id: str) -> list[ProviderConnection]:
@@ -311,7 +317,9 @@ class ProviderService:
     # is_active) still ignore None — an explicit null there would 500 at flush.
     _NULLABLE_OFFERING_FIELDS = frozenset({"cost_per_call_usd"})
 
-    async def update_offering(self, offering_id: str, org_id: str, **fields) -> ProviderModelOffering:
+    async def update_offering(
+        self, offering_id: str, org_id: str, **fields
+    ) -> ProviderModelOffering:
         offering = await self.get_offering(offering_id, org_id)
         for key, value in fields.items():
             if not hasattr(offering, key):
@@ -331,9 +339,7 @@ class ProviderService:
 
     # ── Capability satisfaction check (used by installer) ─
 
-    async def check_capabilities(
-        self, org_id: str, required: list[dict]
-    ) -> list[dict]:
+    async def check_capabilities(self, org_id: str, required: list[dict]) -> list[dict]:
         """Check org's active offerings against required capabilities.
 
         Returns a list of gap dicts (empty = all satisfied). Each required
@@ -425,8 +431,7 @@ class ProviderService:
                 offerings_by_cap[off.capability_key].append(off)
         for cap_key, req_features in normalized:
             satisfied = any(
-                req_features <= set(off.features or [])
-                for off in offerings_by_cap.get(cap_key, [])
+                req_features <= set(off.features or []) for off in offerings_by_cap.get(cap_key, [])
             )
             if not satisfied:
                 gaps.append(

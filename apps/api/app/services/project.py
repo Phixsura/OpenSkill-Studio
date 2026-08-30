@@ -455,7 +455,9 @@ class ProjectService:
 
         from app.models.learning_path import LearningPathItem
 
-        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.project_id == project_id))
+        await self.db.execute(
+            sa_delete(LearningPathItem).where(LearningPathItem.project_id == project_id)
+        )
         await self.db.flush()
 
     async def publish_project(self, project_id: str) -> Project:
@@ -805,8 +807,12 @@ class ProjectService:
         # that could enable stored XSS via inline rendering
         if whitelist is None:
             dangerous_mimes = {
-                "text/html", "text/xml", "application/xhtml+xml",
-                "image/svg+xml", "application/javascript", "text/javascript",
+                "text/html",
+                "text/xml",
+                "application/xhtml+xml",
+                "image/svg+xml",
+                "application/javascript",
+                "text/javascript",
             }
             if content_type.lower() in dangerous_mimes:
                 raise UnsupportedMediaTypeError(content_type)
@@ -914,7 +920,9 @@ class ProjectService:
             from botocore.exceptions import ClientError
 
             if isinstance(exc, ClientError):
-                raise AppError("STORAGE_ERROR", "Failed to upload file. Please try again.", 500) from exc
+                raise AppError(
+                    "STORAGE_ERROR", "Failed to upload file. Please try again.", 500
+                ) from exc
             raise
 
         # Auto-extract generation metadata from AI-tool PNGs (A1111/ComfyUI).
@@ -975,7 +983,9 @@ class ProjectService:
         if item.mime_type:
             params["ResponseContentType"] = item.mime_type
             _safe_prefixes = ("image/", "video/", "audio/")
-            is_safe = item.mime_type.startswith(_safe_prefixes) or item.mime_type == "application/pdf"
+            is_safe = (
+                item.mime_type.startswith(_safe_prefixes) or item.mime_type == "application/pdf"
+            )
             params["ResponseContentDisposition"] = "inline" if is_safe else "attachment"
 
         async for client in get_s3_client():
@@ -1107,7 +1117,9 @@ class ProjectService:
                     description=f"Reviewed submission {submission_id}",
                 )
             except Exception:
-                log.warning("gamification_award_failed", user_id=reviewer_id, reason="review_posted")
+                log.warning(
+                    "gamification_award_failed", user_id=reviewer_id, reason="review_posted"
+                )
 
         log.info("submission_reviewed", submission_id=sub.id, status=status, score=sub.final_score)
         return review
@@ -1258,7 +1270,8 @@ class ProjectService:
             ):
                 effective_deadline = ca.deadline_override
             if ca.late_deadline_override is not None and (
-                effective_late_deadline is None or ca.late_deadline_override > effective_late_deadline
+                effective_late_deadline is None
+                or ca.late_deadline_override > effective_late_deadline
             ):
                 effective_late_deadline = ca.late_deadline_override
 
@@ -1463,9 +1476,7 @@ class ProjectService:
         from app.models.skill_pack import SkillPackTemplate
 
         await self.db.execute(
-            sa_delete(SkillPackTemplate).where(
-                SkillPackTemplate.template_id == template_id
-            )
+            sa_delete(SkillPackTemplate).where(SkillPackTemplate.template_id == template_id)
         )
 
         template.status = ContentStatus.ARCHIVED
@@ -1600,7 +1611,9 @@ class ProjectService:
             from botocore.exceptions import ClientError
 
             if isinstance(exc, ClientError):
-                raise AppError("STORAGE_ERROR", "Failed to upload file. Please try again.", 500) from exc
+                raise AppError(
+                    "STORAGE_ERROR", "Failed to upload file. Please try again.", 500
+                ) from exc
             raise
 
         asset = ProjectAsset(

@@ -28,11 +28,14 @@ class ApplyToBriefRequest(BaseModel):
 class ReviewApplicationRequest(BaseModel):
     status: str
 
+
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
 @router.post(
-    "/orgs/{org_id}/briefs", response_model=DataResponse[ClientBriefResponse], status_code=201,
+    "/orgs/{org_id}/briefs",
+    response_model=DataResponse[ClientBriefResponse],
+    status_code=201,
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def create_brief(
@@ -48,7 +51,11 @@ async def create_brief(
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.get("/orgs/{org_id}/briefs", response_model=ListResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/briefs",
+    response_model=ListResponse[ClientBriefResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_briefs(
     org_id: str,
     status: str | None = None,
@@ -110,7 +117,11 @@ async def list_open_briefs(
     )
 
 
-@router.get("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/briefs/{brief_id}",
+    response_model=DataResponse[ClientBriefResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_brief(
     org_id: str,
     brief_id: str,
@@ -136,7 +147,11 @@ async def get_brief(
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.put("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/briefs/{brief_id}",
+    response_model=DataResponse[ClientBriefResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def update_brief(
     org_id: str,
     brief_id: str,
@@ -154,7 +169,9 @@ async def update_brief(
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.delete("/orgs/{org_id}/briefs/{brief_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/briefs/{brief_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))]
+)
 async def delete_brief(
     org_id: str,
     brief_id: str,
@@ -343,7 +360,9 @@ async def review_application(
         raise HTTPException(status_code=404, detail="Application not found")
 
     if body.status not in ("accepted", "rejected", "withdrawn"):
-        raise HTTPException(status_code=422, detail="Status must be 'accepted', 'rejected', or 'withdrawn'")
+        raise HTTPException(
+            status_code=422, detail="Status must be 'accepted', 'rejected', or 'withdrawn'"
+        )
 
     # No self-dealing (R86). Any registered user can create an org and become
     # its owner (an INSTRUCTOR_ROLE), then apply to their own brief and accept
@@ -416,7 +435,6 @@ async def withdraw_application(
             "status": app_obj.status.value,
         }
     )
-
 
 
 # list_open_briefs is defined above get_brief to avoid route conflict with /briefs/{brief_id}

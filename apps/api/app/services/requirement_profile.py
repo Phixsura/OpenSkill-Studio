@@ -172,14 +172,10 @@ class RequirementProfileService:
         prompt_error: str | None = None
         for _attempt in range(2):
             try:
-                content, model_used = await self._call_llm(
-                    clean_raw, capability_keys, prompt_error
-                )
+                content, model_used = await self._call_llm(clean_raw, capability_keys, prompt_error)
                 parsed = self._parse_json(content)
                 extracted = ExtractedRequirements.model_validate(parsed)
-                structured, unmatched = self._normalize_extracted(
-                    extracted, capability_keys
-                )
+                structured, unmatched = self._normalize_extracted(extracted, capability_keys)
                 extracted_ok = True
                 break
             except (ValidationError, ValueError) as exc:
@@ -240,9 +236,7 @@ class RequirementProfileService:
         profile = await self.get_profile(profile_id, org_id)
         self._assert_can_write(profile, acting_user_id, is_instructor)
         if profile.status != "draft":
-            raise AppError(
-                "PROFILE_ALREADY_CONFIRMED", "Confirmed profiles cannot be edited", 422
-            )
+            raise AppError("PROFILE_ALREADY_CONFIRMED", "Confirmed profiles cannot be edited", 422)
         await self._validate_structured(edits)
         structured = dict(profile.structured_requirements or {})
         meta = dict(profile.extraction_meta or {})
@@ -277,9 +271,7 @@ class RequirementProfileService:
             .values(structured_requirements=structured, extraction_meta=meta)
         )
         if result.rowcount == 0:
-            raise AppError(
-                "PROFILE_ALREADY_CONFIRMED", "Confirmed profiles cannot be edited", 422
-            )
+            raise AppError("PROFILE_ALREADY_CONFIRMED", "Confirmed profiles cannot be edited", 422)
         await self.db.refresh(profile)
         return profile
 
@@ -428,9 +420,7 @@ class RequirementProfileService:
             or isinstance(time_budget, bool)
             or not (1 <= time_budget <= 100_000)
         ):
-            raise AppError(
-                "INVALID_TIME_BUDGET", "time_budget must be minutes (1-100000)", 422
-            )
+            raise AppError("INVALID_TIME_BUDGET", "time_budget must be minutes (1-100000)", 422)
         tools = structured.get("tool_constraints")
         if tools is not None and (
             not isinstance(tools, list)
@@ -546,8 +536,7 @@ class RequirementProfileService:
                     # capability lists) — top-level-only sanitization let
                     # zero-width/bidi payloads through list values.
                     value = [
-                        sanitize_untrusted_text(v, 500) if isinstance(v, str) else v
-                        for v in value
+                        sanitize_untrusted_text(v, 500) if isinstance(v, str) else v for v in value
                     ]
                 structured[key] = value
         return structured, unmatched

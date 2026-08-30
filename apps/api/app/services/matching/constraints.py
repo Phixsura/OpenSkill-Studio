@@ -40,10 +40,9 @@ async def apply_hard_constraints(
                                 "detail": f"Pack does not provide capability '{cap}'",
                             }
                         )
-            elif (
-                (required_caps or preferred_caps)
-                and not (set(required_caps) | set(preferred_caps)) & pack_caps
-            ):
+            elif (required_caps or preferred_caps) and not (
+                set(required_caps) | set(preferred_caps)
+            ) & pack_caps:
                 # Learning coverage is CUMULATIVE across packs — the composer's
                 # set cover assembles coverage over required AND preferred caps,
                 # so a pack teaching only a preferred capability must survive S2.

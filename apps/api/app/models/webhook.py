@@ -13,9 +13,7 @@ class WebhookSubscription(Base):
     """An org's subscription to receive HTTP POST callbacks for specific events."""
 
     __tablename__ = "webhook_subscriptions"
-    __table_args__ = (
-        Index("ix_webhooks_org_active", "org_id", "active"),
-    )
+    __table_args__ = (Index("ix_webhooks_org_active", "org_id", "active"),)
 
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(

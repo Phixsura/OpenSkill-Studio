@@ -29,7 +29,11 @@ from app.schemas.overview import DraftSummary, OverviewResponse, ReviewReceived
 router = APIRouter(tags=["Overview"])
 
 
-@router.get("/me/overview", response_model=DataResponse[OverviewResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/me/overview",
+    response_model=DataResponse[OverviewResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def my_overview(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

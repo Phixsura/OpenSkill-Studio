@@ -100,9 +100,7 @@ class WorkflowPackService:
         )
         return list(result.scalars().all()), total
 
-    async def get_pack(
-        self, pack_id: str, org_id: str, for_update: bool = False
-    ) -> WorkflowPack:
+    async def get_pack(self, pack_id: str, org_id: str, for_update: bool = False) -> WorkflowPack:
         # for_update: take a row lock and REFRESH the in-memory attributes to
         # committed state (populate_existing) for callers that then mutate on
         # a read-check-write basis. Without it, every workflow_pack mutation
@@ -159,8 +157,14 @@ class WorkflowPackService:
         # output_schema are re-derived only via update_definition, which has
         # its own approval reset.)
         _card_fields = (
-            "name", "summary", "description", "scenario_tags",
-            "tool_tags", "difficulty", "workflow_type", "cover_image_key",
+            "name",
+            "summary",
+            "description",
+            "scenario_tags",
+            "tool_tags",
+            "difficulty",
+            "workflow_type",
+            "cover_image_key",
             "provenance",
         )
         card_changed = any(
@@ -294,9 +298,7 @@ class WorkflowPackService:
             if not key:
                 continue
             feats = frozenset(
-                f
-                for f in step.config.get("required_features", [])
-                if isinstance(f, str)
+                f for f in step.config.get("required_features", []) if isinstance(f, str)
             )
             declared.add((key, feats))
         deps["requires_capabilities"] = [
@@ -442,7 +444,9 @@ class WorkflowPackService:
         await self._invalidate_registry_cache()
         return pack
 
-    async def reject_pack(self, pack_id: str, org_id: str, reason: str | None = None) -> WorkflowPack:
+    async def reject_pack(
+        self, pack_id: str, org_id: str, reason: str | None = None
+    ) -> WorkflowPack:
         pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status != "pending":
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
@@ -472,7 +476,9 @@ class WorkflowPackService:
             raise AppError("TOO_MANY_DEPENDENCIES", f"Max {MAX_DEPENDENCIES} dependencies", 422)
         for cap in req_caps:
             if not isinstance(cap, dict):
-                raise AppError("INVALID_DEPENDENCY", "requires_capabilities entries must be objects", 422)
+                raise AppError(
+                    "INVALID_DEPENDENCY", "requires_capabilities entries must be objects", 422
+                )
             capability = cap.get("capability")
             if not isinstance(capability, str) or not capability or len(capability) > 64:
                 raise AppError(
@@ -486,11 +492,15 @@ class WorkflowPackService:
             for feature in features:
                 if not isinstance(feature, str) or len(feature) > 64:
                     raise AppError(
-                        "INVALID_DEPENDENCY", "features entries must be strings of max 64 chars", 422
+                        "INVALID_DEPENDENCY",
+                        "features entries must be strings of max 64 chars",
+                        422,
                     )
         for rec in rec_packs:
             if not isinstance(rec, dict):
-                raise AppError("INVALID_DEPENDENCY", "recommended_packs entries must be objects", 422)
+                raise AppError(
+                    "INVALID_DEPENDENCY", "recommended_packs entries must be objects", 422
+                )
             family = rec.get("family")
             if family not in ("skill_pack", "workflow_pack"):
                 raise AppError(
@@ -512,7 +522,9 @@ class WorkflowPackService:
             slug = rec.get("slug", "")
             if slug and (not isinstance(slug, str) or len(slug) > 200):
                 raise AppError(
-                    "INVALID_DEPENDENCY", "recommended_packs slug must be a string of max 200 chars", 422
+                    "INVALID_DEPENDENCY",
+                    "recommended_packs slug must be a string of max 200 chars",
+                    422,
                 )
 
     @staticmethod

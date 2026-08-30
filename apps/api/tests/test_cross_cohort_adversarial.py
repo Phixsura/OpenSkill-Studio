@@ -667,9 +667,9 @@ async def test_deleted_skill_excluded_from_cohort_assignments(c):
     cid = (
         await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "FilterSkill"}, headers=hi)
     ).json()["data"]["id"]
-    cat = (
-        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "FC"}, headers=hi)
-    ).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "FC"}, headers=hi)).json()[
+        "data"
+    ]["id"]
     sk = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
@@ -701,9 +701,7 @@ async def test_convert_brief_rejects_cross_org_cohort(c):
     oid = await _org(c, hi)
     oid2 = await _org(c, h2)
     foreign_cid = (
-        await c.post(
-            f"/api/v1/orgs/{oid2}/cohorts", json={"name": "Foreign"}, headers=h2
-        )
+        await c.post(f"/api/v1/orgs/{oid2}/cohorts", json={"name": "Foreign"}, headers=h2)
     ).json()["data"]["id"]
     bid = (
         await c.post(

@@ -91,7 +91,9 @@ async def test_cross_org_idor_sweep(c):
         r_own_path = await c.get(f"/api/v1/orgs/{o2}/{family}/{rid}", headers=h2)
         assert r_own_path.status_code == 404, f"{family} via org2 path: {r_own_path.status_code}"
         r_foreign = await c.get(f"/api/v1/orgs/{o1}/{family}/{rid}", headers=h2)
-        assert r_foreign.status_code in (403, 404), f"{family} via org1 path: {r_foreign.status_code}"
+        assert r_foreign.status_code in (403, 404), (
+            f"{family} via org1 path: {r_foreign.status_code}"
+        )
 
 
 @pytest.mark.asyncio
@@ -193,9 +195,7 @@ async def test_match_results_exclude_inaccessible_entities(c):
     )
     assert rm.status_code == 200, rm.text
     data = rm.json()["data"]
-    all_ids = [x["entity_id"] for x in data["results"]] + [
-        x["entity_id"] for x in data["excluded"]
-    ]
+    all_ids = [x["entity_id"] for x in data["results"]] + [x["entity_id"] for x in data["excluded"]]
     assert hidden_id not in all_ids
 
     # S1 exclusion means it never becomes a candidate at all — it must appear
@@ -616,7 +616,7 @@ async def test_shortlist_exposes_no_protected_attributes(c):
     )
     assert r.status_code == 200, r.text[:300]
     body = r.text.lower()
-    for forbidden in ("email", "last_login", "password", "\"role\""):
+    for forbidden in ("email", "last_login", "password", '"role"'):
         assert forbidden not in body, f"shortlist response leaks '{forbidden}'"
     # Structural check: every result carries only the declared fields
     allowed = {"entity_id", "name", "rank", "score", "tier", "reasons", "gaps", "evidence"}
@@ -667,18 +667,47 @@ async def test_authz_matrix_write_endpoints_enforce_roles(c):
     assert await code(nonmember, "POST", "/workflow-packs", {"name": "Dp"}) in (403, 404)
 
     # ADMIN-only endpoint: create provider connection (instructor must be 403)
-    assert await code(admin, "POST", "/provider-connections",
-                      {"adapter_id": "01JFAKE0000000000000000000", "name": "Cx"}) in (404, 422)  # passes authz, fails on fake adapter
-    assert await code(instructor, "POST", "/provider-connections",
-                      {"adapter_id": "01JFAKE0000000000000000000", "name": "Cy"}) == 403
-    assert await code(student, "POST", "/provider-connections",
-                      {"adapter_id": "01JFAKE0000000000000000000", "name": "Cz"}) == 403
+    assert await code(
+        admin,
+        "POST",
+        "/provider-connections",
+        {"adapter_id": "01JFAKE0000000000000000000", "name": "Cx"},
+    ) in (404, 422)  # passes authz, fails on fake adapter
+    assert (
+        await code(
+            instructor,
+            "POST",
+            "/provider-connections",
+            {"adapter_id": "01JFAKE0000000000000000000", "name": "Cy"},
+        )
+        == 403
+    )
+    assert (
+        await code(
+            student,
+            "POST",
+            "/provider-connections",
+            {"adapter_id": "01JFAKE0000000000000000000", "name": "Cz"},
+        )
+        == 403
+    )
 
     # Any-member endpoint: create requirement profile (student allowed)
-    assert await code(student, "POST", "/requirement-profiles",
-                      {"context_type": "learning", "structured_requirements": {"goal": "g"}}) == 201
-    assert await code(nonmember, "POST", "/requirement-profiles",
-                      {"context_type": "learning", "structured_requirements": {"goal": "g"}}) in (403, 404)
+    assert (
+        await code(
+            student,
+            "POST",
+            "/requirement-profiles",
+            {"context_type": "learning", "structured_requirements": {"goal": "g"}},
+        )
+        == 201
+    )
+    assert await code(
+        nonmember,
+        "POST",
+        "/requirement-profiles",
+        {"context_type": "learning", "structured_requirements": {"goal": "g"}},
+    ) in (403, 404)
 
 
 @pytest.mark.asyncio
@@ -735,9 +764,7 @@ async def test_deep_nested_open_dict_fields_rejected(c):
         headers=h,
     )
     assert r.status_code == 422, r.text[:200]
-    r2 = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "ShallowProv"}, headers=h
-    )
+    r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "ShallowProv"}, headers=h)
     pid = r2.json()["data"]["id"]
     r3 = await c.put(
         f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
@@ -789,9 +816,7 @@ async def test_deep_nested_open_dict_fields_rejected(c):
 
     # Everything created in this test remains readable
     assert (await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)).status_code == 200
-    assert (
-        await c.get(f"/api/v1/orgs/{oid}/provider-connections", headers=h)
-    ).status_code == 200
+    assert (await c.get(f"/api/v1/orgs/{oid}/provider-connections", headers=h)).status_code == 200
     assert (await c.get(f"/api/v1/orgs/{oid}/provider-offerings", headers=h)).status_code == 200
 
 
@@ -998,10 +1023,14 @@ async def test_non_owner_cannot_mint_equal_role(c):
     oid = await _org(c, oh)
     ah = await _member(c, oh, oid, "admin")
     sh, stan = await _auth(c)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "student"}, headers=oh)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "student"}, headers=oh
+    )
 
     # admin removes the student, then tries to re-add as admin -> 403
-    assert (await c.delete(f"/api/v1/orgs/{oid}/members/{stan['id']}", headers=ah)).status_code == 204
+    assert (
+        await c.delete(f"/api/v1/orgs/{oid}/members/{stan['id']}", headers=ah)
+    ).status_code == 204
     r = await c.post(
         f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "admin"}, headers=ah
     )
@@ -1014,7 +1043,9 @@ async def test_non_owner_cannot_mint_equal_role(c):
     # admin CAN still add a lower role; owner CAN add an admin
     assert (
         await c.post(
-            f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "student"}, headers=ah
+            f"/api/v1/orgs/{oid}/members",
+            json={"user_id": stan["id"], "role": "student"},
+            headers=ah,
         )
     ).status_code == 201
     bh, bob = await _auth(c)
@@ -1093,10 +1124,14 @@ async def test_submit_draft_enforces_publication_and_cohort_gate(c):
     pid = await _proj()
     sub = (
         await c.post(
-            f"/api/v1/orgs/{oid}/projects/{pid}/submissions", json={"content": {"text": "w"}}, headers=sh
+            f"/api/v1/orgs/{oid}/projects/{pid}/submissions",
+            json={"content": {"text": "w"}},
+            headers=sh,
         )
     ).json()["data"]["id"]
-    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/unpublish", headers=ih)).status_code == 200
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/unpublish", headers=ih)
+    ).status_code == 200
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub}/submit", headers=sh)
     assert r.status_code == 422, r.text
     # republish → the same draft submits fine
@@ -1109,7 +1144,9 @@ async def test_submit_draft_enforces_publication_and_cohort_gate(c):
     p2 = await _proj()
     ds = (
         await c.post(
-            f"/api/v1/orgs/{oid}/projects/{p2}/submissions", json={"content": {"text": "w"}}, headers=sh
+            f"/api/v1/orgs/{oid}/projects/{p2}/submissions",
+            json={"content": {"text": "w"}},
+            headers=sh,
         )
     ).json()["data"]["id"]
     cid = (

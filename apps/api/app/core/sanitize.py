@@ -17,14 +17,7 @@ import unicodedata
 # - Zero-width: ZWSP U+200B, ZWNJ U+200C, ZWJ U+200D, BOM U+FEFF, WJ U+2060
 # - Bidi controls: LRE..RLO U+202A-U+202E, isolates LRI..PDI U+2066-U+2069
 _INVISIBLE_RE = re.compile(
-    "["
-    "\U000e0000-\U000e007f"
-    "\u200b-\u200d"
-    "\ufeff"
-    "\u2060"
-    "\u202a-\u202e"
-    "\u2066-\u2069"
-    "]"
+    "[\U000e0000-\U000e007f\u200b-\u200d\ufeff\u2060\u202a-\u202e\u2066-\u2069]"
 )
 
 # C0/C1 control characters except \t (U+0009) and \n (U+000A)

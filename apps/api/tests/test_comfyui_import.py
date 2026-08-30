@@ -461,7 +461,7 @@ def test_sanitize_strips_tags_block():
     from app.core.sanitize import sanitize_untrusted_text
 
     # ASCII smuggling via Unicode Tags block
-    assert sanitize_untrusted_text("hello\U000E0041\U000E0042world") == "helloworld"
+    assert sanitize_untrusted_text("hello\U000e0041\U000e0042world") == "helloworld"
 
 
 def test_sanitize_strips_bidi_controls():
@@ -775,7 +775,10 @@ async def test_nonfinite_floats_rejected(c):
     # Control: a genuine finite value still imports
     r_ok = await c.post(
         f"/api/v1/orgs/{oid}/comfyui-imports",
-        json={"data": '{"1": {"class_type": "KSampler", "inputs": {"seed": 42}}}', "encoding": "json"},
+        json={
+            "data": '{"1": {"class_type": "KSampler", "inputs": {"seed": 42}}}',
+            "encoding": "json",
+        },
         headers=h,
     )
     assert r_ok.status_code == 201, r_ok.text[:200]

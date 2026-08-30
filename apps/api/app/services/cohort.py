@@ -189,12 +189,20 @@ class CohortService:
         from sqlalchemy import delete as sa_delete
 
         await self.db.execute(sa_delete(CohortMember).where(CohortMember.cohort_id == cohort_id))
-        await self.db.execute(sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.cohort_id == cohort_id))
-        await self.db.execute(sa_delete(CohortProjectAssignment).where(CohortProjectAssignment.cohort_id == cohort_id))
+        await self.db.execute(
+            sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.cohort_id == cohort_id)
+        )
+        await self.db.execute(
+            sa_delete(CohortProjectAssignment).where(CohortProjectAssignment.cohort_id == cohort_id)
+        )
 
         from app.models.learning_path import CohortLearningPathAssignment
 
-        await self.db.execute(sa_delete(CohortLearningPathAssignment).where(CohortLearningPathAssignment.cohort_id == cohort_id))
+        await self.db.execute(
+            sa_delete(CohortLearningPathAssignment).where(
+                CohortLearningPathAssignment.cohort_id == cohort_id
+            )
+        )
         await self.db.flush()
 
     # ── Members ──
@@ -542,8 +550,7 @@ class CohortService:
             )
 
             status_counts_r = await self.db.execute(
-                select(user_best_status.c.best, func.count())
-                .group_by(user_best_status.c.best)
+                select(user_best_status.c.best, func.count()).group_by(user_best_status.c.best)
             )
             best_map = {int(row[0]): row[1] for row in status_counts_r.all()}
 

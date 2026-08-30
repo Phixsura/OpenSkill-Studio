@@ -161,9 +161,7 @@ async def confirm_draft(
     if draft.draft_type == "learning_path":
         entity = await learning_svc.confirm(draft_id, org_id, confirmed_by=user.id)
     else:
-        entity = await ProductionComposerService(db).confirm(
-            draft_id, org_id, confirmed_by=user.id
-        )
+        entity = await ProductionComposerService(db).confirm(draft_id, org_id, confirmed_by=user.id)
     await db.commit()
     await db.refresh(draft)
     return DataResponse(

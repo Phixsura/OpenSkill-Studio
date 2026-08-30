@@ -324,13 +324,17 @@ class SkillService:
         from app.models.skill_pack import SkillPackSkill
 
         await self.db.execute(sa_delete(SkillPackSkill).where(SkillPackSkill.skill_id == skill_id))
-        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.skill_id == skill_id))
+        await self.db.execute(
+            sa_delete(LearningPathItem).where(LearningPathItem.skill_id == skill_id)
+        )
 
         # Clean up cohort and project skill assignments
         from app.models.cohort import CohortSkillAssignment
         from app.models.project import ProjectSkill
 
-        await self.db.execute(sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.skill_id == skill_id))
+        await self.db.execute(
+            sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.skill_id == skill_id)
+        )
         await self.db.execute(sa_delete(ProjectSkill).where(ProjectSkill.skill_id == skill_id))
 
         await self.db.flush()

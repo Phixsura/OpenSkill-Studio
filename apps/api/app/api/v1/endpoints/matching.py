@@ -92,9 +92,7 @@ def _build_run_response(
     names: dict,
     explain_trees: list[dict] | None = None,
 ) -> MatchRunResponse:
-    ranked = sorted(
-        (r for r in results if r.rank is not None), key=lambda r: r.rank
-    )
+    ranked = sorted((r for r in results if r.rank is not None), key=lambda r: r.rank)
     excluded = [r for r in results if r.rank is None]
     items = []
     for i, r in enumerate(ranked):
@@ -216,9 +214,7 @@ async def list_match_runs(
     base_filter = [MatchRun.org_id == org_id]
     if own_only:
         base_filter.append(MatchRun.created_by == user.id)
-    total_r = await db.execute(
-        select(func.count()).select_from(MatchRun).where(*base_filter)
-    )
+    total_r = await db.execute(select(func.count()).select_from(MatchRun).where(*base_filter))
     total = total_r.scalar_one()
     result = await db.execute(
         select(MatchRun)
@@ -274,13 +270,9 @@ async def get_match_run(
     # student could read any workflow_pack/skill_pack/template run in the org.)
     if member.role not in _WRITE_ROLES and run.created_by != user.id:
         raise AppError("MATCH_RUN_NOT_FOUND", "Match run not found", 404)
-    results_r = await db.execute(
-        select(MatchResult).where(MatchResult.match_run_id == run_id)
-    )
+    results_r = await db.execute(select(MatchResult).where(MatchResult.match_run_id == run_id))
     results = list(results_r.scalars().all())
-    names = await _resolve_names(
-        db, run.target_entity_type, [r.entity_id for r in results], org_id
-    )
+    names = await _resolve_names(db, run.target_entity_type, [r.entity_id for r in results], org_id)
     return DataResponse(data=_build_run_response(run, results, names))
 
 

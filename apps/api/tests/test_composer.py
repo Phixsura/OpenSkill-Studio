@@ -104,16 +104,20 @@ def _wf_definition(capability="image_generation", output_type="image"):
             },
         ],
         "edges": [
-            {"id": "e1", "from_step": "take", "from_port": "prompt_text", "to_step": "gen", "to_port": "p"}
+            {
+                "id": "e1",
+                "from_step": "take",
+                "from_port": "prompt_text",
+                "to_step": "gen",
+                "to_port": "p",
+            }
         ],
         "ui": {},
     }
 
 
 async def _wf_pack(c, h, oid, name, capability="image_generation", output_type="image", deps=None):
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-packs", json={"name": name}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": name}, headers=h)
     pid = r.json()["data"]["id"]
     r2 = await c.put(
         f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
@@ -124,9 +128,7 @@ async def _wf_pack(c, h, oid, name, capability="image_generation", output_type="
     body = {"version": "1.0.0"}
     if deps:
         body["dependencies"] = deps
-    r3 = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json=body, headers=h
-    )
+    r3 = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json=body, headers=h)
     assert r3.status_code == 201, r3.text
     return pid
 
@@ -224,9 +226,7 @@ async def test_learning_confirm_materializes_with_placeholder_no_autoinstall(c):
     from app.models.skill_pack import SkillPackInstallation
 
     async with AsyncSessionLocal() as db:
-        before_r = await db.execute(
-            select(func.count()).where(SkillPackInstallation.org_id == oid)
-        )
+        before_r = await db.execute(select(func.count()).where(SkillPackInstallation.org_id == oid))
         before = before_r.scalar_one()
 
     r2 = await c.post(f"/api/v1/orgs/{oid}/drafts/{draft_id}/confirm", headers=h)
@@ -240,16 +240,13 @@ async def test_learning_confirm_materializes_with_placeholder_no_autoinstall(c):
     assert r3.status_code == 200, r3.text
     items = r3.json()["data"]
     assert any(
-        i.get("item_type") == "section"
-        and "Install pack" in (i.get("section_title") or "")
+        i.get("item_type") == "section" and "Install pack" in (i.get("section_title") or "")
         for i in items
     ), items
 
     # NO auto-install happened (red line)
     async with AsyncSessionLocal() as db:
-        after_r = await db.execute(
-            select(func.count()).where(SkillPackInstallation.org_id == oid)
-        )
+        after_r = await db.execute(select(func.count()).where(SkillPackInstallation.org_id == oid))
         assert after_r.scalar_one() == before
     _ = pid
 
@@ -568,35 +565,71 @@ async def test_production_compose_rollup_keeps_distinct_feature_sets(c):
         "inputs": [{"key": "prompt_text", "type": "text", "required": True}],
         "outputs": [{"key": "result", "type": "video", "from_step": "g2", "from_port": "out"}],
         "steps": [
-            {"id": "take", "type": "asset_input", "name": "T",
-             "config": {"accept_types": ["image"]}, "inputs": [],
-             "outputs": [{"port": "prompt_text", "type": "text"}]},
-            {"id": "g1", "type": "provider_action", "name": "G1",
-             "config": {"capability": "text_to_video", "required_features": ["hd"]},
-             "inputs": [{"port": "p", "type": "prompt"}], "outputs": [{"port": "mid", "type": "video"}]},
-            {"id": "g2", "type": "provider_action", "name": "G2",
-             "config": {"capability": "text_to_video", "required_features": ["slowmo"]},
-             "inputs": [{"port": "src", "type": "video"}], "outputs": [{"port": "out", "type": "video"}]},
+            {
+                "id": "take",
+                "type": "asset_input",
+                "name": "T",
+                "config": {"accept_types": ["image"]},
+                "inputs": [],
+                "outputs": [{"port": "prompt_text", "type": "text"}],
+            },
+            {
+                "id": "g1",
+                "type": "provider_action",
+                "name": "G1",
+                "config": {"capability": "text_to_video", "required_features": ["hd"]},
+                "inputs": [{"port": "p", "type": "prompt"}],
+                "outputs": [{"port": "mid", "type": "video"}],
+            },
+            {
+                "id": "g2",
+                "type": "provider_action",
+                "name": "G2",
+                "config": {"capability": "text_to_video", "required_features": ["slowmo"]},
+                "inputs": [{"port": "src", "type": "video"}],
+                "outputs": [{"port": "out", "type": "video"}],
+            },
         ],
         "edges": [
-            {"id": "e1", "from_step": "take", "from_port": "prompt_text", "to_step": "g1", "to_port": "p"},
+            {
+                "id": "e1",
+                "from_step": "take",
+                "from_port": "prompt_text",
+                "to_step": "g1",
+                "to_port": "p",
+            },
             {"id": "e2", "from_step": "g1", "from_port": "mid", "to_step": "g2", "to_port": "src"},
         ],
         "ui": {},
     }
-    pid = (await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "TwoFeat"}, headers=h)).json()["data"]["id"]
-    assert (await c.put(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
-                        json={"definition": two_step}, headers=h)).status_code == 200
-    assert (await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
-                         json={"version": "1.0.0"}, headers=h)).status_code == 201
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "TwoFeat"}, headers=h)
+    ).json()["data"]["id"]
+    assert (
+        await c.put(
+            f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+            json={"definition": two_step},
+            headers=h,
+        )
+    ).status_code == 200
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases",
+            json={"version": "1.0.0"},
+            headers=h,
+        )
+    ).status_code == 201
 
     profile_id = await _confirmed_profile(
-        c, h, oid,
+        c,
+        h,
+        oid,
         {"output_type": "video", "required_capabilities": ["text_to_video"]},
         context="production",
     )
-    r = await c.post(f"/api/v1/orgs/{oid}/drafts/production-solution",
-                     json={"profile_id": profile_id}, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/production-solution", json={"profile_id": profile_id}, headers=h
+    )
     assert r.status_code == 201, r.text
     payload = r.json()["data"]["payload"]
     # No org offerings → each distinct feature-set is its own NO_ELIGIBLE_PROVIDER gap
@@ -654,9 +687,7 @@ async def test_production_confirm_creates_project(c):
     )
     assert rt.status_code == 201, rt.text
 
-    profile_id = await _confirmed_profile(
-        c, h, oid, {"output_type": "image"}, context="production"
-    )
+    profile_id = await _confirmed_profile(c, h, oid, {"output_type": "image"}, context="production")
     r = await c.post(
         f"/api/v1/orgs/{oid}/drafts/production-solution",
         json={"profile_id": profile_id},
@@ -1110,13 +1141,23 @@ async def test_setcover_backfills_capability_below_match_limit(c):
     from app.models.skill_pack import SkillPack
 
     async with AsyncSessionLocal() as db:
-        rows = (await db.execute(_select(SkillPack).where(SkillPack.name.like("ACov%")))).scalars().all()
+        rows = (
+            (await db.execute(_select(SkillPack).where(SkillPack.name.like("ACov%"))))
+            .scalars()
+            .all()
+        )
         for p in rows:
             p.scenario_tags = ["ecommerce"]
         await db.commit()
 
     profile_id = await _confirmed_profile(
-        c, h, oid, {"required_capabilities": ["image_generation", "voice_generation"], "scenario": "ecommerce"}
+        c,
+        h,
+        oid,
+        {
+            "required_capabilities": ["image_generation", "voice_generation"],
+            "scenario": "ecommerce",
+        },
     )
     r = await c.post(
         f"/api/v1/orgs/{oid}/drafts/learning-path",
@@ -1125,7 +1166,9 @@ async def test_setcover_backfills_capability_below_match_limit(c):
     )
     assert r.status_code == 201, r.text
     payload = r.json()["data"]["payload"]
-    selected_ids = {i["entity_id"] for i in payload["items"] if i["status"] in ("included", "waived")}
+    selected_ids = {
+        i["entity_id"] for i in payload["items"] if i["status"] in ("included", "waived")
+    }
     gap_caps = {g.get("capability") for g in payload["gaps"] if g["code"] == "NO_CONTENT_AVAILABLE"}
     # Z's unique pack must be selected (backfilled), and Z must NOT be a false gap
     assert z_pid in selected_ids, f"Z pack not selected: {selected_ids}"
@@ -1182,8 +1225,8 @@ async def test_production_multipack_chain_with_output_type(c):
     # BOTH packs chained (was just [vid] before the fix), producer-first
     assert chain_ids == [img, vid], f"chain not assembled: {chain_ids}"
     # the video's image input is now RESOLVED by the image pack — no no_producer
-    assert not any(
-        p["reason"] == "no_producer" for p in payload["placeholders"]
-    ), payload["placeholders"]
+    assert not any(p["reason"] == "no_producer" for p in payload["placeholders"]), payload[
+        "placeholders"
+    ]
     # the image pack's prompt input is a user value
     assert any(p["reason"] == "needs_user_value" for p in payload["placeholders"])

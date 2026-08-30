@@ -218,12 +218,20 @@ async def test_alembic_issue21_roundtrip_with_workflow_pack_items():
     env = {**os.environ, "PYTHONPATH": "."}
     down = subprocess.run(
         ["uv", "run", "alembic", "downgrade", "-3"],
-        cwd=api_dir, capture_output=True, text=True, timeout=120, env=env,
+        cwd=api_dir,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
     )
     assert down.returncode == 0, f"Downgrade failed: {down.stderr[-2000:]}"
     up = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head"],
-        cwd=api_dir, capture_output=True, text=True, timeout=120, env=env,
+        cwd=api_dir,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
     )
     assert up.returncode == 0, f"Re-upgrade failed: {up.stderr[-2000:]}"
 

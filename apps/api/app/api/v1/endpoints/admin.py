@@ -175,7 +175,9 @@ async def create_pack_category(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Category with this slug already exists") from None
+        raise HTTPException(
+            status_code=409, detail="Category with this slug already exists"
+        ) from None
     await db.refresh(category)
 
     log.info("pack_category_created", category_id=category.id, by=admin.id)
@@ -253,7 +255,9 @@ async def update_pack_category(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Category with this slug already exists") from None
+        raise HTTPException(
+            status_code=409, detail="Category with this slug already exists"
+        ) from None
     await db.refresh(category)
 
     log.info("pack_category_updated", category_id=category_id, by=admin.id)
@@ -288,9 +292,9 @@ async def delete_pack_category(
     # Check for assigned packs
     assignment_count_r = await db.execute(
         select(func.count()).select_from(
-            select(PackCategoryAssignment).where(
-                PackCategoryAssignment.category_id == category_id
-            ).subquery()
+            select(PackCategoryAssignment)
+            .where(PackCategoryAssignment.category_id == category_id)
+            .subquery()
         )
     )
     if assignment_count_r.scalar_one() > 0:

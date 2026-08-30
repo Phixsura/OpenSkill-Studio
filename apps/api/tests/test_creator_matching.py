@@ -1035,15 +1035,21 @@ async def test_eval_result_evidence_scores_from_total_score(c):
             )
         )
         sub = Submission(
-            org_id=oid, project_id=project_id, user_id=owner["id"],
-            status=SubmissionStatus.APPROVED, submitted_at=datetime.now(UTC),
+            org_id=oid,
+            project_id=project_id,
+            user_id=owner["id"],
+            status=SubmissionStatus.APPROVED,
+            submitted_at=datetime.now(UTC),
         )
         db.add(sub)
         await db.flush()
         db.add(
             EvaluationTask(
-                org_id=oid, submission_id=sub.id, type=EvalType.SUBMISSION_REVIEW,
-                status=EvalStatus.COMPLETED, config={},
+                org_id=oid,
+                submission_id=sub.id,
+                type=EvalType.SUBMISSION_REVIEW,
+                status=EvalStatus.COMPLETED,
+                config={},
                 # The real shape EvaluationService stores
                 result={"total_score": 45, "max_score": 60, "scores": []},
                 completed_at=datetime.now(UTC),
@@ -1067,7 +1073,9 @@ async def test_eval_result_evidence_scores_from_total_score(c):
                         CreatorCapabilityEvidence.evidence_type == "eval_result",
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         assert len(rows) == 1
         # 45/60 * 100 = 75.0 — NOT None
@@ -1084,13 +1092,20 @@ async def test_badge_evidence_requires_full_completion(c):
     oid = await _org(c, h)
 
     cat = (
-        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"C-{uuid.uuid4().hex[:4]}"}, headers=h)
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories", json={"name": f"C-{uuid.uuid4().hex[:4]}"}, headers=h
+        )
     ).json()["data"]["id"]
     skill_id = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
-            json={"name": f"S-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-                  "difficulty": "beginner", "category_id": cat, "tags": ["image_generation"]},
+            json={
+                "name": f"S-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+                "tags": ["image_generation"],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1101,8 +1116,12 @@ async def test_badge_evidence_requires_full_completion(c):
     async with AsyncSessionLocal() as db:
         db.add(
             SkillBadge(
-                user_id=owner["id"], skill_id=skill_id, org_id=oid,
-                skill_name="S", category_name="C", completion_pct=20,
+                user_id=owner["id"],
+                skill_id=skill_id,
+                org_id=oid,
+                skill_name="S",
+                category_name="C",
+                completion_pct=20,
             )
         )
         await db.commit()
@@ -1123,13 +1142,17 @@ async def test_badge_evidence_requires_full_completion(c):
                         CreatorCapabilityEvidence.evidence_type == "badge",
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         assert badge_rows == []  # 20% badge is not evidence
 
     # Bump to 100% → now it counts
     async with AsyncSessionLocal() as db:
-        b = (await db.execute(select(SkillBadge).where(SkillBadge.skill_id == skill_id))).scalar_one()
+        b = (
+            await db.execute(select(SkillBadge).where(SkillBadge.skill_id == skill_id))
+        ).scalar_one()
         b.completion_pct = 100
         await db.commit()
     async with AsyncSessionLocal() as db:
@@ -1143,7 +1166,9 @@ async def test_badge_evidence_requires_full_completion(c):
                         CreatorCapabilityEvidence.evidence_type == "badge",
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         assert any(r.capability_key == "image_generation" for r in badge_rows)
 
@@ -1219,7 +1244,11 @@ async def test_reoffer_after_decline_supersedes(c):
     # Re-offer must succeed (supersede), not 409
     r3 = await c.post(
         f"/api/v1/orgs/{oid}/creator-assignments",
-        json={"project_id": project_id, "user_id": creator["id"], "override_reason": "reconsidered"},
+        json={
+            "project_id": project_id,
+            "user_id": creator["id"],
+            "override_reason": "reconsidered",
+        },
         headers=h_owner,
     )
     assert r3.status_code == 201, r3.text
@@ -1254,8 +1283,11 @@ async def test_offer_override_reason_nul_rejected(c):
     project_id = await _project(c, h_owner, oid)
     r = await c.post(
         f"/api/v1/orgs/{oid}/creator-assignments",
-        json={"project_id": project_id, "user_id": creator["id"],
-              "override_reason": "a" + chr(0) + "b"},
+        json={
+            "project_id": project_id,
+            "user_id": creator["id"],
+            "override_reason": "a" + chr(0) + "b",
+        },
         headers=h_owner,
     )
     assert r.status_code == 422, r.text[:200]
@@ -1282,9 +1314,7 @@ async def test_withdraw_assignment_lifecycle(c):
     aid = r.json()["data"]["id"]
 
     # Withdraw the pending offer
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_owner
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_owner)
     assert r.status_code == 200, r.text
     assert r.json()["data"]["status"] == "withdrawn"
 
@@ -1313,15 +1343,11 @@ async def test_withdraw_assignment_lifecycle(c):
         headers=h_creator,
     )
     assert r.status_code == 200, r.text
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_owner
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_owner)
     assert r.status_code == 409, r.text
 
     # Students cannot withdraw (instructor+ surface)
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_creator
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_creator)
     assert r.status_code == 403, r.text
 
 
@@ -1406,13 +1432,17 @@ async def test_approved_submission_evidence_deduped_per_submission(c):
         await db.commit()
 
         rows = (
-            await db.execute(
-                select(CreatorCapabilityEvidence).where(
-                    CreatorCapabilityEvidence.user_id == owner["id"],
-                    CreatorCapabilityEvidence.evidence_type == "approved_submission",
+            (
+                await db.execute(
+                    select(CreatorCapabilityEvidence).where(
+                        CreatorCapabilityEvidence.user_id == owner["id"],
+                        CreatorCapabilityEvidence.evidence_type == "approved_submission",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1, f"expected 1 deduped evidence row, got {len(rows)}"
         # And it carries the LATEST review's score (82 on a max_score-100 scale).
         assert rows[0].evidence_id == sub.id
@@ -1494,11 +1524,15 @@ async def test_approved_evidence_dropped_when_submission_not_finally_approved(c)
         await db.commit()
 
         rows = (
-            await db.execute(
-                select(CreatorCapabilityEvidence).where(
-                    CreatorCapabilityEvidence.user_id == owner["id"],
-                    CreatorCapabilityEvidence.evidence_type == "approved_submission",
+            (
+                await db.execute(
+                    select(CreatorCapabilityEvidence).where(
+                        CreatorCapabilityEvidence.user_id == owner["id"],
+                        CreatorCapabilityEvidence.evidence_type == "approved_submission",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert rows == [], f"stale approved review credited evidence for rejected work: {rows}"

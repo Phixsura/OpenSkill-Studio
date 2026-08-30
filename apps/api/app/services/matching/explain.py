@@ -20,8 +20,7 @@ def build_explain_tree(scored_item: dict, config) -> dict:
     return {
         "value": round(sum(d["value"] for d in details), 6),
         "description": (
-            f"linear weighted sum over {len(details)} signals "
-            f"(config v{config.version})"
+            f"linear weighted sum over {len(details)} signals (config v{config.version})"
         ),
         "details": details,
     }

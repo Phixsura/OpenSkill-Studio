@@ -256,9 +256,7 @@ class LearningComposerService:
         return draft
 
     @staticmethod
-    def _propagate_budget_cuts(
-        entries: list[dict], prereq_edges: list[tuple[str, str]]
-    ) -> int:
+    def _propagate_budget_cuts(entries: list[dict], prereq_edges: list[tuple[str, str]]) -> int:
         """Cut any entry whose (transitive) prerequisite was cut for budget.
 
         Waived prerequisites don't force cuts (the learner already has them).
@@ -279,9 +277,7 @@ class LearningComposerService:
                     dependent["reason_code"] = "cut_for_budget"
                     changed = True
         return sum(
-            _pack_minutes(e["estimated_minutes"])
-            for e in entries
-            if e["status"] == "included"
+            _pack_minutes(e["estimated_minutes"]) for e in entries if e["status"] == "included"
         )
 
     async def _expand_prerequisites(
@@ -385,9 +381,7 @@ class LearningComposerService:
             if prereq_id in indegree and dependent_id in indegree:
                 adj[prereq_id].append(dependent_id)
                 indegree[dependent_id] += 1
-        queue = sorted(
-            [pid for pid, d in indegree.items() if d == 0], key=lambda p: order_hint[p]
-        )
+        queue = sorted([pid for pid, d in indegree.items() if d == 0], key=lambda p: order_hint[p])
         topo: list[str] = []
         while queue:
             node = queue.pop(0)
@@ -709,9 +703,7 @@ class LearningComposerService:
                 slug_by_id = {
                     x.get("entity_id"): x.get("slug") for x in current_items if x.get("slug")
                 }
-                blocking = {
-                    slug_by_id.get(pid, pid) for pid in prereq_ids if pid in removed_ids
-                }
+                blocking = {slug_by_id.get(pid, pid) for pid in prereq_ids if pid in removed_ids}
             else:
                 blocking = removed_slugs & set(item.get("prereq_slugs") or [])
             if blocking:

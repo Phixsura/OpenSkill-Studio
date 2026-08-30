@@ -404,12 +404,20 @@ async def test_cannot_accept_or_reject_own_application(c):
     accept a different user's application."""
     h, owner = await _auth(c)
     oid = await _org(c, h)
-    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(project_type="voice_generation"), headers=h)).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json=_brief_body(project_type="voice_generation"),
+            headers=h,
+        )
+    ).json()["data"]["id"]
     r = await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=h)
     assert r.status_code == 200, r.text
 
     # Owner self-applies
-    r = await c.post(f"/api/v1/orgs/{oid}/briefs/{bid}/apply", json={"note": "self apply"}, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/apply", json={"note": "self apply"}, headers=h
+    )
     assert r.status_code == 201, r.text
     app_id = r.json()["data"]["id"]
 
@@ -451,9 +459,9 @@ async def test_convert_rubric_bad_max_score_is_422_not_500(c):
     oid = await _org(c, h)
 
     async def _convert(rubric):
-        bid = (
-            await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)
-        ).json()["data"]["id"]
+        bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)).json()[
+            "data"
+        ]["id"]
         return await c.post(
             f"/api/v1/orgs/{oid}/briefs/{bid}/convert", json={"rubric": rubric}, headers=h
         )

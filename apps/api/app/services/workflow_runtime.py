@@ -140,6 +140,8 @@ def _iter_strings(v):
             stack.extend(cur.values())
         elif isinstance(cur, (list, tuple)):
             stack.extend(cur)
+
+
 _EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 _STEP_REF_RE = re.compile(r"^steps\.([a-z0-9_]+)\.outputs\.[a-z0-9_]+$")
 
@@ -175,6 +177,7 @@ def _upstream_ids(step_id: str, steps: dict, edges: list) -> set[str]:
         ups |= _template_ref_upstreams(step)
     return ups
 
+
 # Tracked background tasks (webhook.py pattern) — drained on shutdown
 _pending_tasks: set[asyncio.Task] = set()
 
@@ -203,9 +206,7 @@ async def drain_workflow_tasks(timeout: float = 15.0) -> None:
     if not current:
         return
     try:
-        await asyncio.wait_for(
-            asyncio.gather(*current, return_exceptions=True), timeout=timeout
-        )
+        await asyncio.wait_for(asyncio.gather(*current, return_exceptions=True), timeout=timeout)
     except TimeoutError:
         log.warning("workflow_drain_timeout", pending=len(current))
     # CancelledError propagates: a lifespan-shutdown cancellation must not be
@@ -236,18 +237,16 @@ class WorkflowRuntimeService:
         from app.models.skill_pack import InstallStatus
 
         install = await self.db.get(WorkflowPackInstallation, installation_id)
-        if (
-            install is None
-            or install.org_id != org_id
-            or install.status == InstallStatus.REMOVED
-        ):
+        if install is None or install.org_id != org_id or install.status == InstallStatus.REMOVED:
             raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
 
         # Resolve the effective definition: forked local copy or release manifest
         definition = install.local_definition
         if definition is None:
             if install.release_id is None:
-                raise AppError("NO_DEFINITION", "Installation has no release or local definition", 422)
+                raise AppError(
+                    "NO_DEFINITION", "Installation has no release or local definition", 422
+                )
             from app.models.workflow_pack import WorkflowPackRelease
 
             release = await self.db.get(WorkflowPackRelease, install.release_id)
@@ -262,9 +261,7 @@ class WorkflowRuntimeService:
                 raise AppError("MISSING_INPUT", f"Required input '{key}' not provided", 422)
         unknown = set(inputs.keys()) - set(input_defs.keys())
         if unknown:
-            raise AppError(
-                "UNKNOWN_INPUT", f"Unknown inputs: {', '.join(sorted(unknown))}", 422
-            )
+            raise AppError("UNKNOWN_INPUT", f"Unknown inputs: {', '.join(sorted(unknown))}", 422)
         # Apply defaults. Defaults are stored as strings (schema), so a
         # json-typed default must be parsed here or the type check below
         # would reject the pack's own published default (422, never a 500).
@@ -336,8 +333,7 @@ class WorkflowRuntimeService:
         if _values_have_ctrl(effective_inputs):
             raise AppError(
                 "INVALID_INPUT_VALUE",
-                "Inputs contain NUL/control characters or NaN/Infinity values "
-                "that are not allowed",
+                "Inputs contain NUL/control characters or NaN/Infinity values that are not allowed",
                 422,
             )
 
@@ -377,7 +373,10 @@ class WorkflowRuntimeService:
                 # key with a different installation or inputs is a client bug,
                 # not a retry; returning the old run would silently ignore the
                 # new intent.
-                if existing.installation_id != installation_id or existing.inputs != effective_inputs:
+                if (
+                    existing.installation_id != installation_id
+                    or existing.inputs != effective_inputs
+                ):
                     raise AppError(
                         "IDEMPOTENCY_KEY_CONFLICT",
                         "This idempotency key was already used with different inputs",
@@ -543,9 +542,7 @@ class WorkflowRuntimeService:
             select(WorkflowStepRun.id).where(WorkflowStepRun.id == step_run_id).with_for_update()
         )
         result = await self.db.execute(
-            select(WorkflowStepReview)
-            .where(WorkflowStepReview.id == review_id)
-            .with_for_update()
+            select(WorkflowStepReview).where(WorkflowStepReview.id == review_id).with_for_update()
         )
         review = result.scalar_one_or_none()
         if review is None or review.org_id != org_id:
@@ -818,9 +815,7 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
     steps = {s["id"]: s for s in definition.get("steps", [])}
     edges = definition.get("edges", [])
 
-    step_runs_r = await db.execute(
-        select(WorkflowStepRun).where(WorkflowStepRun.run_id == run_id)
-    )
+    step_runs_r = await db.execute(select(WorkflowStepRun).where(WorkflowStepRun.run_id == run_id))
     step_runs = {sr.step_id: sr for sr in step_runs_r.scalars().all()}
 
     # Propagate SKIPPED: any step downstream of a FAILED/SKIPPED/CANCELLED
@@ -837,13 +832,16 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
                 continue
             upstream = _upstream_ids(step_id, steps, edges)
             if any(
-                local_status[u] in (StepRunStatus.FAILED, StepRunStatus.SKIPPED, StepRunStatus.CANCELLED)
+                local_status[u]
+                in (StepRunStatus.FAILED, StepRunStatus.SKIPPED, StepRunStatus.CANCELLED)
                 for u in upstream
                 if u in local_status
             ):
                 result = await db.execute(
                     update(WorkflowStepRun)
-                    .where(WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.PENDING)
+                    .where(
+                        WorkflowStepRun.id == sr.id, WorkflowStepRun.status == StepRunStatus.PENDING
+                    )
                     .values(status=StepRunStatus.SKIPPED, finished_at=_now())
                 )
                 if result.rowcount:
@@ -865,9 +863,7 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
         if sr.status not in (StepRunStatus.PENDING, StepRunStatus.WAITING_RETRY):
             continue
         upstream = _upstream_ids(step_id, steps, edges)
-        if all(
-            step_runs[u].status == StepRunStatus.COMPLETED for u in upstream if u in step_runs
-        ):
+        if all(step_runs[u].status == StepRunStatus.COMPLETED for u in upstream if u in step_runs):
             executed = await _execute_step(db, run, steps[step_id], sr, edges, step_runs)
             if executed:
                 return True  # made progress; loop again
@@ -910,9 +906,7 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
     return False
 
 
-def _resolve_step_inputs(
-    step: dict, run: WorkflowRun, edges: list, step_runs: dict
-) -> dict:
+def _resolve_step_inputs(step: dict, run: WorkflowRun, edges: list, step_runs: dict) -> dict:
     """Resolve a step's input port values from upstream outputs / run inputs."""
     resolved: dict = {}
     for edge in edges:
@@ -951,7 +945,7 @@ def _render_template(template: str, run: WorkflowRun, step_runs: dict) -> str:
     def _sub(m: re.Match) -> str:
         ref = m.group(1)
         if ref.startswith("inputs."):
-            return _render_value(run.inputs.get(ref[len("inputs."):]))
+            return _render_value(run.inputs.get(ref[len("inputs.") :]))
         if ref.startswith("steps."):
             parts = ref.split(".")
             if len(parts) == 4 and parts[2] == "outputs":
@@ -993,15 +987,14 @@ async def _execute_step(
             inputs_resolved=inputs_resolved,
             started_at=_now(),
             attempt=WorkflowStepRun.attempt + 1,
-            lease_expires_at=_now() + timedelta(seconds=settings.workflow_step_timeout_seconds + 30),
+            lease_expires_at=_now()
+            + timedelta(seconds=settings.workflow_step_timeout_seconds + 30),
         )
     )
     if not claim.rowcount:
         return False  # lost the race
     db.add(
-        WorkflowRunEvent(
-            run_id=run.id, step_id=step["id"], event_type="step_started", payload={}
-        )
+        WorkflowRunEvent(run_id=run.id, step_id=step["id"], event_type="step_started", payload={})
     )
     await db.flush()
 
@@ -1042,7 +1035,12 @@ async def _execute_step(
             await _execute_provider_action(db, run, sr, step, inputs_resolved, claimed_attempt)
         else:
             await _fail_step(
-                db, run, sr, "WF_UNKNOWN_STEP_TYPE", f"Unknown step type {step_type}", claimed_attempt
+                db,
+                run,
+                sr,
+                "WF_UNKNOWN_STEP_TYPE",
+                f"Unknown step type {step_type}",
+                claimed_attempt,
             )
     except Exception as exc:
         log.exception("workflow_step_crashed", run_id=run.id, step_id=step["id"])
@@ -1106,7 +1104,9 @@ async def _complete_step(
         )
         return
     if len(json.dumps(output, ensure_ascii=False, default=str)) > MAX_STEP_OUTPUT_BYTES:
-        await _fail_step(db, run, sr, "WF_OUTPUT_TOO_LARGE", "Step output exceeds 48KB", claimed_attempt)
+        await _fail_step(
+            db, run, sr, "WF_OUTPUT_TOO_LARGE", "Step output exceeds 48KB", claimed_attempt
+        )
         return
     result = await db.execute(
         update(WorkflowStepRun)
@@ -1342,9 +1342,7 @@ async def _execute_provider_action(
     # (bypasses the identity map — expire_on_commit=False would otherwise
     # return the stale in-memory object) and bail BEFORE spending provider money.
     fresh_r = await db.execute(
-        select(WorkflowStepRun.status, WorkflowStepRun.attempt).where(
-            WorkflowStepRun.id == sr.id
-        )
+        select(WorkflowStepRun.status, WorkflowStepRun.attempt).where(WorkflowStepRun.id == sr.id)
     )
     fresh = fresh_r.one_or_none()
     if fresh is None or fresh.status != StepRunStatus.RUNNING or fresh.attempt != claimed_attempt:

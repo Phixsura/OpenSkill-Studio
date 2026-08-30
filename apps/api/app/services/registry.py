@@ -77,12 +77,19 @@ class RegistryService:
 
         cache_key_src = _json.dumps(
             {
-                "search": search, "scenario": scenario, "tool": tool,
-                "difficulty": difficulty, "category": category, "sort": sort,
-                "page": page, "per_page": effective_per_page,
-                "min_rating": min_rating, "max_results": max_results,
+                "search": search,
+                "scenario": scenario,
+                "tool": tool,
+                "difficulty": difficulty,
+                "category": category,
+                "sort": sort,
+                "page": page,
+                "per_page": effective_per_page,
+                "min_rating": min_rating,
+                "max_results": max_results,
             },
-            sort_keys=True, default=str,
+            sort_keys=True,
+            default=str,
         )
         cache_key = f"registry:search:{hashlib.sha256(cache_key_src.encode()).hexdigest()}"
         cached = await cache_get(cache_key)
@@ -149,9 +156,7 @@ class RegistryService:
                 cast(SkillPack.capability_tags, String).ilike(term),
             )
             # Combine FTS and ILIKE — FTS failure is caught at query execution time
-            fts_cond = search_vector.op("@@")(
-                func.websearch_to_tsquery("simple", search)
-            )
+            fts_cond = search_vector.op("@@")(func.websearch_to_tsquery("simple", search))
             base = base.where(or_(fts_cond, ilike_cond))
             # Store ILIKE-only fallback for use if FTS fails at execution time
             _ilike_fallback = ilike_cond
@@ -170,9 +175,9 @@ class RegistryService:
 
             base = base.where(
                 SkillPack.id.in_(
-                    select(PackCategoryAssignment.pack_id).join(
-                        PackCategory, PackCategory.id == PackCategoryAssignment.category_id
-                    ).where(PackCategory.slug == category)
+                    select(PackCategoryAssignment.pack_id)
+                    .join(PackCategory, PackCategory.id == PackCategoryAssignment.category_id)
+                    .where(PackCategory.slug == category)
                 )
             )
 
@@ -199,12 +204,18 @@ class RegistryService:
             if _ilike_fallback is not None:
                 # FTS query failed (bad search syntax) — rebuild with ILIKE only
                 log.warning("fts_query_failed_fallback_to_ilike", search=search)
-                base = select(SkillPack).where(
-                    SkillPack.visibility == PackVisibility.PUBLIC,
-                    SkillPack.status == PackStatus.PUBLISHED,
-                    or_(SkillPack.review_status.is_(None), SkillPack.review_status == "approved"),
-                    _ilike_fallback,
-                ).order_by(SkillPack.created_at.desc())
+                base = (
+                    select(SkillPack)
+                    .where(
+                        SkillPack.visibility == PackVisibility.PUBLIC,
+                        SkillPack.status == PackStatus.PUBLISHED,
+                        or_(
+                            SkillPack.review_status.is_(None), SkillPack.review_status == "approved"
+                        ),
+                        _ilike_fallback,
+                    )
+                    .order_by(SkillPack.created_at.desc())
+                )
                 total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
                 total = total_r.scalar_one()
                 offset = (page - 1) * effective_per_page
@@ -275,9 +286,7 @@ class RegistryService:
         """Return pack categories as a tree structure."""
         from app.models.pack_category import PackCategory
 
-        result = await self.db.execute(
-            select(PackCategory).order_by(PackCategory.sort_order)
-        )
+        result = await self.db.execute(select(PackCategory).order_by(PackCategory.sort_order))
         categories = list(result.scalars().all())
 
         # Build tree: group children by parent_id
@@ -339,18 +348,14 @@ class RegistryService:
         latest = latest_r.scalar_one_or_none()
         if latest and latest.manifest:
             total_exercises = sum(
-                len(s.get("exercises", []))
-                for s in latest.manifest.get("skills", [])
+                len(s.get("exercises", [])) for s in latest.manifest.get("skills", [])
             )
             if total_exercises > 0:
                 score += 15
 
             # +10 has rubric templates
             templates = latest.manifest.get("project_templates", [])
-            has_rubric = any(
-                t.get("rubric") and len(t.get("rubric", [])) > 0
-                for t in templates
-            )
+            has_rubric = any(t.get("rubric") and len(t.get("rubric", [])) > 0 for t in templates)
             if has_rubric:
                 score += 10
 
@@ -443,17 +448,19 @@ class RegistryService:
             prereqs = s.get("prerequisites", [])
             if not isinstance(prereqs, list):
                 prereqs = []
-            skills.append({
-                "name": _req_s(s.get("name")),
-                "description": _s(s.get("description")),
-                "difficulty": _s(s.get("difficulty")),
-                "exercise_count": len(exercises),
-                "exercises": [
-                    {"title": _req_s(e.get("title"))} for e in exercises if isinstance(e, dict)
-                ],
-                # prerequisites is list[str] in the schema — drop non-str entries.
-                "prerequisites": [p for p in prereqs if isinstance(p, str)],
-            })
+            skills.append(
+                {
+                    "name": _req_s(s.get("name")),
+                    "description": _s(s.get("description")),
+                    "difficulty": _s(s.get("difficulty")),
+                    "exercise_count": len(exercises),
+                    "exercises": [
+                        {"title": _req_s(e.get("title"))} for e in exercises if isinstance(e, dict)
+                    ],
+                    # prerequisites is list[str] in the schema — drop non-str entries.
+                    "prerequisites": [p for p in prereqs if isinstance(p, str)],
+                }
+            )
 
         # Extract templates
         raw_templates = manifest.get("project_templates", [])
@@ -480,18 +487,18 @@ class RegistryService:
                 criteria_count = len(rubric["criteria"])
             else:
                 criteria_count = 0
-            templates.append({
-                "name": _req_s(t.get("name")),
-                "description": _s(t.get("description")),
-                "rubric_criteria_count": criteria_count,
-            })
+            templates.append(
+                {
+                    "name": _req_s(t.get("name")),
+                    "description": _s(t.get("description")),
+                    "rubric_criteria_count": criteria_count,
+                }
+            )
 
         # Extract categories (skip non-dict entries — untrusted import shape)
         raw_categories = manifest.get("categories", [])
         categories = [
-            {"name": _req_s(c.get("name"))}
-            for c in raw_categories
-            if isinstance(c, dict)
+            {"name": _req_s(c.get("name"))} for c in raw_categories if isinstance(c, dict)
         ]
 
         return {

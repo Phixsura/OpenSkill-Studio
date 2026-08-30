@@ -73,7 +73,13 @@ def _definition(with_review=False, with_provider=False):
         },
     ]
     edges = [
-        {"id": "e1", "from_step": "take_input", "from_port": "topic", "to_step": "build_prompt", "to_port": "topic"},
+        {
+            "id": "e1",
+            "from_step": "take_input",
+            "from_port": "topic",
+            "to_step": "build_prompt",
+            "to_port": "topic",
+        },
     ]
     last_step, last_port, last_type = "build_prompt", "prompt", "prompt"
 
@@ -89,7 +95,13 @@ def _definition(with_review=False, with_provider=False):
             }
         )
         edges.append(
-            {"id": "e2", "from_step": last_step, "from_port": last_port, "to_step": "generate", "to_port": "prompt"}
+            {
+                "id": "e2",
+                "from_step": last_step,
+                "from_port": last_port,
+                "to_step": "generate",
+                "to_port": "prompt",
+            }
         )
         last_step, last_port, last_type = "generate", "result", "image"
 
@@ -108,14 +120,22 @@ def _definition(with_review=False, with_provider=False):
             }
         )
         edges.append(
-            {"id": "e3", "from_step": last_step, "from_port": last_port, "to_step": "qa", "to_port": "subject"}
+            {
+                "id": "e3",
+                "from_step": last_step,
+                "from_port": last_port,
+                "to_step": "qa",
+                "to_port": "subject",
+            }
         )
         last_step, last_port = "qa", "passed"
 
     return {
         "schema_version": 1,
         "inputs": [{"key": "topic", "type": "text", "required": True}],
-        "outputs": [{"key": "final", "type": last_type, "from_step": last_step, "from_port": last_port}],
+        "outputs": [
+            {"key": "final", "type": last_type, "from_step": last_step, "from_port": last_port}
+        ],
         "steps": steps,
         "edges": edges,
         "ui": {},
@@ -723,9 +743,7 @@ async def test_empty_dict_step_output_still_collected(c):
     definition = {
         "schema_version": 1,
         "inputs": [{"key": "topic", "type": "text", "required": True}],
-        "outputs": [
-            {"key": "final", "type": "text", "from_step": "note", "from_port": "done"}
-        ],
+        "outputs": [{"key": "final", "type": "text", "from_step": "note", "from_port": "done"}],
         "steps": [
             {
                 "id": "note",
@@ -868,7 +886,13 @@ async def test_output_step_maps_input_to_declared_output_port(c):
         }
     )
     definition["edges"].append(
-        {"id": "e9", "from_step": "build_prompt", "from_port": "prompt", "to_step": "deliver", "to_port": "incoming"}
+        {
+            "id": "e9",
+            "from_step": "build_prompt",
+            "from_port": "prompt",
+            "to_step": "deliver",
+            "to_port": "incoming",
+        }
     )
     definition["outputs"] = [
         {"key": "final", "type": "prompt", "from_step": "deliver", "from_port": "delivered"}
@@ -911,14 +935,33 @@ async def test_skip_propagation_settles_multihop_chain_in_one_advance(c):
         "inputs": [],
         "outputs": [],
         "steps": [
-            {"id": s, "type": "instruction", "name": s.upper(), "config": {"content": "x"},
-             "inputs": [{"port": "trigger", "type": "text", "required": False}] if s != "c" else [],
-             "outputs": [{"port": "done", "type": "text"}]}
+            {
+                "id": s,
+                "type": "instruction",
+                "name": s.upper(),
+                "config": {"content": "x"},
+                "inputs": [{"port": "trigger", "type": "text", "required": False}]
+                if s != "c"
+                else [],
+                "outputs": [{"port": "done", "type": "text"}],
+            }
             for s in ("a", "b", "c")
         ],
         "edges": [
-            {"id": "e1", "from_step": "c", "from_port": "done", "to_step": "b", "to_port": "trigger"},
-            {"id": "e2", "from_step": "b", "from_port": "done", "to_step": "a", "to_port": "trigger"},
+            {
+                "id": "e1",
+                "from_step": "c",
+                "from_port": "done",
+                "to_step": "b",
+                "to_port": "trigger",
+            },
+            {
+                "id": "e2",
+                "from_step": "b",
+                "from_port": "done",
+                "to_step": "a",
+                "to_port": "trigger",
+            },
         ],
     }
     # Seed: c FAILED, b/a PENDING, run RUNNING. Step rows inserted a,b,c so
@@ -932,14 +975,21 @@ async def test_skip_propagation_settles_multihop_chain_in_one_advance(c):
         for sid in ("a", "b"):
             db.add(
                 WorkflowStepRun(
-                    run_id=run.id, step_id=sid, step_type="instruction",
-                    status=StepRunStatus.PENDING, max_attempts=3,
+                    run_id=run.id,
+                    step_id=sid,
+                    step_type="instruction",
+                    status=StepRunStatus.PENDING,
+                    max_attempts=3,
                 )
             )
         db.add(
             WorkflowStepRun(
-                run_id=run.id, step_id="c", step_type="instruction",
-                status=StepRunStatus.FAILED, error_code="WF_STEP_ERROR", max_attempts=3,
+                run_id=run.id,
+                step_id="c",
+                step_type="instruction",
+                status=StepRunStatus.FAILED,
+                error_code="WF_STEP_ERROR",
+                max_attempts=3,
             )
         )
         await db.commit()
@@ -954,10 +1004,10 @@ async def test_skip_propagation_settles_multihop_chain_in_one_advance(c):
         from sqlalchemy import select as sa_select
 
         srs = (
-            await db.execute(
-                sa_select(WorkflowStepRun).where(WorkflowStepRun.run_id == run_id)
-            )
-        ).scalars().all()
+            (await db.execute(sa_select(WorkflowStepRun).where(WorkflowStepRun.run_id == run_id)))
+            .scalars()
+            .all()
+        )
         by_id = {s.step_id: s.status for s in srs}
         assert by_id["c"] == StepRunStatus.FAILED
         assert by_id["b"] == StepRunStatus.SKIPPED
@@ -1131,7 +1181,9 @@ async def test_step_output_with_nul_fails_step_cleanly(c):
     class NulAdapter(wa.ProviderAdapterBase):
         key = "mock"
 
-        async def execute(self, capability, model_name, inputs, config, credentials, idempotency_key):
+        async def execute(
+            self, capability, model_name, inputs, config, credentials, idempotency_key
+        ):
             return {"result": "a\x00b"}
 
     original = wa._ADAPTERS["mock"]
@@ -1303,9 +1355,7 @@ async def test_template_renders_json_input_as_valid_json(c):
     definition = {
         "schema_version": 1,
         "inputs": [{"key": "cfg", "type": "json", "required": True}],
-        "outputs": [
-            {"key": "final", "type": "prompt", "from_step": "build", "from_port": "out"}
-        ],
+        "outputs": [{"key": "final", "type": "prompt", "from_step": "build", "from_port": "out"}],
         "steps": [
             {
                 "id": "build",
@@ -1372,7 +1422,9 @@ async def test_deep_nested_run_input_no_recursion_error(c):
                 "outputs": [{"port": "o", "type": "json"}],
             },
         ],
-        "edges": [{"id": "e1", "from_step": "take", "from_port": "cfg", "to_step": "echo", "to_port": "i"}],
+        "edges": [
+            {"id": "e1", "from_step": "take", "from_port": "cfg", "to_step": "echo", "to_port": "i"}
+        ],
         "ui": {},
     }
     h, _ = await _auth(c)
@@ -1458,9 +1510,7 @@ async def test_review_gate_passthrough_uses_declared_first_port(c):
             {"key": "subject_text", "type": "text", "required": True},
             {"key": "reference_text", "type": "text", "required": True},
         ],
-        "outputs": [
-            {"key": "final", "type": "text", "from_step": "qa", "from_port": "passed"}
-        ],
+        "outputs": [{"key": "final", "type": "text", "from_step": "qa", "from_port": "passed"}],
         "steps": [
             {
                 "id": "take",
@@ -1491,8 +1541,20 @@ async def test_review_gate_passthrough_uses_declared_first_port(c):
         ],
         # EDGE order: reference's edge drawn FIRST
         "edges": [
-            {"id": "e_ref", "from_step": "take", "from_port": "reference_text", "to_step": "qa", "to_port": "ref"},
-            {"id": "e_subj", "from_step": "take", "from_port": "subject_text", "to_step": "qa", "to_port": "subject"},
+            {
+                "id": "e_ref",
+                "from_step": "take",
+                "from_port": "reference_text",
+                "to_step": "qa",
+                "to_port": "ref",
+            },
+            {
+                "id": "e_subj",
+                "from_step": "take",
+                "from_port": "subject_text",
+                "to_step": "qa",
+                "to_port": "subject",
+            },
         ],
         "ui": {},
     }
@@ -1562,7 +1624,11 @@ async def test_concurrent_run_cap_enforced(c, monkeypatch):
     # At cap → 422
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-runs",
-        json={"installation_id": install_id, "inputs": {"topic": "capped"}, "idempotency_key": "cap-1"},
+        json={
+            "installation_id": install_id,
+            "inputs": {"topic": "capped"},
+            "idempotency_key": "cap-1",
+        },
         headers=h,
     )
     assert r.status_code == 422, r.text
@@ -1582,7 +1648,11 @@ async def test_concurrent_run_cap_enforced(c, monkeypatch):
 
     r2 = await c.post(
         f"/api/v1/orgs/{oid}/workflow-runs",
-        json={"installation_id": install_id, "inputs": {"topic": "fits"}, "idempotency_key": "cap-2"},
+        json={
+            "installation_id": install_id,
+            "inputs": {"topic": "fits"},
+            "idempotency_key": "cap-2",
+        },
         headers=h,
     )
     assert r2.status_code == 201, r2.text
@@ -1602,7 +1672,11 @@ async def test_concurrent_run_cap_enforced(c, monkeypatch):
         await db.commit()
     r3 = await c.post(
         f"/api/v1/orgs/{oid}/workflow-runs",
-        json={"installation_id": install_id, "inputs": {"topic": "fits"}, "idempotency_key": "cap-2"},
+        json={
+            "installation_id": install_id,
+            "inputs": {"topic": "fits"},
+            "idempotency_key": "cap-2",
+        },
         headers=h,
     )
     assert r3.status_code == 201, r3.text
@@ -1698,9 +1772,7 @@ async def test_cancel_run_scoped_to_owner_or_instructor(c):
     # uniform 404 (not 403) — a 403 for an existing peer run vs 404 for a
     # nonexistent id turned cancel_run into an existence oracle that defeated
     # get_run's non-enumerability. A nonexistent id also 404s.
-    r2 = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_other
-    )
+    r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_other)
     assert r2.status_code == 404, r2.text
     assert r2.json()["error"]["code"] == "RUN_NOT_FOUND"
     r_missing = await c.post(
@@ -1712,9 +1784,7 @@ async def test_cancel_run_scoped_to_owner_or_instructor(c):
     assert r_missing.json()["error"]["code"] == r2.json()["error"]["code"]
 
     # The owner can
-    r3 = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_student
-    )
+    r3 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_student)
     assert r3.status_code == 200, r3.text
     assert r3.json()["data"]["status"] == "cancelled"
 
@@ -1738,9 +1808,7 @@ async def test_cancel_run_instructor_can_cancel_any(c):
     )
     run_id = r.json()["data"]["id"]
     # Owner (instructor+) cancels the student's run
-    r2 = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_owner
-    )
+    r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs/{run_id}/cancel", headers=h_owner)
     assert r2.status_code == 200, r2.text
     assert r2.json()["data"]["status"] == "cancelled"
 
@@ -1779,7 +1847,9 @@ async def test_run_reads_scoped_to_owner_or_instructor(c):
     # A sees their own
     la = await c.get(f"/api/v1/orgs/{oid}/workflow-runs", headers=h_a)
     assert run_a in [r["id"] for r in la.json()["data"]]
-    assert (await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_a}", headers=h_a)).status_code == 200
+    assert (
+        await c.get(f"/api/v1/orgs/{oid}/workflow-runs/{run_a}", headers=h_a)
+    ).status_code == 200
 
     # Instructor (owner) sees it too
     lo = await c.get(f"/api/v1/orgs/{oid}/workflow-runs", headers=h_owner)
@@ -2080,7 +2150,11 @@ async def test_credentials_never_reach_run_snapshot_or_detail(c):
     off = (
         await c.post(
             f"/api/v1/orgs/{oid}/provider-offerings",
-            json={"connection_id": conn, "capability_key": "image_generation", "model_name": "claude-sonnet-5"},
+            json={
+                "connection_id": conn,
+                "capability_key": "image_generation",
+                "model_name": "claude-sonnet-5",
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -2135,7 +2209,9 @@ async def test_credentials_never_reach_run_snapshot_or_detail(c):
         ).scalar_one()
         event_leak = (
             await db.execute(
-                text("SELECT count(*) FROM workflow_run_events WHERE run_id=:r AND payload::text LIKE :p"),
+                text(
+                    "SELECT count(*) FROM workflow_run_events WHERE run_id=:r AND payload::text LIKE :p"
+                ),
                 {"r": run_id, "p": pat},
             )
         ).scalar_one()

@@ -232,11 +232,24 @@ async def test_export_round_trip(c):
     oid2 = await _org(c, h2)
 
     # Create pack + publish in org1
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "Round Trip"}, headers=h1)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "RT"}, headers=h1)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": "RT Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "Round Trip"}, headers=h1)
+    ).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "RT"}, headers=h1)).json()[
+        "data"
+    ]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": "RT Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
 
@@ -449,9 +462,9 @@ async def test_export_zip_contains_valid_manifest(c):
     pid = (
         await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Manifest Check"}, headers=h)
     ).json()["data"]["id"]
-    cat = (
-        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "MC"}, headers=h)
-    ).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "MC"}, headers=h)).json()[
+        "data"
+    ]["id"]
     sid = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
@@ -484,9 +497,9 @@ async def test_export_filename_format(c):
     pid = (
         await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "My Export Pack"}, headers=h)
     ).json()["data"]["id"]
-    cat = (
-        await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "EF"}, headers=h)
-    ).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "EF"}, headers=h)).json()[
+        "data"
+    ]["id"]
     sid = (
         await c.post(
             f"/api/v1/orgs/{oid}/skills",
@@ -521,9 +534,9 @@ async def test_export_cross_org(c):
     pid = (
         await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "Cross Export"}, headers=h1)
     ).json()["data"]["id"]
-    cat = (
-        await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "CE"}, headers=h1)
-    ).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "CE"}, headers=h1)).json()[
+        "data"
+    ]["id"]
     sid = (
         await c.post(
             f"/api/v1/orgs/{oid1}/skills",
@@ -597,15 +610,17 @@ async def test_import_skill_missing_logical_id(c):
     oid = await _org(c, h)
     manifest = {
         **VALID_MANIFEST,
-        "skills": [{
-            "name": "No LID Skill",
-            "category_logical_id": "cat-1",
-            "description": "test",
-            "difficulty": "beginner",
-            "sort_order": 0,
-            "exercises": [],
-            "prerequisites": [],
-        }],
+        "skills": [
+            {
+                "name": "No LID Skill",
+                "category_logical_id": "cat-1",
+                "description": "test",
+                "difficulty": "beginner",
+                "sort_order": 0,
+                "exercises": [],
+                "prerequisites": [],
+            }
+        ],
     }
     r = await c.post(
         f"/api/v1/orgs/{oid}/packs/import",
@@ -623,13 +638,15 @@ async def test_import_template_missing_logical_id(c):
     oid = await _org(c, h)
     manifest = {
         **VALID_MANIFEST,
-        "project_templates": [{
-            "name": "No LID Template",
-            "description": "test",
-            "instructions": "do it",
-            "rubric": [{"criterion": "Q", "max_score": 100}],
-            "sort_order": 0,
-        }],
+        "project_templates": [
+            {
+                "name": "No LID Template",
+                "description": "test",
+                "instructions": "do it",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+                "sort_order": 0,
+            }
+        ],
     }
     r = await c.post(
         f"/api/v1/orgs/{oid}/packs/import",
@@ -697,7 +714,9 @@ async def test_import_student_cannot_import(c):
     h, _ = await _auth(c)
     hs, us = await _auth(c)
     oid = await _org(c, h)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h
+    )
 
     zip_bytes = _make_zip(VALID_MANIFEST)
     r = await c.post(
@@ -848,24 +867,12 @@ async def test_import_hostile_entry_types_rejected_not_500(c):
         "prereq unhashable": variant(
             lambda m: m["skills"][0].__setitem__("prerequisites", [["x"]])
         ),
-        "prereq int": variant(
-            lambda m: m["skills"][0].__setitem__("prerequisites", [1])
-        ),
-        "prereqs str": variant(
-            lambda m: m["skills"][0].__setitem__("prerequisites", "a")
-        ),
-        "exercises str": variant(
-            lambda m: m["skills"][0].__setitem__("exercises", "zzz")
-        ),
-        "exercise item str": variant(
-            lambda m: m["skills"][0].__setitem__("exercises", ["x"])
-        ),
-        "logical_id list": variant(
-            lambda m: m["skills"][0].__setitem__("logical_id", ["a"])
-        ),
-        "logical_id int": variant(
-            lambda m: m["skills"][0].__setitem__("logical_id", 7)
-        ),
+        "prereq int": variant(lambda m: m["skills"][0].__setitem__("prerequisites", [1])),
+        "prereqs str": variant(lambda m: m["skills"][0].__setitem__("prerequisites", "a")),
+        "exercises str": variant(lambda m: m["skills"][0].__setitem__("exercises", "zzz")),
+        "exercise item str": variant(lambda m: m["skills"][0].__setitem__("exercises", ["x"])),
+        "logical_id list": variant(lambda m: m["skills"][0].__setitem__("logical_id", ["a"])),
+        "logical_id int": variant(lambda m: m["skills"][0].__setitem__("logical_id", 7)),
         "learning_content int": variant(
             lambda m: m["skills"][0].__setitem__("learning_content", 12345)
         ),
@@ -892,13 +899,9 @@ async def test_import_hostile_entry_types_rejected_not_500(c):
         ),
         "est_minutes str": variant(lambda m: set_meta(m, "estimated_minutes", "NaN")),
         "est_minutes bool": variant(lambda m: set_meta(m, "estimated_minutes", True)),
-        "outcomes dict": variant(
-            lambda m: set_meta(m, "learning_outcomes", {"x": 1})
-        ),
+        "outcomes dict": variant(lambda m: set_meta(m, "learning_outcomes", {"x": 1})),
         "tags int": variant(lambda m: set_meta(m, "scenario_tags", 7)),
-        "provenance list": variant(
-            lambda m: m["pack"].__setitem__("provenance", ["x"])
-        ),
+        "provenance list": variant(lambda m: m["pack"].__setitem__("provenance", ["x"])),
         "metadata str": variant(lambda m: m["pack"].__setitem__("metadata", "zz")),
     }
     for name, manifest in cases.items():

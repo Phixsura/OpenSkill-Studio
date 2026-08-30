@@ -50,27 +50,40 @@ async def _org(c, h):
 
 
 async def _skill(c, h, oid, name="Test Skill"):
-    cat = (await c.post(
-        f"/api/v1/orgs/{oid}/categories",
-        json={"name": f"Cat-{uuid.uuid4().hex[:4]}"},
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories",
+            json={"name": f"Cat-{uuid.uuid4().hex[:4]}"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={
+            "name": name,
+            "description": "d" * 10,
+            "difficulty": "beginner",
+            "category_id": cat,
+        },
         headers=h,
-    )).json()["data"]["id"]
-    r = await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": name, "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h)
+    )
     return r.json()["data"]["id"]
 
 
 async def _project(c, h, oid, title="Test Project"):
-    r = await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": title,
-        "description": "A test project",
-        "instructions": "Do the thing",
-        "project_type": "general",
-        "difficulty": "beginner",
-        "max_score": 100,
-        "rubric": [{"criterion": "Quality", "max_score": 100}],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": title,
+            "description": "A test project",
+            "instructions": "Do the thing",
+            "project_type": "general",
+            "difficulty": "beginner",
+            "max_score": 100,
+            "rubric": [{"criterion": "Quality", "max_score": 100}],
+        },
+        headers=h,
+    )
     assert r.status_code == 201, f"Project creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
@@ -79,9 +92,15 @@ async def _published_public_pack(c, h, oid, pack_name="Pub Pack", skill_name="Pu
     """Create a published, public pack and return its id."""
     # Create private (create no longer accepts visibility=public — R79 gate),
     # publish, then reach public via submit-review → approve.
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": pack_name,
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": pack_name,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     sid = await _skill(c, h, oid, skill_name)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
@@ -99,10 +118,14 @@ async def test_webhook_create(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/webhooks", json={
-        "url": "https://example.com/hook",
-        "events": ["pack.published"],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/webhooks",
+        json={
+            "url": "https://example.com/hook",
+            "events": ["pack.published"],
+        },
+        headers=h,
+    )
     assert r.status_code == 201
     data = r.json()["data"]
     assert data["url"] == "https://example.com/hook"
@@ -117,10 +140,14 @@ async def test_webhook_list_masks_secret(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    await c.post(f"/api/v1/orgs/{oid}/webhooks", json={
-        "url": "https://example.com/hook",
-        "events": ["pack.published"],
-    }, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/webhooks",
+        json={
+            "url": "https://example.com/hook",
+            "events": ["pack.published"],
+        },
+        headers=h,
+    )
 
     r = await c.get(f"/api/v1/orgs/{oid}/webhooks", headers=h)
     assert r.status_code == 200
@@ -138,10 +165,14 @@ async def test_webhook_delete(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    cr = await c.post(f"/api/v1/orgs/{oid}/webhooks", json={
-        "url": "https://example.com/hook",
-        "events": [],
-    }, headers=h)
+    cr = await c.post(
+        f"/api/v1/orgs/{oid}/webhooks",
+        json={
+            "url": "https://example.com/hook",
+            "events": [],
+        },
+        headers=h,
+    )
     wid = cr.json()["data"]["id"]
 
     r = await c.delete(f"/api/v1/orgs/{oid}/webhooks/{wid}", headers=h)
@@ -158,10 +189,14 @@ async def test_webhook_blocked_url(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/webhooks", json={
-        "url": "http://169.254.169.254/latest/meta-data/",
-        "events": [],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/webhooks",
+        json={
+            "url": "http://169.254.169.254/latest/meta-data/",
+            "events": [],
+        },
+        headers=h,
+    )
     assert r.status_code == 422
     assert "WEBHOOK_URL_BLOCKED" in r.text
 
@@ -172,10 +207,14 @@ async def test_webhook_invalid_event_type(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/webhooks", json={
-        "url": "https://example.com/hook",
-        "events": ["totally.invalid.event"],
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/webhooks",
+        json={
+            "url": "https://example.com/hook",
+            "events": ["totally.invalid.event"],
+        },
+        headers=h,
+    )
     assert r.status_code == 422
 
 
@@ -189,9 +228,13 @@ async def test_discussion_create_comment(c):
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid)
 
-    r = await c.post(f"/api/v1/registry/packs/{pid}/discussions", json={
-        "body": "Great pack, very useful!",
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/registry/packs/{pid}/discussions",
+        json={
+            "body": "Great pack, very useful!",
+        },
+        headers=h,
+    )
     assert r.status_code == 201
     data = r.json()["data"]
     assert data["body"] == "Great pack, very useful!"
@@ -204,9 +247,13 @@ async def test_discussion_create_on_nonexistent_pack(c):
     h, _ = await _auth(c)
     fake_id = "01NONEXISTENT000000000000"
 
-    r = await c.post(f"/api/v1/registry/packs/{fake_id}/discussions", json={
-        "body": "This should fail",
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/registry/packs/{fake_id}/discussions",
+        json={
+            "body": "This should fail",
+        },
+        headers=h,
+    )
     assert r.status_code == 404
 
 
@@ -218,17 +265,25 @@ async def test_discussion_threaded_replies(c):
     pid = await _published_public_pack(c, h, oid)
 
     # Create top-level comment
-    r1 = await c.post(f"/api/v1/registry/packs/{pid}/discussions", json={
-        "body": "Top-level comment",
-    }, headers=h)
+    r1 = await c.post(
+        f"/api/v1/registry/packs/{pid}/discussions",
+        json={
+            "body": "Top-level comment",
+        },
+        headers=h,
+    )
     assert r1.status_code == 201
     parent_id = r1.json()["data"]["id"]
 
     # Create reply
-    r2 = await c.post(f"/api/v1/registry/packs/{pid}/discussions", json={
-        "body": "This is a reply",
-        "parent_id": parent_id,
-    }, headers=h)
+    r2 = await c.post(
+        f"/api/v1/registry/packs/{pid}/discussions",
+        json={
+            "body": "This is a reply",
+            "parent_id": parent_id,
+        },
+        headers=h,
+    )
     assert r2.status_code == 201
 
     # List and verify threading
@@ -255,14 +310,16 @@ async def test_discussion_reply_depth_capped_at_two_levels(c):
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid)
 
-    top = (await c.post(
-        f"/api/v1/registry/packs/{pid}/discussions", json={"body": "top"}, headers=h
-    )).json()["data"]["id"]
-    reply = (await c.post(
-        f"/api/v1/registry/packs/{pid}/discussions",
-        json={"body": "reply", "parent_id": top},
-        headers=h,
-    )).json()["data"]["id"]
+    top = (
+        await c.post(f"/api/v1/registry/packs/{pid}/discussions", json={"body": "top"}, headers=h)
+    ).json()["data"]["id"]
+    reply = (
+        await c.post(
+            f"/api/v1/registry/packs/{pid}/discussions",
+            json={"body": "reply", "parent_id": top},
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     # reply-to-a-reply is rejected
     r = await c.post(
@@ -290,9 +347,13 @@ async def test_discussion_delete_own_comment(c):
     oid = await _org(c, h)
     pid = await _published_public_pack(c, h, oid)
 
-    cr = await c.post(f"/api/v1/registry/packs/{pid}/discussions", json={
-        "body": "Delete me",
-    }, headers=h)
+    cr = await c.post(
+        f"/api/v1/registry/packs/{pid}/discussions",
+        json={
+            "body": "Delete me",
+        },
+        headers=h,
+    )
     cid = cr.json()["data"]["id"]
 
     r = await c.delete(f"/api/v1/registry/packs/{pid}/discussions/{cid}", headers=h)
@@ -306,9 +367,13 @@ async def test_discussion_delete_other_user_comment_forbidden(c):
     oid = await _org(c, h1)
     pid = await _published_public_pack(c, h1, oid)
 
-    cr = await c.post(f"/api/v1/registry/packs/{pid}/discussions", json={
-        "body": "Not yours to delete",
-    }, headers=h1)
+    cr = await c.post(
+        f"/api/v1/registry/packs/{pid}/discussions",
+        json={
+            "body": "Not yours to delete",
+        },
+        headers=h1,
+    )
     cid = cr.json()["data"]["id"]
 
     # Second user
@@ -423,9 +488,13 @@ async def test_share_pack_sharing_disabled(c):
     oid2 = await _org(c, h2)
 
     # Default sharing_enabled is False
-    r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/share", json={
-        "target_org_id": oid2,
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid}/share",
+        json={
+            "target_org_id": oid2,
+        },
+        headers=h,
+    )
     assert r.status_code == 422
     assert "SHARING_DISABLED" in r.text
 
@@ -439,9 +508,13 @@ async def test_share_pack_self_share_rejected(c):
 
     # Even though sharing_enabled=False, SELF_SHARE check comes after SHARING_DISABLED,
     # but we test the validation is present
-    r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/share", json={
-        "target_org_id": oid,
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid}/share",
+        json={
+            "target_org_id": oid,
+        },
+        headers=h,
+    )
     assert r.status_code == 422
 
 
@@ -451,9 +524,13 @@ async def test_share_nonexistent_pack(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/packs/01NONEXISTENT000000000000/share", json={
-        "target_org_id": "01OTHER00000000000000000000",
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/01NONEXISTENT000000000000/share",
+        json={
+            "target_org_id": "01OTHER00000000000000000000",
+        },
+        headers=h,
+    )
     assert r.status_code == 404
 
 
@@ -476,16 +553,26 @@ async def test_share_unpublished_pack(c):
 
     # Create a draft pack (no release; visibility irrelevant — create-public
     # needs approval per R79, and the assertion is about the unpublished state)
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": "Draft Pack",
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": "Draft Pack",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     h2, _ = await _auth(c)
     oid2 = await _org(c, h2)
 
-    r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/share", json={
-        "target_org_id": oid2,
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid}/share",
+        json={
+            "target_org_id": oid2,
+        },
+        headers=h,
+    )
     # Should fail because pack is not published
     assert r.status_code in (404, 422)
 
@@ -533,7 +620,9 @@ async def test_submit_for_review_lifecycle(c):
     # A private+published pack that has NOT been through review yet (the shared
     # _published_public_pack helper now auto-approves, which would make the
     # first submit-for-review a 422 already-approved — R79). Build inline.
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "ReviewLifecyclePack"}, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "ReviewLifecyclePack"}, headers=h)
+    ).json()["data"]["id"]
     sid = await _skill(c, h, oid, "ReviewLifecycleSkill")
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
@@ -658,7 +747,9 @@ async def test_points_award_idempotent_per_action(c):
         headers=ih,
     )
     pid = r.json()["data"]["id"]
-    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)).status_code == 200
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)
+    ).status_code == 200
 
     r = await c.post(
         f"/api/v1/orgs/{oid}/projects/{pid}/submissions",
@@ -697,7 +788,9 @@ async def test_points_award_idempotent_per_action(c):
         headers=ih,
     )
     p2 = r.json()["data"]["id"]
-    assert (await c.post(f"/api/v1/orgs/{oid}/projects/{p2}/publish", headers=ih)).status_code == 200
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{p2}/publish", headers=ih)
+    ).status_code == 200
     r = await c.post(
         f"/api/v1/orgs/{oid}/projects/{p2}/submissions",
         json={"content": {"text": "w2"}},
@@ -850,9 +943,7 @@ async def test_sharing_enabled_settable_and_not_a_card_field(c):
     pid = await _published_public_pack(c, h, oid)  # ends approved + public
 
     # toggle sharing on — persists, and approval survives (not a card field)
-    r = await c.put(
-        f"/api/v1/orgs/{oid}/packs/{pid}", json={"sharing_enabled": True}, headers=h
-    )
+    r = await c.put(f"/api/v1/orgs/{oid}/packs/{pid}", json={"sharing_enabled": True}, headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["data"]["sharing_enabled"] is True
 
@@ -876,10 +967,14 @@ async def test_share_then_install_end_to_end(c):
     oid_c = await _org(c, hc)
 
     # A: pack + skill + release, enable sharing, make it PRIVATE
-    pid = (await c.post(f"/api/v1/orgs/{oid_a}/packs", json={"name": "Share E2E"}, headers=ha)).json()["data"]["id"]
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid_a}/packs", json={"name": "Share E2E"}, headers=ha)
+    ).json()["data"]["id"]
     sid = await _skill(c, ha, oid_a, "Share Skill")
     await c.post(f"/api/v1/orgs/{oid_a}/packs/{pid}/skills", json={"skill_id": sid}, headers=ha)
-    await c.post(f"/api/v1/orgs/{oid_a}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=ha)
+    await c.post(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=ha
+    )
     r = await c.put(
         f"/api/v1/orgs/{oid_a}/packs/{pid}",
         json={"sharing_enabled": True, "visibility": "private"},
@@ -914,6 +1009,8 @@ async def test_share_then_install_end_to_end(c):
     hd_, _ = await _auth(c)
     oid_d = await _org(c, hd_)
     r = await c.post(
-        f"/api/v1/orgs/{oid_d}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=hd_
+        f"/api/v1/orgs/{oid_d}/installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=hd_,
     )
     assert r.status_code == 404, r.text

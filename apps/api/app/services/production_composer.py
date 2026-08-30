@@ -229,7 +229,11 @@ class ProductionComposerService:
                     continue  # check_capabilities reports MALFORMED_REQUIREMENT
                 key = cap.get("capability", "")
                 feats = cap.get("features", [])
-                feat_key = frozenset(f for f in feats if isinstance(f, str)) if isinstance(feats, list) else frozenset()
+                feat_key = (
+                    frozenset(f for f in feats if isinstance(f, str))
+                    if isinstance(feats, list)
+                    else frozenset()
+                )
                 dedup_key = (key, feat_key)
                 if isinstance(key, str) and key and dedup_key not in seen_caps:
                     seen_caps.add(dedup_key)
@@ -364,9 +368,7 @@ class ProductionComposerService:
                 await self.db.rollback()
             raise
 
-    async def _materialize(
-        self, draft: SolutionDraft, org_id: str, confirmed_by: str
-    ) -> Project:
+    async def _materialize(self, draft: SolutionDraft, org_id: str, confirmed_by: str) -> Project:
         from app.services.project import ProjectService
 
         draft_id = draft.id
@@ -386,9 +388,7 @@ class ProductionComposerService:
         # Provenance: record the composed workflow chain (traceability)
         wf_ids = [w["entity_id"] for w in (draft.payload or {}).get("workflow_chain", [])]
         if wf_ids:
-            wf_names = ", ".join(
-                w["name"] for w in (draft.payload or {}).get("workflow_chain", [])
-            )
+            wf_names = ", ".join(w["name"] for w in (draft.payload or {}).get("workflow_chain", []))
             project.description = (
                 f"{project.description}\n\n---\nComposed from workflows: {wf_names} "
                 f"(draft {draft.id})"

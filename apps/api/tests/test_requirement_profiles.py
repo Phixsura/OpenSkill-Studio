@@ -125,9 +125,7 @@ async def test_create_from_brief(c):
     assert rb.status_code == 201, rb.text
     brief_id = rb.json()["data"]["id"]
 
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/requirement-profiles/from-brief/{brief_id}", headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/from-brief/{brief_id}", headers=h)
     assert r.status_code == 201
     data = r.json()["data"]
     assert data["source_brief_id"] == brief_id
@@ -252,9 +250,7 @@ async def test_patch_sets_user_entered_provenance(c):
     )
     assert rb.status_code == 201, rb.text
     brief_id = rb.json()["data"]["id"]
-    rp = await c.post(
-        f"/api/v1/orgs/{oid}/requirement-profiles/from-brief/{brief_id}", headers=h
-    )
+    rp = await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/from-brief/{brief_id}", headers=h)
     profile_id = rp.json()["data"]["id"]
 
     r = await c.patch(
@@ -596,9 +592,7 @@ def test_build_match_requirement_demotes_extracted_time_budget():
     profile = RequirementProfile(
         org_id="o",
         structured_requirements={"time_budget": 60, "difficulty": "beginner"},
-        extraction_meta={
-            "provenance": {"time_budget": "extracted", "difficulty": "user_entered"}
-        },
+        extraction_meta={"provenance": {"time_budget": "extracted", "difficulty": "user_entered"}},
     )
     req = RequirementProfileService.build_match_requirement(profile)
     assert "time_budget" not in req
@@ -795,8 +789,11 @@ async def test_profile_confirm_and_edit_race_guarded(c):
 
         with pytest.raises(AppError) as exc_info:
             await RequirementProfileService(db_a).update_profile(
-                pid, oid, {"goal": "smuggled post-confirm edit"},
-                acting_user_id=u["id"], is_instructor=True,
+                pid,
+                oid,
+                {"goal": "smuggled post-confirm edit"},
+                acting_user_id=u["id"],
+                is_instructor=True,
             )
         assert exc_info.value.code == "PROFILE_ALREADY_CONFIRMED"
         await db_a.rollback()

@@ -184,12 +184,16 @@ async def logout(
 # ── Me ────────────────────────────────────────────────────
 
 
-@router.get("/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(60, 60))])
+@router.get(
+    "/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(60, 60))]
+)
 async def get_me(user: User = Depends(get_current_user)):
     return DataResponse(data=UserResponse.model_validate(user))
 
 
-@router.put("/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(10, 60))])
+@router.put(
+    "/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(10, 60))]
+)
 async def update_me(
     body: UpdateProfileRequest,
     user: User = Depends(get_current_user),
@@ -297,7 +301,11 @@ async def resend_verification(
 # ── Sessions ──────────────────────────────────────────────
 
 
-@router.get("/sessions", response_model=DataResponse[list[SessionResponse]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/sessions",
+    response_model=DataResponse[list[SessionResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

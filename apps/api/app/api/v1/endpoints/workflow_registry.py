@@ -80,9 +80,7 @@ async def list_workflow_releases(
 ):
     svc = WorkflowRegistryService(db)
     releases = await svc.get_public_releases(pack_id)
-    return DataResponse(
-        data=[PublicWorkflowReleaseResponse.model_validate(r) for r in releases]
-    )
+    return DataResponse(data=[PublicWorkflowReleaseResponse.model_validate(r) for r in releases])
 
 
 @router.get(

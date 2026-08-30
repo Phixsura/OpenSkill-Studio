@@ -113,7 +113,9 @@ async def update_pack(
     return DataResponse(data=SkillPackResponse.model_validate(pack))
 
 
-@router.delete("/orgs/{org_id}/packs/{pack_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/packs/{pack_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))]
+)
 async def delete_pack(
     org_id: str,
     pack_id: str,
@@ -151,7 +153,11 @@ async def add_skill_to_pack(
     )
 
 
-@router.delete("/orgs/{org_id}/packs/{pack_id}/skills/{skill_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/packs/{pack_id}/skills/{skill_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def remove_skill_from_pack(
     org_id: str,
     pack_id: str,
@@ -182,7 +188,12 @@ async def list_pack_skills(
     items = await svc.list_pack_skills(pack_id)
     return DataResponse(
         data=[
-            PackSkillResponse(pack_id=entry.pack_id, skill_id=entry.skill_id, skill_name=name, sort_order=entry.sort_order)
+            PackSkillResponse(
+                pack_id=entry.pack_id,
+                skill_id=entry.skill_id,
+                skill_name=name,
+                sort_order=entry.sort_order,
+            )
             for entry, name in items
         ]
     )
@@ -215,7 +226,11 @@ async def add_template_to_pack(
     )
 
 
-@router.delete("/orgs/{org_id}/packs/{pack_id}/templates/{template_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/packs/{pack_id}/templates/{template_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def remove_template_from_pack(
     org_id: str,
     pack_id: str,
@@ -247,8 +262,10 @@ async def list_pack_templates(
     return DataResponse(
         data=[
             PackTemplateResponse(
-                pack_id=entry.pack_id, template_id=entry.template_id,
-                template_name=name, sort_order=entry.sort_order
+                pack_id=entry.pack_id,
+                template_id=entry.template_id,
+                template_name=name,
+                sort_order=entry.sort_order,
             )
             for entry, name in items
         ]
@@ -273,9 +290,7 @@ async def publish_release(
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = SkillPackService(db)
-    release = await svc.publish_release(
-        pack_id, org_id, body.version, body.changelog, user.id
-    )
+    release = await svc.publish_release(pack_id, org_id, body.version, body.changelog, user.id)
     await db.commit()
     return DataResponse(data=ReleaseResponse.model_validate(release))
 
@@ -404,9 +419,7 @@ async def get_approval_history(
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = SkillPackService(db)
     events = await svc.list_approval_history(pack_id, org_id)
-    return DataResponse(
-        data=[ApprovalEventResponse.model_validate(e) for e in events]
-    )
+    return DataResponse(data=[ApprovalEventResponse.model_validate(e) for e in events])
 
 
 @router.get(

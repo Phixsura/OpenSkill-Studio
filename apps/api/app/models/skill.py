@@ -73,7 +73,9 @@ class SkillCategory(Base):
         Enum(ContentStatus, name="content_status", create_constraint=True),
         default=ContentStatus.DRAFT,
     )
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -121,7 +123,9 @@ class Skill(Base):
         default=ContentStatus.DRAFT,
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -177,7 +181,9 @@ class Exercise(Base):
         Enum(ContentStatus, name="content_status", create_constraint=True),
         default=ContentStatus.DRAFT,
     )
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

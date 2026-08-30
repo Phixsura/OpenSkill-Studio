@@ -30,9 +30,7 @@ def _cache_key(params: dict) -> str:
     JSON encoding preserves field boundaries. The 'wfregistry:' prefix keeps
     the invalidation pattern ('wfregistry:*') matching.
     """
-    digest = hashlib.sha256(
-        json.dumps(params, sort_keys=True, default=str).encode()
-    ).hexdigest()
+    digest = hashlib.sha256(json.dumps(params, sort_keys=True, default=str).encode()).hexdigest()
     return f"wfregistry:search:{digest}"
 
 
@@ -157,9 +155,7 @@ class WorkflowRegistryService:
         else:
             total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
             total = total_r.scalar_one()
-            result = await self.db.execute(
-                base.offset((page - 1) * per_page).limit(per_page)
-            )
+            result = await self.db.execute(base.offset((page - 1) * per_page).limit(per_page))
             packs = list(result.scalars().all())
 
         await cache_set(cache_key, {"ids": [p.id for p in packs], "total": total}, ttl=300)

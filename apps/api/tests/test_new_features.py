@@ -48,10 +48,23 @@ async def _org(c, h):
 
 
 async def _skill(c, h, oid, name="Test Skill"):
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"Cat-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    r = await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": name, "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h)
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories",
+            json={"name": f"Cat-{uuid.uuid4().hex[:4]}"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={
+            "name": name,
+            "description": "d" * 10,
+            "difficulty": "beginner",
+            "category_id": cat,
+        },
+        headers=h,
+    )
     return r.json()["data"]["id"]
 
 
@@ -59,9 +72,15 @@ async def _published_public_pack(c, h, oid, pack_name="Pub Pack", skill_name="Pu
     """Create a published, public pack and return its id."""
     # Create private (create no longer accepts visibility=public — R79 gate),
     # publish, then reach public via submit-review → approve.
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": pack_name,
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": pack_name,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     sid = await _skill(c, h, oid, skill_name)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
@@ -85,15 +104,26 @@ async def test_registry_preview_pack_with_template_rubric(c):
     oid = await _org(c, h)
     # A published+approved public pack with a skill AND a project template
     # whose rubric is a real 2-entry list.
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Preview Pack"}, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Preview Pack"}, headers=h)
+    ).json()["data"]["id"]
     sid = await _skill(c, h, oid, "Preview Skill")
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
-    tmpl = (await c.post(f"/api/v1/orgs/{oid}/project-templates", json={
-        "name": "Rubric Tmpl",
-        "description": "d",
-        "instructions": "do it",
-        "rubric": [{"criterion": "Quality", "max_score": 100}, {"criterion": "Design", "max_score": 50}],
-    }, headers=h)).json()["data"]["id"]
+    tmpl = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/project-templates",
+            json={
+                "name": "Rubric Tmpl",
+                "description": "d",
+                "instructions": "do it",
+                "rubric": [
+                    {"criterion": "Quality", "max_score": 100},
+                    {"criterion": "Design", "max_score": 50},
+                ],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/templates", json={"template_id": tmpl}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
@@ -205,9 +235,15 @@ async def test_create_review(c):
     pid = await _published_public_pack(c, h, oid)
     hr, _ = await _auth(c)  # reviewer (different user)
 
-    r = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={
-        "rating": 5, "title": "Great pack!", "body": "Very useful.",
-    }, headers=hr)
+    r = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews",
+        json={
+            "rating": 5,
+            "title": "Great pack!",
+            "body": "Very useful.",
+        },
+        headers=hr,
+    )
     assert r.status_code == 201
     d = r.json()["data"]
     assert d["rating"] == 5
@@ -345,14 +381,25 @@ async def test_publish_creates_notification(c):
     # User 1 creates a published public pack
     h1, _ = await _auth(c)
     oid1 = await _org(c, h1)
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
-        "name": "Notif Pack", "visibility": "unlisted",
-    }, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/packs",
+            json={
+                "name": "Notif Pack",
+                "visibility": "unlisted",
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     sid = await _skill(c, h1, oid1, "Notif Skill")
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
-    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={
-        "version": "1.0.0",
-    }, headers=h1)
+    await c.post(
+        f"/api/v1/orgs/{oid1}/packs/{pid}/releases",
+        json={
+            "version": "1.0.0",
+        },
+        headers=h1,
+    )
 
     # User 2 creates org2 and installs the pack
     h2, _ = await _auth(c)
@@ -361,9 +408,14 @@ async def test_publish_creates_notification(c):
     assert ir.status_code == 201
 
     # User 1 publishes v2.0.0
-    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={
-        "version": "2.0.0", "changelog": "New features",
-    }, headers=h1)
+    await c.post(
+        f"/api/v1/orgs/{oid1}/packs/{pid}/releases",
+        json={
+            "version": "2.0.0",
+            "changelog": "New features",
+        },
+        headers=h1,
+    )
 
     # User 2 should have a notification about the update
     r = await c.get("/api/v1/notifications", headers=h2)
@@ -388,9 +440,16 @@ async def test_certificate_issued_on_completion(c):
     path_id = pr.json()["data"]["id"]
 
     # Add skill item
-    await c.post(f"/api/v1/orgs/{oid}/paths/{path_id}/items", json={
-        "item_type": "skill", "skill_id": sid, "sort_order": 0, "required": True,
-    }, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/paths/{path_id}/items",
+        json={
+            "item_type": "skill",
+            "skill_id": sid,
+            "sort_order": 0,
+            "required": True,
+        },
+        headers=h,
+    )
 
     # Mark skill as completed via DB
     from app.core.database import AsyncSessionLocal
@@ -507,9 +566,13 @@ async def test_reject_pack(c):
     pid = await _published_public_pack(c, h, oid, "Reject Pack")
     await _set_review_status(pid, "pending")
 
-    r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/reject", json={
-        "reason": "Needs improvement",
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid}/reject",
+        json={
+            "reason": "Needs improvement",
+        },
+        headers=h,
+    )
     assert r.status_code == 200
     assert r.json()["data"]["review_status"] == "rejected"
 
@@ -545,7 +608,9 @@ async def test_list_categories(c):
     unique = uuid.uuid4().hex[:6]
     async with AsyncSessionLocal() as session:
         cat = PackCategory(
-            name=f"AI Skills {unique}", slug=f"ai-skills-{unique}", sort_order=0,
+            name=f"AI Skills {unique}",
+            slug=f"ai-skills-{unique}",
+            sort_order=0,
         )
         session.add(cat)
         await session.commit()
@@ -570,7 +635,9 @@ async def test_filter_by_category(c):
     cat_slug = f"cat-filter-{unique}"
     async with AsyncSessionLocal() as session:
         cat = PackCategory(
-            name=f"Filter Cat {unique}", slug=cat_slug, sort_order=0,
+            name=f"Filter Cat {unique}",
+            slug=cat_slug,
+            sort_order=0,
         )
         session.add(cat)
         await session.flush()
@@ -722,9 +789,7 @@ async def test_locally_modified_set_on_skill_update(c):
 
     async with AsyncSessionLocal() as session:
         await session.execute(
-            text(
-                "UPDATE skills SET origin_pack_id = 'fakePack00000000000000001' WHERE id = :id"
-            ),
+            text("UPDATE skills SET origin_pack_id = 'fakePack00000000000000001' WHERE id = :id"),
             {"id": sid},
         )
         await session.commit()
@@ -1328,15 +1393,11 @@ async def test_review_forbidden_for_owner_org_members(c):
         json={"user_id": member["id"], "role": "student"},
         headers=h_owner,
     )
-    r = await c.post(
-        f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 5}, headers=h_member
-    )
+    r = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 5}, headers=h_member)
     assert r.status_code == 422, r.text[:200]
     assert r.json()["error"]["code"] == "SELF_REVIEW_FORBIDDEN"
 
     # An outsider can still review
     h_out, _ = await _auth(c)
-    r2 = await c.post(
-        f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=h_out
-    )
+    r2 = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=h_out)
     assert r2.status_code == 201, r2.text[:200]

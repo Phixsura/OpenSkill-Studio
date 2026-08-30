@@ -16,7 +16,11 @@ from app.services.registry import RegistryService
 router = APIRouter(tags=["Registry"])
 
 
-@router.get("/registry/categories", response_model=DataResponse[list], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/registry/categories",
+    response_model=DataResponse[list],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_categories(db: AsyncSession = Depends(get_db)):
     """List pack categories as a tree structure."""
     svc = RegistryService(db)
@@ -24,7 +28,11 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
     return DataResponse(data=tree)
 
 
-@router.get("/registry/packs", response_model=ListResponse[PublicSkillPackResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/registry/packs",
+    response_model=ListResponse[PublicSkillPackResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def search_registry(
     search: str | None = None,
     scenario: str | None = None,
@@ -45,17 +53,34 @@ async def search_registry(
     """
     svc = RegistryService(db)
     packs, total = await svc.search_packs(
-        search, scenario, tool, difficulty, category, sort, page, per_page,
-        min_rating=min_rating, max_results=max_results,
+        search,
+        scenario,
+        tool,
+        difficulty,
+        category,
+        sort,
+        page,
+        per_page,
+        min_rating=min_rating,
+        max_results=max_results,
     )
     effective_per_page = min(per_page, max_results or 50)
     return ListResponse(
         data=[PublicSkillPackResponse.model_validate(p) for p in packs],
-        meta=PaginationMeta(total=total, page=page, per_page=effective_per_page, has_more=(page * effective_per_page) < total),
+        meta=PaginationMeta(
+            total=total,
+            page=page,
+            per_page=effective_per_page,
+            has_more=(page * effective_per_page) < total,
+        ),
     )
 
 
-@router.get("/registry/packs/{pack_id}", response_model=DataResponse[PublicSkillPackResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/registry/packs/{pack_id}",
+    response_model=DataResponse[PublicSkillPackResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def get_registry_pack(pack_id: str, db: AsyncSession = Depends(get_db)):
     """Get a public/unlisted pack detail."""
     svc = RegistryService(db)
@@ -87,7 +112,11 @@ async def get_installed_by(pack_id: str, db: AsyncSession = Depends(get_db)):
     return DataResponse(data=result)
 
 
-@router.get("/registry/packs/{pack_id}/releases", response_model=DataResponse[list[PublicReleaseResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/registry/packs/{pack_id}/releases",
+    response_model=DataResponse[list[PublicReleaseResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def get_registry_releases(pack_id: str, db: AsyncSession = Depends(get_db)):
     """List releases for a public pack."""
     svc = RegistryService(db)

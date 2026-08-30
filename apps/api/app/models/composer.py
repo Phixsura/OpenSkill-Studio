@@ -48,9 +48,7 @@ class SolutionDraft(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -76,9 +74,7 @@ class CreatorCapabilityEvidence(Base):
     weight: Mapped[float] = mapped_column(Numeric(3, 2), default=1.0)
     score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_evidence_user_cap", "org_id", "user_id", "capability_key"),)
 
@@ -105,9 +101,7 @@ class CreatorAssignment(Base):
     )
     override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("uq_creator_assignment", "project_id", "user_id", unique=True),

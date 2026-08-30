@@ -58,9 +58,7 @@ EXPR_RE = re.compile(r"\{\{\s*([a-z0-9_.]+)\s*\}\}")
 # while a single [^,]{0,700} scan is linear and admits the same real URIs.
 # The mediatype itself is optional per RFC 2397 ('data:;base64,' defaults to
 # text/plain), so the type/subtype segment is optional too.
-DATA_URI_RE = re.compile(
-    r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^,]{0,700})?;base64,", re.IGNORECASE
-)
+DATA_URI_RE = re.compile(r"data:([a-z0-9.+-]+/[a-z0-9.+-]+)?(;[^,]{0,700})?;base64,", re.IGNORECASE)
 # Non-base64 data URIs (RFC 2397 allows URL-encoded payloads): '%89%50…'
 # breaks BASE64_BLOB_RE's charset and carries no ';base64,' marker, so a
 # percent-encoded payload smuggled ~96KB of inline media through the
@@ -291,9 +289,7 @@ class PromptTemplateConfig(BaseModel):
 
 class AssetInputConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    accept_types: list[
-        Literal["image", "video", "audio", "reference_asset"]
-    ] = ["image"]
+    accept_types: list[Literal["image", "video", "audio", "reference_asset"]] = ["image"]
 
 
 class TransformConfig(BaseModel):
@@ -529,7 +525,9 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                 )
             )
         if step.id in step_by_id:
-            errors.append(_err("WF_DUPLICATE_STEP_ID", f"{ptr}/id", f"Duplicate step id '{step.id}'"))
+            errors.append(
+                _err("WF_DUPLICATE_STEP_ID", f"{ptr}/id", f"Duplicate step id '{step.id}'")
+            )
         else:
             step_by_id[step.id] = step
 
@@ -609,9 +607,13 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
     input_keys: set[str] = set()
     for i, inp in enumerate(definition.inputs):
         if not PORT_RE.match(inp.key):
-            errors.append(_err("WF_INVALID_PORT", f"/inputs/{i}/key", f"Invalid input key '{inp.key}'"))
+            errors.append(
+                _err("WF_INVALID_PORT", f"/inputs/{i}/key", f"Invalid input key '{inp.key}'")
+            )
         if inp.key in input_keys:
-            errors.append(_err("WF_DUPLICATE_PORT", f"/inputs/{i}/key", f"Duplicate input '{inp.key}'"))
+            errors.append(
+                _err("WF_DUPLICATE_PORT", f"/inputs/{i}/key", f"Duplicate input '{inp.key}'")
+            )
         input_keys.add(inp.key)
         # A selection input without options can never be satisfied at run
         # time (every value fails INVALID_INPUT_VALUE) — reject at publish
@@ -649,7 +651,10 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
             bad_default: str | None = None
             if inp.type in ("text", "prompt") and len(inp.default) > 8000:
                 bad_default = "text default exceeds the 8,000-character run-input limit"
-            elif inp.type in ("image", "video", "audio", "reference_asset") and len(inp.default) > 500:
+            elif (
+                inp.type in ("image", "video", "audio", "reference_asset")
+                and len(inp.default) > 500
+            ):
                 bad_default = "asset-reference default exceeds the 500-character run-input limit"
             elif inp.type == "json":
                 # A flat json-default string dodges the raw-definition depth
@@ -684,8 +689,7 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                     bad_default = "json default exceeds the 8,000-character run-input limit"
                 elif _default_has_ctrl(parsed_default):
                     bad_default = (
-                        "json default contains NUL/control characters or "
-                        "NaN/Infinity values"
+                        "json default contains NUL/control characters or NaN/Infinity values"
                     )
             if bad_default is not None:
                 errors.append(
@@ -703,7 +707,9 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
     for i, edge in enumerate(edges):
         ptr = f"/edges/{i}"
         if edge.id in edge_ids:
-            errors.append(_err("WF_DUPLICATE_EDGE_ID", f"{ptr}/id", f"Duplicate edge id '{edge.id}'"))
+            errors.append(
+                _err("WF_DUPLICATE_EDGE_ID", f"{ptr}/id", f"Duplicate edge id '{edge.id}'")
+            )
         edge_ids.add(edge.id)
 
         src = step_by_id.get(edge.from_step)
@@ -897,9 +903,7 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
                 )
 
     # ── Moustache expression validation ──
-    step_output_refs = {
-        f"steps.{s.id}.outputs.{p.port}" for s in steps for p in s.outputs
-    }
+    step_output_refs = {f"steps.{s.id}.outputs.{p.port}" for s in steps for p in s.outputs}
     input_refs = {f"inputs.{k}" for k in input_keys}
     for i, step in enumerate(steps):
         # Raw string values, not json.dumps — see the implicit-edge scanner.
@@ -941,7 +945,11 @@ def validate_definition(raw: dict) -> tuple[WorkflowDefinition | None, list[dict
         src = step_by_id.get(out.from_step)
         if src is None:
             errors.append(
-                _err("WF_EDGE_UNKNOWN_STEP", f"/outputs/{i}/from_step", f"Unknown step '{out.from_step}'")
+                _err(
+                    "WF_EDGE_UNKNOWN_STEP",
+                    f"/outputs/{i}/from_step",
+                    f"Unknown step '{out.from_step}'",
+                )
             )
             continue
         port = next((p for p in src.outputs if p.port == out.from_port), None)

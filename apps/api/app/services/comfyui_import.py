@@ -211,9 +211,7 @@ def _extract_png_workflow(raw: bytes) -> str | None:
                     if lang_end >= 0:
                         trans_end = rest.find(b"\x00", lang_end + 1)
                         if trans_end >= 0 and compression_flag == 0:
-                            found[keyword] = rest[trans_end + 1 :].decode(
-                                "utf-8", errors="replace"
-                            )
+                            found[keyword] = rest[trans_end + 1 :].decode("utf-8", errors="replace")
         elif ctype == b"IEND":
             break
         pos = data_end + 4  # skip CRC
@@ -337,9 +335,7 @@ class ComfyUIImportService:
             links = parsed.get("links")
             links_count = len(links) if isinstance(links, list) else 0
         else:
-            api_nodes = [
-                v for v in parsed.values() if isinstance(v, dict) and "class_type" in v
-            ]
+            api_nodes = [v for v in parsed.values() if isinstance(v, dict) and "class_type" in v]
             if api_nodes:
                 if format_detected is None:
                     format_detected = "api"
@@ -363,9 +359,7 @@ class ComfyUIImportService:
                             "widgets_values": widget_like,
                         }
                     )
-                    links_count += sum(
-                        1 for val in inputs.values() if isinstance(val, list)
-                    )
+                    links_count += sum(1 for val in inputs.values() if isinstance(val, list))
             else:
                 raise AppError(
                     "UNRECOGNIZED_FORMAT", "Import is not a recognized ComfyUI format", 422

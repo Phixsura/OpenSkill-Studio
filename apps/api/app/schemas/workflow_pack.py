@@ -234,6 +234,7 @@ class PublishWorkflowReleaseRequest(BaseModel):
     def validate_dependencies_size(cls, v: dict) -> dict:
         if len(str(v)) > 10000:
             raise ValueError("Dependencies too large")
+
         # Stored verbatim into the manifest JSONB — control chars anywhere in
         # the dict crash asyncpg the same way changelog/name would
         def _scan(x, depth=0):

@@ -22,6 +22,7 @@ def _screen_ctrl_fields(obj, str_fields: tuple[str, ...], json_fields: tuple[str
         reject_ctrl_json(getattr(obj, name, None), name)
     return obj
 
+
 RESERVED_USERNAMES = frozenset(
     {
         "admin",
@@ -130,9 +131,7 @@ class UpdateProfileRequest(BaseModel):
 
     @model_validator(mode="after")
     def _screen_ctrl(self):
-        return _screen_ctrl_fields(
-            self, ("headline", "bio", "location"), ("social_links",)
-        )
+        return _screen_ctrl_fields(self, ("headline", "bio", "location"), ("social_links",))
 
 
 class UsernameRequest(BaseModel):

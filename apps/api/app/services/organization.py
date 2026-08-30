@@ -289,11 +289,13 @@ class OrgService:
         # concurrent demotions and prevent TOCTOU race to zero owners
         if old_role == OrgRole.OWNER and new_role != OrgRole.OWNER:
             owner_result = await self.db.execute(
-                select(OrgMember.id).where(
+                select(OrgMember.id)
+                .where(
                     OrgMember.org_id == org_id,
                     OrgMember.role == OrgRole.OWNER,
                     OrgMember.status == MemberStatus.ACTIVE,
-                ).with_for_update()
+                )
+                .with_for_update()
             )
             if len(owner_result.all()) <= 1:
                 raise AppError("LAST_OWNER", "Cannot demote the last owner", 400)

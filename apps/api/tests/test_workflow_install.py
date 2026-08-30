@@ -48,7 +48,9 @@ def _definition(capability="image_generation"):
     return {
         "schema_version": 1,
         "inputs": [{"key": "topic", "type": "text", "required": True}],
-        "outputs": [{"key": "final", "type": "image", "from_step": "generate", "from_port": "result"}],
+        "outputs": [
+            {"key": "final", "type": "image", "from_step": "generate", "from_port": "result"}
+        ],
         "steps": [
             {
                 "id": "build_prompt",
@@ -68,7 +70,13 @@ def _definition(capability="image_generation"):
             },
         ],
         "edges": [
-            {"id": "e1", "from_step": "build_prompt", "from_port": "prompt", "to_step": "generate", "to_port": "prompt"},
+            {
+                "id": "e1",
+                "from_step": "build_prompt",
+                "from_port": "prompt",
+                "to_step": "generate",
+                "to_port": "prompt",
+            },
         ],
         "ui": {},
     }
@@ -92,9 +100,7 @@ async def _public_pack(c, h, oid, definition=None, versions=("1.0.0",), dependen
         body = {"version": v}
         if dependencies:
             body["dependencies"] = dependencies
-        r3 = await c.post(
-            f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json=body, headers=h
-        )
+        r3 = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json=body, headers=h)
         assert r3.status_code == 201, r3.text
     await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
     r4 = await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
@@ -146,9 +152,7 @@ async def test_install_public_pack_from_other_org(c):
     assert r2.json()["data"]["install_count"] == 1
 
     # Binding suggestion rows created for the provider_action step (unconfirmed)
-    r3 = await c.get(
-        f"/api/v1/orgs/{o2}/workflow-installations/{data['id']}/bindings", headers=h2
-    )
+    r3 = await c.get(f"/api/v1/orgs/{o2}/workflow-installations/{data['id']}/bindings", headers=h2)
     bindings = r3.json()["data"]
     assert len(bindings) == 1
     assert bindings[0]["step_id"] == "generate"
@@ -169,7 +173,9 @@ async def test_install_capability_gate_unsatisfied(c):
         c,
         h1,
         o1,
-        dependencies={"requires_capabilities": [{"capability": "image_generation", "features": []}]},
+        dependencies={
+            "requires_capabilities": [{"capability": "image_generation", "features": []}]
+        },
     )
 
     h2, _ = await _auth(c)
@@ -193,7 +199,9 @@ async def test_install_capability_gate_satisfied(c):
         c,
         h1,
         o1,
-        dependencies={"requires_capabilities": [{"capability": "image_generation", "features": []}]},
+        dependencies={
+            "requires_capabilities": [{"capability": "image_generation", "features": []}]
+        },
     )
 
     h2, _ = await _auth(c)
@@ -207,9 +215,7 @@ async def test_install_capability_gate_satisfied(c):
     assert r.status_code == 201
     # Binding suggestion now points at the offering
     install_id = r.json()["data"]["id"]
-    r2 = await c.get(
-        f"/api/v1/orgs/{o2}/workflow-installations/{install_id}/bindings", headers=h2
-    )
+    r2 = await c.get(f"/api/v1/orgs/{o2}/workflow-installations/{install_id}/bindings", headers=h2)
     assert r2.json()["data"][0]["offering_id"] is not None
 
 
@@ -225,19 +231,46 @@ async def test_install_gate_per_step_features_not_union(c):
         "inputs": [{"key": "topic", "type": "text", "required": True}],
         "outputs": [{"key": "final", "type": "image", "from_step": "gen2", "from_port": "result"}],
         "steps": [
-            {"id": "prep", "type": "prompt_template", "name": "P",
-             "config": {"template": "About {{inputs.topic}}"},
-             "inputs": [], "outputs": [{"port": "prompt", "type": "prompt"}]},
-            {"id": "gen1", "type": "provider_action", "name": "G1",
-             "config": {"capability": "image_generation", "required_features": ["feat_a"]},
-             "inputs": [{"port": "prompt", "type": "prompt"}], "outputs": [{"port": "img", "type": "image"}]},
-            {"id": "gen2", "type": "provider_action", "name": "G2",
-             "config": {"capability": "image_generation", "required_features": ["feat_b"]},
-             "inputs": [{"port": "src", "type": "image"}], "outputs": [{"port": "result", "type": "image"}]},
+            {
+                "id": "prep",
+                "type": "prompt_template",
+                "name": "P",
+                "config": {"template": "About {{inputs.topic}}"},
+                "inputs": [],
+                "outputs": [{"port": "prompt", "type": "prompt"}],
+            },
+            {
+                "id": "gen1",
+                "type": "provider_action",
+                "name": "G1",
+                "config": {"capability": "image_generation", "required_features": ["feat_a"]},
+                "inputs": [{"port": "prompt", "type": "prompt"}],
+                "outputs": [{"port": "img", "type": "image"}],
+            },
+            {
+                "id": "gen2",
+                "type": "provider_action",
+                "name": "G2",
+                "config": {"capability": "image_generation", "required_features": ["feat_b"]},
+                "inputs": [{"port": "src", "type": "image"}],
+                "outputs": [{"port": "result", "type": "image"}],
+            },
         ],
         "edges": [
-            {"id": "e1", "from_step": "prep", "from_port": "prompt", "to_step": "gen1", "to_port": "prompt"},
-            {"id": "e2", "from_step": "gen1", "from_port": "img", "to_step": "gen2", "to_port": "src"},
+            {
+                "id": "e1",
+                "from_step": "prep",
+                "from_port": "prompt",
+                "to_step": "gen1",
+                "to_port": "prompt",
+            },
+            {
+                "id": "e2",
+                "from_step": "gen1",
+                "from_port": "img",
+                "to_step": "gen2",
+                "to_port": "src",
+            },
         ],
         "ui": {},
     }
@@ -250,12 +283,24 @@ async def test_install_gate_per_step_features_not_union(c):
     o2 = await _org(c, h2)
     adapters = await c.get("/api/v1/providers/adapters", headers=h2)
     aid = next(a for a in adapters.json()["data"] if a["key"] == "mock")["id"]
-    conn = (await c.post(f"/api/v1/orgs/{o2}/provider-connections",
-                         json={"adapter_id": aid, "name": f"mc-{uuid.uuid4().hex[:4]}"}, headers=h2)).json()["data"]["id"]
+    conn = (
+        await c.post(
+            f"/api/v1/orgs/{o2}/provider-connections",
+            json={"adapter_id": aid, "name": f"mc-{uuid.uuid4().hex[:4]}"},
+            headers=h2,
+        )
+    ).json()["data"]["id"]
     for model, feat in (("A", "feat_a"), ("B", "feat_b")):
-        await c.post(f"/api/v1/orgs/{o2}/provider-offerings",
-                     json={"connection_id": conn, "capability_key": "image_generation",
-                           "model_name": model, "features": [feat]}, headers=h2)
+        await c.post(
+            f"/api/v1/orgs/{o2}/provider-offerings",
+            json={
+                "connection_id": conn,
+                "capability_key": "image_generation",
+                "model_name": model,
+                "features": [feat],
+            },
+            headers=h2,
+        )
 
     r = await c.post(f"/api/v1/orgs/{o2}/workflow-installations", json={"pack_id": pid}, headers=h2)
     assert r.status_code == 201, r.text[:300]
@@ -263,12 +308,26 @@ async def test_install_gate_per_step_features_not_union(c):
     # Negative control: an org with only feat_a still can't satisfy gen2.
     h3, _ = await _auth(c)
     o3 = await _org(c, h3)
-    conn3 = (await c.post(f"/api/v1/orgs/{o3}/provider-connections",
-                          json={"adapter_id": aid, "name": f"mc-{uuid.uuid4().hex[:4]}"}, headers=h3)).json()["data"]["id"]
-    await c.post(f"/api/v1/orgs/{o3}/provider-offerings",
-                 json={"connection_id": conn3, "capability_key": "image_generation",
-                       "model_name": "AOnly", "features": ["feat_a"]}, headers=h3)
-    r3 = await c.post(f"/api/v1/orgs/{o3}/workflow-installations", json={"pack_id": pid}, headers=h3)
+    conn3 = (
+        await c.post(
+            f"/api/v1/orgs/{o3}/provider-connections",
+            json={"adapter_id": aid, "name": f"mc-{uuid.uuid4().hex[:4]}"},
+            headers=h3,
+        )
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{o3}/provider-offerings",
+        json={
+            "connection_id": conn3,
+            "capability_key": "image_generation",
+            "model_name": "AOnly",
+            "features": ["feat_a"],
+        },
+        headers=h3,
+    )
+    r3 = await c.post(
+        f"/api/v1/orgs/{o3}/workflow-installations", json={"pack_id": pid}, headers=h3
+    )
     assert r3.status_code == 422
     assert r3.json()["error"]["code"] == "CAPABILITY_UNSATISFIED"
 
@@ -295,9 +354,7 @@ async def test_private_pack_not_installable_cross_org(c):
     h1, _ = await _auth(c)
     o1 = await _org(c, h1)
     # Published but PRIVATE (no approval)
-    r = await c.post(
-        f"/api/v1/orgs/{o1}/workflow-packs", json={"name": "Private WF"}, headers=h1
-    )
+    r = await c.post(f"/api/v1/orgs/{o1}/workflow-packs", json={"name": "Private WF"}, headers=h1)
     pid = r.json()["data"]["id"]
     await c.put(
         f"/api/v1/orgs/{o1}/workflow-packs/{pid}/definition",
@@ -398,9 +455,7 @@ async def test_fork_and_remove_reinstall(c):
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
     await _mock_offering(c, h, oid)
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
     install_id = r.json()["data"]["id"]
 
     r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/fork", headers=h)
@@ -431,9 +486,7 @@ async def test_confirm_binding(c):
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
     offering_id = await _mock_offering(c, h, oid)
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
     install_id = r.json()["data"]["id"]
 
     r2 = await c.put(
@@ -455,9 +508,7 @@ async def test_confirm_binding_capability_mismatch(c):
     pid = await _public_pack(c, h, oid)  # step requires image_generation
     await _mock_offering(c, h, oid)  # satisfies the install capability gate
     wrong_offering = await _mock_offering(c, h, oid, capability="voice_generation")
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
     install_id = r.json()["data"]["id"]
     r2 = await c.put(
         f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings/generate",
@@ -476,9 +527,7 @@ async def test_compute_diff(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     # v1.0.0 with base definition
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "Diff Pack"}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "Diff Pack"}, headers=h)
     pid = r.json()["data"]["id"]
     await c.put(
         f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
@@ -502,7 +551,13 @@ async def test_compute_diff(c):
         }
     )
     d2["edges"].append(
-        {"id": "e2", "from_step": "generate", "from_port": "result", "to_step": "qa", "to_port": "subject"}
+        {
+            "id": "e2",
+            "from_step": "generate",
+            "from_port": "result",
+            "to_step": "qa",
+            "to_port": "subject",
+        }
     )
     await c.put(
         f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
@@ -541,9 +596,7 @@ async def test_installation_cross_org_isolation(c):
     o1 = await _org(c, h1)
     pid = await _public_pack(c, h1, o1)
     await _mock_offering(c, h1, o1)
-    r = await c.post(
-        f"/api/v1/orgs/{o1}/workflow-installations", json={"pack_id": pid}, headers=h1
-    )
+    r = await c.post(f"/api/v1/orgs/{o1}/workflow-installations", json={"pack_id": pid}, headers=h1)
     install_id = r.json()["data"]["id"]
 
     h2, _ = await _auth(c)
@@ -562,9 +615,7 @@ async def test_registry_only_shows_public_approved(c):
     public_pid = await _public_pack(c, h, oid)
 
     # Private published pack — must NOT appear
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "Private One"}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "Private One"}, headers=h)
     private_pid = r.json()["data"]["id"]
     await c.put(
         f"/api/v1/orgs/{oid}/workflow-packs/{private_pid}/definition",
@@ -658,15 +709,11 @@ async def test_registry_search_and_output_type_filter(c):
     assert [p["id"] for p in r2.json()["data"]] == [pid]
 
     # output_type=image matches (definition outputs image)
-    r3 = await c.get(
-        f"/api/v1/registry/workflow-packs?search={marker}&output_type=image"
-    )
+    r3 = await c.get(f"/api/v1/registry/workflow-packs?search={marker}&output_type=image")
     assert [p["id"] for p in r3.json()["data"]] == [pid]
 
     # output_type=audio does not match
-    r4 = await c.get(
-        f"/api/v1/registry/workflow-packs?search={marker}&output_type=audio"
-    )
+    r4 = await c.get(f"/api/v1/registry/workflow-packs?search={marker}&output_type=audio")
     assert r4.json()["data"] == []
 
 
@@ -707,9 +754,7 @@ async def test_upgrade_preserves_confirmed_binding(c):
     )
     assert r3.status_code == 200, r3.text
 
-    r4 = await c.get(
-        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings", headers=h
-    )
+    r4 = await c.get(f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings", headers=h)
     binding = next(b for b in r4.json()["data"] if b["step_id"] == "generate")
     assert binding["confirmed_by"] is not None  # preserved, not wiped
     assert binding["offering_id"] == offering_id
@@ -958,15 +1003,11 @@ async def test_binding_suggestion_prefers_null_cost_like_runtime(c):
     free_id = await _mock_offering(c, h, oid)  # cost stays NULL
 
     pid = await _public_pack(c, h, oid)
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
     assert r.status_code == 201, r.text
     install_id = r.json()["data"]["id"]
 
-    r2 = await c.get(
-        f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings", headers=h
-    )
+    r2 = await c.get(f"/api/v1/orgs/{oid}/workflow-installations/{install_id}/bindings", headers=h)
     binding = next(b for b in r2.json()["data"] if b["step_id"] == "generate")
     assert binding["offering_id"] == free_id  # NULL cost first, like the runtime
 
@@ -985,9 +1026,7 @@ async def test_reinstall_race_lost_reactivation_maps_to_409(c):
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
     await _mock_offering(c, h, oid)
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
     install_id = r.json()["data"]["id"]
     r2 = await c.delete(f"/api/v1/orgs/{oid}/workflow-installations/{install_id}", headers=h)
     assert r2.status_code == 204
@@ -1092,9 +1131,7 @@ async def test_remove_race_double_delete_decrements_once(c):
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
     await _mock_offering(c, h, oid)
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
     install_id = r.json()["data"]["id"]
     # Second install from another org so install_count starts at 2 — a double
     # decrement would land at 0 and be indistinguishable from correct if it
@@ -1198,9 +1235,7 @@ async def test_fork_remove_race_cannot_resurrect(c):
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
     await _mock_offering(c, h, oid)
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
     install_id = r.json()["data"]["id"]
 
     async with AsyncSessionLocal() as db_a:
@@ -1253,8 +1288,12 @@ async def test_confirm_binding_rejects_offering_missing_required_features(c):
     good = (
         await c.post(
             f"/api/v1/orgs/{oid}/provider-offerings",
-            json={"connection_id": conn, "capability_key": "image_generation",
-                  "model_name": "hi", "features": ["hi_res"]},
+            json={
+                "connection_id": conn,
+                "capability_key": "image_generation",
+                "model_name": "hi",
+                "features": ["hi_res"],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1262,8 +1301,12 @@ async def test_confirm_binding_rejects_offering_missing_required_features(c):
     bad = (
         await c.post(
             f"/api/v1/orgs/{oid}/provider-offerings",
-            json={"connection_id": conn, "capability_key": "image_generation",
-                  "model_name": "lo", "features": []},
+            json={
+                "connection_id": conn,
+                "capability_key": "image_generation",
+                "model_name": "lo",
+                "features": [],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1305,7 +1348,8 @@ async def test_upgrade_race_cannot_resurrect_removed(c):
     await _mock_offering(c, h, oid)
     pid = await _public_pack(c, h, oid, versions=("1.0.0", "2.0.0"))
     r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid, "version": "1.0.0"},
+        f"/api/v1/orgs/{oid}/workflow-installations",
+        json={"pack_id": pid, "version": "1.0.0"},
         headers=h,
     )
     install_id = r.json()["data"]["id"]
@@ -1339,24 +1383,33 @@ async def test_confirm_binding_rejects_inactive_offering(c):
     # a SECOND, inactive offering for the same capability
     r = await c.get("/api/v1/providers/adapters", headers=h)
     aid = next(a for a in r.json()["data"] if a["key"] == "mock")["id"]
-    conn = (await c.post(
-        f"/api/v1/orgs/{oid}/provider-connections", json={"adapter_id": aid, "name": "C2"},
-        headers=h,
-    )).json()["data"]["id"]
-    off = (await c.post(
-        f"/api/v1/orgs/{oid}/provider-offerings",
-        json={"connection_id": conn, "capability_key": "image_generation", "model_name": "off2"},
-        headers=h,
-    )).json()["data"]["id"]
+    conn = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-connections",
+            json={"adapter_id": aid, "name": "C2"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    off = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-offerings",
+            json={
+                "connection_id": conn,
+                "capability_key": "image_generation",
+                "model_name": "off2",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     # deactivate it
     ru = await c.put(
         f"/api/v1/orgs/{oid}/provider-offerings/{off}", json={"is_active": False}, headers=h
     )
     assert ru.status_code == 200, ru.text
 
-    inst = (await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )).json()["data"]["id"]
+    inst = (
+        await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
+    ).json()["data"]["id"]
     rb = await c.put(
         f"/api/v1/orgs/{oid}/workflow-installations/{inst}/bindings/generate",
         json={"offering_id": off, "binding_mode": "pinned"},
@@ -1386,9 +1439,7 @@ async def test_confirm_binding_race_cannot_orphan_on_removed_install(c):
     oid = await _org(c, h)
     pid = await _public_pack(c, h, oid)
     offering_id = await _mock_offering(c, h, oid)
-    r = await c.post(
-        f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h
-    )
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-installations", json={"pack_id": pid}, headers=h)
     install_id = r.json()["data"]["id"]
 
     async with AsyncSessionLocal() as db_a:
@@ -1470,9 +1521,13 @@ async def test_fork_snapshots_committed_definition_not_stale(c):
         svc = WorkflowPackService(db)
         pack = await svc.create_pack(oid, u["id"], name=f"Fork-{uuid.uuid4().hex[:6]}")
         await svc.update_definition(pack.id, oid, _defn("v1step"))
-        await svc.publish_release(pack.id, oid, version="1.0.0", changelog=None, released_by=u["id"])
+        await svc.publish_release(
+            pack.id, oid, version="1.0.0", changelog=None, released_by=u["id"]
+        )
         await svc.update_definition(pack.id, oid, _defn("v2step"))
-        await svc.publish_release(pack.id, oid, version="2.0.0", changelog=None, released_by=u["id"])
+        await svc.publish_release(
+            pack.id, oid, version="2.0.0", changelog=None, released_by=u["id"]
+        )
         pid = pack.id
         inst = await WorkflowInstallationService(db).install(oid, pid, "1.0.0", u["id"])
         install_id = inst.id
@@ -1529,9 +1584,7 @@ async def test_registry_releases_defers_manifest_load(c):
         # accessing it would trigger a lazy load, proving it wasn't fetched.
         for rel in releases:
             unloaded = sa_inspect(rel).unloaded
-            assert "manifest" in unloaded, (
-                f"manifest was eagerly loaded (unloaded={unloaded})"
-            )
+            assert "manifest" in unloaded, f"manifest was eagerly loaded (unloaded={unloaded})"
 
 
 @pytest.mark.asyncio
@@ -1557,19 +1610,30 @@ async def test_upgrade_drops_binding_no_longer_satisfying_features(c):
             "outputs": [{"key": "o", "type": "image", "from_step": "gen", "from_port": "result"}],
             "steps": [
                 {
-                    "id": "mk", "type": "prompt_template", "name": "M",
+                    "id": "mk",
+                    "type": "prompt_template",
+                    "name": "M",
                     "config": {"template": "x {{inputs.t}}"},
-                    "inputs": [], "outputs": [{"port": "p", "type": "prompt"}],
+                    "inputs": [],
+                    "outputs": [{"port": "p", "type": "prompt"}],
                 },
                 {
-                    "id": "gen", "type": "provider_action", "name": "G",
+                    "id": "gen",
+                    "type": "provider_action",
+                    "name": "G",
                     "config": {"capability": "image_generation", "required_features": feats},
                     "inputs": [{"port": "prompt", "type": "prompt"}],
                     "outputs": [{"port": "result", "type": "image"}],
                 },
             ],
             "edges": [
-                {"id": "e1", "from_step": "mk", "from_port": "p", "to_step": "gen", "to_port": "prompt"}
+                {
+                    "id": "e1",
+                    "from_step": "mk",
+                    "from_port": "p",
+                    "to_step": "gen",
+                    "to_port": "prompt",
+                }
             ],
             "ui": {},
         }
@@ -1589,7 +1653,12 @@ async def test_upgrade_drops_binding_no_longer_satisfying_features(c):
     off_plain = (
         await c.post(
             f"/api/v1/orgs/{oid}/provider-offerings",
-            json={"connection_id": conn, "capability_key": "image_generation", "model_name": "plain", "features": []},
+            json={
+                "connection_id": conn,
+                "capability_key": "image_generation",
+                "model_name": "plain",
+                "features": [],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1599,16 +1668,25 @@ async def test_upgrade_drops_binding_no_longer_satisfying_features(c):
         svc = WorkflowPackService(db)
         pack = await svc.create_pack(oid, u["id"], name=f"RB-{uuid.uuid4().hex[:6]}")
         await svc.update_definition(pack.id, oid, _defn([]))
-        await svc.publish_release(pack.id, oid, version="1.0.0", changelog=None, released_by=u["id"])
+        await svc.publish_release(
+            pack.id, oid, version="1.0.0", changelog=None, released_by=u["id"]
+        )
         await svc.update_definition(pack.id, oid, _defn(["highres"]))
-        await svc.publish_release(pack.id, oid, version="2.0.0", changelog=None, released_by=u["id"])
+        await svc.publish_release(
+            pack.id, oid, version="2.0.0", changelog=None, released_by=u["id"]
+        )
         pid = pack.id
         await db.commit()
 
     off_hr = (
         await c.post(
             f"/api/v1/orgs/{oid}/provider-offerings",
-            json={"connection_id": conn, "capability_key": "image_generation", "model_name": "hr", "features": ["highres"]},
+            json={
+                "connection_id": conn,
+                "capability_key": "image_generation",
+                "model_name": "hr",
+                "features": ["highres"],
+            },
             headers=h,
         )
     ).json()["data"]["id"]
@@ -1740,6 +1818,10 @@ def test_workflow_registry_search_all_sorts_have_id_tiebreak():
     from app.services.workflow_registry import WorkflowRegistryService
 
     src = _inspect.getsource(WorkflowRegistryService.search_packs)
-    assert "WorkflowPack.install_count.desc(), WorkflowPack.id.desc()" in src, "most_installed sort lacks id tiebreak"
+    assert "WorkflowPack.install_count.desc(), WorkflowPack.id.desc()" in src, (
+        "most_installed sort lacks id tiebreak"
+    )
     assert "WorkflowPack.name.asc(), WorkflowPack.id.asc()" in src, "name sort lacks id tiebreak"
-    assert "WorkflowPack.created_at.desc(), WorkflowPack.id.desc()" in src, "newest sort lacks id tiebreak"
+    assert "WorkflowPack.created_at.desc(), WorkflowPack.id.desc()" in src, (
+        "newest sort lacks id tiebreak"
+    )

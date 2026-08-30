@@ -190,9 +190,7 @@ class AuthService:
         # Look up token record by hash
         token_hash = sha256(jti.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(RefreshToken)
-            .where(RefreshToken.token_hash == token_hash)
-            .with_for_update()
+            select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update()
         )
         token_record = stmt_result.scalar_one_or_none()
 
@@ -541,7 +539,9 @@ class AuthService:
         import html as html_mod
 
         # Points to backend endpoint which verifies and redirects to frontend
-        verify_url = f"{settings.frontend_url}/api/v1/auth/verify-email?token={html_mod.escape(raw_token)}"
+        verify_url = (
+            f"{settings.frontend_url}/api/v1/auth/verify-email?token={html_mod.escape(raw_token)}"
+        )
         await sender.send(
             to=user.email,
             subject="Verify your OpenSkill Studio email",

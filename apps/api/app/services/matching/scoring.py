@@ -121,9 +121,7 @@ async def score(db: AsyncSession, survivors: list, spec, config) -> list[dict]:
     if spec.target_entity_type == "creator":
         signal_rows = await _creator_signals(db, survivors, spec, requirement)
     else:
-        signal_rows = [
-            (entity, _entity_signals(entity, spec, requirement)) for entity in survivors
-        ]
+        signal_rows = [(entity, _entity_signals(entity, spec, requirement)) for entity in survivors]
 
     # A DEFAULTED capability signal is not evidence: when the profile requests
     # no capabilities, _fraction_present returns its 1.0 default and the chip
@@ -142,9 +140,7 @@ async def score(db: AsyncSession, survivors: list, spec, config) -> list[dict]:
         requested_caps = (requirement.get("required_capabilities") or []) + (
             requirement.get("preferred_capabilities") or []
         )
-    vacuous_signals = (
-        set() if requested_caps else {"capability_match", "capability_teach_match"}
-    )
+    vacuous_signals = set() if requested_caps else {"capability_match", "capability_teach_match"}
 
     scored: list[dict] = []
     for entity, signals in signal_rows:
@@ -226,9 +222,7 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
         time_budget = requirement.get("time_budget") or requirement.get("_soft_time_budget")
         est = entity.estimated_minutes
         if isinstance(time_budget, int | float) and time_budget > 0 and est:
-            time_fit = max(
-                0.0, 1.0 if est <= time_budget else min(time_budget / est, 1.0)
-            )
+            time_fit = max(0.0, 1.0 if est <= time_budget else min(time_budget / est, 1.0))
         else:
             time_fit = 0.5
         difficulty = requirement.get("difficulty") or requirement.get("_soft_difficulty")
@@ -243,9 +237,7 @@ def _entity_signals(entity, spec, requirement: dict) -> dict[str, float]:
     if spec.target_entity_type == "project_template":
         scenario = requirement.get("scenario")
         difficulty_val = (
-            entity.difficulty.value
-            if hasattr(entity.difficulty, "value")
-            else entity.difficulty
+            entity.difficulty.value if hasattr(entity.difficulty, "value") else entity.difficulty
         )
         # Template project_type is a closed 2-value taxonomy ({general,
         # ai_visual}) while scenario is free text (brief.project_type
@@ -325,9 +317,7 @@ async def _creator_signals(
     rubric_r = await db.execute(
         select(
             Submission.user_id,
-            func.avg(
-                SubmissionReview.score * 1.0 / func.greatest(_Project.max_score, 1)
-            ),
+            func.avg(SubmissionReview.score * 1.0 / func.greatest(_Project.max_score, 1)),
         )
         .join(SubmissionReview, SubmissionReview.submission_id == Submission.id)
         .join(_Project, _Project.id == Submission.project_id)
@@ -395,7 +385,10 @@ async def _creator_signals(
                 capability_evidence = 0.5
             else:
                 vals = [
-                    min(float(r.weight) * (float(r.score) / 100.0 if r.score is not None else 1.0), 1.0)
+                    min(
+                        float(r.weight) * (float(r.score) / 100.0 if r.score is not None else 1.0),
+                        1.0,
+                    )
                     for r in rows
                 ]
                 raw_mean = sum(vals) / n

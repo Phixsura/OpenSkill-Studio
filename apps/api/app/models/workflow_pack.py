@@ -72,9 +72,7 @@ class WorkflowPack(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -142,9 +140,7 @@ class WorkflowPackInstallation(Base):
     )
     # Forked local copy of the definition; None while tracking the release
     local_definition: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    locally_modified: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default="false"
-    )
+    locally_modified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     installed_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -183,8 +179,6 @@ class ComfyUIImport(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_comfyui_imports_org", "org_id"),)

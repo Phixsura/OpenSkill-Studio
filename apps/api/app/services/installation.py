@@ -88,10 +88,12 @@ class InstallationService:
             from app.models.pack_share import PackShare
 
             grant = await self.db.execute(
-                select(PackShare.id).where(
+                select(PackShare.id)
+                .where(
                     PackShare.pack_id == pack_id,
                     PackShare.target_org_id == org_id,
-                ).limit(1)
+                )
+                .limit(1)
             )
             if grant.scalar_one_or_none() is None:
                 raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
@@ -110,7 +112,9 @@ class InstallationService:
                 select(SkillPackRelease).where(SkillPackRelease.pack_id == pack_id)
             )
             all_releases = list(release_r.scalars().all())
-            release = max(all_releases, key=lambda r: _parse_semver(r.version)) if all_releases else None
+            release = (
+                max(all_releases, key=lambda r: _parse_semver(r.version)) if all_releases else None
+            )
 
         if release is None:
             raise AppError("RELEASE_NOT_FOUND", "No release found for this pack", 404)
@@ -160,6 +164,7 @@ class InstallationService:
             )
             # Always add random suffix to prevent slug conflicts with existing org content
             import secrets as _cat_secrets
+
             cat.slug = f"{cat.slug[:90]}-{_cat_secrets.token_hex(3)}"
             self.db.add(cat)
             await self.db.flush()
@@ -186,7 +191,10 @@ class InstallationService:
                 org_id=org_id,
                 category_id=category_id,
                 name=skill_def["name"],
-                slug=re.sub(r"[^a-z0-9]+", "-", skill_def.get("slug", skill_def["name"]).lower()).strip("-")[:200] or f"skill-{secrets.token_hex(3)}",
+                slug=re.sub(
+                    r"[^a-z0-9]+", "-", skill_def.get("slug", skill_def["name"]).lower()
+                ).strip("-")[:200]
+                or f"skill-{secrets.token_hex(3)}",
                 description=skill_def.get("description", ""),
                 learning_content=skill_def.get("learning_content"),
                 difficulty=skill_def.get("difficulty", "beginner"),
@@ -270,6 +278,7 @@ class InstallationService:
 
         # Atomic install count increment (avoid lost-update race)
         from sqlalchemy import update
+
         await self.db.execute(
             update(SkillPack)
             .where(SkillPack.id == pack_id)
@@ -280,11 +289,14 @@ class InstallationService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
-            raise AppError("ALREADY_INSTALLED", "Pack already installed in this organization", 409) from None
+            raise AppError(
+                "ALREADY_INSTALLED", "Pack already installed in this organization", 409
+            ) from None
 
         # Fire webhook event
         try:
             from app.services.webhook import WebhookService
+
             webhook_svc = WebhookService(self.db)
             await webhook_svc.trigger_event(
                 org_id,
@@ -386,15 +398,23 @@ class InstallationService:
 
         # Added
         for lid in set(new_skills) - set(old_skills):
-            diff["added"].append({"type": "skill", "logical_id": lid, "name": new_skills[lid]["name"]})
+            diff["added"].append(
+                {"type": "skill", "logical_id": lid, "name": new_skills[lid]["name"]}
+            )
         for lid in set(new_tmpls) - set(old_tmpls):
-            diff["added"].append({"type": "template", "logical_id": lid, "name": new_tmpls[lid]["name"]})
+            diff["added"].append(
+                {"type": "template", "logical_id": lid, "name": new_tmpls[lid]["name"]}
+            )
 
         # Removed
         for lid in set(old_skills) - set(new_skills):
-            diff["removed"].append({"type": "skill", "logical_id": lid, "name": old_skills[lid]["name"]})
+            diff["removed"].append(
+                {"type": "skill", "logical_id": lid, "name": old_skills[lid]["name"]}
+            )
         for lid in set(old_tmpls) - set(new_tmpls):
-            diff["removed"].append({"type": "template", "logical_id": lid, "name": old_tmpls[lid]["name"]})
+            diff["removed"].append(
+                {"type": "template", "logical_id": lid, "name": old_tmpls[lid]["name"]}
+            )
 
         # Batch-load locally_modified flags (exclude archived — they don't conflict)
         skill_mod_r = await self.db.execute(
@@ -419,28 +439,42 @@ class InstallationService:
         for lid in set(old_skills) & set(new_skills):
             if old_skills[lid] != new_skills[lid]:
                 if skill_modified_map.get(lid):
-                    diff["conflicts"].append({
-                        "type": "skill", "logical_id": lid,
-                        "name": new_skills[lid]["name"], "reason": "locally_modified",
-                    })
+                    diff["conflicts"].append(
+                        {
+                            "type": "skill",
+                            "logical_id": lid,
+                            "name": new_skills[lid]["name"],
+                            "reason": "locally_modified",
+                        }
+                    )
                 else:
-                    diff["changed"].append({
-                        "type": "skill", "logical_id": lid,
-                        "name": new_skills[lid]["name"],
-                    })
+                    diff["changed"].append(
+                        {
+                            "type": "skill",
+                            "logical_id": lid,
+                            "name": new_skills[lid]["name"],
+                        }
+                    )
 
         for lid in set(old_tmpls) & set(new_tmpls):
             if old_tmpls[lid] != new_tmpls[lid]:
                 if tmpl_modified_map.get(lid):
-                    diff["conflicts"].append({
-                        "type": "template", "logical_id": lid,
-                        "name": new_tmpls[lid]["name"], "reason": "locally_modified",
-                    })
+                    diff["conflicts"].append(
+                        {
+                            "type": "template",
+                            "logical_id": lid,
+                            "name": new_tmpls[lid]["name"],
+                            "reason": "locally_modified",
+                        }
+                    )
                 else:
-                    diff["changed"].append({
-                        "type": "template", "logical_id": lid,
-                        "name": new_tmpls[lid]["name"],
-                    })
+                    diff["changed"].append(
+                        {
+                            "type": "template",
+                            "logical_id": lid,
+                            "name": new_tmpls[lid]["name"],
+                        }
+                    )
 
         return diff
 
@@ -497,6 +531,7 @@ class InstallationService:
         # Fire webhook event
         try:
             from app.services.webhook import WebhookService
+
             webhook_svc = WebhookService(self.db)
             await webhook_svc.trigger_event(
                 org_id,
@@ -576,6 +611,7 @@ class InstallationService:
         # Create NEW categories
         for cat_lid in set(new_cats) - set(old_cats):
             import secrets as _cat_secrets
+
             cat_def = new_cats[cat_lid]
             cat = SkillCategory(
                 org_id=org_id,
@@ -706,9 +742,7 @@ class InstallationService:
                         existing.category_id = cat_id_map[cat_logical]
 
                     # ---- Sync exercises for changed skill ----
-                    new_exercises = {
-                        e["logical_id"]: e for e in skill_def.get("exercises", [])
-                    }
+                    new_exercises = {e["logical_id"]: e for e in skill_def.get("exercises", [])}
                     existing_ex_r = await self.db.execute(
                         select(Exercise).where(
                             Exercise.skill_id == existing.id,
@@ -808,7 +842,9 @@ class InstallationService:
                     existing.difficulty = tmpl_def.get("difficulty", "intermediate")
                     existing.suggested_minutes = tmpl_def.get("suggested_minutes")
                     existing.max_score = tmpl_def.get("max_score", 100)
-                    existing.rubric = tmpl_def.get("rubric", [{"criterion": "Overall", "max_score": 100}])
+                    existing.rubric = tmpl_def.get(
+                        "rubric", [{"criterion": "Overall", "max_score": 100}]
+                    )
                     existing.deliverables = tmpl_def.get("deliverables", [])
                     existing.skill_names = tmpl_def.get("skill_names", [])
                     existing.origin_release_id = release.id
@@ -935,9 +971,7 @@ class InstallationService:
                 from app.models.skill import SkillPrerequisite
 
                 await self.db.execute(
-                    sa_delete(SkillPrerequisite).where(
-                        SkillPrerequisite.skill_id.in_(archived_ids)
-                    )
+                    sa_delete(SkillPrerequisite).where(SkillPrerequisite.skill_id.in_(archived_ids))
                 )
                 await self.db.execute(
                     sa_delete(SkillPrerequisite).where(

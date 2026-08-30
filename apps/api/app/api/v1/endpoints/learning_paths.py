@@ -28,10 +28,17 @@ INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 # ── Path CRUD ──
 
 
-@router.post("/orgs/{org_id}/paths", response_model=DataResponse[LearningPathResponse], status_code=201, dependencies=[Depends(rate_limit(20, 60))])
+@router.post(
+    "/orgs/{org_id}/paths",
+    response_model=DataResponse[LearningPathResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def create_path(
-    org_id: str, body: CreateLearningPathRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    body: CreateLearningPathRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
@@ -40,24 +47,39 @@ async def create_path(
     return DataResponse(data=LearningPathResponse.model_validate(path))
 
 
-@router.get("/orgs/{org_id}/paths", response_model=ListResponse[LearningPathResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/paths",
+    response_model=ListResponse[LearningPathResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_paths(
-    org_id: str, page: int = Query(default=1, ge=1, le=1_000_000), per_page: int = Query(default=20, ge=1, le=100),
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = LearningPathService(db)
     paths, total = await svc.list_paths(org_id, page, per_page)
     return ListResponse(
         data=[LearningPathResponse.model_validate(p) for p in paths],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=(page * per_page) < total),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
+        ),
     )
 
 
-@router.get("/orgs/{org_id}/paths/{path_id}", response_model=DataResponse[LearningPathResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/paths/{path_id}",
+    response_model=DataResponse[LearningPathResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_path(
-    org_id: str, path_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    path_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = LearningPathService(db)
@@ -65,10 +87,17 @@ async def get_path(
     return DataResponse(data=LearningPathResponse.model_validate(path))
 
 
-@router.put("/orgs/{org_id}/paths/{path_id}", response_model=DataResponse[LearningPathResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/paths/{path_id}",
+    response_model=DataResponse[LearningPathResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def update_path(
-    org_id: str, path_id: str, body: UpdateLearningPathRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    path_id: str,
+    body: UpdateLearningPathRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
@@ -81,10 +110,14 @@ async def update_path(
     return DataResponse(data=LearningPathResponse.model_validate(path))
 
 
-@router.delete("/orgs/{org_id}/paths/{path_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/paths/{path_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))]
+)
 async def delete_path(
-    org_id: str, path_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    path_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
@@ -95,10 +128,18 @@ async def delete_path(
 # ── Items ──
 
 
-@router.post("/orgs/{org_id}/paths/{path_id}/items", response_model=DataResponse[PathItemResponse], status_code=201, dependencies=[Depends(rate_limit(20, 60))])
+@router.post(
+    "/orgs/{org_id}/paths/{path_id}/items",
+    response_model=DataResponse[PathItemResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def add_item(
-    org_id: str, path_id: str, body: AddPathItemRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    path_id: str,
+    body: AddPathItemRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
@@ -107,10 +148,17 @@ async def add_item(
     return DataResponse(data=PathItemResponse.model_validate(item))
 
 
-@router.delete("/orgs/{org_id}/paths/{path_id}/items/{item_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/paths/{path_id}/items/{item_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def remove_item(
-    org_id: str, path_id: str, item_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    path_id: str,
+    item_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
@@ -118,10 +166,16 @@ async def remove_item(
     await db.commit()
 
 
-@router.get("/orgs/{org_id}/paths/{path_id}/items", response_model=DataResponse[list[PathItemResponse]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/paths/{path_id}/items",
+    response_model=DataResponse[list[PathItemResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_items(
-    org_id: str, path_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    path_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = LearningPathService(db)
@@ -133,26 +187,43 @@ async def list_items(
 # ── Cohort Assignment ──
 
 
-@router.post("/orgs/{org_id}/cohorts/{cohort_id}/paths", response_model=DataResponse[CohortPathAssignmentResponse], status_code=201, dependencies=[Depends(rate_limit(20, 60))])
+@router.post(
+    "/orgs/{org_id}/cohorts/{cohort_id}/paths",
+    response_model=DataResponse[CohortPathAssignmentResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def assign_path_to_cohort(
-    org_id: str, cohort_id: str, body: AssignPathRequest,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    cohort_id: str,
+    body: AssignPathRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
     assignment = await svc.assign_to_cohort(body.path_id, cohort_id, org_id, user.id)
     await db.commit()
-    return DataResponse(data=CohortPathAssignmentResponse(
-        cohort_id=cohort_id,
-        path_id=body.path_id,
-        assigned_at=assignment.assigned_at,
-    ))
+    return DataResponse(
+        data=CohortPathAssignmentResponse(
+            cohort_id=cohort_id,
+            path_id=body.path_id,
+            assigned_at=assignment.assigned_at,
+        )
+    )
 
 
-@router.delete("/orgs/{org_id}/cohorts/{cohort_id}/paths/{path_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/cohorts/{cohort_id}/paths/{path_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def unassign_path(
-    org_id: str, cohort_id: str, path_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    cohort_id: str,
+    path_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
@@ -160,27 +231,43 @@ async def unassign_path(
     await db.commit()
 
 
-@router.get("/orgs/{org_id}/cohorts/{cohort_id}/paths", response_model=DataResponse[list[CohortPathAssignmentResponse]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/cohorts/{cohort_id}/paths",
+    response_model=DataResponse[list[CohortPathAssignmentResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_cohort_paths(
-    org_id: str, cohort_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    cohort_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = LearningPathService(db)
     assignments = await svc.list_cohort_paths(cohort_id, org_id)
-    return DataResponse(data=[
-        CohortPathAssignmentResponse(cohort_id=cohort_id, path_id=a.path_id, path_name=name, assigned_at=a.assigned_at)
-        for a, name in assignments
-    ])
+    return DataResponse(
+        data=[
+            CohortPathAssignmentResponse(
+                cohort_id=cohort_id, path_id=a.path_id, path_name=name, assigned_at=a.assigned_at
+            )
+            for a, name in assignments
+        ]
+    )
 
 
 # ── Progress ──
 
 
-@router.get("/orgs/{org_id}/paths/{path_id}/my-progress", response_model=DataResponse[dict], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/paths/{path_id}/my-progress",
+    response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def my_path_progress(
-    org_id: str, path_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    path_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
     svc = LearningPathService(db)
@@ -194,10 +281,16 @@ async def my_path_progress(
 # ── Effective Skills ──
 
 
-@router.get("/orgs/{org_id}/cohorts/{cohort_id}/effective-skills", response_model=DataResponse[list[str]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/cohorts/{cohort_id}/effective-skills",
+    response_model=DataResponse[list[str]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def effective_skills(
-    org_id: str, cohort_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    cohort_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Return de-duplicated skill IDs from direct assignments + learning path assignments."""
     await require_org_member(org_id, user, db)
@@ -209,10 +302,17 @@ async def effective_skills(
 # ── Cohort Path Progress (instructor view) ──
 
 
-@router.get("/orgs/{org_id}/cohorts/{cohort_id}/paths/{path_id}/progress", response_model=DataResponse[list[dict]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/cohorts/{cohort_id}/paths/{path_id}/progress",
+    response_model=DataResponse[list[dict]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def cohort_path_progress(
-    org_id: str, cohort_id: str, path_id: str,
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    org_id: str,
+    cohort_id: str,
+    path_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Instructor view: per-learner progress on a specific learning path within a cohort."""
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)

@@ -317,9 +317,7 @@ async def test_list_offerings_filter_by_capability(c):
             json={"connection_id": conn_id, "capability_key": cap, "model_name": model},
             headers=h,
         )
-    r = await c.get(
-        f"/api/v1/orgs/{oid}/provider-offerings?capability=image_to_video", headers=h
-    )
+    r = await c.get(f"/api/v1/orgs/{oid}/provider-offerings?capability=image_to_video", headers=h)
     assert r.status_code == 200
     data = r.json()["data"]
     assert len(data) == 1
@@ -554,9 +552,7 @@ def test_key_rotation_round_trip(monkeypatch):
     token_old = encrypt_credentials({"api_key": "sk-rotate"})
 
     # Rotate: new primary first, old key kept for decryption
-    monkeypatch.setattr(
-        live_settings, "credential_encryption_key", f"{new_key},{old_key}"
-    )
+    monkeypatch.setattr(live_settings, "credential_encryption_key", f"{new_key},{old_key}")
     assert decrypt_credentials(token_old) == {"api_key": "sk-rotate"}
     token_new = encrypt_credentials({"api_key": "sk-rotate"})
     # New tokens use the primary — decryptable with the new key alone
@@ -801,24 +797,33 @@ async def test_connection_and_offering_nul_rejected(c):
     assert r.status_code == 422, r.text[:200]
 
     # a clean connection, then offering with NUL model_name / features
-    conn = (await c.post(
-        f"/api/v1/orgs/{oid}/provider-connections",
-        json={"adapter_id": aid, "name": "clean"},
-        headers=h,
-    )).json()["data"]["id"]
+    conn = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/provider-connections",
+            json={"adapter_id": aid, "name": "clean"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     r2 = await c.post(
         f"/api/v1/orgs/{oid}/provider-offerings",
-        json={"connection_id": conn, "capability_key": "image_generation",
-              "model_name": "m" + chr(0) + "v"},
+        json={
+            "connection_id": conn,
+            "capability_key": "image_generation",
+            "model_name": "m" + chr(0) + "v",
+        },
         headers=h,
     )
     assert r2.status_code == 422, r2.text[:200]
 
     r3 = await c.post(
         f"/api/v1/orgs/{oid}/provider-offerings",
-        json={"connection_id": conn, "capability_key": "image_generation",
-              "model_name": "ok", "features": ["hi" + chr(0) + "res"]},
+        json={
+            "connection_id": conn,
+            "capability_key": "image_generation",
+            "model_name": "ok",
+            "features": ["hi" + chr(0) + "res"],
+        },
         headers=h,
     )
     assert r3.status_code == 422, r3.text[:200]

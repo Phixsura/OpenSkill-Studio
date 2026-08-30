@@ -126,9 +126,7 @@ class NotificationService:
 
     async def get_preferences(self, user_id: str) -> dict:
         result = await self.db.execute(
-            select(UserNotificationPreference).where(
-                UserNotificationPreference.user_id == user_id
-            )
+            select(UserNotificationPreference).where(UserNotificationPreference.user_id == user_id)
         )
         pref = result.scalar_one_or_none()
         if pref is None:
@@ -138,9 +136,7 @@ class NotificationService:
 
     async def update_preferences(self, user_id: str, preferences: dict) -> dict:
         result = await self.db.execute(
-            select(UserNotificationPreference).where(
-                UserNotificationPreference.user_id == user_id
-            )
+            select(UserNotificationPreference).where(UserNotificationPreference.user_id == user_id)
         )
         pref = result.scalar_one_or_none()
         if pref is None:

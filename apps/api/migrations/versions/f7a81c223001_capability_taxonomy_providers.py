@@ -187,24 +187,69 @@ def upgrade() -> None:
     # ── Seed platform capabilities (deterministic IDs — consistent across envs) ──
     capabilities = [
         # (id, key, name, category, io_signature)
-        ("01J21000000000000000IMGGEN", "image_generation", "Image Generation", "generation",
-         '{"inputs": ["prompt"], "outputs": ["image"]}'),
-        ("01J21000000000000000IMGEDT", "image_editing", "Image Editing", "editing",
-         '{"inputs": ["image", "prompt"], "outputs": ["image"]}'),
-        ("01J21000000000000000IMG2VD", "image_to_video", "Image to Video", "generation",
-         '{"inputs": ["image", "prompt"], "outputs": ["video"]}'),
-        ("01J21000000000000000TXT2VD", "text_to_video", "Text to Video", "generation",
-         '{"inputs": ["prompt"], "outputs": ["video"]}'),
-        ("01J21000000000000000VIDEDT", "video_editing", "Video Editing", "editing",
-         '{"inputs": ["video"], "outputs": ["video"]}'),
-        ("01J21000000000000000VOICEG", "voice_generation", "Voice Generation", "audio",
-         '{"inputs": ["text"], "outputs": ["audio"]}'),
-        ("01J21000000000000000MMRVW0", "multimodal_review", "Multimodal Review", "review",
-         '{"inputs": ["image", "prompt"], "outputs": ["json"]}'),
-        ("01J21000000000000000UPSCAL", "upscale", "Upscale", "editing",
-         '{"inputs": ["image"], "outputs": ["image"]}'),
-        ("01J21000000000000000BGREMV", "background_removal", "Background Removal", "editing",
-         '{"inputs": ["image"], "outputs": ["image"]}'),
+        (
+            "01J21000000000000000IMGGEN",
+            "image_generation",
+            "Image Generation",
+            "generation",
+            '{"inputs": ["prompt"], "outputs": ["image"]}',
+        ),
+        (
+            "01J21000000000000000IMGEDT",
+            "image_editing",
+            "Image Editing",
+            "editing",
+            '{"inputs": ["image", "prompt"], "outputs": ["image"]}',
+        ),
+        (
+            "01J21000000000000000IMG2VD",
+            "image_to_video",
+            "Image to Video",
+            "generation",
+            '{"inputs": ["image", "prompt"], "outputs": ["video"]}',
+        ),
+        (
+            "01J21000000000000000TXT2VD",
+            "text_to_video",
+            "Text to Video",
+            "generation",
+            '{"inputs": ["prompt"], "outputs": ["video"]}',
+        ),
+        (
+            "01J21000000000000000VIDEDT",
+            "video_editing",
+            "Video Editing",
+            "editing",
+            '{"inputs": ["video"], "outputs": ["video"]}',
+        ),
+        (
+            "01J21000000000000000VOICEG",
+            "voice_generation",
+            "Voice Generation",
+            "audio",
+            '{"inputs": ["text"], "outputs": ["audio"]}',
+        ),
+        (
+            "01J21000000000000000MMRVW0",
+            "multimodal_review",
+            "Multimodal Review",
+            "review",
+            '{"inputs": ["image", "prompt"], "outputs": ["json"]}',
+        ),
+        (
+            "01J21000000000000000UPSCAL",
+            "upscale",
+            "Upscale",
+            "editing",
+            '{"inputs": ["image"], "outputs": ["image"]}',
+        ),
+        (
+            "01J21000000000000000BGREMV",
+            "background_removal",
+            "Background Removal",
+            "editing",
+            '{"inputs": ["image"], "outputs": ["image"]}',
+        ),
     ]
     for cap_id, key, name, category, io_sig in capabilities:
         op.execute(
@@ -217,10 +262,22 @@ def upgrade() -> None:
     # ── Seed platform adapters ──
     adapters = [
         # (id, key, name, description, config_schema, credential_fields)
-        ("01J21000000000000000MOCK00", "mock", "Mock Provider",
-         "Deterministic echo adapter for testing and demos", "{}", "[]"),
-        ("01J21000000000000000ANTHRO", "anthropic", "Anthropic",
-         "Claude multimodal review adapter", "{}", '["api_key"]'),
+        (
+            "01J21000000000000000MOCK00",
+            "mock",
+            "Mock Provider",
+            "Deterministic echo adapter for testing and demos",
+            "{}",
+            "[]",
+        ),
+        (
+            "01J21000000000000000ANTHRO",
+            "anthropic",
+            "Anthropic",
+            "Claude multimodal review adapter",
+            "{}",
+            '["api_key"]',
+        ),
     ]
     for a_id, key, name, desc, cfg, creds in adapters:
         op.execute(

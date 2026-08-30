@@ -161,15 +161,15 @@ class WorkflowInstallationService:
         total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
         total = total_r.scalar_one()
         result = await self.db.execute(
-            base.order_by(WorkflowPackInstallation.installed_at.desc(), WorkflowPackInstallation.id.desc())
+            base.order_by(
+                WorkflowPackInstallation.installed_at.desc(), WorkflowPackInstallation.id.desc()
+            )
             .offset((page - 1) * per_page)
             .limit(per_page)
         )
         return list(result.scalars().all()), total
 
-    async def get_installation(
-        self, installation_id: str, org_id: str
-    ) -> WorkflowPackInstallation:
+    async def get_installation(self, installation_id: str, org_id: str) -> WorkflowPackInstallation:
         inst = await self.db.get(WorkflowPackInstallation, installation_id)
         if inst is None or inst.org_id != org_id or inst.status == InstallStatus.REMOVED:
             raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
@@ -318,9 +318,7 @@ class WorkflowInstallationService:
 
     # ── Bindings ──────────────────────────────────────────
 
-    async def list_bindings(
-        self, installation_id: str, org_id: str
-    ) -> list[WorkflowStepBinding]:
+    async def list_bindings(self, installation_id: str, org_id: str) -> list[WorkflowStepBinding]:
         await self.get_installation(installation_id, org_id)
         result = await self.db.execute(
             select(WorkflowStepBinding)
@@ -340,7 +338,9 @@ class WorkflowInstallationService:
     ) -> WorkflowStepBinding:
         inst = await self.get_installation(installation_id, org_id)
         if binding_mode not in ("auto", "preferred", "pinned"):
-            raise AppError("INVALID_BINDING_MODE", "Binding mode must be auto, preferred, or pinned", 422)
+            raise AppError(
+                "INVALID_BINDING_MODE", "Binding mode must be auto, preferred, or pinned", 422
+            )
 
         # Row-lock the installation and re-check it is not REMOVED — a
         # concurrent remove() commits status=REMOVED and DELETEs this
@@ -397,9 +397,7 @@ class WorkflowInstallationService:
         # would only defer a NO_ELIGIBLE_PROVIDER to run time. Match the
         # runtime's usability check at confirm time.
         if not offering.is_active:
-            raise AppError(
-                "OFFERING_INACTIVE", "The selected offering is not active", 422
-            )
+            raise AppError("OFFERING_INACTIVE", "The selected offering is not active", 422)
         conn = await self.db.get(ProviderConnection, offering.connection_id)
         if conn is None or conn.status != "active":
             raise AppError(
@@ -642,9 +640,7 @@ class WorkflowInstallationService:
         }
 
         existing_r = await self.db.execute(
-            select(WorkflowStepBinding).where(
-                WorkflowStepBinding.installation_id == inst.id
-            )
+            select(WorkflowStepBinding).where(WorkflowStepBinding.installation_id == inst.id)
         )
         preserved_step_ids: set[str] = set()
         for binding in existing_r.scalars().all():

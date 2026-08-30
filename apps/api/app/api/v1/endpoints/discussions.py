@@ -76,7 +76,9 @@ async def list_comments(
     comments, total = await svc.list_comments(pack_id, page, per_page)
     return ListResponse(
         data=comments,
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=(page * per_page) < total),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
+        ),
     )
 
 

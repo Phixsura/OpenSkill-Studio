@@ -45,9 +45,7 @@ class PackReviewService:
         lock, the subqueries re-execute with a fresh READ COMMITTED snapshot.
         """
         count_sq = (
-            select(func.count(PackReview.id))
-            .where(PackReview.pack_id == pack_id)
-            .scalar_subquery()
+            select(func.count(PackReview.id)).where(PackReview.pack_id == pack_id).scalar_subquery()
         )
         avg_sq = (
             select(func.avg(PackReview.rating))
@@ -187,9 +185,7 @@ class PackReviewService:
             order_clause = PackReview.created_at.desc()
 
         offset = (page - 1) * per_page
-        result = await self.db.execute(
-            base.order_by(order_clause).offset(offset).limit(per_page)
-        )
+        result = await self.db.execute(base.order_by(order_clause).offset(offset).limit(per_page))
         return list(result.scalars().all()), total
 
     async def delete_review(self, review_id: str, user_id: str, pack_id: str | None = None) -> None:
@@ -263,7 +259,9 @@ class PackReviewService:
             "distribution": distribution,
         }
 
-    async def toggle_helpful(self, review_id: str, user_id: str, pack_id: str | None = None) -> PackReview:
+    async def toggle_helpful(
+        self, review_id: str, user_id: str, pack_id: str | None = None
+    ) -> PackReview:
         """Toggle a helpful vote on a review."""
         review = await self.db.get(PackReview, review_id)
         if review is None:

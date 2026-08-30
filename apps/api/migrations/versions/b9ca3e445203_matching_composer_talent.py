@@ -22,12 +22,19 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # ── requirement_context enum ──
     ENUM(
-        "LEARNING", "PRODUCTION", "COMMERCIAL_PROJECT", "TALENT_MATCHING",
+        "LEARNING",
+        "PRODUCTION",
+        "COMMERCIAL_PROJECT",
+        "TALENT_MATCHING",
         name="requirement_context",
     ).create(op.get_bind(), checkfirst=True)
     requirement_context = ENUM(
-        "LEARNING", "PRODUCTION", "COMMERCIAL_PROJECT", "TALENT_MATCHING",
-        name="requirement_context", create_type=False,
+        "LEARNING",
+        "PRODUCTION",
+        "COMMERCIAL_PROJECT",
+        "TALENT_MATCHING",
+        name="requirement_context",
+        create_type=False,
     )
 
     # ── requirement_profiles ──
@@ -35,12 +42,16 @@ def upgrade() -> None:
         "requirement_profiles",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column(
-            "org_id", sa.String(26),
-            sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False,
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column(
-            "user_id", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+            "user_id",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.Column("context_type", requirement_context, nullable=False),
         sa.Column("raw_request", sa.Text(), nullable=True),
@@ -50,16 +61,22 @@ def upgrade() -> None:
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
         sa.Column("confirmed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
-            "created_by", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+            "created_by",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index("ix_req_profiles_org", "requirement_profiles", ["org_id", "context_type"])
@@ -74,8 +91,10 @@ def upgrade() -> None:
         sa.Column("thresholds", JSONB(), nullable=False, server_default="{}"),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index(
@@ -87,13 +106,17 @@ def upgrade() -> None:
         "match_runs",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column(
-            "org_id", sa.String(26),
-            sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False,
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column("context_type", sa.String(30), nullable=False),
         sa.Column(
-            "requirement_profile_id", sa.String(26),
-            sa.ForeignKey("requirement_profiles.id", ondelete="SET NULL"), nullable=True,
+            "requirement_profile_id",
+            sa.String(26),
+            sa.ForeignKey("requirement_profiles.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.Column("target_entity_type", sa.String(30), nullable=False),
         sa.Column("engine_version", sa.String(20), nullable=False),
@@ -101,12 +124,16 @@ def upgrade() -> None:
         sa.Column("candidate_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("excluded_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column(
-            "created_by", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+            "created_by",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index("ix_match_runs_org", "match_runs", ["org_id", "created_at"])
@@ -116,8 +143,10 @@ def upgrade() -> None:
         "match_results",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column(
-            "match_run_id", sa.String(26),
-            sa.ForeignKey("match_runs.id", ondelete="CASCADE"), nullable=False,
+            "match_run_id",
+            sa.String(26),
+            sa.ForeignKey("match_runs.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column("entity_type", sa.String(30), nullable=False),
         sa.Column("entity_id", sa.String(26), nullable=False),
@@ -135,8 +164,10 @@ def upgrade() -> None:
         "feedback_events",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column(
-            "org_id", sa.String(26),
-            sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False,
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column("match_run_id", sa.String(26), nullable=True),
         sa.Column("entity_type", sa.String(30), nullable=False),
@@ -146,12 +177,16 @@ def upgrade() -> None:
         sa.Column("score", sa.Numeric(5, 4), nullable=True),
         sa.Column("config_version", sa.Integer(), nullable=True),
         sa.Column(
-            "created_by", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+            "created_by",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         # R17: rank position at impression time is unrecoverable — enforce it
         sa.CheckConstraint(
@@ -168,8 +203,10 @@ def upgrade() -> None:
         "solution_drafts",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column(
-            "org_id", sa.String(26),
-            sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False,
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column("draft_type", sa.String(30), nullable=False),
         sa.Column("requirement_profile_id", sa.String(26), nullable=True),
@@ -178,22 +215,30 @@ def upgrade() -> None:
         sa.Column("engine_version", sa.String(20), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
         sa.Column(
-            "confirmed_by", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+            "confirmed_by",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.Column("confirmed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("materialized_entity_id", sa.String(26), nullable=True),
         sa.Column(
-            "created_by", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+            "created_by",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index("ix_solution_drafts_org", "solution_drafts", ["org_id", "draft_type"])
@@ -203,12 +248,16 @@ def upgrade() -> None:
         "creator_capability_evidence",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column(
-            "org_id", sa.String(26),
-            sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False,
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column(
-            "user_id", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+            "user_id",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column("capability_key", sa.String(64), nullable=False),
         sa.Column("evidence_type", sa.String(30), nullable=False),
@@ -217,12 +266,15 @@ def upgrade() -> None:
         sa.Column("score", sa.Numeric(5, 2), nullable=True),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index(
-        "ix_evidence_user_cap", "creator_capability_evidence",
+        "ix_evidence_user_cap",
+        "creator_capability_evidence",
         ["org_id", "user_id", "capability_key"],
     )
 
@@ -231,28 +283,38 @@ def upgrade() -> None:
         "creator_assignments",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column(
-            "org_id", sa.String(26),
-            sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False,
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column(
-            "project_id", sa.String(26),
-            sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False,
+            "project_id",
+            sa.String(26),
+            sa.ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column(
-            "user_id", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+            "user_id",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
         ),
         sa.Column("match_run_id", sa.String(26), nullable=True),
         sa.Column("status", sa.String(20), nullable=False, server_default="offered"),
         sa.Column(
-            "assigned_by", sa.String(26),
-            sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=False,
+            "assigned_by",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=False,
         ),
         sa.Column("override_reason", sa.Text(), nullable=True),
         sa.Column("responded_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.text("now()"), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index(
@@ -284,9 +346,7 @@ def upgrade() -> None:
         "GENERATED ALWAYS AS (to_tsvector('simple', "
         "coalesce(name,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(description,''))) STORED"
     )
-    op.execute(
-        "CREATE INDEX ix_skill_packs_search_tsv ON skill_packs USING gin (search_tsv)"
-    )
+    op.execute("CREATE INDEX ix_skill_packs_search_tsv ON skill_packs USING gin (search_tsv)")
 
     # ── Seed matching configs v1 (deterministic IDs) ──
     configs = [

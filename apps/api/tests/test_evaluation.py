@@ -355,7 +355,9 @@ async def test_multimodal_eval_types_persist_not_500(client):
     ).json()["data"]["id"]
     await client.post(f"/api/v1/orgs/{oid}/projects/{proj}/publish", headers=h)
     sub = (
-        await client.post(f"/api/v1/orgs/{oid}/projects/{proj}/submissions", json={"content": "w"}, headers=h)
+        await client.post(
+            f"/api/v1/orgs/{oid}/projects/{proj}/submissions", json={"content": "w"}, headers=h
+        )
     ).json()["data"]["id"]
     await client.post(f"/api/v1/orgs/{oid}/projects/{proj}/submissions/{sub}/submit", headers=h)
 
