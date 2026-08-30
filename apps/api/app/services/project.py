@@ -1018,7 +1018,12 @@ class ProjectService:
                 403,
             )
 
-        # Only submitted work can be reviewed — a draft hasn't been handed in
+        # Only submitted work can be reviewed — a draft hasn't been handed in.
+        # (An APPROVED submission CAN be reopened to REVISION_REQUESTED or have
+        # its grade corrected — an intended instructor action — so terminal
+        # states are NOT blocked here. The evidence-inflation risk from repeated
+        # APPROVED reviews is handled at the source in creator_matching, which
+        # dedups approved_submission evidence per submission, not per review row.)
         if sub.status in (SubmissionStatus.DRAFT,):
             raise InvalidStateError("Cannot review a draft submission")
 

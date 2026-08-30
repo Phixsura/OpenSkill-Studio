@@ -1323,3 +1323,97 @@ async def test_withdraw_assignment_lifecycle(c):
         f"/api/v1/orgs/{oid}/creator-assignments/{aid}/withdraw", headers=h_creator
     )
     assert r.status_code == 403, r.text
+
+
+# ── R92a: repeated approvals of one submission are single evidence, not N ──
+
+
+@pytest.mark.asyncio
+async def test_approved_submission_evidence_deduped_per_submission(c):
+    """R92a: re-review / grade-correction can leave several APPROVED reviews on
+    one submission (an allowed instructor action). rebuild_evidence keyed
+    approved_submission evidence on review.id, so each re-approval minted
+    another weight-1.0 verified-evidence row — an unbounded creator-evidence
+    inflation. Evidence must collapse to ONE row per submission (latest approved
+    review). Reverting to per-review keying makes this assert >1."""
+    import uuid as _uuid
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.composer import CreatorCapabilityEvidence
+    from app.models.project import (
+        ContentStatus,
+        Project,
+        ReviewerType,
+        ReviewStatus,
+        Submission,
+        SubmissionReview,
+        SubmissionStatus,
+    )
+    from app.services.creator_matching import CreatorMatchingService
+
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+
+    async with AsyncSessionLocal() as db:
+        svc = CreatorMatchingService(db)
+        keys = await svc._capability_keys()
+        assert keys, "need at least one capability key registered"
+        cap = sorted(keys)[0]
+
+        # A project whose project_type IS a capability key → its approved
+        # submission attests that capability (branch 1 of _project_capabilities).
+        proj = Project(
+            org_id=oid,
+            title="Dedup Proj",
+            slug=f"dedup-{_uuid.uuid4().hex[:8]}",
+            description="d",
+            instructions="i",
+            project_type=cap,
+            max_score=100,
+            rubric=[{"criterion": "Q", "max_score": 100}],
+            status=ContentStatus.PUBLISHED,
+            created_by=owner["id"],
+        )
+        db.add(proj)
+        await db.flush()
+        sub = Submission(
+            org_id=oid,
+            project_id=proj.id,
+            user_id=owner["id"],
+            status=SubmissionStatus.APPROVED,
+            version=1,
+        )
+        db.add(sub)
+        await db.flush()
+        # Three approved reviews on the SAME submission.
+        for i in range(3):
+            db.add(
+                SubmissionReview(
+                    submission_id=sub.id,
+                    reviewer_id=owner["id"],
+                    reviewer_type=ReviewerType.INSTRUCTOR,
+                    status=ReviewStatus.APPROVED,
+                    score=80 + i,
+                    created_at=datetime(2026, 1, 1 + i, tzinfo=UTC),
+                )
+            )
+        await db.flush()
+
+        await svc.rebuild_evidence(oid, owner["id"])
+        await db.commit()
+
+        rows = (
+            await db.execute(
+                select(CreatorCapabilityEvidence).where(
+                    CreatorCapabilityEvidence.user_id == owner["id"],
+                    CreatorCapabilityEvidence.evidence_type == "approved_submission",
+                )
+            )
+        ).scalars().all()
+        assert len(rows) == 1, f"expected 1 deduped evidence row, got {len(rows)}"
+        # And it carries the LATEST review's score (82 on a max_score-100 scale).
+        assert rows[0].evidence_id == sub.id
+        assert float(rows[0].score) == 82.0

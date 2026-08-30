@@ -222,11 +222,26 @@ class CreatorMatchingService:
             )
         )
         review_rows = rev_r.all()
-        # Batch-load referenced projects (avoid per-row db.get N+1)
-        review_project_ids = {submission.project_id for _, submission in review_rows}
+        # R92: a submission can accumulate MORE THAN ONE approved review over its
+        # lifetime (re-review / grade correction is an allowed instructor action).
+        # Keying evidence on review.id would then mint one weight-1.0
+        # approved_submission row PER review — an instructor could inflate a
+        # creator's verified evidence without bound simply by re-approving the
+        # same submission. Collapse to the LATEST approved review per submission
+        # (evidence is "this submission was approved", counted once), so the
+        # evidence is idempotent in the work, not in the number of review clicks.
+        latest_by_submission: dict[str, object] = {}
+        submissions_by_id: dict[str, object] = {}
+        for review, submission in review_rows:
+            submissions_by_id[submission.id] = submission
+            prev = latest_by_submission.get(submission.id)
+            if prev is None or review.created_at > prev.created_at:
+                latest_by_submission[submission.id] = review
+        review_project_ids = {s.project_id for s in submissions_by_id.values()}
         projects_by_id = await self._load_projects(review_project_ids)
         review_caps = await self._project_capabilities(projects_by_id, keys)
-        for review, submission in review_rows:
+        for submission_id, review in latest_by_submission.items():
+            submission = submissions_by_id[submission_id]
             project = projects_by_id.get(submission.project_id)
             for cap in review_caps.get(submission.project_id, []):
                 # SubmissionReview.score is on the PROJECT's max_score scale
@@ -237,7 +252,9 @@ class CreatorMatchingService:
                 if review.score is not None:
                     max_score = project.max_score if project and project.max_score else 100
                     score = min(float(review.score) / max(max_score, 1) * 100.0, 100.0)
-                add(cap, "approved_submission", review.id, review.created_at, score)
+                # Evidence id is the SUBMISSION, not the review row, so repeated
+                # approvals of the same work stay a single evidence record.
+                add(cap, "approved_submission", submission_id, review.created_at, score)
 
         # 4. Accepted commercial brief applications
         app_r = await self.db.execute(
