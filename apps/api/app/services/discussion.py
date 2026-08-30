@@ -40,6 +40,20 @@ class DiscussionService:
             parent = await self.db.get(PackDiscussion, parent_id)
             if parent is None or parent.pack_id != pack_id:
                 raise AppError("PARENT_NOT_FOUND", "Parent comment not found in this pack", 404)
+            # R93a: discussions are a TWO-LEVEL model — top-level comments and
+            # their direct replies. list_comments only fetches replies whose
+            # parent is a top-level comment (parent_id IN top_ids), and the web
+            # comment panel renders exactly one reply level. Replying to a reply
+            # (parent itself has a parent) previously succeeded but the L3+
+            # comment was then orphaned — persisted yet never rendered anywhere,
+            # a silent data-loss + confusing UX. Reject it so a reply can only
+            # attach to a top-level comment.
+            if parent.parent_id is not None:
+                raise AppError(
+                    "REPLY_DEPTH_EXCEEDED",
+                    "Replies can only be posted on a top-level comment",
+                    422,
+                )
 
         comment = PackDiscussion(
             pack_id=pack_id,

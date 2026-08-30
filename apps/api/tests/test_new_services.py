@@ -243,6 +243,47 @@ async def test_discussion_threaded_replies(c):
 
 
 @pytest.mark.asyncio
+async def test_discussion_reply_depth_capped_at_two_levels(c):
+    """R93a: discussions are a two-level model — list_comments only fetches
+    replies whose parent is top-level, and the web panel renders one reply
+    level. Replying to a REPLY previously succeeded but the L3 comment was
+    orphaned (persisted, never rendered anywhere). create_comment must reject a
+    reply whose parent is itself a reply, so nothing created is invisible.
+    Reverting the parent.parent_id check lets the L3 reply be created (201) and
+    silently vanish from the tree."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _published_public_pack(c, h, oid)
+
+    top = (await c.post(
+        f"/api/v1/registry/packs/{pid}/discussions", json={"body": "top"}, headers=h
+    )).json()["data"]["id"]
+    reply = (await c.post(
+        f"/api/v1/registry/packs/{pid}/discussions",
+        json={"body": "reply", "parent_id": top},
+        headers=h,
+    )).json()["data"]["id"]
+
+    # reply-to-a-reply is rejected
+    r = await c.post(
+        f"/api/v1/registry/packs/{pid}/discussions",
+        json={"body": "reply to reply", "parent_id": reply},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "REPLY_DEPTH_EXCEEDED"
+
+    # the tree contains exactly the two comments that can render (top + reply),
+    # nothing orphaned
+    comments = (await c.get(f"/api/v1/registry/packs/{pid}/discussions")).json()["data"]
+
+    def _count(nodes):
+        return sum(1 + _count(n.get("replies", [])) for n in nodes)
+
+    assert _count(comments) == 2
+
+
+@pytest.mark.asyncio
 async def test_discussion_delete_own_comment(c):
     """Author can delete their own comment."""
     h, _ = await _auth(c)
