@@ -221,6 +221,17 @@ class PackImportService:
                     "Every skill logical_id must be a non-empty string (max 200 chars)",
                     422,
                 )
+            # R89: install (installation.py) reads skill_def["name"] with a hard
+            # subscript — a manifest skill missing "name" imported fine (only
+            # logical_id was checked) then KeyError-500'd every install. Require
+            # a non-empty name <=200 (the Skill.name VARCHAR bound) here.
+            _s_name = s.get("name")
+            if not isinstance(_s_name, str) or not _s_name.strip() or len(_s_name) > 200:
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Skill '{lid}' name must be a non-empty string (max 200 chars)",
+                    422,
+                )
             prereqs = s.get("prerequisites", [])
             if not isinstance(prereqs, list) or any(
                 not isinstance(p, str) for p in prereqs
@@ -252,6 +263,16 @@ class PackImportService:
                     raise AppError(
                         "INVALID_MANIFEST",
                         f"Exercise logical_id in skill '{lid}' must be a string (max 251 chars)",
+                        422,
+                    )
+                # R89: install reads ex_def["title"] with a hard subscript —
+                # a missing/oversized title KeyError/StringTruncation-500s the
+                # install. Exercise.title is VARCHAR(200).
+                _ex_title = ex.get("title")
+                if not isinstance(_ex_title, str) or not _ex_title.strip() or len(_ex_title) > 200:
+                    raise AppError(
+                        "INVALID_MANIFEST",
+                        f"Exercise title in skill '{lid}' must be a non-empty string (max 200 chars)",
                         422,
                     )
                 if not isinstance(ex.get("config", {}), dict):
@@ -308,6 +329,16 @@ class PackImportService:
                 raise AppError(
                     "INVALID_MANIFEST",
                     "Every template logical_id must be a non-empty string (max 200 chars)",
+                    422,
+                )
+            # R89: install reads tmpl_def["name"] with a hard subscript — a
+            # template missing "name" imported fine then KeyError-500'd every
+            # install. ProjectTemplate.name is VARCHAR(200).
+            _t_name = t.get("name")
+            if not isinstance(_t_name, str) or not _t_name.strip() or len(_t_name) > 200:
+                raise AppError(
+                    "INVALID_MANIFEST",
+                    f"Template '{t_lid}' name must be a non-empty string (max 200 chars)",
                     422,
                 )
 

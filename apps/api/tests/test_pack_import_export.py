@@ -1085,3 +1085,73 @@ async def test_import_nonint_exercise_max_score_rejected_not_500(c):
         headers=h,
     )
     assert r.status_code == 422, r.text[:200]
+
+
+# ── R89b: manifest components missing name/title crash install, not import ──
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_component_missing_name_or_title(c):
+    """R89b guard: install (installation.py) reads skill_def["name"],
+    tmpl_def["name"], ex_def["title"] with hard subscripts. A manifest whose
+    component omits those imported fine (only logical_id was validated) then
+    KeyError-500'd EVERY install of the pack. Import must reject them 422.
+    Reverting the import-side name/title checks fails this."""
+    import copy
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # skill missing name
+    m1 = copy.deepcopy(VALID_MANIFEST)
+    del m1["skills"][0]["name"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("s.zip", _make_zip(m1), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+    # template missing name
+    m2 = copy.deepcopy(VALID_MANIFEST)
+    del m2["project_templates"][0]["name"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("t.zip", _make_zip(m2), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+    # exercise missing title
+    m3 = copy.deepcopy(VALID_MANIFEST)
+    del m3["skills"][0]["exercises"][0]["title"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("e.zip", _make_zip(m3), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+
+@pytest.mark.asyncio
+async def test_import_valid_pack_installs_cleanly(c):
+    """R89b positive: a fully-formed manifest imports AND installs (the install
+    is where the missing-field bug bit) — proves the new checks don't over-reject."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("ok.zip", _make_zip(VALID_MANIFEST), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["data"]["pack"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
