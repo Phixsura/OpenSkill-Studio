@@ -17,6 +17,12 @@ from app.controlplane.models.billing import (  # noqa: F401
     Subscription,
     SubscriptionChange,
 )
+from app.controlplane.models.client_portal import (  # noqa: F401
+    ClientApprovalRecord,
+    ClientGuestLink,
+    ClientPortalMember,
+    ClientShare,
+)
 from app.controlplane.models.credit import (  # noqa: F401
     BudgetPolicy,
     CreditLedgerEntry,
