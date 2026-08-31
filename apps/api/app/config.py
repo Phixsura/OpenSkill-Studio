@@ -56,6 +56,23 @@ class Settings(BaseSettings):
     workflow_step_timeout_seconds: int = 120
     workflow_max_concurrent_runs: int = 20
 
+    # Control plane (Issue #27)
+    platform_currency: str = "USD"
+    trial_days: int = 14
+    trial_expiry_action: str = "downgrade"  # downgrade | suspend
+    impersonation_max_minutes: int = 60
+    client_guest_token_expire_minutes: int = 30
+    reservation_ttl_hours: int = 24
+    billing_provider_default: str = "manual"  # manual | mock | stripe
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    platform_default_commission_pct: str = "30.00"
+    platform_base_domains: list[str] = ["localhost"]
+    domain_verifier: str = "mock"  # mock | dns
+    tls_provisioner: str = "null"  # null | mock
+    outbox_max_attempts: int = 8
+    outbox_batch_size: int = 50
+
     # Frontend
     frontend_url: str = "http://localhost:3000"
 
@@ -65,7 +82,7 @@ class Settings(BaseSettings):
     # API
     api_prefix: str = "/api/v1"
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "platform_base_domains", mode="before")
     @classmethod
     def parse_cors(cls, v: object) -> object:
         if isinstance(v, str):
