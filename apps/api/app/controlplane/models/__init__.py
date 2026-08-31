@@ -13,6 +13,13 @@ from app.controlplane.models.plan import (  # noqa: F401
     ProductPlan,
     TenantEntitlementOverride,
 )
+from app.controlplane.models.pricing import (  # noqa: F401
+    FxRate,
+    PricePolicy,
+    ProviderCostRate,
+    RatedUsage,
+    ReconciliationReport,
+)
 from app.controlplane.models.tenant import (  # noqa: F401
     PlatformRoleAssignment,
     SupportImpersonationGrant,

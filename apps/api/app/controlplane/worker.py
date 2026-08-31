@@ -53,6 +53,15 @@ def register_handler(topic: str):
     return deco
 
 
+def load_handlers() -> None:
+    """Import every handler-bearing module so HANDLERS is fully populated.
+    Called by worker startup AND process_outbox_once (tests)."""
+    import app.controlplane.services.rating  # noqa: F401
+    # P5: reservations (run.terminal); P6: billing (period.close_due);
+    # P7: revenue share (invoice.finalized, purchase.paid);
+    # P10: provisioning (provision.run) — appended as phases land.
+
+
 def _worker_id() -> str:
     return f"{socket.gethostname()}:{id(HANDLERS) & 0xFFFF}"
 
@@ -68,6 +77,7 @@ async def process_outbox_once(db: AsyncSession, topics: list[str] | None = None)
     Each message is claimed with FOR UPDATE SKIP LOCKED so concurrent
     workers never double-consume.
     """
+    load_handlers()
     from sqlalchemy import func as _sql_func
 
     from app.controlplane.models.outbox import OutboxMessage
