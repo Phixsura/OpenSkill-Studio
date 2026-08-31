@@ -201,6 +201,40 @@ async def test_terminated_partner_stops_accruing(db):
 
 
 @pytest.mark.asyncio
+async def test_suspended_partner_still_accrues(db):
+    """R35/C28: SUSPENDED is a temporary payout hold, not a stop. The revenue
+    is still earned, and invoice.finalized fires exactly once — dropping the
+    accrual here would lose it permanently. Only TERMINATED stops accrual."""
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="10")
+    partner.status = "suspended"
+    await db.flush()
+    invoice = await _mk_invoice(db, tenant, subtotal=100000)
+    entry = await revshare_svc.accrue_for_invoice(db, invoice.id)
+    assert entry is not None and entry.share_amount_minor == 10000
+
+
+@pytest.mark.asyncio
+async def test_missing_fx_raises_not_silently_drops(db):
+    """R35/C24: a missing FX rate for a cross-currency accrual must RAISE (so
+    the outbox retries / dead-letters), not return None (which the worker
+    marks done → the accrual is lost forever)."""
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)  # partner currency USD
+    partner.currency = "EUR"
+    tenant = await _mk_tenant(db, user, partner)
+    tenant.currency = "USD"
+    await _mk_rule(db, user, partner, rate="10")
+    await db.flush()
+    invoice = await _mk_invoice(db, tenant, subtotal=100000)  # USD invoice, no USD→EUR rate
+    with pytest.raises(AppError) as exc:
+        await revshare_svc.accrue_for_invoice(db, invoice.id)
+    assert exc.value.code == "REVSHARE_FX_MISSING"
+
+
+@pytest.mark.asyncio
 async def test_rule_versioning_never_rewrites_history(db):
     """Issue §23 acceptance: activating v2 leaves v1-based entries intact."""
     user = await _mk_user(db)

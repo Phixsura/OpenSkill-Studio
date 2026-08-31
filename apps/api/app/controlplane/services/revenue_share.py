@@ -187,8 +187,11 @@ async def accrue_for_invoice(db: AsyncSession, invoice_id: str) -> RevenueShareE
     if tenant is None or tenant.partner_id is None:
         return None  # unattributed — seller shares ride the purchase path
     partner = await db.get(Partner, tenant.partner_id)
-    if partner is None or partner.status != "active":
-        return None  # terminated partners stop accruing (ADR §7.6)
+    if partner is None or partner.status == "terminated":
+        return None  # only TERMINATED stops accruing (ADR §7.6). SUSPENDED is
+        # a temporary payout hold (handled at the settlement stage) — the
+        # revenue is still earned, so accrue it; dropping it here would lose
+        # the accrual permanently (invoice.finalized fires once, never re-runs).
     at = invoice.finalized_at or _now()
     rule = await _resolve_rule(
         db,
@@ -250,7 +253,18 @@ async def accrue_for_invoice(db: AsyncSession, invoice_id: str) -> RevenueShareE
                 invoice_id=invoice.id,
                 pair=f"{invoice.currency}->{partner.currency}",
             )
-            return None  # retried on outbox backoff once an FX rate lands
+            # RAISE, don't return None: a None return signals "nothing to do"
+            # and the outbox marks the message done → the accrual would be
+            # SILENTLY LOST. Raising lets process_outbox_once retry with
+            # backoff (ops adds the FX rate) and, past max attempts,
+            # dead-letter into the platform dashboard's dead_outbox counter
+            # instead of vanishing. All the None returns above are genuine
+            # no-ops (unattributed / no rule / inactive partner) and stay.
+            raise AppError(
+                "REVSHARE_FX_MISSING",
+                f"No FX rate {invoice.currency}->{partner.currency} for invoice accrual",
+                409,
+            )
         rate_val, fx_snapshot = fx
         share = convert_minor(share, rate_val, invoice.currency, partner.currency)
         base = convert_minor(base, rate_val, invoice.currency, partner.currency)
