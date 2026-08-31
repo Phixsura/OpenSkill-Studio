@@ -120,6 +120,18 @@ def test_compute_billable_matrix():
         )
         == 100 + 1000
     )
+    # R7: markup is per STARTED block → ⌈qty/per⌉, never round-half-up.
+    # A partial block (1400/1000) bills 2 blocks, not 1 (was an under-bill).
+    for qty, blocks in ((1000, 1), (1001, 2), (1400, 2), (2000, 2), (2001, 3)):
+        assert (
+            f(
+                "cost_plus_fixed",
+                {"fixed_markup_minor": 500, "per_quantity": "1000"},
+                internal_cost_minor=0,
+                quantity=Decimal(qty),
+            )
+            == 500 * blocks
+        ), qty
     # fixed unit price: 3 minor per 1000 tokens × 2000 tokens = 6
     assert (
         f(

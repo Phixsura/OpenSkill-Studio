@@ -2,7 +2,7 @@
 (ADR-014 §4.3). Consumes outbox usage.recorded; rate_pending() batch-scans."""
 
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 
 import structlog
 from sqlalchemy import and_, or_, select
@@ -81,8 +81,11 @@ def compute_billable_minor(
         )
     if policy_type == "cost_plus_fixed":
         per = Decimal(str(params.get("per_quantity", "1")))
-        units = (quantity / per).quantize(Decimal("1"), rounding=ROUND_HALF_UP) if per else 1
-        return internal_cost_minor + int(params["fixed_markup_minor"]) * max(int(units), 1)
+        # markup applies per STARTED block → ceiling, not round (ADR §4.2:
+        # markup×⌈qty/per⌉). ROUND_HALF_UP under-billed any partial block
+        # (1400/1000 → 1 instead of 2).
+        units = int((quantity / per).to_integral_value(rounding=ROUND_CEILING)) if per else 1
+        return internal_cost_minor + int(params["fixed_markup_minor"]) * max(units, 1)
     if policy_type == "fixed_unit_price":
         per = Decimal(str(params.get("per_quantity", "1")))
         price = Decimal(int(params["unit_price_minor"]))
