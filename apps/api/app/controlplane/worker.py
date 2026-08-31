@@ -57,9 +57,9 @@ def load_handlers() -> None:
     """Import every handler-bearing module so HANDLERS is fully populated.
     Called by worker startup AND process_outbox_once (tests)."""
     import app.controlplane.services.rating  # noqa: F401
-    # P5: reservations (run.terminal); P6: billing (period.close_due);
-    # P7: revenue share (invoice.finalized, purchase.paid);
-    # P10: provisioning (provision.run) — appended as phases land.
+    import app.controlplane.services.settlement_handlers  # noqa: F401
+    # P6: billing (period.close_due); P7: revenue share (invoice.finalized,
+    # purchase.paid); P10: provisioning (provision.run) — appended as phases land.
 
 
 def _worker_id() -> str:
@@ -202,6 +202,28 @@ async def _sweep_seats(ctx: dict) -> None:
         log.info("cp_seats_swept", events=n)
 
 
+async def _expire_reservations(ctx: dict) -> None:
+    from app.controlplane.services.credits import expire_stale_reservations
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        n = await expire_stale_reservations(db)
+        await db.commit()
+        if n:
+            log.info("cp_reservations_expired", count=n)
+
+
+async def _expire_promos(ctx: dict) -> None:
+    from app.controlplane.services.credits import expire_promotional
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        n = await expire_promotional(db)
+        await db.commit()
+        if n:
+            log.info("cp_promos_expired", count=n)
+
+
 async def _flush_api_counters(ctx: dict) -> None:
     from app.controlplane.services.metering import flush_api_request_counters
     from app.core.database import AsyncSessionLocal
@@ -227,7 +249,9 @@ def _cron_jobs() -> list:
         cron(_sweep_storage, hour=3, minute=23, name="cp_storage_sweep"),
         cron(_sweep_seats, day={1}, hour=4, minute=17, name="cp_seat_sweep"),
         cron(_flush_api_counters, minute=5, name="cp_api_flush"),
-        # P5: reservation expiry, promo credit expiry
+        # P5 sweeps: reservation expiry every 30 min; promo expiry daily 02:37
+        cron(_expire_reservations, minute={7, 37}, name="cp_reservation_expiry"),
+        cron(_expire_promos, hour=2, minute=37, name="cp_promo_expiry"),
         # P6: period close scan
         # P10: tls refresh
     ]

@@ -507,7 +507,15 @@ class EvaluationService:
         }
 
     async def check_budget(self, org_id: str) -> bool:
-        """Return True if under budget (or no budget set)."""
+        """Return True if under budget (or no budget set).
+
+        Issue #27 §17: the legacy settings check stays as the fast path (it
+        reads EvalUsageMonthly, the display ledger), and the control-plane
+        BudgetService is enforced on top — one budget SYSTEM with a
+        compatibility read. A legacy settings value with no policy row is
+        lazily converted by update_eval_settings' write-through; until then
+        both checks agree because upsert_from_eval_settings mirrors it.
+        """
         from app.models.organization import Organization
 
         org = await self.db.get(Organization, org_id)
@@ -516,22 +524,36 @@ class EvaluationService:
 
         eval_settings = (org.settings or {}).get("ai_evaluation", {})
         budget = _coerce_budget(eval_settings.get("monthly_budget_usd"))
-        if budget is None:
-            return True
-
-        current_month = date.today().replace(day=1)
-        result = await self.db.execute(
-            select(EvalUsageMonthly).where(
-                EvalUsageMonthly.org_id == org_id,
-                EvalUsageMonthly.month == current_month,
+        if budget is not None:
+            current_month = date.today().replace(day=1)
+            result = await self.db.execute(
+                select(EvalUsageMonthly).where(
+                    EvalUsageMonthly.org_id == org_id,
+                    EvalUsageMonthly.month == current_month,
+                )
             )
-        )
-        usage = result.scalar_one_or_none()
-        # No usage row means $0 spent — still subject to the budget. Returning
-        # True unconditionally here let a 0-budget org run its first eval of
-        # every month.
-        spent = float(usage.total_cost_usd) if usage is not None else 0.0
-        return spent < budget
+            usage = result.scalar_one_or_none()
+            # No usage row means $0 spent — still subject to the budget.
+            spent = float(usage.total_cost_usd) if usage is not None else 0.0
+            if spent >= budget:
+                return False
+
+        # Control-plane budgets: org/tenant policies + tenant AI ceiling.
+        try:
+            from app.controlplane.services import budgets as cp_budgets
+            from app.controlplane.services.tenants import get_tenant_for_org
+
+            tenant = await get_tenant_for_org(self.db, org_id)
+            await cp_budgets.check(self.db, tenant, org_id)
+        except AppError as exc:
+            if exc.code == "BUDGET_EXCEEDED":
+                return False
+            if exc.code == "TENANT_NOT_FOUND":
+                # Org row exists but tenant resolution failed (should not
+                # happen post-backfill) — legacy check already passed above.
+                return True
+            raise
+        return True
 
     # ── Settings ──
 
@@ -580,6 +602,19 @@ class EvaluationService:
         current["ai_evaluation"] = eval_cfg
         org.settings = current
         await self.db.flush()
+
+        # Issue #27 §17 (ONE budget system): write-through the monthly budget
+        # into a control-plane BudgetPolicy (org scope). The settings mirror
+        # stays for the existing UI; enforcement lives in BudgetService.
+        if "monthly_budget_usd" in updates:
+            from app.controlplane.services import budgets as cp_budgets
+
+            await cp_budgets.upsert_from_eval_settings(
+                self.db,
+                tenant_id=org.tenant_id,
+                org_id=org_id,
+                monthly_budget_usd=_coerce_budget(eval_cfg.get("monthly_budget_usd")),
+            )
 
         return await self.get_eval_settings(org_id)
 

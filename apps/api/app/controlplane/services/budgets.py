@@ -1,0 +1,214 @@
+"""Budget policies + multi-scope enforcement (ADR-014 §5.4).
+
+ALL matching active policies are enforced (defense in layers — not
+most-specific-only). Spent amounts come from RatedUsage billable sums.
+"""
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from decimal import Decimal
+from zoneinfo import ZoneInfo
+
+import structlog
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.controlplane.models.credit import BudgetPolicy
+from app.controlplane.models.pricing import RatedUsage
+from app.controlplane.models.tenant import TenantAccount
+from app.controlplane.models.usage import UsageEvent
+from app.exceptions import AppError
+
+log = structlog.get_logger()
+
+
+@dataclass
+class BudgetDecision:
+    allowed: bool = True
+    warnings: list[dict] = field(default_factory=list)
+
+
+def _period_start(period: str, tz_name: str) -> datetime:
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001 — bad tz falls back to UTC
+        tz = UTC
+    now_local = datetime.now(tz)
+    if period == "daily":
+        start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:  # monthly
+        start = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return start.astimezone(UTC)
+
+
+def policy_matches(
+    policy: BudgetPolicy,
+    *,
+    org_id: str | None,
+    project_id: str | None,
+    cohort_id: str | None,
+    user_id: str | None,
+    capability: str | None,
+    usage_type: str | None,
+) -> bool:
+    """Scope + optional narrowing match (pure logic, unit-tested)."""
+    scope_ok = (
+        policy.scope_type == "tenant"
+        or (policy.scope_type == "org" and policy.scope_id == org_id)
+        or (policy.scope_type == "project" and project_id and policy.scope_id == project_id)
+        or (policy.scope_type == "cohort" and cohort_id and policy.scope_id == cohort_id)
+        or (policy.scope_type == "user" and user_id and policy.scope_id == user_id)
+    )
+    if not scope_ok:
+        return False
+    if policy.capability_key is not None and policy.capability_key != capability:
+        return False
+    if policy.usage_type is not None and policy.usage_type != usage_type:
+        return False
+    return True
+
+
+async def _spent_minor(db: AsyncSession, tenant: TenantAccount, policy: BudgetPolicy) -> int:
+    start = _period_start(policy.period, tenant.timezone)
+    q = (
+        select(func.coalesce(func.sum(RatedUsage.billable_amount_minor), 0))
+        .select_from(RatedUsage)
+        .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
+        .where(
+            RatedUsage.tenant_id == tenant.id,
+            RatedUsage.status.in_(["rated", "invoiced"]),
+            RatedUsage.billable_currency == policy.currency,
+            RatedUsage.rated_at >= start,
+        )
+    )
+    if policy.scope_type == "org":
+        q = q.where(RatedUsage.org_id == policy.scope_id)
+    elif policy.scope_type == "project":
+        q = q.where(UsageEvent.project_id == policy.scope_id)
+    elif policy.scope_type == "user":
+        q = q.where(UsageEvent.user_id == policy.scope_id)
+    # cohort scope resolves through project metadata in v1 — no direct dim on
+    # usage events; enforced only when project→cohort linkage exists (ADR note)
+    if policy.usage_type is not None:
+        q = q.where(RatedUsage.usage_type == policy.usage_type)
+    return (await db.execute(q)).scalar_one()
+
+
+async def check(
+    db: AsyncSession,
+    tenant: TenantAccount,
+    org_id: str | None,
+    *,
+    project_id: str | None = None,
+    cohort_id: str | None = None,
+    user_id: str | None = None,
+    capability: str | None = None,
+    usage_type: str | None = None,
+    projected_minor: int = 0,
+) -> BudgetDecision:
+    decision = BudgetDecision()
+    policies = (
+        (
+            await db.execute(
+                select(BudgetPolicy).where(
+                    BudgetPolicy.tenant_id == tenant.id,
+                    BudgetPolicy.is_active.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    matched = [
+        p
+        for p in policies
+        if policy_matches(
+            p,
+            org_id=org_id,
+            project_id=project_id,
+            cohort_id=cohort_id,
+            user_id=user_id,
+            capability=capability,
+            usage_type=usage_type,
+        )
+    ]
+
+    # Tenant entitlement ceiling: max_ai_budget_usd_month acts as an implicit
+    # tenant-scope monthly policy (no BudgetPolicy row needed).
+    from app.controlplane.services.entitlements import get_effective
+
+    eff = await get_effective(db, tenant)
+    ceiling = eff.get("max_ai_budget_usd_month")
+    if ceiling is not None:
+        implicit = BudgetPolicy(
+            tenant_id=tenant.id,
+            scope_type="tenant",
+            period="monthly",
+            limit_minor=int(Decimal(str(ceiling)) * 100),
+            currency="USD",
+            hard_stop=True,
+            warning_threshold_pct=80,
+        )
+        matched.append(implicit)
+
+    for policy in matched:
+        spent = await _spent_minor(db, tenant, policy)
+        projected_total = spent + projected_minor
+        if projected_total > policy.limit_minor:
+            if policy.hard_stop:
+                raise AppError(
+                    "BUDGET_EXCEEDED",
+                    f"Budget exceeded ({policy.scope_type}/{policy.period}: "
+                    f"{projected_total} > {policy.limit_minor} {policy.currency})",
+                    429,
+                )
+            decision.warnings.append(
+                {"policy_id": policy.id, "scope": policy.scope_type, "over": True}
+            )
+        elif projected_total >= policy.limit_minor * policy.warning_threshold_pct // 100:
+            decision.warnings.append(
+                {"policy_id": policy.id, "scope": policy.scope_type, "threshold": True}
+            )
+    return decision
+
+
+async def upsert_from_eval_settings(
+    db: AsyncSession, tenant_id: str, org_id: str, monthly_budget_usd: float | None
+) -> None:
+    """Write-through from PUT /orgs/{id}/settings/evaluation (issue §17 —
+    ONE budget system). None removes the org-scope policy."""
+    existing = (
+        await db.execute(
+            select(BudgetPolicy).where(
+                BudgetPolicy.tenant_id == tenant_id,
+                BudgetPolicy.scope_type == "org",
+                BudgetPolicy.scope_id == org_id,
+                BudgetPolicy.period == "monthly",
+                BudgetPolicy.capability_key.is_(None),
+                BudgetPolicy.usage_type.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if monthly_budget_usd is None:
+        if existing is not None:
+            await db.delete(existing)
+            await db.flush()
+        return
+    limit_minor = int(Decimal(str(monthly_budget_usd)) * 100)
+    if existing is not None:
+        existing.limit_minor = limit_minor
+        existing.is_active = True
+    else:
+        db.add(
+            BudgetPolicy(
+                tenant_id=tenant_id,
+                scope_type="org",
+                scope_id=org_id,
+                period="monthly",
+                limit_minor=limit_minor,
+                currency="USD",
+                hard_stop=True,
+                metadata_={"source": "eval_settings"},
+            )
+        )
+    await db.flush()

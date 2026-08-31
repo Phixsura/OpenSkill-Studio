@@ -461,6 +461,24 @@ class WorkflowRuntimeService:
                     return existing
             raise
 
+        # Issue #27 §5.3: credit reservation (opt-in via tenant metadata
+        # credit_enforcement). Same transaction as run creation — a failed
+        # reserve (INSUFFICIENT_CREDIT 402) aborts the run atomically; the
+        # run.terminal outbox handler settles ACTUAL usage or releases.
+        if bool((tenant.metadata_ or {}).get("credit_enforcement")):
+            from app.controlplane.services import credits as _credits
+
+            estimate = await _credits.estimate_run_cost_minor(self.db, definition, org_id)
+            if estimate > 0:
+                await _credits.reserve(
+                    self.db,
+                    tenant.id,
+                    tenant.currency,
+                    estimate,
+                    reference_type="workflow_run",
+                    reference_id=run.id,
+                )
+
         # Pre-create all step runs as PENDING
         for step in definition.get("steps", []):
             self.db.add(

@@ -6,6 +6,12 @@ Alembic's env.py and app startup import this package explicitly instead.
 """
 
 from app.controlplane.models.audit import CommercialAuditEvent  # noqa: F401
+from app.controlplane.models.credit import (  # noqa: F401
+    BudgetPolicy,
+    CreditLedgerEntry,
+    CreditReservation,
+    TenantCreditBalance,
+)
 from app.controlplane.models.outbox import OutboxMessage  # noqa: F401
 from app.controlplane.models.plan import (  # noqa: F401
     PlanPrice,
