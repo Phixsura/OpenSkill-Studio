@@ -38,6 +38,7 @@ from app.api.v1.endpoints import (
 )
 from app.controlplane.api import billing as cp_billing
 from app.controlplane.api import credits as cp_credits
+from app.controlplane.api import marketplace as cp_marketplace
 from app.controlplane.api import partners as cp_partners
 from app.controlplane.api import plans as cp_plans
 from app.controlplane.api import platform as cp_platform
@@ -90,3 +91,4 @@ api_v1_router.include_router(cp_pricing.router)
 api_v1_router.include_router(cp_credits.router)
 api_v1_router.include_router(cp_billing.router)
 api_v1_router.include_router(cp_partners.router)
+api_v1_router.include_router(cp_marketplace.router)

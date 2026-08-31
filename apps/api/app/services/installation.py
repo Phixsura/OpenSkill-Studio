@@ -98,6 +98,16 @@ class InstallationService:
             if grant.scalar_one_or_none() is None:
                 raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
+        # Issue #27 §8.4: marketplace license gate — after the visibility gate,
+        # before any content is copied. Paid/partner_only listings need a
+        # covering active grant; included_with_plan checks the buyer's plan.
+        from app.controlplane import facade as cp_facade
+        from app.models.organization import Organization as _CpOrg
+
+        _org = await self.db.get(_CpOrg, org_id)
+        if _org is not None:
+            await cp_facade.check_install_license(self.db, "skill_pack", pack_id, _org)
+
         # Get release (latest if no version specified)
         if version:
             release_r = await self.db.execute(
@@ -559,6 +569,15 @@ class InstallationService:
             raise AppError("INSTALL_FORKED", "Cannot upgrade a forked installation", 422)
         if inst.pack_id is None:
             raise AppError("NO_SOURCE", "Installation source pack is unavailable", 422)
+
+        # Issue #27 §8.4: upgrades re-verify the license (revoked license
+        # blocks upgrades; major_locked grants block newer majors).
+        from app.controlplane.services.marketplace import check_upgrade_license
+        from app.models.organization import Organization as _CpOrg
+
+        _org = await self.db.get(_CpOrg, org_id)
+        if _org is not None:
+            await check_upgrade_license(self.db, "skill_pack", inst.pack_id, _org, target_version)
 
         # Get target release
         release_r = await self.db.execute(

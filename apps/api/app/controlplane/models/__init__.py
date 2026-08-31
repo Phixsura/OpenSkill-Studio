@@ -23,6 +23,11 @@ from app.controlplane.models.credit import (  # noqa: F401
     CreditReservation,
     TenantCreditBalance,
 )
+from app.controlplane.models.marketplace import (  # noqa: F401
+    LicenseGrant,
+    MarketplaceListing,
+    MarketplacePurchase,
+)
 from app.controlplane.models.outbox import OutboxMessage  # noqa: F401
 from app.controlplane.models.partner import (  # noqa: F401
     Partner,
