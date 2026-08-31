@@ -232,7 +232,18 @@ async def get_me(
         }
         for t, role in tenant_rows
     ]
-    partner_memberships: list[dict] = []  # populated when partners land (P7)
+    from app.controlplane.models.partner import Partner, PartnerMember
+
+    partner_rows = (
+        await db.execute(
+            select(Partner, PartnerMember.role)
+            .join(PartnerMember, PartnerMember.partner_id == Partner.id)
+            .where(PartnerMember.user_id == user.id)
+        )
+    ).all()
+    partner_memberships = [
+        {"partner_id": p.id, "name": p.name, "role": role} for p, role in partner_rows
+    ]
 
     # Impersonation banner: decode the presented token's imp claims (the
     # signature was already verified by get_current_user).

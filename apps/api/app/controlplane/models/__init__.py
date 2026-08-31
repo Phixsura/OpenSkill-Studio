@@ -24,6 +24,13 @@ from app.controlplane.models.credit import (  # noqa: F401
     TenantCreditBalance,
 )
 from app.controlplane.models.outbox import OutboxMessage  # noqa: F401
+from app.controlplane.models.partner import (  # noqa: F401
+    Partner,
+    PartnerMember,
+    RevenueShareEntry,
+    RevenueShareRule,
+    SettlementStatement,
+)
 from app.controlplane.models.plan import (  # noqa: F401
     PlanPrice,
     PlanVersion,

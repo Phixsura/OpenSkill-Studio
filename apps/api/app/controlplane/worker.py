@@ -58,8 +58,8 @@ def load_handlers() -> None:
     Called by worker startup AND process_outbox_once (tests)."""
     import app.controlplane.services.billing  # noqa: F401
     import app.controlplane.services.rating  # noqa: F401
+    import app.controlplane.services.revenue_share  # noqa: F401
     import app.controlplane.services.settlement_handlers  # noqa: F401
-    # P7: revenue share (invoice.finalized, purchase.paid);
     # P10: provisioning (provision.run) — appended as phases land.
 
 
