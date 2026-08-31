@@ -341,6 +341,18 @@ class OrgService:
         member = await self._get_active_member(org_id, user_id)
         old_role = member.role
 
+        # Issue #27 §2.5: a role change that moves a member INTO a seat class
+        # it did not previously occupy consumes a seat of that class — gate it,
+        # else the seat quota is bypassable by add-then-promote (add a student
+        # under the learner cap, promote to instructor past the staff cap).
+        staff_roles = (OrgRole.INSTRUCTOR, OrgRole.ADMIN, OrgRole.OWNER)
+        old_staff = old_role in staff_roles
+        new_staff = new_role in staff_roles
+        if new_staff and not old_staff:
+            await self._check_seat_quota(org_id, new_role)  # student → staff
+        elif new_role == OrgRole.STUDENT and old_role != OrgRole.STUDENT:
+            await self._check_seat_quota(org_id, OrgRole.STUDENT)  # staff → student
+
         # Prevent removing the last owner — lock owner rows to serialize
         # concurrent demotions and prevent TOCTOU race to zero owners
         if old_role == OrgRole.OWNER and new_role != OrgRole.OWNER:

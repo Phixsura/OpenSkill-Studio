@@ -252,9 +252,18 @@ async def verify_domain(
 ):
     await tenant_svc.require_tenant_member(db, tenant_id, user, "owner")
     domain = await _tenant_domain(db, tenant_id, domain_id)
-    domain = await domain_svc.verify_domain(
-        db, domain, body.token, actor=make_actor(request, user, "tenant")
-    )
+    try:
+        domain = await domain_svc.verify_domain(
+            db, domain, body.token, actor=make_actor(request, user, "tenant")
+        )
+    except AppError as exc:
+        # A failed verify increments verify_attempts (and flips to 'failed' on
+        # the 3rd) but the service raises before the endpoint's commit — without
+        # this the increment rolls back and MAX_VERIFY_ATTEMPTS never persists
+        # (attempts reset every request). Persist the counter, then re-raise.
+        if exc.code == "DOMAIN_VERIFY_FAILED":
+            await db.commit()
+        raise
     await db.commit()
     return DataResponse(data=_domain_response(domain))
 

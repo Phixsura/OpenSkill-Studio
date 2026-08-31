@@ -391,3 +391,47 @@ async def test_seat_quota_blocks_new_addition_not_existing(db):
     student = await _mk_user(db)
     member = await svc.add_member(org.id, student.id, OrgRole.STUDENT)
     assert member is not None
+
+
+@pytest.mark.asyncio
+async def test_seat_quota_not_bypassable_by_role_promotion(db):
+    """R27/C0: add-then-promote must not slip past the staff seat cap — a
+    student promoted to instructor consumes a staff seat and is gated."""
+    from app.models.organization import OrgRole
+    from app.services.organization import OrgService
+
+    owner = await _mk_user(db)
+    svc = OrgService(db)
+    org = await svc.create(
+        name=f"Promote {ULID()}",
+        slug=f"promote-{str(ULID()).lower()}",
+        description=None,
+        created_by=owner.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    # Staff cap = 1 (the owner). Adding a student is fine (learner seat)...
+    await plan_svc.set_override(
+        db, tenant.id, "max_instructors", value=1, enforcement="hard",
+        expires_at=None, reason="cap", actor=_actor(owner),
+    )
+    student = await _mk_user(db)
+    await svc.add_member(org.id, student.id, OrgRole.STUDENT)
+    # ...but promoting that student to instructor would be a 2nd staff seat → blocked
+    with pytest.raises(AppError) as exc:
+        await svc.update_member_role(org.id, student.id, OrgRole.INSTRUCTOR, owner.id)
+    assert exc.value.code == "QUOTA_EXCEEDED"
+    # Demotion (staff → student) is never blocked by the staff cap
+    # (raise the learner cap so the demotion's student-seat check passes)
+    await plan_svc.set_override(
+        db, tenant.id, "max_active_learners", value=100, enforcement="hard",
+        expires_at=None, reason="cap", actor=_actor(owner),
+    )
+    instr = await _mk_user(db)
+    # free a staff seat first by lifting the cap, add an instructor, then demote
+    await plan_svc.set_override(
+        db, tenant.id, "max_instructors", value=10, enforcement="hard",
+        expires_at=None, reason="cap", actor=_actor(owner),
+    )
+    await svc.add_member(org.id, instr.id, OrgRole.INSTRUCTOR)
+    demoted = await svc.update_member_role(org.id, instr.id, OrgRole.STUDENT, owner.id)
+    assert demoted.role == OrgRole.STUDENT

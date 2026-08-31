@@ -790,6 +790,12 @@ class WorkflowRuntimeService:
         # run_cancelled event for a run that was never cancelled.
         if result.rowcount:
             self.db.add(WorkflowRunEvent(run_id=run_id, event_type="run_cancelled", payload={}))
+            # Emit run.terminal so the held credit reservation is settled/
+            # released. Without this a credit-enforced tenant's estimate stays
+            # reserved until the 36h expiry sweep — cancel is a terminal state
+            # exactly like completed/failed and must release the hold now.
+            await self.db.refresh(run)
+            await _emit_run_terminal(self.db, run, "cancelled")
         await self.db.flush()
         await self.db.refresh(run)
         return run
