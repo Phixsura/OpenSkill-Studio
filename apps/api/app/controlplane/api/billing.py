@@ -323,7 +323,7 @@ async def cancel_subscription(
 @router.get("/tenants/{tenant_id}/invoices", dependencies=[Depends(rate_limit(30, 60))])
 async def list_invoices(
     tenant_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

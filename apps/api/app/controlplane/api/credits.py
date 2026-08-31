@@ -146,7 +146,7 @@ async def credit_balances(
 async def credit_ledger(
     tenant_id: str,
     currency: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -178,7 +178,7 @@ async def credit_ledger(
 async def list_reservations(
     tenant_id: str,
     status: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

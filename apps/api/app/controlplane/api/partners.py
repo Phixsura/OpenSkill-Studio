@@ -537,7 +537,7 @@ async def partner_entries(
     partner_id: str,
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     status: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
