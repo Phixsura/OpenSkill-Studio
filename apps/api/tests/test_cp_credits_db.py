@@ -349,6 +349,40 @@ async def test_promo_expiry(db):
     assert len(entries) == 1
 
 
+@pytest.mark.asyncio
+async def test_expire_stale_reservations(db):
+    """R22: the reservation-expiry sweep releases an expired non-running hold
+    (freeing reserved credit) and leaves a still-valid hold untouched."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    await credit_svc.top_up(db, tenant.id, "USD", 1000, actor=a)
+    stale = await credit_svc.reserve(
+        db, tenant.id, "USD", 300, reference_type="manual", reference_id="stale-ref"
+    )
+    stale.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    fresh = await credit_svc.reserve(
+        db, tenant.id, "USD", 200, reference_type="manual", reference_id="fresh-ref"
+    )
+    await db.flush()
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert balance.reserved_minor == 500
+
+    handled = await credit_svc.expire_stale_reservations(db)
+    await db.flush()
+    assert handled >= 1
+    await db.refresh(stale)
+    await db.refresh(fresh)
+    await db.refresh(balance)
+    assert stale.status == "released"
+    assert fresh.status == "held"
+    assert balance.reserved_minor == 200  # only the stale hold freed
+
+
 # ── Budgets ──────────────────────────────────────────────────
 
 

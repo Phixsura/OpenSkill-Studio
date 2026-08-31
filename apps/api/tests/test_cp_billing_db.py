@@ -339,6 +339,90 @@ async def test_period_close_generates_invoice_lines(db):
 
 
 @pytest.mark.asyncio
+async def test_invoice_excludes_foreign_currency_usage_and_credit(db):
+    """R21: a USD invoice bills ONLY USD-currency rated rows and applies ONLY
+    USD credit — a foreign (EUR) rated row or credit balance never leaks in."""
+    from decimal import Decimal
+
+    from ulid import ULID as _ULID
+
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    org = "01JFAKEORGFAKEORGFAKEORGFA"
+    now = datetime.now(UTC) - timedelta(minutes=5)
+
+    async def seed(billable, currency):
+        eid = str(_ULID())
+        db.add(
+            UsageEvent(
+                id=eid,
+                tenant_id=tenant.id,
+                org_id=org,
+                usage_type="image_generation",
+                quantity=Decimal(1),
+                unit="images",
+                occurred_at=now,
+                source="manual",
+            )
+        )
+        await db.flush()
+        db.add(
+            RatedUsage(
+                usage_event_id=eid,
+                tenant_id=tenant.id,
+                org_id=org,
+                usage_type="image_generation",
+                quantity=Decimal(1),
+                cost_rate_snapshot={},
+                internal_cost_minor=0,
+                internal_cost_currency="USD",
+                sell_rate_snapshot={},
+                billable_amount_minor=billable,
+                billable_currency=currency,
+                status="rated",
+                rated_at=now,
+            )
+        )
+        await db.flush()
+
+    await seed(300, "USD")  # bills
+    await seed(999, "EUR")  # must not bill
+    await credit_svc.top_up(db, tenant.id, "EUR", 100000, actor=a)  # must not apply
+
+    period = (
+        await db.execute(select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
+    ).scalar_one()
+    period.period_end = datetime.now(UTC) - timedelta(seconds=1)
+    await db.flush()
+    invoice = await billing_svc.close_period_and_invoice(db, period.id)
+    assert invoice is not None and invoice.currency == "USD"
+    lines = (
+        (await db.execute(select(InvoiceLine).where(InvoiceLine.invoice_id == invoice.id)))
+        .scalars()
+        .all()
+    )
+    usage_total = sum(line.amount_minor for line in lines if line.line_type == "usage")
+    assert usage_total == 300, usage_total  # EUR 999 excluded
+    assert not [line for line in lines if line.line_type == "credit"]  # EUR credit not applied
+    # EUR rated row remains unbilled
+    eur = (
+        await db.execute(
+            select(RatedUsage).where(
+                RatedUsage.tenant_id == tenant.id, RatedUsage.billable_currency == "EUR"
+            )
+        )
+    ).scalar_one()
+    assert eur.status == "rated"
+
+
+@pytest.mark.asyncio
 async def test_finalized_invoice_immutable_and_credit_note(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
