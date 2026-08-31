@@ -613,12 +613,13 @@ async def test_run_terminal_settles_actual_usage():
             await db.commit()
             tid = tenant.id
 
-        # Drain until quiet: a full-suite run leaves backlog from earlier
-        # tests, and each pass handles at most outbox_batch_size messages —
-        # a fixed two passes may never reach OUR message.
+        # Drain until quiet, SCOPED to this test's topics — a full-suite run
+        # leaves unrelated backlog that would otherwise exhaust the pass
+        # budget before reaching our messages. usage.recorded rates the
+        # events; run.terminal then settles the reservation with actual usage.
         for _ in range(30):
             async with AsyncSessionLocal() as db:
-                if await process_outbox_once(db) == 0:
+                if await process_outbox_once(db, topics=["usage.recorded", "run.terminal"]) == 0:
                     break
 
         async with AsyncSessionLocal() as db:

@@ -466,10 +466,11 @@ async def test_purchase_accrues_seller_share_via_outbox():
             )
             await db.commit()
             purchase_id, seller_org_id = purchase.id, seller_org.id
-        # Drain until quiet (full-suite backlog can exceed one batch)
+        # Drain until quiet, SCOPED to this test's topic — unrelated
+        # full-suite backlog would otherwise exhaust the pass budget.
         for _ in range(30):
             async with AsyncSessionLocal() as db:
-                if await process_outbox_once(db) == 0:
+                if await process_outbox_once(db, topics=["purchase.paid"]) == 0:
                     break
         async with AsyncSessionLocal() as db:
             entry = (
