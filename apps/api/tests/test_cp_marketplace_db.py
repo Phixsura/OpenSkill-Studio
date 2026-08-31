@@ -484,3 +484,39 @@ async def test_purchase_accrues_seller_share_via_outbox():
             assert entry.share_amount_minor == 7000  # 10000 − 30% fee
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_registry_listings_hides_private_and_draft(db):
+    """R25: the PUBLIC batch price-badge endpoint returns only public-offer
+    active listings — private/partner-only/draft never surface, and no
+    seller-internal fields (commission, seller_tenant_id) leak."""
+    from app.controlplane.api.marketplace import registry_listings
+
+    user = await _mk_user(db)
+    seller_org = await _mk_org(db, user)
+    paid = await _mk_listing(db, seller_org, user, offer_type="paid")
+    private = await _mk_listing(
+        db, seller_org, user, offer_type="private", price_minor=None, currency=None
+    )
+    partner_only = await _mk_listing(
+        db, seller_org, user, offer_type="partner_only", price_minor=5000, currency="USD"
+    )
+    draft = await _mk_listing(db, seller_org, user, offer_type="paid")
+    draft.status = "draft"
+    await db.flush()
+
+    ids = ",".join([paid.product_id, private.product_id, partner_only.product_id, draft.product_id])
+    resp = await registry_listings(product_type="skill_pack", product_ids=ids, db=db)
+    data = resp.data
+
+    assert paid.product_id in data
+    assert private.product_id not in data  # anti-enumeration
+    assert partner_only.product_id not in data  # not for anonymous public
+    assert draft.product_id not in data  # not active
+    # No seller-internal fields in the public payload
+    import json as _json
+
+    blob = _json.dumps(data)
+    for leak in ("commission_pct", "seller_tenant_id", "bill_via_invoice", "seller_org_id"):
+        assert leak not in blob, leak

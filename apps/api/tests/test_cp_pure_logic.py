@@ -87,6 +87,23 @@ async def test_record_audit_rejects_unregistered_action():
         )
 
 
+def test_every_recorded_action_literal_is_registered():
+    """R24 drift guard: every `action="x.y"` literal passed to record_audit
+    across the control-plane services is in AUDIT_ACTIONS — a new call site
+    with an unregistered action would blow up at runtime, so catch it here."""
+    import pathlib
+    import re
+
+    svc_dir = pathlib.Path(__file__).resolve().parent.parent / "app" / "controlplane" / "services"
+    literals: set[str] = set()
+    for f in svc_dir.glob("*.py"):
+        for m in re.finditer(r'action="([a-z_]+\.[a-z_]+)"', f.read_text()):
+            literals.add(m.group(1))
+    assert literals, "no action literals found — scan path wrong?"
+    unregistered = literals - AUDIT_ACTIONS
+    assert not unregistered, f"unregistered audit actions in call sites: {unregistered}"
+
+
 # ── P1: impersonation guard path rules ───────────────────────
 
 
@@ -130,7 +147,6 @@ def test_entitlement_defs_have_valid_types():
 
 
 def test_money_fields_reject_over_int8():
-    import pytest as _pytest
     from pydantic import ValidationError
 
     from app.controlplane.api.billing import CreditNoteRequest, RecordPaymentRequest
@@ -140,35 +156,34 @@ def test_money_fields_reject_over_int8():
         GrantPromoRequest,
     )
 
-    BIG = 10**19  # > int8 max (9.2e18)
-    with _pytest.raises(ValidationError):
-        AdjustCreditRequest(amount_minor=BIG, currency="USD", reason="over")
-    with _pytest.raises(ValidationError):
-        AdjustCreditRequest(amount_minor=-BIG, currency="USD", reason="under")
-    with _pytest.raises(ValidationError):
+    big = 10**19  # > int8 max (9.2e18)
+    with pytest.raises(ValidationError):
+        AdjustCreditRequest(amount_minor=big, currency="USD", reason="over")
+    with pytest.raises(ValidationError):
+        AdjustCreditRequest(amount_minor=-big, currency="USD", reason="under")
+    with pytest.raises(ValidationError):
         GrantPromoRequest(
-            amount_minor=BIG, currency="USD", expires_at="2027-01-01T00:00:00Z", reason="over"
+            amount_minor=big, currency="USD", expires_at="2027-01-01T00:00:00Z", reason="over"
         )
-    with _pytest.raises(ValidationError):
-        BudgetPolicyRequest(scope_type="tenant", period="monthly", limit_minor=BIG, currency="USD")
-    with _pytest.raises(ValidationError):
-        RecordPaymentRequest(amount_minor=BIG, method="other")
-    with _pytest.raises(ValidationError):
-        CreditNoteRequest(amount_minor=BIG, reason="over")
+    with pytest.raises(ValidationError):
+        BudgetPolicyRequest(scope_type="tenant", period="monthly", limit_minor=big, currency="USD")
+    with pytest.raises(ValidationError):
+        RecordPaymentRequest(amount_minor=big, method="other")
+    with pytest.raises(ValidationError):
+        CreditNoteRequest(amount_minor=big, reason="over")
     # A legitimate amount still passes
     AdjustCreditRequest(amount_minor=19900, currency="USD", reason="fine")
 
 
 def test_decimal_string_fields_reject_nan_and_overflow():
-    import pytest as _pytest
     from pydantic import ValidationError
 
+    from app.controlplane.api.partners import CreateRuleRequest
     from app.controlplane.api.pricing import (
         CreateCostRateRequest,
         CreateFxRateRequest,
         CreateReconReportRequest,
     )
-    from app.controlplane.api.partners import CreateRuleRequest
 
     def cost(uc):
         return CreateCostRateRequest(
@@ -182,7 +197,7 @@ def test_decimal_string_fields_reject_nan_and_overflow():
 
     # Numeric(18,8): integer part must stay < 10^10
     for bad in ("NaN", "Infinity", "9" * 30, "-1"):
-        with _pytest.raises((ValidationError, ValueError)):
+        with pytest.raises((ValidationError, ValueError)):
             cost(bad)
     cost("0.018")  # ok
 
@@ -195,7 +210,7 @@ def test_decimal_string_fields_reject_nan_and_overflow():
         )
 
     for bad in ("NaN", "0", "-1", "9" * 30):
-        with _pytest.raises((ValidationError, ValueError)):
+        with pytest.raises((ValidationError, ValueError)):
             fx(bad)
     fx("7.12")
 
@@ -210,7 +225,7 @@ def test_decimal_string_fields_reject_nan_and_overflow():
 
     # Numeric(9,6): integer part < 10^3
     for bad in ("NaN", "9" * 15, "-1"):
-        with _pytest.raises((ValidationError, ValueError)):
+        with pytest.raises((ValidationError, ValueError)):
             rule(bad)
     rule("10.5")
 
@@ -225,6 +240,6 @@ def test_decimal_string_fields_reject_nan_and_overflow():
         )
 
     for bad in ("NaN", "Infinity", "9" * 20, "-1"):
-        with _pytest.raises((ValidationError, ValueError)):
+        with pytest.raises((ValidationError, ValueError)):
             recon(bad)
     recon("1834")

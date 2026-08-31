@@ -226,7 +226,12 @@ async def registry_listings(
     product_ids: str = Query(max_length=2000),
     db: AsyncSession = Depends(get_db),
 ):
-    """Batch price badges for registry cards (≤50 ids, public)."""
+    """Batch price badges for registry cards (≤50 ids, public).
+
+    PUBLIC-offer types only: private (and partner-only) listings must never
+    surface here — private is anti-enumeration (the install gate returns
+    PACK_NOT_FOUND for non-sellers), and partner-only pricing is not for the
+    anonymous public. Restricting the query is the fix (R25 leak)."""
     ids = [i.strip() for i in product_ids.split(",") if i.strip()][:50]
     rows = (
         (
@@ -235,6 +240,7 @@ async def registry_listings(
                     MarketplaceListing.product_type == product_type,
                     MarketplaceListing.product_id.in_(ids),
                     MarketplaceListing.status == "active",
+                    MarketplaceListing.offer_type.in_(("free", "paid", "included_with_plan")),
                 )
             )
         )
