@@ -63,9 +63,7 @@ def policy_matches(
         return False
     if policy.capability_key is not None and policy.capability_key != capability:
         return False
-    if policy.usage_type is not None and policy.usage_type != usage_type:
-        return False
-    return True
+    return policy.usage_type is None or policy.usage_type == usage_type
 
 
 async def _spent_minor(db: AsyncSession, tenant: TenantAccount, policy: BudgetPolicy) -> int:

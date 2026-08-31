@@ -17,6 +17,13 @@ from app.controlplane.models.billing import (  # noqa: F401
     Subscription,
     SubscriptionChange,
 )
+from app.controlplane.models.branding import (  # noqa: F401
+    TenantBlueprint,
+    TenantBranding,
+    TenantDomain,
+    TenantExport,
+    TenantProvisionRun,
+)
 from app.controlplane.models.client_portal import (  # noqa: F401
     ClientApprovalRecord,
     ClientGuestLink,

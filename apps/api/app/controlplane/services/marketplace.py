@@ -103,9 +103,8 @@ async def create_listing(
         raise AppError("LISTING_INVALID", f"Unknown offer type '{offer_type}'", 422)
     if license_scope not in LICENSE_SCOPES:
         raise AppError("LISTING_INVALID", f"Unknown license scope '{license_scope}'", 422)
-    if offer_type in ("paid", "partner_only"):
-        if not price_minor or not currency:
-            raise AppError("LISTING_INVALID", "Paid listings need price and currency", 422)
+    if offer_type in ("paid", "partner_only") and (not price_minor or not currency):
+        raise AppError("LISTING_INVALID", "Paid listings need price and currency", 422)
     if license_scope == "seat_limited" and not seat_limit:
         raise AppError("LISTING_INVALID", "seat_limited listings need seat_limit", 422)
 
@@ -465,9 +464,10 @@ async def _find_covering_grant(
             continue
         if grant.scope == "tenant":
             return grant
-        if grant.scope in ("organization", "seat_limited", "cohort"):
-            if grant.org_id == org_id or grant.org_id is None:
-                return grant
+        if grant.scope in ("organization", "seat_limited", "cohort") and (
+            grant.org_id == org_id or grant.org_id is None
+        ):
+            return grant
     return None
 
 

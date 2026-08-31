@@ -333,7 +333,7 @@ async def test_promo_expiry(db):
     ).scalar_one()
     assert balance.balance_minor == 0
     # Rerun: no-op (lot marked consumed)
-    n2 = await credit_svc.expire_promotional(db)
+    await credit_svc.expire_promotional(db)
     entries = (
         (
             await db.execute(

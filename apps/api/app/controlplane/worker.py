@@ -57,10 +57,10 @@ def load_handlers() -> None:
     """Import every handler-bearing module so HANDLERS is fully populated.
     Called by worker startup AND process_outbox_once (tests)."""
     import app.controlplane.services.billing  # noqa: F401
+    import app.controlplane.services.provisioning  # noqa: F401
     import app.controlplane.services.rating  # noqa: F401
     import app.controlplane.services.revenue_share  # noqa: F401
     import app.controlplane.services.settlement_handlers  # noqa: F401
-    # P10: provisioning (provision.run) — appended as phases land.
 
 
 def _worker_id() -> str:

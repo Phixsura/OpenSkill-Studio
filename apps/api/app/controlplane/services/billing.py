@@ -493,7 +493,7 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         sort += 1
 
     # c. usage lines: un-invoiced rated usage grouped by type
-    from app.controlplane.models.usage import UsageEvent as _UE
+    from app.controlplane.models.usage import UsageEvent
 
     usage_rows = (
         await db.execute(
@@ -503,14 +503,14 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                 func.sum(RatedUsage.quantity).label("qty"),
                 func.count(RatedUsage.id).label("events"),
             )
-            .join(_UE, _UE.id == RatedUsage.usage_event_id)
+            .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
             .where(
                 RatedUsage.tenant_id == tenant.id,
                 RatedUsage.status == "rated",
                 RatedUsage.billable_currency == sub.currency,
                 # In-period CONSUMPTION bills here even if rated late; usage
                 # occurring after period end waits for the next invoice.
-                _UE.occurred_at < period.period_end,
+                UsageEvent.occurred_at < period.period_end,
             )
             .group_by(RatedUsage.usage_type)
         )
@@ -542,7 +542,9 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     for line in lines:
         if line.line_type != "usage":
             continue
-        in_period_event_ids = select(_UE.id).where(_UE.occurred_at < period.period_end)
+        in_period_event_ids = select(UsageEvent.id).where(
+            UsageEvent.occurred_at < period.period_end
+        )
         await db.execute(
             update(RatedUsage)
             .where(

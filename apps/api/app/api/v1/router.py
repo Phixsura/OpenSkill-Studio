@@ -46,6 +46,7 @@ from app.controlplane.api import platform as cp_platform
 from app.controlplane.api import pricing as cp_pricing
 from app.controlplane.api import tenants as cp_tenants
 from app.controlplane.api import usage as cp_usage
+from app.controlplane.api import whitelabel as cp_whitelabel
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(health.router)
@@ -94,3 +95,4 @@ api_v1_router.include_router(cp_billing.router)
 api_v1_router.include_router(cp_partners.router)
 api_v1_router.include_router(cp_marketplace.router)
 api_v1_router.include_router(cp_client_portal.router)
+api_v1_router.include_router(cp_whitelabel.router)

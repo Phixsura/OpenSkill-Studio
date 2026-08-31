@@ -6,6 +6,7 @@ balance_after, balance update. The DB CHECK constraint backstops races.
 """
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import structlog
 from sqlalchemy import select, update
@@ -479,11 +480,9 @@ async def expire_promotional(db: AsyncSession) -> int:
 async def estimate_run_cost_minor(db: AsyncSession, definition: dict, org_id: str) -> int:
     """Rough reservation estimate: Σ provider_action steps × resolved offering
     cost × global markup. Missing data → 0 for that step (pure best-effort)."""
-    from decimal import Decimal as D
-
     from app.models.provider import ProviderConnection, ProviderModelOffering
 
-    total = D(0)
+    total = Decimal(0)
     for step in definition.get("steps", []):
         if step.get("type") != "provider_action":
             continue
@@ -506,6 +505,6 @@ async def estimate_run_cost_minor(db: AsyncSession, definition: dict, org_id: st
             )
         ).scalar_one_or_none()
         if offering is not None and offering.cost_per_call_usd is not None:
-            total += D(str(offering.cost_per_call_usd))
+            total += Decimal(str(offering.cost_per_call_usd))
     # Global fallback markup mirrors the seeded cost+50% policy
-    return int(total * 100 * D("1.5"))
+    return int(total * 100 * Decimal("1.5"))

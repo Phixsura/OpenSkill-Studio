@@ -229,6 +229,12 @@ class EvaluationService:
         if submission is None or submission.org_id != org_id:
             raise AppError("SUBMISSION_NOT_FOUND", "Submission not found", 404)
 
+        # Issue #27: suspended tenants cannot start costed executions
+        from app.controlplane import facade as cp_facade
+
+        tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+        cp_facade.require_tenant_active(tenant)
+
         # AI evaluation must be switched on for the org — the enabled flag
         # was stored but never checked, so a disabled org could still run
         # (and pay for) evaluations.
