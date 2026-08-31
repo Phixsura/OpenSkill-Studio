@@ -446,6 +446,57 @@ async def test_budget_hard_stop_and_ceiling(db):
 
 
 @pytest.mark.asyncio
+async def test_tenant_ai_ceiling_enforced_without_policy_row(db):
+    """R15: max_ai_budget_usd_month entitlement acts as an implicit
+    tenant-scope monthly hard ceiling — enforced with NO BudgetPolicy row."""
+    from app.controlplane.models.plan import TenantEntitlementOverride
+    from app.controlplane.services import metering, rating
+    from app.controlplane.services import pricing as pricing_svc
+    from app.controlplane.services.entitlements import invalidate_cache
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    # $0.50 ceiling = 50 minor
+    db.add(
+        TenantEntitlementOverride(
+            tenant_id=tenant.id,
+            key="max_ai_budget_usd_month",
+            value={"v": "0.5"},
+            reason="probe ceiling",
+            enforcement="hard",
+        )
+    )
+    await db.flush()
+    await invalidate_cache(tenant.id)
+    await pricing_svc.create_price_policy(
+        db,
+        actor=_actor(user),
+        name=f"ceil {ULID()}",
+        policy_type="fixed_unit_price",
+        usage_type="image_generation",
+        currency="USD",
+        params={"unit_price_minor": 100},
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        tenant_id=tenant.id,
+    )
+    event = await metering.emit_usage(
+        db,
+        tenant_id=tenant.id,
+        org_id="01JCEILORGCEILORGCEILORGCE",
+        usage_type="image_generation",
+        quantity=1,  # 100 minor > 50 ceiling
+        occurred_at=datetime.now(UTC),
+        source="manual",
+        idempotency_key=f"ceil-{ULID()}",
+    )
+    await rating.rate_event(db, event.id)
+    # No BudgetPolicy row exists for this org, yet the ceiling blocks
+    with pytest.raises(AppError) as exc:
+        await budget_svc.check(db, tenant, "01JCEILORGCEILORGCEILORGCE")
+    assert exc.value.code == "BUDGET_EXCEEDED"
+
+
+@pytest.mark.asyncio
 async def test_eval_settings_write_through(db):
     """Issue §17: PUT settings/evaluation creates/updates/removes the policy."""
     user = await _mk_user(db)

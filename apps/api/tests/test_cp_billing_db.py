@@ -121,6 +121,43 @@ def test_proration_boundaries_and_seats():
     assert p["seat_proration_minor"] == 2500  # 10 seats × 500 × 15/30
 
 
+def test_proration_downgrade_and_seat_decrease():
+    # R16: downgrade → negative net → next_period_default mode
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    end = datetime(2026, 10, 1, tzinfo=UTC)
+    at = datetime(2026, 9, 11, tzinfo=UTC)  # 20 days left of 30
+    p = billing_svc.proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=49900,
+        new_amount_minor=19900,
+    )
+    assert p["net_minor"] == -20000
+    assert p["mode"] == "next_period_default"
+    # Seat DECREASE must never produce a negative proration (max(delta,0))
+    p = billing_svc.proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=19900,
+        new_amount_minor=19900,
+        old_seats=12,
+        new_seats=0,
+        seat_price_minor=500,
+    )
+    assert p["seat_proration_minor"] == 0
+    # Clock skew: at < period_start clamps days_left to the full period, never > total
+    p = billing_svc.proration_preview(
+        period_start=start,
+        period_end=end,
+        at=datetime(2026, 8, 20, tzinfo=UTC),
+        old_amount_minor=19900,
+        new_amount_minor=49900,
+    )
+    assert p["days_left"] == 30
+
+
 # ── Lifecycle ────────────────────────────────────────────────
 
 
@@ -497,3 +534,107 @@ def test_stripe_webhook_signature_with_fake_secret(monkeypatch):
     # Tampered body fails
     with pytest.raises(AppError):
         StripeProvider().verify_webhook({"stripe-signature": header}, payload + b"tampered")
+
+
+# ── R20: Stripe adapter param assembly + response mapping (thin wrapper) ──
+# Fully monkeypatched SDK — asserts exact params sent and fields mapped back,
+# so a wrong key/mode/price-ref can't silently reach Stripe.
+
+
+def test_stripe_checkout_and_subscription_mapping(monkeypatch):
+    import types
+
+    from app.config import settings as app_settings
+    from app.controlplane.services.billing_providers.stripe import StripeProvider
+
+    monkeypatch.setattr(app_settings, "stripe_secret_key", "sk_test_x")
+    calls: dict = {}
+
+    def cap(name, ret):
+        def f(*a, **kw):
+            calls[name] = {"args": a, "kwargs": kw}
+            return ret
+
+        return f
+
+    fake = types.ModuleType("stripe")
+    fake.api_key = None
+    fake.Customer = types.SimpleNamespace(create=cap("customer", {"id": "cus_1"}))
+    fake.checkout = types.SimpleNamespace(
+        Session=types.SimpleNamespace(
+            create=cap("checkout", {"id": "cs_1", "url": "https://pay"}),
+            retrieve=cap("session", {"payment_status": "paid"}),
+        )
+    )
+    fake.Subscription = types.SimpleNamespace(
+        retrieve=cap("sub_get", {"items": {"data": [{"id": "si_1"}]}}),
+        modify=cap("sub_mod", {"id": "sub_1"}),
+        cancel=cap("sub_cancel", {"id": "sub_1"}),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "stripe", fake)
+
+    p = StripeProvider()
+    tenant = types.SimpleNamespace(id="01TENANT", name="Acme", billing_email="a@b.c")
+
+    async def run():
+        assert (await p.create_customer(tenant)) == "cus_1"
+        assert calls["customer"]["kwargs"]["metadata"]["tenant_id"] == "01TENANT"
+
+        price = types.SimpleNamespace(external_price_ref="price_abc")
+        cs = await p.create_checkout_session(
+            tenant=tenant,
+            kind="subscription",
+            plan_price=price,
+            currency="USD",
+            success_url="https://s",
+            cancel_url="https://c",
+        )
+        assert cs.url == "https://pay" and cs.session_ref == "cs_1"
+        kw = calls["checkout"]["kwargs"]
+        assert kw["mode"] == "subscription"
+        assert kw["line_items"][0]["price"] == "price_abc"
+
+        # subscription checkout with no price ref → 409, never sent
+        with pytest.raises(AppError) as exc:
+            await p.create_checkout_session(
+                tenant=tenant,
+                kind="subscription",
+                plan_price=types.SimpleNamespace(external_price_ref=None),
+                currency="USD",
+                success_url="https://s",
+                cancel_url="https://c",
+            )
+        assert exc.value.code == "PLAN_NOT_AVAILABLE"
+
+        # one-off top-up assembles price_data with lowercased currency
+        await p.create_checkout_session(
+            tenant=tenant,
+            kind="credit_topup",
+            amount_minor=5000,
+            currency="USD",
+            success_url="https://s",
+            cancel_url="https://c",
+        )
+        kw2 = calls["checkout"]["kwargs"]
+        assert kw2["mode"] == "payment"
+        assert kw2["line_items"][0]["price_data"]["unit_amount"] == 5000
+        assert kw2["line_items"][0]["price_data"]["currency"] == "usd"
+
+        # change reuses retrieved item id + disables Stripe-side proration
+        await p.change_subscription("sub_1", "price_new", 5)
+        mk = calls["sub_mod"]["kwargs"]
+        assert mk["items"][0]["id"] == "si_1"
+        assert mk["items"][0]["price"] == "price_new"
+        assert mk["proration_behavior"] == "none"
+
+        # cancel routing
+        await p.cancel_subscription("sub_1", at_period_end=True)
+        assert calls["sub_mod"]["kwargs"].get("cancel_at_period_end") is True
+        await p.cancel_subscription("sub_1", at_period_end=False)
+        assert "sub_cancel" in calls
+
+        assert (await p.fetch_payment_status("cs_1")) == "paid"
+
+    import asyncio
+
+    asyncio.get_event_loop().run_until_complete(run()) if False else asyncio.run(run())
