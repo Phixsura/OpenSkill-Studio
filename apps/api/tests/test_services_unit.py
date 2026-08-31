@@ -489,7 +489,8 @@ async def test_file_too_large():
 
 
 @pytest.mark.asyncio
-async def test_eval_budget_exceeded():
+async def test_eval_budget_exceeded(monkeypatch):
+    from app.controlplane import facade as cp_facade
     from app.services.evaluation import BudgetExceededError, EvaluationService
 
     db = _mock_db()
@@ -499,6 +500,10 @@ async def test_eval_budget_exceeded():
     submission.org_id = "org1"
     db.get = AsyncMock(return_value=submission)
     svc = EvaluationService(db)
+    # Issue #27 suspension gate runs before the budget check — stub an active tenant
+    active_tenant = MagicMock()
+    monkeypatch.setattr(cp_facade, "get_tenant_for_org", AsyncMock(return_value=active_tenant))
+    monkeypatch.setattr(cp_facade, "require_tenant_active", MagicMock())
     # enabled gate now runs before the budget check
     svc.get_eval_settings = AsyncMock(return_value={"enabled": True})
     svc.check_budget = AsyncMock(return_value=False)

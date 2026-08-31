@@ -223,9 +223,12 @@ async def create_purchase(
             "LISTING_NOT_PURCHASABLE", "This listing is available to partner tenants only", 409
         )
     seller_tenant = await db.get(TenantAccount, listing.seller_tenant_id)
+    # Suspended/cancelled/archived sellers can't sell (§8.9); TRIAL can —
+    # listing creation already gates on the paid_marketplace entitlement.
     if seller_tenant is None or seller_tenant.status not in (
         TenantStatus.ACTIVE,
         TenantStatus.PAST_DUE,
+        TenantStatus.TRIAL,
     ):
         raise AppError("LISTING_NOT_PURCHASABLE", "Seller is not currently active", 409)
     covering = await _find_covering_grant(

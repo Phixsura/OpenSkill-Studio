@@ -139,22 +139,26 @@ async def test_domain_flow_verify_activate(db):
     assert domain.hostname == "ai.example-school.com"
     assert domain.status == "pending_verification"
     assert raw not in domain.verification_token_hash
-    # Mock verifier: token must start "ok-" — ours starts "openskill-verify-"
-    # → verification FAILS (proving the verifier is consulted)
+    # Forged token with the passing prefix → hash mismatch BEFORE the verifier
+    # (a valid-looking "ok-" token from another source can't verify)
     with pytest.raises(AppError) as exc:
-        await domain_svc.verify_domain(db, domain, raw, actor=_actor(user))
-    assert exc.value.code == "DOMAIN_VERIFY_FAILED"
-    assert domain.verify_attempts == 1
-    # Wrong token → mismatch
-    with pytest.raises(AppError):
         await domain_svc.verify_domain(db, domain, "ok-forged", actor=_actor(user))
-    # Force-mock a passing token by rewriting the hash (unit-level shortcut)
+    assert exc.value.code == "DOMAIN_VERIFY_FAILED"
+    # Verifier consultation: rewrite the hash to a NON-passing token → the
+    # mock verifier rejects it and counts the attempt
     import hashlib
 
-    passing = "ok-" + raw
-    domain.verification_token_hash = hashlib.sha256(passing.encode()).hexdigest()
+    non_passing = "openskill-verify-x"
+    domain.verification_token_hash = hashlib.sha256(non_passing.encode()).hexdigest()
     await db.flush()
-    domain = await domain_svc.verify_domain(db, domain, passing, actor=_actor(user))
+    with pytest.raises(AppError) as exc2:
+        await domain_svc.verify_domain(db, domain, non_passing, actor=_actor(user))
+    assert exc2.value.code == "DOMAIN_VERIFY_FAILED"
+    assert domain.verify_attempts == 1
+    # Restore the real token → passes (mock mode issues "ok-" tokens)
+    domain.verification_token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    await db.flush()
+    domain = await domain_svc.verify_domain(db, domain, raw, actor=_actor(user))
     assert domain.status == "verified"
     domain = await domain_svc.activate_domain(db, domain, actor=_actor(user))
     assert domain.status == "active"

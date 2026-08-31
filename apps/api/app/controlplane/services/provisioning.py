@@ -212,7 +212,10 @@ async def execute_provision_run(db: AsyncSession, run_id: str) -> None:
             ]
             org = await OrgService(db).create(
                 name=org_name,
-                slug=None,  # auto-generated from name
+                # Slug from the run's unique requested_slug, NOT the name
+                # template — two runs of the same blueprint would otherwise
+                # collide on the derived slug.
+                slug=run.requested_slug[:100],
                 description=None,
                 created_by=creator,
                 tenant_id=tenant.id,

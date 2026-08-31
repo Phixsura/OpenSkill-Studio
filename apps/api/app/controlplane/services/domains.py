@@ -158,7 +158,11 @@ async def create_domain(
     if taken is not None:
         # Uniform message — never reveals WHICH tenant holds it
         raise AppError("DOMAIN_TAKEN", "This domain is already registered", 409)
-    raw_token = f"openskill-verify-{secrets.token_urlsafe(24)}"
+    # Mock verifier passes tokens prefixed "ok-": issue such tokens in mock
+    # mode so the dev/E2E flow can complete without DNS. The sha256-hash
+    # equality check still runs first, so forged "ok-" tokens are rejected.
+    prefix = "ok-" if settings.domain_verifier == "mock" else "openskill-verify-"
+    raw_token = f"{prefix}{secrets.token_urlsafe(24)}"
     domain = TenantDomain(
         tenant_id=tenant_id,
         hostname=host,

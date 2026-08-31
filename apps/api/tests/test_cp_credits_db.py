@@ -528,10 +528,13 @@ async def test_run_terminal_settles_actual_usage():
             await db.commit()
             tid = tenant.id
 
-        async with AsyncSessionLocal() as db:
-            # Process usage.recorded (rating) then run.terminal (settlement)
-            await process_outbox_once(db)
-            await process_outbox_once(db)
+        # Drain until quiet: a full-suite run leaves backlog from earlier
+        # tests, and each pass handles at most outbox_batch_size messages —
+        # a fixed two passes may never reach OUR message.
+        for _ in range(30):
+            async with AsyncSessionLocal() as db:
+                if await process_outbox_once(db) == 0:
+                    break
 
         async with AsyncSessionLocal() as db:
             balance = (

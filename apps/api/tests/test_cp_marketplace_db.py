@@ -466,8 +466,11 @@ async def test_purchase_accrues_seller_share_via_outbox():
             )
             await db.commit()
             purchase_id, seller_org_id = purchase.id, seller_org.id
-        async with AsyncSessionLocal() as db:
-            await process_outbox_once(db)  # usage.recorded + purchase.paid
+        # Drain until quiet (full-suite backlog can exceed one batch)
+        for _ in range(30):
+            async with AsyncSessionLocal() as db:
+                if await process_outbox_once(db) == 0:
+                    break
         async with AsyncSessionLocal() as db:
             entry = (
                 await db.execute(

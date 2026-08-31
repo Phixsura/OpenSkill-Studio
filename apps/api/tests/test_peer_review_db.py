@@ -40,10 +40,22 @@ async def _user(db, name="Peer"):
 
 
 async def _org(db, owner):
+    # Issue #27: organizations.tenant_id is NOT NULL — create the owning tenant
+    from app.controlplane.services.audit import Actor
+    from app.controlplane.services.tenants import create_tenant
+
+    tenant = await create_tenant(
+        db,
+        name=f"PeerTenant-{uuid.uuid4().hex[:6]}",
+        slug=f"peer-t-{uuid.uuid4().hex[:8]}",
+        actor=Actor(user_id=owner.id, type="tenant"),
+        owner_user_id=owner.id,
+    )
     org = Organization(
         name=f"PeerOrg-{uuid.uuid4().hex[:6]}",
         slug=f"peer-{uuid.uuid4().hex[:8]}",
         created_by=owner.id,
+        tenant_id=tenant.id,
     )
     db.add(org)
     await db.flush()

@@ -141,14 +141,17 @@ class AnthropicReviewAdapter(ProviderAdapterBase):
             max_tokens=1024,
             temperature=0.0,
         )
+        # Token counts are metering hints, never a hard dependency — a client
+        # (or test double) without usage fields must not break the review.
+        usage = [
+            {"usage_type": "llm_input_tokens", "quantity": getattr(response, "input_tokens", 0)},
+            {"usage_type": "llm_output_tokens", "quantity": getattr(response, "output_tokens", 0)},
+        ]
         return {
             "result": response.content[:8000],
             "model": response.model,
             "provider": response.provider,
-            "__usage__": [
-                {"usage_type": "llm_input_tokens", "quantity": response.input_tokens},
-                {"usage_type": "llm_output_tokens", "quantity": response.output_tokens},
-            ],
+            "__usage__": [u for u in usage if u["quantity"]],
         }
 
 
