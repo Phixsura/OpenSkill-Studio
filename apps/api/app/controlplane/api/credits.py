@@ -29,8 +29,13 @@ log = structlog.get_logger()
 router = APIRouter(tags=["Credits & Budgets"])
 
 
+# Money ceiling in minor units — well under int8 (9.2e18) so a valid amount
+# can never overflow the BIGINT column (R88 class: unbounded amount → 500).
+MAX_MINOR = 1_000_000_000_000_000  # 10^15
+
+
 class AdjustCreditRequest(BaseModel):
-    amount_minor: int
+    amount_minor: int = Field(ge=-MAX_MINOR, le=MAX_MINOR)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     reason: str = Field(min_length=3, max_length=500)
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
@@ -42,7 +47,7 @@ class AdjustCreditRequest(BaseModel):
 
 
 class GrantPromoRequest(BaseModel):
-    amount_minor: int = Field(gt=0)
+    amount_minor: int = Field(gt=0, le=MAX_MINOR)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     expires_at: datetime
     reason: str = Field(min_length=3, max_length=500)
@@ -59,14 +64,14 @@ class BudgetPolicyRequest(BaseModel):
     period: str = Field(pattern=r"^(daily|monthly)$")
     capability_key: str | None = Field(default=None, max_length=64)
     usage_type: str | None = Field(default=None, max_length=40)
-    limit_minor: int = Field(ge=0)
+    limit_minor: int = Field(ge=0, le=MAX_MINOR)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     warning_threshold_pct: int = Field(default=80, ge=1, le=100)
     hard_stop: bool = True
 
 
 class UpdateBudgetPolicyRequest(BaseModel):
-    limit_minor: int | None = Field(default=None, ge=0)
+    limit_minor: int | None = Field(default=None, ge=0, le=MAX_MINOR)
     warning_threshold_pct: int | None = Field(default=None, ge=1, le=100)
     hard_stop: bool | None = None
     is_active: bool | None = None

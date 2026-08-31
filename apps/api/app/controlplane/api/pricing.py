@@ -52,7 +52,7 @@ class CreateCostRateRequest(BaseModel):
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     unit_cost: str  # decimal string
     tier_rules: list[dict] | None = Field(default=None, max_length=20)
-    minimum_fee_minor: int | None = Field(default=None, ge=0)
+    minimum_fee_minor: int | None = Field(default=None, ge=0, le=1_000_000_000_000_000)
     effective_from: datetime
     effective_until: datetime | None = None
     source_note: str | None = Field(default=None, max_length=500)
@@ -66,8 +66,10 @@ class CreateCostRateRequest(BaseModel):
     @classmethod
     def _cost(cls, v):
         d = Decimal(v)
-        if not d.is_finite() or d < 0:
-            raise ValueError("unit_cost must be non-negative")
+        # Column is Numeric(18,8): integer part must be < 10^10, else the
+        # INSERT overflows PG (R88 class → 500). Bound at the schema.
+        if not d.is_finite() or d < 0 or d >= Decimal("10000000000"):
+            raise ValueError("unit_cost must be non-negative and < 10^10")
         return v
 
     @field_validator("tier_rules")
@@ -123,9 +125,10 @@ class CreateFxRateRequest(BaseModel):
     @field_validator("rate")
     @classmethod
     def _rate(cls, v):
+        # Numeric(18,8): integer part < 10^10 or the INSERT overflows → 500.
         d = Decimal(v)
-        if not d.is_finite() or d <= 0:
-            raise ValueError("rate must be positive")
+        if not d.is_finite() or d <= 0 or d >= Decimal("10000000000"):
+            raise ValueError("rate must be positive and < 10^10")
         return v
 
 
@@ -135,7 +138,7 @@ class CreateReconReportRequest(BaseModel):
     usage_type: str
     period: str = Field(pattern=r"^\d{4}-\d{2}$")
     provider_reported_quantity: str
-    provider_reported_cost_minor: int = Field(ge=0)
+    provider_reported_cost_minor: int = Field(ge=0, le=1_000_000_000_000_000)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     note: str | None = Field(default=None, max_length=500)
 
@@ -143,6 +146,16 @@ class CreateReconReportRequest(BaseModel):
     @classmethod
     def _ctrl(cls, v, info):
         return reject_ctrl_str(v, info.field_name)
+
+    @field_validator("provider_reported_quantity")
+    @classmethod
+    def _qty(cls, v):
+        # Numeric(18,6): raw string is fed straight to Decimal() in the
+        # handler — a NaN/Infinity or over-range value would 500 the write.
+        d = Decimal(v)
+        if not d.is_finite() or d < 0 or d >= Decimal("1000000000000"):
+            raise ValueError("quantity must be non-negative and < 10^12")
+        return v
 
 
 class VoidRatedRequest(BaseModel):

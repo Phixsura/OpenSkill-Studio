@@ -97,9 +97,21 @@ class CreateRuleRequest(BaseModel):
     country: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
     rule_type: str
     rate: str | None = None
-    amount_minor: int | None = Field(default=None, ge=0)
+    amount_minor: int | None = Field(default=None, ge=0, le=1_000_000_000_000_000)
     amount_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     effective_from: datetime
+
+    @field_validator("rate")
+    @classmethod
+    def _rate(cls, v):
+        if v is None:
+            return v
+        # Column is Numeric(9,6): integer part < 10^3. A NaN/Infinity or an
+        # over-range value would otherwise overflow the INSERT → 500.
+        d = Decimal(v)
+        if not d.is_finite() or d < 0 or d >= Decimal("1000"):
+            raise ValueError("rate must be non-negative and < 1000")
+        return v
 
 
 class StatementGenerateRequest(BaseModel):
@@ -110,7 +122,7 @@ class StatementGenerateRequest(BaseModel):
 
 
 class StatementAdjustRequest(BaseModel):
-    amount_minor: int
+    amount_minor: int = Field(ge=-1_000_000_000_000_000, le=1_000_000_000_000_000)
     reason: str = Field(min_length=3, max_length=500)
 
     @field_validator("reason")

@@ -122,3 +122,109 @@ def test_entitlement_defs_have_valid_types():
         if d.type == "bool":
             assert isinstance(d.default, bool)
             assert not d.soft_capable  # soft only makes sense for numerics
+
+
+# ── R1/R2: numeric-overflow input guards (adversarial regression) ──
+# Every money/rate field bound at the SCHEMA so an over-range value is a
+# clean 422, never a BIGINT/Numeric overflow 500 at the write boundary.
+
+
+def test_money_fields_reject_over_int8():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.controlplane.api.billing import CreditNoteRequest, RecordPaymentRequest
+    from app.controlplane.api.credits import (
+        AdjustCreditRequest,
+        BudgetPolicyRequest,
+        GrantPromoRequest,
+    )
+
+    BIG = 10**19  # > int8 max (9.2e18)
+    with _pytest.raises(ValidationError):
+        AdjustCreditRequest(amount_minor=BIG, currency="USD", reason="over")
+    with _pytest.raises(ValidationError):
+        AdjustCreditRequest(amount_minor=-BIG, currency="USD", reason="under")
+    with _pytest.raises(ValidationError):
+        GrantPromoRequest(
+            amount_minor=BIG, currency="USD", expires_at="2027-01-01T00:00:00Z", reason="over"
+        )
+    with _pytest.raises(ValidationError):
+        BudgetPolicyRequest(scope_type="tenant", period="monthly", limit_minor=BIG, currency="USD")
+    with _pytest.raises(ValidationError):
+        RecordPaymentRequest(amount_minor=BIG, method="other")
+    with _pytest.raises(ValidationError):
+        CreditNoteRequest(amount_minor=BIG, reason="over")
+    # A legitimate amount still passes
+    AdjustCreditRequest(amount_minor=19900, currency="USD", reason="fine")
+
+
+def test_decimal_string_fields_reject_nan_and_overflow():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.controlplane.api.pricing import (
+        CreateCostRateRequest,
+        CreateFxRateRequest,
+        CreateReconReportRequest,
+    )
+    from app.controlplane.api.partners import CreateRuleRequest
+
+    def cost(uc):
+        return CreateCostRateRequest(
+            provider="p",
+            usage_type="image_generation",
+            unit="images",
+            currency="USD",
+            unit_cost=uc,
+            effective_from="2026-01-01T00:00:00Z",
+        )
+
+    # Numeric(18,8): integer part must stay < 10^10
+    for bad in ("NaN", "Infinity", "9" * 30, "-1"):
+        with _pytest.raises((ValidationError, ValueError)):
+            cost(bad)
+    cost("0.018")  # ok
+
+    def fx(rate):
+        return CreateFxRateRequest(
+            base_currency="USD",
+            quote_currency="EUR",
+            rate=rate,
+            effective_from="2026-01-01T00:00:00Z",
+        )
+
+    for bad in ("NaN", "0", "-1", "9" * 30):
+        with _pytest.raises((ValidationError, ValueError)):
+            fx(bad)
+    fx("7.12")
+
+    def rule(rate):
+        return CreateRuleRequest(
+            beneficiary_type="seller_org",
+            revenue_type="all",
+            rule_type="percentage_of_gross_revenue",
+            rate=rate,
+            effective_from="2026-01-01T00:00:00Z",
+        )
+
+    # Numeric(9,6): integer part < 10^3
+    for bad in ("NaN", "9" * 15, "-1"):
+        with _pytest.raises((ValidationError, ValueError)):
+            rule(bad)
+    rule("10.5")
+
+    def recon(qty):
+        return CreateReconReportRequest(
+            provider="p",
+            usage_type="image_generation",
+            period="2026-08",
+            provider_reported_quantity=qty,
+            provider_reported_cost_minor=1,
+            currency="USD",
+        )
+
+    for bad in ("NaN", "Infinity", "9" * 20, "-1"):
+        with _pytest.raises((ValidationError, ValueError)):
+            recon(bad)
+    recon("1834")

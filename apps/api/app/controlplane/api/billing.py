@@ -50,8 +50,11 @@ class CancelSubscriptionRequest(BaseModel):
     at_period_end: bool = True
 
 
+MAX_MINOR = 1_000_000_000_000_000  # 10^15, well under int8 (R88 overflow guard)
+
+
 class RecordPaymentRequest(BaseModel):
-    amount_minor: int = Field(gt=0)
+    amount_minor: int = Field(gt=0, le=MAX_MINOR)
     method: str = Field(pattern=r"^(manual_bank_transfer|other)$")
     external_ref: str | None = Field(default=None, max_length=120)
     reference_note: str | None = Field(default=None, max_length=500)
@@ -73,7 +76,7 @@ class VoidInvoiceRequest(BaseModel):
 
 
 class CreditNoteRequest(BaseModel):
-    amount_minor: int = Field(gt=0)
+    amount_minor: int = Field(gt=0, le=MAX_MINOR)
     reason: str = Field(min_length=3, max_length=500)
 
     @field_validator("reason")
@@ -84,7 +87,7 @@ class CreditNoteRequest(BaseModel):
 
 class ManualInvoiceLineInput(BaseModel):
     description: str = Field(min_length=1, max_length=500)
-    amount_minor: int
+    amount_minor: int = Field(ge=-MAX_MINOR, le=MAX_MINOR)
     quantity: str = "1"
 
     @field_validator("description")
