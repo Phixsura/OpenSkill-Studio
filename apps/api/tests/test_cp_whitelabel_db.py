@@ -345,6 +345,49 @@ async def test_provision_resume_after_failure(db):
     assert tenants_with_name == 1
 
 
+@pytest.mark.asyncio
+async def test_provision_resume_tolerates_already_installed_packs(db, monkeypatch):
+    """R38/C33: install_skill_packs has no per-pack progress marker, so a
+    resume re-runs the whole loop. Packs installed before an earlier failure
+    are committed → their ALREADY_INSTALLED must be treated as success, or the
+    run can never complete. Simulate pack A already-installed + pack B fresh."""
+    from app.services import installation as install_mod
+
+    user = await _mk_user(db)
+    blueprint = TenantBlueprint(
+        name=f"BPR {ULID()}",
+        config=provision_svc.validate_blueprint_config(
+            {"skill_packs": [{"pack_id": "01JPACKAAAAAAAAAAAAAAAAAAA"},
+                             {"pack_id": "01JPACKBBBBBBBBBBBBBBBBBBB"}]}
+        ),
+        created_by=user.id,
+    )
+    db.add(blueprint)
+    await db.flush()
+    run = await provision_svc.create_provision_run(
+        db, blueprint_id=blueprint.id, name="Resume Already",
+        slug=f"ra-{str(ULID()).lower()[:10]}", idempotency_key=f"ra-{ULID()}",
+        partner_id=None, actor=_actor(user),
+    )
+
+    installed: list[str] = []
+
+    async def fake_install_pack(self, org_id, pack_id, version, installed_by):
+        # Pack A is "already installed" (committed by a prior attempt);
+        # pack B installs fine. The step must complete despite A's 409.
+        if pack_id.endswith("AAA"):
+            raise AppError("ALREADY_INSTALLED", "Pack already installed", 409)
+        installed.append(pack_id)
+
+    monkeypatch.setattr(install_mod.InstallationService, "install_pack", fake_install_pack)
+    await provision_svc.execute_provision_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "completed", run.error
+    assert installed == ["01JPACKBBBBBBBBBBBBBBBBBBB"]  # only the fresh one installed
+    done = [s["step"] for s in run.steps if s.get("status") == "done"]
+    assert "install_skill_packs" in done
+
+
 # ── Export ───────────────────────────────────────────────────
 
 

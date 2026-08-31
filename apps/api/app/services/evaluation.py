@@ -446,8 +446,14 @@ class EvaluationService:
         task = await self.get_task(task_id)
         if task.status != EvalStatus.FAILED:
             raise AppError("INVALID_STATE", "Only failed tasks can be retried", 422)
-        # Retry spends LLM budget just like a fresh trigger — enforce the
-        # same enabled + monthly-cap gates.
+        # Retry spends LLM budget just like a fresh trigger — enforce the SAME
+        # three gates trigger_evaluation applies: tenant not suspended (a
+        # costed action), AI enabled, and monthly cap. The suspension gate was
+        # missing, letting a suspended tenant re-run a paid LLM call (R32/C2).
+        from app.controlplane import facade as cp_facade
+
+        tenant = await cp_facade.get_tenant_for_org(self.db, task.org_id)
+        cp_facade.require_tenant_active(tenant)
         eval_settings = await self.get_eval_settings(task.org_id)
         if not eval_settings.get("enabled"):
             raise EvalNotEnabledError()

@@ -286,6 +286,12 @@ async def execute_provision_run(db: AsyncSession, run_id: str) -> None:
                         org_id, ref["pack_id"], version, creator
                     )
                 except AppError as exc:
+                    # Resume-safe: this step has no per-pack progress marker, so
+                    # a retry re-runs the whole loop. Packs installed before an
+                    # earlier failure are already committed → treat their
+                    # ALREADY_INSTALLED as success, else resume never completes.
+                    if exc.code == "ALREADY_INSTALLED":
+                        continue
                     raise AppError(
                         "BLUEPRINT_PACK_UNAVAILABLE",
                         f"Skill pack {ref['pack_id']} not installable: {exc.message}",
@@ -304,6 +310,8 @@ async def execute_provision_run(db: AsyncSession, run_id: str) -> None:
                         org_id, ref["pack_id"], version, creator
                     )
                 except AppError as exc:
+                    if exc.code == "ALREADY_INSTALLED":
+                        continue  # resume-safe (see install_skill_packs above)
                     raise AppError(
                         "BLUEPRINT_PACK_UNAVAILABLE",
                         f"Workflow pack {ref['pack_id']} not installable: {exc.message}",
