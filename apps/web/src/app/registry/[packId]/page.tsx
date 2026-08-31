@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, apiWithAuth } from "@/lib/api";
+import { MarketplacePanel } from "@/components/marketplace-panel";
 
 interface PackDetail {
   id: string;
@@ -105,11 +106,16 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 
 function StarRating({ rating }: { rating: number }) {
   return (
-    <span className="inline-flex items-center gap-0.5" aria-label={`${rating.toFixed(1)} out of 5 stars`}>
+    <span
+      className="inline-flex items-center gap-0.5"
+      aria-label={`${rating.toFixed(1)} out of 5 stars`}
+    >
       {[1, 2, 3, 4, 5].map((star) => (
         <span
           key={star}
-          className={star <= Math.round(rating) ? "text-yellow-500" : "text-gray-300 dark:text-gray-600"}
+          className={
+            star <= Math.round(rating) ? "text-yellow-500" : "text-gray-300 dark:text-gray-600"
+          }
         >
           ★
         </span>
@@ -133,7 +139,7 @@ function ClickableStarRating({
           key={star}
           type="button"
           onClick={() => onChange(star)}
-          className={`text-xl ${star <= value ? "text-yellow-500" : "text-gray-300 dark:text-gray-600"} hover:text-yellow-400 transition-colors`}
+          className={`text-xl ${star <= value ? "text-yellow-500" : "text-gray-300 dark:text-gray-600"} transition-colors hover:text-yellow-400`}
           aria-label={`Rate ${star} star${star !== 1 ? "s" : ""}`}
         >
           ★
@@ -174,7 +180,9 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
           e.preventDefault();
           // Validate: low ratings require a body of at least 20 chars
           if (rating <= 2 && (!body || body.trim().length < 20)) {
-            setFormError("Reviews with a rating of 2 or below must include a body of at least 20 characters");
+            setFormError(
+              "Reviews with a rating of 2 or below must include a body of at least 20 characters",
+            );
             return;
           }
           setFormError("");
@@ -187,7 +195,9 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
           <ClickableStarRating value={rating} onChange={setRating} />
         </div>
         <div>
-          <label htmlFor="review-title" className="mb-1 block text-sm font-medium">Title</label>
+          <label htmlFor="review-title" className="mb-1 block text-sm font-medium">
+            Title
+          </label>
           <Input
             id="review-title"
             value={title}
@@ -198,7 +208,9 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
           />
         </div>
         <div>
-          <label htmlFor="review-body" className="mb-1 block text-sm font-medium">Review (optional)</label>
+          <label htmlFor="review-body" className="mb-1 block text-sm font-medium">
+            Review (optional)
+          </label>
           <textarea
             id="review-body"
             value={body}
@@ -206,14 +218,12 @@ function WriteReviewForm({ packId, onSuccess }: { packId: string; onSuccess: () 
             placeholder="Share more details about your experience..."
             rows={4}
             maxLength={5000}
-            className="block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] placeholder:text-[hsl(var(--muted-foreground))]"
+            className="block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none placeholder:text-[hsl(var(--muted-foreground))] focus:ring-2 focus:ring-[hsl(var(--ring))]"
           />
         </div>
-        {formError && (
-          <p className="text-sm text-red-600 mb-2">{formError}</p>
-        )}
+        {formError && <p className="mb-2 text-sm text-red-600">{formError}</p>}
         {mutation.isError && (
-          <p className="text-sm text-red-600 mb-2">{(mutation.error as Error).message}</p>
+          <p className="mb-2 text-sm text-red-600">{(mutation.error as Error).message}</p>
         )}
         <Button type="submit" disabled={mutation.isPending || !title.trim()}>
           {mutation.isPending ? "Submitting..." : "Submit Review"}
@@ -228,14 +238,12 @@ function ReviewsSection({ packId, isAuthed }: { packId: string; isAuthed: boolea
 
   const { data: reviewsData } = useQuery({
     queryKey: ["registry-reviews", packId],
-    queryFn: () =>
-      api<ReviewsResponse>(`/registry/packs/${packId}/reviews`),
+    queryFn: () => api<ReviewsResponse>(`/registry/packs/${packId}/reviews`),
   });
 
   const { data: statsData } = useQuery({
     queryKey: ["registry-review-stats", packId],
-    queryFn: () =>
-      api<{ data: ReviewStatsData }>(`/registry/packs/${packId}/reviews/stats`),
+    queryFn: () => api<{ data: ReviewStatsData }>(`/registry/packs/${packId}/reviews/stats`),
   });
 
   const reviews = reviewsData?.data ?? [];
@@ -314,9 +322,7 @@ function ReviewsSection({ packId, isAuthed }: { packId: string; isAuthed: boolea
               </div>
               <p className="mt-1 font-medium">{review.title}</p>
               {review.body && (
-                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-                  {review.body}
-                </p>
+                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{review.body}</p>
               )}
             </div>
           ))}
@@ -385,20 +391,24 @@ function CurriculumSection({ preview }: { preview: PackPreview }) {
               <button
                 type="button"
                 onClick={() => toggleSkill(skill.name)}
-                className="flex w-full items-center justify-between p-3 text-left hover:bg-[hsl(var(--secondary)/0.5)] transition-colors"
+                className="flex w-full items-center justify-between p-3 text-left transition-colors hover:bg-[hsl(var(--secondary)/0.5)]"
                 aria-expanded={isExpanded}
               >
                 <span className="font-medium">{skill.name}</span>
                 <div className="flex items-center gap-2">
                   {skill.difficulty && (
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${DIFFICULTY_COLORS[skill.difficulty] ?? ""}`}>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${DIFFICULTY_COLORS[skill.difficulty] ?? ""}`}
+                    >
                       {skill.difficulty}
                     </span>
                   )}
                   <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">
                     {skill.exercise_count} {skill.exercise_count === 1 ? "exercise" : "exercises"}
                   </span>
-                  <span className={`text-sm transition-transform ${isExpanded ? "rotate-180" : ""}`}>
+                  <span
+                    className={`text-sm transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                  >
                     &#9662;
                   </span>
                 </div>
@@ -418,7 +428,10 @@ function CurriculumSection({ preview }: { preview: PackPreview }) {
                   {skill.exercises.length > 0 && (
                     <ul className="mt-2 space-y-1">
                       {skill.exercises.map((ex) => (
-                        <li key={ex.title} className="flex items-start gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+                        <li
+                          key={ex.title}
+                          className="flex items-start gap-2 text-sm text-[hsl(var(--muted-foreground))]"
+                        >
                           <span className="mt-0.5 text-xs">&#9679;</span>
                           {ex.title}
                         </li>
@@ -465,22 +478,23 @@ export default function RegistryPackDetailPage() {
     };
   }, []);
 
-  const { data: packData, isLoading, isError } = useQuery({
+  const {
+    data: packData,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["registry-pack", packId],
-    queryFn: () =>
-      api<{ data: PackDetail }>(`/registry/packs/${packId}`),
+    queryFn: () => api<{ data: PackDetail }>(`/registry/packs/${packId}`),
   });
 
   const { data: releasesData } = useQuery({
     queryKey: ["registry-releases", packId],
-    queryFn: () =>
-      api<{ data: Release[] }>(`/registry/packs/${packId}/releases`),
+    queryFn: () => api<{ data: Release[] }>(`/registry/packs/${packId}/releases`),
   });
 
   const { data: previewData } = useQuery({
     queryKey: ["registry-preview", packId],
-    queryFn: () =>
-      api<{ data: PackPreview }>(`/registry/packs/${packId}/preview`),
+    queryFn: () => api<{ data: PackPreview }>(`/registry/packs/${packId}/preview`),
   });
 
   const pack = packData?.data;
@@ -501,7 +515,11 @@ export default function RegistryPackDetailPage() {
         <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           Pack not found or failed to load.
         </div>
-        <Link href="/registry" aria-label="Back to registry" className="mt-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline">
+        <Link
+          href="/registry"
+          aria-label="Back to registry"
+          className="mt-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline"
+        >
           &larr; Back to Registry
         </Link>
       </div>
@@ -510,7 +528,11 @@ export default function RegistryPackDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
-      <Link href="/registry" aria-label="Back to registry" className="mb-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline">
+      <Link
+        href="/registry"
+        aria-label="Back to registry"
+        className="mb-4 inline-block text-sm text-[hsl(var(--primary))] hover:underline"
+      >
         &larr; Back to Registry
       </Link>
 
@@ -526,16 +548,16 @@ export default function RegistryPackDetailPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
-            {pack.average_rating != null && (
-              <StarRating rating={pack.average_rating} />
-            )}
+            {pack.average_rating != null && <StarRating rating={pack.average_rating} />}
             {pack.review_count > 0 && (
               <span className="text-sm text-[hsl(var(--muted-foreground))]">
                 ({pack.review_count} {pack.review_count === 1 ? "review" : "reviews"})
               </span>
             )}
             {pack.difficulty && (
-              <span className={`rounded-full px-3 py-1 text-sm font-medium ${DIFFICULTY_COLORS[pack.difficulty] ?? ""}`}>
+              <span
+                className={`rounded-full px-3 py-1 text-sm font-medium ${DIFFICULTY_COLORS[pack.difficulty] ?? ""}`}
+              >
                 {pack.difficulty}
               </span>
             )}
@@ -545,15 +567,14 @@ export default function RegistryPackDetailPage() {
           </div>
         </div>
         {pack.summary && (
-          <p className="mt-3 text-lg text-[hsl(var(--muted-foreground))]">
-            {pack.summary}
-          </p>
+          <p className="mt-3 text-lg text-[hsl(var(--muted-foreground))]">{pack.summary}</p>
         )}
+        <div className="mt-4">
+          <MarketplacePanel productType="skill_pack" productId={packId} isAuthed={isAuthed} />
+        </div>
         <Link href={isAuthed ? "/dashboard" : "/login"}>
           <Button className="mt-4" aria-label={`Install ${pack.name}`}>
-            {isAuthed
-              ? "Install in your organization →"
-              : "Sign in to install →"}
+            {isAuthed ? "Install in your organization →" : "Sign in to install →"}
           </Button>
         </Link>
       </div>
@@ -594,7 +615,8 @@ export default function RegistryPackDetailPage() {
             <div>
               <h2 className="text-xl font-semibold">Templates</h2>
               <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-                {preview.total_templates} project {preview.total_templates === 1 ? "template" : "templates"}
+                {preview.total_templates} project{" "}
+                {preview.total_templates === 1 ? "template" : "templates"}
               </p>
               <div className="mt-3 space-y-2" role="list">
                 {preview.templates.map((tmpl) => (
@@ -602,7 +624,8 @@ export default function RegistryPackDetailPage() {
                     <div className="flex items-center justify-between">
                       <span className="font-medium">{tmpl.name}</span>
                       <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">
-                        {tmpl.rubric_criteria_count} rubric {tmpl.rubric_criteria_count === 1 ? "criterion" : "criteria"}
+                        {tmpl.rubric_criteria_count} rubric{" "}
+                        {tmpl.rubric_criteria_count === 1 ? "criterion" : "criteria"}
                       </span>
                     </div>
                     {tmpl.description && (
@@ -620,12 +643,10 @@ export default function RegistryPackDetailPage() {
           <div>
             <h2 className="text-xl font-semibold">Version History</h2>
             {releases.length === 0 && (
-              <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
-                No releases yet.
-              </p>
+              <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">No releases yet.</p>
             )}
             {releases.length > 0 && (
-              <div className="relative mt-3 ml-3 border-l-2 border-[hsl(var(--border))]">
+              <div className="relative ml-3 mt-3 border-l-2 border-[hsl(var(--border))]">
                 {releases.map((rel, i) => (
                   <div key={rel.id} className="relative mb-4 pl-6">
                     <div className="absolute -left-[9px] top-1.5 h-4 w-4 rounded-full border-2 border-[hsl(var(--border))] bg-[hsl(var(--background))]">
@@ -673,11 +694,22 @@ export default function RegistryPackDetailPage() {
             <div className="rounded-lg border p-4">
               <h3 className="text-sm font-medium">Contents</h3>
               <div className="mt-2 space-y-1 text-sm">
-                <p>{preview.total_skills} {preview.total_skills === 1 ? "skill" : "skills"}</p>
-                <p>{preview.total_exercises} {preview.total_exercises === 1 ? "exercise" : "exercises"}</p>
-                <p>{preview.total_templates} {preview.total_templates === 1 ? "template" : "templates"}</p>
+                <p>
+                  {preview.total_skills} {preview.total_skills === 1 ? "skill" : "skills"}
+                </p>
+                <p>
+                  {preview.total_exercises}{" "}
+                  {preview.total_exercises === 1 ? "exercise" : "exercises"}
+                </p>
+                <p>
+                  {preview.total_templates}{" "}
+                  {preview.total_templates === 1 ? "template" : "templates"}
+                </p>
                 {preview.categories.length > 0 && (
-                  <p>{preview.categories.length} {preview.categories.length === 1 ? "category" : "categories"}</p>
+                  <p>
+                    {preview.categories.length}{" "}
+                    {preview.categories.length === 1 ? "category" : "categories"}
+                  </p>
                 )}
               </div>
             </div>
@@ -687,7 +719,8 @@ export default function RegistryPackDetailPage() {
             <div className="rounded-lg border p-4">
               <h3 className="text-sm font-medium">Estimated time</h3>
               <p className="mt-1 text-lg font-semibold">
-                {pack.estimated_minutes >= 60 ? `${Math.floor(pack.estimated_minutes / 60)}h ` : ""}{pack.estimated_minutes % 60}m
+                {pack.estimated_minutes >= 60 ? `${Math.floor(pack.estimated_minutes / 60)}h ` : ""}
+                {pack.estimated_minutes % 60}m
               </p>
             </div>
           )}
@@ -704,7 +737,10 @@ export default function RegistryPackDetailPage() {
               <h3 className="text-sm font-medium">Scenarios</h3>
               <div className="mt-2 flex flex-wrap gap-1">
                 {pack.scenario_tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">
+                  <span
+                    key={tag}
+                    className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs"
+                  >
                     {tag}
                   </span>
                 ))}
@@ -717,7 +753,10 @@ export default function RegistryPackDetailPage() {
               <h3 className="text-sm font-medium">Tools</h3>
               <div className="mt-2 flex flex-wrap gap-1">
                 {pack.tool_tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">
+                  <span
+                    key={tag}
+                    className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs"
+                  >
                     {tag}
                   </span>
                 ))}
@@ -730,7 +769,10 @@ export default function RegistryPackDetailPage() {
               <h3 className="text-sm font-medium">Capabilities</h3>
               <div className="mt-2 flex flex-wrap gap-1">
                 {pack.capability_tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">
+                  <span
+                    key={tag}
+                    className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs"
+                  >
                     {tag}
                   </span>
                 ))}

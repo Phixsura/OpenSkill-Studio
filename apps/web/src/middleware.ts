@@ -1,16 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = [
-  "/",
-  "/login",
-  "/register",
-  "/forgot-password",
-  "/reset-password",
-  "/health",
-];
+const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password", "/reset-password", "/health"];
+
+/** Hosts that serve the platform UI directly (comma-separated env).
+ * Any other host is treated as a white-label custom domain: the request
+ * passes through unchanged but carries x-tenant-host so the root layout
+ * can resolve site-context (branding + theme) for it. */
+const PLATFORM_HOSTS = new Set(
+  (process.env.NEXT_PUBLIC_PLATFORM_HOSTS ?? "localhost:3000,localhost")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+);
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const host = (request.headers.get("host") ?? "").toLowerCase();
+
+  // White-label custom domain → tag the request; the root layout resolves
+  // site-context (branding + theme) for it. The backend never trusts this
+  // header — it is only a lookup key for the public site-context endpoint.
+  const requestHeaders = new Headers(request.headers);
+  if (host && !PLATFORM_HOSTS.has(host)) {
+    requestHeaders.set("x-tenant-host", host);
+  }
 
   // Public pages + API + static assets → pass through
   if (
@@ -20,9 +33,10 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/join/") ||
     pathname.startsWith("/u/") ||
     pathname.startsWith("/registry") ||
-    pathname.startsWith("/certificates")
+    pathname.startsWith("/certificates") ||
+    pathname.startsWith("/client")
   ) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   // Check for refresh token cookie (presence only — actual validation by API)
@@ -34,7 +48,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

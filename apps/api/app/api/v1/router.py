@@ -43,6 +43,7 @@ from app.controlplane.api import marketplace as cp_marketplace
 from app.controlplane.api import partners as cp_partners
 from app.controlplane.api import plans as cp_plans
 from app.controlplane.api import platform as cp_platform
+from app.controlplane.api import platform_dashboard as cp_platform_dashboard
 from app.controlplane.api import pricing as cp_pricing
 from app.controlplane.api import tenants as cp_tenants
 from app.controlplane.api import usage as cp_usage
@@ -86,6 +87,7 @@ api_v1_router.include_router(matching.router)
 
 # ── Control plane (Issue #27) ──
 api_v1_router.include_router(cp_platform.router)
+api_v1_router.include_router(cp_platform_dashboard.router)
 api_v1_router.include_router(cp_tenants.router)
 api_v1_router.include_router(cp_plans.router)
 api_v1_router.include_router(cp_usage.router)

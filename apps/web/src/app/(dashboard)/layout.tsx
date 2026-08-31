@@ -9,6 +9,7 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { api, sharedRefresh } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
+import { useMe } from "@/lib/use-me";
 import { NotificationBell } from "@/components/notification-bell";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +19,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { theme, setTheme } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // Role-conditional navigation: tenant admin / partner portal / platform
+  // console links appear only for users holding those memberships (#27 §11.2)
+  const { data: meData } = useMe();
+  const me = meData?.data;
+  const tenantMemberships = me?.tenant_memberships ?? [];
+  const partnerMemberships = me?.partner_memberships ?? [];
+  const hasPlatformRole = (me?.platform_roles?.length ?? 0) > 0 || me?.role === "admin";
+  const impersonation = me?.impersonation ?? null;
 
   useEffect(() => setMounted(true), []);
 
@@ -110,6 +120,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         Settings
       </NavLink>
+      {tenantMemberships[0] && (
+        <NavLink
+          href={`/dashboard/tenant/${tenantMemberships[0].tenant_id}`}
+          active={pathname.startsWith("/dashboard/tenant")}
+          onClick={closeSidebar}
+        >
+          Tenant
+        </NavLink>
+      )}
+      {partnerMemberships[0] && (
+        <NavLink
+          href={`/partner/${partnerMemberships[0].partner_id}`}
+          active={pathname.startsWith("/partner")}
+          onClick={closeSidebar}
+        >
+          Partner
+        </NavLink>
+      )}
+      {hasPlatformRole && (
+        <NavLink href="/platform" active={pathname.startsWith("/platform")} onClick={closeSidebar}>
+          Platform
+        </NavLink>
+      )}
     </>
   );
 
@@ -208,6 +241,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Main content */}
       <main id="main-content" className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        {/* Impersonation banner — session is read-only (#27 §6) */}
+        {impersonation && (
+          <div className="flex items-center justify-center gap-2 bg-amber-500 px-4 py-2 text-sm font-medium text-black">
+            <span>
+              ⚠ Support impersonation session (read-only) — viewing as {user?.display_name}
+            </span>
+          </div>
+        )}
         {/* Desktop header bar */}
         <div className="hidden items-center justify-end border-b px-8 py-3 md:flex">
           {mounted && isAuthenticated && <NotificationBell />}

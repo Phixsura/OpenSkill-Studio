@@ -184,3 +184,80 @@ async def test_impersonation_grant_caps_expiry(client):
         },
     )
     assert r.status_code in (401, 422)
+
+
+# ── P10: white-label / domains / blueprints / export ─────────
+
+
+@pytest.mark.asyncio
+async def test_tenant_branding_requires_auth(client):
+    r = await client.get("/api/v1/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/branding")
+    assert r.status_code == 401
+    r = await client.put(
+        "/api/v1/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/branding",
+        json={"product_display_name": "X"},
+    )
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_tenant_domains_require_auth(client):
+    r = await client.get("/api/v1/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/domains")
+    assert r.status_code == 401
+    r = await client.post(
+        "/api/v1/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/domains",
+        json={"hostname": "x.example.com"},
+    )
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_site_context_is_public(client):
+    # Invalid host short-circuits before any DB access → suite stays DB-free
+    r = await client.get("/api/v1/public/site-context", params={"host": "///bad host///"})
+    assert r.status_code == 200
+    assert r.json()["data"]["tenant_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_platform_blueprints_require_auth(client):
+    r = await client.get("/api/v1/platform/blueprints")
+    assert r.status_code == 401
+    r = await client.post("/api/v1/platform/blueprints", json={"name": "B", "config": {}})
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_provision_runs_require_auth(client):
+    r = await client.post(
+        "/api/v1/platform/provision-runs",
+        json={"name": "T", "slug": "t-x", "idempotency_key": "k1"},
+    )
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_tenant_exports_require_auth(client):
+    r = await client.post("/api/v1/platform/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/exports")
+    assert r.status_code == 401
+
+
+# ── P11: ops console ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_platform_dashboard_requires_auth(client):
+    r = await client.get("/api/v1/platform/dashboard")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_trace_invoice_line_requires_auth(client):
+    r = await client.get("/api/v1/platform/trace/invoice-lines/01JFAKEFAKEFAKEFAKEFAKEFAK")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_trace_settlement_entry_requires_auth(client):
+    r = await client.get("/api/v1/platform/trace/settlement-entries/01JFAKEFAKEFAKEFAKEFAKEFAK")
+    assert r.status_code == 401
