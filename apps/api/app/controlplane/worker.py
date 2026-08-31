@@ -112,7 +112,16 @@ async def process_outbox_once(db: AsyncSession, topics: list[str] | None = None)
         msg.locked_at = _now()
         await db.flush()
         try:
-            await handler(db, msg.payload)
+            # Isolate each handler in a SAVEPOINT: a handler that hits a
+            # DB-level error (e.g. revenue_share._insert_entry's documented
+            # concurrent-loser IntegrityError) would otherwise deactivate the
+            # shared batch transaction and poison every SIBLING message in the
+            # same poll (PendingRollbackError on the next flush → the whole
+            # batch stalls and re-stalls). The nested block rolls back only
+            # this message's partial writes; the outer tx stays usable for the
+            # status bookkeeping below and for the remaining messages.
+            async with db.begin_nested():
+                await handler(db, msg.payload)
         except Exception as exc:  # noqa: BLE001 — retry/dead-letter path
             msg.attempts += 1
             msg.last_error = str(exc)[:2000]

@@ -184,6 +184,72 @@ async def test_dual_worker_no_double_consumption(test_topic):
         await engine.dispose()
 
 
+# ── R38/C34: DB-error handler must not poison sibling messages ──
+
+
+@pytest.mark.asyncio
+async def test_db_error_handler_does_not_poison_batch():
+    """A handler that raises a DB-level IntegrityError (deactivating the
+    transaction) must NOT stall its sibling messages in the same batch. The
+    per-handler SAVEPOINT rolls back only the failing message's writes; the
+    good ones still process and the bad one retries."""
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.core.database import engine
+
+    good = f"test.good.{str(ULID()).lower()[-8:]}"
+    dberr = f"test.dberr.{str(ULID()).lower()[-8:]}"
+    dup_id = str(ULID())
+    processed: list[int] = []
+
+    @register_handler(good)
+    async def _good(session, payload):  # noqa: ARG001
+        processed.append(payload["n"])
+
+    @register_handler(dberr)
+    async def _dberr(session, payload):  # noqa: ARG001
+        for _ in range(2):  # second insert violates the PK → IntegrityError
+            session.add(
+                CommercialAuditEvent(
+                    id=dup_id,
+                    actor_user_id=None,
+                    actor_type="system",
+                    action="tenant.created",
+                    target_type="x",
+                    target_id="y",
+                )
+            )
+            await session.flush()
+
+    try:
+        async with AsyncSessionLocal() as db:
+            enqueue(db, dberr, {"n": 1})  # fails first, in the same batch
+            enqueue(db, good, {"n": 2})
+            enqueue(db, good, {"n": 3})
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            handled = await process_outbox_once(db, topics=[good, dberr])
+        assert handled == 2  # both good messages, despite the earlier DB error
+        assert sorted(processed) == [2, 3]
+        async with AsyncSessionLocal() as db:
+            good_rows = (
+                (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == good)))
+                .scalars()
+                .all()
+            )
+            bad_row = (
+                await db.execute(select(OutboxMessage).where(OutboxMessage.topic == dberr))
+            ).scalar_one()
+            assert all(r.status == "done" for r in good_rows)
+            assert bad_row.status == "pending"  # retries, not lost
+            # the failing handler's partial write was rolled back by the savepoint
+            dup = await db.get(CommercialAuditEvent, dup_id)
+            assert dup is None
+    finally:
+        HANDLERS.pop(good, None)
+        HANDLERS.pop(dberr, None)
+        await engine.dispose()
+
+
 # ── Reaper ───────────────────────────────────────────────────
 
 
