@@ -6,6 +6,17 @@ Alembic's env.py and app startup import this package explicitly instead.
 """
 
 from app.controlplane.models.audit import CommercialAuditEvent  # noqa: F401
+from app.controlplane.models.billing import (  # noqa: F401
+    BillingPeriod,
+    BillingWebhookEvent,
+    CreditNote,
+    Invoice,
+    InvoiceLine,
+    InvoiceSequence,
+    PaymentRecord,
+    Subscription,
+    SubscriptionChange,
+)
 from app.controlplane.models.credit import (  # noqa: F401
     BudgetPolicy,
     CreditLedgerEntry,

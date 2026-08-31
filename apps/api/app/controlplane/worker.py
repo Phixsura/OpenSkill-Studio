@@ -56,10 +56,11 @@ def register_handler(topic: str):
 def load_handlers() -> None:
     """Import every handler-bearing module so HANDLERS is fully populated.
     Called by worker startup AND process_outbox_once (tests)."""
+    import app.controlplane.services.billing  # noqa: F401
     import app.controlplane.services.rating  # noqa: F401
     import app.controlplane.services.settlement_handlers  # noqa: F401
-    # P6: billing (period.close_due); P7: revenue share (invoice.finalized,
-    # purchase.paid); P10: provisioning (provision.run) — appended as phases land.
+    # P7: revenue share (invoice.finalized, purchase.paid);
+    # P10: provisioning (provision.run) — appended as phases land.
 
 
 def _worker_id() -> str:
@@ -202,6 +203,17 @@ async def _sweep_seats(ctx: dict) -> None:
         log.info("cp_seats_swept", events=n)
 
 
+async def _scan_periods(ctx: dict) -> None:
+    from app.controlplane.services.billing import scan_due_periods
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        n = await scan_due_periods(db)
+        await db.commit()
+        if n:
+            log.info("cp_periods_enqueued", count=n)
+
+
 async def _expire_reservations(ctx: dict) -> None:
     from app.controlplane.services.credits import expire_stale_reservations
     from app.core.database import AsyncSessionLocal
@@ -252,7 +264,8 @@ def _cron_jobs() -> list:
         # P5 sweeps: reservation expiry every 30 min; promo expiry daily 02:37
         cron(_expire_reservations, minute={7, 37}, name="cp_reservation_expiry"),
         cron(_expire_promos, hour=2, minute=37, name="cp_promo_expiry"),
-        # P6: period close scan
+        # P6: billing period close scan hourly at :47
+        cron(_scan_periods, minute=47, name="cp_period_scan"),
         # P10: tls refresh
     ]
 

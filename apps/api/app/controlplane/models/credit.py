@@ -81,7 +81,7 @@ class CreditLedgerEntry(Base):
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)  # signed
     balance_after_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     reference_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    reference_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    reference_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consumed_expiration_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
@@ -112,7 +112,7 @@ class CreditReservation(Base):
         String(10), default="held", server_default="held"
     )  # held | settled | released | expired
     reference_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    reference_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    reference_id: Mapped[str] = mapped_column(String(120), nullable=False)
     settled_amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     extension_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

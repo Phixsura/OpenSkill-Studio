@@ -36,6 +36,7 @@ from app.api.v1.endpoints import (
     workflow_registry,
     workflow_runs,
 )
+from app.controlplane.api import billing as cp_billing
 from app.controlplane.api import credits as cp_credits
 from app.controlplane.api import plans as cp_plans
 from app.controlplane.api import platform as cp_platform
@@ -86,3 +87,4 @@ api_v1_router.include_router(cp_plans.router)
 api_v1_router.include_router(cp_usage.router)
 api_v1_router.include_router(cp_pricing.router)
 api_v1_router.include_router(cp_credits.router)
+api_v1_router.include_router(cp_billing.router)
