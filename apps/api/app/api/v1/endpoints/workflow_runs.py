@@ -1,0 +1,208 @@
+"""Workflow run endpoints (ADR-010 D6).
+
+The executor runs as tracked background tasks dispatched AFTER commit so its
+independent sessions can see the run rows.
+"""
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
+from app.models.organization import OrgRole
+from app.models.user import User
+from app.models.workflow_run import RunStatus
+from app.schemas.base import DataResponse, ListResponse, PaginationMeta
+from app.schemas.workflow_run import (
+    CreateRunRequest,
+    DecideReviewRequest,
+    RunEventResponse,
+    StepReviewResponse,
+    StepRunResponse,
+    WorkflowRunDetailResponse,
+    WorkflowRunResponse,
+)
+from app.services.workflow_runtime import (
+    WorkflowRuntimeService,
+    dispatch_advance,
+    sweep_stale,
+)
+
+router = APIRouter(tags=["Workflow Runs"])
+
+WRITE_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+
+
+@router.post(
+    "/orgs/{org_id}/workflow-runs",
+    response_model=DataResponse[WorkflowRunResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
+async def create_run(
+    org_id: str,
+    body: CreateRunRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_org_member(org_id, user, db)
+    svc = WorkflowRuntimeService(db)
+    run = await svc.create_run(
+        org_id=org_id,
+        installation_id=body.installation_id,
+        inputs=body.inputs,
+        started_by=user.id,
+        idempotency_key=body.idempotency_key,
+    )
+    await db.commit()
+    # Dispatch AFTER commit — the executor uses its own session
+    dispatch_advance(run.id)
+    return DataResponse(data=WorkflowRunResponse.model_validate(run))
+
+
+@router.get(
+    "/orgs/{org_id}/workflow-runs",
+    response_model=ListResponse[WorkflowRunResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def list_runs(
+    org_id: str,
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    member = await require_org_member(org_id, user, db)
+    svc = WorkflowRuntimeService(db)
+    # Non-instructors see only their own runs (inputs/outputs carry private
+    # prompts + asset refs) — mirrors project submission-list scoping
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    runs, total = await svc.list_runs(
+        org_id, page=page, per_page=per_page, only_user_id=only_user_id
+    )
+    return ListResponse(
+        data=[WorkflowRunResponse.model_validate(r) for r in runs],
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=page * per_page < total
+        ),
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/workflow-runs/{run_id}",
+    response_model=DataResponse[WorkflowRunDetailResponse],
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def get_run(
+    org_id: str,
+    run_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    member = await require_org_member(org_id, user, db)
+    svc = WorkflowRuntimeService(db)
+    # Non-instructors may read only their own run's detail (inputs/outputs
+    # carry private prompts + asset refs); uniform 404 keeps ids opaque
+    only_user_id = None if member.role in WRITE_ROLES else user.id
+    run = await svc.get_run(run_id, org_id, only_user_id=only_user_id)
+
+    # Lazy sweep: recover crashed executors / expire overdue reviews (cheap)
+    swept = await sweep_stale(db, org_id)
+    if swept["expired_leases"] or swept["expired_reviews"] or swept.get("stalled_runs"):
+        await db.commit()
+        # Re-dispatch EVERY run the sweep touched — the sweep repairs step
+        # state globally but does not resume advance loops itself; without
+        # this, a run swept while a different run was viewed would stall.
+        for swept_run_id in swept["run_ids"]:
+            dispatch_advance(swept_run_id)
+        run = await svc.get_run(run_id, org_id, only_user_id=only_user_id)
+
+    # Durable re-dispatch trigger: the advance loop is an in-memory
+    # continuation over durable state — a crash/deploy between commit and
+    # dispatch (or a drained task at shutdown) would otherwise leave the run
+    # stuck in PENDING/RUNNING forever. Conditional claims make this
+    # idempotent and cheap, so dispatch on every read of a non-settled run.
+    if run.status in (RunStatus.PENDING, RunStatus.RUNNING):
+        dispatch_advance(run_id)
+
+    step_runs = await svc.get_step_runs(run_id)
+    events = await svc.get_events(run_id)
+    detail = WorkflowRunDetailResponse.model_validate(run)
+    detail.step_runs = [StepRunResponse.model_validate(s) for s in step_runs]
+    detail.events = [RunEventResponse.model_validate(e) for e in events]
+    return DataResponse(data=detail)
+
+
+@router.post(
+    "/orgs/{org_id}/workflow-runs/{run_id}/cancel",
+    response_model=DataResponse[WorkflowRunResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
+async def cancel_run(
+    org_id: str,
+    run_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    member = await require_org_member(org_id, user, db)
+    svc = WorkflowRuntimeService(db)
+    run = await svc.cancel_run(
+        run_id, org_id, acting_user_id=user.id, is_instructor=member.role in WRITE_ROLES
+    )
+    await db.commit()
+    return DataResponse(data=WorkflowRunResponse.model_validate(run))
+
+
+# ── Step reviews ──────────────────────────────────────────
+
+
+@router.get(
+    "/orgs/{org_id}/step-reviews",
+    response_model=DataResponse[list[StepReviewResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def list_open_reviews(
+    org_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # R90d: the open-review queue exposes each waiting run's step_run_id, gate
+    # instructions and due date. get_run/list_runs scope non-instructors to
+    # their own runs (private prompts/asset refs), and only WRITE_ROLES may
+    # /decide a review — so a student reading the org-wide queue is a pure leak
+    # around the run-read privacy model with no legitimate use. Gate to
+    # WRITE_ROLES, matching the sibling decide_review endpoint.
+    await require_org_member(org_id, user, db, *WRITE_ROLES)
+    svc = WorkflowRuntimeService(db)
+    reviews = await svc.get_open_reviews(org_id)
+    return DataResponse(data=[StepReviewResponse.model_validate(r) for r in reviews])
+
+
+@router.post(
+    "/orgs/{org_id}/step-reviews/{review_id}/decide",
+    response_model=DataResponse[StepReviewResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def decide_review(
+    org_id: str,
+    review_id: str,
+    body: DecideReviewRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Synchronous validate-then-accept decision (Temporal Update semantics)."""
+    # Review gates approve real provider work — students must not self-approve
+    await require_org_member(org_id, user, db, *WRITE_ROLES)
+    svc = WorkflowRuntimeService(db)
+    review = await svc.decide_review(
+        review_id, org_id, decision=body.decision, note=body.note, decided_by=user.id
+    )
+    # Find the run to resume before commit
+    from app.models.workflow_run import WorkflowStepRun
+
+    step_run = await db.get(WorkflowStepRun, review.step_run_id)
+    run_id = step_run.run_id if step_run else None
+    await db.commit()
+    if run_id:
+        dispatch_advance(run_id)
+    return DataResponse(data=StepReviewResponse.model_validate(review))

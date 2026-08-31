@@ -11,7 +11,7 @@ from app.core.rate_limit import rate_limit
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse
-from app.schemas.skill_pack import SkillPackResponse
+from app.schemas.skill_pack import PublicSkillPackResponse
 from app.services.pack_sharing import PackSharingService
 
 router = APIRouter(tags=["Pack Sharing"])
@@ -56,7 +56,7 @@ async def share_pack(
 
 @router.get(
     "/orgs/{org_id}/shared-with-me",
-    response_model=DataResponse[list[SkillPackResponse]],
+    response_model=DataResponse[list[PublicSkillPackResponse]],
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def list_shared_packs(
@@ -64,11 +64,18 @@ async def list_shared_packs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List packs shared with this org (installable even if PRIVATE)."""
+    """List packs shared with this org (installable even if PRIVATE).
+
+    R92h: the grantee is a DIFFERENT tenant, so serialize via
+    PublicSkillPackResponse — the same sanitized shape the anon registry uses
+    (R71) — NOT the internal SkillPackResponse. The internal shape leaked the
+    owner org's rejection_reason (moderator's private note), review_status,
+    owner_org_id and created_by cross-tenant.
+    """
     await require_org_member(org_id, user, db)
     svc = PackSharingService(db)
     packs = await svc.list_shared_packs(org_id)
-    return DataResponse(data=[SkillPackResponse.model_validate(p) for p in packs])
+    return DataResponse(data=[PublicSkillPackResponse.model_validate(p) for p in packs])
 
 
 @router.delete(

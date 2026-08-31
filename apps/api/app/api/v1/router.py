@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     certificates,
     client_briefs,
     cohorts,
+    composer,
     discussions,
     duplicate,
     evaluation,
@@ -14,6 +15,7 @@ from app.api.v1.endpoints import (
     installations,
     learning_paths,
     lti,
+    matching,
     notifications,
     organizations,
     overview,
@@ -23,10 +25,16 @@ from app.api.v1.endpoints import (
     peer_review,
     portfolio,
     projects,
+    providers,
     registry,
+    requirement_profiles,
     skill_packs,
     skills,
     webhooks,
+    workflow_installations,
+    workflow_packs,
+    workflow_registry,
+    workflow_runs,
 )
 
 api_v1_router = APIRouter()
@@ -56,3 +64,11 @@ api_v1_router.include_router(discussions.router)
 api_v1_router.include_router(gamification.router)
 api_v1_router.include_router(duplicate.router)
 api_v1_router.include_router(pack_sharing.router)
+api_v1_router.include_router(providers.router)
+api_v1_router.include_router(workflow_packs.router)
+api_v1_router.include_router(workflow_runs.router)
+api_v1_router.include_router(composer.router)
+api_v1_router.include_router(workflow_installations.router)
+api_v1_router.include_router(workflow_registry.router)
+api_v1_router.include_router(requirement_profiles.router)
+api_v1_router.include_router(matching.router)

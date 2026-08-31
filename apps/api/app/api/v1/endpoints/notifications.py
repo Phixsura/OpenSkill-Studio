@@ -40,7 +40,7 @@ class NotificationPreferencesRequest(BaseModel):
     dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_notifications(
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     include_read: bool = Query(default=False),
     user: User = Depends(get_current_user),

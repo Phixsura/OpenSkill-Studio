@@ -25,7 +25,13 @@ COOKIE_OPTS = {
     "secure": settings.app_env != "development",
     "samesite": "lax",
     "max_age": settings.refresh_token_expire_days * 24 * 3600,
-    "path": "/api/v1/auth",
+    # Path must stay "/" — the Next.js middleware gates dashboard routes on
+    # the presence of this cookie (request.cookies.has), and page routes only
+    # receive it with a root path. Narrowing to /api/v1/auth breaks browser
+    # login entirely (redirect loop to /login). The token is httpOnly, so JS
+    # exposure is unchanged; the wider path only affects which requests carry
+    # the cookie header.
+    "path": "/",
 }
 
 
@@ -157,9 +163,15 @@ async def refresh(
 async def logout(
     request: Request,
     response: Response,
-    _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # No Bearer requirement: logout means "revoke the session in my cookie".
+    # Requiring an access token made logout silently FAIL when clicked before
+    # auth hydration (store token still null) — the 401 was swallowed
+    # client-side, the refresh cookie stayed valid, and the "logged out"
+    # user was re-authenticated on the next visit (shared-machine hazard).
+    # Revocation is keyed on the httpOnly cookie itself, which is the
+    # credential being revoked — possession is sufficient authorization.
     raw_token = request.cookies.get("refresh_token")
     if raw_token:
         service = AuthService(db)
@@ -172,12 +184,16 @@ async def logout(
 # ── Me ────────────────────────────────────────────────────
 
 
-@router.get("/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(60, 60))])
+@router.get(
+    "/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(60, 60))]
+)
 async def get_me(user: User = Depends(get_current_user)):
     return DataResponse(data=UserResponse.model_validate(user))
 
 
-@router.put("/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(10, 60))])
+@router.put(
+    "/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(10, 60))]
+)
 async def update_me(
     body: UpdateProfileRequest,
     user: User = Depends(get_current_user),
@@ -285,7 +301,11 @@ async def resend_verification(
 # ── Sessions ──────────────────────────────────────────────
 
 
-@router.get("/sessions", response_model=DataResponse[list[SessionResponse]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/sessions",
+    response_model=DataResponse[list[SessionResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -304,17 +324,24 @@ async def revoke_session(
     db: AsyncSession = Depends(get_db),
 ):
     service = AuthService(db)
-    await service.revoke_session(user.id, token_id)
+    revoked = await service.revoke_session(user.id, token_id)
     await db.commit()
 
-    # If the revoked session is the current browser session, clear the cookie
+    # If the revoked session is the current browser session, clear the cookie.
+    # The path param is the RefreshToken row id while the cookie's `jti` claim
+    # is a separately generated ULID — they NEVER match directly. What links
+    # them is the hash: sha256(jti) == RefreshToken.token_hash (see
+    # AuthService._create_token_pair), so compare hashes.
     raw_cookie = request.cookies.get("refresh_token")
     if raw_cookie:
         try:
+            from hashlib import sha256
+
             from app.core.security import decode_token
 
             payload = decode_token(raw_cookie)
-            if payload.get("jti") == token_id:
+            jti = payload.get("jti")
+            if jti and sha256(jti.encode()).hexdigest() == revoked.token_hash:
                 _clear_refresh_cookie(response)
         except Exception:
             pass  # Token already expired/invalid — no action needed

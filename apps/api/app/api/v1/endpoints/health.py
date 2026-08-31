@@ -15,7 +15,9 @@ async def liveness():
     return HealthResponse(status="ok")
 
 
-@router.get("/health/ready", response_model=ReadinessResponse, dependencies=[Depends(rate_limit(10, 60))])
+@router.get(
+    "/health/ready", response_model=ReadinessResponse, dependencies=[Depends(rate_limit(10, 60))]
+)
 async def readiness(db: AsyncSession = Depends(get_db)):
     """Readiness: can the service accept traffic (checks all dependencies)."""
     components: dict[str, str] = {}

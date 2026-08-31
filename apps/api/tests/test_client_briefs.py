@@ -167,6 +167,47 @@ async def test_brief_validation(c):
     assert r.status_code == 422  # bad URL scheme
 
 
+@pytest.mark.asyncio
+async def test_update_brief_validation_mirrors_create(c):
+    """UPDATE must enforce the same field caps and URL-scheme rules as CREATE:
+    oversized short-text fields → 422 (not a DB 500), javascript: URL → 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)).json()[
+        "data"
+    ]["id"]
+    url = f"/api/v1/orgs/{oid}/briefs/{bid}"
+
+    # Oversized short-text fields → 422, never a StringDataRightTruncation 500
+    for bad in (
+        {"title": "X" * 400},  # > 300
+        {"client_industry": "I" * 150},  # > 100 (String(100) column)
+        {"timeline": "T" * 250},  # > 200 (String(200) column)
+        {"budget_range": "B" * 150},  # > 100
+        {"project_type": "P" * 60},  # > 50
+        {"brand_guidelines": "G" * 20000},  # > 10000
+        {"target_audience": "A" * 20000},
+        {"tone_and_style": "S" * 20000},
+        {"constraints": "C" * 20000},
+        {"client_website": "https://" + "w" * 500},  # > 500
+    ):
+        r = await c.put(url, json=bad, headers=h)
+        assert r.status_code == 422, f"{bad.keys()} → {r.status_code}: {r.text[:200]}"
+
+    # URL-scheme validation on update — create rejects this, update must too
+    r = await c.put(url, json={"client_website": "javascript:alert(1)"}, headers=h)
+    assert r.status_code == 422
+
+    # Valid values still pass
+    r = await c.put(
+        url,
+        json={"client_industry": "Tech", "client_website": "https://example.com"},
+        headers=h,
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["client_industry"] == "Tech"
+
+
 # ── Convert Brief to Project ─────────────────────────────
 
 
@@ -349,3 +390,96 @@ async def test_brief_with_all_fields(c):
     assert d["budget_range"] == "$1000-$5000"
     assert len(d["deliverable_specs"]) == 1
     assert len(d["evaluation_criteria"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_cannot_accept_or_reject_own_application(c):
+    """R86: an ACCEPTED BriefApplication is a platform-verified creator-evidence
+    source (commercial_project, weight 1.0, keyed on the applicant — ADR-013),
+    and brief.project_type is free text that snake-cases to a capability key.
+    Any user can create an org (becoming an INSTRUCTOR_ROLE owner), apply to
+    their own brief, and self-accept — minting fabricated 'verified' capability
+    evidence with no second party. Self-accept/reject must be 403; the applicant
+    may still WITHDRAW their own application, and a distinct instructor may
+    accept a different user's application."""
+    h, owner = await _auth(c)
+    oid = await _org(c, h)
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json=_brief_body(project_type="voice_generation"),
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=h)
+    assert r.status_code == 200, r.text
+
+    # Owner self-applies
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/apply", json={"note": "self apply"}, headers=h
+    )
+    assert r.status_code == 201, r.text
+    app_id = r.json()["data"]["id"]
+
+    # Self-ACCEPT → 403
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
+        json={"status": "accepted"},
+        headers=h,
+    )
+    assert r.status_code == 403, r.text
+
+    # Self-REJECT → 403 too
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
+        json={"status": "rejected"},
+        headers=h,
+    )
+    assert r.status_code == 403, r.text
+
+    # Self-WITHDRAW → allowed (an applicant may retract their own bid)
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
+        json={"status": "withdrawn"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+
+
+# ── R92b: convert rubric max_score must be a bounded number (no 500) ──
+
+
+@pytest.mark.asyncio
+async def test_convert_rubric_bad_max_score_is_422_not_500(c):
+    """R92b: convert_to_project sums rubric max_score into the project's INTEGER
+    max_score column. A string max_score raised `int + str` TypeError, and a
+    huge value overflowed int32 at the INSERT (DataError) — both unhandled 500s.
+    The convert rubric validator must reject them 422. Reverting the gate fails."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    async def _convert(rubric):
+        bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)).json()[
+            "data"
+        ]["id"]
+        return await c.post(
+            f"/api/v1/orgs/{oid}/briefs/{bid}/convert", json={"rubric": rubric}, headers=h
+        )
+
+    # string max_score -> 422 (was: int+str TypeError 500)
+    r = await _convert([{"criterion": "Quality", "max_score": "lots"}])
+    assert r.status_code == 422, r.text
+    # int32-overflowing max_score -> 422 (was: asyncpg DataError 500)
+    r = await _convert([{"criterion": "Quality", "max_score": 99999999999}])
+    assert r.status_code == 422, r.text
+    # sum across items overflowing the project column -> 422
+    r = await _convert(
+        [{"criterion": f"C{i}", "max_score": 9000} for i in range(20)]
+        + [{"criterion": "extra", "max_score": 9000}]
+    )
+    assert r.status_code == 422, r.text  # 21 items also trips the >20 cap; still 422
+
+    # a normal rubric still converts
+    r = await _convert([{"criterion": "Quality", "max_score": 100}])
+    assert r.status_code == 201, r.text
+    assert r.json()["data"]["max_score"] == 100

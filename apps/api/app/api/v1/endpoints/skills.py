@@ -68,7 +68,11 @@ def _require_skill_visible(skill, member) -> None:
 # ── Categories ───────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/categories", response_model=DataResponse[list[CategoryResponse]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/categories",
+    response_model=DataResponse[list[CategoryResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_categories(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -81,7 +85,9 @@ async def list_categories(
 
 
 @router.post(
-    "/orgs/{org_id}/categories", response_model=DataResponse[CategoryResponse], status_code=201,
+    "/orgs/{org_id}/categories",
+    response_model=DataResponse[CategoryResponse],
+    status_code=201,
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def create_category(
@@ -104,7 +110,9 @@ async def create_category(
     return DataResponse(data=CategoryResponse.model_validate(cat))
 
 
-@router.put("/orgs/{org_id}/categories/reorder", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/categories/reorder", status_code=204, dependencies=[Depends(rate_limit(20, 60))]
+)
 async def reorder_categories(
     org_id: str,
     body: ReorderRequest,
@@ -122,7 +130,8 @@ async def reorder_categories(
 
 
 @router.put(
-    "/orgs/{org_id}/categories/{category_id}", response_model=DataResponse[CategoryResponse],
+    "/orgs/{org_id}/categories/{category_id}",
+    response_model=DataResponse[CategoryResponse],
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def update_category(
@@ -141,7 +150,11 @@ async def update_category(
     return DataResponse(data=CategoryResponse.model_validate(cat))
 
 
-@router.delete("/orgs/{org_id}/categories/{category_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/categories/{category_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def delete_category(
     org_id: str,
     category_id: str,
@@ -159,7 +172,11 @@ async def delete_category(
 # ── Skills ───────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/skills", response_model=ListResponse[SkillResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/skills",
+    response_model=ListResponse[SkillResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_skills(
     org_id: str,
     category: str | None = None,
@@ -168,7 +185,7 @@ async def list_skills(
     tag: str | None = None,
     q: str | None = None,
     cohort_id: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -197,7 +214,12 @@ async def list_skills(
     )
 
 
-@router.post("/orgs/{org_id}/skills", response_model=DataResponse[SkillResponse], status_code=201, dependencies=[Depends(rate_limit(20, 60))])
+@router.post(
+    "/orgs/{org_id}/skills",
+    response_model=DataResponse[SkillResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def create_skill(
     org_id: str,
     body: CreateSkillRequest,
@@ -223,7 +245,11 @@ async def create_skill(
     return DataResponse(data=SkillResponse.model_validate(skill))
 
 
-@router.get("/orgs/{org_id}/skills/{skill_id}", response_model=DataResponse[SkillDetailResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/skills/{skill_id}",
+    response_model=DataResponse[SkillDetailResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_skill(
     org_id: str,
     skill_id: str,
@@ -251,7 +277,11 @@ async def get_skill(
     return DataResponse(data=resp)
 
 
-@router.put("/orgs/{org_id}/skills/{skill_id}", response_model=DataResponse[SkillResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/skills/{skill_id}",
+    response_model=DataResponse[SkillResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def update_skill(
     org_id: str,
     skill_id: str,
@@ -268,7 +298,9 @@ async def update_skill(
     return DataResponse(data=SkillResponse.model_validate(skill))
 
 
-@router.delete("/orgs/{org_id}/skills/{skill_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/skills/{skill_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))]
+)
 async def delete_skill(
     org_id: str,
     skill_id: str,
@@ -283,7 +315,11 @@ async def delete_skill(
     await db.commit()
 
 
-@router.post("/orgs/{org_id}/skills/{skill_id}/publish", response_model=DataResponse[SkillResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.post(
+    "/orgs/{org_id}/skills/{skill_id}/publish",
+    response_model=DataResponse[SkillResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def publish_skill(
     org_id: str,
     skill_id: str,
@@ -300,7 +336,8 @@ async def publish_skill(
 
 
 @router.post(
-    "/orgs/{org_id}/skills/{skill_id}/unpublish", response_model=DataResponse[SkillResponse],
+    "/orgs/{org_id}/skills/{skill_id}/unpublish",
+    response_model=DataResponse[SkillResponse],
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def unpublish_skill(
@@ -318,7 +355,11 @@ async def unpublish_skill(
     return DataResponse(data=SkillResponse.model_validate(skill))
 
 
-@router.put("/orgs/{org_id}/skills/{skill_id}/prerequisites", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/skills/{skill_id}/prerequisites",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def set_prerequisites(
     org_id: str,
     skill_id: str,
@@ -357,7 +398,11 @@ async def list_exercises(
     return DataResponse(data=[_exercise_response(e, member) for e in exercises])
 
 
-@router.get("/orgs/{org_id}/exercises/{exercise_id}", response_model=DataResponse[ExerciseResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/exercises/{exercise_id}",
+    response_model=DataResponse[ExerciseResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_exercise(
     org_id: str,
     exercise_id: str,
@@ -407,7 +452,11 @@ async def create_exercise(
     return DataResponse(data=ExerciseResponse.model_validate(ex))
 
 
-@router.put("/orgs/{org_id}/exercises/{exercise_id}", response_model=DataResponse[ExerciseResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/exercises/{exercise_id}",
+    response_model=DataResponse[ExerciseResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def update_exercise(
     org_id: str,
     exercise_id: str,
@@ -427,7 +476,11 @@ async def update_exercise(
     return DataResponse(data=ExerciseResponse.model_validate(ex))
 
 
-@router.delete("/orgs/{org_id}/exercises/{exercise_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/exercises/{exercise_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def delete_exercise(
     org_id: str,
     exercise_id: str,
@@ -499,7 +552,11 @@ async def list_my_attempts(
 # ── Progress ─────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/progress/me", response_model=DataResponse[OverallProgressResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/progress/me",
+    response_model=DataResponse[OverallProgressResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_my_progress(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -538,7 +595,11 @@ async def get_my_skill_progress(
 # ── Grading ──────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/grading/pending", response_model=DataResponse[list[AttemptResponse]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/grading/pending",
+    response_model=DataResponse[list[AttemptResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_pending_grading(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -551,7 +612,8 @@ async def get_pending_grading(
 
 
 @router.post(
-    "/orgs/{org_id}/grading/attempts/{attempt_id}", response_model=DataResponse[AttemptResponse],
+    "/orgs/{org_id}/grading/attempts/{attempt_id}",
+    response_model=DataResponse[AttemptResponse],
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def grade_attempt(
@@ -565,7 +627,7 @@ async def grade_attempt(
     svc = SkillService(db)
     attempt = await svc.get_attempt(attempt_id)
     _verify_org(attempt, org_id, "Attempt")
-    attempt = await svc.grade_attempt(attempt_id, body.score, body.feedback)
+    attempt = await svc.grade_attempt(attempt_id, body.score, body.feedback, grader_id=user.id)
     await db.commit()
     return DataResponse(data=AttemptResponse.model_validate(attempt))
 
@@ -574,7 +636,8 @@ async def grade_attempt(
 
 
 @router.get(
-    "/orgs/{org_id}/categories/{category_id}", response_model=DataResponse[CategoryResponse],
+    "/orgs/{org_id}/categories/{category_id}",
+    response_model=DataResponse[CategoryResponse],
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def get_category(
@@ -590,7 +653,11 @@ async def get_category(
     return DataResponse(data=CategoryResponse.model_validate(cat))
 
 
-@router.put("/orgs/{org_id}/skills/{skill_id}/exercises/reorder", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/skills/{skill_id}/exercises/reorder",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def reorder_exercises(
     org_id: str,
     skill_id: str,
@@ -612,7 +679,11 @@ async def reorder_exercises(
     await db.commit()
 
 
-@router.get("/orgs/{org_id}/skills/{skill_id}/tree", response_model=DataResponse[SkillTreeResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/skills/{skill_id}/tree",
+    response_model=DataResponse[SkillTreeResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_skill_tree(
     org_id: str,
     skill_id: str,
@@ -640,7 +711,11 @@ async def get_skill_tree(
     )
 
 
-@router.get("/orgs/{org_id}/progress/me/skills", response_model=DataResponse[list[SkillProgressSummaryResponse]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/progress/me/skills",
+    response_model=DataResponse[list[SkillProgressSummaryResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_my_skill_progress(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -703,7 +778,11 @@ async def list_my_skill_progress(
     return DataResponse(data=result)
 
 
-@router.get("/orgs/{org_id}/progress/students/{student_id}", response_model=DataResponse[OverallProgressResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/progress/students/{student_id}",
+    response_model=DataResponse[OverallProgressResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_student_progress(
     org_id: str,
     student_id: str,

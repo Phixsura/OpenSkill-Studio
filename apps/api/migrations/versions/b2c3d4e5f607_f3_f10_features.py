@@ -151,12 +151,14 @@ def upgrade() -> None:
 
     # ── Seed default pack categories ──
     # Deterministic IDs so they are consistent across all environments.
+    # Deterministic 26-char ULIDs (the column is varchar(26); four of these
+    # were previously 27 chars and truncated on a from-scratch migration).
     categories = [
-        ("01J00000000000000000000AIML", "AI & ML", "ai-ml", "brain", 0),
+        ("01J0000000000000000000AIML", "AI & ML", "ai-ml", "brain", 0),
         ("01J00000000000000000DESIGN", "Design", "design", "palette", 1),
-        ("01J000000000000000000DEVLOP", "Development", "development", "code", 2),
-        ("01J0000000000000000BUSINESS", "Business", "business", "briefcase", 3),
-        ("01J000000000000000MARKETING", "Marketing", "marketing", "megaphone", 4),
+        ("01J0000000000000000DEVELOP", "Development", "development", "code", 2),
+        ("01J000000000000000BUSINES1", "Business", "business", "briefcase", 3),
+        ("01J00000000000000MARKETIN1", "Marketing", "marketing", "megaphone", 4),
     ]
     for cat_id, name, slug, icon, sort_order in categories:
         op.execute(

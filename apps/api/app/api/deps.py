@@ -25,7 +25,15 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
 
-    user = await db.get(User, payload["sub"])
+    # R91: a validly-signed token missing the `sub` claim (e.g. a token minted
+    # for another purpose with the same secret, or a tampered payload) must be
+    # rejected as unauthorized, not KeyError-500 the request. Also guard against
+    # a non-str sub reaching db.get.
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or not sub:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user = await db.get(User, sub)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
 

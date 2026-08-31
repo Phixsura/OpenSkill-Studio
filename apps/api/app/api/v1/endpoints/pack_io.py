@@ -21,7 +21,10 @@ router = APIRouter(tags=["Pack Import/Export"])
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
-@router.get("/orgs/{org_id}/packs/{pack_id}/releases/{version}/export", dependencies=[Depends(rate_limit(10, 60))])
+@router.get(
+    "/orgs/{org_id}/packs/{pack_id}/releases/{version}/export",
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def export_release(
     org_id: str,
     pack_id: str,
@@ -41,15 +44,15 @@ async def export_release(
     # RFC 6266: ASCII-only filename= fallback + UTF-8 filename*= for non-ASCII
     import re
     from urllib.parse import quote
-    ascii_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+
+    ascii_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
     utf8_filename = quote(filename)
     return Response(
         content=zip_bytes,
         media_type="application/zip",
         headers={
             "Content-Disposition": (
-                f'attachment; filename="{ascii_filename}"; '
-                f"filename*=UTF-8''{utf8_filename}"
+                f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{utf8_filename}"
             )
         },
     )
@@ -88,7 +91,9 @@ async def import_pack(
     svc = PackImportService(db)
     pack, release = await svc.import_pack(org_id, file_bytes, user.id)
     await db.commit()
-    return DataResponse(data={
-        "pack": SkillPackResponse.model_validate(pack).model_dump(),
-        "release": ReleaseResponse.model_validate(release).model_dump(),
-    })
+    return DataResponse(
+        data={
+            "pack": SkillPackResponse.model_validate(pack).model_dump(),
+            "release": ReleaseResponse.model_validate(release).model_dump(),
+        }
+    )

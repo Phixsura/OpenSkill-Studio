@@ -19,13 +19,15 @@ from app.models.webhook import WebhookSubscription
 log = structlog.get_logger()
 
 # Known event types for validation
-VALID_EVENT_TYPES = frozenset({
-    "pack.published",
-    "pack.installed",
-    "pack.forked",
-    "pack.updated",
-    "pack.uninstalled",
-})
+VALID_EVENT_TYPES = frozenset(
+    {
+        "pack.published",
+        "pack.installed",
+        "pack.forked",
+        "pack.updated",
+        "pack.uninstalled",
+    }
+)
 
 # Blocked IP ranges for SSRF protection
 _BLOCKED_NETWORKS = [
@@ -189,11 +191,13 @@ class WebhookService:
         for sub in subs:
             if sub.events and event_type not in sub.events:
                 continue
-            deliveries.append({
-                "url": sub.url,
-                "secret": sub.secret,
-                "webhook_id": sub.id,
-            })
+            deliveries.append(
+                {
+                    "url": sub.url,
+                    "secret": sub.secret,
+                    "webhook_id": sub.id,
+                }
+            )
 
         if not deliveries:
             return
@@ -256,9 +260,7 @@ class WebhookService:
             },
             default=str,
         )
-        signature = hmac.new(
-            secret.encode(), body.encode(), hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:

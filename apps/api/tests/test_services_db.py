@@ -225,6 +225,37 @@ async def test_org_delete_by_owner(db):
 
 
 @pytest.mark.asyncio
+async def test_org_delete_invalidates_both_registry_caches(db, monkeypatch):
+    """R36: delete_org bulk-archives BOTH skill and workflow packs, bypassing
+    the per-pack service methods that normally clear the registry caches. It
+    must clear BOTH cache prefixes — clearing only wfregistry:* left the just-
+    archived PUBLIC skill packs contributing a stale meta.total on warm
+    registry:search pages for the ~5min TTL."""
+    from app.services import organization as org_mod
+    from app.services.organization import OrgService
+
+    cleared: list[str] = []
+
+    async def _spy(pattern: str):
+        cleared.append(pattern)
+
+    monkeypatch.setattr(org_mod, "cache_delete_pattern", _spy, raising=False)
+    # delete_org imports cache_delete_pattern locally, so patch the source too
+    import app.core.cache as cache_mod
+
+    monkeypatch.setattr(cache_mod, "cache_delete_pattern", _spy)
+
+    user = await _user(db)
+    svc = OrgService(db)
+    org = await svc.create("OrgCacheDel", None, None, user.id)
+    await db.flush()
+    await svc.delete_org(org.id, user.id)
+
+    assert "wfregistry:*" in cleared, cleared
+    assert "registry:*" in cleared, cleared
+
+
+@pytest.mark.asyncio
 async def test_org_add_remove_member(db):
     from app.models.organization import OrgRole
     from app.services.organization import OrgService
@@ -446,9 +477,11 @@ async def test_skill_full_crud(db):
     # Pending grading
     await svc.get_pending_grading(org.id)
 
-    # Delete
+    # Delete — category delete requires ALL its skills archived
+    # (CATEGORY_HAS_SKILLS guard), including the first one
     await svc.delete_exercise(ex2.id)
     await svc.delete_skill(skill2.id)
+    await svc.delete_skill(skill.id)
     await svc.delete_category(cat.id)
 
 
@@ -531,8 +564,13 @@ async def test_project_full_flow(db):
     timing = await svc.get_submission_timing(project, user.id)
     assert timing == "on_time"
 
-    # Review (approve)
-    review = await svc.create_review(sub.id, user.id, "approved", 85, None, "Great!")
+    # Review (approve) — a DISTINCT reviewer (no self-review, R86)
+    from app.models.organization import OrgRole as _OrgRole
+
+    reviewer = await _user(db)
+    await org_svc.add_member(org.id, reviewer.id, _OrgRole.INSTRUCTOR, invited_by=user.id)
+    await db.flush()
+    review = await svc.create_review(sub.id, reviewer.id, "approved", 85, None, "Great!")
     assert review.score == 85
 
     # Check final score
@@ -572,6 +610,12 @@ async def test_project_review_revision_and_reject(db):
     org_svc = OrgService(db)
     org = await org_svc.create("RevOrg", None, None, user.id)
     await db.flush()
+    # A distinct instructor to review the author's submissions (no self-review, R86)
+    from app.models.organization import OrgRole as _OrgRole
+
+    reviewer = await _user(db)
+    await org_svc.add_member(org.id, reviewer.id, _OrgRole.INSTRUCTOR, invited_by=user.id)
+    await db.flush()
 
     svc = ProjectService(db)
     project = await svc.create_project(
@@ -595,18 +639,71 @@ async def test_project_review_revision_and_reject(db):
     # Submission 1: revision requested
     sub1 = await svc.create_submission(org.id, project.id, user.id)
     await svc.submit_draft(sub1.id, user.id)
-    r1 = await svc.create_review(sub1.id, user.id, "revision_requested", None, None, "Fix this")
+    r1 = await svc.create_review(sub1.id, reviewer.id, "revision_requested", None, None, "Fix this")
     assert r1.status.value == "revision_requested"
 
     # Submission 2: rejected
     sub2 = await svc.create_submission(org.id, project.id, user.id)
     await svc.submit_draft(sub2.id, user.id)
-    r2 = await svc.create_review(sub2.id, user.id, "rejected", 20, None, "Poor")
+    r2 = await svc.create_review(sub2.id, reviewer.id, "rejected", 20, None, "Poor")
     assert r2.status.value == "rejected"
 
     # List reviews
     reviews = await svc.list_reviews(sub1.id)
     assert len(reviews) >= 1
+
+
+@pytest.mark.asyncio
+async def test_create_review_rejects_self_review(db):
+    """R86: an instructor can submit to their own project; letting them
+    review+APPROVE that submission is a self-grade that self-inflates
+    creator-capability evidence (an APPROVED submission review is a
+    platform-verified evidence source keyed on the submission author,
+    ADR-013). The instructor review path must reject self-review, mirroring
+    the peer-review module's self-exclusion."""
+    from app.exceptions import AppError
+    from app.services.organization import OrgService
+    from app.services.project import ProjectService
+
+    author = await _user(db)
+    org_svc = OrgService(db)
+    org = await org_svc.create("SelfRevOrg", None, None, author.id)
+    await db.flush()
+    svc = ProjectService(db)
+    project = await svc.create_project(
+        org.id,
+        "SR",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        author.id,
+    )
+    await db.flush()
+    sub = await svc.create_submission(org.id, project.id, author.id)
+    await svc.submit_draft(sub.id, author.id)
+
+    # Author reviewing their own submission → 403 SELF_REVIEW_FORBIDDEN
+    with pytest.raises(AppError) as ei:
+        await svc.create_review(sub.id, author.id, "approved", 95, None, "self")
+    assert ei.value.code == "SELF_REVIEW_FORBIDDEN"
+    assert ei.value.status_code == 403
+
+    # A distinct instructor CAN review it
+    reviewer = await _user(db)
+    from app.models.organization import OrgRole as _OrgRole
+
+    await org_svc.add_member(org.id, reviewer.id, _OrgRole.INSTRUCTOR, invited_by=author.id)
+    await db.flush()
+    review = await svc.create_review(sub.id, reviewer.id, "approved", 88, None, "peer")
+    assert review.status.value == "approved"
 
 
 # ══════════════════════════════════════════════════════════

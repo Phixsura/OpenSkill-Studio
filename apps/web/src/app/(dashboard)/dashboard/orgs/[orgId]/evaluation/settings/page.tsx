@@ -20,9 +20,14 @@ export default function EvalSettingsPage() {
   const { orgId } = useParams<{ orgId: string }>();
   const queryClient = useQueryClient();
 
-  const { data: settings, isLoading, isError } = useQuery({
+  const {
+    data: settings,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["eval-settings", orgId],
-    queryFn: () => apiWithAuth<EvalSettings>(`/orgs/${orgId}/settings/evaluation`),
+    queryFn: () =>
+      apiWithAuth<{ data: EvalSettings }>(`/orgs/${orgId}/settings/evaluation`).then((r) => r.data),
   });
 
   const [enabled, setEnabled] = useState(false);
@@ -73,7 +78,10 @@ export default function EvalSettingsPage() {
   });
 
   if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
-  if (isError) return <p className="text-sm text-red-600">Failed to load evaluation settings. Please try again.</p>;
+  if (isError)
+    return (
+      <p className="text-sm text-red-600">Failed to load evaluation settings. Please try again.</p>
+    );
 
   return (
     <div className="space-y-6">
@@ -153,13 +161,14 @@ export default function EvalSettingsPage() {
         </div>
 
         {message && (
-          <p className={`text-sm ${message.toLowerCase().includes("fail") ? "text-red-600" : "text-green-600"}`}>{message}</p>
+          <p
+            className={`text-sm ${message.toLowerCase().includes("fail") ? "text-red-600" : "text-green-600"}`}
+          >
+            {message}
+          </p>
         )}
 
-        <Button
-          onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
-        >
+        <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
           {saveMutation.isPending ? "Saving..." : "Save Settings"}
         </Button>
       </div>

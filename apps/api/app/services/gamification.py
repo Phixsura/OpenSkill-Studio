@@ -38,7 +38,42 @@ class GamificationService:
         reference_id: str | None = None,
         description: str | None = None,
     ) -> UserPoints:
-        """Award points to a user and update their aggregate record."""
+        """Award points to a user and update their aggregate record.
+
+        Idempotent per action (R88d): when reference_id is set, at most one
+        ledger row per (user, org, reason, reference_id). Without this,
+        resubmitting the same submission after revision_requested re-awarded
+        POINTS_PROJECT_SUBMISSION every time, and re-reviewing the same
+        submission re-awarded POINTS_REVIEW_POSTED — two colluding accounts
+        could ping-pong review/resubmit for unbounded leaderboard inflation.
+        (Concurrent duplicate awards remain a known READ COMMITTED race of the
+        check-then-insert pattern — same issue-18 stale-read class.)
+        """
+        if reference_id is not None:
+            dup = await self.db.execute(
+                select(PointsLedger.id)
+                .where(
+                    PointsLedger.user_id == user_id,
+                    PointsLedger.org_id == org_id,
+                    PointsLedger.reason == reason,
+                    PointsLedger.reference_id == reference_id,
+                )
+                .limit(1)
+            )
+            if dup.scalar_one_or_none() is not None:
+                # Already awarded for this exact action — no-op, return aggregate
+                existing = await self.db.execute(
+                    select(UserPoints).where(
+                        UserPoints.user_id == user_id,
+                        UserPoints.org_id == org_id,
+                    )
+                )
+                agg = existing.scalar_one_or_none()
+                if agg is not None:
+                    return agg
+                # Ledger row exists but no aggregate (shouldn't happen) — fall
+                # through and award so the aggregate self-heals.
+
         # Append ledger entry
         entry = PointsLedger(
             user_id=user_id,
@@ -84,7 +119,10 @@ class GamificationService:
                     .where(UserPoints.user_id == user_id, UserPoints.org_id == org_id)
                     .values(
                         total_points=UserPoints.total_points + points,
-                        level=func.floor(cast(UserPoints.total_points + points, Float) / _LEVEL_STEP) + 1,
+                        level=func.floor(
+                            cast(UserPoints.total_points + points, Float) / _LEVEL_STEP
+                        )
+                        + 1,
                     )
                 )
                 await self.db.flush()
@@ -99,7 +137,8 @@ class GamificationService:
                 )
                 .values(
                     total_points=UserPoints.total_points + points,
-                    level=func.floor(cast(UserPoints.total_points + points, Float) / _LEVEL_STEP) + 1,
+                    level=func.floor(cast(UserPoints.total_points + points, Float) / _LEVEL_STEP)
+                    + 1,
                 )
             )
             await self.db.flush()
@@ -115,9 +154,7 @@ class GamificationService:
         )
         return user_points
 
-    async def get_leaderboard(
-        self, org_id: str, limit: int = 20
-    ) -> list[dict]:
+    async def get_leaderboard(self, org_id: str, limit: int = 20) -> list[dict]:
         """Top N users by total points in an org."""
         result = await self.db.execute(
             select(

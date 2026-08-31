@@ -487,12 +487,22 @@ async def test_skills_full_crud(c):
     )
     teid = r26.json()["data"]["id"]
 
+    # R88g forbids self-grading — a separate student submits the attempt.
+    # The skill was left in draft above (unpublish); a student can only attempt
+    # a published skill's exercises, so republish before the student submits.
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/publish", headers=h)
+    sh, student = await _reg(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h,
+    )
     r27 = await c.post(
         f"/api/v1/orgs/{oid}/exercises/{teid}/attempts",
         json={
             "answer": {"text": "My long answer here that is sufficient"},
         },
-        headers=h,
+        headers=sh,
     )
     aid = r27.json()["data"]["id"]
 
@@ -521,8 +531,12 @@ async def test_skills_full_crud(c):
     r33 = await c.delete(f"/api/v1/orgs/{oid}/skills/{sid}", headers=h)
     assert r33.status_code == 204
 
-    r34 = await c.delete(f"/api/v1/orgs/{oid}/categories/{cid}", headers=h)
+    # Category delete requires ALL its skills archived (CATEGORY_HAS_SKILLS
+    # guard) — the prerequisites skill (sid2) is still active
+    r34 = await c.delete(f"/api/v1/orgs/{oid}/skills/{sid2}", headers=h)
     assert r34.status_code == 204
+    r35 = await c.delete(f"/api/v1/orgs/{oid}/categories/{cid}", headers=h)
+    assert r35.status_code == 204
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -633,6 +647,11 @@ async def test_projects_full_flow(c):
     r16 = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{subid}/submit", headers=h)
     assert r16.status_code == 200
 
+    # Distinct reviewer — no self-review (R86)
+    hr, ur = await _reg(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": ur["id"], "role": "instructor"}, headers=h
+    )
     # Reviews
     r17 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{subid}/reviews",
@@ -641,7 +660,7 @@ async def test_projects_full_flow(c):
             "score": 85,
             "feedback": "Well done!",
         },
-        headers=h,
+        headers=hr,
     )
     assert r17.status_code == 201
 

@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret-change-me-in-production"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
+    # Concurrent-refresh grace: a just-rotated token re-presented within this
+    # window is a cross-tab race (shared cookie, per-tab dedup), not theft —
+    # the loser tab gets its own fresh pair instead of a forced logout.
+    refresh_reuse_grace_seconds: int = 10
 
     # LLM
     llm_provider: str = "anthropic"  # anthropic | openai
@@ -45,6 +49,12 @@ class Settings(BaseSettings):
     eval_max_video_duration: int = 600  # seconds
     eval_max_image_size: int = 20 * 1024 * 1024  # 20 MB
     eval_max_retries: int = 3
+
+    # Workflow runtime (Issue #21)
+    credential_encryption_key: str = ""  # Fernet key or passphrase; required in production
+    extraction_enabled: bool = False  # LLM requirement extraction feature flag
+    workflow_step_timeout_seconds: int = 120
+    workflow_max_concurrent_runs: int = 20
 
     # Frontend
     frontend_url: str = "http://localhost:3000"
@@ -70,10 +80,7 @@ class Settings(BaseSettings):
         # propagate them to os.environ, so os.environ.get("APP_ENV") can
         # return None even when APP_ENV=production is set in .env.
         app_env = (info.data.get("app_env") or "development") if info.data else "development"
-        if (
-            app_env not in ("development", "test")
-            and v == "dev-secret-change-me-in-production"
-        ):
+        if app_env not in ("development", "test") and v == "dev-secret-change-me-in-production":
             raise ValueError("JWT_SECRET must be set to a unique value in production")
         return v
 
@@ -90,7 +97,31 @@ class Settings(BaseSettings):
     def validate_database_url(cls, v: str, info: Any) -> str:
         app_env = (info.data.get("app_env") or "development") if info.data else "development"
         if app_env not in ("development", "test") and "postgres:postgres@" in v:
-            raise ValueError("DATABASE_URL must not use default postgres:postgres credentials in production")
+            raise ValueError(
+                "DATABASE_URL must not use default postgres:postgres credentials in production"
+            )
+        return v
+
+    @field_validator("credential_encryption_key")
+    @classmethod
+    def validate_credential_key(cls, v: str, info: Any) -> str:
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if app_env not in ("development", "test") and not v:
+            raise ValueError("CREDENTIAL_ENCRYPTION_KEY must be set in production")
+        # Format check at BOOT, not first use: a malformed key otherwise
+        # boots cleanly and the first credential operation 500s hours later.
+        # Comma-separated Fernet keys (MultiFernet rotation) — validate each.
+        if v:
+            from cryptography.fernet import Fernet
+
+            for idx, key in enumerate(k.strip() for k in v.split(",")):
+                try:
+                    Fernet(key.encode())
+                except ValueError as exc:
+                    raise ValueError(
+                        f"CREDENTIAL_ENCRYPTION_KEY entry {idx + 1} is not a valid "
+                        "Fernet key (expected 32-byte urlsafe base64)"
+                    ) from exc
         return v
 
     model_config = {

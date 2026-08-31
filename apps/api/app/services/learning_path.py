@@ -85,9 +85,13 @@ class LearningPathService:
         # Clean up path items and cohort assignments
         from sqlalchemy import delete as sa_delete
 
-        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.path_id == path_id))
         await self.db.execute(
-            sa_delete(CohortLearningPathAssignment).where(CohortLearningPathAssignment.path_id == path_id)
+            sa_delete(LearningPathItem).where(LearningPathItem.path_id == path_id)
+        )
+        await self.db.execute(
+            sa_delete(CohortLearningPathAssignment).where(
+                CohortLearningPathAssignment.path_id == path_id
+            )
         )
         await self.db.flush()
 
@@ -101,6 +105,7 @@ class LearningPathService:
         skill_id: str | None = None,
         project_id: str | None = None,
         section_title: str | None = None,
+        workflow_pack_id: str | None = None,
         sort_order: int = 0,
         required: bool = True,
         unlock_rule: str = "previous_required",
@@ -112,7 +117,8 @@ class LearningPathService:
         except ValueError as exc:
             raise AppError(
                 "INVALID_ITEM_TYPE",
-                f"Invalid item_type '{item_type}'. Must be one of: skill, project, section",
+                f"Invalid item_type '{item_type}'. Must be one of: "
+                "skill, project, section, workflow_pack",
                 422,
             ) from exc
 
@@ -132,6 +138,32 @@ class LearningPathService:
         elif ptype == PathItemType.SECTION:
             if not section_title:
                 raise AppError("MISSING_TITLE", "section_title required for section items", 422)
+        elif ptype == PathItemType.WORKFLOW_PACK:
+            if not workflow_pack_id:
+                raise AppError(
+                    "MISSING_WORKFLOW_PACK_ID",
+                    "workflow_pack_id required for workflow_pack items",
+                    422,
+                )
+            # The pack must be INSTALLED in this org (an installation row is
+            # the org's claim to it — a bare pack id could reference any
+            # foreign private pack). Loose-coupled column, so check here.
+            from app.models.skill_pack import InstallStatus
+            from app.models.workflow_pack import WorkflowPackInstallation
+
+            install_r = await self.db.execute(
+                select(WorkflowPackInstallation).where(
+                    WorkflowPackInstallation.org_id == org_id,
+                    WorkflowPackInstallation.pack_id == workflow_pack_id,
+                    WorkflowPackInstallation.status != InstallStatus.REMOVED,
+                )
+            )
+            if install_r.scalar_one_or_none() is None:
+                raise AppError(
+                    "WORKFLOW_PACK_NOT_INSTALLED",
+                    "Workflow pack is not installed in this organization",
+                    404,
+                )
 
         item = LearningPathItem(
             path_id=path_id,
@@ -139,6 +171,7 @@ class LearningPathService:
             skill_id=skill_id if ptype == PathItemType.SKILL else None,
             project_id=project_id if ptype == PathItemType.PROJECT else None,
             section_title=section_title if ptype == PathItemType.SECTION else None,
+            workflow_pack_id=(workflow_pack_id if ptype == PathItemType.WORKFLOW_PACK else None),
             sort_order=sort_order,
             required=required,
             unlock_rule=unlock_rule,
@@ -148,7 +181,9 @@ class LearningPathService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
-            raise AppError("REFERENCE_NOT_FOUND", "Referenced skill or project no longer exists", 404) from None
+            raise AppError(
+                "REFERENCE_NOT_FOUND", "Referenced skill or project no longer exists", 404
+            ) from None
         return item
 
     async def remove_item(self, item_id: str, path_id: str, org_id: str) -> None:
@@ -195,7 +230,9 @@ class LearningPathService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
-            raise AppError("ALREADY_ASSIGNED", "Path already assigned to this cohort", 409) from None
+            raise AppError(
+                "ALREADY_ASSIGNED", "Path already assigned to this cohort", 409
+            ) from None
         return assignment
 
     async def unassign_from_cohort(self, path_id: str, cohort_id: str, org_id: str) -> None:
@@ -213,7 +250,9 @@ class LearningPathService:
         await self.db.delete(assignment)
         await self.db.flush()
 
-    async def list_cohort_paths(self, cohort_id: str, org_id: str) -> list[tuple[CohortLearningPathAssignment, str]]:
+    async def list_cohort_paths(
+        self, cohort_id: str, org_id: str
+    ) -> list[tuple[CohortLearningPathAssignment, str]]:
         await self._verify_cohort_org(cohort_id, org_id)
         result = await self.db.execute(
             select(CohortLearningPathAssignment, LearningPath.name)
@@ -251,7 +290,9 @@ class LearningPathService:
 
         # Batch-load all referenced skills and projects (avoid N+1)
         skill_ids = [i.skill_id for i in items if i.item_type == PathItemType.SKILL and i.skill_id]
-        project_ids = [i.project_id for i in items if i.item_type == PathItemType.PROJECT and i.project_id]
+        project_ids = [
+            i.project_id for i in items if i.item_type == PathItemType.PROJECT and i.project_id
+        ]
 
         skills_map: dict[str, Skill] = {}
         progress_map: dict[str, SkillProgress] = {}
@@ -281,12 +322,41 @@ class LearningPathService:
             )
             approved_projects = {row[0] for row in sub_r.all()}
 
+        wf_pack_ids = [
+            i.workflow_pack_id
+            for i in items
+            if i.item_type == PathItemType.WORKFLOW_PACK and i.workflow_pack_id
+        ]
+        wf_packs_map: dict = {}
+        completed_wf_packs: set[str] = set()
+        if wf_pack_ids:
+            from app.models.workflow_pack import WorkflowPack
+            from app.models.workflow_run import RunStatus, WorkflowRun
+
+            wp_r = await self.db.execute(
+                select(WorkflowPack).where(WorkflowPack.id.in_(wf_pack_ids))
+            )
+            wf_packs_map = {p.id: p for p in wp_r.scalars().all()}
+            # Done = the learner completed at least one run of the pack in
+            # this org (runs reference the pack loosely via pack_id)
+            run_r = await self.db.execute(
+                select(WorkflowRun.pack_id).where(
+                    WorkflowRun.org_id == org_id,
+                    WorkflowRun.pack_id.in_(wf_pack_ids),
+                    WorkflowRun.started_by == user_id,
+                    WorkflowRun.status == RunStatus.COMPLETED,
+                )
+            )
+            completed_wf_packs = {row[0] for row in run_r.all()}
+
         for item in items:
             if item.item_type == PathItemType.SECTION:
-                result_items.append({
-                    "type": "section",
-                    "title": item.section_title,
-                })
+                result_items.append(
+                    {
+                        "type": "section",
+                        "title": item.section_title,
+                    }
+                )
                 continue
 
             is_required = item.required
@@ -306,6 +376,11 @@ class LearningPathService:
                 project = projects_map.get(item.project_id)
                 name = project.title if project else "Unknown"
                 is_done = item.project_id in approved_projects
+
+            elif item.item_type == PathItemType.WORKFLOW_PACK and item.workflow_pack_id:
+                pack = wf_packs_map.get(item.workflow_pack_id)
+                name = pack.name if pack else "Unknown"
+                is_done = item.workflow_pack_id in completed_wf_packs
 
             # Unlock logic
             is_locked = False if item.unlock_rule == "immediate" else not all_prev_done
@@ -332,24 +407,30 @@ class LearningPathService:
             else:
                 status = "available"
 
-            result_items.append({
-                "type": item.item_type.value,
-                "item_id": item.id,
-                "skill_id": item.skill_id,
-                "project_id": item.project_id,
-                "name": name,
-                "required": is_required,
-                "status": status,
-            })
+            result_items.append(
+                {
+                    "type": item.item_type.value,
+                    "item_id": item.id,
+                    "skill_id": item.skill_id,
+                    "project_id": item.project_id,
+                    "workflow_pack_id": item.workflow_pack_id,
+                    "name": name,
+                    "required": is_required,
+                    "status": status,
+                }
+            )
 
             if is_required:
                 all_prev_done = all_prev_done and is_done
 
         pct = round(completed * 100 / total_required) if total_required > 0 else 0
 
-        # Issue certificate on 100% completion
+        # Issue certificate on ACTUAL completion, not the display percentage.
+        # R88f: pct is rounded for display — with >=200 required items,
+        # 199/200 rounds to 100 and `pct == 100` minted a real certificate
+        # (+ path-completion points) with a required item still incomplete.
         certificate_number = None
-        if pct == 100:
+        if total_required > 0 and completed >= total_required:
             certificate_number, was_new = await self._maybe_issue_certificate(
                 path_id, user_id, org_id, completed
             )
@@ -371,7 +452,9 @@ class LearningPathService:
                         description=f"Completed learning path {path_id}",
                     )
                 except Exception:
-                    log.warning("gamification_award_failed", user_id=user_id, reason="path_completion")
+                    log.warning(
+                        "gamification_award_failed", user_id=user_id, reason="path_completion"
+                    )
 
         result = {
             "path_id": path_id,
@@ -426,17 +509,21 @@ class LearningPathService:
             if item.item_type == PathItemType.SKILL and item.skill_id:
                 skill = await self.db.get(Skill, item.skill_id)
                 if skill:
-                    skills_data.append({
-                        "skill_id": skill.id,
-                        "name": skill.name,
-                    })
+                    skills_data.append(
+                        {
+                            "skill_id": skill.id,
+                            "name": skill.name,
+                        }
+                    )
             elif item.item_type == PathItemType.PROJECT and item.project_id:
                 project = await self.db.get(Project, item.project_id)
                 if project:
-                    projects_data.append({
-                        "project_id": project.id,
-                        "name": project.title,
-                    })
+                    projects_data.append(
+                        {
+                            "project_id": project.id,
+                            "name": project.title,
+                        }
+                    )
 
         cert_number = str(uuid.uuid4())
         cert = Certificate(
@@ -544,12 +631,14 @@ class LearningPathService:
         results: list[dict] = []
         for member in learners:
             progress = await self.get_path_progress(path_id, member.user_id, org_id)
-            results.append({
-                "user_id": member.user_id,
-                "completed": progress["completed"],
-                "total_required": progress["total_required"],
-                "pct": progress["pct"],
-            })
+            results.append(
+                {
+                    "user_id": member.user_id,
+                    "completed": progress["completed"],
+                    "total_required": progress["total_required"],
+                    "pct": progress["pct"],
+                }
+            )
 
         return results
 

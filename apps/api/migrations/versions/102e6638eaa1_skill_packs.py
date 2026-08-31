@@ -23,13 +23,42 @@ def upgrade() -> None:
     op.create_table(
         "skill_packs",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("owner_org_id", sa.String(26), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "owner_org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("name", sa.String(200), nullable=False),
         sa.Column("slug", sa.String(200), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("summary", sa.String(500), nullable=True),
-        sa.Column("status", sa.Enum("DRAFT", "PUBLISHED", "ARCHIVED", name="pack_status", create_constraint=False, create_type=False), nullable=False, server_default="DRAFT"),
-        sa.Column("visibility", sa.Enum("PRIVATE", "UNLISTED", "PUBLIC", name="pack_visibility", create_constraint=False, create_type=False), nullable=False, server_default="PRIVATE"),
+        sa.Column(
+            "status",
+            sa.Enum(
+                "DRAFT",
+                "PUBLISHED",
+                "ARCHIVED",
+                name="pack_status",
+                create_constraint=False,
+                create_type=False,
+            ),
+            nullable=False,
+            server_default="DRAFT",
+        ),
+        sa.Column(
+            "visibility",
+            sa.Enum(
+                "PRIVATE",
+                "UNLISTED",
+                "PUBLIC",
+                name="pack_visibility",
+                create_constraint=False,
+                create_type=False,
+            ),
+            nullable=False,
+            server_default="PRIVATE",
+        ),
         sa.Column("language", sa.String(10), nullable=False, server_default="en"),
         sa.Column("cover_image_key", sa.String(500), nullable=True),
         sa.Column("learning_outcomes", JSONB(), nullable=False, server_default="[]"),
@@ -52,16 +81,36 @@ def upgrade() -> None:
     # skill_pack_skills (composite PK)
     op.create_table(
         "skill_pack_skills",
-        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("skill_id", sa.String(26), sa.ForeignKey("skills.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column(
+            "pack_id",
+            sa.String(26),
+            sa.ForeignKey("skill_packs.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column(
+            "skill_id",
+            sa.String(26),
+            sa.ForeignKey("skills.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
         sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
     )
 
     # skill_pack_templates (composite PK)
     op.create_table(
         "skill_pack_templates",
-        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("template_id", sa.String(26), sa.ForeignKey("project_templates.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column(
+            "pack_id",
+            sa.String(26),
+            sa.ForeignKey("skill_packs.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column(
+            "template_id",
+            sa.String(26),
+            sa.ForeignKey("project_templates.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
         sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
     )
 
@@ -69,7 +118,12 @@ def upgrade() -> None:
     op.create_table(
         "skill_pack_releases",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "pack_id",
+            sa.String(26),
+            sa.ForeignKey("skill_packs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("version", sa.String(20), nullable=False),
         sa.Column("manifest", JSONB(), nullable=False),
         sa.Column("changelog", sa.Text(), nullable=True),
@@ -78,23 +132,54 @@ def upgrade() -> None:
         sa.Column("released_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("released_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("uq_release_version", "skill_pack_releases", ["pack_id", "version"], unique=True)
+    op.create_index(
+        "uq_release_version", "skill_pack_releases", ["pack_id", "version"], unique=True
+    )
     op.create_index("ix_releases_pack_date", "skill_pack_releases", ["pack_id", "released_at"])
 
     # skill_pack_installations
     op.create_table(
         "skill_pack_installations",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("org_id", sa.String(26), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("release_id", sa.String(26), sa.ForeignKey("skill_pack_releases.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "pack_id",
+            sa.String(26),
+            sa.ForeignKey("skill_packs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column(
+            "release_id",
+            sa.String(26),
+            sa.ForeignKey("skill_pack_releases.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("installed_version", sa.String(20), nullable=False),
-        sa.Column("status", sa.Enum("ACTIVE", "FORKED", "REMOVED", name="install_status", create_constraint=False, create_type=False), nullable=False, server_default="ACTIVE"),
+        sa.Column(
+            "status",
+            sa.Enum(
+                "ACTIVE",
+                "FORKED",
+                "REMOVED",
+                name="install_status",
+                create_constraint=False,
+                create_type=False,
+            ),
+            nullable=False,
+            server_default="ACTIVE",
+        ),
         sa.Column("installed_by", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("installed_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("uq_install_org_pack", "skill_pack_installations", ["org_id", "pack_id"], unique=True)
+    op.create_index(
+        "uq_install_org_pack", "skill_pack_installations", ["org_id", "pack_id"], unique=True
+    )
     op.create_index("ix_installs_org", "skill_pack_installations", ["org_id"])
 
 

@@ -7,15 +7,11 @@ import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, sharedRefresh } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 import { NotificationBell } from "@/components/notification-bell";
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, clearAuth } = useAuthStore();
@@ -50,6 +46,14 @@ export default function DashboardLayout({
 
   const handleLogout = async () => {
     try {
+      // Settle any in-flight refresh FIRST. AuthInitializer fires
+      // sharedRefresh() on mount, which ROTATES the refresh cookie to a new
+      // token. If we log out mid-rotation, we'd revoke the OLD token while
+      // the refresh response re-sets a valid NEW cookie that logout never
+      // saw — leaving the "logged out" session alive on the next visit.
+      // Awaiting the shared promise means the cookie is stable before we
+      // revoke + clear it.
+      await sharedRefresh().catch(() => {});
       const token = useAuthStore.getState().accessToken;
       await api("/auth/logout", {
         method: "POST",
@@ -68,12 +72,44 @@ export default function DashboardLayout({
 
   const navLinks = (
     <>
-      <NavLink href="/dashboard" active={pathname === "/dashboard"} onClick={closeSidebar}>Dashboard</NavLink>
-      <NavLink href="/dashboard/orgs" active={pathname.startsWith("/dashboard/orgs")} onClick={closeSidebar}>Organizations</NavLink>
-      <NavLink href="/dashboard/skills" active={pathname.startsWith("/dashboard/skills")} onClick={closeSidebar}>Skills</NavLink>
-      <NavLink href="/dashboard/projects" active={pathname.startsWith("/dashboard/projects")} onClick={closeSidebar}>Projects</NavLink>
-      <NavLink href="/dashboard/portfolio" active={pathname.startsWith("/dashboard/portfolio")} onClick={closeSidebar}>Portfolio</NavLink>
-      <NavLink href="/dashboard/settings" active={pathname === "/dashboard/settings"} onClick={closeSidebar}>Settings</NavLink>
+      <NavLink href="/dashboard" active={pathname === "/dashboard"} onClick={closeSidebar}>
+        Dashboard
+      </NavLink>
+      <NavLink
+        href="/dashboard/orgs"
+        active={pathname.startsWith("/dashboard/orgs")}
+        onClick={closeSidebar}
+      >
+        Organizations
+      </NavLink>
+      <NavLink
+        href="/dashboard/skills"
+        active={pathname.startsWith("/dashboard/skills")}
+        onClick={closeSidebar}
+      >
+        Skills
+      </NavLink>
+      <NavLink
+        href="/dashboard/projects"
+        active={pathname.startsWith("/dashboard/projects")}
+        onClick={closeSidebar}
+      >
+        Projects
+      </NavLink>
+      <NavLink
+        href="/dashboard/portfolio"
+        active={pathname.startsWith("/dashboard/portfolio")}
+        onClick={closeSidebar}
+      >
+        Portfolio
+      </NavLink>
+      <NavLink
+        href="/dashboard/settings"
+        active={pathname === "/dashboard/settings"}
+        onClick={closeSidebar}
+      >
+        Settings
+      </NavLink>
     </>
   );
 
@@ -112,9 +148,19 @@ export default function DashboardLayout({
         >
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             {sidebarOpen ? (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
             )}
           </svg>
         </button>
@@ -126,10 +172,7 @@ export default function DashboardLayout({
 
       {/* Mobile overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
-          onClick={closeSidebar}
-        />
+        <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={closeSidebar} />
       )}
 
       {/* Sidebar — hidden on mobile, shown on md+ */}
@@ -192,9 +235,7 @@ function NavLink({
       onClick={onClick}
       className={cn(
         "block rounded-md px-3 py-2 text-sm",
-        active
-          ? "bg-[hsl(var(--secondary))] font-medium"
-          : "hover:bg-[hsl(var(--secondary))]",
+        active ? "bg-[hsl(var(--secondary))] font-medium" : "hover:bg-[hsl(var(--secondary))]",
       )}
     >
       {children}

@@ -19,7 +19,10 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("@/stores/auth", () => ({
-  useAuthStore: { getState: () => ({ isAuthenticated: false }) },
+  useAuthStore: {
+    getState: () => ({ isAuthenticated: false }),
+    subscribe: () => () => {},
+  },
 }));
 
 import RegistryPackDetailPage from "@/app/registry/[packId]/page";

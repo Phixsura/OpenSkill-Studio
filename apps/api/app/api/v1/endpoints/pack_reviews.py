@@ -78,7 +78,7 @@ async def update_review(
 )
 async def list_reviews(
     pack_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     sort: SortOrder = Query(default="newest"),
     rating: int | None = Query(default=None, ge=1, le=5),
@@ -86,17 +86,13 @@ async def list_reviews(
 ):
     """List reviews for a pack. No authentication required."""
     svc = PackReviewService(db)
-    reviews, total = await svc.list_reviews(
-        pack_id, page, per_page, sort=sort, rating=rating
-    )
+    reviews, total = await svc.list_reviews(pack_id, page, per_page, sort=sort, rating=rating)
 
     # Enrich reviews with user display names
     user_ids = list({r.user_id for r in reviews})
     display_names: dict[str, str] = {}
     if user_ids:
-        result = await db.execute(
-            select(User.id, User.display_name).where(User.id.in_(user_ids))
-        )
+        result = await db.execute(select(User.id, User.display_name).where(User.id.in_(user_ids)))
         display_names = {row[0]: row[1] for row in result.all()}
 
     response_data = []

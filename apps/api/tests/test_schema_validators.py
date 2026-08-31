@@ -11,7 +11,9 @@ def test_create_project_title_too_short():
 
     with pytest.raises(ValidationError, match="Title"):
         CreateProjectRequest(
-            title="A", description="d" * 10, instructions="i" * 10,
+            title="A",
+            description="d" * 10,
+            instructions="i" * 10,
             rubric=[{"criterion": "Q", "max_score": 100}],
         )
 
@@ -21,7 +23,9 @@ def test_create_project_title_too_long():
 
     with pytest.raises(ValidationError, match="Title"):
         CreateProjectRequest(
-            title="A" * 201, description="d" * 10, instructions="i" * 10,
+            title="A" * 201,
+            description="d" * 10,
+            instructions="i" * 10,
             rubric=[{"criterion": "Q", "max_score": 100}],
         )
 
@@ -31,7 +35,9 @@ def test_create_project_rubric_empty():
 
     with pytest.raises(ValidationError, match="rubric"):
         CreateProjectRequest(
-            title="Valid", description="d" * 10, instructions="i" * 10,
+            title="Valid",
+            description="d" * 10,
+            instructions="i" * 10,
             rubric=[],
         )
 
@@ -41,7 +47,9 @@ def test_create_project_rubric_item_missing_criterion():
 
     with pytest.raises(ValidationError, match="criterion"):
         CreateProjectRequest(
-            title="Valid", description="d" * 10, instructions="i" * 10,
+            title="Valid",
+            description="d" * 10,
+            instructions="i" * 10,
             rubric=[{"max_score": 100}],
         )
 
@@ -51,7 +59,9 @@ def test_create_project_rubric_item_missing_max_score():
 
     with pytest.raises(ValidationError, match="max_score"):
         CreateProjectRequest(
-            title="Valid", description="d" * 10, instructions="i" * 10,
+            title="Valid",
+            description="d" * 10,
+            instructions="i" * 10,
             rubric=[{"criterion": "Q"}],
         )
 
@@ -61,7 +71,9 @@ def test_create_project_rubric_item_not_dict():
 
     with pytest.raises(ValidationError):
         CreateProjectRequest(
-            title="Valid", description="d" * 10, instructions="i" * 10,
+            title="Valid",
+            description="d" * 10,
+            instructions="i" * 10,
             rubric=["not a dict"],
         )
 
@@ -71,7 +83,9 @@ def test_create_project_max_submissions_negative():
 
     with pytest.raises(ValidationError):
         CreateProjectRequest(
-            title="Valid", description="d" * 10, instructions="i" * 10,
+            title="Valid",
+            description="d" * 10,
+            instructions="i" * 10,
             rubric=[{"criterion": "Q", "max_score": 100}],
             max_submissions=-1,
         )
@@ -102,7 +116,10 @@ def test_create_skill_name_too_short():
 
     with pytest.raises(ValidationError, match="name"):
         CreateSkillRequest(
-            name="A", description="d" * 10, difficulty="beginner", category_id="cat123",
+            name="A",
+            description="d" * 10,
+            difficulty="beginner",
+            category_id="cat123",
         )
 
 
@@ -111,7 +128,10 @@ def test_create_skill_name_too_long():
 
     with pytest.raises(ValidationError, match="name"):
         CreateSkillRequest(
-            name="A" * 201, description="d" * 10, difficulty="beginner", category_id="cat123",
+            name="A" * 201,
+            description="d" * 10,
+            difficulty="beginner",
+            category_id="cat123",
         )
 
 
@@ -120,7 +140,10 @@ def test_create_skill_invalid_difficulty():
 
     with pytest.raises(ValidationError, match="difficulty"):
         CreateSkillRequest(
-            name="Valid Skill", description="d" * 10, difficulty="impossible", category_id="cat123",
+            name="Valid Skill",
+            description="d" * 10,
+            difficulty="impossible",
+            category_id="cat123",
         )
 
 
@@ -129,7 +152,10 @@ def test_create_exercise_invalid_type():
 
     with pytest.raises(ValidationError, match="type"):
         CreateExerciseRequest(
-            title="Ex", description="desc", type="invalid_type", config={},
+            title="Ex",
+            description="desc",
+            type="invalid_type",
+            config={},
         )
 
 
@@ -138,7 +164,11 @@ def test_create_exercise_negative_score():
 
     with pytest.raises(ValidationError, match="score"):
         CreateExerciseRequest(
-            title="Ex", description="desc", type="text_answer", config={}, max_score=-5,
+            title="Ex",
+            description="desc",
+            type="text_answer",
+            config={},
+            max_score=-5,
         )
 
 
@@ -199,7 +229,9 @@ def test_create_brief_title_too_short():
 
     with pytest.raises(ValidationError, match="Title"):
         CreateClientBriefRequest(
-            title="A", client_name="C", project_type="p",
+            title="A",
+            client_name="C",
+            project_type="p",
             objective="o" * 10,
         )
 
@@ -209,7 +241,9 @@ def test_create_brief_objective_too_short():
 
     with pytest.raises(ValidationError, match="Objective"):
         CreateClientBriefRequest(
-            title="Valid", client_name="C", project_type="p",
+            title="Valid",
+            client_name="C",
+            project_type="p",
             objective="short",
         )
 
@@ -219,7 +253,9 @@ def test_create_brief_invalid_website():
 
     with pytest.raises(ValidationError, match="URL"):
         CreateClientBriefRequest(
-            title="Valid", client_name="C", project_type="p",
+            title="Valid",
+            client_name="C",
+            project_type="p",
             objective="o" * 10,
             client_website="not-a-url",
         )
@@ -230,7 +266,9 @@ def test_create_brief_deliverable_specs_too_many():
 
     with pytest.raises(ValidationError, match="50"):
         CreateClientBriefRequest(
-            title="Valid", client_name="C", project_type="p",
+            title="Valid",
+            client_name="C",
+            project_type="p",
             objective="o" * 10,
             deliverable_specs=[{"name": f"D{i}"} for i in range(51)],
         )
@@ -251,7 +289,9 @@ def test_portfolio_item_title_too_long():
 
     with pytest.raises(ValidationError):
         CreatePortfolioItemRequest(
-            title="A" * 201, description="d", type="image",
+            title="A" * 201,
+            description="d",
+            type="image",
         )
 
 

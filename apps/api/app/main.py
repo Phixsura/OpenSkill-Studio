@@ -71,10 +71,13 @@ async def lifespan(app: FastAPI):
     log = structlog.get_logger()
     log.info("shutdown_start")
 
-    # 1. Drain in-flight webhook deliveries before tearing down connections
+    # 1. Drain in-flight webhook deliveries and workflow executions before
+    #    tearing down connections
     from app.services.webhook import drain_webhook_tasks
+    from app.services.workflow_runtime import drain_workflow_tasks
 
     await drain_webhook_tasks()
+    await drain_workflow_tasks()
 
     # 2. Close DB pool
     await engine.dispose()

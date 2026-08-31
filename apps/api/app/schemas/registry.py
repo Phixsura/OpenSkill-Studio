@@ -1,6 +1,6 @@
 """Pydantic schemas for public registry endpoints."""
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class PreviewExerciseItem(BaseModel):
@@ -43,7 +43,8 @@ class CreateCategoryRequest(BaseModel):
     slug: str
     parent_id: str | None = None
     icon: str | None = None
-    sort_order: int = 0
+    # Bounded: values past int32 (e.g. 2**40) overflow the Integer column (500)
+    sort_order: int = Field(default=0, ge=0, le=100000)
 
     @field_validator("name")
     @classmethod
@@ -67,7 +68,8 @@ class UpdateCategoryRequest(BaseModel):
     slug: str | None = None
     parent_id: str | None = None
     icon: str | None = None
-    sort_order: int | None = None
+    # Bounded: values past int32 (e.g. 2**40) overflow the Integer column (500)
+    sort_order: int | None = Field(default=None, ge=0, le=100000)
 
     @field_validator("name")
     @classmethod

@@ -77,9 +77,26 @@ class InstallationService:
         if pack.status != PackStatus.PUBLISHED:
             raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
-        # Visibility check
+        # Visibility check. R92i: a PRIVATE pack owned by another org is normally
+        # invisible (404), but the cross-org sharing feature lets the owner grant
+        # a specific target org access via a PackShare row. Honor that grant here
+        # so a shared pack is installable ("anyone who can see it can install it"
+        # — the same grant that surfaces it in /shared-with-me), and revoking the
+        # share immediately removes install access. Only PRIVATE+non-owner needs
+        # the grant lookup; PUBLIC/UNLISTED and own-org packs are unaffected.
         if pack.visibility == PackVisibility.PRIVATE and pack.owner_org_id != org_id:
-            raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
+            from app.models.pack_share import PackShare
+
+            grant = await self.db.execute(
+                select(PackShare.id)
+                .where(
+                    PackShare.pack_id == pack_id,
+                    PackShare.target_org_id == org_id,
+                )
+                .limit(1)
+            )
+            if grant.scalar_one_or_none() is None:
+                raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
         # Get release (latest if no version specified)
         if version:
@@ -95,7 +112,9 @@ class InstallationService:
                 select(SkillPackRelease).where(SkillPackRelease.pack_id == pack_id)
             )
             all_releases = list(release_r.scalars().all())
-            release = max(all_releases, key=lambda r: _parse_semver(r.version)) if all_releases else None
+            release = (
+                max(all_releases, key=lambda r: _parse_semver(r.version)) if all_releases else None
+            )
 
         if release is None:
             raise AppError("RELEASE_NOT_FOUND", "No release found for this pack", 404)
@@ -145,6 +164,7 @@ class InstallationService:
             )
             # Always add random suffix to prevent slug conflicts with existing org content
             import secrets as _cat_secrets
+
             cat.slug = f"{cat.slug[:90]}-{_cat_secrets.token_hex(3)}"
             self.db.add(cat)
             await self.db.flush()
@@ -171,7 +191,10 @@ class InstallationService:
                 org_id=org_id,
                 category_id=category_id,
                 name=skill_def["name"],
-                slug=re.sub(r"[^a-z0-9]+", "-", skill_def.get("slug", skill_def["name"]).lower()).strip("-")[:200] or f"skill-{secrets.token_hex(3)}",
+                slug=re.sub(
+                    r"[^a-z0-9]+", "-", skill_def.get("slug", skill_def["name"]).lower()
+                ).strip("-")[:200]
+                or f"skill-{secrets.token_hex(3)}",
                 description=skill_def.get("description", ""),
                 learning_content=skill_def.get("learning_content"),
                 difficulty=skill_def.get("difficulty", "beginner"),
@@ -255,6 +278,7 @@ class InstallationService:
 
         # Atomic install count increment (avoid lost-update race)
         from sqlalchemy import update
+
         await self.db.execute(
             update(SkillPack)
             .where(SkillPack.id == pack_id)
@@ -265,11 +289,14 @@ class InstallationService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
-            raise AppError("ALREADY_INSTALLED", "Pack already installed in this organization", 409) from None
+            raise AppError(
+                "ALREADY_INSTALLED", "Pack already installed in this organization", 409
+            ) from None
 
         # Fire webhook event
         try:
             from app.services.webhook import WebhookService
+
             webhook_svc = WebhookService(self.db)
             await webhook_svc.trigger_event(
                 org_id,
@@ -371,15 +398,23 @@ class InstallationService:
 
         # Added
         for lid in set(new_skills) - set(old_skills):
-            diff["added"].append({"type": "skill", "logical_id": lid, "name": new_skills[lid]["name"]})
+            diff["added"].append(
+                {"type": "skill", "logical_id": lid, "name": new_skills[lid]["name"]}
+            )
         for lid in set(new_tmpls) - set(old_tmpls):
-            diff["added"].append({"type": "template", "logical_id": lid, "name": new_tmpls[lid]["name"]})
+            diff["added"].append(
+                {"type": "template", "logical_id": lid, "name": new_tmpls[lid]["name"]}
+            )
 
         # Removed
         for lid in set(old_skills) - set(new_skills):
-            diff["removed"].append({"type": "skill", "logical_id": lid, "name": old_skills[lid]["name"]})
+            diff["removed"].append(
+                {"type": "skill", "logical_id": lid, "name": old_skills[lid]["name"]}
+            )
         for lid in set(old_tmpls) - set(new_tmpls):
-            diff["removed"].append({"type": "template", "logical_id": lid, "name": old_tmpls[lid]["name"]})
+            diff["removed"].append(
+                {"type": "template", "logical_id": lid, "name": old_tmpls[lid]["name"]}
+            )
 
         # Batch-load locally_modified flags (exclude archived — they don't conflict)
         skill_mod_r = await self.db.execute(
@@ -404,28 +439,42 @@ class InstallationService:
         for lid in set(old_skills) & set(new_skills):
             if old_skills[lid] != new_skills[lid]:
                 if skill_modified_map.get(lid):
-                    diff["conflicts"].append({
-                        "type": "skill", "logical_id": lid,
-                        "name": new_skills[lid]["name"], "reason": "locally_modified",
-                    })
+                    diff["conflicts"].append(
+                        {
+                            "type": "skill",
+                            "logical_id": lid,
+                            "name": new_skills[lid]["name"],
+                            "reason": "locally_modified",
+                        }
+                    )
                 else:
-                    diff["changed"].append({
-                        "type": "skill", "logical_id": lid,
-                        "name": new_skills[lid]["name"],
-                    })
+                    diff["changed"].append(
+                        {
+                            "type": "skill",
+                            "logical_id": lid,
+                            "name": new_skills[lid]["name"],
+                        }
+                    )
 
         for lid in set(old_tmpls) & set(new_tmpls):
             if old_tmpls[lid] != new_tmpls[lid]:
                 if tmpl_modified_map.get(lid):
-                    diff["conflicts"].append({
-                        "type": "template", "logical_id": lid,
-                        "name": new_tmpls[lid]["name"], "reason": "locally_modified",
-                    })
+                    diff["conflicts"].append(
+                        {
+                            "type": "template",
+                            "logical_id": lid,
+                            "name": new_tmpls[lid]["name"],
+                            "reason": "locally_modified",
+                        }
+                    )
                 else:
-                    diff["changed"].append({
-                        "type": "template", "logical_id": lid,
-                        "name": new_tmpls[lid]["name"],
-                    })
+                    diff["changed"].append(
+                        {
+                            "type": "template",
+                            "logical_id": lid,
+                            "name": new_tmpls[lid]["name"],
+                        }
+                    )
 
         return diff
 
@@ -435,6 +484,29 @@ class InstallationService:
         inst = await self.get_installation(install_id, org_id)
         if inst.status == InstallStatus.FORKED:
             raise AppError("ALREADY_FORKED", "Installation is already forked", 422)
+
+        # Claim FIRST with a status-guarded UPDATE (mirror of the
+        # workflow-family fork): a concurrent remove() may flip the row to
+        # REMOVED between our read and the flush — an unguarded attribute
+        # write would resurrect the removed installation as FORKED (with
+        # install_count already decremented), and this path would also sever
+        # origin tracking on components remove() had just archived.
+        from sqlalchemy import update as _upd
+
+        claimed = await self.db.execute(
+            _upd(SkillPackInstallation)
+            .where(
+                SkillPackInstallation.id == install_id,
+                SkillPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(status=InstallStatus.FORKED)
+        )
+        if not claimed.rowcount:
+            self.db.expire(inst)
+            fresh = await self.db.get(SkillPackInstallation, install_id)
+            if fresh is not None and fresh.status == InstallStatus.FORKED:
+                raise AppError("ALREADY_FORKED", "Installation is already forked", 422)
+            raise InstallationNotFoundError()
 
         # Remove origin tracking from all installed components
         for model in (Skill, Exercise, SkillCategory, ProjectTemplate):
@@ -450,12 +522,16 @@ class InstallationService:
                 component.origin_component_id = None
                 component.locally_modified = False
 
-        inst.status = InstallStatus.FORKED
         await self.db.flush()
+        # The guarded UPDATE bypassed the identity map — refresh so the
+        # returned object (and the response) carries FORKED, not the stale
+        # pre-claim status.
+        await self.db.refresh(inst)
 
         # Fire webhook event
         try:
             from app.services.webhook import WebhookService
+
             webhook_svc = WebhookService(self.db)
             await webhook_svc.trigger_event(
                 org_id,
@@ -535,6 +611,7 @@ class InstallationService:
         # Create NEW categories
         for cat_lid in set(new_cats) - set(old_cats):
             import secrets as _cat_secrets
+
             cat_def = new_cats[cat_lid]
             cat = SkillCategory(
                 org_id=org_id,
@@ -665,9 +742,7 @@ class InstallationService:
                         existing.category_id = cat_id_map[cat_logical]
 
                     # ---- Sync exercises for changed skill ----
-                    new_exercises = {
-                        e["logical_id"]: e for e in skill_def.get("exercises", [])
-                    }
+                    new_exercises = {e["logical_id"]: e for e in skill_def.get("exercises", [])}
                     existing_ex_r = await self.db.execute(
                         select(Exercise).where(
                             Exercise.skill_id == existing.id,
@@ -767,7 +842,9 @@ class InstallationService:
                     existing.difficulty = tmpl_def.get("difficulty", "intermediate")
                     existing.suggested_minutes = tmpl_def.get("suggested_minutes")
                     existing.max_score = tmpl_def.get("max_score", 100)
-                    existing.rubric = tmpl_def.get("rubric", [{"criterion": "Overall", "max_score": 100}])
+                    existing.rubric = tmpl_def.get(
+                        "rubric", [{"criterion": "Overall", "max_score": 100}]
+                    )
                     existing.deliverables = tmpl_def.get("deliverables", [])
                     existing.skill_names = tmpl_def.get("skill_names", [])
                     existing.origin_release_id = release.id
@@ -778,10 +855,31 @@ class InstallationService:
             if existing:
                 existing.status = ContentStatus.ARCHIVED
 
-        # Update installation record
-        inst.release_id = release.id
-        inst.installed_version = target_version
+        # Update installation record via a STATUS-GUARDED UPDATE (R70d —
+        # mirror of the workflow-family upgrade): the FORKED check above ran
+        # on this session's identity-map snapshot, so a concurrent fork()
+        # (guarded, commits FORKED) or remove() (commits REMOVED) between the
+        # read and this write would otherwise be silently overwritten — a
+        # detached fork repointed at a new release, or a removed installation
+        # resurrected with fresh version metadata. Only an ACTIVE row upgrades.
+        from sqlalchemy import update as _upd
+
+        claimed = await self.db.execute(
+            _upd(SkillPackInstallation)
+            .where(
+                SkillPackInstallation.id == install_id,
+                SkillPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(release_id=release.id, installed_version=target_version)
+        )
+        if not claimed.rowcount:
+            raise AppError(
+                "INSTALL_CONFLICT",
+                "Installation was forked or removed by a concurrent request",
+                409,
+            )
         await self.db.flush()
+        self.db.expire(inst)
 
         log.info(
             "pack_upgraded",
@@ -790,6 +888,7 @@ class InstallationService:
             from_version=current_release.version,
             to_version=target_version,
         )
+        await self.db.refresh(inst)
         return inst
 
     # ── Remove ──
@@ -797,16 +896,36 @@ class InstallationService:
     async def remove(self, install_id: str, org_id: str) -> None:
         inst = await self.get_installation(install_id, org_id)
         was_forked = inst.status == InstallStatus.FORKED
-        inst.status = InstallStatus.REMOVED
+        # Capture before the guarded UPDATE expires the row (async lazy
+        # refresh on an expired object raises MissingGreenlet)
+        pack_id = inst.pack_id
+        inst_org_id = inst.org_id
+        # Status-guarded UPDATE: two concurrent DELETEs both pass
+        # get_installation (second session's identity map still says
+        # ACTIVE) — an unguarded write would decrement install_count twice
+        # and double-archive. rowcount 0 = lost race = already removed.
+        from sqlalchemy import update as _upd
+
+        claimed = await self.db.execute(
+            _upd(SkillPackInstallation)
+            .where(
+                SkillPackInstallation.id == install_id,
+                SkillPackInstallation.status != InstallStatus.REMOVED,
+            )
+            .values(status=InstallStatus.REMOVED)
+        )
+        if not claimed.rowcount:
+            raise InstallationNotFoundError()
+        self.db.expire(inst)
         await self.db.flush()
 
         # Decrement install_count atomically (floor at 0)
-        if inst.pack_id:
+        if pack_id:
             from sqlalchemy import update
 
             await self.db.execute(
                 update(SkillPack)
-                .where(SkillPack.id == inst.pack_id)
+                .where(SkillPack.id == pack_id)
                 .values(install_count=func.greatest(SkillPack.install_count - 1, 0))
             )
 
@@ -814,15 +933,15 @@ class InstallationService:
         # fork() nulls origin_pack_id (severing tracking), so the WHERE clause
         # wouldn't match anything. More importantly, fork is a deliberate choice
         # to keep the content independently, so archiving would be wrong.
-        if not was_forked and inst.pack_id:
+        if not was_forked and pack_id:
             from sqlalchemy import update as _update
 
             for model in [Skill, Exercise, SkillCategory]:
                 await self.db.execute(
                     _update(model)
                     .where(
-                        model.origin_pack_id == inst.pack_id,
-                        model.org_id == inst.org_id,
+                        model.origin_pack_id == pack_id,
+                        model.org_id == inst_org_id,
                         model.status != ContentStatus.ARCHIVED,
                     )
                     .values(status=ContentStatus.ARCHIVED)
@@ -830,8 +949,8 @@ class InstallationService:
             await self.db.execute(
                 _update(ProjectTemplate)
                 .where(
-                    ProjectTemplate.origin_pack_id == inst.pack_id,
-                    ProjectTemplate.org_id == inst.org_id,
+                    ProjectTemplate.origin_pack_id == pack_id,
+                    ProjectTemplate.org_id == inst_org_id,
                     ProjectTemplate.status != ContentStatus.ARCHIVED,
                 )
                 .values(status=ContentStatus.ARCHIVED)
@@ -842,8 +961,8 @@ class InstallationService:
 
             archived_skill_ids_r = await self.db.execute(
                 select(Skill.id).where(
-                    Skill.origin_pack_id == inst.pack_id,
-                    Skill.org_id == inst.org_id,
+                    Skill.origin_pack_id == pack_id,
+                    Skill.org_id == inst_org_id,
                     Skill.status == ContentStatus.ARCHIVED,
                 )
             )
@@ -852,9 +971,7 @@ class InstallationService:
                 from app.models.skill import SkillPrerequisite
 
                 await self.db.execute(
-                    sa_delete(SkillPrerequisite).where(
-                        SkillPrerequisite.skill_id.in_(archived_ids)
-                    )
+                    sa_delete(SkillPrerequisite).where(SkillPrerequisite.skill_id.in_(archived_ids))
                 )
                 await self.db.execute(
                     sa_delete(SkillPrerequisite).where(

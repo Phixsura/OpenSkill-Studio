@@ -1,0 +1,1159 @@
+"""Cross-org IDOR / privacy sweep across ALL Issue #21 endpoint families (Part J)."""
+
+import uuid
+from contextlib import asynccontextmanager
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+
+@pytest_asyncio.fixture
+async def c():
+    from app.core.database import engine
+    from app.main import app
+
+    orig = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    app.router.lifespan_context = _noop
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+    app.router.lifespan_context = orig
+    await engine.dispose()
+
+
+def _email():
+    return f"sec-{uuid.uuid4().hex[:8]}@test.com"
+
+
+async def _auth(c):
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={"email": _email(), "password": "TestPass123!", "display_name": "Sec"},
+    )
+    d = r.json()
+    return {"Authorization": f"Bearer {d['access_token']}"}, d["user"]
+
+
+async def _org(c, h):
+    r = await c.post("/api/v1/orgs", json={"name": f"S-{uuid.uuid4().hex[:8]}"}, headers=h)
+    return r.json()["data"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_cross_org_idor_sweep(c):
+    """Org1 creates one resource of every Issue-21 family; org2 must get
+    404/403 both through its own path and through org1's path."""
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+
+    resources: dict[str, str] = {}
+
+    # workflow pack
+    r = await c.post(f"/api/v1/orgs/{o1}/workflow-packs", json={"name": "Sec Pack"}, headers=h1)
+    resources["workflow-packs"] = r.json()["data"]["id"]
+
+    # provider connection (mock, no creds)
+    adapters = (await c.get("/api/v1/providers/adapters", headers=h1)).json()["data"]
+    mock_id = next(a for a in adapters if a["key"] == "mock")["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{o1}/provider-connections",
+        json={"adapter_id": mock_id, "name": "Sec Conn"},
+        headers=h1,
+    )
+    resources["provider-connections"] = r.json()["data"]["id"]
+
+    # requirement profile
+    r = await c.post(
+        f"/api/v1/orgs/{o1}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {}},
+        headers=h1,
+    )
+    resources["requirement-profiles"] = r.json()["data"]["id"]
+
+    # comfyui import
+    r = await c.post(
+        f"/api/v1/orgs/{o1}/comfyui-imports",
+        json={"data": '{"1": {"class_type": "KSampler", "inputs": {}}}', "encoding": "json"},
+        headers=h1,
+    )
+    assert r.status_code == 201, r.text
+    resources["comfyui-imports"] = r.json()["data"]["id"]
+
+    # GET each via org2's path → 404; via org1's path as non-member → 403/404
+    for family, rid in resources.items():
+        r_own_path = await c.get(f"/api/v1/orgs/{o2}/{family}/{rid}", headers=h2)
+        assert r_own_path.status_code == 404, f"{family} via org2 path: {r_own_path.status_code}"
+        r_foreign = await c.get(f"/api/v1/orgs/{o1}/{family}/{rid}", headers=h2)
+        assert r_foreign.status_code in (403, 404), (
+            f"{family} via org1 path: {r_foreign.status_code}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_credential_never_leaks_anywhere(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    adapters = (await c.get("/api/v1/providers/adapters", headers=h)).json()["data"]
+    anth_id = next(a for a in adapters if a["key"] == "anthropic")["id"]
+    secret = f"sk-super-secret-{uuid.uuid4().hex}"
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": anth_id, "name": "Leak Test", "credentials": {"api_key": secret}},
+        headers=h,
+    )
+    conn_id = r.json()["data"]["id"]
+    assert secret not in r.text
+
+    # Sweep every provider read surface
+    for path in (
+        f"/api/v1/orgs/{oid}/provider-connections",
+        f"/api/v1/orgs/{oid}/provider-connections/{conn_id}",
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        "/api/v1/providers/adapters",
+        "/api/v1/capabilities",
+    ):
+        resp = await c.get(path, headers=h)
+        assert secret not in resp.text, f"credential leaked via {path}"
+
+
+@pytest.mark.asyncio
+async def test_match_results_exclude_inaccessible_entities(c):
+    """Org2's match must not surface org1's private packs even as excluded.
+
+    Airtight variant: the requirement is scoped so the hidden pack would be
+    the TOP candidate were it eligible (required capability + an exclusive
+    scenario tag no other pack can have) — an empty-requirement query would
+    let a leaked pack hide below the top-50 truncation on a shared DB and
+    the assertion would pass without exercising the S1 filter at all."""
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    scenario = f"exclusive-scenario-{uuid.uuid4().hex}"
+    r = await c.post(
+        f"/api/v1/orgs/{o1}/workflow-packs",
+        json={"name": f"Hidden Pack {uuid.uuid4().hex[:8]}"},
+        headers=h1,
+    )
+    hidden_id = r.json()["data"]["id"]
+    # Publish but PRIVATE, with a capability + exclusive scenario that make it
+    # score strictly above every other pack for the query below
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import PackStatus
+    from app.models.workflow_pack import WorkflowPack
+
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(WorkflowPack, hidden_id)
+        pack.status = PackStatus.PUBLISHED
+        pack.capability_tags = ["multimodal_review"]
+        pack.scenario_tags = [scenario]
+        await db.commit()
+
+    structured = {
+        "required_capabilities": ["multimodal_review"],
+        "scenario": scenario,
+    }
+
+    # Sanity (self-validating test): the OWNER org's match ranks the pack #1 —
+    # capability 1.0 + exclusive scenario 1.0 beat any rival's best possible
+    # score. So if the S1 org-visibility filter leaked, org2's run below
+    # would rank it #1 too and the absence assertions would fail.
+    rp1 = await c.post(
+        f"/api/v1/orgs/{o1}/requirement-profiles",
+        json={"context_type": "production", "structured_requirements": structured},
+        headers=h1,
+    )
+    pid1 = rp1.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{o1}/requirement-profiles/{pid1}/confirm", headers=h1)
+    rm1 = await c.post(
+        f"/api/v1/orgs/{o1}/match",
+        json={"requirement_profile_id": pid1, "target_entity_type": "workflow_pack", "limit": 50},
+        headers=h1,
+    )
+    assert rm1.status_code == 200, rm1.text
+    own_ranked = [x["entity_id"] for x in rm1.json()["data"]["results"]]
+    assert own_ranked and own_ranked[0] == hidden_id
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    rp = await c.post(
+        f"/api/v1/orgs/{o2}/requirement-profiles",
+        json={"context_type": "production", "structured_requirements": structured},
+        headers=h2,
+    )
+    pid = rp.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{o2}/requirement-profiles/{pid}/confirm", headers=h2)
+    rm = await c.post(
+        f"/api/v1/orgs/{o2}/match",
+        json={"requirement_profile_id": pid, "target_entity_type": "workflow_pack", "limit": 50},
+        headers=h2,
+    )
+    assert rm.status_code == 200, rm.text
+    data = rm.json()["data"]
+    all_ids = [x["entity_id"] for x in data["results"]] + [x["entity_id"] for x in data["excluded"]]
+    assert hidden_id not in all_ids
+
+    # S1 exclusion means it never becomes a candidate at all — it must appear
+    # NOWHERE: not in the persisted result rows either. And because the pack
+    # SATISFIES every hard constraint of this query, a leaked candidate could
+    # only land in ranked results (rank #1) — it cannot hide inside
+    # excluded_count, so the absence above also proves excluded_count does
+    # not include it.
+    from sqlalchemy import select
+
+    from app.models.matching import MatchResult
+
+    async with AsyncSessionLocal() as db:
+        rows_r = await db.execute(
+            select(MatchResult.entity_id).where(MatchResult.match_run_id == data["id"])
+        )
+        persisted_ids = {row[0] for row in rows_r.all()}
+    assert hidden_id not in persisted_ids
+
+
+@pytest.mark.asyncio
+async def test_definition_data_uri_rejected(c):
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "URI Pack"}, headers=h)
+    pack_id = r.json()["data"]["id"]
+    bad = {
+        "schema_version": 1,
+        "inputs": [],
+        "outputs": [],
+        "steps": [
+            {
+                "id": "bad",
+                "type": "instruction",
+                "name": "Bad",
+                "config": {"content": "data:image/png;base64,AAAA"},
+                "inputs": [],
+                "outputs": [],
+            }
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    r2 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pack_id}/definition",
+        json={"definition": bad},
+        headers=h,
+    )
+    assert r2.status_code == 422
+    codes = {d["code"] for d in r2.json()["error"]["details"]}
+    assert "WF_DATA_URI_REJECTED" in codes
+
+
+@pytest.mark.asyncio
+async def test_student_role_restrictions(c):
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    h_student, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h_owner,
+    )
+    # Packs
+    r1 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "Student Pack"}, headers=h_student
+    )
+    assert r1.status_code == 403
+    # Connections
+    adapters = (await c.get("/api/v1/providers/adapters", headers=h_student)).json()["data"]
+    mock_id = next(a for a in adapters if a["key"] == "mock")["id"]
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": mock_id, "name": "Student Conn"},
+        headers=h_student,
+    )
+    assert r2.status_code == 403
+    # Drafts
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/drafts/learning-path",
+        json={"profile_id": "01AAAAAAAAAAAAAAAAAAAAAAAA"},
+        headers=h_student,
+    )
+    assert r3.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_match_run_and_draft_cross_org(c):
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+    rp = await c.post(
+        f"/api/v1/orgs/{o1}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {}},
+        headers=h1,
+    )
+    pid = rp.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{o1}/requirement-profiles/{pid}/confirm", headers=h1)
+    rm = await c.post(
+        f"/api/v1/orgs/{o1}/match",
+        json={"requirement_profile_id": pid, "target_entity_type": "skill_pack"},
+        headers=h1,
+    )
+    run_id = rm.json()["data"]["id"]
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    r = await c.get(f"/api/v1/orgs/{o2}/match-runs/{run_id}", headers=h2)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_step_review_cross_org(c):
+    """Reviews and runs are unreachable across orgs (uses direct DB seed)."""
+    h1, _ = await _auth(c)
+    o1 = await _org(c, h1)
+
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import (
+        StepRunStatus,
+        WorkflowRun,
+        WorkflowStepReview,
+        WorkflowStepRun,
+    )
+
+    async with AsyncSessionLocal() as db:
+        run = WorkflowRun(org_id=o1, definition_snapshot={"steps": []}, inputs={})
+        db.add(run)
+        await db.flush()
+        sr = WorkflowStepRun(
+            run_id=run.id,
+            step_id="gate",
+            step_type="review_gate",
+            status=StepRunStatus.WAITING_REVIEW,
+        )
+        db.add(sr)
+        await db.flush()
+        review = WorkflowStepReview(
+            step_run_id=sr.id, org_id=o1, due_at=datetime.now(UTC) + timedelta(days=7)
+        )
+        db.add(review)
+        await db.commit()
+        run_id, review_id = run.id, review.id
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    r1 = await c.get(f"/api/v1/orgs/{o2}/workflow-runs/{run_id}", headers=h2)
+    assert r1.status_code == 404
+    r2 = await c.post(
+        f"/api/v1/orgs/{o2}/step-reviews/{review_id}/decide",
+        json={"decision": "approved"},
+        headers=h2,
+    )
+    assert r2.status_code == 404
+    # Cancel across orgs also blocked
+    r3 = await c.post(f"/api/v1/orgs/{o2}/workflow-runs/{run_id}/cancel", headers=h2)
+    assert r3.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_org_archives_workflow_packs(c):
+    """Deleting an org must archive its workflow packs too — otherwise a
+    dead org's PUBLIC packs stay live and installable (audit HIGH 1)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    # Publish + approve a PUBLIC workflow pack
+    r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "Zombie Pack"}, headers=h)
+    pid = r.json()["data"]["id"]
+    definition = {
+        "schema_version": 1,
+        "inputs": [{"key": "topic", "type": "text", "required": True}],
+        "outputs": [{"key": "final", "type": "image", "from_step": "gen", "from_port": "result"}],
+        "steps": [
+            {
+                "id": "gen",
+                "type": "provider_action",
+                "name": "Gen",
+                "config": {"capability": "image_generation"},
+                "inputs": [],
+                "outputs": [{"port": "result", "type": "image"}],
+            }
+        ],
+        "edges": [],
+        "ui": {},
+    }
+    await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/definition",
+        json={"definition": definition},
+        headers=h,
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}/releases", json={"version": "1.0.0"}, headers=h
+    )
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/submit-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/workflow-packs/{pid}/approve", headers=h)
+
+    # Visible in the public registry before deletion
+    r1 = await c.get(f"/api/v1/registry/workflow-packs/{pid}")
+    assert r1.status_code == 200
+
+    # Delete the org
+    r2 = await c.delete(f"/api/v1/orgs/{oid}", headers=h)
+    assert r2.status_code == 204
+
+    # Pack is archived: gone from registry detail AND not installable elsewhere
+    r3 = await c.get(f"/api/v1/registry/workflow-packs/{pid}")
+    assert r3.status_code == 404
+
+    h2, _ = await _auth(c)
+    o2 = await _org(c, h2)
+    r4 = await c.post(
+        f"/api/v1/orgs/{o2}/workflow-installations", json={"pack_id": pid}, headers=h2
+    )
+    assert r4.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_decide_step_review(c):
+    """decide_review approves real provider work — students must not
+    self-approve (audit MEDIUM 14)."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    h_student, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h_owner,
+    )
+
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.workflow_run import (
+        RunStatus,
+        StepRunStatus,
+        WorkflowRun,
+        WorkflowStepReview,
+        WorkflowStepRun,
+    )
+
+    async with AsyncSessionLocal() as db:
+        run = WorkflowRun(
+            org_id=oid,
+            definition_snapshot={"steps": []},
+            inputs={},
+            status=RunStatus.WAITING_REVIEW,
+        )
+        db.add(run)
+        await db.flush()
+        sr = WorkflowStepRun(
+            run_id=run.id,
+            step_id="gate",
+            step_type="review_gate",
+            status=StepRunStatus.WAITING_REVIEW,
+        )
+        db.add(sr)
+        await db.flush()
+        review = WorkflowStepReview(
+            step_run_id=sr.id, org_id=oid, due_at=datetime.now(UTC) + timedelta(days=7)
+        )
+        db.add(review)
+        await db.commit()
+        review_id = review.id
+
+    # Student blocked
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/step-reviews/{review_id}/decide",
+        json={"decision": "approved"},
+        headers=h_student,
+    )
+    assert r.status_code == 403
+
+    # Owner allowed
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/step-reviews/{review_id}/decide",
+        json={"decision": "approved"},
+        headers=h_owner,
+    )
+    assert r2.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_workflow_pack_path_item_progress_no_crash(c):
+    """get_path_progress must tolerate WORKFLOW_PACK items — they were added
+    to the enum without a progress branch (audit finding 16)."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    path_id = (
+        await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "WF Path"}, headers=h)
+    ).json()["data"]["id"]
+
+    # A regular skill item so there's real progress to compute
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories", json={"name": f"PC-{uuid.uuid4().hex[:4]}"}, headers=h
+        )
+    ).json()["data"]["id"]
+    skill_id = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "WF Path Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/paths/{path_id}/items",
+        json={"item_type": "skill", "skill_id": skill_id},
+        headers=h,
+    )
+
+    # Insert a WORKFLOW_PACK item directly (creation API is out of scope)
+    from app.core.database import AsyncSessionLocal
+    from app.models.learning_path import LearningPathItem, PathItemType
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            LearningPathItem(
+                path_id=path_id,
+                item_type=PathItemType.WORKFLOW_PACK,
+                workflow_pack_id="01AAAAAAAAAAAAAAAAAAAAAAAA",
+                sort_order=99,
+            )
+        )
+        await db.commit()
+
+    r = await c.get(f"/api/v1/orgs/{oid}/paths/{path_id}/my-progress", headers=h)
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    types = {i["type"] for i in data["items"]}
+    assert "workflow_pack" in types
+    # Both items count as required; neither is done
+    assert data["total_required"] == 2
+    assert data["completed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_shortlist_forbidden_to_plain_members(c):
+    """Part J: private learner evidence must not be exposed to unauthorized
+    users. The creator shortlist carries per-capability evidence details —
+    a plain MEMBER (student) must get 403, not the org's evidence graph."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # Create a project to shortlist against
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Sec Project",
+            "description": "d",
+            "instructions": "deliver",
+            "rubric": [{"criterion": "Quality", "max_score": 100}],
+            "project_type": "ai_visual",
+        },
+        headers=h,
+    )
+    project_id = r.json()["data"]["id"]
+    # A confirmed profile
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "talent_matching", "structured_requirements": {"goal": "match"}},
+        headers=h,
+    )
+    profile_id = r.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{profile_id}/confirm", headers=h)
+    # Student member (direct add — same pattern as test_creator_matching)
+    h2, user2 = await _auth(c)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": user2["id"], "role": "student"},
+        headers=h,
+    )
+    assert r.status_code in (200, 201), r.text[:200]
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/projects/{project_id}/creator-shortlist",
+        params={"profile_id": profile_id},
+        headers=h2,
+    )
+    assert r.status_code == 403, f"{r.status_code}: {r.text[:200]}"
+
+
+@pytest.mark.asyncio
+async def test_shortlist_exposes_no_protected_attributes(c):
+    """Part J: creator matching never uses or exposes protected/sensitive
+    personal attributes — the shortlist payload carries only entity_id,
+    display name, rank/score/tier, reasons/gaps, and evidence rows. No
+    email, no last_login, no role, no PII fields."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/projects",
+        json={
+            "title": "Attr Project",
+            "description": "d",
+            "instructions": "deliver",
+            "rubric": [{"criterion": "Quality", "max_score": 100}],
+            "project_type": "ai_visual",
+        },
+        headers=h,
+    )
+    project_id = r.json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "talent_matching", "structured_requirements": {"goal": "match"}},
+        headers=h,
+    )
+    profile_id = r.json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{profile_id}/confirm", headers=h)
+    r = await c.get(
+        f"/api/v1/orgs/{oid}/projects/{project_id}/creator-shortlist",
+        params={"profile_id": profile_id},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text[:300]
+    body = r.text.lower()
+    for forbidden in ("email", "last_login", "password", '"role"'):
+        assert forbidden not in body, f"shortlist response leaks '{forbidden}'"
+    # Structural check: every result carries only the declared fields
+    allowed = {"entity_id", "name", "rank", "score", "tier", "reasons", "gaps", "evidence"}
+    for entry in r.json()["data"]["results"]:
+        assert set(entry.keys()) <= allowed, set(entry.keys()) - allowed
+
+
+# ── R26: authorization correctness matrix (role enforcement, not just presence) ──
+
+
+async def _member(c, owner_h, oid, role):
+    """Register a fresh user and add them to the org at the given role."""
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={"email": _email(), "password": "TestPass123!", "display_name": f"Role{role[:3]}"},
+    )
+    d = r.json()
+    h = {"Authorization": f"Bearer {d['access_token']}"}
+    rr = await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": d["user"]["id"], "role": role},
+        headers=owner_h,
+    )
+    assert rr.status_code in (200, 201), rr.text
+    return h
+
+
+@pytest.mark.asyncio
+async def test_authz_matrix_write_endpoints_enforce_roles(c):
+    """R26: guards must enforce the RIGHT role, not merely be present.
+    WRITE_ROLES = owner/admin/instructor; provider connections = admin only;
+    a student must be 403 on write endpoints; a non-member always 403/404."""
+    owner, _ = await _auth(c)
+    oid = await _org(c, owner)
+    admin = await _member(c, owner, oid, "admin")
+    instructor = await _member(c, owner, oid, "instructor")
+    student = await _member(c, owner, oid, "student")
+    nonmember, _ = await _auth(c)
+
+    async def code(h, method, path, body=None):
+        r = await c.request(method, f"/api/v1/orgs/{oid}{path}", json=body, headers=h)
+        return r.status_code
+
+    # WRITE_ROLES endpoint: create workflow pack
+    assert await code(owner, "POST", "/workflow-packs", {"name": "Ap"}) == 201
+    assert await code(instructor, "POST", "/workflow-packs", {"name": "Bp"}) == 201
+    assert await code(student, "POST", "/workflow-packs", {"name": "Cp"}) == 403
+    assert await code(nonmember, "POST", "/workflow-packs", {"name": "Dp"}) in (403, 404)
+
+    # ADMIN-only endpoint: create provider connection (instructor must be 403)
+    assert await code(
+        admin,
+        "POST",
+        "/provider-connections",
+        {"adapter_id": "01JFAKE0000000000000000000", "name": "Cx"},
+    ) in (404, 422)  # passes authz, fails on fake adapter
+    assert (
+        await code(
+            instructor,
+            "POST",
+            "/provider-connections",
+            {"adapter_id": "01JFAKE0000000000000000000", "name": "Cy"},
+        )
+        == 403
+    )
+    assert (
+        await code(
+            student,
+            "POST",
+            "/provider-connections",
+            {"adapter_id": "01JFAKE0000000000000000000", "name": "Cz"},
+        )
+        == 403
+    )
+
+    # Any-member endpoint: create requirement profile (student allowed)
+    assert (
+        await code(
+            student,
+            "POST",
+            "/requirement-profiles",
+            {"context_type": "learning", "structured_requirements": {"goal": "g"}},
+        )
+        == 201
+    )
+    assert await code(
+        nonmember,
+        "POST",
+        "/requirement-profiles",
+        {"context_type": "learning", "structured_requirements": {"goal": "g"}},
+    ) in (403, 404)
+
+
+@pytest.mark.asyncio
+async def test_authz_profile_owner_isolation(c):
+    """R26: a member cannot confirm or edit ANOTHER member's requirement
+    profile (would turn their unconfirmed extractions into hard constraints
+    they never approved); an instructor may act on behalf."""
+    owner, _ = await _auth(c)
+    oid = await _org(c, owner)
+    s1 = await _member(c, owner, oid, "student")
+    s2 = await _member(c, owner, oid, "student")
+    instructor = await _member(c, owner, oid, "instructor")
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/requirement-profiles",
+        json={"context_type": "learning", "structured_requirements": {"goal": "mine"}},
+        headers=s1,
+    )
+    pid = r.json()["data"]["id"]
+
+    # s2 confirm/patch s1's profile → 403 PROFILE_FORBIDDEN
+    rc = await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{pid}/confirm", headers=s2)
+    assert rc.status_code == 403 and rc.json()["error"]["code"] == "PROFILE_FORBIDDEN"
+    rp = await c.patch(
+        f"/api/v1/orgs/{oid}/requirement-profiles/{pid}",
+        json={"edits": {"goal": "hijacked"}},
+        headers=s2,
+    )
+    assert rp.status_code == 403 and rp.json()["error"]["code"] == "PROFILE_FORBIDDEN"
+
+    # instructor may confirm on the learner's behalf
+    ri = await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{pid}/confirm", headers=instructor)
+    assert ri.status_code == 200, ri.text
+
+
+@pytest.mark.asyncio
+async def test_deep_nested_open_dict_fields_rejected(c):
+    """R53: open dict fields that are ECHOED on reads (pack provenance,
+    connection config, offering limits) accepted arbitrarily deep nesting —
+    a ~2KB 400-level payload passed every size cap, stored fine, then
+    PydanticSerializationError-500'd every subsequent read of the row
+    (permanently bricking the pack card / connection / offering). Same
+    class as the R51 definition depth gate, through the side doors."""
+    import json as _json
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    deep = _json.loads("[" * 400 + "null" + "]" * 400)
+
+    # Pack provenance (create + update)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-packs",
+        json={"name": "DeepProv", "provenance": {"x": deep}},
+        headers=h,
+    )
+    assert r.status_code == 422, r.text[:200]
+    r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": "ShallowProv"}, headers=h)
+    pid = r2.json()["data"]["id"]
+    r3 = await c.put(
+        f"/api/v1/orgs/{oid}/workflow-packs/{pid}",
+        json={"provenance": {"x": deep}},
+        headers=h,
+    )
+    assert r3.status_code == 422, r3.text[:200]
+
+    # Provider connection config
+    adapters = (await c.get("/api/v1/providers/adapters", headers=h)).json()["data"]
+    aid = next(a["id"] for a in adapters if a["key"] == "mock")
+    r4 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "DeepCfg", "config": {"x": deep}},
+        headers=h,
+    )
+    assert r4.status_code == 422, r4.text[:200]
+
+    # Offering limits (create + update)
+    r5 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-connections",
+        json={"adapter_id": aid, "name": "OkConn"},
+        headers=h,
+    )
+    conn_id = r5.json()["data"]["id"]
+    r6 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={
+            "connection_id": conn_id,
+            "capability_key": "image_generation",
+            "model_name": "m1",
+            "limits": {"x": deep},
+        },
+        headers=h,
+    )
+    assert r6.status_code == 422, r6.text[:200]
+    r7 = await c.post(
+        f"/api/v1/orgs/{oid}/provider-offerings",
+        json={"connection_id": conn_id, "capability_key": "image_generation", "model_name": "m1"},
+        headers=h,
+    )
+    off_id = r7.json()["data"]["id"]
+    r8 = await c.put(
+        f"/api/v1/orgs/{oid}/provider-offerings/{off_id}",
+        json={"limits": {"x": deep}},
+        headers=h,
+    )
+    assert r8.status_code == 422, r8.text[:200]
+
+    # Everything created in this test remains readable
+    assert (await c.get(f"/api/v1/orgs/{oid}/workflow-packs/{pid}", headers=h)).status_code == 200
+    assert (await c.get(f"/api/v1/orgs/{oid}/provider-connections", headers=h)).status_code == 200
+    assert (await c.get(f"/api/v1/orgs/{oid}/provider-offerings", headers=h)).status_code == 200
+
+
+# ── R89d: draft project asset download must honor draft-visibility ──
+
+
+@pytest.mark.asyncio
+async def test_draft_project_asset_download_hidden_from_students(c):
+    """R89d: download_asset used org-only _verify_project_org while list/get use
+    _verify_project_visible, so a student could pull a DRAFT project's asset
+    (e.g. a confidential brief) signed URL directly. It must 404 until publish;
+    the instructor can always download. Reverting the fix makes the student
+    draft download return 200."""
+    # 1x1 png (assets enforce an image content-type)
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000d49444154789c62000100000500010d0a2db40000000049454e44ae426082"
+    )
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+    sh = await _member(c, ih, oid, "student")
+
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Draft Brief Project",
+                "description": "d" * 20,
+                "instructions": "confidential",
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+    aid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/assets",
+            files={"file": ("brief.png", png, "image/png")},
+            data={"name": "Secret Brief"},
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+
+    dl = f"/api/v1/orgs/{oid}/projects/{pid}/assets/{aid}/download"
+    # student blocked while draft; instructor allowed
+    assert (await c.get(dl, headers=sh)).status_code == 404
+    assert (await c.get(dl, headers=ih)).status_code == 200
+    # after publish the student can download
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)
+    ).status_code == 200
+    assert (await c.get(dl, headers=sh)).status_code == 200
+
+
+# ── R89e: match run/history must not leak a peer's confidential profile ──
+
+
+@pytest.mark.asyncio
+async def test_match_run_and_history_respect_profile_owner(c):
+    """R89e: run_match fetched the requirement profile with only_user_id=None,
+    and match-run list/get were org-wide (only creator runs were gated). A
+    student could run a match against an instructor's confidential profile and
+    read any run in the org. Now: student match on a peer profile -> 404;
+    history list excludes others' runs; GET a peer's run -> 404. Instructor
+    keeps full access. Reverting any of the three fixes fails this."""
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+    sh = await _member(c, ih, oid, "student")
+
+    prof = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/requirement-profiles",
+            json={"raw_request": "SECRET client ACME", "context_type": "production"},
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{prof}/confirm", json={}, headers=ih)
+
+    # student cannot run a match against the instructor's profile
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/match",
+        json={"requirement_profile_id": prof, "target_entity_type": "workflow_pack", "limit": 5},
+        headers=sh,
+    )
+    assert r.status_code == 404, r.text
+
+    # instructor runs their own match
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/match",
+        json={"requirement_profile_id": prof, "target_entity_type": "workflow_pack", "limit": 5},
+        headers=ih,
+    )
+    assert r.status_code == 200, r.text
+    run_id = r.json()["data"]["id"]
+
+    # student history excludes the instructor's run; instructor sees it
+    s_list = await c.get(f"/api/v1/orgs/{oid}/match-runs", headers=sh)
+    assert s_list.status_code == 200
+    assert all(run["id"] != run_id for run in s_list.json()["data"])
+    i_list = await c.get(f"/api/v1/orgs/{oid}/match-runs", headers=ih)
+    assert any(run["id"] == run_id for run in i_list.json()["data"])
+
+    # student cannot GET the instructor's run; instructor can
+    assert (await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=sh)).status_code == 404
+    assert (await c.get(f"/api/v1/orgs/{oid}/match-runs/{run_id}", headers=ih)).status_code == 200
+
+
+# ── R90a: composer drafts must not leak a peer's confidential profile ──
+
+
+@pytest.mark.asyncio
+async def test_composer_drafts_respect_owner(c):
+    """R90a: a solution draft is composed (WRITE_ROLES only) from a confidential
+    requirement profile and carries its derived constraints. list/get drafts
+    were org-member-open, so a student could read an instructor's draft — a
+    side door around the R89e profile owner gate. Now non-instructors see only
+    their own drafts; instructors see all. Reverting the only_user_id gate fails
+    this."""
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+    sh = await _member(c, ih, oid, "student")
+
+    prof = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/requirement-profiles",
+            json={"raw_request": "CONFIDENTIAL client ask", "context_type": "production"},
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/requirement-profiles/{prof}/confirm", json={}, headers=ih)
+    did = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/drafts/production-solution",
+            json={"profile_id": prof},
+            headers=ih,
+        )
+    ).json()["data"]["id"]
+
+    # student: list excludes it, get 404s
+    s_list = await c.get(f"/api/v1/orgs/{oid}/drafts", headers=sh)
+    assert s_list.status_code == 200
+    assert all(d["id"] != did for d in s_list.json()["data"])
+    assert (await c.get(f"/api/v1/orgs/{oid}/drafts/{did}", headers=sh)).status_code == 404
+
+    # instructor: sees it
+    i_list = await c.get(f"/api/v1/orgs/{oid}/drafts", headers=ih)
+    assert any(d["id"] == did for d in i_list.json()["data"])
+    assert (await c.get(f"/api/v1/orgs/{oid}/drafts/{did}", headers=ih)).status_code == 200
+
+
+# ── R90b: generic org-settings write must not poison typed namespaces ──
+
+
+@pytest.mark.asyncio
+async def test_org_settings_reject_reserved_namespace(c):
+    """R90b: PUT /settings shallow-merged an arbitrary dict into org.settings.
+    Writing ai_evaluation with a wrong-typed value (monthly_budget_usd:'abc')
+    persisted and then 500'd every eval usage/settings read. The generic
+    endpoint must reject reserved, separately-typed namespaces; the dedicated
+    typed endpoint still works. Reverting the guard fails this."""
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+
+    # reserved namespace rejected 422
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/settings",
+        json={"settings": {"ai_evaluation": {"enabled": True, "monthly_budget_usd": "abc"}}},
+        headers=ih,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "RESERVED_SETTINGS_KEY"
+
+    # eval reads stay healthy (not poisoned)
+    assert (await c.get(f"/api/v1/orgs/{oid}/evaluation/usage", headers=ih)).status_code == 200
+    assert (await c.get(f"/api/v1/orgs/{oid}/settings/evaluation", headers=ih)).status_code == 200
+
+    # a non-reserved setting still writes
+    assert (
+        await c.put(
+            f"/api/v1/orgs/{oid}/settings", json={"settings": {"theme": "dark"}}, headers=ih
+        )
+    ).status_code == 200
+
+    # the typed eval endpoint validates + persists
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/settings/evaluation",
+        json={"enabled": True, "monthly_budget_usd": 500},
+        headers=ih,
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["monthly_budget_usd"] == 500
+
+
+# ── R91c: role-mint gate must block a role AT OR ABOVE the actor's own ──
+
+
+@pytest.mark.asyncio
+async def test_non_owner_cannot_mint_equal_role(c):
+    """R91c: the three role-mint paths (add member, invite-link, email invite)
+    used `< actor.role`, blocking only a STRICTLY higher role — so an admin
+    could grant its own admin role (incl. re-adding a removed student as admin,
+    an escalation around the owner-only PUT gate). Must be `<=`. Reverting fails."""
+    oh, _ = await _auth(c)
+    oid = await _org(c, oh)
+    ah = await _member(c, oh, oid, "admin")
+    sh, stan = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "student"}, headers=oh
+    )
+
+    # admin removes the student, then tries to re-add as admin -> 403
+    assert (
+        await c.delete(f"/api/v1/orgs/{oid}/members/{stan['id']}", headers=ah)
+    ).status_code == 204
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": stan["id"], "role": "admin"}, headers=ah
+    )
+    assert r.status_code == 403, r.text
+
+    # admin cannot mint an admin invite-link
+    r = await c.post(f"/api/v1/orgs/{oid}/invite-links", json={"role": "admin"}, headers=ah)
+    assert r.status_code == 403, r.text
+
+    # admin CAN still add a lower role; owner CAN add an admin
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/members",
+            json={"user_id": stan["id"], "role": "student"},
+            headers=ah,
+        )
+    ).status_code == 201
+    bh, bob = await _auth(c)
+    assert (
+        await c.post(
+            f"/api/v1/orgs/{oid}/members", json={"user_id": bob["id"], "role": "admin"}, headers=oh
+        )
+    ).status_code == 201
+
+
+# ── R91d: portfolio write endpoints must be a uniform 404 (no existence oracle) ──
+
+
+@pytest.mark.asyncio
+async def test_portfolio_write_no_existence_oracle(c):
+    """R91d: PUT/DELETE /portfolio/items/{id} returned 403 for an existing
+    not-owned item vs 404 for a nonexistent id — an existence oracle over other
+    users' private item ids. Both must be a uniform 404. Reverting fails this."""
+    ha, _ = await _auth(c)
+    hb, _ = await _auth(c)
+    priv = (
+        await c.post(
+            "/api/v1/portfolio/items",
+            json={"title": "Secret A", "visibility": "private"},
+            headers=ha,
+        )
+    ).json()["data"]["id"]
+
+    missing = "01NONEXISTENT000000000000"
+    for method in ("put", "delete"):
+        call = getattr(c, method)
+        kw = {"json": {"title": "hax"}} if method == "put" else {}
+        r_exists = await call(f"/api/v1/portfolio/items/{priv}", headers=hb, **kw)
+        r_missing = await call(f"/api/v1/portfolio/items/{missing}", headers=hb, **kw)
+        assert r_exists.status_code == 404, f"{method} not-owned: {r_exists.status_code}"
+        assert r_missing.status_code == 404, f"{method} missing: {r_missing.status_code}"
+
+    # owner can still edit their own
+    assert (
+        await c.put(f"/api/v1/portfolio/items/{priv}", json={"title": "legit"}, headers=ha)
+    ).status_code == 200
+
+
+# ── R92f: submit_draft must enforce the same publication/cohort gate as create ──
+
+
+@pytest.mark.asyncio
+async def test_submit_draft_enforces_publication_and_cohort_gate(c):
+    """R92f: create_submission gates on project PUBLISHED + cohort/creator
+    assignment, but submit_draft enforced neither. A draft created while a
+    project was open could be submitted after it was unpublished, or after it
+    was restricted to a cohort the student is not in. Both gates now hold at
+    submit time; instructor test-flow and normal student flow still work.
+    Reverting the submit_draft gate makes these submits succeed."""
+    ih, _ = await _auth(c)
+    oid = await _org(c, ih)
+    sh = await _member(c, ih, oid, "student")
+
+    async def _proj():
+        pid = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/projects",
+                json={
+                    "title": "SM Gate",
+                    "description": "d" * 20,
+                    "instructions": "i",
+                    "rubric": [{"criterion": "Q", "max_score": 100}],
+                },
+                headers=ih,
+            )
+        ).json()["data"]["id"]
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)
+        return pid
+
+    # (1) publication gate: draft while published → unpublish → submit 422
+    pid = await _proj()
+    sub = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{pid}/submissions",
+            json={"content": {"text": "w"}},
+            headers=sh,
+        )
+    ).json()["data"]["id"]
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/unpublish", headers=ih)
+    ).status_code == 200
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub}/submit", headers=sh)
+    assert r.status_code == 422, r.text
+    # republish → the same draft submits fine
+    await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=ih)
+    assert (
+        await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub}/submit", headers=sh)
+    ).status_code == 200
+
+    # (2) cohort gate: draft org-wide → restrict project to a cohort student not in → submit 404
+    p2 = await _proj()
+    ds = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects/{p2}/submissions",
+            json={"content": {"text": "w"}},
+            headers=sh,
+        )
+    ).json()["data"]["id"]
+    cid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts", json={"name": "NoStud", "description": "x"}, headers=ih
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": p2}, headers=ih)
+    r = await c.post(f"/api/v1/orgs/{oid}/projects/{p2}/submissions/{ds}/submit", headers=sh)
+    assert r.status_code == 404, r.text

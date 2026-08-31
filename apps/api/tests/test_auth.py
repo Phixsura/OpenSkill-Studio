@@ -243,6 +243,57 @@ def test_password_hash_and_verify():
     assert not verify_password("WrongPassword1!", hashed)
 
 
+def test_password_over_72_bytes_hashes_and_verifies():
+    """R87: bcrypt 5.0.0 RAISES on passwords >72 bytes (it only consumes the
+    first 72), but the password policy allows up to 128 characters — so a
+    policy-compliant long password crashed hash_password/verify_password with
+    an unhandled 500 on register / login / change-password / reset. We
+    pre-truncate to 72 bytes so hashing is total and verification is
+    consistent."""
+    from app.core.security import hash_password, verify_password
+
+    # 93 chars, policy-valid (<=128, has upper+digit), > 72 bytes
+    longpw = "Aa1" + "x" * 90
+    assert len(longpw.encode()) > 72
+    hashed = hash_password(longpw)  # must not raise
+    assert verify_password(longpw, hashed)
+    # a password differing WITHIN the first 72 bytes must not verify
+    assert not verify_password("Aa1" + "y" * 90, hashed)
+    # multibyte (emoji) password past 72 bytes also hashes without raising
+    emoji_pw = "Aa1" + "😀" * 30  # 3 + 30*4 = 123 bytes
+    assert len(emoji_pw.encode()) > 72
+    h2 = hash_password(emoji_pw)
+    assert verify_password(emoji_pw, h2)
+
+
+@pytest.mark.asyncio
+async def test_register_and_login_long_password_not_500(client):
+    """R87 end-to-end: register + login with a >72-byte password must succeed
+    (201 / 200), never 500."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    # Fresh pool: pooled connections may be bound to a prior test's (closed)
+    # event loop — same hygiene the other client-fixture tests in this file use.
+    await engine.dispose()
+
+    email = f"pw72-{_uuid.uuid4().hex[:8]}@test.com"
+    longpw = "Aa1" + "x" * 90
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": longpw, "display_name": "PW72"},
+    )
+    assert r.status_code == 201, r.text
+    r = await client.post("/api/v1/auth/login", json={"email": email, "password": longpw})
+    assert r.status_code == 200, r.text
+    # wrong password (differs in first 72 bytes) → 401, not 500
+    r = await client.post("/api/v1/auth/login", json={"email": email, "password": "Aa1" + "y" * 90})
+    assert r.status_code == 401, r.text
+
+    await engine.dispose()
+
+
 def test_access_token_roundtrip():
     from app.core.security import decode_token
 
@@ -282,3 +333,322 @@ def test_common_password_check():
     assert is_common_password("123456")
     assert is_common_password("qwerty")
     assert not is_common_password("xK9#mL2$pQ7!")
+
+
+# ── Concurrent-refresh grace window (cross-tab race) ─────────
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_within_grace_window_succeeds(client):
+    """Two browser tabs share the refresh cookie but dedup per tab: the
+    loser presents a just-rotated token. Within the grace window that must
+    mint a fresh pair, not force a logout."""
+    import uuid as _uuid
+
+    email = f"grace-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Grace"},
+    )
+    assert r.status_code == 201
+    cookie = r.cookies.get("refresh_token")
+    assert cookie
+
+    # Tab 1 refreshes (rotates the token)
+    client.cookies.set("refresh_token", cookie)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+
+    # Tab 2 re-presents the ORIGINAL (now-revoked) token within the grace
+    # window → fresh pair, not 401
+    client.cookies.set("refresh_token", cookie)
+    r2 = await client.post("/api/v1/auth/refresh")
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["access_token"]
+
+
+# ── Revoke-session cookie clearing ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_revoke_current_session_clears_cookie(client):
+    """Revoking the session backing the CURRENT refresh cookie must delete
+    the cookie in the response. The session id (RefreshToken.id) and the
+    cookie's jti are unrelated ULIDs — the link is sha256(jti) == token_hash,
+    so this is a regression test for the always-false jti == token_id guard."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"revoke-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Revoke"},
+    )
+    assert r.status_code == 201
+    cookie = r.cookies.get("refresh_token")
+    access = r.json()["access_token"]
+    headers = {"Authorization": f"Bearer {access}"}
+
+    # Only one session exists — it backs the current cookie
+    sessions = (await client.get("/api/v1/auth/sessions", headers=headers)).json()["data"]
+    assert len(sessions) == 1
+    session_id = sessions[0]["id"]
+
+    client.cookies.set("refresh_token", cookie)
+    r2 = await client.delete(f"/api/v1/auth/sessions/{session_id}", headers=headers)
+    assert r2.status_code == 204
+    set_cookie = r2.headers.get("set-cookie", "")
+    assert "refresh_token=" in set_cookie
+    assert "max-age=0" in set_cookie.lower() or 'refresh_token=""' in set_cookie
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_revoke_other_session_keeps_cookie(client):
+    """Revoking a DIFFERENT session must NOT touch the current cookie."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"revoke2-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Revoke2"},
+    )
+    assert r.status_code == 201
+    headers_a = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    old_sessions = (await client.get("/api/v1/auth/sessions", headers=headers_a)).json()["data"]
+    old_id = old_sessions[0]["id"]
+
+    # Second login → second session, new cookie (the "current" one)
+    r_b = await client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
+    assert r_b.status_code == 200
+    cookie_b = r_b.cookies.get("refresh_token")
+    headers_b = {"Authorization": f"Bearer {r_b.json()['access_token']}"}
+
+    # Revoke the OLD session while presenting cookie B → no cookie clear
+    client.cookies.set("refresh_token", cookie_b)
+    r2 = await client.delete(f"/api/v1/auth/sessions/{old_id}", headers=headers_b)
+    assert r2.status_code == 204
+    assert "set-cookie" not in r2.headers
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_after_grace_window_rejected(client):
+    """Outside the grace window, reuse of a rotated token is a revoked
+    session (or replay) and must 401."""
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+    from hashlib import sha256
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.core.security import decode_token
+    from app.models.user import RefreshToken
+
+    # Fresh pool: earlier tests in this file leave pooled connections bound
+    # to their own (closed) event loops ("attached to a different loop")
+    await engine.dispose()
+
+    email = f"grace2-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Grace2"},
+    )
+    cookie = r.cookies.get("refresh_token")
+
+    client.cookies.set("refresh_token", cookie)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+
+    # Backdate the revocation beyond the grace window
+    jti = decode_token(cookie)["jti"]
+    token_hash = sha256(jti.encode()).hexdigest()
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import update as sa_update
+
+        await db.execute(
+            sa_update(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash)
+            .values(revoked_at=datetime.now(UTC) - timedelta(seconds=60))
+        )
+        await db.commit()
+
+    client.cookies.set("refresh_token", cookie)
+    r2 = await client.post("/api/v1/auth/refresh")
+    assert r2.status_code == 401
+
+    # Leave a fresh pool for the next test file (loop hygiene)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_logout_kills_rotation_predecessor_within_grace(client):
+    """R87 session-revival: rotating tok1→tok2 leaves tok1 revoked-by-rotation
+    but still inside the grace window. Logging out with the CURRENT token
+    (tok2) must also finalize tok1 — otherwise replaying tok1 is graced and
+    revives the just-logged-out session. Logout must be final for the whole
+    within-grace chain, while other devices' live sessions stay alive."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"revive-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Revive"},
+    )
+    tok1 = r.cookies.get("refresh_token")
+
+    # Second device — its own live session must survive the first's logout
+    r_b = await client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
+    tok_b = r_b.cookies.get("refresh_token")
+
+    # Device 1 rotates tok1 → tok2
+    client.cookies.set("refresh_token", tok1)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+    tok2 = r1.cookies.get("refresh_token")
+
+    # Device 1 logs out with the CURRENT token (tok2)
+    client.cookies.set("refresh_token", tok2)
+    rlo = await client.post("/api/v1/auth/logout")
+    assert rlo.status_code == 204
+
+    # Replaying the rotation-predecessor tok1 (still within grace) must NOT be
+    # graced back into a session — the revival the fix closes.
+    client.cookies.set("refresh_token", tok1)
+    rrev = await client.post("/api/v1/auth/refresh")
+    assert rrev.status_code == 401, rrev.text
+
+    # Device 2's independent session is untouched.
+    client.cookies.set("refresh_token", tok_b)
+    rb = await client.post("/api/v1/auth/refresh")
+    assert rb.status_code == 200, rb.text
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_change_password_kills_rotation_predecessor_within_grace(client):
+    """R87: change-password revokes all sessions, but a rotation-predecessor
+    token revoked seconds ago would still be graced on replay → session
+    survives the password change. _revoke_all_user_tokens must finalize
+    within-grace tokens too."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"cpwd-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Cpwd"},
+    )
+    tok1 = r.cookies.get("refresh_token")
+    access = r.json()["access_token"]
+
+    client.cookies.set("refresh_token", tok1)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+
+    r2 = await client.post(
+        "/api/v1/auth/change-password",
+        json={"old_password": "TestPass123!", "new_password": "NewValid456!"},
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r2.status_code == 204, r2.text
+
+    # Replaying the rotation-revoked tok1 after the password change must 401.
+    client.cookies.set("refresh_token", tok1)
+    r3 = await client.post("/api/v1/auth/refresh")
+    assert r3.status_code == 401, r3.text
+
+    await engine.dispose()
+
+
+# ── R91: validly-signed token with bad/missing `sub` must 401, not 500 ──
+
+
+@pytest.mark.asyncio
+async def test_me_token_missing_sub_is_401_not_500(client):
+    """R91: get_current_user read payload["sub"] with a hard subscript. A
+    validly-signed access token missing `sub` (or with a non-str sub) KeyError-
+    500'd /auth/me instead of returning 401. Reverting the guard fails this."""
+    import jwt
+
+    from app.config import settings
+    from app.core.security import ALGORITHM
+
+    for label, payload in (
+        ("no-sub", {"type": "access"}),
+        ("int-sub", {"type": "access", "sub": 12345}),
+        ("empty-sub", {"type": "access", "sub": ""}),
+        ("null-sub", {"type": "access", "sub": None}),
+    ):
+        tok = jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
+        r = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 401, f"{label}: expected 401, got {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_revoke_session_kills_rotation_predecessor_within_grace(client):
+    """R91b: DELETE /auth/sessions/{id} ("revoke this device") backdated only
+    the one row it was handed. If that session had rotated within the grace
+    window, the rotation-predecessor (revoked-by-rotation, still graced) could
+    replay and revive the just-revoked session — defeating the exact remediation
+    flow. revoke_session must sweep the within-grace chain like logout (R87e),
+    while other devices' live sessions survive. Reverting the sweep fails this."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    await engine.dispose()
+
+    email = f"revrevive-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "RevRevive"},
+    )
+    tok1 = r.cookies.get("refresh_token")
+
+    # Second device — its own live session must survive.
+    r_b = await client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
+    tok_b = r_b.cookies.get("refresh_token")
+
+    # Device 1 rotates tok1 → tok2.
+    client.cookies.set("refresh_token", tok1)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+    tok2 = r1.cookies.get("refresh_token")
+    headers2 = {"Authorization": f"Bearer {r1.json()['access_token']}"}
+
+    # Device 1 explicitly revokes its CURRENT session (the tok2 row).
+    sessions = (await client.get("/api/v1/auth/sessions", headers=headers2)).json()["data"]
+    current_id = sessions[0]["id"]
+    client.cookies.set("refresh_token", tok2)
+    rdel = await client.delete(f"/api/v1/auth/sessions/{current_id}", headers=headers2)
+    assert rdel.status_code == 204
+
+    # Replaying the rotation-predecessor tok1 (within grace) must NOT revive it.
+    client.cookies.set("refresh_token", tok1)
+    rrev = await client.post("/api/v1/auth/refresh")
+    assert rrev.status_code == 401, rrev.text
+
+    # Device 2's independent session is untouched.
+    client.cookies.set("refresh_token", tok_b)
+    rb = await client.post("/api/v1/auth/refresh")
+    assert rb.status_code == 200, rb.text
+
+    await engine.dispose()

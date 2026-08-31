@@ -122,11 +122,15 @@ async def test_auth_refresh_token_not_found():
 
 @pytest.mark.asyncio
 async def test_auth_refresh_token_reuse():
+    from datetime import UTC, datetime, timedelta
+
     from app.services.auth import AuthService, TokenInvalidError
 
     db = _mock_db()
     token_record = MagicMock()
     token_record.is_revoked = True
+    # Revoked OUTSIDE the concurrent-refresh grace window → reuse rejected
+    token_record.revoked_at = datetime.now(UTC) - timedelta(seconds=60)
     db.execute = AsyncMock(return_value=_mock_result(value=token_record))
 
     svc = AuthService(db)
@@ -573,8 +577,12 @@ async def test_portfolio_update_not_owner():
     db.get = AsyncMock(return_value=item)
 
     svc = PortfolioService(db)
-    with pytest.raises(AppError, match="Not your item"):
+    # R91d: a not-owned item is a uniform 404 (ITEM_NOT_FOUND), not a 403 — a
+    # distinct 403-for-exists vs 404-for-missing leaked other users' item ids.
+    with pytest.raises(AppError) as ei:
         await svc.update_item("item1", "my-user", title="New")
+    assert ei.value.code == "ITEM_NOT_FOUND"
+    assert ei.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -588,8 +596,11 @@ async def test_portfolio_delete_not_owner():
     db.get = AsyncMock(return_value=item)
 
     svc = PortfolioService(db)
-    with pytest.raises(AppError, match="Not your item"):
+    # R91d: uniform 404 (see test_portfolio_update_not_owner).
+    with pytest.raises(AppError) as ei:
         await svc.delete_item("item1", "my-user")
+    assert ei.value.code == "ITEM_NOT_FOUND"
+    assert ei.value.status_code == 404
 
 
 @pytest.mark.asyncio

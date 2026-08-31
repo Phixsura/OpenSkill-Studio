@@ -1,0 +1,234 @@
+"""Public workflow-pack registry — search, browse, preview (ADR-010).
+
+Mirrors app/services/registry.py: Redis caches only {ids, total} and cache
+hits re-apply access-control filters so stale entries can never serve
+archived/private/rejected packs.
+"""
+
+import copy
+import hashlib
+import json
+
+import structlog
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.cache import cache_get, cache_set
+from app.exceptions import AppError
+from app.models.skill_pack import PackStatus, PackVisibility
+from app.models.workflow_pack import WorkflowPack, WorkflowPackRelease
+from app.services.workflow_pack import _parse_semver
+
+log = structlog.get_logger()
+
+
+def _cache_key(params: dict) -> str:
+    """Build the search cache key from a canonical JSON dump of the params.
+
+    A raw ':'-join of user-controlled values collides when values themselves
+    contain ':' (search='a:b' vs scenario='b'), serving wrong cached results.
+    JSON encoding preserves field boundaries. The 'wfregistry:' prefix keeps
+    the invalidation pattern ('wfregistry:*') matching.
+    """
+    digest = hashlib.sha256(json.dumps(params, sort_keys=True, default=str).encode()).hexdigest()
+    return f"wfregistry:search:{digest}"
+
+
+def _public_filters(query):
+    return query.where(
+        WorkflowPack.visibility == PackVisibility.PUBLIC,
+        WorkflowPack.status == PackStatus.PUBLISHED,
+        or_(
+            WorkflowPack.review_status.is_(None),
+            WorkflowPack.review_status == "approved",
+        ),
+    )
+
+
+class WorkflowRegistryService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def search_packs(
+        self,
+        search: str | None = None,
+        scenario: str | None = None,
+        tool: str | None = None,
+        capability: str | None = None,
+        workflow_type: str | None = None,
+        input_type: str | None = None,
+        output_type: str | None = None,
+        sort: str = "newest",
+        page: int = 1,
+        per_page: int = 20,
+    ) -> tuple[list[WorkflowPack], int]:
+        """Search public, published workflow packs. Cached 5 minutes."""
+        # ── Cache check (ids-only payload; access control re-applied on hit) ──
+        cache_key = _cache_key(
+            {
+                "search": search,
+                "scenario": scenario,
+                "tool": tool,
+                "capability": capability,
+                "workflow_type": workflow_type,
+                "input_type": input_type,
+                "output_type": output_type,
+                "sort": sort,
+                "page": page,
+                "per_page": per_page,
+            }
+        )
+        cached = await cache_get(cache_key)
+        if cached is not None:
+            pack_ids = cached.get("ids", [])
+            if pack_ids:
+                result = await self.db.execute(
+                    _public_filters(select(WorkflowPack).where(WorkflowPack.id.in_(pack_ids)))
+                )
+                packs_by_id = {p.id: p for p in result.scalars().all()}
+                filtered = [packs_by_id[pid] for pid in pack_ids if pid in packs_by_id]
+                # Return the cached TOTAL (across all pages), not the page
+                # size — otherwise has_more computes False and pagination
+                # stops at page 1 for the cache TTL.
+                return filtered, cached.get("total", len(filtered))
+            # Empty page (e.g. page beyond the last result) still carries the
+            # real catalog total — dropping it to 0 makes clients think the
+            # catalog shrank for the cache TTL.
+            return [], cached.get("total", 0)
+
+        # ── Build query ──
+        base = _public_filters(select(WorkflowPack))
+
+        if search and search.strip():
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            term = f"%{escaped}%"
+            base = base.where(
+                or_(
+                    WorkflowPack.name.ilike(term),
+                    WorkflowPack.summary.ilike(term),
+                    WorkflowPack.description.ilike(term),
+                )
+            )
+        if scenario:
+            base = base.where(WorkflowPack.scenario_tags.contains([scenario]))
+        if tool:
+            base = base.where(WorkflowPack.tool_tags.contains([tool]))
+        if capability:
+            base = base.where(WorkflowPack.capability_tags.contains([capability]))
+        if workflow_type:
+            base = base.where(WorkflowPack.workflow_type == workflow_type)
+
+        # Every sort chains the ULID id as a unique tiebreak (R75): OFFSET
+        # pagination over a non-unique key has no stability guarantee, and this
+        # search caches an ids-only page payload for 5 min — untiebroken ties
+        # reshuffle between the DB and the cached pages, silently skipping or
+        # duplicating packs across pages for the WHOLE cache TTL (worse than a
+        # plain unstable list). install_count and name are especially tie-prone.
+        if sort == "most_installed":
+            base = base.order_by(WorkflowPack.install_count.desc(), WorkflowPack.id.desc())
+        elif sort == "name":
+            base = base.order_by(WorkflowPack.name.asc(), WorkflowPack.id.asc())
+        else:  # newest
+            base = base.order_by(WorkflowPack.created_at.desc(), WorkflowPack.id.desc())
+
+        # input/output type filters require inspecting the derived JSONB
+        # schemas. The workflow catalog stays small (<1k packs for years) so
+        # we filter in Python when either filter is present — simpler and
+        # correct vs. a fragile JSONB path predicate.
+        if input_type or output_type:
+            result = await self.db.execute(base)
+            all_packs = list(result.scalars().all())
+            filtered = [
+                p
+                for p in all_packs
+                if (
+                    not input_type
+                    or any(i.get("type") == input_type for i in (p.input_schema or []))
+                )
+                and (
+                    not output_type
+                    or any(o.get("type") == output_type for o in (p.output_schema or []))
+                )
+            ]
+            total = len(filtered)
+            packs = filtered[(page - 1) * per_page : page * per_page]
+        else:
+            total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
+            total = total_r.scalar_one()
+            result = await self.db.execute(base.offset((page - 1) * per_page).limit(per_page))
+            packs = list(result.scalars().all())
+
+        await cache_set(cache_key, {"ids": [p.id for p in packs], "total": total}, ttl=300)
+        return packs, total
+
+    async def get_public_pack(self, pack_id: str) -> WorkflowPack:
+        """Get a public or unlisted workflow pack by ID."""
+        pack = await self.db.get(WorkflowPack, pack_id)
+        if pack is None or pack.status != PackStatus.PUBLISHED:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        if pack.visibility == PackVisibility.PRIVATE:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        # PUBLIC packs must pass review (mirror _public_filters / list path)
+        if pack.visibility == PackVisibility.PUBLIC and pack.review_status not in (
+            None,
+            "approved",
+        ):
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        return pack
+
+    async def get_public_releases(self, pack_id: str) -> list[WorkflowPackRelease]:
+        await self.get_public_pack(pack_id)  # verify accessible
+        # defer(manifest): PublicWorkflowReleaseResponse serializes NO manifest
+        # body ("Release list entry — no manifest body"), so loading it is pure
+        # waste — each manifest embeds a definition up to 262,144 bytes
+        # (ck_wfpack_definition_size). On an anonymous endpoint an author can
+        # publish unbounded releases (only version uniqueness is enforced), so a
+        # single GET would materialize N × 256KB of JSONB into ORM objects that
+        # are immediately discarded (R71 amplification). The skill-pack twin
+        # (services/registry.py get_public_releases) already defers identically.
+        from sqlalchemy.orm import defer
+
+        result = await self.db.execute(
+            select(WorkflowPackRelease)
+            .where(WorkflowPackRelease.pack_id == pack_id)
+            .options(defer(WorkflowPackRelease.manifest))
+        )
+        releases = list(result.scalars().all())
+        releases.sort(key=lambda r: _parse_semver(r.version), reverse=True)
+        return releases
+
+    async def get_pack_preview(self, pack_id: str) -> dict:
+        """Structural preview from the latest release — definition without ui block."""
+        await self.get_public_pack(pack_id)
+        result = await self.db.execute(
+            select(WorkflowPackRelease).where(WorkflowPackRelease.pack_id == pack_id)
+        )
+        releases = list(result.scalars().all())
+        if not releases:
+            raise AppError("NO_RELEASES", "This pack has no releases yet", 404)
+        # Public preview shows the latest STABLE release; pre-releases only
+        # when nothing stable exists (a 1.1.0-beta must not shadow 1.0.0)
+        stable = [r for r in releases if "-" not in r.version]
+        pool = stable if stable else releases
+        latest = max(pool, key=lambda r: _parse_semver(r.version))
+        manifest = latest.manifest or {}
+        definition = copy.deepcopy(
+            {k: v for k, v in (manifest.get("definition") or {}).items() if k != "ui"}
+        )
+        # Strip org-internal binding details from the anonymous preview —
+        # pinned offerings / binding modes leak the author org's provider setup
+        for step in definition.get("steps", []) or []:
+            config = step.get("config")
+            if isinstance(config, dict):
+                config.pop("pinned_offering_id", None)
+                config.pop("binding_mode", None)
+        deps = manifest.get("dependencies") or {}
+        return {
+            "version": latest.version,
+            "definition": definition,
+            "step_count": latest.step_count,
+            "inputs": definition.get("inputs", []),
+            "outputs": definition.get("outputs", []),
+            "requires_capabilities": deps.get("requires_capabilities", []),
+            "recommended_packs": deps.get("recommended_packs", []),
+        }

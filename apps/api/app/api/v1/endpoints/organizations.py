@@ -84,7 +84,12 @@ async def _member_response(
 # ── Organization CRUD ────────────────────────────────────
 
 
-@router.post("/orgs", response_model=DataResponse[OrgResponse], status_code=201, dependencies=[Depends(rate_limit(10, 60))])
+@router.post(
+    "/orgs",
+    response_model=DataResponse[OrgResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def create_org(
     body: CreateOrgRequest,
     user: User = Depends(get_current_user),
@@ -113,7 +118,11 @@ async def create_org(
     return DataResponse(data=resp)
 
 
-@router.get("/orgs", response_model=DataResponse[list[OrgResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs",
+    response_model=DataResponse[list[OrgResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_my_orgs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -136,7 +145,11 @@ async def list_my_orgs(
     return DataResponse(data=items)
 
 
-@router.get("/orgs/{org_id}", response_model=DataResponse[OrgDetailResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}",
+    response_model=DataResponse[OrgDetailResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def get_org(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -167,7 +180,11 @@ async def get_org(
     return DataResponse(data=resp)
 
 
-@router.put("/orgs/{org_id}", response_model=DataResponse[OrgResponse], dependencies=[Depends(rate_limit(10, 60))])
+@router.put(
+    "/orgs/{org_id}",
+    response_model=DataResponse[OrgResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def update_org(
     org_id: str,
     body: UpdateOrgRequest,
@@ -205,7 +222,11 @@ async def delete_org(
     await db.commit()
 
 
-@router.put("/orgs/{org_id}/settings", response_model=DataResponse[OrgDetailResponse], dependencies=[Depends(rate_limit(10, 60))])
+@router.put(
+    "/orgs/{org_id}/settings",
+    response_model=DataResponse[OrgDetailResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def update_org_settings(
     org_id: str,
     body: UpdateOrgSettingsRequest,
@@ -238,10 +259,14 @@ async def update_org_settings(
 # ── Members ──────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/members", response_model=ListResponse[OrgMemberResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}/members",
+    response_model=ListResponse[OrgMemberResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_members(
     org_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     role: str | None = None,
     user: User = Depends(get_current_user),
@@ -264,7 +289,11 @@ async def list_members(
     )
 
 
-@router.put("/orgs/{org_id}/members/{user_id}", response_model=DataResponse[OrgMemberResponse], dependencies=[Depends(rate_limit(10, 60))])
+@router.put(
+    "/orgs/{org_id}/members/{user_id}",
+    response_model=DataResponse[OrgMemberResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def update_member_role(
     org_id: str,
     user_id: str,
@@ -284,7 +313,9 @@ async def update_member_role(
     return DataResponse(data=resp)
 
 
-@router.delete("/orgs/{org_id}/members/{user_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/members/{user_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))]
+)
 async def remove_member(
     org_id: str,
     user_id: str,
@@ -299,7 +330,11 @@ async def remove_member(
 # ── Invitations ──────────────────────────────────────────
 
 
-@router.post("/orgs/{org_id}/invites", response_model=InviteResponse, dependencies=[Depends(rate_limit(10, 60))])
+@router.post(
+    "/orgs/{org_id}/invites",
+    response_model=InviteResponse,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def invite_members(
     org_id: str,
     body: InviteMembersRequest,
@@ -314,9 +349,9 @@ async def invite_members(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
 
-    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+    if ROLE_HIERARCHY.get(role, 99) <= ROLE_HIERARCHY.get(actor.role, 99):
         raise HTTPException(
-            status_code=403, detail="Cannot invite a member at a role higher than your own"
+            status_code=403, detail="Cannot invite a member at a role at or above your own"
         )
 
     service = OrgService(db)
@@ -329,7 +364,11 @@ async def invite_members(
     )
 
 
-@router.get("/orgs/{org_id}/invites", response_model=DataResponse[list[InvitationResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}/invites",
+    response_model=DataResponse[list[InvitationResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_invitations(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -353,7 +392,11 @@ async def list_invitations(
     )
 
 
-@router.delete("/orgs/{org_id}/invites/{invite_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/invites/{invite_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def revoke_invite(
     org_id: str,
     invite_id: str,
@@ -369,7 +412,12 @@ async def revoke_invite(
 # ── Direct Member Add ────────────────────────────────────
 
 
-@router.post("/orgs/{org_id}/members", response_model=DataResponse[OrgMemberResponse], status_code=201, dependencies=[Depends(rate_limit(10, 60))])
+@router.post(
+    "/orgs/{org_id}/members",
+    response_model=DataResponse[OrgMemberResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def add_member_directly(
     org_id: str,
     body: AddMemberRequest,
@@ -383,10 +431,13 @@ async def add_member_directly(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid role: {body.role}") from exc
 
-    # Cannot add a member at a role higher than your own (admin adding an owner)
-    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+    # R91: cannot add a member at a role AT OR ABOVE your own. Strict `<` let an
+    # admin re-add a removed student as another admin (equal role) — a non-owner
+    # escalation path around the owner-only PUT role gate. Only OWNER (rank 0)
+    # can grant OWNER/ADMIN via any of the three mint paths.
+    if ROLE_HIERARCHY.get(role, 99) <= ROLE_HIERARCHY.get(actor.role, 99):
         raise HTTPException(
-            status_code=403, detail="Cannot add a member at a role higher than your own"
+            status_code=403, detail="Cannot add a member at a role at or above your own"
         )
 
     service = OrgService(db)
@@ -421,9 +472,9 @@ async def create_invite_link(
 
     # An inviter cannot mint a link that grants a role at or above their own —
     # otherwise an instructor could create an admin/owner link and escalate.
-    if ROLE_HIERARCHY.get(role, 99) < ROLE_HIERARCHY.get(actor.role, 99):
+    if ROLE_HIERARCHY.get(role, 99) <= ROLE_HIERARCHY.get(actor.role, 99):
         raise HTTPException(
-            status_code=403, detail="Cannot create an invite for a role higher than your own"
+            status_code=403, detail="Cannot create an invite for a role at or above your own"
         )
 
     service = OrgService(db)
@@ -434,7 +485,11 @@ async def create_invite_link(
     return DataResponse(data=_link_response(link))
 
 
-@router.get("/orgs/{org_id}/invite-links", response_model=DataResponse[list[InviteLinkResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}/invite-links",
+    response_model=DataResponse[list[InviteLinkResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_invite_links(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -447,7 +502,8 @@ async def list_invite_links(
 
 
 @router.put(
-    "/orgs/{org_id}/invite-links/{link_id}", response_model=DataResponse[InviteLinkResponse],
+    "/orgs/{org_id}/invite-links/{link_id}",
+    response_model=DataResponse[InviteLinkResponse],
     dependencies=[Depends(rate_limit(10, 60))],
 )
 async def toggle_invite_link(
@@ -464,7 +520,11 @@ async def toggle_invite_link(
     return DataResponse(data=_link_response(link))
 
 
-@router.delete("/orgs/{org_id}/invite-links/{link_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/invite-links/{link_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def delete_invite_link(
     org_id: str,
     link_id: str,
@@ -480,7 +540,11 @@ async def delete_invite_link(
 # ── Invite Actions (public-ish) ──────────────────────────
 
 
-@router.post("/invites/accept", response_model=DataResponse[JoinOrgResponse], dependencies=[Depends(rate_limit(10, 60))])
+@router.post(
+    "/invites/accept",
+    response_model=DataResponse[JoinOrgResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def accept_email_invite(
     body: AcceptInviteRequest,
     user: User = Depends(get_current_user),
@@ -492,7 +556,11 @@ async def accept_email_invite(
     return DataResponse(data=JoinOrgResponse(message="Invitation accepted", org_id=member.org_id))
 
 
-@router.post("/invites/join", response_model=DataResponse[JoinOrgResponse], dependencies=[Depends(rate_limit(10, 60))])
+@router.post(
+    "/invites/join",
+    response_model=DataResponse[JoinOrgResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def join_by_code(
     body: JoinByCodeRequest,
     user: User = Depends(get_current_user),

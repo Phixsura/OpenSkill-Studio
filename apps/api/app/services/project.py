@@ -455,7 +455,9 @@ class ProjectService:
 
         from app.models.learning_path import LearningPathItem
 
-        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.project_id == project_id))
+        await self.db.execute(
+            sa_delete(LearningPathItem).where(LearningPathItem.project_id == project_id)
+        )
         await self.db.flush()
 
     async def publish_project(self, project_id: str) -> Project:
@@ -546,6 +548,58 @@ class ProjectService:
 
     # ── Submissions ──
 
+    async def _assert_project_visible_to_user(self, project: Project, user_id: str) -> None:
+        """R92f: cohort/creator-assignment visibility gate — if the project is
+        restricted to specific cohorts or creators, the acting user must be
+        assigned. Shared by create_submission AND submit_draft: submit_draft
+        previously enforced NEITHER this nor the publication gate, so a draft on
+        an org-wide project could be submitted after the project was later
+        restricted to a cohort the student is not in. (The publication gate is
+        applied at the endpoint layer, where the caller's role is known — a
+        student may not submit to an unpublished project, an instructor may, and
+        direct internal/service callers create drafts on unpublished projects by
+        design.) This gate is a no-op for unrestricted projects, so it is safe on
+        every create/submit path."""
+        from app.models.cohort import CohortMember, CohortProjectAssignment
+
+        has_cohort_assignment = await self.db.execute(
+            select(CohortProjectAssignment.id)
+            .where(CohortProjectAssignment.project_id == project.id)
+            .limit(1)
+        )
+        has_creator_assignment = await self.db.execute(
+            select(ProjectCreatorAssignment.id)
+            .where(ProjectCreatorAssignment.project_id == project.id)
+            .limit(1)
+        )
+        is_restricted = (
+            has_cohort_assignment.scalar_one_or_none() is not None
+            or has_creator_assignment.scalar_one_or_none() is not None
+        )
+        if is_restricted:
+            in_cohort = await self.db.execute(
+                select(CohortProjectAssignment.id)
+                .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
+                .where(
+                    CohortProjectAssignment.project_id == project.id,
+                    CohortMember.user_id == user_id,
+                )
+                .limit(1)
+            )
+            individually_assigned = await self.db.execute(
+                select(ProjectCreatorAssignment.id)
+                .where(
+                    ProjectCreatorAssignment.project_id == project.id,
+                    ProjectCreatorAssignment.user_id == user_id,
+                )
+                .limit(1)
+            )
+            if (
+                in_cohort.scalar_one_or_none() is None
+                and individually_assigned.scalar_one_or_none() is None
+            ):
+                raise AppError("PROJECT_NOT_FOUND", "Project not found", 404)
+
     async def create_submission(
         self,
         org_id: str,
@@ -561,61 +615,17 @@ class ProjectService:
         if project is None or project.status == ContentStatus.ARCHIVED:
             raise ProjectNotFoundError()
 
-        # ── Cohort visibility gate ──
-        # If this project is assigned to specific cohorts or individual creators,
-        # the submitting user must be in at least one of them. Without this check
-        # a student who guesses the project ID can submit even though the project
-        # doesn't appear in their listing.
-        from app.models.cohort import CohortMember, CohortProjectAssignment
-
-        has_cohort_assignment = await self.db.execute(
-            select(CohortProjectAssignment.id)
-            .where(CohortProjectAssignment.project_id == project_id)
-            .limit(1)
-        )
-        has_creator_assignment = await self.db.execute(
-            select(ProjectCreatorAssignment.id)
-            .where(ProjectCreatorAssignment.project_id == project_id)
-            .limit(1)
-        )
-        is_restricted = (
-            has_cohort_assignment.scalar_one_or_none() is not None
-            or has_creator_assignment.scalar_one_or_none() is not None
-        )
-        if is_restricted:
-            # Check if user is in a cohort that has this project assigned
-            in_cohort = await self.db.execute(
-                select(CohortProjectAssignment.id)
-                .join(CohortMember, CohortMember.cohort_id == CohortProjectAssignment.cohort_id)
-                .where(
-                    CohortProjectAssignment.project_id == project_id,
-                    CohortMember.user_id == user_id,
-                )
-                .limit(1)
-            )
-            # Check if user is individually assigned
-            individually_assigned = await self.db.execute(
-                select(ProjectCreatorAssignment.id)
-                .where(
-                    ProjectCreatorAssignment.project_id == project_id,
-                    ProjectCreatorAssignment.user_id == user_id,
-                )
-                .limit(1)
-            )
-            if (
-                in_cohort.scalar_one_or_none() is None
-                and individually_assigned.scalar_one_or_none() is None
-            ):
-                raise AppError(
-                    "PROJECT_NOT_FOUND",
-                    "Project not found",
-                    404,
-                )
+        # Cohort/creator-assignment visibility gate (shared with submit_draft).
+        # The publication gate is enforced at the endpoint (role-aware); direct
+        # service callers legitimately create drafts on unpublished projects.
+        await self._assert_project_visible_to_user(project, user_id)
 
         count = await self._count_user_submissions(project_id, user_id)
 
         # Cohort override takes precedence over project default
         effective_max = project.max_submissions
+
+        from app.models.cohort import CohortMember, CohortProjectAssignment
 
         # Find the most generous max_submissions_override across ALL cohorts
         # the student belongs to (same rationale as deadline: benefit of most generous).
@@ -692,7 +702,9 @@ class ProjectService:
         )
         return [(sub, name) for sub, name in result.all()], total
 
-    async def submit_draft(self, submission_id: str, user_id: str) -> Submission:
+    async def submit_draft(
+        self, submission_id: str, user_id: str, require_published: bool = False
+    ) -> Submission:
         sub = await self.get_submission(submission_id)
 
         if sub.user_id != user_id:
@@ -708,6 +720,18 @@ class ProjectService:
 
         # Check deadline
         project = await self.get_project(sub.project_id)
+        # R92f: submit_draft must enforce the SAME gates as create_submission.
+        # (1) Publication gate — the endpoint passes require_published=True for a
+        # non-instructor caller, so a student can't submit to a project that is
+        # not PUBLISHED (e.g. a draft created while it was open, then
+        # unpublished). Instructors and direct internal/service callers pass the
+        # default (False), preserving the ability to drive a draft submission on
+        # an unpublished project. (2) Cohort/creator visibility gate — applies to
+        # everyone, so a draft on an org-wide project can't be submitted after
+        # the project was later restricted to a cohort the student is not in.
+        if require_published and project.status != ContentStatus.PUBLISHED:
+            raise InvalidStateError("Project is not open for submissions")
+        await self._assert_project_visible_to_user(project, user_id)
         timing = await self.get_submission_timing(project, user_id)
         if timing == "closed":
             raise DeadlinePassedError()
@@ -783,8 +807,12 @@ class ProjectService:
         # that could enable stored XSS via inline rendering
         if whitelist is None:
             dangerous_mimes = {
-                "text/html", "text/xml", "application/xhtml+xml",
-                "image/svg+xml", "application/javascript", "text/javascript",
+                "text/html",
+                "text/xml",
+                "application/xhtml+xml",
+                "image/svg+xml",
+                "application/javascript",
+                "text/javascript",
             }
             if content_type.lower() in dangerous_mimes:
                 raise UnsupportedMediaTypeError(content_type)
@@ -892,7 +920,9 @@ class ProjectService:
             from botocore.exceptions import ClientError
 
             if isinstance(exc, ClientError):
-                raise AppError("STORAGE_ERROR", "Failed to upload file. Please try again.", 500) from exc
+                raise AppError(
+                    "STORAGE_ERROR", "Failed to upload file. Please try again.", 500
+                ) from exc
             raise
 
         # Auto-extract generation metadata from AI-tool PNGs (A1111/ComfyUI).
@@ -953,7 +983,9 @@ class ProjectService:
         if item.mime_type:
             params["ResponseContentType"] = item.mime_type
             _safe_prefixes = ("image/", "video/", "audio/")
-            is_safe = item.mime_type.startswith(_safe_prefixes) or item.mime_type == "application/pdf"
+            is_safe = (
+                item.mime_type.startswith(_safe_prefixes) or item.mime_type == "application/pdf"
+            )
             params["ResponseContentDisposition"] = "inline" if is_safe else "attachment"
 
         async for client in get_s3_client():
@@ -1003,7 +1035,27 @@ class ProjectService:
         sub = await self.get_submission(submission_id)
         project = await self.get_project(sub.project_id)
 
-        # Only submitted work can be reviewed — a draft hasn't been handed in
+        # No self-review (R86). An instructor can submit to their own project;
+        # letting them then review+APPROVE that submission is a self-grade. An
+        # APPROVED review is a platform-VERIFIED creator-evidence source
+        # (`approved_submission`, keyed on the submission author — ADR-013
+        # "evidence, not declarations"), so a self-approval self-inflates
+        # capability evidence used in creator matching/shortlists. The
+        # peer-review module already excludes self-review pairs; the instructor
+        # review path must mirror that.
+        if sub.user_id == reviewer_id:
+            raise AppError(
+                "SELF_REVIEW_FORBIDDEN",
+                "You cannot review your own submission",
+                403,
+            )
+
+        # Only submitted work can be reviewed — a draft hasn't been handed in.
+        # (An APPROVED submission CAN be reopened to REVISION_REQUESTED or have
+        # its grade corrected — an intended instructor action — so terminal
+        # states are NOT blocked here. The evidence-inflation risk from repeated
+        # APPROVED reviews is handled at the source in creator_matching, which
+        # dedups approved_submission evidence per submission, not per review row.)
         if sub.status in (SubmissionStatus.DRAFT,):
             raise InvalidStateError("Cannot review a draft submission")
 
@@ -1053,16 +1105,21 @@ class ProjectService:
                 from app.services.gamification import POINTS_REVIEW_POSTED, GamificationService
 
                 gam = GamificationService(self.db)
+                # R88d: dedupe by submission_id, not review.id — every review is
+                # a fresh row with a fresh id, so keying on review.id would let a
+                # reviewer re-review the same submission for repeated points.
                 await gam.award_points(
                     reviewer_id,
                     sub.org_id,
                     POINTS_REVIEW_POSTED,
                     "review_posted",
-                    reference_id=review.id,
+                    reference_id=submission_id,
                     description=f"Reviewed submission {submission_id}",
                 )
             except Exception:
-                log.warning("gamification_award_failed", user_id=reviewer_id, reason="review_posted")
+                log.warning(
+                    "gamification_award_failed", user_id=reviewer_id, reason="review_posted"
+                )
 
         log.info("submission_reviewed", submission_id=sub.id, status=status, score=sub.final_score)
         return review
@@ -1213,7 +1270,8 @@ class ProjectService:
             ):
                 effective_deadline = ca.deadline_override
             if ca.late_deadline_override is not None and (
-                effective_late_deadline is None or ca.late_deadline_override > effective_late_deadline
+                effective_late_deadline is None
+                or ca.late_deadline_override > effective_late_deadline
             ):
                 effective_late_deadline = ca.late_deadline_override
 
@@ -1418,9 +1476,7 @@ class ProjectService:
         from app.models.skill_pack import SkillPackTemplate
 
         await self.db.execute(
-            sa_delete(SkillPackTemplate).where(
-                SkillPackTemplate.template_id == template_id
-            )
+            sa_delete(SkillPackTemplate).where(SkillPackTemplate.template_id == template_id)
         )
 
         template.status = ContentStatus.ARCHIVED
@@ -1555,7 +1611,9 @@ class ProjectService:
             from botocore.exceptions import ClientError
 
             if isinstance(exc, ClientError):
-                raise AppError("STORAGE_ERROR", "Failed to upload file. Please try again.", 500) from exc
+                raise AppError(
+                    "STORAGE_ERROR", "Failed to upload file. Please try again.", 500
+                ) from exc
             raise
 
         asset = ProjectAsset(

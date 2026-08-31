@@ -312,6 +312,11 @@ async def test_review_revision_requested(c):
     sub_id = r2.json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}/submit", headers=h)
 
+    # Distinct reviewer — no self-review (R86)
+    hr, ur = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": ur["id"], "role": "instructor"}, headers=h
+    )
     # Review: request revision
     r3 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
@@ -319,7 +324,7 @@ async def test_review_revision_requested(c):
             "status": "revision_requested",
             "feedback": "Needs work",
         },
-        headers=h,
+        headers=hr,
     )
     assert r3.status_code == 201
 
@@ -349,6 +354,11 @@ async def test_review_rejected(c):
     sub_id = r2.json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}/submit", headers=h)
 
+    # Distinct reviewer — no self-review (R86)
+    hr, ur = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": ur["id"], "role": "instructor"}, headers=h
+    )
     r3 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
         json={
@@ -356,7 +366,7 @@ async def test_review_rejected(c):
             "score": 20,
             "feedback": "Poor",
         },
-        headers=h,
+        headers=hr,
     )
     assert r3.status_code == 201
 
@@ -428,3 +438,66 @@ async def test_lifespan_runs():
         r = await ac.get("/api/v1/health")
         assert r.status_code == 200
     await engine.dispose()
+
+
+# -- R88c: global DBAPIError backstop (input-fault SQLSTATEs -> 422, others re-raise) --
+
+
+class _FakePgInputError(Exception):
+    """Mimics asyncpg CharacterNotInRepertoireError as seen via exc.orig.sqlstate."""
+
+    sqlstate = "22021"
+
+
+class _FakePgServerError(Exception):
+    sqlstate = "40001"  # serialization_failure: a server fault, must NOT map to 422
+
+
+def _dbapi_test_app():
+    from fastapi import FastAPI
+    from sqlalchemy.exc import DBAPIError
+
+    from app.exceptions import register_exception_handlers
+    from app.middleware.request_id import RequestIDMiddleware
+
+    app = FastAPI()
+    app.add_middleware(RequestIDMiddleware)
+    register_exception_handlers(app)
+
+    @app.get("/boom-input")
+    async def boom_input():
+        raise DBAPIError("INSERT INTO t VALUES ($1)", None, _FakePgInputError())
+
+    @app.get("/boom-server")
+    async def boom_server():
+        raise DBAPIError("UPDATE t SET x = $1", None, _FakePgServerError())
+
+    return app
+
+
+@pytest.mark.asyncio
+async def test_dbapi_input_sqlstate_maps_to_422():
+    """R88c guard: a NUL/non-finite write fault (SQLSTATE 22021/22P05/22P02) wrapped
+    in DBAPIError must return a clean 422 INVALID_VALUE, not an unhandled 500.
+    Reverting the dbapi_error_handler in app/exceptions.py makes this test fail
+    (the DBAPIError propagates out of the ASGI transport)."""
+    from httpx import ASGITransport, AsyncClient
+
+    app = _dbapi_test_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get("/boom-input")
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "INVALID_VALUE"
+
+
+@pytest.mark.asyncio
+async def test_dbapi_server_sqlstate_still_raises():
+    """The backstop must only swallow client-input SQLSTATEs; genuine server faults
+    (e.g. 40001 serialization_failure) must keep propagating to the 500 path."""
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.exc import DBAPIError
+
+    app = _dbapi_test_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        with pytest.raises(DBAPIError):
+            await ac.get("/boom-server")

@@ -47,7 +47,8 @@ class InstallResponse(BaseModel):
 
 
 async def _enrich_with_pack_name(
-    db: AsyncSession, installs: list[SkillPackInstallation],
+    db: AsyncSession,
+    installs: list[SkillPackInstallation],
 ) -> list[InstallResponse]:
     """Convert installations to InstallResponse with pack_name populated."""
     pack_ids = {i.pack_id for i in installs if i.pack_id}
@@ -96,7 +97,7 @@ async def install_pack(
 )
 async def list_installations(
     org_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -107,7 +108,9 @@ async def list_installations(
     enriched = await _enrich_with_pack_name(db, installs)
     return ListResponse(
         data=enriched,
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=(page * per_page) < total),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(page * per_page) < total
+        ),
     )
 
 
@@ -188,7 +191,11 @@ async def fork_installation(
     return DataResponse(data=enriched[0])
 
 
-@router.delete("/orgs/{org_id}/installations/{install_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/installations/{install_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def remove_installation(
     org_id: str,
     install_id: str,

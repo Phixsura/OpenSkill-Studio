@@ -23,7 +23,12 @@ def upgrade() -> None:
     # ── user_notification_preferences ──
     op.create_table(
         "user_notification_preferences",
-        sa.Column("user_id", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column(
+            "user_id",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
         sa.Column("preferences", JSONB, nullable=False, server_default="{}"),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
@@ -32,13 +37,22 @@ def upgrade() -> None:
     op.create_table(
         "pack_approval_events",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "pack_id",
+            sa.String(26),
+            sa.ForeignKey("skill_packs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("action", sa.String(20), nullable=False),
-        sa.Column("actor_id", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "actor_id", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("reason", sa.Text, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("ix_pack_approval_events_pack", "pack_approval_events", ["pack_id", "created_at"])
+    op.create_index(
+        "ix_pack_approval_events_pack", "pack_approval_events", ["pack_id", "created_at"]
+    )
 
 
 def downgrade() -> None:

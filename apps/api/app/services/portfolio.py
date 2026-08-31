@@ -80,10 +80,19 @@ class PortfolioService:
         await self.db.flush()
         return profile
 
+    # Nullable profile columns where an explicit null means "clear the field".
+    # Non-nullable columns (visibility, theme, social_links) still ignore None.
+    _NULLABLE_PROFILE_FIELDS = frozenset({"headline", "bio", "location", "website_url"})
+
     async def update_profile(self, user_id: str, **fields) -> UserProfile:
         profile = await self.get_or_create_profile(user_id)
         for k, v in fields.items():
-            if v is not None and hasattr(profile, k):
+            if not hasattr(profile, k):
+                continue
+            # The endpoint dumps with exclude_unset, so a None here is an
+            # EXPLICIT null from the client — clear nullable fields instead
+            # of silently dropping the update.
+            if v is not None or k in self._NULLABLE_PROFILE_FIELDS:
                 setattr(profile, k, v)
         await self.db.flush()
         return profile
@@ -293,9 +302,13 @@ class PortfolioService:
         return item
 
     async def update_item(self, item_id: str, user_id: str, **fields) -> PortfolioItem:
-        item = await self.get_item(item_id)
-        if item.user_id != user_id:
-            raise AppError("PERMISSION_DENIED", "Not your item", 403)
+        item = await self.db.get(PortfolioItem, item_id)
+        # R91: uniform 404 when the item doesn't exist OR isn't the caller's —
+        # a distinct 403-for-exists vs 404-for-missing was an existence oracle
+        # over other users' private item ids (the anon read path is already
+        # non-enumerable; the write path must match). Same pattern as toggle_badge.
+        if item is None or item.user_id != user_id:
+            raise ItemNotFoundError()
         for k, v in fields.items():
             if v is not None and hasattr(item, k):
                 setattr(item, k, v)
@@ -303,9 +316,9 @@ class PortfolioService:
         return item
 
     async def delete_item(self, item_id: str, user_id: str) -> None:
-        item = await self.get_item(item_id)
-        if item.user_id != user_id:
-            raise AppError("PERMISSION_DENIED", "Not your item", 403)
+        item = await self.db.get(PortfolioItem, item_id)
+        if item is None or item.user_id != user_id:
+            raise ItemNotFoundError()
         await self.db.delete(item)
         await self.db.flush()
 

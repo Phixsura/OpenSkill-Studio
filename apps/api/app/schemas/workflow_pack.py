@@ -1,0 +1,516 @@
+"""Schemas for workflow packs, releases, installations (ADR-010)."""
+
+import re
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from app.schemas.base import reject_ctrl_json, reject_deep_json, reject_nonfinite_json
+
+# Control chars other than \t \n \r — asyncpg raises
+# UntranslatableCharacterError (→ 500) on NUL and friends, so plain-text
+# request fields must reject them at the schema boundary (same class the
+# definition and run-input paths already guard against).
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+# BCP-47-ish primary subtag (2-3 letters: 'en', 'fil', 'yue') + optional
+# one subtag ('pt-BR', 'zh-Hans')
+_LANGUAGE_RE = re.compile(r"^[a-z]{2,3}(-[A-Za-z]{2,8})?$")
+
+
+def _reject_ctrl(v: str) -> str:
+    """Reject NUL/control characters (tab/newline/CR allowed)."""
+    if _CTRL_CHARS_RE.search(v):
+        raise ValueError("Control characters are not allowed")
+    return v
+
+
+class CreateWorkflowPackRequest(BaseModel):
+    name: str
+    summary: str | None = None
+    description: str | None = None
+    workflow_type: str = "production"
+    scenario_tags: list[str] = []
+    tool_tags: list[str] = []
+    difficulty: str | None = None
+    language: str = "en"
+    provenance: dict = {}
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v or len(v) > 200:
+            raise ValueError("Name must be 1-200 characters")
+        return _reject_ctrl(v)
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 500:
+                raise ValueError("Summary must be 500 characters or less")
+            _reject_ctrl(v)
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 20000:
+                raise ValueError("Description must be 20,000 characters or less")
+            _reject_ctrl(v)
+        return v
+
+    @field_validator("workflow_type")
+    @classmethod
+    def validate_workflow_type(cls, v: str) -> str:
+        if v not in ("production", "pipeline", "review"):
+            raise ValueError("Workflow type must be production, pipeline, or review")
+        return v
+
+    @field_validator("scenario_tags", "tool_tags")
+    @classmethod
+    def validate_tags(cls, v: list) -> list:
+        if len(v) > 20:
+            raise ValueError("Maximum 20 tags")
+        for tag in v:
+            if not isinstance(tag, str) or not tag.strip() or len(tag) > 50:
+                raise ValueError("Tags must be non-empty strings of max 50 chars")
+            _reject_ctrl(tag)
+        return [t.strip() for t in v]
+
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("beginner", "intermediate", "advanced", "expert"):
+            raise ValueError("Invalid difficulty")
+        return v
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        v = v.strip()
+        # Column is String(10) — reject before asyncpg truncation 500s
+        if len(v) > 10 or not _LANGUAGE_RE.match(v):
+            raise ValueError("Language must be a code like 'en' or 'pt-BR' (max 10 chars)")
+        return v
+
+    @field_validator("provenance")
+    @classmethod
+    def validate_provenance(cls, v: dict) -> dict:
+        if len(str(v)) > 20000:
+            raise ValueError("Provenance too large (max 20,000 chars)")
+        reject_deep_json(v, "provenance")
+        reject_nonfinite_json(v, "provenance")
+        return reject_ctrl_json(v, "provenance")
+
+
+class UpdateWorkflowPackRequest(BaseModel):
+    name: str | None = None
+    summary: str | None = None
+    description: str | None = None
+    workflow_type: str | None = None
+    visibility: str | None = None
+    scenario_tags: list[str] | None = None
+    tool_tags: list[str] | None = None
+    difficulty: str | None = None
+    provenance: dict | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if not v or len(v) > 200:
+                raise ValueError("Name must be 1-200 characters")
+            _reject_ctrl(v)
+        return v
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 500:
+                raise ValueError("Summary must be 500 characters or less")
+            _reject_ctrl(v)
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 20000:
+                raise ValueError("Description must be 20,000 characters or less")
+            _reject_ctrl(v)
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("private", "unlisted", "public"):
+            raise ValueError("Visibility must be private, unlisted, or public")
+        return v
+
+    @field_validator("workflow_type")
+    @classmethod
+    def validate_workflow_type(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("production", "pipeline", "review"):
+            raise ValueError("Workflow type must be production, pipeline, or review")
+        return v
+
+    @field_validator("scenario_tags", "tool_tags")
+    @classmethod
+    def validate_tags(cls, v: list | None) -> list | None:
+        if v is None:
+            return v
+        if len(v) > 20:
+            raise ValueError("Maximum 20 tags")
+        for tag in v:
+            if not isinstance(tag, str) or not tag.strip() or len(tag) > 50:
+                raise ValueError("Tags must be non-empty strings of max 50 chars")
+            _reject_ctrl(tag)
+        return [t.strip() for t in v]
+
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("beginner", "intermediate", "advanced", "expert"):
+            raise ValueError("Invalid difficulty")
+        return v
+
+    @field_validator("provenance")
+    @classmethod
+    def validate_provenance(cls, v: dict | None) -> dict | None:
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("Provenance too large (max 20,000 chars)")
+        reject_deep_json(v, "provenance")
+        reject_nonfinite_json(v, "provenance")
+        return reject_ctrl_json(v, "provenance")
+
+
+class UpdateDefinitionRequest(BaseModel):
+    definition: dict
+
+    @field_validator("definition")
+    @classmethod
+    def validate_definition_size(cls, v: dict) -> dict:
+        # Full graph validation happens in the service; this is just a cheap
+        # pre-parse bound so oversized payloads fail fast.
+        if len(str(v)) > 400000:
+            raise ValueError("Definition too large")
+        return v
+
+
+class PublishWorkflowReleaseRequest(BaseModel):
+    version: str
+    changelog: str | None = None
+    dependencies: dict = {}
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        import re
+
+        # Column is String(50) — an unbounded prerelease suffix would pass
+        # the semver regex then 500 on flush (StringDataRightTruncation)
+        if len(v) > 50:
+            raise ValueError("Version must be 50 characters or less")
+        if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", v):
+            raise ValueError("Version must be semver (X.Y.Z)")
+        return v
+
+    @field_validator("changelog")
+    @classmethod
+    def validate_changelog(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 10000:
+                raise ValueError("Changelog must be 10,000 characters or less")
+            _reject_ctrl(v)
+        return v
+
+    @field_validator("dependencies")
+    @classmethod
+    def validate_dependencies_size(cls, v: dict) -> dict:
+        if len(str(v)) > 10000:
+            raise ValueError("Dependencies too large")
+
+        # Stored verbatim into the manifest JSONB — control chars anywhere in
+        # the dict crash asyncpg the same way changelog/name would
+        def _scan(x, depth=0):
+            if depth > 20:
+                raise ValueError("Dependencies nested too deeply")
+            if isinstance(x, str):
+                _reject_ctrl(x)
+            elif isinstance(x, dict):
+                for k, val in x.items():
+                    _scan(k, depth + 1)
+                    _scan(val, depth + 1)
+            elif isinstance(x, list):
+                for item in x:
+                    _scan(item, depth + 1)
+
+        _scan(v)
+        return v
+
+
+class RejectPackRequest(BaseModel):
+    reason: str | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 500:
+                raise ValueError("Reason must be 500 characters or less")
+            _reject_ctrl(v)
+        return v
+
+
+class WorkflowPackResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    owner_org_id: str
+    name: str
+    slug: str
+    summary: str | None = None
+    description: str | None = None
+    status: str
+    visibility: str
+    language: str
+    workflow_type: str
+    scenario_tags: list
+    tool_tags: list
+    capability_tags: list
+    difficulty: str | None = None
+    install_count: int
+    review_status: str | None = None
+    rejection_reason: str | None = None
+    provenance: dict
+    input_schema: list
+    output_schema: list
+    definition_updated_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkflowPackDetailResponse(WorkflowPackResponse):
+    """Detail response includes the working definition."""
+
+    definition: dict
+
+
+class WorkflowReleaseResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    pack_id: str
+    version: str
+    changelog: str | None = None
+    checksum: str
+    step_count: int
+    deprecated_by: str | None = None
+    released_at: datetime
+
+
+class ValidationErrorItem(BaseModel):
+    code: str
+    pointer: str
+    message: str
+    meta: dict | None = None
+
+
+class ValidateDefinitionResponse(BaseModel):
+    valid: bool
+    errors: list[ValidationErrorItem]
+
+
+# ── Installation (Batch 4) ────────────────────────────────
+
+
+class InstallWorkflowPackRequest(BaseModel):
+    pack_id: str
+    version: str | None = None
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str | None) -> str | None:
+        if v is not None:
+            import re
+
+            if len(v) > 50:
+                raise ValueError("Version must be 50 characters or less")
+            if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", v):
+                raise ValueError("Version must be semver (X.Y.Z)")
+        return v
+
+
+class UpgradeInstallationRequest(BaseModel):
+    version: str
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        import re
+
+        if len(v) > 50:
+            raise ValueError("Version must be 50 characters or less")
+        if not re.match(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", v):
+            raise ValueError("Version must be semver (X.Y.Z)")
+        return v
+
+
+class ConfirmBindingRequest(BaseModel):
+    offering_id: str
+    binding_mode: str = "preferred"
+
+    @field_validator("binding_mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        if v not in ("auto", "preferred", "pinned"):
+            raise ValueError("Binding mode must be auto, preferred, or pinned")
+        return v
+
+
+class WorkflowInstallationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    org_id: str
+    pack_id: str | None = None
+    release_id: str | None = None
+    installed_version: str
+    status: str
+    locally_modified: bool
+    installed_at: datetime
+    updated_at: datetime
+    # Effective input schema (from local_definition or release manifest) —
+    # populated on the detail endpoint only. The run form must not depend on
+    # the PUBLIC registry endpoint, which 404s for own-org private packs.
+    input_schema: list = []
+
+
+class StepBindingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    step_id: str
+    binding_mode: str
+    offering_id: str | None = None
+    reasons: list
+    gaps: list
+    confirmed_by: str | None = None
+
+
+class InstallDiffResponse(BaseModel):
+    steps: dict
+    inputs: dict
+    edges: dict
+
+
+# ── Public registry (Batch 4) ─────────────────────────────
+
+
+class PublicWorkflowPackResponse(BaseModel):
+    """Public registry card/detail — metadata only, no working definition."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    slug: str
+    summary: str | None = None
+    description: str | None = None
+    workflow_type: str
+    scenario_tags: list
+    tool_tags: list
+    capability_tags: list
+    difficulty: str | None = None
+    install_count: int
+    language: str
+    input_schema: list
+    output_schema: list
+    provenance: dict
+    created_at: datetime
+    updated_at: datetime
+
+
+class PublicWorkflowReleaseResponse(BaseModel):
+    """Release list entry — no manifest body."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    version: str
+    changelog: str | None = None
+    checksum: str
+    step_count: int
+    deprecated_by: str | None = None
+    released_at: datetime
+
+
+class WorkflowPreviewResponse(BaseModel):
+    version: str
+    definition: dict
+    step_count: int
+    inputs: list
+    outputs: list
+    requires_capabilities: list
+    recommended_packs: list
+
+
+# ── ComfyUI import (Batch 5) ──────────────────────────────
+
+
+class ComfyUIImportRequest(BaseModel):
+    # JSON text or base64-encoded PNG bytes
+    data: str
+    encoding: str = "json"  # json | base64
+
+    @field_validator("data")
+    @classmethod
+    def validate_data_size(cls, v: str) -> str:
+        if len(v) > 7 * 1024 * 1024:
+            raise ValueError("Import data too large")
+        if not v.strip():
+            raise ValueError("Import data is empty")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def validate_encoding(cls, v: str) -> str:
+        if v not in ("json", "base64"):
+            raise ValueError("Encoding must be json or base64")
+        return v
+
+
+class ComfyUIImportResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    org_id: str
+    pack_id: str | None = None
+    format_detected: str
+    status: str
+    dependency_report: dict
+    original_sha256: str
+    created_at: datetime
+
+
+class ComfyUIImportDetailResponse(ComfyUIImportResponse):
+    """Detail response optionally including the original JSON (provenance)."""
+
+    original_json: dict | None = None
+
+
+class CreatePackFromImportRequest(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v or len(v) > 200:
+            raise ValueError("Name must be 1-200 characters")
+        return _reject_ctrl(v)

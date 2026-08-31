@@ -93,7 +93,10 @@ class AnthropicClient(LLMClient):
                 last_exc = exc
                 if attempt < MAX_RETRIES - 1:
                     delay = RETRY_BASE_DELAY * (2**attempt)
-                    logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
+                    logger.warning(
+                        "llm_retry",
+                        extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)},
+                    )
                     await asyncio.sleep(delay)
         if last_exc is not None:
             raise last_exc
@@ -153,7 +156,10 @@ class OpenAIClient(LLMClient):
                 last_exc = exc
                 if attempt < MAX_RETRIES - 1:
                     delay = RETRY_BASE_DELAY * (2**attempt)
-                    logger.warning("llm_retry", extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)})
+                    logger.warning(
+                        "llm_retry",
+                        extra={"attempt": attempt + 1, "delay": delay, "error": str(exc)},
+                    )
                     await asyncio.sleep(delay)
         if last_exc is not None:
             raise last_exc

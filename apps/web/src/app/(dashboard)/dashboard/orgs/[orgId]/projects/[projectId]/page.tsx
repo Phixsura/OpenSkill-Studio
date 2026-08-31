@@ -33,6 +33,7 @@ interface ProjectDetail {
   title: string;
   description: string;
   instructions: string;
+  status: string;
   project_type: string;
   rubric: { criterion: string; max_score: number; description?: string }[];
   difficulty: string;
@@ -66,7 +67,11 @@ export default function ProjectDetailPage() {
   const queryClient = useQueryClient();
   const [creatorUserId, setCreatorUserId] = useState("");
 
-  const { data: projectData, isLoading, isError } = useQuery({
+  const {
+    data: projectData,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => apiWithAuth<{ data: ProjectDetail }>(`/orgs/${orgId}/projects/${projectId}`),
   });
@@ -123,9 +128,7 @@ export default function ProjectDetailPage() {
     queryKey: ["project-creators", projectId],
     enabled: isInstructor,
     queryFn: () =>
-      apiWithAuth<{ data: CreatorAssignment[] }>(
-        `/orgs/${orgId}/projects/${projectId}/creators`,
-      ),
+      apiWithAuth<{ data: CreatorAssignment[] }>(`/orgs/${orgId}/projects/${projectId}/creators`),
   });
 
   const assignCreatorMutation = useMutation({
@@ -139,6 +142,18 @@ export default function ProjectDetailPage() {
       setCreatorUserId("");
     },
     onError: (err: Error) => toast.error(err.message || "Failed to assign creator"),
+  });
+
+  // Publish/unpublish — drafts are invisible to students (backend filters
+  // list, 404s detail, 422s submissions), so instructors need this control.
+  const publishMutation = useMutation({
+    mutationFn: (action: "publish" | "unpublish") =>
+      apiWithAuth(`/orgs/${orgId}/projects/${projectId}/${action}`, { method: "POST" }),
+    onSuccess: (_res, action) => {
+      toast.success(action === "publish" ? "Project published" : "Project unpublished");
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    },
+    onError: (err: Error) => toast.error(err.message || "Failed to update status"),
   });
 
   const removeCreatorMutation = useMutation({
@@ -160,7 +175,13 @@ export default function ProjectDetailPage() {
   // Latest item per deliverable (highest version) from my latest submission.
   const latestItemByDeliverable = new Map<
     string,
-    { id: string; type: string; file_name: string | null; mime_type: string | null; version: number }
+    {
+      id: string;
+      type: string;
+      file_name: string | null;
+      mime_type: string | null;
+      version: number;
+    }
   >();
   for (const it of latestSubDetail?.data?.items ?? []) {
     const prev = latestItemByDeliverable.get(it.deliverable_id);
@@ -169,17 +190,53 @@ export default function ProjectDetailPage() {
   const completedDeliverables = new Set(latestItemByDeliverable.keys());
 
   if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
-  if (isError || !project) return <p className="text-[hsl(var(--destructive))]">Failed to load project.</p>;
+  if (isError || !project)
+    return <p className="text-[hsl(var(--destructive))]">Failed to load project.</p>;
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
       <div className="space-y-8">
         <div>
-          <h1 className="text-3xl font-bold">{project.title}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold">{project.title}</h1>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+                project.status === "published"
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200"
+                  : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+              }`}
+            >
+              {project.status}
+            </span>
+            {isInstructor && project.status !== "published" && (
+              <Button
+                size="sm"
+                disabled={publishMutation.isPending}
+                onClick={() => publishMutation.mutate("publish")}
+              >
+                Publish
+              </Button>
+            )}
+            {isInstructor && project.status === "published" && (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={publishMutation.isPending}
+                onClick={() => publishMutation.mutate("unpublish")}
+              >
+                Unpublish
+              </Button>
+            )}
+          </div>
           <p className="mt-2 text-[hsl(var(--muted-foreground))]">{project.description}</p>
+          {isInstructor && project.status !== "published" && (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+              Draft — students cannot see or submit to this project until it is published.
+            </p>
+          )}
         </div>
 
-        <div className="prose prose-sm max-w-none dark:prose-invert">
+        <div className="prose prose-sm dark:prose-invert max-w-none">
           <h2>Instructions</h2>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{project.instructions}</ReactMarkdown>
         </div>
@@ -397,11 +454,7 @@ export default function ProjectDetailPage() {
         )}
 
         {/* Peer Review */}
-        <PeerReviewSection
-          orgId={orgId}
-          projectId={projectId}
-          isInstructor={isInstructor}
-        />
+        <PeerReviewSection orgId={orgId} projectId={projectId} isInstructor={isInstructor} />
 
         {/* Submissions */}
         <div>
@@ -431,7 +484,8 @@ export default function ProjectDetailPage() {
                   )}
                   {isInstructor && <span className="font-medium">{s.author_name}</span>}
                   <span>
-                    v{s.version} — <span className="capitalize">{s.status.replaceAll("_", " ")}</span>
+                    v{s.version} —{" "}
+                    <span className="capitalize">{s.status.replaceAll("_", " ")}</span>
                   </span>
                   {s.submitted_at && (
                     <span className="text-xs text-[hsl(var(--muted-foreground))]">
@@ -440,7 +494,9 @@ export default function ProjectDetailPage() {
                   )}
                 </span>
                 {s.final_score !== null && (
-                  <span className="font-mono font-bold">{s.final_score}/{project.max_score}</span>
+                  <span className="font-mono font-bold">
+                    {s.final_score}/{project.max_score}
+                  </span>
                 )}
               </Link>
             ))}

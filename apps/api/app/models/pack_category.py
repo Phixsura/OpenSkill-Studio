@@ -13,9 +13,7 @@ from app.models.base import Base, ulid_pk
 
 class PackCategory(Base):
     __tablename__ = "pack_categories"
-    __table_args__ = (
-        Index("uq_pack_category_slug", "slug", unique=True),
-    )
+    __table_args__ = (Index("uq_pack_category_slug", "slug", unique=True),)
 
     id: Mapped[str] = ulid_pk()
     name: Mapped[str] = mapped_column(String(100), nullable=False)

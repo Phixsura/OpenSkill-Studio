@@ -39,6 +39,23 @@ export default function EditProfilePage() {
     }
   }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [usernameDraft, setUsernameDraft] = useState<string | null>(null);
+  const usernameMutation = useMutation({
+    mutationFn: (username: string) =>
+      apiWithAuth("/portfolio/username", {
+        method: "PUT",
+        body: JSON.stringify({ username }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["portfolio-profile"] });
+      setUsernameDraft(null);
+      setMessage("Username updated.");
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "Failed to update username.");
+    },
+  });
+
   const saveMutation = useMutation({
     mutationFn: () => {
       // Convert empty strings to null for optional URL fields
@@ -60,7 +77,8 @@ export default function EditProfilePage() {
   });
 
   if (isLoading) return <p className="text-[hsl(var(--muted-foreground))]">Loading...</p>;
-  if (isError || !profile) return <p className="text-[hsl(var(--destructive))]">Failed to load profile.</p>;
+  if (isError || !profile)
+    return <p className="text-[hsl(var(--destructive))]">Failed to load profile.</p>;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -68,11 +86,39 @@ export default function EditProfilePage() {
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium">Username</label>
-          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{profile.username}</p>
+          <label htmlFor="username" className="block text-sm font-medium">
+            Username
+          </label>
+          <div className="mt-1 flex items-center gap-2">
+            <Input
+              id="username"
+              value={usernameDraft ?? profile.username}
+              onChange={(e) => setUsernameDraft(e.target.value)}
+              maxLength={50}
+              className="max-w-xs"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={
+                usernameDraft === null ||
+                usernameDraft.trim() === profile.username ||
+                !usernameDraft.trim() ||
+                usernameMutation.isPending
+              }
+              onClick={() => usernameMutation.mutate(usernameDraft!.trim())}
+            >
+              Change
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+            Your public profile lives at /u/{usernameDraft?.trim() || profile.username}
+          </p>
         </div>
         <div>
-          <label htmlFor="headline" className="block text-sm font-medium">Headline</label>
+          <label htmlFor="headline" className="block text-sm font-medium">
+            Headline
+          </label>
           <Input
             id="headline"
             value={form.headline ?? profile.headline ?? ""}
@@ -82,7 +128,9 @@ export default function EditProfilePage() {
           />
         </div>
         <div>
-          <label htmlFor="bio" className="block text-sm font-medium">Bio</label>
+          <label htmlFor="bio" className="block text-sm font-medium">
+            Bio
+          </label>
           <textarea
             id="bio"
             className="mt-1 block w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
@@ -92,7 +140,9 @@ export default function EditProfilePage() {
           />
         </div>
         <div>
-          <label htmlFor="location" className="block text-sm font-medium">Location</label>
+          <label htmlFor="location" className="block text-sm font-medium">
+            Location
+          </label>
           <Input
             id="location"
             value={form.location ?? profile.location ?? ""}
@@ -101,7 +151,9 @@ export default function EditProfilePage() {
           />
         </div>
         <div>
-          <label htmlFor="website" className="block text-sm font-medium">Website</label>
+          <label htmlFor="website" className="block text-sm font-medium">
+            Website
+          </label>
           <Input
             id="website"
             value={form.website_url ?? profile.website_url ?? ""}
@@ -110,7 +162,13 @@ export default function EditProfilePage() {
           />
         </div>
 
-        {message && <p className={`text-sm ${message.toLowerCase().includes("fail") ? "text-red-600" : "text-green-600"}`}>{message}</p>}
+        {message && (
+          <p
+            className={`text-sm ${message.toLowerCase().includes("fail") ? "text-red-600" : "text-green-600"}`}
+          >
+            {message}
+          </p>
+        )}
 
         <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
           {saveMutation.isPending ? "Saving..." : "Save Changes"}

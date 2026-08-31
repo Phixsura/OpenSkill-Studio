@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
 from app.core.rate_limit import rate_limit
+from app.exceptions import AppError
 from app.models.pack_category import PackCategory, PackCategoryAssignment
 from app.models.user import User, UserRole, UserStatus
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -23,7 +24,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
     dependencies=[Depends(require_role(UserRole.ADMIN)), Depends(rate_limit(10, 60))],
 )
 async def list_users(
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
@@ -174,7 +175,9 @@ async def create_pack_category(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Category with this slug already exists") from None
+        raise HTTPException(
+            status_code=409, detail="Category with this slug already exists"
+        ) from None
     await db.refresh(category)
 
     log.info("pack_category_created", category_id=category.id, by=admin.id)
@@ -197,23 +200,64 @@ async def update_pack_category(
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    # Validate parent if being changed
-    if body.parent_id is not None:
-        if body.parent_id == category_id:
+    # exclude_unset (not exclude_none): an explicit `"parent_id": null` must
+    # clear the parent (move to root), while an absent field leaves it
+    # unchanged — exclude_none made the two indistinguishable, so a child
+    # category could never be moved back to root (same for clearing icon).
+    update_data = body.model_dump(exclude_unset=True)
+
+    # Validate parent if being changed to a non-null value
+    if update_data.get("parent_id") is not None:
+        new_parent_id = update_data["parent_id"]
+        if new_parent_id == category_id:
             raise HTTPException(status_code=422, detail="Category cannot be its own parent")
-        parent = await db.get(PackCategory, body.parent_id)
+        parent = await db.get(PackCategory, new_parent_id)
         if parent is None:
             raise HTTPException(status_code=404, detail="Parent category not found")
+        # Walk the proposed parent's ancestor chain (bounded): re-parenting
+        # under one's own descendant (A->B then B->A) creates a cycle that
+        # removes both nodes from the root listing and blocks deletion.
+        ancestor = parent
+        chain_resolved = False
+        for _ in range(100):
+            if ancestor.parent_id is None:
+                chain_resolved = True
+                break
+            if ancestor.parent_id == category_id:
+                raise AppError(
+                    "CATEGORY_CYCLE",
+                    "Cannot set parent: it is a descendant of this category",
+                    422,
+                )
+            ancestor = await db.get(PackCategory, ancestor.parent_id)
+            if ancestor is None:
+                chain_resolved = True  # dangling parent = chain ends, no cycle
+                break
+        if not chain_resolved:
+            # Bound exceeded without reaching a root: either the chain is
+            # already cyclic or deeper than any legitimate taxonomy — REJECT,
+            # don't silently accept (a silent break resurrects the cycle bug
+            # through a >100-deep chain)
+            raise AppError(
+                "CATEGORY_CYCLE",
+                "Cannot set parent: ancestor chain is too deep to verify (max 100)",
+                422,
+            )
 
-    update_data = body.model_dump(exclude_none=True)
     for field, value in update_data.items():
+        # Only parent_id and icon are nullable columns — an explicit null on
+        # name/slug/sort_order would 500 at flush, so treat it as "unchanged"
+        if value is None and field not in ("parent_id", "icon"):
+            continue
         setattr(category, field, value)
 
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Category with this slug already exists") from None
+        raise HTTPException(
+            status_code=409, detail="Category with this slug already exists"
+        ) from None
     await db.refresh(category)
 
     log.info("pack_category_updated", category_id=category_id, by=admin.id)
@@ -248,9 +292,9 @@ async def delete_pack_category(
     # Check for assigned packs
     assignment_count_r = await db.execute(
         select(func.count()).select_from(
-            select(PackCategoryAssignment).where(
-                PackCategoryAssignment.category_id == category_id
-            ).subquery()
+            select(PackCategoryAssignment)
+            .where(PackCategoryAssignment.category_id == category_id)
+            .subquery()
         )
     )
     if assignment_count_r.scalar_one() > 0:
@@ -262,3 +306,44 @@ async def delete_pack_category(
     await db.delete(category)
     await db.commit()
     log.info("pack_category_deleted", category_id=category_id, by=admin.id)
+
+
+# ── Workflow sweeper (manual/cron trigger) ────────────────
+
+
+@router.post(
+    "/workflows/sweep",
+    dependencies=[Depends(rate_limit(6, 60))],
+)
+async def sweep_workflows(
+    admin: User = Depends(require_role(UserRole.ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide sweep: recover expired executor leases + expire overdue
+    reviews across ALL orgs, then re-dispatch every touched run.
+
+    The lazy sweep (run-detail reads) only fires for orgs whose runs someone
+    is actually viewing — this is the operator/cron path for the rest.
+    """
+    from app.services.workflow_runtime import dispatch_advance, sweep_stale
+
+    swept = await sweep_stale(db, org_id=None)
+    await db.commit()
+    for run_id in swept["run_ids"]:
+        dispatch_advance(run_id)
+    log.info(
+        "workflow_sweep_manual",
+        by=admin.id,
+        expired_leases=swept["expired_leases"],
+        expired_reviews=swept["expired_reviews"],
+        stalled_runs=swept.get("stalled_runs", 0),
+        runs_redispatched=len(swept["run_ids"]),
+    )
+    return {
+        "data": {
+            "expired_leases": swept["expired_leases"],
+            "expired_reviews": swept["expired_reviews"],
+            "stalled_runs": swept.get("stalled_runs", 0),
+            "runs_redispatched": len(swept["run_ids"]),
+        }
+    }

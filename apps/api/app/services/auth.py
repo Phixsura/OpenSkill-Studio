@@ -6,10 +6,11 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.email import get_email_sender
 from app.core.security import (
     create_access_token,
@@ -189,9 +190,7 @@ class AuthService:
         # Look up token record by hash
         token_hash = sha256(jti.encode()).hexdigest()
         stmt_result = await self.db.execute(
-            select(RefreshToken)
-            .where(RefreshToken.token_hash == token_hash)
-            .with_for_update()
+            select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update()
         )
         token_record = stmt_result.scalar_one_or_none()
 
@@ -199,13 +198,26 @@ class AuthService:
             raise TokenInvalidError("Token not found")
 
         if token_record.is_revoked:
-            # Token was revoked — could be user-initiated session revocation
-            # or password change, not necessarily theft. Don't nuke all sessions.
-            log.info("auth_revoked_token_used", user_id=user_id, jti=jti)
-            raise TokenInvalidError("Session has been revoked. Please log in again.")
-
-        # Revoke old token
-        token_record.revoked_at = datetime.now(UTC)
+            # Rotation is strict, but the refresh cookie is shared across
+            # browser tabs while the client-side dedup is per-tab: two tabs
+            # restoring a session refresh simultaneously and the loser
+            # presents the just-revoked token. Within a short grace window
+            # treat that as the race it is — mint the loser its own pair —
+            # instead of logging the tab out. Outside the window it's a
+            # revoked session (user action, password change, or replay).
+            revoked_age = (
+                (datetime.now(UTC) - token_record.revoked_at).total_seconds()
+                if token_record.revoked_at
+                else None
+            )
+            if revoked_age is not None and revoked_age <= settings.refresh_reuse_grace_seconds:
+                log.info("auth_refresh_race_grace", user_id=user_id, age_s=round(revoked_age, 2))
+            else:
+                log.info("auth_revoked_token_used", user_id=user_id, jti=jti)
+                raise TokenInvalidError("Session has been revoked. Please log in again.")
+        else:
+            # Revoke old token (rotation)
+            token_record.revoked_at = datetime.now(UTC)
 
         # Fetch user
         user = await self.db.get(User, user_id)
@@ -223,15 +235,41 @@ class AuthService:
         try:
             payload = decode_token(raw_refresh_token)
             jti = payload.get("jti")
+            user_id = payload.get("sub")
             if jti:
+                final = datetime.now(UTC) - timedelta(
+                    seconds=settings.refresh_reuse_grace_seconds + 1
+                )
                 token_hash = sha256(jti.encode()).hexdigest()
                 stmt_result = await self.db.execute(
                     select(RefreshToken).where(RefreshToken.token_hash == token_hash)
                 )
                 token_record = stmt_result.scalar_one_or_none()
                 if token_record and not token_record.is_revoked:
-                    token_record.revoked_at = datetime.now(UTC)
-                    await self.db.flush()
+                    # Backdate past the concurrent-refresh grace window: the
+                    # grace exists ONLY for rotation races — an explicit
+                    # logout must be immediately final, or anyone holding the
+                    # cookie could revive the session within the window.
+                    token_record.revoked_at = final
+                # R87: the presented token may already be revoked-BY-ROTATION
+                # (client logs out with the current token while an older token
+                # in the chain, revoked seconds ago by rotation, is still
+                # within the grace window). Replaying that predecessor would be
+                # graced → session revival. Backdate EVERY within-grace token of
+                # this user so no superseded token can revive the session. Live
+                # tokens (revoked_at IS NULL) on other devices are untouched, so
+                # this stays per-user-safe: other sessions remain logged in.
+                if user_id:
+                    stale = await self.db.execute(
+                        select(RefreshToken).where(
+                            RefreshToken.user_id == user_id,
+                            RefreshToken.revoked_at.is_not(None),
+                            RefreshToken.revoked_at > final,
+                        )
+                    )
+                    for t in stale.scalars():
+                        t.revoked_at = final
+                await self.db.flush()
         except Exception as exc:
             log.debug("logout_cleanup_failed", error=str(exc))
 
@@ -393,16 +431,38 @@ class AuthService:
         )
         return list(stmt_result.scalars().all())
 
-    async def revoke_session(self, user_id: str, token_id: str) -> None:
-        """Revoke a specific session by token ID."""
+    async def revoke_session(self, user_id: str, token_id: str) -> RefreshToken:
+        """Revoke a specific session by token ID. Returns the revoked row so
+        callers can compare its token_hash against the current cookie."""
         token = await self.db.get(RefreshToken, token_id)
         if token is None or token.user_id != user_id:
             raise AppError("NOT_FOUND", "Session not found", 404)
         if token.is_revoked:
-            return  # Already revoked
+            return token  # Already revoked
 
-        token.revoked_at = datetime.now(UTC)
+        # Backdate past the rotation-race grace window — explicit revocation
+        # must be immediately final (see logout)
+        final = datetime.now(UTC) - timedelta(seconds=settings.refresh_reuse_grace_seconds + 1)
+        token.revoked_at = final
+        # R91: mirror logout()/R87e — the revoked session may have rotated
+        # within the last grace window, leaving a predecessor whose revoked_at
+        # is only seconds old (revoked-by-rotation, still graced on replay).
+        # Without sweeping it, an attacker holding that predecessor cookie
+        # revives the explicitly-killed session — defeating the exact "revoke
+        # this device" remediation flow. Backdate every within-grace token of
+        # this user; live tokens (revoked_at IS NULL) on OTHER devices are
+        # untouched, so other sessions stay logged in (per-user-safe).
+        stale = await self.db.execute(
+            select(RefreshToken).where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_not(None),
+                RefreshToken.revoked_at > final,
+            )
+        )
+        for t in stale.scalars():
+            t.revoked_at = final
         await self.db.flush()
+        return token
 
     # ── Helpers ───────────────────────────────────────────────
 
@@ -431,14 +491,25 @@ class AuthService:
         )
 
     async def _revoke_all_user_tokens(self, user_id: str) -> None:
+        # Backdated past the rotation-race grace window: password changes and
+        # bulk revocations must be immediately final (see logout).
+        final = datetime.now(UTC) - timedelta(seconds=settings.refresh_reuse_grace_seconds + 1)
+        # Cover BOTH live tokens (revoked_at IS NULL) AND tokens revoked-by-
+        # rotation within the grace window (R87): after a password change, a
+        # predecessor token whose revoked_at is only seconds old would still be
+        # graced on replay → session revival. Backdate every such token so no
+        # superseded token in any chain can revive the session.
         stmt_result = await self.db.execute(
             select(RefreshToken).where(
                 RefreshToken.user_id == user_id,
-                RefreshToken.revoked_at.is_(None),
+                or_(
+                    RefreshToken.revoked_at.is_(None),
+                    RefreshToken.revoked_at > final,
+                ),
             )
         )
         for token in stmt_result.scalars():
-            token.revoked_at = datetime.now(UTC)
+            token.revoked_at = final
 
     async def _create_email_verification(self, user: User) -> None:
         """Generate a verification token and send email."""
@@ -468,7 +539,9 @@ class AuthService:
         import html as html_mod
 
         # Points to backend endpoint which verifies and redirects to frontend
-        verify_url = f"{settings.frontend_url}/api/v1/auth/verify-email?token={html_mod.escape(raw_token)}"
+        verify_url = (
+            f"{settings.frontend_url}/api/v1/auth/verify-email?token={html_mod.escape(raw_token)}"
+        )
         await sender.send(
             to=user.email,
             subject="Verify your OpenSkill Studio email",

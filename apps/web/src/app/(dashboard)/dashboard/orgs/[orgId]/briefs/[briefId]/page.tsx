@@ -66,8 +66,7 @@ export default function BriefDetailPage() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["brief", briefId],
-    queryFn: () =>
-      apiWithAuth<{ data: ClientBrief }>(`/orgs/${orgId}/briefs/${briefId}`),
+    queryFn: () => apiWithAuth<{ data: ClientBrief }>(`/orgs/${orgId}/briefs/${briefId}`),
   });
 
   // Applications — visible to instructors, used to check if student already applied
@@ -81,21 +80,18 @@ export default function BriefDetailPage() {
 
   const convertMutation = useMutation({
     mutationFn: () =>
-      apiWithAuth<{ data: { id: string } }>(
-        `/orgs/${orgId}/briefs/${briefId}/convert`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            rubric: [
-              {
-                criterion: rubricCriterion,
-                max_score: parseInt(rubricMaxScore, 10) || 100,
-              },
-            ],
-            deadline: deadline || undefined,
-          }),
-        },
-      ),
+      apiWithAuth<{ data: { id: string } }>(`/orgs/${orgId}/briefs/${briefId}/convert`, {
+        method: "POST",
+        body: JSON.stringify({
+          rubric: [
+            {
+              criterion: rubricCriterion,
+              max_score: parseInt(rubricMaxScore, 10) || 100,
+            },
+          ],
+          deadline: deadline || undefined,
+        }),
+      }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["brief", briefId] });
       router.push(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
@@ -110,6 +106,7 @@ export default function BriefDetailPage() {
         body: JSON.stringify({ note: applyNote || undefined }),
       }),
     onSuccess: () => {
+      toast.success("Application submitted");
       queryClient.invalidateQueries({ queryKey: ["brief-applications", briefId] });
       setApplyNote("");
     },
@@ -124,13 +121,10 @@ export default function BriefDetailPage() {
 
   const reviewMutation = useMutation({
     mutationFn: ({ appId, status }: { appId: string; status: string }) =>
-      apiWithAuth(
-        `/orgs/${orgId}/briefs/${briefId}/applications/${appId}`,
-        {
-          method: "PUT",
-          body: JSON.stringify({ status }),
-        },
-      ),
+      apiWithAuth(`/orgs/${orgId}/briefs/${briefId}/applications/${appId}`, {
+        method: "PUT",
+        body: JSON.stringify({ status }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["brief-applications", briefId] });
     },
@@ -151,8 +145,7 @@ export default function BriefDetailPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () =>
-      apiWithAuth(`/orgs/${orgId}/briefs/${briefId}`, { method: "DELETE" }),
+    mutationFn: () => apiWithAuth(`/orgs/${orgId}/briefs/${briefId}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["briefs", orgId] });
       router.push(`/dashboard/orgs/${orgId}/briefs`);
@@ -419,9 +412,7 @@ export default function BriefDetailPage() {
       {/* Applications list — for instructors */}
       {applications.length > 0 && (
         <div className="mb-8">
-          <h2 className="mb-3 text-lg font-semibold">
-            Applications ({applications.length})
-          </h2>
+          <h2 className="mb-3 text-lg font-semibold">Applications ({applications.length})</h2>
           <div className="space-y-2">
             {applications.map((app) => (
               <div
@@ -429,36 +420,28 @@ export default function BriefDetailPage() {
                 className="flex items-center justify-between rounded border px-4 py-3"
               >
                 <div>
-                  <span className="text-sm font-medium">
-                    {app.user_name || app.user_id}
-                  </span>
+                  <span className="text-sm font-medium">{app.user_name || app.user_id}</span>
                   <span
                     className={`ml-2 rounded-full px-2 py-0.5 text-xs capitalize ${STATUS_COLORS[app.status] || ""}`}
                   >
                     {app.status}
                   </span>
                   {app.note && (
-                    <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">
-                      {app.note}
-                    </p>
+                    <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">{app.note}</p>
                   )}
                 </div>
                 {app.status === "pending" && (
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() =>
-                        reviewMutation.mutate({ appId: app.id, status: "accepted" })
-                      }
+                      onClick={() => reviewMutation.mutate({ appId: app.id, status: "accepted" })}
                       className="rounded bg-green-600 px-2 py-1 text-xs text-white hover:bg-green-700"
                     >
                       Accept
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
-                        reviewMutation.mutate({ appId: app.id, status: "rejected" })
-                      }
+                      onClick={() => reviewMutation.mutate({ appId: app.id, status: "rejected" })}
                       className="rounded bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-700"
                     >
                       Reject
@@ -505,10 +488,7 @@ export default function BriefDetailPage() {
                 onChange={(e) => setDeadline(e.target.value)}
                 className="w-full rounded border px-3 py-2 text-sm"
               />
-              <Button
-                onClick={() => convertMutation.mutate()}
-                disabled={convertMutation.isPending}
-              >
+              <Button onClick={() => convertMutation.mutate()} disabled={convertMutation.isPending}>
                 {convertMutation.isPending ? "Creating project..." : "Create Project"}
               </Button>
             </div>

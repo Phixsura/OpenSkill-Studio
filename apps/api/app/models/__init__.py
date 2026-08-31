@@ -1,4 +1,5 @@
 from app.models.base import Base  # noqa: F401
+from app.models.capability import CapabilityTag  # noqa: F401
 from app.models.certificate import Certificate  # noqa: F401
 from app.models.client_brief import (  # noqa: F401
     ApplicationStatus,
@@ -15,6 +16,11 @@ from app.models.cohort import (  # noqa: F401
     CohortStatus,
     ParticipationMode,
 )
+from app.models.composer import (  # noqa: F401
+    CreatorAssignment,
+    CreatorCapabilityEvidence,
+    SolutionDraft,
+)
 from app.models.discussion import PackDiscussion  # noqa: F401
 from app.models.evaluation import (  # noqa: F401
     EvalStatus,
@@ -28,6 +34,14 @@ from app.models.learning_path import (  # noqa: F401
     LearningPath,
     LearningPathItem,
     PathItemType,
+)
+from app.models.matching import (  # noqa: F401
+    FeedbackEvent,
+    MatchingConfig,
+    MatchResult,
+    MatchRun,
+    RequirementContext,
+    RequirementProfile,
 )
 from app.models.notification import (  # noqa: F401
     Notification,
@@ -77,6 +91,12 @@ from app.models.project import (  # noqa: F401
     SubmissionReview,
     SubmissionStatus,
 )
+from app.models.provider import (  # noqa: F401
+    OrgCredential,
+    ProviderAdapter,
+    ProviderConnection,
+    ProviderModelOffering,
+)
 from app.models.skill import (  # noqa: F401
     ContentStatus,
     DifficultyLevel,
@@ -110,3 +130,18 @@ from app.models.user import (  # noqa: F401
     UserStatus,
 )
 from app.models.webhook import WebhookSubscription  # noqa: F401
+from app.models.workflow_pack import (  # noqa: F401
+    ComfyUIImport,
+    WorkflowPack,
+    WorkflowPackInstallation,
+    WorkflowPackRelease,
+)
+from app.models.workflow_run import (  # noqa: F401
+    RunStatus,
+    StepRunStatus,
+    WorkflowRun,
+    WorkflowRunEvent,
+    WorkflowStepBinding,
+    WorkflowStepReview,
+    WorkflowStepRun,
+)

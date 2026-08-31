@@ -324,13 +324,17 @@ class SkillService:
         from app.models.skill_pack import SkillPackSkill
 
         await self.db.execute(sa_delete(SkillPackSkill).where(SkillPackSkill.skill_id == skill_id))
-        await self.db.execute(sa_delete(LearningPathItem).where(LearningPathItem.skill_id == skill_id))
+        await self.db.execute(
+            sa_delete(LearningPathItem).where(LearningPathItem.skill_id == skill_id)
+        )
 
         # Clean up cohort and project skill assignments
         from app.models.cohort import CohortSkillAssignment
         from app.models.project import ProjectSkill
 
-        await self.db.execute(sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.skill_id == skill_id))
+        await self.db.execute(
+            sa_delete(CohortSkillAssignment).where(CohortSkillAssignment.skill_id == skill_id)
+        )
         await self.db.execute(sa_delete(ProjectSkill).where(ProjectSkill.skill_id == skill_id))
 
         await self.db.flush()
@@ -406,19 +410,27 @@ class SkillService:
 
     async def update_exercise(self, exercise_id: str, **fields) -> Exercise:
         ex = await self.get_exercise(exercise_id)
-        # Replacing an MCQ's config with one lacking a non-empty `correct`
-        # would make every blank answer auto-grade as full marks.
+        # Replacing an MCQ's config with one lacking a usable `correct` would
+        # make every blank answer auto-grade as full marks. R88h: mirror the
+        # create-time check — a dict like {"a": 1} is truthy but coerces to []
+        # in the grader, so truthiness alone is not enough.
         new_config = fields.get("config")
-        if (
-            new_config is not None
-            and ex.type == ExerciseType.MULTIPLE_CHOICE
-            and not new_config.get("correct")
-        ):
-            raise AppError(
-                "INVALID_CONFIG",
-                "multiple_choice config must include a non-empty 'correct'",
-                422,
-            )
+        if new_config is not None and ex.type == ExerciseType.MULTIPLE_CHOICE:
+            correct = new_config.get("correct")
+            if isinstance(correct, list):
+                usable = len(correct) > 0
+            elif isinstance(correct, bool):
+                usable = False
+            elif isinstance(correct, (str, int, float)):
+                usable = correct != ""
+            else:
+                usable = False
+            if not usable:
+                raise AppError(
+                    "INVALID_CONFIG",
+                    "multiple_choice config must include a non-empty 'correct'",
+                    422,
+                )
         for k, v in fields.items():
             if v is not None and hasattr(ex, k):
                 setattr(ex, k, v)
@@ -473,7 +485,11 @@ class SkillService:
                 user_answer = []
             user_answer = sorted(str(x) for x in user_answer)
 
-            is_correct = user_answer == correct
+            # R88h defense-in-depth: if `correct` collapsed to [] (malformed
+            # config that slipped past create/update/import screens), a blank
+            # answer would match ([] == []) and auto-grade to full marks.
+            # An unanswerable MCQ must never grade as correct.
+            is_correct = bool(correct) and user_answer == correct
             attempt.score = exercise.max_score if is_correct else 0
             attempt.is_correct = is_correct
             attempt.graded_by = GradingMethod.AUTO
@@ -507,10 +523,22 @@ class SkillService:
         attempt_id: str,
         score: int,
         feedback: str | None,
+        grader_id: str | None = None,
     ) -> ExerciseAttempt:
         attempt = await self.db.get(ExerciseAttempt, attempt_id)
         if attempt is None:
             raise AttemptNotFoundError()
+
+        # No self-grading (R88g, same class as the R86 self-review gate): an
+        # instructor can submit their own attempt to a manual exercise, and
+        # without this check could grade it to full marks — minting completion,
+        # gamification points, and a portfolio badge with no second party.
+        if grader_id is not None and attempt.user_id == grader_id:
+            raise AppError(
+                "SELF_GRADING_FORBIDDEN",
+                "You cannot grade your own attempt",
+                403,
+            )
 
         exercise = await self.get_exercise(attempt.exercise_id)
         attempt.score = max(0, min(score, exercise.max_score))

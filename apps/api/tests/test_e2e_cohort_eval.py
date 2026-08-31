@@ -318,9 +318,14 @@ async def test_application_workflow(c):
     assert r.status_code == 200
     assert r.json()["data"]["status"] == "accepted"
 
-    # Student cannot list applications
+    # Student listing applications sees ONLY their own (the brief detail
+    # page uses this for the "you have applied" state) — never other
+    # members' applications
     r = await c.get(f"/api/v1/orgs/{oid}/briefs/{bid}/applications", headers=hs)
-    assert r.status_code == 403
+    assert r.status_code == 200
+    rows = r.json()["data"]
+    assert len(rows) == 1
+    assert rows[0]["note"] == "I have relevant experience"
 
 
 @pytest.mark.asyncio

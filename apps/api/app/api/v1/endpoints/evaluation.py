@@ -45,12 +45,16 @@ async def trigger_evaluation(
 # ── Tasks CRUD ───────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/evaluation/tasks", response_model=ListResponse[EvalTaskResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/evaluation/tasks",
+    response_model=ListResponse[EvalTaskResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_eval_tasks(
     org_id: str,
     status: str | None = None,
     eval_type: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -67,7 +71,8 @@ async def list_eval_tasks(
 
 
 @router.get(
-    "/orgs/{org_id}/evaluation/tasks/{task_id}", response_model=DataResponse[EvalTaskResponse],
+    "/orgs/{org_id}/evaluation/tasks/{task_id}",
+    response_model=DataResponse[EvalTaskResponse],
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def get_eval_task(
@@ -85,7 +90,8 @@ async def get_eval_task(
 
 
 @router.post(
-    "/orgs/{org_id}/evaluation/tasks/{task_id}/retry", response_model=DataResponse[EvalTaskResponse],
+    "/orgs/{org_id}/evaluation/tasks/{task_id}/retry",
+    response_model=DataResponse[EvalTaskResponse],
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def retry_eval_task(
@@ -128,7 +134,11 @@ async def cancel_eval_task(
 # ── Usage ────────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/evaluation/usage", response_model=DataResponse[EvalUsageResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/evaluation/usage",
+    response_model=DataResponse[EvalUsageResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_eval_usage(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -143,7 +153,11 @@ async def get_eval_usage(
 # ── Settings ─────────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/settings/evaluation", response_model=DataResponse[EvalSettingsResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/settings/evaluation",
+    response_model=DataResponse[EvalSettingsResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_eval_settings(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -155,7 +169,11 @@ async def get_eval_settings(
     return DataResponse(data=settings)
 
 
-@router.put("/orgs/{org_id}/settings/evaluation", response_model=DataResponse[EvalSettingsResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/settings/evaluation",
+    response_model=DataResponse[EvalSettingsResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def update_eval_settings(
     org_id: str,
     body: UpdateEvalSettingsRequest,
@@ -164,6 +182,10 @@ async def update_eval_settings(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     svc = EvaluationService(db)
-    result = await svc.update_eval_settings(org_id, body.model_dump(exclude_none=True))
+    # exclude_unset (NOT exclude_none): an explicit {"monthly_budget_usd": null}
+    # must reach the service to CLEAR the budget, while absent fields stay
+    # untouched. exclude_none silently dropped explicit nulls, making a budget
+    # impossible to remove once set.
+    result = await svc.update_eval_settings(org_id, body.model_dump(exclude_unset=True))
     await db.commit()
     return DataResponse(data=result)

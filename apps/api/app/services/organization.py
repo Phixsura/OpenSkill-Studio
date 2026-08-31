@@ -180,12 +180,34 @@ class OrgService:
         from sqlalchemy import update as sa_update
 
         from app.models.skill_pack import PackStatus, SkillPack
+        from app.models.workflow_pack import WorkflowPack
 
         await self.db.execute(
             sa_update(SkillPack)
             .where(SkillPack.owner_org_id == org_id, SkillPack.status != PackStatus.ARCHIVED)
             .values(status=PackStatus.ARCHIVED)
         )
+        # Workflow packs live in a sibling registry — archive them too, or a
+        # deleted org's PUBLIC workflow packs stay live and installable
+        await self.db.execute(
+            sa_update(WorkflowPack)
+            .where(
+                WorkflowPack.owner_org_id == org_id,
+                WorkflowPack.status != PackStatus.ARCHIVED,
+            )
+            .values(status=PackStatus.ARCHIVED)
+        )
+        from app.core.cache import cache_delete_pattern
+
+        # Both registries have their own cached search pages. This bulk-archive
+        # bypasses the per-pack service methods that normally invalidate, so
+        # clear BOTH prefixes — omitting registry:* left this org's just-
+        # archived PUBLIC skill packs contributing a stale meta.total (and,
+        # for the ~5min TTL, phantom rows on any warm search page) even though
+        # the cache-hit re-filter drops the archived bodies. wfregistry:* alone
+        # was the workflow half only.
+        await cache_delete_pattern("wfregistry:*")
+        await cache_delete_pattern("registry:*")
 
         await self.db.flush()
         log.info("org_deleted", org_id=org_id, by=user_id)
@@ -267,11 +289,13 @@ class OrgService:
         # concurrent demotions and prevent TOCTOU race to zero owners
         if old_role == OrgRole.OWNER and new_role != OrgRole.OWNER:
             owner_result = await self.db.execute(
-                select(OrgMember.id).where(
+                select(OrgMember.id)
+                .where(
                     OrgMember.org_id == org_id,
                     OrgMember.role == OrgRole.OWNER,
                     OrgMember.status == MemberStatus.ACTIVE,
-                ).with_for_update()
+                )
+                .with_for_update()
             )
             if len(owner_result.all()) <= 1:
                 raise AppError("LAST_OWNER", "Cannot demote the last owner", 400)
@@ -523,8 +547,26 @@ class OrgService:
 
     # ── Settings ──
 
+    # Settings namespaces that have their own typed endpoint + schema and whose
+    # shape other code relies on (e.g. ai_evaluation is read into a typed
+    # EvalSettings/Usage response and used in budget arithmetic). The generic
+    # settings blob must NOT be a back door to write untyped/wrong-typed values
+    # into them — a string monthly_budget_usd here 500s every eval read (R90b).
+    _RESERVED_SETTINGS_KEYS = frozenset({"ai_evaluation"})
+
     async def update_settings(self, org_id: str, settings: dict) -> Organization:
         org = await self.get_org(org_id)
+        # R90b: reject writes that target a reserved, separately-typed namespace.
+        # Those have dedicated endpoints (PUT /settings/evaluation) that validate
+        # types; letting the generic blob overwrite them poisons the JSONB.
+        reserved = self._RESERVED_SETTINGS_KEYS & settings.keys()
+        if reserved:
+            raise AppError(
+                "RESERVED_SETTINGS_KEY",
+                "These settings must be changed through their dedicated endpoint: "
+                + ", ".join(sorted(reserved)),
+                422,
+            )
         # New dict so SQLAlchemy detects the change — mutating org.settings in
         # place leaves the reference identical and the update is not persisted.
         current = {**(org.settings or {}), **settings}

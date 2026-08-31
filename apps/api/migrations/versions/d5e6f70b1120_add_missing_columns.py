@@ -22,11 +22,16 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # --- fix certificates unique constraint (was non-unique in b2c3d4e5f607) ---
     op.drop_index("ix_certificates_user_path", table_name="certificates")
-    op.create_index("uq_certificates_user_path", "certificates", ["user_id", "path_id"], unique=True)
+    op.create_index(
+        "uq_certificates_user_path", "certificates", ["user_id", "path_id"], unique=True
+    )
 
     # --- missing columns ---
     op.add_column("skill_packs", sa.Column("quality_score", sa.Integer(), nullable=True))
-    op.add_column("skill_packs", sa.Column("sharing_enabled", sa.Boolean(), nullable=False, server_default="false"))
+    op.add_column(
+        "skill_packs",
+        sa.Column("sharing_enabled", sa.Boolean(), nullable=False, server_default="false"),
+    )
     op.add_column("skills", sa.Column("sandbox_url", sa.String(500), nullable=True))
     op.add_column("exercises", sa.Column("sandbox_config", JSONB(), nullable=True))
     op.add_column("learning_path_items", sa.Column("drip_schedule", JSONB(), nullable=True))
@@ -35,8 +40,15 @@ def upgrade() -> None:
     op.create_table(
         "user_points",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("user_id", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("org_id", sa.String(26), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "user_id", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
+        sa.Column(
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("total_points", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("level", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -47,8 +59,15 @@ def upgrade() -> None:
     op.create_table(
         "points_ledger",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("user_id", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("org_id", sa.String(26), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "user_id", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
+        sa.Column(
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("points", sa.Integer(), nullable=False),
         sa.Column("reason", sa.String(50), nullable=False),
         sa.Column("reference_id", sa.String(26), nullable=True),
@@ -61,7 +80,12 @@ def upgrade() -> None:
     op.create_table(
         "webhook_subscriptions",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("org_id", sa.String(26), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("url", sa.String(500), nullable=False),
         sa.Column("events", JSONB(), nullable=False, server_default="[]"),
         sa.Column("secret", sa.String(64), nullable=False),
@@ -74,9 +98,19 @@ def upgrade() -> None:
     op.create_table(
         "pack_discussions",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "pack_id",
+            sa.String(26),
+            sa.ForeignKey("skill_packs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("parent_id", sa.String(26), sa.ForeignKey("pack_discussions.id", ondelete="CASCADE"), nullable=True),
+        sa.Column(
+            "parent_id",
+            sa.String(26),
+            sa.ForeignKey("pack_discussions.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
         sa.Column("body", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -88,16 +122,34 @@ def upgrade() -> None:
     op.create_table(
         "pack_shares",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("pack_id", sa.String(26), sa.ForeignKey("skill_packs.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("target_org_id", sa.String(26), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("shared_by", sa.String(26), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "pack_id",
+            sa.String(26),
+            sa.ForeignKey("skill_packs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "target_org_id",
+            sa.String(26),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "shared_by",
+            sa.String(26),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("shared_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
     op.create_index("uq_pack_share", "pack_shares", ["pack_id", "target_org_id"], unique=True)
     op.create_index("ix_pack_shares_target", "pack_shares", ["target_org_id"])
 
     # --- webhook updated_at column ---
-    op.add_column("webhook_subscriptions", sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()))
+    op.add_column(
+        "webhook_subscriptions",
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    )
 
 
 def downgrade() -> None:

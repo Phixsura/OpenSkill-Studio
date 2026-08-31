@@ -48,22 +48,181 @@ async def _org(c, h):
 
 
 async def _skill(c, h, oid, name="Test Skill"):
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"Cat-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    r = await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": name, "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h)
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories",
+            json={"name": f"Cat-{uuid.uuid4().hex[:4]}"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/skills",
+        json={
+            "name": name,
+            "description": "d" * 10,
+            "difficulty": "beginner",
+            "category_id": cat,
+        },
+        headers=h,
+    )
     return r.json()["data"]["id"]
 
 
 async def _published_public_pack(c, h, oid, pack_name="Pub Pack", skill_name="Pub Skill"):
     """Create a published, public pack and return its id."""
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": pack_name, "visibility": "public",
-    }, headers=h)).json()["data"]["id"]
+    # Create private (create no longer accepts visibility=public — R79 gate),
+    # publish, then reach public via submit-review → approve.
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": pack_name,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     sid = await _skill(c, h, oid, skill_name)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
     return pid
+
+
+# ═══════════════ Registry preview (R86) ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_registry_preview_pack_with_template_rubric(c):
+    """R86: ProjectTemplate.rubric is a LIST of {criterion, max_score} dicts,
+    and the published manifest stores it verbatim. get_pack_preview treated it
+    as a dict (`rubric.get("criteria")`) → AttributeError('list' has no .get)
+    → anon-registry preview 500 for ANY approved pack whose template has a
+    rubric (642 packs in the shared dev DB). Preview must 200 and count the
+    rubric criteria correctly. Endpoint is UNAUTHENTICATED."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # A published+approved public pack with a skill AND a project template
+    # whose rubric is a real 2-entry list.
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Preview Pack"}, headers=h)
+    ).json()["data"]["id"]
+    sid = await _skill(c, h, oid, "Preview Skill")
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
+    tmpl = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/project-templates",
+            json={
+                "name": "Rubric Tmpl",
+                "description": "d",
+                "instructions": "do it",
+                "rubric": [
+                    {"criterion": "Quality", "max_score": 100},
+                    {"criterion": "Design", "max_score": 50},
+                ],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/templates", json={"template_id": tmpl}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
+
+    # Anonymous preview (no auth header) must 200, not 500
+    r = await c.get(f"/api/v1/registry/packs/{pid}/preview")
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    tmpls = d["templates"]
+    assert len(tmpls) == 1, tmpls
+    # rubric criteria counted from the LIST (2 entries), not dict-.get
+    assert tmpls[0]["rubric_criteria_count"] == 2, tmpls[0]
+
+
+@pytest.mark.asyncio
+async def test_registry_preview_tolerates_hostile_manifest_shapes(c):
+    """R87 fix-of-fix on R86e: the preview shaper runs over release manifests
+    that, via the import path, are untrusted JSON. The R86e dict-branch
+    `len(rubric.get("criteria", []))` re-introduced a 500 when criteria was a
+    non-list (int/null), and a non-dict skill/template/category entry would
+    AttributeError. Drive get_pack_preview directly over hostile shapes — it
+    must never raise, and rubric_criteria_count defaults to 0 for unsized
+    shapes."""
+    import uuid as _uuid
+
+    from sqlalchemy import text
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.registry import RegistryService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # Create a real pack + release, then overwrite the release manifest with a
+    # hostile shape directly (simulating any producer of a malformed manifest).
+    pid = await _published_public_pack(c, h, oid, pack_name=f"Hostile {_uuid.uuid4().hex[:6]}")
+
+    hostile = {
+        "skills": [
+            {"name": "ok", "exercises": [{"title": "e"}]},
+            "STRING_SKILL",  # non-dict skill
+            {"exercises": "NOT_A_LIST"},  # non-list exercises
+            # R92c: non-STRING field values. PackPreviewResponse types
+            # name/description/difficulty/title as str|None; an int/list here
+            # raised a pydantic ValidationError at serialization → preview 500.
+            {
+                "name": 999,  # non-str required field
+                "description": 12345,  # non-str optional field
+                "difficulty": ["x"],  # non-str optional field
+                "exercises": [{"title": 777}],  # non-str exercise title
+                "prerequisites": [1, "keep", {"bad": 1}],  # non-str prereqs dropped
+            },
+        ],
+        "project_templates": [
+            {"name": "t1", "rubric": {"criteria": 5}},  # criteria non-list (int)
+            {"name": "t2", "rubric": {"criteria": None}},  # criteria None
+            {"name": "t3", "rubric": [{"criterion": "Q", "max_score": 100}]},  # list form
+            "STRING_TEMPLATE",  # non-dict template
+            {"name": 42, "description": [], "rubric": []},  # R92c non-str name/desc
+        ],
+        "categories": ["STRING_CAT", {"name": "realcat"}, {"name": 123}],  # R92c non-str name
+    }
+    import json as _json
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            text("UPDATE skill_pack_releases SET manifest = CAST(:m AS jsonb) WHERE pack_id = :p"),
+            {"m": _json.dumps(hostile), "p": pid},
+        )
+        await db.commit()
+
+    # Anonymous preview must 200, not 500
+    r = await c.get(f"/api/v1/registry/packs/{pid}/preview")
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    # non-dict skill/template/category entries skipped; unsized rubric → 0
+    counts = {t["name"]: t["rubric_criteria_count"] for t in d["templates"]}
+    assert counts.get("t1") == 0, counts  # criteria=int → 0, not a crash
+    assert counts.get("t2") == 0, counts  # criteria=None → 0
+    assert counts.get("t3") == 1, counts  # list form counted
+    # R92c: the non-string-valued skill/template/category entries serialized
+    # cleanly (coerced), so the whole preview is a 200 and every string field
+    # in the response is a str-or-None per the schema.
+    for sk in d["skills"]:
+        assert isinstance(sk["name"], str)
+        assert sk["description"] is None or isinstance(sk["description"], str)
+        assert sk["difficulty"] is None or isinstance(sk["difficulty"], str)
+        assert all(isinstance(ex["title"], str) for ex in sk["exercises"])
+        assert all(isinstance(p, str) for p in sk["prerequisites"])
+    for t in d["templates"]:
+        assert isinstance(t["name"], str)
+        assert t["description"] is None or isinstance(t["description"], str)
+    for cat in d["categories"]:
+        assert isinstance(cat["name"], str)
+    # service-level call is also total (no raise)
+    async with AsyncSessionLocal() as db:
+        preview = await RegistryService(db).get_pack_preview(pid)
+        assert isinstance(preview["skills"], list)
+        assert isinstance(preview["categories"], list)
 
 
 # ═══════════════ Pack Reviews (5 tests) ═══════════════
@@ -76,9 +235,15 @@ async def test_create_review(c):
     pid = await _published_public_pack(c, h, oid)
     hr, _ = await _auth(c)  # reviewer (different user)
 
-    r = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={
-        "rating": 5, "title": "Great pack!", "body": "Very useful.",
-    }, headers=hr)
+    r = await c.post(
+        f"/api/v1/registry/packs/{pid}/reviews",
+        json={
+            "rating": 5,
+            "title": "Great pack!",
+            "body": "Very useful.",
+        },
+        headers=hr,
+    )
     assert r.status_code == 201
     d = r.json()["data"]
     assert d["rating"] == 5
@@ -216,14 +381,25 @@ async def test_publish_creates_notification(c):
     # User 1 creates a published public pack
     h1, _ = await _auth(c)
     oid1 = await _org(c, h1)
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
-        "name": "Notif Pack", "visibility": "public",
-    }, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/packs",
+            json={
+                "name": "Notif Pack",
+                "visibility": "unlisted",
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     sid = await _skill(c, h1, oid1, "Notif Skill")
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
-    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={
-        "version": "1.0.0",
-    }, headers=h1)
+    await c.post(
+        f"/api/v1/orgs/{oid1}/packs/{pid}/releases",
+        json={
+            "version": "1.0.0",
+        },
+        headers=h1,
+    )
 
     # User 2 creates org2 and installs the pack
     h2, _ = await _auth(c)
@@ -232,9 +408,14 @@ async def test_publish_creates_notification(c):
     assert ir.status_code == 201
 
     # User 1 publishes v2.0.0
-    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={
-        "version": "2.0.0", "changelog": "New features",
-    }, headers=h1)
+    await c.post(
+        f"/api/v1/orgs/{oid1}/packs/{pid}/releases",
+        json={
+            "version": "2.0.0",
+            "changelog": "New features",
+        },
+        headers=h1,
+    )
 
     # User 2 should have a notification about the update
     r = await c.get("/api/v1/notifications", headers=h2)
@@ -259,9 +440,16 @@ async def test_certificate_issued_on_completion(c):
     path_id = pr.json()["data"]["id"]
 
     # Add skill item
-    await c.post(f"/api/v1/orgs/{oid}/paths/{path_id}/items", json={
-        "item_type": "skill", "skill_id": sid, "sort_order": 0, "required": True,
-    }, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/paths/{path_id}/items",
+        json={
+            "item_type": "skill",
+            "skill_id": sid,
+            "sort_order": 0,
+            "required": True,
+        },
+        headers=h,
+    )
 
     # Mark skill as completed via DB
     from app.core.database import AsyncSessionLocal
@@ -317,6 +505,29 @@ async def test_certificate_public_verification(c):
     assert r2.status_code == 200
     d = r2.json()["data"]
     assert d["certificate_number"] == cert_number
+    # R90c: the endpoint builds the response via model_validate (bypasses
+    # __init__), so the top-level flattened fields the public page reads must be
+    # populated by the model_validator, not left None. Reverting to the
+    # __init__-only flatten makes these assertions fail.
+    assert d["user_name"] == "Tester"
+    assert d["path_name"] == "Verify Path"
+    assert d["org_name"] == "TestOrg"
+
+
+@pytest.mark.asyncio
+async def test_certificate_verify_nul_in_number_is_404_not_500(c):
+    """R88: the anon /certificates/{number} endpoint takes the path param
+    straight into a parameterized query. A NUL byte (%00) URL-decodes to a
+    valid str but crashes the asyncpg bind (22P05 CharacterNotInRepertoireError
+    → DBAPIError, not ValueError) → unhandled 500. A NUL can never match a real
+    certificate number, so it must be a clean 404, never a 500."""
+    # %00 in the path → NUL after decode
+    r = await c.get("/api/v1/certificates/abc%00def")
+    assert r.status_code == 404, r.text
+    assert r.json()["error"]["code"] == "CERTIFICATE_NOT_FOUND"
+    # a normal miss is still a 404
+    r2 = await c.get("/api/v1/certificates/definitely-not-a-real-cert-xyz")
+    assert r2.status_code == 404, r2.text
 
 
 # ═══════════════ Approval (3 tests) ═══════════════
@@ -355,9 +566,13 @@ async def test_reject_pack(c):
     pid = await _published_public_pack(c, h, oid, "Reject Pack")
     await _set_review_status(pid, "pending")
 
-    r = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/reject", json={
-        "reason": "Needs improvement",
-    }, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid}/reject",
+        json={
+            "reason": "Needs improvement",
+        },
+        headers=h,
+    )
     assert r.status_code == 200
     assert r.json()["data"]["review_status"] == "rejected"
 
@@ -393,7 +608,9 @@ async def test_list_categories(c):
     unique = uuid.uuid4().hex[:6]
     async with AsyncSessionLocal() as session:
         cat = PackCategory(
-            name=f"AI Skills {unique}", slug=f"ai-skills-{unique}", sort_order=0,
+            name=f"AI Skills {unique}",
+            slug=f"ai-skills-{unique}",
+            sort_order=0,
         )
         session.add(cat)
         await session.commit()
@@ -418,7 +635,9 @@ async def test_filter_by_category(c):
     cat_slug = f"cat-filter-{unique}"
     async with AsyncSessionLocal() as session:
         cat = PackCategory(
-            name=f"Filter Cat {unique}", slug=cat_slug, sort_order=0,
+            name=f"Filter Cat {unique}",
+            slug=cat_slug,
+            sort_order=0,
         )
         session.add(cat)
         await session.flush()
@@ -570,9 +789,7 @@ async def test_locally_modified_set_on_skill_update(c):
 
     async with AsyncSessionLocal() as session:
         await session.execute(
-            text(
-                "UPDATE skills SET origin_pack_id = 'fakePack00000000000000001' WHERE id = :id"
-            ),
+            text("UPDATE skills SET origin_pack_id = 'fakePack00000000000000001' WHERE id = :id"),
             {"id": sid},
         )
         await session.commit()
@@ -1005,7 +1222,7 @@ async def test_upgrade_clean(c):
     sid1 = await _skill(c, h, oid_pub, "Upgrade Skill A")
     pack_r = await c.post(
         f"/api/v1/orgs/{oid_pub}/packs",
-        json={"name": f"UpgPack-{uuid.uuid4().hex[:6]}", "visibility": "public"},
+        json={"name": f"UpgPack-{uuid.uuid4().hex[:6]}", "visibility": "unlisted"},
         headers=h,
     )
     assert pack_r.status_code == 201
@@ -1067,7 +1284,7 @@ async def test_upgrade_locally_modified_skipped(c):
     sid = await _skill(c, h, oid_pub, "LM Upgrade Skill")
     pack_r = await c.post(
         f"/api/v1/orgs/{oid_pub}/packs",
-        json={"name": f"LMPack-{uuid.uuid4().hex[:6]}", "visibility": "public"},
+        json={"name": f"LMPack-{uuid.uuid4().hex[:6]}", "visibility": "unlisted"},
         headers=h,
     )
     assert pack_r.status_code == 201
@@ -1158,3 +1375,29 @@ async def test_upgrade_locally_modified_skipped(c):
         )
         desc = row.scalar_one()
         assert desc == "MY LOCAL EDIT", f"Expected 'MY LOCAL EDIT' but got '{desc}'"
+
+
+@pytest.mark.asyncio
+async def test_review_forbidden_for_owner_org_members(c):
+    """R62: pack ownership is org-level; blocking self-review only on
+    created_by let any OTHER member of the owning org rate the pack.
+    Every active owner-org member must be blocked."""
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    pid = await _published_public_pack(c, h_owner, oid)
+
+    # A second member of the SAME org
+    h_member, member = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": member["id"], "role": "student"},
+        headers=h_owner,
+    )
+    r = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 5}, headers=h_member)
+    assert r.status_code == 422, r.text[:200]
+    assert r.json()["error"]["code"] == "SELF_REVIEW_FORBIDDEN"
+
+    # An outsider can still review
+    h_out, _ = await _auth(c)
+    r2 = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=h_out)
+    assert r2.status_code == 201, r2.text[:200]

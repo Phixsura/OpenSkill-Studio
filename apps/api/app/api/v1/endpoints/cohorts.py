@@ -41,7 +41,12 @@ def _cohort_response(cohort, member_count: int = 0) -> CohortResponse:
 # ── CRUD ──────────────────────────────────────────────────
 
 
-@router.post("/orgs/{org_id}/cohorts", response_model=DataResponse[CohortResponse], status_code=201, dependencies=[Depends(rate_limit(20, 60))])
+@router.post(
+    "/orgs/{org_id}/cohorts",
+    response_model=DataResponse[CohortResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def create_cohort(
     org_id: str,
     body: CreateCohortRequest,
@@ -63,11 +68,15 @@ async def create_cohort(
     return DataResponse(data=_cohort_response(cohort))
 
 
-@router.get("/orgs/{org_id}/cohorts", response_model=ListResponse[CohortResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/cohorts",
+    response_model=ListResponse[CohortResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_cohorts(
     org_id: str,
     status: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -98,7 +107,11 @@ async def list_cohorts(
     )
 
 
-@router.get("/orgs/{org_id}/cohorts/{cohort_id}", response_model=DataResponse[CohortResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/cohorts/{cohort_id}",
+    response_model=DataResponse[CohortResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_cohort(
     org_id: str,
     cohort_id: str,
@@ -114,7 +127,11 @@ async def get_cohort(
     return DataResponse(data=_cohort_response(cohort, count))
 
 
-@router.put("/orgs/{org_id}/cohorts/{cohort_id}", response_model=DataResponse[CohortResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/cohorts/{cohort_id}",
+    response_model=DataResponse[CohortResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def update_cohort(
     org_id: str,
     cohort_id: str,
@@ -133,7 +150,11 @@ async def update_cohort(
     return DataResponse(data=_cohort_response(cohort, count))
 
 
-@router.delete("/orgs/{org_id}/cohorts/{cohort_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/cohorts/{cohort_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def delete_cohort(
     org_id: str,
     cohort_id: str,
@@ -211,7 +232,11 @@ async def bulk_enroll(
     return DataResponse(data=result)
 
 
-@router.delete("/orgs/{org_id}/cohorts/{cohort_id}/members/{user_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/cohorts/{cohort_id}/members/{user_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def remove_member(
     org_id: str,
     cohort_id: str,
@@ -234,7 +259,7 @@ async def list_members(
     org_id: str,
     cohort_id: str,
     role: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -283,7 +308,11 @@ async def assign_skill(
     return DataResponse(data=CohortSkillAssignmentResponse.model_validate(assignment))
 
 
-@router.delete("/orgs/{org_id}/cohorts/{cohort_id}/skills/{skill_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/cohorts/{cohort_id}/skills/{skill_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def unassign_skill(
     org_id: str,
     cohort_id: str,
@@ -357,7 +386,11 @@ async def assign_project(
     return DataResponse(data=CohortProjectAssignmentResponse.model_validate(assignment))
 
 
-@router.delete("/orgs/{org_id}/cohorts/{cohort_id}/projects/{project_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/cohorts/{cohort_id}/projects/{project_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def unassign_project(
     org_id: str,
     cohort_id: str,
@@ -402,7 +435,11 @@ async def list_assigned_projects(
 # ── Dashboard / Progress ─────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/cohorts/{cohort_id}/progress", response_model=DataResponse[dict], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/cohorts/{cohort_id}/progress",
+    response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def cohort_progress(
     org_id: str,
     cohort_id: str,
@@ -456,7 +493,11 @@ async def my_cohort_dashboard(
 # ── Learner: My Cohorts ──────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/my-cohorts", response_model=DataResponse[list[CohortResponse]], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/my-cohorts",
+    response_model=DataResponse[list[CohortResponse]],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def my_cohorts(
     org_id: str,
     user: User = Depends(get_current_user),

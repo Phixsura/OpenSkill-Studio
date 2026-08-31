@@ -43,9 +43,7 @@ class PointsLedger(Base):
     """Append-only audit log of every point award."""
 
     __tablename__ = "points_ledger"
-    __table_args__ = (
-        Index("ix_points_ledger_user_org", "user_id", "org_id"),
-    )
+    __table_args__ = (Index("ix_points_ledger_user_org", "user_id", "org_id"),)
 
     id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(
@@ -58,6 +56,4 @@ class PointsLedger(Base):
     reason: Mapped[str] = mapped_column(String(50), nullable=False)
     reference_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

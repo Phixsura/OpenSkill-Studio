@@ -98,6 +98,78 @@ async def test_create_item_title_too_short(client):
     assert r.status_code in (401, 422)
 
 
+# ── Null-clear on profile update ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_profile_null_clears_nullable_fields(client):
+    """An explicit null for headline/bio/location/website_url must CLEAR the
+    field; an empty body leaves everything unchanged. Regression for
+    exclude_none / `if v is not None` dropping explicit nulls."""
+    import uuid as _uuid
+
+    from app.core.database import engine
+
+    # Fresh pool: earlier tests may leave pooled connections bound to their
+    # own (closed) event loops (same hygiene as test_auth.py)
+    await engine.dispose()
+
+    email = f"pf-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Pf User"},
+    )
+    assert r.status_code == 201
+    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    # Set the nullable fields
+    r = await client.put(
+        "/api/v1/portfolio/profile",
+        json={
+            "headline": "AI Creator",
+            "bio": "original bio text",
+            "location": "Shanghai",
+            "website_url": "https://example.com",
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["bio"] == "original bio text"
+
+    # Empty body → all unchanged
+    r = await client.put("/api/v1/portfolio/profile", json={}, headers=h)
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["headline"] == "AI Creator"
+    assert d["bio"] == "original bio text"
+    assert d["location"] == "Shanghai"
+    assert d["website_url"] == "https://example.com"
+
+    # Explicit nulls → cleared
+    r = await client.put(
+        "/api/v1/portfolio/profile",
+        json={"headline": None, "bio": None, "location": None, "website_url": None},
+        headers=h,
+    )
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["headline"] is None
+    assert d["bio"] is None
+    assert d["location"] is None
+    assert d["website_url"] is None
+
+    # Partial null: clear only bio, headline untouched
+    r = await client.put("/api/v1/portfolio/profile", json={"headline": "Back again"}, headers=h)
+    assert r.status_code == 200
+    r = await client.put("/api/v1/portfolio/profile", json={"bio": None}, headers=h)
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["headline"] == "Back again"
+    assert d["bio"] is None
+
+    await engine.dispose()
+
+
 # ── Unit tests ───────────────────────────────────────────────
 
 
@@ -141,3 +213,44 @@ def test_slug_generation():
 
     assert PortfolioService._generate_slug("AI Chatbot v2") == "ai-chatbot-v2"
     assert len(PortfolioService._generate_slug("AB")) >= 3
+
+
+def test_profile_and_item_reject_control_chars():
+    """R87: profile (headline/bio/location + social_links) and portfolio-item
+    (title/description + tags) free-text/JSONB fields write to Postgres. A NUL
+    (a valid-JSON \\u0000 escape) crashed the write with asyncpg 22P05 →
+    DBAPIError (not ValueError) → unhandled 500. The schemas now screen NUL /
+    control chars → clean 422 (ValidationError)."""
+    from pydantic import ValidationError
+
+    from app.schemas.portfolio import (
+        CreatePortfolioItemRequest,
+        UpdatePortfolioItemRequest,
+        UpdateProfileRequest,
+    )
+
+    nul = "\x00"
+    # profile string fields
+    for field in ("headline", "bio", "location"):
+        with pytest.raises(ValidationError):
+            UpdateProfileRequest(**{field: "x" + nul})
+    # profile JSONB (social_links) — NUL in a value
+    with pytest.raises(ValidationError):
+        UpdateProfileRequest(social_links={"tw": "https://x" + nul})
+    # item create: title + description + tags
+    with pytest.raises(ValidationError):
+        CreatePortfolioItemRequest(title="Good" + nul)
+    with pytest.raises(ValidationError):
+        CreatePortfolioItemRequest(title="Good Title", description="d" + nul)
+    with pytest.raises(ValidationError):
+        CreatePortfolioItemRequest(title="Good Title", tags=["ok" + nul])
+    # item update: same fields
+    with pytest.raises(ValidationError):
+        UpdatePortfolioItemRequest(title="t" + nul)
+    with pytest.raises(ValidationError):
+        UpdatePortfolioItemRequest(tags=["a" + nul])
+    # control: clean values validate fine
+    ok = CreatePortfolioItemRequest(title="Clean Title", description="clean", tags=["python", "ai"])
+    assert ok.title == "Clean Title"
+    prof = UpdateProfileRequest(headline="Clean", bio="clean bio", location="Earth")
+    assert prof.headline == "Clean"

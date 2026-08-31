@@ -141,11 +141,68 @@ class UpdateClientBriefRequest(BaseModel):
                 raise ValueError("Client name must be 1-200 characters")
         return v
 
+    @field_validator("client_industry")
+    @classmethod
+    def validate_client_industry(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100:
+            raise ValueError("Client industry must be 100 characters or less")
+        return v
+
+    @field_validator("project_type")
+    @classmethod
+    def validate_project_type(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if len(v) < 1 or len(v) > 50:
+                raise ValueError("Project type must be 1-50 characters")
+        return v
+
+    @field_validator("brand_guidelines", "target_audience", "tone_and_style", "constraints")
+    @classmethod
+    def validate_text_fields(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 10000:
+            raise ValueError("Text field must be 10,000 characters or less")
+        return v
+
+    @field_validator("client_website")
+    @classmethod
+    def validate_website(cls, v: str | None) -> str | None:
+        if v is not None and v != "":
+            if len(v) > 500:
+                raise ValueError("URL must be 500 characters or less")
+            if not re.match(r"^https?://", v, re.IGNORECASE):
+                raise ValueError("URL must start with http:// or https://")
+        return v
+
+    @field_validator("budget_range")
+    @classmethod
+    def validate_budget_range(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 100:
+            raise ValueError("Budget range must be 100 characters or less")
+        return v
+
+    @field_validator("timeline")
+    @classmethod
+    def validate_timeline(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 200:
+            raise ValueError("Timeline must be 200 characters or less")
+        return v
+
     @field_validator("status")
     @classmethod
     def validate_status(cls, v: str | None) -> str | None:
         if v is not None:
-            valid = {"draft", "open", "assigned", "in_production", "review", "active", "completed", "cancelled", "archived"}
+            valid = {
+                "draft",
+                "open",
+                "assigned",
+                "in_production",
+                "review",
+                "active",
+                "completed",
+                "cancelled",
+                "archived",
+            }
             if v not in valid:
                 raise ValueError(f"Status must be one of: {', '.join(sorted(valid))}")
         return v
@@ -225,9 +282,25 @@ class ConvertBriefToProjectRequest(BaseModel):
             raise ValueError("Rubric must have at least one criterion")
         if len(v) > 20:
             raise ValueError("Rubric must have at most 20 criteria")
+        # R92b: convert_to_project sums each item's max_score into the project's
+        # max_score INTEGER column. Without a type+range gate here, a string
+        # max_score raised `int + str` TypeError, and a huge value overflowed
+        # int32 at the INSERT (DataError) — both unhandled 500s. Mirror the
+        # CreateProjectRequest rubric gate: criterion a bounded str, max_score a
+        # non-negative number within the column range, and the SUM in range too.
+        total = 0
         for item in v:
             if not isinstance(item, dict) or "criterion" not in item or "max_score" not in item:
                 raise ValueError("Each rubric item must have 'criterion' and 'max_score'")
+            if not isinstance(item["criterion"], str) or not (1 <= len(item["criterion"]) <= 200):
+                raise ValueError("Criterion name must be a string of 1-200 chars")
+            ms = item["max_score"]
+            if isinstance(ms, bool) or not isinstance(ms, (int, float)) or not (0 <= ms <= 10000):
+                raise ValueError("Criterion max_score must be a number between 0 and 10000")
+            total += ms
+        # Project.max_score is a 32-bit INTEGER; the derived sum must fit.
+        if total > 1_000_000:
+            raise ValueError("Sum of criterion max_scores must not exceed 1,000,000")
         return v
 
     @field_validator("deadline", "late_deadline")

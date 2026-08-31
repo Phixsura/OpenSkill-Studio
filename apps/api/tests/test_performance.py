@@ -62,10 +62,9 @@ async def test_concurrent_reads_cohort_list(c):
         await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": f"C{i}"}, headers=h)
 
     start = time.monotonic()
-    results = await asyncio.gather(*[
-        c.get(f"/api/v1/orgs/{oid}/cohorts", headers=h)
-        for _ in range(20)
-    ])
+    results = await asyncio.gather(
+        *[c.get(f"/api/v1/orgs/{oid}/cohorts", headers=h) for _ in range(20)]
+    )
     elapsed = time.monotonic() - start
 
     assert all(r.status_code == 200 for r in results)
@@ -79,24 +78,33 @@ async def test_concurrent_submissions_different_users(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    pid = (await c.post(f"/api/v1/orgs/{oid}/projects", json={
-        "title": "Conc", "description": "d" * 10, "instructions": "i" * 10,
-        "rubric": [{"criterion": "Q", "max_score": 100}],
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/projects",
+            json={
+                "title": "Conc",
+                "description": "d" * 10,
+                "instructions": "i" * 10,
+                "rubric": [{"criterion": "Q", "max_score": 100}],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
 
     # Register 10 students
     students = []
     for _ in range(10):
         hs, us = await _auth(c)
-        await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
+        await c.post(
+            f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h
+        )
         students.append(hs)
 
     # All create submissions concurrently
-    results = await asyncio.gather(*[
-        c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=sh)
-        for sh in students
-    ])
+    results = await asyncio.gather(
+        *[c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=sh) for sh in students]
+    )
     assert all(r.status_code == 201 for r in results)
 
 
@@ -132,23 +140,39 @@ async def test_progress_with_many_members(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    cid = (await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "BigCoh"}, headers=h)).json()["data"]["id"]
+    cid = (await c.post(f"/api/v1/orgs/{oid}/cohorts", json={"name": "BigCoh"}, headers=h)).json()[
+        "data"
+    ]["id"]
     await c.put(f"/api/v1/orgs/{oid}/cohorts/{cid}", json={"status": "active"}, headers=h)
 
     # Add 20 members
     for _ in range(20):
         _, us = await _auth(c)
-        await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
-        await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=h)
+        await c.post(
+            f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h
+        )
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts/{cid}/members", json={"user_id": us["id"]}, headers=h
+        )
 
     # Add 3 projects
     for i in range(3):
-        pid = (await c.post(f"/api/v1/orgs/{oid}/projects", json={
-            "title": f"BigP{i}", "description": "d" * 10, "instructions": "i" * 10,
-            "rubric": [{"criterion": "Q", "max_score": 100}],
-        }, headers=h)).json()["data"]["id"]
+        pid = (
+            await c.post(
+                f"/api/v1/orgs/{oid}/projects",
+                json={
+                    "title": f"BigP{i}",
+                    "description": "d" * 10,
+                    "instructions": "i" * 10,
+                    "rubric": [{"criterion": "Q", "max_score": 100}],
+                },
+                headers=h,
+            )
+        ).json()["data"]["id"]
         await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
-        await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=h)
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts/{cid}/projects", json={"project_id": pid}, headers=h
+        )
 
     start = time.monotonic()
     r = await c.get(f"/api/v1/orgs/{oid}/cohorts/{cid}/progress", headers=h)
@@ -168,12 +192,16 @@ async def test_slug_uniqueness_under_load(c):
 
     slugs = set()
     for _ in range(50):
-        r = await c.post(f"/api/v1/orgs/{oid}/briefs", json={
-            "title": "Identical Title",
-            "client_name": "Same Client",
-            "project_type": "viz",
-            "objective": "Test slug uniqueness with identical titles repeatedly",
-        }, headers=h)
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Identical Title",
+                "client_name": "Same Client",
+                "project_type": "viz",
+                "objective": "Test slug uniqueness with identical titles repeatedly",
+            },
+            headers=h,
+        )
         assert r.status_code == 201
         slugs.add(r.json()["data"]["slug"])
 

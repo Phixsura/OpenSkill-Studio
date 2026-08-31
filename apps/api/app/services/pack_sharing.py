@@ -44,9 +44,7 @@ class PackSharingService:
             raise AppError("TARGET_ORG_NOT_FOUND", "Target organization not found", 404)
 
         # Lock parent row to serialize concurrent share additions
-        await self.db.execute(
-            select(SkillPack).where(SkillPack.id == pack_id).with_for_update()
-        )
+        await self.db.execute(select(SkillPack).where(SkillPack.id == pack_id).with_for_update())
         # Check share limit
         existing_count_r = await self.db.execute(
             select(func.count()).where(PackShare.pack_id == pack_id)

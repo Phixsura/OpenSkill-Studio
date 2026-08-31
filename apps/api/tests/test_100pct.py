@@ -134,9 +134,16 @@ async def test_auth_verify_email_success(db):
 
 @pytest.mark.asyncio
 async def test_auth_refresh_reuse_detection(db):
-    """Cover token reuse detection — revoked token raises TokenInvalidError
-    (changed from TokenReuseError to avoid nuking all sessions on
-    legitimate session revocation scenarios)."""
+    """Token reuse OUTSIDE the concurrent-refresh grace window raises
+    TokenInvalidError. (Within the window it's treated as a cross-tab race
+    and succeeds — covered in test_auth.py.)"""
+    from datetime import UTC, datetime, timedelta
+    from hashlib import sha256
+
+    from sqlalchemy import update as sa_update
+
+    from app.core.security import decode_token
+    from app.models.user import RefreshToken
     from app.services.auth import AuthService, TokenInvalidError
 
     email = f"reu-{uuid.uuid4().hex[:8]}@test.com"
@@ -148,7 +155,14 @@ async def test_auth_refresh_reuse_detection(db):
     await svc.refresh_tokens(reg.refresh_token)
     await db.flush()
 
-    # Try to use the old token again → reuse detection
+    # Backdate the revocation beyond the grace window, then reuse → 401
+    jti = decode_token(reg.refresh_token)["jti"]
+    await db.execute(
+        sa_update(RefreshToken)
+        .where(RefreshToken.token_hash == sha256(jti.encode()).hexdigest())
+        .values(revoked_at=datetime.now(UTC) - timedelta(seconds=60))
+    )
+    await db.flush()
     with pytest.raises(TokenInvalidError):
         await svc.refresh_tokens(reg.refresh_token)
 

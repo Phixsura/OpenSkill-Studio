@@ -9,6 +9,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
+import uuid
 
 BASE = "http://localhost:8000/api/v1"
 PASS = 0
@@ -25,9 +26,12 @@ def api(method, path, body=None, headers=None, expect=200):
     req = urllib.request.Request(url, data=data, headers=h, method=method)
     try:
         resp = urllib.request.urlopen(req)
+        raw = resp.read()
+        # 204s carry an application/json content-type with an EMPTY body —
+        # json.loads(b"") crashes. Parse only when there are bytes.
         result = (
-            json.loads(resp.read())
-            if resp.headers.get("content-type", "").startswith("application/json")
+            json.loads(raw)
+            if raw and resp.headers.get("content-type", "").startswith("application/json")
             else {}
         )
         if resp.status == expect:
@@ -76,7 +80,9 @@ check("redis ok", r.get("components", {}).get("redis") == "ok")
 
 # ════════════════════════════════════════════════════════
 section("2. Auth: Register + Login")
-email = "smoke-test@example.com"
+# Unique per run — a hardcoded address 409s (EMAIL_ALREADY_EXISTS) on every
+# rerun against the shared dev DB.
+email = f"smoke-{uuid.uuid4().hex[:10]}@example.com"
 r = api(
     "POST",
     "/auth/register",
@@ -110,11 +116,11 @@ check("sessions list", isinstance(r.get("data"), list) and len(r["data"]) >= 1)
 
 # ════════════════════════════════════════════════════════
 section("4. Auth: Forgot password + Errors")
-r = api("POST", "/auth/forgot-password", {"email": email})
-check("forgot password 200", True)
+r = api("POST", "/auth/forgot-password", {"email": email}, expect=204)
+check("forgot password 204", True)
 
-r = api("POST", "/auth/forgot-password", {"email": "nobody@x.com"})
-check("forgot nonexistent 200 (no leak)", True)
+r = api("POST", "/auth/forgot-password", {"email": "nobody@x.com"}, expect=204)
+check("forgot nonexistent 204 (no leak)", True)
 
 r = api("POST", "/auth/login", {"email": email, "password": "Wrong123!"}, expect=401)
 check("wrong password 401", r.get("error", {}).get("code") == "INVALID_CREDENTIALS")
@@ -124,8 +130,9 @@ check("no token 401", True)
 
 # ════════════════════════════════════════════════════════
 section("5. Organizations")
-r = api("POST", "/orgs", {"name": "Smoke Org", "description": "E2E test"}, headers=AUTH, expect=201)
-check("create org", r.get("data", {}).get("name") == "Smoke Org")
+org_name = f"Smoke Org {uuid.uuid4().hex[:6]}"
+r = api("POST", "/orgs", {"name": org_name, "description": "E2E test"}, headers=AUTH, expect=201)
+check("create org", r.get("data", {}).get("name") == org_name)
 oid = r.get("data", {}).get("id", "")
 check("creator is owner", r.get("data", {}).get("role") == "owner")
 
@@ -133,7 +140,7 @@ r = api("GET", "/orgs", headers=AUTH)
 check("list orgs", any(o["id"] == oid for o in r.get("data", [])))
 
 r = api("GET", f"/orgs/{oid}", headers=AUTH)
-check("get org detail", r.get("data", {}).get("name") == "Smoke Org")
+check("get org detail", r.get("data", {}).get("name") == org_name)
 
 r = api("PUT", f"/orgs/{oid}", {"name": "Smoke Org Updated"}, headers=AUTH)
 check("update org", r.get("data", {}).get("name") == "Smoke Org Updated")
@@ -296,7 +303,7 @@ check("manual grade", r.get("data", {}).get("score") == 85)
 
 # Progress
 r = api("GET", f"/orgs/{oid}/progress/me", headers=AUTH)
-check("overall progress", r.get("skills_total", 0) >= 1)
+check("overall progress", r.get("data", {}).get("skills_total", 0) >= 1)
 
 r = api("GET", f"/orgs/{oid}/progress/me/skills/{sid}", headers=AUTH)
 check("skill progress", r.get("data") is not None)
@@ -353,7 +360,25 @@ r = api("POST", f"/orgs/{oid}/projects/{pid}/submissions/{subid}/submit", header
 check("submit draft", r.get("data", {}).get("status") == "submitted")
 check("not late", r.get("data", {}).get("is_late") is False)
 
-# Review: approve
+# A submission's author cannot review it (R86 self-review guard) — register a
+# distinct instructor to review the owner's submission.
+rev_email = f"smoke-rev-{uuid.uuid4().hex[:10]}@example.com"
+rr = api(
+    "POST",
+    "/auth/register",
+    {"email": rev_email, "password": "Smoke123!", "display_name": "Smoke Reviewer"},
+    expect=201,
+)
+REV_AUTH = {"Authorization": f"Bearer {rr.get('access_token', '')}"}
+api(
+    "POST",
+    f"/orgs/{oid}/members",
+    {"user_id": rr["user"]["id"], "role": "instructor"},
+    headers=AUTH,
+    expect=201,
+)
+
+# Review: approve (by the distinct reviewer)
 r = api(
     "POST",
     f"/orgs/{oid}/submissions/{subid}/reviews",
@@ -363,7 +388,7 @@ r = api(
         "feedback": "Excellent chatbot!",
         "score_breakdown": {"Functionality": 38, "Code Quality": 28, "Innovation": 26},
     },
-    headers=AUTH,
+    headers=REV_AUTH,
     expect=201,
 )
 check("review approved", r.get("data", {}).get("status") == "approved")
@@ -389,7 +414,7 @@ check("create submission v2", r.get("data", {}).get("version") == 2)
 # ════════════════════════════════════════════════════════
 section("8. AI Evaluation Settings")
 r = api("GET", f"/orgs/{oid}/settings/evaluation", headers=AUTH)
-check("eval settings default", r.get("enabled") is False)
+check("eval settings default", r.get("data", {}).get("enabled") is False)
 
 r = api(
     "PUT",
@@ -401,10 +426,10 @@ r = api(
     },
     headers=AUTH,
 )
-check("update eval settings", r.get("enabled") is True)
+check("update eval settings", r.get("data", {}).get("enabled") is True)
 
 r = api("GET", f"/orgs/{oid}/evaluation/usage", headers=AUTH)
-check("eval usage", r.get("total_tasks") == 0)
+check("eval usage", r.get("data", {}).get("total_tasks") == 0)
 
 r = api("GET", f"/orgs/{oid}/evaluation/tasks", headers=AUTH)
 check("eval tasks list", isinstance(r.get("data"), list))
@@ -457,10 +482,13 @@ check("badges list", isinstance(r.get("data"), list))
 # ════════════════════════════════════════════════════════
 section("10. Public Profile")
 r = api("GET", f"/u/{username}")
-check("public profile", r.get("display_name") == "Smoke Updated")
-check("public skills", isinstance(r.get("skills"), list))
-check("public featured", isinstance(r.get("featured_items"), list))
-check("no email exposed", r.get("email") is None)
+_pub = r.get("data", {})
+check("public profile", _pub.get("display_name") == "Smoke Updated")
+# assert the keys are PRESENT and lists — a missing key must FAIL (no []
+# default, which would make this a tautology that passes on any response, R82)
+check("public skills", isinstance(_pub.get("skills"), list))
+check("public featured", isinstance(_pub.get("featured_items"), list))
+check("no email exposed", _pub.get("email") is None)
 
 r = api("GET", f"/u/{username}/items")
 check("public items list", isinstance(r.get("data"), list))

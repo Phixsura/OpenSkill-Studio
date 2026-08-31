@@ -50,12 +50,8 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("rating >= 1 AND rating <= 5", name="ck_review_rating_range"),
     )
-    op.create_index(
-        "uq_review_pack_user", "pack_reviews", ["pack_id", "user_id"], unique=True
-    )
-    op.create_index(
-        "ix_reviews_pack_created", "pack_reviews", ["pack_id", "created_at"]
-    )
+    op.create_index("uq_review_pack_user", "pack_reviews", ["pack_id", "user_id"], unique=True)
+    op.create_index("ix_reviews_pack_created", "pack_reviews", ["pack_id", "created_at"])
 
     # Add review_count and average_rating to skill_packs
     op.add_column(

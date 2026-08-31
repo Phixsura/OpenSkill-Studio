@@ -55,6 +55,21 @@ async def _org(c, h):
     return r.json()["data"]["id"]
 
 
+async def _reviewer(c, oid, owner_h):
+    """Register a SECOND instructor in org `oid` and return their headers.
+    Reviews of a submission must come from someone other than the author
+    (R86 self-review guard), so tests where the owner both submits and reviews
+    need a distinct reviewer."""
+    rh, ru = await _auth(c)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": ru["id"], "role": "instructor"},
+        headers=owner_h,
+    )
+    assert r.status_code in (200, 201), f"add reviewer failed: {r.text}"
+    return rh
+
+
 # ── Auth: forgot/reset password, sessions, change-password, verify ──
 
 
@@ -363,13 +378,20 @@ async def test_skills_full_flow(c):
 
     # Grading
     await c.get(f"/api/v1/orgs/{oid}/grading/pending", headers=h)
-    # Grade text answer (submit first)
+    # Grade text answer — R88g forbids self-grading, so a separate student
+    # submits the attempt and the owner grades it.
+    sh, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h,
+    )
     r8 = await c.post(
         f"/api/v1/orgs/{oid}/exercises/{eid2}/attempts",
         json={
             "answer": {"text": "My answer"},
         },
-        headers=h,
+        headers=sh,
     )
     attempt_id = r8.json()["data"]["id"]
     r9 = await c.post(
@@ -468,7 +490,8 @@ async def test_projects_full_flow(c):
     # Get submission detail
     await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sub_id}", headers=h)
 
-    # Review (approve)
+    # Review (approve) — distinct reviewer (no self-review, R86)
+    rh = await _reviewer(c, oid, h)
     r5 = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sub_id}/reviews",
         json={
@@ -477,7 +500,7 @@ async def test_projects_full_flow(c):
             "feedback": "Well done",
             "score_breakdown": {"Quality": 50, "Design": 35},
         },
-        headers=h,
+        headers=rh,
     )
     assert r5.status_code == 201
 
@@ -887,12 +910,13 @@ async def test_review_rejects_draft_and_over_max(c):
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/publish", headers=h)
     rs = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions", headers=h)
     sid = rs.json()["data"]["id"]
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
 
     # review a draft → 422
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 80},
-        headers=h,
+        headers=rh,
     )
     assert r.status_code == 422
 
@@ -901,7 +925,7 @@ async def test_review_rejects_draft_and_over_max(c):
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 150},
-        headers=h,
+        headers=rh,
     )
     assert r.status_code == 422
 
@@ -1130,15 +1154,15 @@ async def test_eval_settings_bounds_and_persist(c):
     await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"pass_threshold": 0.5}, headers=h)
     await c.put(f"/api/v1/orgs/{oid}/settings/evaluation", json={"pass_threshold": 0.9}, headers=h)
     r = await c.get(f"/api/v1/orgs/{oid}/settings/evaluation", headers=h)
-    assert r.json()["pass_threshold"] == 0.9
+    assert r.json()["data"]["pass_threshold"] == 0.9
 
     # zero budget is a real budget, not "unlimited"
     await c.put(
         f"/api/v1/orgs/{oid}/settings/evaluation", json={"monthly_budget_usd": 0}, headers=h
     )
     r = await c.get(f"/api/v1/orgs/{oid}/evaluation/usage", headers=h)
-    assert r.json()["budget_usd"] == 0
-    assert r.json()["budget_remaining"] == 0
+    assert r.json()["data"]["budget_usd"] == 0
+    assert r.json()["data"]["budget_remaining"] == 0
 
 
 @pytest.mark.asyncio
@@ -1200,7 +1224,7 @@ async def test_wrong_mcq_does_not_complete_skill(c):
     )
     assert r.json()["data"]["is_correct"] is False
     prog = await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)
-    assert prog.json()["skills_completed"] == 0
+    assert prog.json()["data"]["skills_completed"] == 0
 
     # correct answer → skill completes
     r = await c.post(
@@ -1210,7 +1234,7 @@ async def test_wrong_mcq_does_not_complete_skill(c):
     )
     assert r.json()["data"]["is_correct"] is True
     prog = await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)
-    assert prog.json()["skills_completed"] == 1
+    assert prog.json()["data"]["skills_completed"] == 1
 
 
 @pytest.mark.asyncio
@@ -1635,7 +1659,7 @@ async def test_duplicate_prerequisites_and_project_skills(c):
         json={"prerequisite_ids": [b, b, b]},
         headers=h,
     )
-    assert r.status_code == 200
+    assert r.status_code == 204
 
     # self-prerequisite → cycle 422
     r = await c.put(
@@ -1659,7 +1683,7 @@ async def test_duplicate_prerequisites_and_project_skills(c):
     r = await c.put(
         f"/api/v1/orgs/{oid}/projects/{pid}/skills", json={"skill_ids": [a, a, b]}, headers=h
     )
-    assert r.status_code == 200
+    assert r.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -1814,12 +1838,13 @@ async def test_revision_requested_edit_and_resubmit(c):
         "data"
     ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
 
     # instructor requests revision
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "revision_requested", "feedback": "add more"},
-        headers=h,
+        headers=rh,
     )
     assert r.status_code == 201
 
@@ -1838,7 +1863,7 @@ async def test_revision_requested_edit_and_resubmit(c):
     r = await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 90},
-        headers=h,
+        headers=rh,
     )
     assert r.status_code == 201
     r = await c.put(
@@ -2515,11 +2540,12 @@ async def test_revision_clears_stale_final_score(c):
         "data"
     ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
 
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 80},
-        headers=h,
+        headers=rh,
     )
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
         "data"
@@ -2529,7 +2555,7 @@ async def test_revision_clears_stale_final_score(c):
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "revision_requested", "feedback": "redo"},
-        headers=h,
+        headers=rh,
     )
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
         "data"
@@ -2570,12 +2596,13 @@ async def test_review_lifecycle_queue_and_history(c):
     assert await pending_count() == 0  # draft not pending
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert await pending_count() == 1
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
 
     # revision → resubmit → back in queue
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "revision_requested", "feedback": "redo"},
-        headers=h,
+        headers=rh,
     )
     assert await pending_count() == 0
     await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
@@ -2585,7 +2612,7 @@ async def test_review_lifecycle_queue_and_history(c):
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 90},
-        headers=h,
+        headers=rh,
     )
     assert await pending_count() == 0
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
@@ -2833,7 +2860,7 @@ async def test_progress_categories_populated(c):
             },
             headers=h,
         )
-    d = (await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)).json()
+    d = (await c.get(f"/api/v1/orgs/{oid}/progress/me", headers=h)).json()["data"]
     assert len(d["categories"]) == 1
     entry = d["categories"][0]
     assert entry["name"] == "Programming"
@@ -3184,10 +3211,11 @@ async def test_late_penalty_and_max_submissions(c):
     ]["id"]
     r = await c.post(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}/submit", headers=h)
     assert r.json()["data"]["is_late"] is True
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 100},
-        headers=h,
+        headers=rh,
     )
     d = (await c.get(f"/api/v1/orgs/{oid}/projects/{pid}/submissions/{sid}", headers=h)).json()[
         "data"
@@ -3269,11 +3297,18 @@ async def test_grading_queue_routing_and_scoping(c):
     ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
 
+    # R88g forbids self-grading — attempts come from a separate student
+    sh, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h,
+    )
     mcq_att = (
         await c.post(
             f"/api/v1/orgs/{oid}/exercises/{mcq}/attempts",
             json={"answer": {"selected": ["a"]}},
-            headers=h,
+            headers=sh,
         )
     ).json()["data"]
     assert mcq_att["graded_by"] == "auto"
@@ -3281,7 +3316,7 @@ async def test_grading_queue_routing_and_scoping(c):
         await c.post(
             f"/api/v1/orgs/{oid}/exercises/{txt}/attempts",
             json={"answer": {"text": "ans"}},
-            headers=h,
+            headers=sh,
         )
     ).json()["data"]
     assert txt_att["graded_by"] is None
@@ -3718,12 +3753,12 @@ async def test_skill_badges_sync_from_progress(c):
     # badge shows on public profile, and hiding removes it
     un = f"user{uuid.uuid4().hex[:8]}"
     await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)
-    skills = (await c.get(f"/api/v1/u/{un}")).json()["skills"]
+    skills = (await c.get(f"/api/v1/u/{un}")).json()["data"]["skills"]
     assert any(s["name"] == "Badge Skill" for s in skills)
     await c.put(
         f"/api/v1/portfolio/badges/{badges[0]['id']}", json={"show_on_profile": False}, headers=h
     )
-    skills = (await c.get(f"/api/v1/u/{un}")).json()["skills"]
+    skills = (await c.get(f"/api/v1/u/{un}")).json()["data"]["skills"]
     assert not any(s["name"] == "Badge Skill" for s in skills)
 
 
@@ -3753,10 +3788,11 @@ async def test_show_score_masks_public_score(c):
         "data"
     ]["id"]
     await c.post(f"/api/v1/orgs/{oid}/projects/{p['id']}/submissions/{sid}/submit", headers=h)
+    rh = await _reviewer(c, oid, h)  # distinct reviewer (no self-review, R86)
     await c.post(
         f"/api/v1/orgs/{oid}/submissions/{sid}/reviews",
         json={"status": "approved", "score": 92},
-        headers=h,
+        headers=rh,
     )
     item = (
         await c.post(
@@ -5139,3 +5175,157 @@ async def test_draft_skill_exercises_hidden_from_students(c):
     r = await c.get(f"/api/v1/orgs/{oid}/exercises/{ex}", headers=hs)
     assert r.status_code == 200
     assert "correct" not in r.json()["data"]["config"]
+
+
+# ── R88g/R88h: self-grading gate + MCQ dict-correct rejection ──
+
+
+@pytest.mark.asyncio
+async def test_self_grading_forbidden(c):
+    """R88g guard: an instructor who submitted their OWN attempt must not be
+    able to grade it (self-grade minted completion + points + badge with no
+    second party — same class as the R86 self-review gate). A different
+    instructor CAN grade it. Reverting the grader check fails this."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "SG"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "SelfGrade Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Text",
+                "description": "d",
+                "type": "text_answer",
+                "config": {},
+                "max_score": 100,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    att = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+            json={"answer": {"text": "my own work"}},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    # Self-grade -> 403 SELF_GRADING_FORBIDDEN
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/grading/attempts/{att}",
+        json={"score": 100, "feedback": "perfect (self)"},
+        headers=h,
+    )
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "SELF_GRADING_FORBIDDEN"
+
+    # A second instructor grades it fine
+    h2, other = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": other["id"], "role": "instructor"},
+        headers=h,
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/grading/attempts/{att}",
+        json={"score": 80, "feedback": "ok"},
+        headers=h2,
+    )
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_mcq_dict_correct_rejected_and_blank_never_correct(c):
+    """R88h guard: `correct` of dict type passed the old None/[]/"" check but
+    coerces to [] in the grader, so a BLANK answer graded as full marks.
+    Create and update must both reject non-list/non-scalar `correct`; the
+    grader must never mark an empty correct-set as correct. Reverting either
+    the schema check or the update gate fails this."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": "MC"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    sk = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": "MCQ Dict Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+
+    # create with dict correct -> 422 (both non-empty and empty dict)
+    for bad_correct in ({"a": 1}, {}, True):
+        r = await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Bad MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"choices": ["A", "B"], "correct": bad_correct},
+                "max_score": 100,
+            },
+            headers=h,
+        )
+        assert r.status_code == 422, f"correct={bad_correct!r} accepted: {r.text}"
+
+    # valid create, then update to dict correct -> 422
+    ex = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills/{sk}/exercises",
+            json={
+                "title": "Good MCQ",
+                "description": "d",
+                "type": "multiple_choice",
+                "config": {"choices": ["A", "B"], "correct": ["A"]},
+                "max_score": 100,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.put(
+        f"/api/v1/orgs/{oid}/exercises/{ex}",
+        json={"config": {"choices": ["A", "B"], "correct": {"a": 1}}},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+    # normal grading still works: correct answer full marks, wrong answer 0
+    await c.post(f"/api/v1/orgs/{oid}/skills/{sk}/publish", headers=h)
+    sh, student = await _auth(c)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members",
+        json={"user_id": student["id"], "role": "student"},
+        headers=h,
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": ["A"]}},
+        headers=sh,
+    )
+    assert r.json()["data"]["is_correct"] is True
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/exercises/{ex}/attempts",
+        json={"answer": {"selected": []}},
+        headers=sh,
+    )
+    assert r.json()["data"]["is_correct"] is False

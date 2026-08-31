@@ -14,7 +14,14 @@
  * - Registry: sort dropdown, tags/time/license display
  */
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
-import { registerUser, createOrg, loginInBrowser, createCohort, activateCohort, type AuthContext } from "./helpers";
+import {
+  registerUser,
+  createOrg,
+  loginInBrowser,
+  createCohort,
+  activateCohort,
+  type AuthContext,
+} from "./helpers";
 
 const API = process.env.E2E_API_URL || "http://localhost:8000/api/v1";
 let admin: AuthContext;
@@ -26,34 +33,72 @@ let adminPage: Page;
 let conCtx: BrowserContext;
 let conPage: Page;
 
-async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 async function api(auth: AuthContext, method: string, path: string, body?: object) {
-  const res = await fetch(`${API}${path}`, { method, headers: auth.headers, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: auth.headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
   return res.json();
 }
 
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ browser }) => {
-  for (let i = 0; i < 5; i++) { try { admin = await registerUser("EvBtn Admin"); break; } catch { await sleep(5000); } }
+  for (let i = 0; i < 5; i++) {
+    try {
+      admin = await registerUser("EvBtn Admin");
+      break;
+    } catch {
+      await sleep(5000);
+    }
+  }
   await sleep(3000);
-  for (let i = 0; i < 5; i++) { try { consumer = await registerUser("EvBtn Consumer"); break; } catch { await sleep(5000); } }
+  for (let i = 0; i < 5; i++) {
+    try {
+      consumer = await registerUser("EvBtn Consumer");
+      break;
+    } catch {
+      await sleep(5000);
+    }
+  }
 
   orgId = await createOrg(admin, `EvBtn-${Date.now()}`);
   conOrgId = await createOrg(consumer, `EvBtnC-${Date.now()}`);
 
   // Create skills, templates, pack, release
-  const cat = await api(admin, "POST", `/orgs/${orgId}/categories`, { name: `EvCat-${Date.now()}` });
-  await api(admin, "POST", `/orgs/${orgId}/skills`, { name: "EvSkill1", description: "test", difficulty: "beginner", category_id: cat.data.id });
-  await api(admin, "POST", `/orgs/${orgId}/skills`, { name: "EvSkill2", description: "test2", difficulty: "intermediate", category_id: cat.data.id });
+  const cat = await api(admin, "POST", `/orgs/${orgId}/categories`, {
+    name: `EvCat-${Date.now()}`,
+  });
+  await api(admin, "POST", `/orgs/${orgId}/skills`, {
+    name: "EvSkill1",
+    description: "test",
+    difficulty: "beginner",
+    category_id: cat.data.id,
+  });
+  await api(admin, "POST", `/orgs/${orgId}/skills`, {
+    name: "EvSkill2",
+    description: "test2",
+    difficulty: "intermediate",
+    category_id: cat.data.id,
+  });
   const tmpl = await api(admin, "POST", `/orgs/${orgId}/project-templates`, {
-    name: "EvTemplate", description: "template test", instructions: "do this",
+    name: "EvTemplate",
+    description: "template test",
+    instructions: "do this",
     rubric: [{ criterion: "Quality", max_score: 100 }],
   });
+  // Create private; approved → public after publish (R79 gate)
   const pack = await api(admin, "POST", `/orgs/${orgId}/packs`, {
-    name: "EveryButton Pack", visibility: "public", difficulty: "beginner",
-    scenario_tags: ["ecommerce"], tool_tags: ["midjourney"],
-    estimated_minutes: 120, provenance: { author_name: "Test", license_name: "MIT" },
+    name: "EveryButton Pack",
+    difficulty: "beginner",
+    scenario_tags: ["ecommerce"],
+    tool_tags: ["midjourney"],
+    estimated_minutes: 120,
+    provenance: { author_name: "Test", license_name: "MIT" },
   });
   const packId = pack.data.id;
   const skillsRes = await api(admin, "GET", `/orgs/${orgId}/skills?per_page=100`);
@@ -61,22 +106,42 @@ test.beforeAll(async ({ browser }) => {
   const s2id = skillsRes.data[1].id;
   await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/skills`, { skill_id: s1id });
   await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/skills`, { skill_id: s2id });
-  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/templates`, { template_id: tmpl.data.id });
+  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/templates`, {
+    template_id: tmpl.data.id,
+  });
   await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/releases`, { version: "1.0.0" });
+  // Public via review flow (R79): registry detail (test 15) + cross-org install need it
+  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/submit-for-review`);
+  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/approve`);
   // Publish v1.1.0 for diff testing
-  const cat2 = await api(admin, "POST", `/orgs/${orgId}/categories`, { name: `EvCat2-${Date.now()}` });
-  await api(admin, "POST", `/orgs/${orgId}/skills`, { name: "EvSkill3-New", description: "new skill", difficulty: "advanced", category_id: cat2.data.id });
+  const cat2 = await api(admin, "POST", `/orgs/${orgId}/categories`, {
+    name: `EvCat2-${Date.now()}`,
+  });
+  await api(admin, "POST", `/orgs/${orgId}/skills`, {
+    name: "EvSkill3-New",
+    description: "new skill",
+    difficulty: "advanced",
+    category_id: cat2.data.id,
+  });
   const newSkills = await api(admin, "GET", `/orgs/${orgId}/skills?per_page=100`);
   const s3id = newSkills.data.find((s: any) => s.name === "EvSkill3-New")?.id;
   if (s3id) await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/skills`, { skill_id: s3id });
-  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/releases`, { version: "1.1.0", changelog: "Added new skill" });
+  await api(admin, "POST", `/orgs/${orgId}/packs/${packId}/releases`, {
+    version: "1.1.0",
+    changelog: "Added new skill",
+  });
 
   // Install in consumer org (v1.0.0)
-  await api(consumer, "POST", `/orgs/${conOrgId}/installations`, { pack_id: packId, version: "1.0.0" });
+  await api(consumer, "POST", `/orgs/${conOrgId}/installations`, {
+    pack_id: packId,
+    version: "1.0.0",
+  });
 
   // Create project in consumer org for path items
   await api(consumer, "POST", `/orgs/${conOrgId}/projects`, {
-    title: "EvProject", description: "test project", instructions: "build something",
+    title: "EvProject",
+    description: "test project",
+    instructions: "build something",
     rubric: [{ criterion: "Quality", max_score: 100 }],
   });
 
@@ -90,7 +155,10 @@ test.beforeAll(async ({ browser }) => {
   await loginInBrowser(conPage, consumer.email, "TestPass123!");
 });
 
-test.afterAll(async () => { await adminCtx?.close(); await conCtx?.close(); });
+test.afterAll(async () => {
+  await adminCtx?.close();
+  await conCtx?.close();
+});
 
 // ═══ 1. Pack List: status filter dropdown ═══
 test("1. Pack list: filter by status dropdown", async () => {
@@ -130,7 +198,9 @@ test("3. Pack detail: click Archive → pack archived", async () => {
   await adminPage.goto(`/dashboard/orgs/${orgId}/packs/${pid}`);
   await adminPage.waitForLoadState("networkidle");
 
-  // Click Archive
+  // Click Archive — the button asks via confirm(); accept it (Playwright
+  // dismisses dialogs by default, which silently no-ops the archive)
+  adminPage.once("dialog", (d) => d.accept());
   await adminPage.locator("button:has-text('Archive')").click();
   await adminPage.waitForLoadState("networkidle");
   await sleep(1000);
@@ -154,7 +224,7 @@ test("4. Pack detail: add template via dropdown, then remove", async () => {
   // Find template dropdown
   const tmplSelect = adminPage.locator("select").filter({ hasText: "Select template..." });
   const options = await tmplSelect.locator("option").allTextContents();
-  const tmplOpt = options.find(o => o.includes("EvTemplate"));
+  const tmplOpt = options.find((o) => o.includes("EvTemplate"));
 
   if (tmplOpt) {
     await tmplSelect.selectOption({ label: tmplOpt });
@@ -168,7 +238,7 @@ test("4. Pack detail: add template via dropdown, then remove", async () => {
 
     // Remove it (× button in templates section)
     const removeButtons = adminPage.locator("button:has-text('×')");
-    if (await removeButtons.count() > 0) {
+    if ((await removeButtons.count()) > 0) {
       await removeButtons.last().click();
       await adminPage.waitForLoadState("networkidle");
       await sleep(500);
@@ -208,7 +278,13 @@ test("6. Installation detail: View Changes shows diff", async () => {
     await sleep(1000);
 
     // Diff sections should appear (added/changed/removed)
-    const hasDiff = await conPage.locator("text=Added").or(conPage.locator("text=Changed")).or(conPage.locator("text=Removed")).first().isVisible().catch(() => false);
+    const hasDiff = await conPage
+      .locator("text=Added")
+      .or(conPage.locator("text=Changed"))
+      .or(conPage.locator("text=Removed"))
+      .first()
+      .isVisible()
+      .catch(() => false);
     expect(hasDiff).toBeTruthy();
   }
 });
@@ -219,18 +295,24 @@ test("7. Installation detail: Remove → confirm → redirect", async () => {
   const packs = await api(admin, "GET", `/orgs/${orgId}/packs`);
   const packId = packs.data.find((p: any) => p.name === "EveryButton Pack")?.id;
   // Create second install to remove
-  const p2 = await api(admin, "POST", `/orgs/${orgId}/packs`, { name: "RemoveTest Pack", visibility: "public" });
+  // Unlisted: cross-org installable by pack_id without approval (R79)
+  const p2 = await api(admin, "POST", `/orgs/${orgId}/packs`, {
+    name: "RemoveTest Pack",
+    visibility: "unlisted",
+  });
   const s = await api(admin, "GET", `/orgs/${orgId}/skills?per_page=100`);
   await api(admin, "POST", `/orgs/${orgId}/packs/${p2.data.id}/skills`, { skill_id: s.data[0].id });
   await api(admin, "POST", `/orgs/${orgId}/packs/${p2.data.id}/releases`, { version: "1.0.0" });
-  const inst2 = await api(consumer, "POST", `/orgs/${conOrgId}/installations`, { pack_id: p2.data.id });
+  const inst2 = await api(consumer, "POST", `/orgs/${conOrgId}/installations`, {
+    pack_id: p2.data.id,
+  });
   const inst2Id = inst2.data?.id;
   if (!inst2Id) return;
 
   await conPage.goto(`/dashboard/orgs/${conOrgId}/installations/${inst2Id}`);
   await conPage.waitForLoadState("networkidle");
 
-  conPage.on("dialog", d => d.accept());
+  conPage.on("dialog", (d) => d.accept());
   await conPage.locator("button:has-text('Remove')").click();
   await conPage.waitForLoadState("networkidle");
   await sleep(1000);
@@ -301,7 +383,12 @@ test("11. Path detail: click Archive", async () => {
   // Path should show archived or redirect
   await conPage.goto(`/dashboard/orgs/${conOrgId}/paths/${pathId}`);
   await conPage.waitForLoadState("networkidle");
-  await expect(conPage.locator("text=Failed").or(conPage.locator("text=not found")).or(conPage.locator("text=archived"))).toBeVisible({ timeout: 5_000 });
+  await expect(
+    conPage
+      .locator("text=Failed")
+      .or(conPage.locator("text=not found"))
+      .or(conPage.locator("text=archived")),
+  ).toBeVisible({ timeout: 5_000 });
 });
 
 // ═══ 12. Path Detail: Remove item ═══
@@ -310,7 +397,9 @@ test("12. Path detail: add item then remove it", async () => {
   const pathId = path.data.id;
   // Add a section item via API
   await api(consumer, "POST", `/orgs/${conOrgId}/paths/${pathId}/items`, {
-    item_type: "section", section_title: "RemoveMe Section", sort_order: 0,
+    item_type: "section",
+    section_title: "RemoveMe Section",
+    sort_order: 0,
   });
 
   await conPage.goto(`/dashboard/orgs/${conOrgId}/paths/${pathId}`);
@@ -339,7 +428,9 @@ test("13. Cohort paths: unassign path → confirm → removed", async () => {
   await api(consumer, "PUT", `/orgs/${conOrgId}/paths/${path.data.id}`, { status: "published" });
   const cohortId = await createCohort(consumer, conOrgId, `UnCoh-${Date.now()}`);
   await activateCohort(consumer, conOrgId, cohortId);
-  await api(consumer, "POST", `/orgs/${conOrgId}/cohorts/${cohortId}/paths`, { path_id: path.data.id });
+  await api(consumer, "POST", `/orgs/${conOrgId}/cohorts/${cohortId}/paths`, {
+    path_id: path.data.id,
+  });
 
   await conPage.goto(`/dashboard/orgs/${conOrgId}/cohorts/${cohortId}/paths`);
   await conPage.waitForLoadState("networkidle");
@@ -350,7 +441,7 @@ test("13. Cohort paths: unassign path → confirm → removed", async () => {
 
   // Click Remove — remove all prior dialog handlers first
   conPage.removeAllListeners("dialog");
-  conPage.once("dialog", d => d.accept());
+  conPage.once("dialog", (d) => d.accept());
   await conPage.locator("button:has-text('Remove')").click();
   await conPage.waitForLoadState("networkidle");
   await sleep(1000);
@@ -389,8 +480,8 @@ test("15. Registry detail: shows tags, estimated time, and license", async () =>
   await expect(adminPage.locator("text=ecommerce")).toBeVisible();
   // Tool tags
   await expect(adminPage.locator("text=midjourney")).toBeVisible();
-  // License
-  await expect(adminPage.locator("text=MIT")).toBeVisible();
+  // License — exact match ("MIT" also substring-matches "Submit Review")
+  await expect(adminPage.getByText("MIT", { exact: true })).toBeVisible();
   // Estimated time (120 min = 2h 0m)
   await expect(adminPage.locator("text=2h")).toBeVisible();
 });

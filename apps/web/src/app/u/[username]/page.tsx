@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "http://localhost:8000";
 
 interface PublicProfile {
   username: string;
@@ -14,7 +13,16 @@ interface PublicProfile {
   website_url: string | null;
   social_links: Record<string, string>;
   skills: { name: string; category: string; completion_pct: number; completed: boolean }[];
-  featured_items: { slug: string; title: string; description: string | null; cover_image_url: string | null; tags: string[]; score: number | null; show_score: boolean; source_org_name: string | null }[];
+  featured_items: {
+    slug: string;
+    title: string;
+    description: string | null;
+    cover_image_url: string | null;
+    tags: string[];
+    score: number | null;
+    show_score: boolean;
+    source_org_name: string | null;
+  }[];
   item_count: number;
   joined_at: string;
 }
@@ -23,13 +31,19 @@ async function fetchProfile(username: string): Promise<PublicProfile | null> {
   try {
     const res = await fetch(`${API_BASE}/api/v1/u/${username}`, { next: { revalidate: 60 } });
     if (!res.ok) return null;
-    return res.json();
+    // Unwrap the standard { data: T } envelope (same as [itemSlug]/page.tsx)
+    const body = await res.json();
+    return body.data ?? null;
   } catch {
     return null;
   }
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ username: string }> }): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ username: string }>;
+}): Promise<Metadata> {
   const { username } = await params;
   const profile = await fetchProfile(username);
   if (!profile) return { title: "Not Found" };
@@ -44,7 +58,11 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
   };
 }
 
-export default async function PublicProfilePage({ params }: { params: Promise<{ username: string }> }) {
+export default async function PublicProfilePage({
+  params,
+}: {
+  params: Promise<{ username: string }>;
+}) {
   const { username } = await params;
   const profile = await fetchProfile(username);
   if (!profile) notFound();
@@ -77,27 +95,43 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
         </div>
         <div>
           <h1 className="text-3xl font-bold">{profile.display_name}</h1>
-          {profile.headline && <p className="text-lg text-[hsl(var(--muted-foreground))]">{profile.headline}</p>}
-          {profile.location && <p className="text-sm text-[hsl(var(--muted-foreground))]">{profile.location}</p>}
+          {profile.headline && (
+            <p className="text-lg text-[hsl(var(--muted-foreground))]">{profile.headline}</p>
+          )}
+          {profile.location && (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">{profile.location}</p>
+          )}
           <div className="mt-2 flex gap-3">
             {Object.entries(profile.social_links || {})
               .filter(([, url]) => typeof url === "string" && /^https?:\/\//i.test(url))
               .map(([platform, url]) => (
-              <a key={platform} href={url} target="_blank" rel="noopener noreferrer"
-                className="text-sm capitalize text-[hsl(var(--primary))] hover:underline">{platform}</a>
-            ))}
+                <a
+                  key={platform}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm capitalize text-[hsl(var(--primary))] hover:underline"
+                >
+                  {platform}
+                </a>
+              ))}
           </div>
         </div>
       </div>
 
       {(profile.skills ?? []).length > 0 && (
         <section className="mt-8">
-          <h2 className="text-lg font-semibold mb-3">Skills</h2>
+          <h2 className="mb-3 text-lg font-semibold">Skills</h2>
           <div className="flex flex-wrap gap-2">
             {(profile.skills ?? []).map((s) => (
-              <span key={s.name} className={`rounded-full px-3 py-1 text-sm font-medium ${
-                s.completed ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                  : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"}`}>
+              <span
+                key={s.name}
+                className={`rounded-full px-3 py-1 text-sm font-medium ${
+                  s.completed
+                    ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                    : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                }`}
+              >
                 {s.completed ? "✓" : `${s.completion_pct}%`} {s.name}
               </span>
             ))}
@@ -107,22 +141,34 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
 
       {(profile.featured_items ?? []).length > 0 && (
         <section className="mt-8">
-          <h2 className="text-lg font-semibold mb-3">Featured Projects</h2>
+          <h2 className="mb-3 text-lg font-semibold">Featured Projects</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {(profile.featured_items ?? []).map((item) => (
-              <a key={item.slug} href={`/u/${profile.username}/${item.slug}`}
-                className="group block overflow-hidden rounded-lg border transition-shadow hover:shadow-md">
-                <div className="aspect-video w-full bg-[hsl(var(--secondary))] flex items-center justify-center">
+              <a
+                key={item.slug}
+                href={`/u/${profile.username}/${item.slug}`}
+                className="group block overflow-hidden rounded-lg border transition-shadow hover:shadow-md"
+              >
+                <div className="flex aspect-video w-full items-center justify-center bg-[hsl(var(--secondary))]">
                   <span className="text-4xl">🎨</span>
                 </div>
                 <div className="p-4">
-                  <h3 className="font-semibold group-hover:text-[hsl(var(--primary))]">{item.title}</h3>
+                  <h3 className="font-semibold group-hover:text-[hsl(var(--primary))]">
+                    {item.title}
+                  </h3>
                   {item.show_score && item.score != null && (
-                    <span className="text-sm text-[hsl(var(--muted-foreground))]">⭐ {item.score}/100</span>
+                    <span className="text-sm text-[hsl(var(--muted-foreground))]">
+                      ⭐ {item.score}/100
+                    </span>
                   )}
                   <div className="mt-2 flex flex-wrap gap-1">
                     {(item.tags ?? []).map((tag) => (
-                      <span key={tag} className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">{tag}</span>
+                      <span
+                        key={tag}
+                        className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs"
+                      >
+                        {tag}
+                      </span>
                     ))}
                   </div>
                 </div>
@@ -134,7 +180,7 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
 
       {profile.bio && (
         <section className="mt-8">
-          <h2 className="text-lg font-semibold mb-3">About</h2>
+          <h2 className="mb-3 text-lg font-semibold">About</h2>
           <p className="text-sm text-[hsl(var(--muted-foreground))]">{profile.bio}</p>
         </section>
       )}

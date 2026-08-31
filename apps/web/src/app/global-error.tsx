@@ -61,6 +61,10 @@ export default function GlobalError({
             >
               Try again
             </button>
+            {/* Intentional hard link: global-error replaces the root layout,
+                so client-side routing may be broken — a full reload is the
+                only reliable escape. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/"
               style={{

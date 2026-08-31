@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cache_get, cache_set
@@ -68,13 +68,34 @@ class RegistryService:
         """
         effective_per_page = min(per_page, max_results) if max_results else per_page
         # ── Check cache ──
-        cache_key_src = f"{search}:{scenario}:{tool}:{difficulty}:{category}:{sort}:{page}:{effective_per_page}:{min_rating}:{max_results}"
-        cache_key = f"registry:search:{hashlib.md5(cache_key_src.encode()).hexdigest()}"
+        # Canonical JSON key, not a raw ':'-join: a ':'-join collides when a
+        # user-controlled value itself contains ':' (search='a:b' vs
+        # scenario='b' → same string), serving one query's results for
+        # another. JSON preserves field boundaries. (Mirrors
+        # workflow_registry._cache_key.)
+        import json as _json
+
+        cache_key_src = _json.dumps(
+            {
+                "search": search,
+                "scenario": scenario,
+                "tool": tool,
+                "difficulty": difficulty,
+                "category": category,
+                "sort": sort,
+                "page": page,
+                "per_page": effective_per_page,
+                "min_rating": min_rating,
+                "max_results": max_results,
+            },
+            sort_keys=True,
+            default=str,
+        )
+        cache_key = f"registry:search:{hashlib.sha256(cache_key_src.encode()).hexdigest()}"
         cached = await cache_get(cache_key)
         if cached is not None:
             # Re-hydrate from cache: fetch packs by id list
             pack_ids = cached.get("ids", [])
-            total = cached.get("total", 0)
             if pack_ids:
                 # Re-apply access-control filters on cache hit to prevent
                 # serving archived/private/rejected packs from stale cache
@@ -91,8 +112,11 @@ class RegistryService:
                 )
                 packs_by_id = {p.id: p for p in result.scalars().all()}
                 filtered = [packs_by_id[pid] for pid in pack_ids if pid in packs_by_id]
-                return filtered, len(filtered)
-            return [], 0
+                # Return the cached catalog TOTAL (across all pages), not the
+                # page length — otherwise has_more computes False and
+                # pagination dead-ends at page 1 for the cache TTL.
+                return filtered, cached.get("total", len(filtered))
+            return [], cached.get("total", 0)
 
         # ── Build query ──
         base = select(SkillPack).where(
@@ -107,16 +131,19 @@ class RegistryService:
         _ilike_fallback = None  # set if FTS is used, for fallback on DB error
 
         if search and search.strip():
-            # Full-text search on name + summary + description
-            search_vector = func.to_tsvector(
-                "simple",
-                func.coalesce(SkillPack.name, "")
-                + " "
-                + func.coalesce(SkillPack.summary, "")
-                + " "
-                + func.coalesce(SkillPack.description, ""),
-            )
-            # ILIKE fallback for substring / random-token searches
+            # Full-text search on the STORED search_tsv column (computed once
+            # at write time, migration b9ca3e445203) OR-combined with ILIKE
+            # for substring / random-token matches that word-based FTS misses.
+            #
+            # Plan note (verified with EXPLAIN): because the tsquery match is
+            # OR-ed with unanchored ILIKEs, Postgres CANNOT use the GIN index
+            # ix_skill_packs_search_tsv for this predicate — the whole OR is
+            # evaluated as a per-row Filter. The scan is instead bounded by a
+            # Bitmap Index Scan on ix_packs_visibility_status (public +
+            # published only), so cost grows with the size of the published
+            # catalog, not the whole table. The GIN index only accelerates a
+            # future FTS-only path; acceptable at Phase 1 catalog sizes.
+            search_vector = literal_column("skill_packs.search_tsv")
             # Escape LIKE wildcards to prevent CPU-intensive pattern matching
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             term = f"%{escaped}%"
@@ -129,9 +156,7 @@ class RegistryService:
                 cast(SkillPack.capability_tags, String).ilike(term),
             )
             # Combine FTS and ILIKE — FTS failure is caught at query execution time
-            fts_cond = search_vector.op("@@")(
-                func.websearch_to_tsquery("simple", search)
-            )
+            fts_cond = search_vector.op("@@")(func.websearch_to_tsquery("simple", search))
             base = base.where(or_(fts_cond, ilike_cond))
             # Store ILIKE-only fallback for use if FTS fails at execution time
             _ilike_fallback = ilike_cond
@@ -150,9 +175,9 @@ class RegistryService:
 
             base = base.where(
                 SkillPack.id.in_(
-                    select(PackCategoryAssignment.pack_id).join(
-                        PackCategory, PackCategory.id == PackCategoryAssignment.category_id
-                    ).where(PackCategory.slug == category)
+                    select(PackCategoryAssignment.pack_id)
+                    .join(PackCategory, PackCategory.id == PackCategoryAssignment.category_id)
+                    .where(PackCategory.slug == category)
                 )
             )
 
@@ -179,12 +204,18 @@ class RegistryService:
             if _ilike_fallback is not None:
                 # FTS query failed (bad search syntax) — rebuild with ILIKE only
                 log.warning("fts_query_failed_fallback_to_ilike", search=search)
-                base = select(SkillPack).where(
-                    SkillPack.visibility == PackVisibility.PUBLIC,
-                    SkillPack.status == PackStatus.PUBLISHED,
-                    or_(SkillPack.review_status.is_(None), SkillPack.review_status == "approved"),
-                    _ilike_fallback,
-                ).order_by(SkillPack.created_at.desc())
+                base = (
+                    select(SkillPack)
+                    .where(
+                        SkillPack.visibility == PackVisibility.PUBLIC,
+                        SkillPack.status == PackStatus.PUBLISHED,
+                        or_(
+                            SkillPack.review_status.is_(None), SkillPack.review_status == "approved"
+                        ),
+                        _ilike_fallback,
+                    )
+                    .order_by(SkillPack.created_at.desc())
+                )
                 total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
                 total = total_r.scalar_one()
                 offset = (page - 1) * effective_per_page
@@ -226,6 +257,15 @@ class RegistryService:
             raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
         if pack.visibility == PackVisibility.PRIVATE:
             raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
+        # A PUBLIC pack whose review regressed to rejected/pending must 404
+        # by ID too — the list/search path already filters on review_status
+        # (NULL or approved), so serving it by direct id was an inconsistency
+        # that surfaced rejected content. Mirrors workflow_registry.
+        if pack.visibility == PackVisibility.PUBLIC and pack.review_status not in (
+            None,
+            "approved",
+        ):
+            raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
         return pack
 
     async def get_public_releases(self, pack_id: str) -> list[SkillPackRelease]:
@@ -246,9 +286,7 @@ class RegistryService:
         """Return pack categories as a tree structure."""
         from app.models.pack_category import PackCategory
 
-        result = await self.db.execute(
-            select(PackCategory).order_by(PackCategory.sort_order)
-        )
+        result = await self.db.execute(select(PackCategory).order_by(PackCategory.sort_order))
         categories = list(result.scalars().all())
 
         # Build tree: group children by parent_id
@@ -310,18 +348,14 @@ class RegistryService:
         latest = latest_r.scalar_one_or_none()
         if latest and latest.manifest:
             total_exercises = sum(
-                len(s.get("exercises", []))
-                for s in latest.manifest.get("skills", [])
+                len(s.get("exercises", [])) for s in latest.manifest.get("skills", [])
             )
             if total_exercises > 0:
                 score += 15
 
             # +10 has rubric templates
             templates = latest.manifest.get("project_templates", [])
-            has_rubric = any(
-                t.get("rubric") and len(t.get("rubric", [])) > 0
-                for t in templates
-            )
+            has_rubric = any(t.get("rubric") and len(t.get("rubric", [])) > 0 for t in templates)
             if has_rubric:
                 score += 10
 
@@ -384,37 +418,88 @@ class RegistryService:
 
         manifest = release.manifest or {}
 
-        # Extract skills
+        # Extract skills. Every entry from the import path is untrusted JSON —
+        # a non-dict skill, or a non-list exercises value, must be skipped, not
+        # crash the anon preview with AttributeError/TypeError (R87 hardening,
+        # same class as the R86e rubric 500).
+        # R92c: the manifest is untrusted JSON (import path). PackPreviewResponse
+        # types name/description/difficulty/title as str|None, so a NON-string
+        # value (e.g. an int description) that reached the response model raised
+        # a pydantic ValidationError at serialization — an anon-registry preview
+        # 500 with no sqlstate (not caught by the DBAPIError backstop). R86e/R87d
+        # hardened the rubric SHAPE; this hardens the string FIELD TYPES too.
+        # Coerce: a required str field → "" when not a str, optional → None.
+        def _s(v):
+            return v if isinstance(v, str) else None
+
+        def _req_s(v):
+            return v if isinstance(v, str) else ""
+
         raw_skills = manifest.get("skills", [])
         skills = []
         total_exercises = 0
         for s in raw_skills:
-            exercises = s.get("exercises", [])
+            if not isinstance(s, dict):
+                continue
+            exercises = s.get("exercises")
+            if not isinstance(exercises, list):
+                exercises = []
             total_exercises += len(exercises)
-            skills.append({
-                "name": s.get("name", ""),
-                "description": s.get("description"),
-                "difficulty": s.get("difficulty"),
-                "exercise_count": len(exercises),
-                "exercises": [{"title": e.get("title", "")} for e in exercises],
-                "prerequisites": s.get("prerequisites", []),
-            })
+            prereqs = s.get("prerequisites", [])
+            if not isinstance(prereqs, list):
+                prereqs = []
+            skills.append(
+                {
+                    "name": _req_s(s.get("name")),
+                    "description": _s(s.get("description")),
+                    "difficulty": _s(s.get("difficulty")),
+                    "exercise_count": len(exercises),
+                    "exercises": [
+                        {"title": _req_s(e.get("title"))} for e in exercises if isinstance(e, dict)
+                    ],
+                    # prerequisites is list[str] in the schema — drop non-str entries.
+                    "prerequisites": [p for p in prereqs if isinstance(p, str)],
+                }
+            )
 
         # Extract templates
         raw_templates = manifest.get("project_templates", [])
         templates = []
         for t in raw_templates:
-            rubric = t.get("rubric") or {}
-            criteria = rubric.get("criteria", [])
-            templates.append({
-                "name": t.get("name", ""),
-                "description": t.get("description"),
-                "rubric_criteria_count": len(criteria),
-            })
+            # A template entry from the import path is untrusted JSON — it may
+            # not even be a dict. Skip anything that is not a dict rather than
+            # AttributeError on t.get (R87 fix-of-fix on R86e).
+            if not isinstance(t, dict):
+                continue
+            # ProjectTemplate.rubric is a LIST of {criterion, max_score} dicts
+            # (models/project.py:425, JSONB list), and the published manifest
+            # stores it verbatim (skill_pack.py). Treating it as a dict with a
+            # "criteria" key raised AttributeError ('list' has no .get) →
+            # anon-registry preview 500 for ANY pack whose template has a rubric
+            # (R86e). Count only when the shape is genuinely sized: a legacy
+            # dict form {criteria: [...]} counts its list, but criteria of a
+            # non-list type (int/None/str via the untrusted import path) must
+            # NOT reach len() — that re-introduced the 500 (R87). Default 0.
+            rubric = t.get("rubric")
+            if isinstance(rubric, list):
+                criteria_count = len(rubric)
+            elif isinstance(rubric, dict) and isinstance(rubric.get("criteria"), list):
+                criteria_count = len(rubric["criteria"])
+            else:
+                criteria_count = 0
+            templates.append(
+                {
+                    "name": _req_s(t.get("name")),
+                    "description": _s(t.get("description")),
+                    "rubric_criteria_count": criteria_count,
+                }
+            )
 
-        # Extract categories
+        # Extract categories (skip non-dict entries — untrusted import shape)
         raw_categories = manifest.get("categories", [])
-        categories = [{"name": c.get("name", "")} for c in raw_categories]
+        categories = [
+            {"name": _req_s(c.get("name"))} for c in raw_categories if isinstance(c, dict)
+        ]
 
         return {
             "skills": skills,

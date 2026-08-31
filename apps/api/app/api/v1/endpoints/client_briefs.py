@@ -28,11 +28,14 @@ class ApplyToBriefRequest(BaseModel):
 class ReviewApplicationRequest(BaseModel):
     status: str
 
+
 INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 
 @router.post(
-    "/orgs/{org_id}/briefs", response_model=DataResponse[ClientBriefResponse], status_code=201,
+    "/orgs/{org_id}/briefs",
+    response_model=DataResponse[ClientBriefResponse],
+    status_code=201,
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def create_brief(
@@ -48,11 +51,15 @@ async def create_brief(
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.get("/orgs/{org_id}/briefs", response_model=ListResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/briefs",
+    response_model=ListResponse[ClientBriefResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def list_briefs(
     org_id: str,
     status: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -110,22 +117,41 @@ async def list_open_briefs(
     )
 
 
-@router.get("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.get(
+    "/orgs/{org_id}/briefs/{brief_id}",
+    response_model=DataResponse[ClientBriefResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def get_brief(
     org_id: str,
     brief_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    # Plain members may view OPEN/ACTIVE briefs — the apply flow lives on
+    # this page and apply_to_brief already allows any org member. Draft and
+    # closed briefs stay instructor-only.
+    member = await require_org_member(org_id, user, db)
     svc = ClientBriefService(db)
     brief = await svc.get_brief(brief_id)
     if brief.org_id != org_id:
         raise HTTPException(status_code=404, detail="Brief not found")
+    from app.models.client_brief import BriefStatus
+
+    if brief.status not in (BriefStatus.OPEN, BriefStatus.ACTIVE) and member.role not in (
+        OrgRole.OWNER,
+        OrgRole.ADMIN,
+        OrgRole.INSTRUCTOR,
+    ):
+        raise HTTPException(status_code=404, detail="Brief not found")
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.put("/orgs/{org_id}/briefs/{brief_id}", response_model=DataResponse[ClientBriefResponse], dependencies=[Depends(rate_limit(20, 60))])
+@router.put(
+    "/orgs/{org_id}/briefs/{brief_id}",
+    response_model=DataResponse[ClientBriefResponse],
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def update_brief(
     org_id: str,
     brief_id: str,
@@ -143,7 +169,9 @@ async def update_brief(
     return DataResponse(data=ClientBriefResponse.model_validate(brief))
 
 
-@router.delete("/orgs/{org_id}/briefs/{brief_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))])
+@router.delete(
+    "/orgs/{org_id}/briefs/{brief_id}", status_code=204, dependencies=[Depends(rate_limit(20, 60))]
+)
 async def delete_brief(
     org_id: str,
     brief_id: str,
@@ -261,8 +289,10 @@ async def list_applications(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Instructor: list all applications for a brief."""
-    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    """Instructors see ALL applications; plain members see only their own
+    (the brief detail page uses this to show the "you have applied" state)."""
+    member = await require_org_member(org_id, user, db)
+    is_instructor = member.role in INSTRUCTOR_ROLES
 
     # Verify the brief belongs to this org
     svc = ClientBriefService(db)
@@ -275,12 +305,15 @@ async def list_applications(
     from app.models.client_brief import BriefApplication
     from app.models.user import User as UserModel
 
-    result = await db.execute(
+    query = (
         select(BriefApplication, UserModel.display_name)
         .join(UserModel, UserModel.id == BriefApplication.user_id, isouter=True)
         .where(BriefApplication.brief_id == brief_id)
         .order_by(BriefApplication.applied_at)
     )
+    if not is_instructor:
+        query = query.where(BriefApplication.user_id == user.id)
+    result = await db.execute(query)
     return DataResponse(
         data=[
             {
@@ -327,7 +360,25 @@ async def review_application(
         raise HTTPException(status_code=404, detail="Application not found")
 
     if body.status not in ("accepted", "rejected", "withdrawn"):
-        raise HTTPException(status_code=422, detail="Status must be 'accepted', 'rejected', or 'withdrawn'")
+        raise HTTPException(
+            status_code=422, detail="Status must be 'accepted', 'rejected', or 'withdrawn'"
+        )
+
+    # No self-dealing (R86). Any registered user can create an org and become
+    # its owner (an INSTRUCTOR_ROLE), then apply to their own brief and accept
+    # their own application. An ACCEPTED BriefApplication is a platform-VERIFIED
+    # creator-evidence source (`commercial_project`, weight 1.0, keyed on the
+    # applicant — ADR-013 "evidence, not declarations"), and brief.project_type
+    # is free text that snake-cases straight to a capability key. So self-accept
+    # mints fabricated "verified" capability evidence with no second party and
+    # no real work, flipping a hard S2 exclusion into a ranked shortlist entry.
+    # An applicant may withdraw their OWN application; they may never accept or
+    # reject it.
+    if app_obj.user_id == user.id and body.status in ("accepted", "rejected"):
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot accept or reject your own application",
+        )
 
     app_obj.status = ApplicationStatus(body.status)
     app_obj.reviewed_at = datetime.now(UTC)
@@ -384,7 +435,6 @@ async def withdraw_application(
             "status": app_obj.status.value,
         }
     )
-
 
 
 # list_open_briefs is defined above get_brief to avoid route conflict with /briefs/{brief_id}

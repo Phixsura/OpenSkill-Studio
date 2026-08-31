@@ -106,7 +106,9 @@ class Project(Base):
     cohort_id: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("cohorts.id", ondelete="SET NULL"), nullable=True
     )
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -261,7 +263,9 @@ class PeerReviewRound(Base):
         default=PeerReviewPhase.SETUP,
     )
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -334,7 +338,9 @@ class SubmissionComment(Base):
     item_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("submission_items.id", ondelete="CASCADE"), nullable=False
     )
-    author_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    author_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     parent_id: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("submission_comments.id", ondelete="CASCADE"), nullable=True
     )
@@ -394,7 +400,9 @@ class SubmissionExtension(Base):
     original_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     extended_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    granted_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    granted_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -430,7 +438,9 @@ class ProjectTemplate(Base):
         Enum(ContentStatus, name="content_status", create_constraint=True),
         default=ContentStatus.PUBLISHED,
     )
-    created_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -465,7 +475,9 @@ class ProjectAsset(Base):
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    uploaded_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    uploaded_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -489,7 +501,9 @@ class ProjectCreatorAssignment(Base):
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    assigned_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    assigned_by: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    )
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

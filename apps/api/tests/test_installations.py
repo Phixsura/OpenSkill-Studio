@@ -47,24 +47,56 @@ async def _org(c, h):
 
 
 async def _pack_with_release(c, h, oid, name="Test Pack", visibility="public"):
-    """Create a pack with a skill and publish v1.0.0."""
-    # Create pack
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": name, "visibility": visibility,
-    }, headers=h)).json()["data"]["id"]
+    """Create a pack with a skill and publish v1.0.0.
+
+    PUBLIC visibility is reachable only via submit-review → approve (R60/R79
+    approval gate) — create no longer accepts visibility=public. Create the
+    pack private, publish, then approve to reach public when requested.
+    """
+    # Create pack (never directly public — the approval gate rejects that)
+    create_vis = "private" if visibility == "public" else visibility
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": name,
+                "visibility": create_vis,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     # Create category + skill
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"Cat-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories",
+            json={"name": f"Cat-{uuid.uuid4().hex[:4]}"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"Skill-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     # Add skill to pack
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
 
     # Publish
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+
+    # Reach public via the review flow (approve sets visibility=public)
+    if visibility == "public":
+        await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+        await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
 
     return pid
 
@@ -99,8 +131,17 @@ async def test_registry_excludes_private(c):
 async def test_registry_excludes_draft(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    # Create pack but DON'T publish — stays draft
-    await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Draft Pack", "visibility": "public"}, headers=h)
+    # Reach PUBLIC + DRAFT (approve without ever publishing a release) so the
+    # registry's status==PUBLISHED filter is the ONLY thing excluding it —
+    # otherwise the assertion is vacuous (a private pack is excluded by
+    # visibility regardless, R82). public+draft is a reachable product state.
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid}/packs", json={"name": "Draft Pack"}, headers=h)
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    appr = await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
+    d = appr.json()["data"]
+    assert d["visibility"] == "public" and d["status"] == "draft"
 
     r = await c.get("/api/v1/registry/packs?search=Draft")
     assert not any("Draft" in p["name"] for p in r.json()["data"])
@@ -238,10 +279,22 @@ async def test_update_check(c):
     assert r.json()["data"]["update_available"] is False
 
     # Publish v1.1.0
-    sid2 = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": "New Skill", "description": "d" * 10, "difficulty": "beginner",
-        "category_id": (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "NewCat"}, headers=h1)).json()["data"]["id"],
-    }, headers=h1)).json()["data"]["id"]
+    sid2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": "New Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": (
+                    await c.post(
+                        f"/api/v1/orgs/{oid1}/categories", json={"name": "NewCat"}, headers=h1
+                    )
+                ).json()["data"]["id"],
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid2}, headers=h1)
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.1.0"}, headers=h1)
 
@@ -332,19 +385,38 @@ async def test_registry_filter_by_scenario(c):
     """Search with ?scenario=ecommerce finds pack tagged with that scenario."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": "Scenario Pack",
-        "visibility": "public",
-        "scenario_tags": ["ecommerce"],
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": "Scenario Pack",
+                "scenario_tags": ["ecommerce"],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"SC-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"SC-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories", json={"name": f"SC-{uuid.uuid4().hex[:4]}"}, headers=h
+        )
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"SC-Skill-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
 
     r = await c.get("/api/v1/registry/packs?scenario=ecommerce")
     assert r.status_code == 200
@@ -356,19 +428,38 @@ async def test_registry_filter_by_tool(c):
     """Search with ?tool=comfyui finds pack tagged with that tool."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": "Tool Pack",
-        "visibility": "public",
-        "tool_tags": ["comfyui"],
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": "Tool Pack",
+                "tool_tags": ["comfyui"],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"TL-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"TL-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories", json={"name": f"TL-{uuid.uuid4().hex[:4]}"}, headers=h
+        )
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"TL-Skill-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
 
     r = await c.get("/api/v1/registry/packs?tool=comfyui")
     assert r.status_code == 200
@@ -380,19 +471,38 @@ async def test_registry_filter_by_difficulty(c):
     """Search with ?difficulty=beginner finds pack with that difficulty."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": "Difficulty Pack",
-        "visibility": "public",
-        "difficulty": "beginner",
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": "Difficulty Pack",
+                "difficulty": "beginner",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"DF-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"DF-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories", json={"name": f"DF-{uuid.uuid4().hex[:4]}"}, headers=h
+        )
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"DF-Skill-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
 
     r = await c.get("/api/v1/registry/packs?difficulty=beginner")
     assert r.status_code == 200
@@ -491,10 +601,21 @@ async def test_compute_diff_added_skill(c):
     iid = inst_r.json()["data"]["id"]
 
     # Add a second skill to source pack and publish v2
-    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "DiffAddCat"}, headers=h1)).json()["data"]["id"]
-    sid2 = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": "Added Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "DiffAddCat"}, headers=h1)
+    ).json()["data"]["id"]
+    sid2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": "Added Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid2}, headers=h1)
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
 
@@ -514,14 +635,40 @@ async def test_compute_diff_removed_skill(c):
     oid2 = await _org(c, h2)
 
     # Create pack with TWO skills so removing one still allows publishing
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "DiffRm Pack", "visibility": "public"}, headers=h1)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "DiffRmCat"}, headers=h1)).json()["data"]["id"]
-    sid_a = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": "Keep Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
-    sid_b = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": "Remove Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/packs",
+            json={"name": "DiffRm Pack", "visibility": "unlisted"},
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "DiffRmCat"}, headers=h1)
+    ).json()["data"]["id"]
+    sid_a = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": "Keep Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    sid_b = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": "Remove Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid_a}, headers=h1)
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid_b}, headers=h1)
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
@@ -555,7 +702,9 @@ async def test_compute_diff_changed_skill(c):
     # Edit the skill's description and publish v2
     pack_skills_r = await c.get(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", headers=h1)
     original_sid = pack_skills_r.json()["data"][0]["skill_id"]
-    await c.put(f"/api/v1/orgs/{oid1}/skills/{original_sid}", json={"description": "x" * 20}, headers=h1)
+    await c.put(
+        f"/api/v1/orgs/{oid1}/skills/{original_sid}", json={"description": "x" * 20}, headers=h1
+    )
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
 
     r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
@@ -581,6 +730,7 @@ async def test_compute_diff_conflict_locally_modified(c):
 
     # Mark the installed skill as locally_modified directly in DB
     from sqlalchemy import select, update
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(SkillModel).where(
@@ -599,7 +749,9 @@ async def test_compute_diff_conflict_locally_modified(c):
     # Modify source skill and publish v2
     pack_skills_r = await c.get(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", headers=h1)
     original_sid = pack_skills_r.json()["data"][0]["skill_id"]
-    await c.put(f"/api/v1/orgs/{oid1}/skills/{original_sid}", json={"description": "y" * 20}, headers=h1)
+    await c.put(
+        f"/api/v1/orgs/{oid1}/skills/{original_sid}", json={"description": "y" * 20}, headers=h1
+    )
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
 
     r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
@@ -639,14 +791,27 @@ async def test_install_specific_version(c):
     pid = await _pack_with_release(c, h1, oid1, "VerPick Pack")
 
     # Publish v2
-    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "VP"}, headers=h1)).json()["data"]["id"]
-    sid2 = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": "VP Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
+    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "VP"}, headers=h1)).json()[
+        "data"
+    ]["id"]
+    sid2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": "VP Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid2}, headers=h1)
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
 
-    r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=h2)
+    r = await c.post(
+        f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=h2
+    )
     assert r.status_code == 201
     assert r.json()["data"]["installed_version"] == "1.0.0"
 
@@ -656,7 +821,11 @@ async def test_install_pack_not_found(c):
     """Installing a pack with a fake ID returns 404."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    r = await c.post(f"/api/v1/orgs/{oid}/installations", json={"pack_id": "01JFAKE00000000000000FAKE"}, headers=h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/installations",
+        json={"pack_id": "01JFAKE00000000000000FAKE"},
+        headers=h,
+    )
     assert r.status_code == 404
 
 
@@ -667,9 +836,16 @@ async def test_install_no_release(c):
     h2, _ = await _auth(c)
     oid1 = await _org(c, h1)
     oid2 = await _org(c, h2)
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
-        "name": "NoRelease Pack", "visibility": "public",
-    }, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/packs",
+            json={
+                "name": "NoRelease Pack",
+                "visibility": "unlisted",
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
 
     r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
     assert r.status_code == 404
@@ -684,16 +860,40 @@ async def test_install_creates_exercises(c):
     oid2 = await _org(c, h2)
 
     # Create pack with a skill that has an exercise
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "ExPack", "visibility": "public"}, headers=h1)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "ExCat"}, headers=h1)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": "Ex Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/packs",
+            json={"name": "ExPack", "visibility": "unlisted"},
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "ExCat"}, headers=h1)
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": "Ex Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     # Create an exercise for this skill
-    await c.post(f"/api/v1/orgs/{oid1}/skills/{sid}/exercises", json={
-        "title": "Test Exercise", "description": "Do this", "type": "text_answer",
-        "config": {}, "max_score": 100,
-    }, headers=h1)
+    await c.post(
+        f"/api/v1/orgs/{oid1}/skills/{sid}/exercises",
+        json={
+            "title": "Test Exercise",
+            "description": "Do this",
+            "type": "text_answer",
+            "config": {},
+            "max_score": 100,
+        },
+        headers=h1,
+    )
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
 
@@ -716,18 +916,44 @@ async def test_install_creates_project_templates(c):
     oid2 = await _org(c, h2)
 
     # Create pack with skill + template
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={"name": "TmplPack", "visibility": "public"}, headers=h1)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "TmplCat"}, headers=h1)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": "Tmpl Skill", "description": "d" * 10, "difficulty": "beginner", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
-    tid = (await c.post(f"/api/v1/orgs/{oid1}/project-templates", json={
-        "name": "Installed Template", "description": "Template desc",
-        "instructions": "Do the thing",
-        "rubric": [{"criterion": "Quality", "max_score": 100}],
-    }, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/packs",
+            json={"name": "TmplPack", "visibility": "unlisted"},
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "TmplCat"}, headers=h1)
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": "Tmpl Skill",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    tid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/project-templates",
+            json={
+                "name": "Installed Template",
+                "description": "Template desc",
+                "instructions": "Do the thing",
+                "rubric": [{"criterion": "Quality", "max_score": 100}],
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
-    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1)
+    await c.post(
+        f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1
+    )
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
 
     await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
@@ -826,7 +1052,9 @@ async def test_student_cannot_install(c):
     h, _ = await _auth(c)
     hs, us = await _auth(c)
     oid = await _org(c, h)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=h
+    )
 
     h_pub, _ = await _auth(c)
     oid_pub = await _org(c, h_pub)
@@ -853,12 +1081,9 @@ async def test_check_update_source_unavailable(c):
 
     # Null out pack_id directly in DB to simulate source unavailable
     from sqlalchemy import update
+
     async with AsyncSessionLocal() as session:
-        await session.execute(
-            update(InstModel)
-            .where(InstModel.id == iid)
-            .values(pack_id=None)
-        )
+        await session.execute(update(InstModel).where(InstModel.id == iid).values(pack_id=None))
         await session.commit()
 
     r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}", headers=h2)
@@ -879,16 +1104,33 @@ async def test_install_data_integrity_skill_fields(c):
     oid2 = await _org(c, h2)
 
     # Create pack with known skill attributes
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
-        "name": "Integrity Pack", "visibility": "public",
-    }, headers=h1)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "IntCat"}, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/packs",
+            json={
+                "name": "Integrity Pack",
+                "visibility": "unlisted",
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "IntCat"}, headers=h1)
+    ).json()["data"]["id"]
     skill_name = f"IntSkill-{uuid.uuid4().hex[:6]}"
     skill_desc = "A very specific description for integrity test"
-    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": skill_name, "description": skill_desc,
-        "difficulty": "intermediate", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": skill_name,
+                "description": skill_desc,
+                "difficulty": "intermediate",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
 
@@ -922,6 +1164,7 @@ async def test_install_sets_origin_fields(c):
     assert inst_r.status_code == 201
 
     from sqlalchemy import select
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(SkillModel).where(
@@ -964,12 +1207,21 @@ async def test_compute_diff_added_template(c):
     iid = inst_r.json()["data"]["id"]
 
     # Add a template and publish v2
-    tid = (await c.post(f"/api/v1/orgs/{oid1}/project-templates", json={
-        "name": "Added Template", "description": "Template desc",
-        "instructions": "Do it",
-        "rubric": [{"criterion": "Quality", "max_score": 100}],
-    }, headers=h1)).json()["data"]["id"]
-    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1)
+    tid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/project-templates",
+            json={
+                "name": "Added Template",
+                "description": "Template desc",
+                "instructions": "Do it",
+                "rubric": [{"criterion": "Quality", "max_score": 100}],
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1
+    )
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h1)
 
     r = await c.get(f"/api/v1/orgs/{oid2}/installations/{iid}/diff?version=2.0.0", headers=h2)
@@ -987,21 +1239,47 @@ async def test_compute_diff_removed_template(c):
     oid2 = await _org(c, h2)
 
     # Create pack with skill + template, then publish v1
-    pid = (await c.post(f"/api/v1/orgs/{oid1}/packs", json={
-        "name": "TmplDiffRm Pack", "visibility": "public",
-    }, headers=h1)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "TDRCat"}, headers=h1)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid1}/skills", json={
-        "name": f"TDR-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h1)).json()["data"]["id"]
-    tid = (await c.post(f"/api/v1/orgs/{oid1}/project-templates", json={
-        "name": "Removable Template", "description": "Template desc",
-        "instructions": "Do it",
-        "rubric": [{"criterion": "Quality", "max_score": 100}],
-    }, headers=h1)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/packs",
+            json={
+                "name": "TmplDiffRm Pack",
+                "visibility": "unlisted",
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(f"/api/v1/orgs/{oid1}/categories", json={"name": "TDRCat"}, headers=h1)
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/skills",
+            json={
+                "name": f"TDR-Skill-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
+    tid = (
+        await c.post(
+            f"/api/v1/orgs/{oid1}/project-templates",
+            json={
+                "name": "Removable Template",
+                "description": "Template desc",
+                "instructions": "Do it",
+                "rubric": [{"criterion": "Quality", "max_score": 100}],
+            },
+            headers=h1,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/skills", json={"skill_id": sid}, headers=h1)
-    await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1)
+    await c.post(
+        f"/api/v1/orgs/{oid1}/packs/{pid}/templates", json={"template_id": tid}, headers=h1
+    )
     await c.post(f"/api/v1/orgs/{oid1}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h1)
 
     inst_r = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
@@ -1078,12 +1356,24 @@ async def test_registry_archived_pack_detail_rejected(c):
 
 @pytest.mark.asyncio
 async def test_registry_draft_pack_detail_rejected(c):
-    """Draft pack (no release) returns 404 on registry detail."""
+    """PUBLIC + DRAFT pack (approved but never released) 404s on registry
+    detail — the status==PUBLISHED gate must reject it. Reaching public+draft
+    (not just private) is what makes this exercise the status filter rather
+    than the visibility filter (R82)."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": "Draft Detail Pack", "visibility": "public",
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": "Draft Detail Pack",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    d = (await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)).json()["data"]
+    assert d["visibility"] == "public" and d["status"] == "draft"
 
     r = await c.get(f"/api/v1/registry/packs/{pid}")
     assert r.status_code == 404
@@ -1095,20 +1385,42 @@ async def test_registry_search_matches_summary(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     unique_term = f"xyzzy{uuid.uuid4().hex[:8]}"
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": "Summary Pack", "visibility": "public",
-        "summary": f"Pack about {unique_term}",
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": "Summary Pack",
+                "summary": f"Pack about {unique_term}",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={
-        "name": f"SM-{uuid.uuid4().hex[:4]}",
-    }, headers=h)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"SM-Skill-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories",
+            json={
+                "name": f"SM-{uuid.uuid4().hex[:4]}",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"SM-Skill-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
 
     r = await c.get(f"/api/v1/registry/packs?search={unique_term}")
     assert r.status_code == 200
@@ -1126,33 +1438,73 @@ async def test_registry_combined_filters_scenario_and_difficulty(c):
     oid = await _org(c, h)
 
     # Pack matching both filters
-    pid_match = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": f"Both-{uuid.uuid4().hex[:6]}",
-        "visibility": "public",
-        "scenario_tags": ["healthcare"],
-        "difficulty": "advanced",
-    }, headers=h)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"CF-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"CF-Sk-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
+    pid_match = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": f"Both-{uuid.uuid4().hex[:6]}",
+                "scenario_tags": ["healthcare"],
+                "difficulty": "advanced",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories", json={"name": f"CF-{uuid.uuid4().hex[:4]}"}, headers=h
+        )
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"CF-Sk-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid_match}/skills", json={"skill_id": sid}, headers=h)
-    await c.post(f"/api/v1/orgs/{oid}/packs/{pid_match}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid_match}/releases", json={"version": "1.0.0"}, headers=h
+    )
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid_match}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid_match}/approve", headers=h)
 
     # Pack matching only scenario (wrong difficulty)
-    pid_partial = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": f"Partial-{uuid.uuid4().hex[:6]}",
-        "visibility": "public",
-        "scenario_tags": ["healthcare"],
-        "difficulty": "beginner",
-    }, headers=h)).json()["data"]["id"]
-    sid2 = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"CF-Sk2-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
-    await c.post(f"/api/v1/orgs/{oid}/packs/{pid_partial}/skills", json={"skill_id": sid2}, headers=h)
-    await c.post(f"/api/v1/orgs/{oid}/packs/{pid_partial}/releases", json={"version": "1.0.0"}, headers=h)
+    pid_partial = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": f"Partial-{uuid.uuid4().hex[:6]}",
+                "scenario_tags": ["healthcare"],
+                "difficulty": "beginner",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    sid2 = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"CF-Sk2-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid_partial}/skills", json={"skill_id": sid2}, headers=h
+    )
+    await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid_partial}/releases", json={"version": "1.0.0"}, headers=h
+    )
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid_partial}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid_partial}/approve", headers=h)
 
     r = await c.get("/api/v1/registry/packs?scenario=healthcare&difficulty=advanced")
     assert r.status_code == 200
@@ -1186,18 +1538,37 @@ async def test_registry_combined_filters_tool_and_search(c):
     oid = await _org(c, h)
     unique = f"zqwrty{uuid.uuid4().hex[:6]}"
 
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": f"ToolSearch-{unique}",
-        "visibility": "public",
-        "tool_tags": ["blender"],
-    }, headers=h)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"TS-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"TS-Sk-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": f"ToolSearch-{unique}",
+                "tool_tags": ["blender"],
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories", json={"name": f"TS-{uuid.uuid4().hex[:4]}"}, headers=h
+        )
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"TS-Sk-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
 
     # Correct tool + matching search
     r = await c.get(f"/api/v1/registry/packs?tool=blender&search={unique}")
@@ -1274,18 +1645,39 @@ async def test_registry_search_description_match(c):
     oid = await _org(c, h)
     unique = f"descword{uuid.uuid4().hex[:8]}"
 
-    pid = (await c.post(f"/api/v1/orgs/{oid}/packs", json={
-        "name": f"DescPack-{uuid.uuid4().hex[:6]}",
-        "visibility": "public",
-        "description": f"This pack covers {unique} techniques",
-    }, headers=h)).json()["data"]["id"]
-    cat = (await c.post(f"/api/v1/orgs/{oid}/categories", json={"name": f"DSR-{uuid.uuid4().hex[:4]}"}, headers=h)).json()["data"]["id"]
-    sid = (await c.post(f"/api/v1/orgs/{oid}/skills", json={
-        "name": f"DSR-Sk-{uuid.uuid4().hex[:4]}", "description": "d" * 10,
-        "difficulty": "beginner", "category_id": cat,
-    }, headers=h)).json()["data"]["id"]
+    pid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/packs",
+            json={
+                "name": f"DescPack-{uuid.uuid4().hex[:6]}",
+                "description": f"This pack covers {unique} techniques",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    cat = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/categories",
+            json={"name": f"DSR-{uuid.uuid4().hex[:4]}"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    sid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/skills",
+            json={
+                "name": f"DSR-Sk-{uuid.uuid4().hex[:4]}",
+                "description": "d" * 10,
+                "difficulty": "beginner",
+                "category_id": cat,
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/skills", json={"skill_id": sid}, headers=h)
     await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/submit-for-review", headers=h)
+    await c.post(f"/api/v1/orgs/{oid}/packs/{pid}/approve", headers=h)
 
     r = await c.get(f"/api/v1/registry/packs?search={unique}")
     assert r.status_code == 200
@@ -1424,10 +1816,12 @@ async def test_concurrent_install_count_accuracy(c):
         ox = await _org(c, hx)
         installers.append((hx, ox))
 
-    results = await asyncio.gather(*[
-        c.post(f"/api/v1/orgs/{ox}/installations", json={"pack_id": pid}, headers=hx)
-        for hx, ox in installers
-    ])
+    results = await asyncio.gather(
+        *[
+            c.post(f"/api/v1/orgs/{ox}/installations", json={"pack_id": pid}, headers=hx)
+            for hx, ox in installers
+        ]
+    )
 
     successes = sum(1 for r in results if r.status_code == 201)
 
@@ -1448,7 +1842,9 @@ async def test_existing_install_survives_source_org_deletion(c):
     oid_target = await _org(c, h2)
     pid = await _pack_with_release(c, h1, oid_source, "SrcDel Install")
 
-    inst_r = await c.post(f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2)
+    inst_r = await c.post(
+        f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2
+    )
     assert inst_r.status_code == 201
     iid = inst_r.json()["data"]["id"]
 
@@ -1532,7 +1928,9 @@ async def test_check_update_after_source_org_deleted(c):
     oid_target = await _org(c, h2)
     pid = await _pack_with_release(c, h1, oid_source, "SrcDel Update")
 
-    inst_r = await c.post(f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2)
+    inst_r = await c.post(
+        f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2
+    )
     iid = inst_r.json()["data"]["id"]
 
     # Archive source org
@@ -1554,7 +1952,9 @@ async def test_fork_after_source_org_deleted(c):
     oid_target = await _org(c, h2)
     pid = await _pack_with_release(c, h1, oid_source, "SrcDel Fork")
 
-    inst_r = await c.post(f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2)
+    inst_r = await c.post(
+        f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2
+    )
     iid = inst_r.json()["data"]["id"]
 
     # Archive source org
@@ -1575,7 +1975,9 @@ async def test_remove_installation_after_source_org_deleted(c):
     oid_target = await _org(c, h2)
     pid = await _pack_with_release(c, h1, oid_source, "SrcDel Remove")
 
-    inst_r = await c.post(f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2)
+    inst_r = await c.post(
+        f"/api/v1/orgs/{oid_target}/installations", json={"pack_id": pid}, headers=h2
+    )
     iid = inst_r.json()["data"]["id"]
 
     # Archive source org
@@ -1603,3 +2005,191 @@ async def test_list_installations_after_source_org_deleted(c):
     r = await c.get(f"/api/v1/orgs/{oid_target}/installations", headers=h2)
     assert r.status_code == 200
     assert r.json()["meta"]["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_skill_pack_remove_race_decrements_once(c):
+    """R42 (skill-pack family): two concurrent removes — the loser's
+    status-guarded UPDATE hits rowcount 0 and 404s; install_count is
+    decremented exactly once."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPack, SkillPackInstallation
+    from app.services.installation import InstallationNotFoundError, InstallationService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, f"RaceRm-{uuid.uuid4().hex[:6]}")
+    r = await c.post(f"/api/v1/orgs/{oid}/installations", json={"pack_id": pid}, headers=h)
+    assert r.status_code == 201, r.text
+    install_id = r.json()["data"]["id"]
+
+    # Second org installs too → count starts at 2 (the greatest(...,0) floor
+    # would mask a double decrement if the count started at 1)
+    h2, _ = await _auth(c)
+    oid2 = await _org(c, h2)
+    r2 = await c.post(f"/api/v1/orgs/{oid2}/installations", json={"pack_id": pid}, headers=h2)
+    assert r2.status_code == 201, r2.text
+
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(SkillPackInstallation, install_id)
+        assert stale.status.value == "active"
+
+        async with AsyncSessionLocal() as db_b:
+            await InstallationService(db_b).remove(install_id, oid)
+            await db_b.commit()
+
+        with pytest.raises(InstallationNotFoundError):
+            await InstallationService(db_a).remove(install_id, oid)
+
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(SkillPack, pid)
+        assert pack.install_count == 1  # 2 installs − exactly 1 remove
+
+
+@pytest.mark.asyncio
+async def test_skill_pack_fork_remove_race_cannot_resurrect(c):
+    """R55 (skill-pack family): same fork-vs-remove resurrection race."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import SkillPackInstallation
+    from app.services.installation import InstallationNotFoundError, InstallationService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, f"ForkRace-{uuid.uuid4().hex[:6]}")
+    r = await c.post(f"/api/v1/orgs/{oid}/installations", json={"pack_id": pid}, headers=h)
+    install_id = r.json()["data"]["id"]
+
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(SkillPackInstallation, install_id)
+        assert stale.status.value == "active"
+
+        async with AsyncSessionLocal() as db_b:
+            await InstallationService(db_b).remove(install_id, oid)
+            await db_b.commit()
+
+        with pytest.raises(InstallationNotFoundError):
+            await InstallationService(db_a).fork(install_id, oid)
+        await db_a.rollback()
+
+    async with AsyncSessionLocal() as db:
+        final = await db.get(SkillPackInstallation, install_id)
+        assert final.status.value == "removed"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_race_cannot_repoint_forked_install(c):
+    """R70d: skill-pack upgrade() wrote release_id/installed_version via
+    unguarded ORM attr assignment after a stale ACTIVE read — a concurrent
+    fork() (guarded, commits FORKED) between the read and the write was
+    silently overwritten: a DETACHED fork repointed at a new release with
+    fresh version metadata. The write is now a status-guarded UPDATE
+    (WHERE status==ACTIVE); the loser gets 409 INSTALL_CONFLICT."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.skill_pack import InstallStatus, SkillPackInstallation
+    from app.services.installation import InstallationService
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, f"Race-{uuid.uuid4().hex[:6]}")
+    # second release so upgrade has a target
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/{pid}/releases", json={"version": "2.0.0"}, headers=h
+    )
+    assert r.status_code == 201, r.text
+
+    # consumer org installs v1.0.0
+    h2, u2 = await _auth(c)
+    o2 = await _org(c, h2)
+    ri = await c.post(
+        f"/api/v1/orgs/{o2}/installations",
+        json={"pack_id": pid, "version": "1.0.0"},
+        headers=h2,
+    )
+    assert ri.status_code == 201, ri.text
+    install_id = ri.json()["data"]["id"]
+
+    # Session A primes its identity map with the ACTIVE row; session B forks
+    # (guarded UPDATE → FORKED) and commits; A's upgrade then runs on the
+    # stale ACTIVE snapshot — its guarded write must lose (409), never
+    # repoint the forked install.
+    async with AsyncSessionLocal() as db_a:
+        stale = await db_a.get(SkillPackInstallation, install_id)
+        assert stale.status == InstallStatus.ACTIVE
+
+        async with AsyncSessionLocal() as db_b:
+            await InstallationService(db_b).fork(install_id, o2)
+            await db_b.commit()
+
+        with pytest.raises(AppError) as exc_info:
+            await InstallationService(db_a).upgrade(install_id, o2, "2.0.0", u2["id"])
+        assert exc_info.value.code in ("INSTALL_CONFLICT", "INSTALL_FORKED"), exc_info.value.code
+        await db_a.rollback()
+
+    async with AsyncSessionLocal() as db:
+        p = await db.get(SkillPackInstallation, install_id)
+        assert p.status == InstallStatus.FORKED
+        assert p.installed_version == "1.0.0", f"forked install repointed to {p.installed_version}"
+
+
+@pytest.mark.asyncio
+async def test_anon_registry_omits_internal_fields(c):
+    """R71: the anonymous /registry endpoints served SkillPackResponse, which
+    exposes rejection_reason (the moderator's PRIVATE review note), plus
+    review_status, owner_org_id and created_by, to unauthenticated callers. A
+    rejected-then-approved pack thus published the moderator's rejection note
+    to the world. The anon endpoints now use PublicSkillPackResponse, which
+    omits all four. Seed the leaky state directly, then read as anon."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill_pack import PackStatus, PackVisibility, SkillPack
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, "Leaky Pack")
+
+    # Simulate the reject→resubmit→approve history that leaves a stale
+    # rejection_reason on an approved, public pack.
+    secret = "INTERNAL: suspected asset theft from ClientCo"
+    async with AsyncSessionLocal() as db:
+        pack = await db.get(SkillPack, pid)
+        pack.rejection_reason = secret
+        pack.review_status = "approved"
+        pack.visibility = PackVisibility.PUBLIC
+        pack.status = PackStatus.PUBLISHED
+        await db.commit()
+
+    # Anonymous detail read (no auth header)
+    r = await c.get(f"/api/v1/registry/packs/{pid}")
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    for leaked in ("rejection_reason", "review_status", "owner_org_id", "created_by"):
+        assert leaked not in d, f"{leaked} leaked to anon registry: {d.get(leaked)!r}"
+    assert d["name"] == "Leaky Pack"  # discovery metadata still present
+
+    # Anonymous search must not leak either
+    rs = await c.get("/api/v1/registry/packs?search=Leaky")
+    assert rs.status_code == 200
+    for row in rs.json()["data"]:
+        assert "rejection_reason" not in row
+        assert "owner_org_id" not in row
+
+
+@pytest.mark.asyncio
+async def test_anon_registry_releases_omit_released_by(c):
+    """R72 (same class as R71 leak): the anonymous
+    /registry/packs/{id}/releases endpoint served ReleaseResponse, which
+    exposes released_by — the publisher's internal user id — to
+    unauthenticated callers. The workflow twin
+    (PublicWorkflowReleaseResponse) already omits it. The anon skill endpoint
+    now uses PublicReleaseResponse, which omits released_by."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _pack_with_release(c, h, oid, "ReleasesLeak")
+
+    r = await c.get(f"/api/v1/registry/packs/{pid}/releases")
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert len(data) >= 1
+    for rel in data:
+        assert "released_by" not in rel, f"released_by leaked to anon: {rel.get('released_by')!r}"
+        assert rel["version"] == "1.0.0"  # discovery metadata preserved

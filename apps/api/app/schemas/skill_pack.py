@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, field_validator
 
+from app.schemas.base import reject_ctrl_json, reject_deep_json, reject_nonfinite_json
+
 # ── Pack CRUD ────────────────────────────────────────────
 
 
@@ -20,6 +22,9 @@ class CreateSkillPackRequest(BaseModel):
     tool_tags: list[str] = []
     capability_tags: list[str] = []
     provenance: dict | None = None
+    # R92i: opt-in flag for cross-org sharing (share_pack requires it True).
+    # Not a public-registry card field, so toggling it never voids approval.
+    sharing_enabled: bool = False
 
     @field_validator("name")
     @classmethod
@@ -100,7 +105,11 @@ class CreateSkillPackRequest(BaseModel):
     def validate_provenance_size(cls, v: dict | None) -> dict | None:
         if v is not None and len(str(v)) > 20000:
             raise ValueError("Provenance data too large (max 20,000 chars)")
-        return v
+        # Mirror the workflow_pack twin (R78): NaN/Infinity and NUL/control
+        # chars in this open JSONB dict 500 at the write (22P02 / 22P05).
+        reject_deep_json(v, "provenance")
+        reject_nonfinite_json(v, "provenance")
+        return reject_ctrl_json(v, "provenance")
 
 
 class UpdateSkillPackRequest(BaseModel):
@@ -116,6 +125,9 @@ class UpdateSkillPackRequest(BaseModel):
     tool_tags: list[str] | None = None
     capability_tags: list[str] | None = None
     provenance: dict | None = None
+    # R92i: cross-org sharing toggle. Not a _card_fields entry (update_pack), so
+    # enabling/disabling sharing on an approved pack does not void its approval.
+    sharing_enabled: bool | None = None
 
     @field_validator("name")
     @classmethod
@@ -200,7 +212,11 @@ class UpdateSkillPackRequest(BaseModel):
     def validate_provenance_size(cls, v: dict | None) -> dict | None:
         if v is not None and len(str(v)) > 20000:
             raise ValueError("Provenance data too large (max 20,000 chars)")
-        return v
+        # Mirror the workflow_pack twin (R78): NaN/Infinity and NUL/control
+        # chars in this open JSONB dict 500 at the write (22P02 / 22P05).
+        reject_deep_json(v, "provenance")
+        reject_nonfinite_json(v, "provenance")
+        return reject_ctrl_json(v, "provenance")
 
 
 class RejectPackRequest(BaseModel):
@@ -240,6 +256,38 @@ class SkillPackResponse(BaseModel):
     sharing_enabled: bool = False
     provenance: dict
     created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PublicSkillPackResponse(BaseModel):
+    """Anonymous registry card/detail — internal moderation + ownership fields
+    are OMITTED. SkillPackResponse (the authenticated org-scoped shape) leaked
+    rejection_reason (the moderator's PRIVATE review note), review_status,
+    owner_org_id, and created_by to unauthenticated /registry callers (R71).
+    The public registry serves only discovery metadata."""
+
+    id: str
+    name: str
+    slug: str
+    description: str | None = None
+    summary: str | None = None
+    visibility: str
+    language: str
+    difficulty: str | None = None
+    estimated_minutes: int | None = None
+    learning_outcomes: list = []
+    scenario_tags: list = []
+    tool_tags: list = []
+    capability_tags: list = []
+    install_count: int = 0
+    review_count: int = 0
+    average_rating: float | None = None
+    quality_score: int | None = None
+    badges: list[str] = []
+    provenance: dict = {}
     created_at: datetime
     updated_at: datetime
 
@@ -339,5 +387,22 @@ class ReleaseResponse(BaseModel):
 
 class ReleaseDetailResponse(ReleaseResponse):
     manifest: dict
+
+    model_config = {"from_attributes": True}
+
+
+class PublicReleaseResponse(BaseModel):
+    """Anonymous registry release entry — OMITS released_by (the publisher's
+    user id, an internal identifier the anon /registry/packs/{id}/releases
+    endpoint has no business exposing to the world — R72). Mirrors the
+    workflow twin PublicWorkflowReleaseResponse, which already omits it."""
+
+    id: str
+    pack_id: str
+    version: str
+    changelog: str | None = None
+    checksum: str
+    component_count: int
+    released_at: datetime
 
     model_config = {"from_attributes": True}

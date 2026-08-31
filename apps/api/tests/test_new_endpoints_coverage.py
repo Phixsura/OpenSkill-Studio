@@ -59,10 +59,18 @@ async def test_briefs_open_endpoint_returns_open_briefs(c):
     oid = await _org(c, h)
 
     # Create brief and set to open
-    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json={
-        "title": "Open Brief", "client_name": "C", "project_type": "p",
-        "objective": "An open brief for coverage testing",
-    }, headers=h)).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Open Brief",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "An open brief for coverage testing",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=h)
 
@@ -81,10 +89,18 @@ async def test_briefs_open_endpoint_excludes_draft(c):
     oid = await _org(c, h)
 
     # Create draft brief (don't change status)
-    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json={
-        "title": "Draft Brief", "client_name": "C", "project_type": "p",
-        "objective": "A draft brief that should not appear",
-    }, headers=h)).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Draft Brief",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "A draft brief that should not appear",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     r = await c.get(f"/api/v1/orgs/{oid}/briefs/open", headers=h)
     assert r.status_code == 200
@@ -111,12 +127,22 @@ async def test_withdraw_application(c):
     hi, _ = await _auth(c)
     hs, us = await _auth(c)
     oid = await _org(c, hi)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
 
-    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json={
-        "title": "Withdraw Brief", "client_name": "C", "project_type": "p",
-        "objective": "A brief for testing withdrawal",
-    }, headers=hi)).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Withdraw Brief",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "A brief for testing withdrawal",
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
     await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=hi)
 
     # Apply
@@ -134,12 +160,22 @@ async def test_withdraw_no_application(c):
     hi, _ = await _auth(c)
     hs, us = await _auth(c)
     oid = await _org(c, hi)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
 
-    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json={
-        "title": "No App Brief", "client_name": "C", "project_type": "p",
-        "objective": "A brief where nobody applied",
-    }, headers=hi)).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "No App Brief",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "A brief where nobody applied",
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
 
     r = await c.post(f"/api/v1/orgs/{oid}/briefs/{bid}/withdraw", headers=hs)
     assert r.status_code == 404
@@ -151,20 +187,33 @@ async def test_withdraw_accepted_application_rejected(c):
     hi, _ = await _auth(c)
     hs, us = await _auth(c)
     oid = await _org(c, hi)
-    await c.post(f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi)
+    await c.post(
+        f"/api/v1/orgs/{oid}/members", json={"user_id": us["id"], "role": "student"}, headers=hi
+    )
 
-    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json={
-        "title": "Accepted Brief", "client_name": "C", "project_type": "p",
-        "objective": "A brief where application was accepted",
-    }, headers=hi)).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Accepted Brief",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "A brief where application was accepted",
+            },
+            headers=hi,
+        )
+    ).json()["data"]["id"]
     await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=hi)
 
     app_r = await c.post(f"/api/v1/orgs/{oid}/briefs/{bid}/apply", json={"note": "hi"}, headers=hs)
     app_id = app_r.json()["data"]["id"]
 
     # Accept the application
-    await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
-                json={"status": "accepted"}, headers=hi)
+    await c.put(
+        f"/api/v1/orgs/{oid}/briefs/{bid}/applications/{app_id}",
+        json={"status": "accepted"},
+        headers=hi,
+    )
 
     # Try to withdraw → should fail
     r = await c.post(f"/api/v1/orgs/{oid}/briefs/{bid}/withdraw", headers=hs)
@@ -229,10 +278,10 @@ def test_video_eval_frames_to_base64():
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         # Minimal 1x1 PNG
         f.write(
-            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01'
-            b'\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00'
-            b'\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00'
-            b'\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82'
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
+            b"\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00"
+            b"\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
         )
         path = f.name
 
@@ -262,10 +311,18 @@ async def test_brief_status_transitions(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json={
-        "title": "Lifecycle", "client_name": "C", "project_type": "p",
-        "objective": "Testing full brief lifecycle",
-    }, headers=h)).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Lifecycle",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "Testing full brief lifecycle",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     # draft → open
     r = await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "open"}, headers=h)
@@ -295,10 +352,18 @@ async def test_brief_cancel(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
 
-    bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json={
-        "title": "Cancellable", "client_name": "C", "project_type": "p",
-        "objective": "A brief that will be cancelled",
-    }, headers=h)).json()["data"]["id"]
+    bid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/briefs",
+            json={
+                "title": "Cancellable",
+                "client_name": "C",
+                "project_type": "p",
+                "objective": "A brief that will be cancelled",
+            },
+            headers=h,
+        )
+    ).json()["data"]["id"]
 
     r = await c.put(f"/api/v1/orgs/{oid}/briefs/{bid}", json={"status": "cancelled"}, headers=h)
     assert r.status_code == 200

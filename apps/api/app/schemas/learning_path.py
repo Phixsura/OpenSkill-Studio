@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CreateLearningPathRequest(BaseModel):
@@ -88,10 +88,11 @@ class LearningPathResponse(BaseModel):
 
 
 class AddPathItemRequest(BaseModel):
-    item_type: str  # skill / project / section
+    item_type: str  # skill / project / section / workflow_pack
     skill_id: str | None = None
     project_id: str | None = None
     section_title: str | None = None
+    workflow_pack_id: str | None = Field(default=None, max_length=26)
     sort_order: int = 0
     required: bool = True
     unlock_rule: str = "previous_required"
@@ -99,7 +100,7 @@ class AddPathItemRequest(BaseModel):
     @field_validator("item_type")
     @classmethod
     def validate_item_type(cls, v: str) -> str:
-        valid = {"skill", "project", "section"}
+        valid = {"skill", "project", "section", "workflow_pack"}
         if v.lower() not in valid:
             raise ValueError(f"item_type must be one of: {', '.join(sorted(valid))}")
         return v
@@ -127,6 +128,8 @@ class AddPathItemRequest(BaseModel):
             raise ValueError("project_id is required for project items")
         if t == "section" and not self.section_title:
             raise ValueError("section_title is required for section items")
+        if t == "workflow_pack" and not self.workflow_pack_id:
+            raise ValueError("workflow_pack_id is required for workflow_pack items")
         return self
 
 
@@ -137,6 +140,7 @@ class PathItemResponse(BaseModel):
     skill_id: str | None
     project_id: str | None
     section_title: str | None
+    workflow_pack_id: str | None = None
     sort_order: int
     required: bool
     unlock_rule: str

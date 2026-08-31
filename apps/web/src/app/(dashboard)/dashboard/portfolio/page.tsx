@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
-import { apiWithAuth } from "@/lib/api";
+import { apiWithAuth, ApiError } from "@/lib/api";
 
 interface ProfileData {
   username: string;
@@ -22,6 +23,15 @@ interface PortfolioItem {
   show_score: boolean;
 }
 
+interface SkillBadge {
+  id: string;
+  skill_name: string;
+  category_name: string;
+  completion_pct: number;
+  completed: boolean;
+  show_on_profile: boolean;
+}
+
 export default function PortfolioPage() {
   const { data: profileData } = useQuery({
     queryKey: ["portfolio-profile"],
@@ -33,8 +43,25 @@ export default function PortfolioPage() {
     queryFn: () => apiWithAuth<{ data: PortfolioItem[] }>("/portfolio/items"),
   });
 
+  const queryClient = useQueryClient();
+  const { data: badgesData } = useQuery({
+    queryKey: ["portfolio-badges"],
+    queryFn: () => apiWithAuth<{ data: SkillBadge[] }>("/portfolio/badges"),
+  });
+
+  const toggleBadge = useMutation({
+    mutationFn: ({ id, show }: { id: string; show: boolean }) =>
+      apiWithAuth(`/portfolio/badges/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ show_on_profile: show }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["portfolio-badges"] }),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update badge"),
+  });
+
   const profile = profileData?.data;
   const items = itemsData?.data ?? [];
+  const badges = badgesData?.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -55,14 +82,52 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-[hsl(var(--muted-foreground))]">Public page</p>
-              <a href={`/u/${profile.username}`} target="_blank" rel="noopener noreferrer"
-                className="text-[hsl(var(--primary))] hover:underline">
+              <a
+                href={`/u/${profile.username}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[hsl(var(--primary))] hover:underline"
+              >
                 openskill.studio/u/{profile.username}
               </a>
             </div>
             <Link href="/dashboard/portfolio/profile">
               <Button variant="secondary">Edit Profile</Button>
             </Link>
+          </div>
+        </div>
+      )}
+
+      {badges.length > 0 && (
+        <div className="rounded-lg border p-4">
+          <h2 className="text-lg font-semibold">Skill Badges</h2>
+          <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">
+            Earned from completed skills — choose which appear on your public profile.
+          </p>
+          <div className="mt-3 space-y-2">
+            {badges.map((b) => (
+              <div
+                key={b.id}
+                className="flex items-center justify-between rounded-md border px-3 py-2"
+              >
+                <div>
+                  <p className="text-sm font-medium">{b.skill_name}</p>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    {b.category_name} · {b.completion_pct}%{b.completed ? " · completed" : ""}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={b.show_on_profile}
+                    disabled={toggleBadge.isPending}
+                    onChange={(e) => toggleBadge.mutate({ id: b.id, show: e.target.checked })}
+                    aria-label={`Show ${b.skill_name} badge on profile`}
+                  />
+                  Show on profile
+                </label>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -77,7 +142,9 @@ export default function PortfolioPage() {
           <div key={item.id} className="flex items-center justify-between rounded-lg border p-4">
             <div>
               <h3 className="font-semibold">{item.title}</h3>
-              <p className="text-xs text-[hsl(var(--muted-foreground))] capitalize">{item.visibility}</p>
+              <p className="text-xs capitalize text-[hsl(var(--muted-foreground))]">
+                {item.visibility}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               {item.featured && (

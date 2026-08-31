@@ -2,14 +2,18 @@
 
 import { useEffect, useRef } from "react";
 
+import { sharedRefresh } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 
 /**
  * On mount, attempts to refresh the access token from the httpOnly cookie.
  * This restores the session after a full page reload.
+ *
+ * Uses the SHARED deduplicated refresh from lib/api — refresh tokens rotate
+ * on use, so a raw fetch here racing apiWithAuth's 401-refresh would present
+ * a just-revoked token and wrongly log the user out.
  */
 export function AuthInitializer({ children }: { children: React.ReactNode }) {
-  const setAuth = useAuthStore((s) => s.setAuth);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const initialized = useRef(false);
 
@@ -17,22 +21,10 @@ export function AuthInitializer({ children }: { children: React.ReactNode }) {
     if (initialized.current || isAuthenticated) return;
     initialized.current = true;
 
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
-
-    fetch(`${API_BASE}/api/v1/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-    })
-      .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          setAuth(data.access_token, data.user);
-        }
-      })
-      .catch(() => {
-        // No valid session — user stays unauthenticated
-      });
-  }, [setAuth, isAuthenticated]);
+    sharedRefresh().catch(() => {
+      // No valid session — user stays unauthenticated
+    });
+  }, [isAuthenticated]);
 
   return <>{children}</>;
 }

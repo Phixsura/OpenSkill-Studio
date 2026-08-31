@@ -1,0 +1,745 @@
+"""Workflow pack installation service (ADR-010).
+
+Mirrors app/services/installation.py semantics for the workflow-pack family:
+install/upgrade/rollback/fork/remove with the capability gate (ADR-011) —
+installation NEVER auto-connects providers; unsatisfied capabilities are a
+hard 422 with structured gaps.
+"""
+
+import structlog
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.exceptions import AppError
+from app.models.provider import ProviderConnection, ProviderModelOffering
+from app.models.skill_pack import InstallStatus, PackStatus, PackVisibility
+from app.models.workflow_pack import (
+    WorkflowPack,
+    WorkflowPackInstallation,
+    WorkflowPackRelease,
+)
+from app.models.workflow_run import WorkflowStepBinding
+from app.services.provider import ProviderService
+from app.services.workflow_pack import _parse_semver
+
+log = structlog.get_logger()
+
+
+class WorkflowInstallationService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    # ── Install ───────────────────────────────────────────
+
+    async def install(
+        self,
+        org_id: str,
+        pack_id: str,
+        version: str | None,
+        installed_by: str,
+    ) -> WorkflowPackInstallation:
+        pack = await self.db.get(WorkflowPack, pack_id)
+        if pack is None:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+
+        # Only PUBLISHED packs are installable. Same code for status/visibility
+        # failures to prevent pack-id enumeration (mirror installation.py).
+        if pack.status != PackStatus.PUBLISHED:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        if pack.visibility == PackVisibility.PRIVATE and pack.owner_org_id != org_id:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        # PUBLIC packs must be approved (or predate the approval flow)
+        if (
+            pack.visibility == PackVisibility.PUBLIC
+            and pack.owner_org_id != org_id
+            and pack.review_status not in (None, "approved")
+        ):
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+
+        release = await self._resolve_release(pack_id, version)
+        if release is None:
+            raise AppError("RELEASE_NOT_FOUND", "No release found for this pack", 404)
+
+        # ── Capability gate (ADR-011): hard failure, never auto-connect ──
+        await self._capability_gate(org_id, release)
+
+        # Already installed?
+        existing_r = await self.db.execute(
+            select(WorkflowPackInstallation).where(
+                WorkflowPackInstallation.org_id == org_id,
+                WorkflowPackInstallation.pack_id == pack_id,
+            )
+        )
+        existing = existing_r.scalar_one_or_none()
+        if existing is not None:
+            if existing.status != InstallStatus.REMOVED:
+                raise AppError(
+                    "ALREADY_INSTALLED", "Workflow pack already installed in this organization", 409
+                )
+            # Reactivate the removed installation — status-guarded UPDATE +
+            # nested transaction, the same race-safe pattern as the fresh
+            # INSERT below. rowcount 0 = a concurrent reinstall already
+            # reactivated the row: clean 409, never a double install_count
+            # bump; begin_nested keeps the session usable if the concurrent
+            # winner's binding rebuild trips uq_binding here.
+            try:
+                async with self.db.begin_nested():
+                    reactivated = await self.db.execute(
+                        update(WorkflowPackInstallation)
+                        .where(
+                            WorkflowPackInstallation.id == existing.id,
+                            WorkflowPackInstallation.status == InstallStatus.REMOVED,
+                        )
+                        .values(
+                            release_id=release.id,
+                            installed_version=release.version,
+                            status=InstallStatus.ACTIVE,
+                            local_definition=None,
+                            locally_modified=False,
+                            installed_by=installed_by,
+                        )
+                    )
+                    if not reactivated.rowcount:
+                        raise AppError(
+                            "ALREADY_INSTALLED",
+                            "Workflow pack already installed in this organization",
+                            409,
+                        )
+                    await self._rebuild_bindings(existing, release)
+                    await self._bump_install_count(pack_id, +1)
+            except IntegrityError:
+                raise AppError(
+                    "ALREADY_INSTALLED",
+                    "Workflow pack already installed in this organization",
+                    409,
+                ) from None
+            await self.db.refresh(existing)
+            log.info("workflow_pack_reinstalled", installation_id=existing.id, org_id=org_id)
+            return existing
+
+        install = WorkflowPackInstallation(
+            org_id=org_id,
+            pack_id=pack_id,
+            release_id=release.id,
+            installed_version=release.version,
+            installed_by=installed_by,
+        )
+        try:
+            async with self.db.begin_nested():
+                self.db.add(install)
+                await self.db.flush()
+        except IntegrityError:
+            # Concurrent install lost the race on uq_wfinstall_org_pack — 409,
+            # not an unhandled 500 with a poisoned session (audit TOCTOU)
+            raise AppError(
+                "ALREADY_INSTALLED",
+                "Workflow pack already installed in this organization",
+                409,
+            ) from None
+        await self._rebuild_bindings(install, release)
+        await self._bump_install_count(pack_id, +1)
+        log.info(
+            "workflow_pack_installed",
+            installation_id=install.id,
+            org_id=org_id,
+            pack_id=pack_id,
+            version=release.version,
+        )
+        return install
+
+    # ── Reads ─────────────────────────────────────────────
+
+    async def list_installations(
+        self, org_id: str, page: int = 1, per_page: int = 20
+    ) -> tuple[list[WorkflowPackInstallation], int]:
+        base = select(WorkflowPackInstallation).where(
+            WorkflowPackInstallation.org_id == org_id,
+            WorkflowPackInstallation.status != InstallStatus.REMOVED,
+        )
+        total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
+        total = total_r.scalar_one()
+        result = await self.db.execute(
+            base.order_by(
+                WorkflowPackInstallation.installed_at.desc(), WorkflowPackInstallation.id.desc()
+            )
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+        )
+        return list(result.scalars().all()), total
+
+    async def get_installation(self, installation_id: str, org_id: str) -> WorkflowPackInstallation:
+        inst = await self.db.get(WorkflowPackInstallation, installation_id)
+        if inst is None or inst.org_id != org_id or inst.status == InstallStatus.REMOVED:
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+        return inst
+
+    # ── Upgrade / rollback (same method — any released version) ──
+
+    async def upgrade(
+        self, installation_id: str, org_id: str, target_version: str
+    ) -> WorkflowPackInstallation:
+        inst = await self.get_installation(installation_id, org_id)
+        if inst.status == InstallStatus.FORKED:
+            raise AppError(
+                "CANNOT_UPGRADE_FORKED",
+                "Forked installations track a local definition — upgrade is not applicable",
+                422,
+            )
+        if inst.pack_id is None:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Original pack no longer exists", 404)
+        # Re-check pack access — visibility/status may have changed since install
+        await self._check_pack_access(inst.pack_id, org_id)
+
+        release = await self._resolve_release(inst.pack_id, target_version)
+        if release is None:
+            raise AppError("RELEASE_NOT_FOUND", f"No release {target_version} for this pack", 404)
+        if release.id == inst.release_id:
+            raise AppError("ALREADY_ON_VERSION", f"Already on version {target_version}", 409)
+
+        # Re-run the capability gate against the target release
+        await self._capability_gate(org_id, release)
+
+        # Status-guarded UPDATE (not a bare ORM write): a concurrent remove()
+        # may flip the row to REMOVED between get_installation and here — an
+        # unguarded flush would repoint a removed install at a new release
+        # (same resurrection class as the R55 fork race). Only an ACTIVE row
+        # upgrades; a lost race is a clean 404.
+        claimed = await self.db.execute(
+            update(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(release_id=release.id, installed_version=release.version)
+        )
+        if not claimed.rowcount:
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+        await self.db.refresh(inst)
+        # Rebuild binding suggestions (unconfirmed) for the new definition
+        await self._rebuild_bindings(inst, release)
+        await self.db.refresh(inst)
+        log.info(
+            "workflow_installation_upgraded",
+            installation_id=installation_id,
+            version=release.version,
+        )
+        return inst
+
+    # ── Fork ──────────────────────────────────────────────
+
+    async def fork(self, installation_id: str, org_id: str) -> WorkflowPackInstallation:
+        inst = await self.get_installation(installation_id, org_id)
+        if inst.status == InstallStatus.FORKED:
+            raise AppError("ALREADY_FORKED", "Installation is already forked", 409)
+        # Row-lock + refresh to committed state BEFORE snapshotting the
+        # definition. Without the lock, fork snapshots inst's identity-map
+        # (possibly v1) definition, then a concurrent upgrade() repoints
+        # release_id to v2 while leaving status=ACTIVE — fork's status-guarded
+        # UPDATE (WHERE status==ACTIVE) still passes and writes a
+        # local_definition frozen at v1 onto a row whose installed_version now
+        # reads 2.0.0: a fork whose code and version label disagree (R70 #3).
+        # populate_existing refreshes release_id/local_definition so the
+        # _effective_definition read below sees the committed release; the lock
+        # serializes fork vs upgrade so one fully commits before the other reads.
+        locked = await self.db.execute(
+            select(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        inst = locked.scalar_one_or_none()
+        if inst is None:
+            # Not ACTIVE under the lock: already forked (409) or removed (404).
+            self.db.expire_all()
+            fresh = await self.db.get(WorkflowPackInstallation, installation_id)
+            if fresh is not None and fresh.status == InstallStatus.FORKED:
+                raise AppError("ALREADY_FORKED", "Installation is already forked", 409)
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+        definition = await self._effective_definition(inst)
+        # Status-guarded UPDATE (belt-and-braces alongside the row lock): a
+        # concurrent remove() cannot slip in between the locked SELECT and this
+        # write, but the guard keeps the transition intent explicit.
+        claimed = await self.db.execute(
+            update(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(
+                status=InstallStatus.FORKED,
+                local_definition=definition,
+                locally_modified=False,
+            )
+        )
+        if not claimed.rowcount:
+            self.db.expire(inst)
+            fresh = await self.db.get(WorkflowPackInstallation, installation_id)
+            if fresh is not None and fresh.status == InstallStatus.FORKED:
+                raise AppError("ALREADY_FORKED", "Installation is already forked", 409)
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+        await self.db.refresh(inst)
+        log.info("workflow_installation_forked", installation_id=installation_id)
+        return inst
+
+    # ── Remove ────────────────────────────────────────────
+
+    async def remove(self, installation_id: str, org_id: str) -> None:
+        inst = await self.get_installation(installation_id, org_id)
+        # Status-guarded UPDATE (same race-safe pattern as the reinstall
+        # path): two concurrent DELETEs both pass get_installation — the
+        # second session's identity map still says ACTIVE — and an unguarded
+        # write would decrement install_count TWICE. rowcount 0 = lost race
+        # = already removed.
+        claimed = await self.db.execute(
+            update(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status != InstallStatus.REMOVED,
+            )
+            .values(status=InstallStatus.REMOVED)
+        )
+        if not claimed.rowcount:
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+        await self.db.execute(
+            sa_delete(WorkflowStepBinding).where(
+                WorkflowStepBinding.installation_id == installation_id
+            )
+        )
+        if inst.pack_id:
+            await self._bump_install_count(inst.pack_id, -1)
+        await self.db.flush()
+        self.db.expire(inst)
+        log.info("workflow_installation_removed", installation_id=installation_id)
+
+    # ── Bindings ──────────────────────────────────────────
+
+    async def list_bindings(self, installation_id: str, org_id: str) -> list[WorkflowStepBinding]:
+        await self.get_installation(installation_id, org_id)
+        result = await self.db.execute(
+            select(WorkflowStepBinding)
+            .where(WorkflowStepBinding.installation_id == installation_id)
+            .order_by(WorkflowStepBinding.step_id)
+        )
+        return list(result.scalars().all())
+
+    async def confirm_binding(
+        self,
+        installation_id: str,
+        org_id: str,
+        step_id: str,
+        offering_id: str,
+        binding_mode: str,
+        confirmed_by: str,
+    ) -> WorkflowStepBinding:
+        inst = await self.get_installation(installation_id, org_id)
+        if binding_mode not in ("auto", "preferred", "pinned"):
+            raise AppError(
+                "INVALID_BINDING_MODE", "Binding mode must be auto, preferred, or pinned", 422
+            )
+
+        # Row-lock the installation and re-check it is not REMOVED — a
+        # concurrent remove() commits status=REMOVED and DELETEs this
+        # installation's bindings, but get_installation reads this session's
+        # own (pre-remove) snapshot, so a blind insert below would land a
+        # fresh binding row AFTER remove's delete: an orphan binding on a
+        # removed install (live-confirmed R67, 6/8 races). remove() takes the
+        # install row lock first (its conditional UPDATE) then touches
+        # bindings — locking here in the same order serializes the two safely:
+        # if remove won, this SELECT (status != REMOVED) returns nothing → 404;
+        # if we win, remove blocks until our binding write commits, then
+        # deletes it as part of removal.
+        # Lock AND refresh the row to committed state (populate_existing): a
+        # column-only lock would leave `inst`'s identity-map release_id /
+        # local_definition stale, so a concurrent upgrade() that repointed the
+        # release between get_installation and here would make the step check
+        # below validate against the OLD definition — confirming a binding for
+        # a step (or capability) that no longer exists in the effective release
+        # (R70 #1, same class as the fork stale-definition race). The lock also
+        # closes the R67 orphan-binding race: if remove() won, the guarded
+        # SELECT (status != REMOVED) returns nothing → 404 and no insert; if we
+        # win, remove blocks until our binding write commits.
+        locked = await self.db.execute(
+            select(WorkflowPackInstallation)
+            .where(
+                WorkflowPackInstallation.id == installation_id,
+                WorkflowPackInstallation.status != InstallStatus.REMOVED,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        inst = locked.scalar_one_or_none()
+        if inst is None:
+            raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+
+        # The step must exist in the effective (committed) definition and declare a capability
+        definition = await self._effective_definition(inst)
+        step = next((s for s in definition.get("steps", []) if s["id"] == step_id), None)
+        if step is None or step.get("type") != "provider_action":
+            raise AppError("STEP_NOT_FOUND", "No provider_action step with this id", 404)
+        capability = step.get("config", {}).get("capability", "")
+
+        # The offering must belong to this org and serve the step's capability
+        provider_svc = ProviderService(self.db)
+        offering = await provider_svc.get_offering(offering_id, org_id)
+        if offering.capability_key != capability:
+            raise AppError(
+                "CAPABILITY_MISMATCH",
+                f"Offering serves '{offering.capability_key}' but the step requires '{capability}'",
+                422,
+            )
+        # …and be usable: an inactive offering or a disabled connection is
+        # rejected by the runtime's _resolve_offering, so confirming one now
+        # would only defer a NO_ELIGIBLE_PROVIDER to run time. Match the
+        # runtime's usability check at confirm time.
+        if not offering.is_active:
+            raise AppError("OFFERING_INACTIVE", "The selected offering is not active", 422)
+        conn = await self.db.get(ProviderConnection, offering.connection_id)
+        if conn is None or conn.status != "active":
+            raise AppError(
+                "OFFERING_INACTIVE",
+                "The selected offering's provider connection is not active",
+                422,
+            )
+        # …and provide every required_feature the step declares. Without this
+        # a human could confirm a binding to an offering missing a feature —
+        # the runtime's _resolve_offering then rejects it (feature-superset
+        # check) and the step fails NO_ELIGIBLE_PROVIDER mid-run, the exact
+        # late surprise binding confirmation is meant to prevent.
+        required_features = set(step.get("config", {}).get("required_features", []))
+        missing = required_features - set(offering.features or [])
+        if missing:
+            raise AppError(
+                "OFFERING_MISSING_FEATURES",
+                f"Offering lacks required features: {', '.join(sorted(missing))}",
+                422,
+            )
+
+        binding_r = await self.db.execute(
+            select(WorkflowStepBinding).where(
+                WorkflowStepBinding.installation_id == installation_id,
+                WorkflowStepBinding.step_id == step_id,
+            )
+        )
+        binding = binding_r.scalar_one_or_none()
+        if binding is None:
+            binding = WorkflowStepBinding(
+                org_id=org_id,
+                installation_id=installation_id,
+                step_id=step_id,
+            )
+            self.db.add(binding)
+        binding.offering_id = offering_id
+        binding.binding_mode = binding_mode
+        binding.confirmed_by = confirmed_by
+        binding.reasons = [
+            {"code": "HUMAN_CONFIRMED", "label": f"Confirmed offering {offering.model_name}"}
+        ]
+        binding.gaps = []
+        await self.db.flush()
+        return binding
+
+    # ── Diff ──────────────────────────────────────────────
+
+    async def compute_diff(self, installation_id: str, org_id: str, to_version: str) -> dict:
+        inst = await self.get_installation(installation_id, org_id)
+        if inst.pack_id is None:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Original pack no longer exists", 404)
+        # Re-check pack access — visibility/status may have changed since install
+        await self._check_pack_access(inst.pack_id, org_id)
+        current = await self._effective_definition(inst)
+        target_release = await self._resolve_release(inst.pack_id, to_version)
+        if target_release is None:
+            raise AppError("RELEASE_NOT_FOUND", f"No release {to_version} for this pack", 404)
+        target = target_release.manifest.get("definition", {})
+        return self._diff_definitions(current, target)
+
+    @staticmethod
+    def _diff_definitions(current: dict, target: dict) -> dict:
+        cur_steps = {s["id"]: s for s in current.get("steps", [])}
+        tgt_steps = {s["id"]: s for s in target.get("steps", [])}
+        added = sorted(set(tgt_steps) - set(cur_steps))
+        removed = sorted(set(cur_steps) - set(tgt_steps))
+        changed = sorted(
+            sid for sid in set(cur_steps) & set(tgt_steps) if cur_steps[sid] != tgt_steps[sid]
+        )
+
+        cur_inputs = {i["key"]: i for i in current.get("inputs", [])}
+        tgt_inputs = {i["key"]: i for i in target.get("inputs", [])}
+        inputs_added = sorted(set(tgt_inputs) - set(cur_inputs))
+        inputs_removed = sorted(set(cur_inputs) - set(tgt_inputs))
+        inputs_changed = sorted(
+            k for k in set(cur_inputs) & set(tgt_inputs) if cur_inputs[k] != tgt_inputs[k]
+        )
+
+        cur_edges = {e["id"] for e in current.get("edges", [])}
+        tgt_edges = {e["id"] for e in target.get("edges", [])}
+        return {
+            "steps": {"added": added, "removed": removed, "changed": changed},
+            "inputs": {
+                "added": inputs_added,
+                "removed": inputs_removed,
+                "changed": inputs_changed,
+            },
+            "edges": {
+                "added_count": len(tgt_edges - cur_edges),
+                "removed_count": len(cur_edges - tgt_edges),
+            },
+        }
+
+    # ── Internals ─────────────────────────────────────────
+
+    async def _check_pack_access(self, pack_id: str, org_id: str) -> WorkflowPack:
+        """Same access rules as install() — owner org always, otherwise the
+        pack must be PUBLISHED and non-private, and a PUBLIC pack must be
+        approved (unlisted is reachable by anyone holding the id — the
+        approval gate only guards registry discovery). Uniform 404 to
+        prevent pack-id enumeration."""
+        pack = await self.db.get(WorkflowPack, pack_id)
+        if pack is None:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        # ARCHIVED is soft-delete: reject it FIRST, for the owner org too (R73).
+        # install() and WorkflowPackService.get_pack both 404 an archived pack
+        # even for its owner, but the owner-org early return here skipped the
+        # status check — so upgrade()/compute_diff() succeeded against a
+        # just-archived (soft-deleted) pack, resurrecting operations on content
+        # the owner had deleted. Uniform 404 keeps the three paths consistent.
+        if pack.status == PackStatus.ARCHIVED:
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        if pack.owner_org_id == org_id:
+            return pack
+        if (
+            pack.status != PackStatus.PUBLISHED
+            or pack.visibility == PackVisibility.PRIVATE
+            or (
+                pack.visibility == PackVisibility.PUBLIC
+                and pack.review_status not in (None, "approved")
+            )
+        ):
+            raise AppError("WORKFLOW_PACK_NOT_FOUND", "Workflow pack not found", 404)
+        return pack
+
+    async def _binding_still_valid(
+        self, binding: WorkflowStepBinding, org_id: str, step_config: dict
+    ) -> bool:
+        """A confirmed binding survives an upgrade only if its offering STILL
+        satisfies the NEW step definition the same way confirm_binding checks
+        at confirmation time (R73): right capability, offering active,
+        connection active, AND every required_feature the (possibly-changed)
+        step now declares. Checking capability alone (the old
+        _binding_capability_matches) let an upgrade preserve a binding whose
+        offering no longer meets a newly-added required_features on the step —
+        or whose offering/connection went inactive — deferring the failure to a
+        mid-run NO_ELIGIBLE_PROVIDER, exactly what confirm-time validation
+        exists to prevent. An invalid binding is dropped and re-suggested."""
+        if not binding.offering_id:
+            return False  # confirmed but offering gone (SET NULL) — re-suggest
+        offering = await self.db.get(ProviderModelOffering, binding.offering_id)
+        if offering is None or not offering.is_active:
+            return False
+        if offering.capability_key != step_config.get("capability", ""):
+            return False
+        conn = await self.db.get(ProviderConnection, offering.connection_id)
+        if conn is None or conn.org_id != org_id or conn.status != "active":
+            return False
+        required = set(step_config.get("required_features", []))
+        return required <= set(offering.features or [])
+
+    async def _resolve_release(
+        self, pack_id: str, version: str | None
+    ) -> WorkflowPackRelease | None:
+        if version:
+            result = await self.db.execute(
+                select(WorkflowPackRelease).where(
+                    WorkflowPackRelease.pack_id == pack_id,
+                    WorkflowPackRelease.version == version,
+                )
+            )
+            return result.scalar_one_or_none()
+        result = await self.db.execute(
+            select(WorkflowPackRelease).where(WorkflowPackRelease.pack_id == pack_id)
+        )
+        releases = list(result.scalars().all())
+        if not releases:
+            return None
+        # Implicit "latest" prefers stable releases — a newer pre-release
+        # (1.1.0-beta) must not shadow the stable 1.0.0 (npm dist-tag semantics)
+        stable = [r for r in releases if "-" not in r.version]
+        pool = stable if stable else releases
+        return max(pool, key=lambda r: _parse_semver(r.version))
+
+    async def _capability_gate(self, org_id: str, release: WorkflowPackRelease) -> None:
+        """Hard install gate: unsatisfied capabilities → 422 with gaps (never auto-connect)."""
+        required = (release.manifest.get("dependencies") or {}).get("requires_capabilities", [])
+        if not required:
+            return
+        provider_svc = ProviderService(self.db)
+        gaps = await provider_svc.check_capabilities(org_id, required)
+        if gaps:
+            raise AppError(
+                "CAPABILITY_UNSATISFIED",
+                "Organization is missing required provider capabilities for this workflow",
+                422,
+                details=gaps,
+            )
+
+    async def _effective_definition(self, inst: WorkflowPackInstallation) -> dict:
+        if inst.local_definition is not None:
+            return inst.local_definition
+        if inst.release_id is None:
+            raise AppError("NO_DEFINITION", "Installation has no release or local definition", 422)
+        release = await self.db.get(WorkflowPackRelease, inst.release_id)
+        if release is None:
+            raise AppError("NO_DEFINITION", "Release no longer exists", 422)
+        return release.manifest.get("definition", {})
+
+    async def get_input_schema(self, inst: WorkflowPackInstallation) -> list[dict]:
+        """Effective run-input schema for the detail endpoint.
+
+        The frontend run form must read this (authenticated) — the public
+        registry endpoint 404s for own-org private packs (audit HIGH).
+        """
+        try:
+            definition = await self._effective_definition(inst)
+        except AppError:
+            return []
+        return [
+            {
+                "key": i.get("key"),
+                "type": i.get("type"),
+                "label": i.get("label") or i.get("key"),
+                "required": i.get("required", True),
+                "default": i.get("default"),
+                "options": i.get("options"),
+            }
+            for i in definition.get("inputs", [])
+        ]
+
+    async def _rebuild_bindings(
+        self, inst: WorkflowPackInstallation, release: WorkflowPackRelease
+    ) -> None:
+        """Rebuild binding suggestions per provider_action step.
+
+        Human-CONFIRMED bindings are preserved when the step still exists in
+        the new definition with an unchanged capability — upgrades must not
+        silently discard explicit provider choices (D5). Unconfirmed
+        suggestions, and confirmed bindings whose step disappeared or changed
+        capability, are deleted and re-suggested.
+        """
+        definition = release.manifest.get("definition", {})
+        # Map of step_id → full config for provider_action steps in the NEW
+        # definition (capability AND required_features both matter — R73).
+        new_configs: dict[str, dict] = {
+            step["id"]: step.get("config", {})
+            for step in definition.get("steps", [])
+            if step.get("type") == "provider_action"
+        }
+
+        existing_r = await self.db.execute(
+            select(WorkflowStepBinding).where(WorkflowStepBinding.installation_id == inst.id)
+        )
+        preserved_step_ids: set[str] = set()
+        for binding in existing_r.scalars().all():
+            step_config = new_configs.get(binding.step_id)
+            keep = (
+                binding.confirmed_by is not None
+                and step_config is not None
+                and await self._binding_still_valid(binding, inst.org_id, step_config)
+            )
+            if keep:
+                preserved_step_ids.add(binding.step_id)
+            elif (
+                binding.confirmed_by is not None
+                and binding.binding_mode == "pinned"
+                and step_config is not None
+            ):
+                # A stale confirmed PIN must never be deleted and re-suggested:
+                # the replacement suggestion resets binding_mode to the step
+                # default and the runtime's auto rung then silently executes on
+                # a provider the org never chose — the exact "silent fallback
+                # to auto-selection" the pinned semantics forbid (R78; the
+                # runtime treats a stale pinned binding as a hard stop).
+                # Keep the pin (this offering or nothing) and surface the
+                # staleness as a gap so a human re-confirms or re-pins.
+                binding.reasons = []
+                binding.gaps = [
+                    {
+                        "code": "BINDING_STALE",
+                        "label": "Pinned offering no longer satisfies this step "
+                        "after upgrade — re-confirm or choose another offering",
+                    }
+                ]
+                preserved_step_ids.add(binding.step_id)
+            else:
+                await self.db.delete(binding)
+        await self.db.flush()
+
+        provider_svc = ProviderService(self.db)
+        for step in definition.get("steps", []):
+            if step.get("type") != "provider_action":
+                continue
+            if step["id"] in preserved_step_ids:
+                continue  # confirmed binding kept as-is
+            config = step.get("config", {})
+            capability = config.get("capability", "")
+            required = set(config.get("required_features", []))
+            offerings = await provider_svc.list_offerings(inst.org_id, capability_key=capability)
+            best = None
+            # NULL cost sorts FIRST — must mirror the runtime auto-resolver's
+            # nullsfirst() ordering so the suggested offering is the one the
+            # auto rung would actually pick at execution time.
+            for off in sorted(
+                offerings,
+                key=lambda o: (o.cost_per_call_usd is not None, o.cost_per_call_usd or 0, o.id),
+            ):
+                if required <= set(off.features or []):
+                    best = off
+                    break
+            reasons = []
+            gaps = []
+            if best is not None:
+                reasons.append(
+                    {
+                        "code": "AUTO_SUGGESTED",
+                        "label": f"Cheapest active offering: {best.model_name}",
+                    }
+                )
+            else:
+                gaps.append(
+                    {
+                        "code": "NO_ELIGIBLE_PROVIDER",
+                        "label": f"No active offering for '{capability}'"
+                        + (f" with features {sorted(required)}" if required else ""),
+                    }
+                )
+            self.db.add(
+                WorkflowStepBinding(
+                    org_id=inst.org_id,
+                    installation_id=inst.id,
+                    step_id=step["id"],
+                    binding_mode=config.get("binding_mode", "auto"),
+                    offering_id=best.id if best else None,
+                    reasons=reasons,
+                    gaps=gaps,
+                    confirmed_by=None,  # suggestions are unconfirmed (D5)
+                )
+            )
+        await self.db.flush()
+
+    async def _bump_install_count(self, pack_id: str, delta: int) -> None:
+        if delta > 0:
+            await self.db.execute(
+                update(WorkflowPack)
+                .where(WorkflowPack.id == pack_id)
+                .values(install_count=WorkflowPack.install_count + delta)
+            )
+        else:
+            await self.db.execute(
+                update(WorkflowPack)
+                .where(WorkflowPack.id == pack_id)
+                .values(install_count=func.greatest(WorkflowPack.install_count + delta, 0))
+            )

@@ -88,6 +88,23 @@ export default function RegistryPage() {
         </p>
       </div>
 
+      {/* Component family tabs */}
+      <div className="mb-6 flex gap-1 border-b">
+        <Link
+          href="/registry"
+          className="rounded-t-md border-b-2 border-[hsl(var(--primary))] px-4 py-2 text-sm font-medium"
+          aria-current="page"
+        >
+          Skill Packs
+        </Link>
+        <Link
+          href="/registry/workflows"
+          className="rounded-t-md px-4 py-2 text-sm font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+        >
+          Workflow Packs
+        </Link>
+      </div>
+
       {isError && (
         <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           Failed to load packs. Please try again.

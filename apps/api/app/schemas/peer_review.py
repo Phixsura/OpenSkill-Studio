@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, field_validator
 
+from app.schemas.base import reject_ctrl_json, reject_ctrl_str, reject_nonfinite_json
+
 
 class CreateRoundRequest(BaseModel):
     project_id: str
@@ -68,7 +70,10 @@ class SubmitAssessmentRequest(BaseModel):
     def validate_feedback(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 10000:
             raise ValueError("Feedback must be 10,000 characters or less")
-        return v
+        # feedback -> PeerAssessment.feedback (text column). A NUL/control char
+        # (a valid-JSON backslash-u0000 escape) crashes the write with asyncpg
+        # 22P05 -> 500 (R87). Screen it to a clean 422.
+        return reject_ctrl_str(v, "feedback")
 
     @field_validator("score_breakdown")
     @classmethod
@@ -82,6 +87,11 @@ class SubmitAssessmentRequest(BaseModel):
                 raise ValueError("Each breakdown entry needs 'criterion' and 'score'")
             if not isinstance(item.get("score"), (int, float)) or item["score"] < 0:
                 raise ValueError("Breakdown scores must be non-negative numbers")
+        # score_breakdown → PeerAssessment.score_breakdown (JSONB). NUL/control
+        # chars and NaN/Infinity floats both crash the JSONB write (22P05 /
+        # 22P02) → 500 (R87) — every other JSONB write surface screens both.
+        reject_ctrl_json(v, "score_breakdown")
+        reject_nonfinite_json(v, "score_breakdown")
         return v
 
 

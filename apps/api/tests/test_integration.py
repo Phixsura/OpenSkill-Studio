@@ -221,6 +221,14 @@ async def test_org_skill_project_portfolio_flow(client):
         f"/api/v1/orgs/{org_id}/projects/{proj_id}/submissions/{sub_id}/submit", headers=headers
     )
 
+    # Distinct reviewer — a submission's author cannot review it (R86 self-review guard)
+    rev_headers, rev_user = await _register(client)
+    ar = await client.post(
+        f"/api/v1/orgs/{org_id}/members",
+        json={"user_id": rev_user["id"], "role": "instructor"},
+        headers=headers,
+    )
+    assert ar.status_code in (200, 201), ar.text
     r8 = await client.post(
         f"/api/v1/orgs/{org_id}/submissions/{sub_id}/reviews",
         json={
@@ -228,7 +236,7 @@ async def test_org_skill_project_portfolio_flow(client):
             "score": 95,
             "feedback": "Great!",
         },
-        headers=headers,
+        headers=rev_headers,
     )
     assert r8.status_code == 201
 

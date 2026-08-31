@@ -16,6 +16,20 @@ interface AuthResponse {
   user: AuthUser;
 }
 
+// Open-redirect guard: relative path only. Browsers treat "\" as "/" in
+// URLs, so "/\evil.com" (or any backslash) must be rejected — and the
+// WHATWG URL parser strips tab/newline/CR before parsing, so "/%09/evil.com"
+// (decoded: "/\t/evil.com") would resolve external too. Strip those exactly
+// like the parser does BEFORE applying the shape checks.
+function safeRedirect(target: string | null): string {
+  if (!target) return "/dashboard";
+  const t = target.replace(/[\t\n\r]/g, "");
+  if (!t.startsWith("/") || t.startsWith("//") || t.includes("\\")) {
+    return "/dashboard";
+  }
+  return t;
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -90,8 +104,7 @@ export default function RegisterPage() {
           </p>
         </div>
         <Button onClick={() => {
-          const redirect = searchParams.get("redirect") ?? "/dashboard";
-          router.push(redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/dashboard");
+          router.push(safeRedirect(searchParams.get("redirect")));
         }} className="w-full">
           Continue to Dashboard
         </Button>

@@ -82,6 +82,22 @@ class SkillPackService:
         created_by: str,
         **fields,
     ) -> SkillPack:
+        # Approval gate at CREATE, completing R60's class (which gated PUT only,
+        # update_pack below). A newly-created pack can never be pre-approved
+        # (review_status starts None), and the anon registry serves
+        # review_status IS NULL as grandfathered-approved (registry.py), so a
+        # direct POST visibility=public + publish listed an unapproved pack in
+        # the public registry — the identical bypass R60 closed for update.
+        # PUBLIC is reachable only via submit-review → approve. The workflow
+        # twin is already safe (CreateWorkflowPackRequest has no visibility
+        # field); this brings skill-pack create to parity.
+        requested_visibility = fields.get("visibility")
+        if requested_visibility in ("public", PackVisibility.PUBLIC):
+            raise AppError(
+                "APPROVAL_REQUIRED",
+                "Public visibility requires approval — create the pack, then submit for review",
+                422,
+            )
         name = fields.get("name", "Untitled Pack")
         slug = self._generate_slug(name)
 
@@ -108,7 +124,11 @@ class SkillPackService:
     ) -> tuple[list[SkillPack], int]:
         base = select(SkillPack).where(SkillPack.owner_org_id == org_id)
         if status:
-            base = base.where(SkillPack.status == PackStatus(status))
+            try:
+                parsed_status = PackStatus(status)
+            except ValueError:
+                raise AppError("INVALID_STATUS", f"Unknown status '{status}'", 422) from None
+            base = base.where(SkillPack.status == parsed_status)
         else:
             base = base.where(SkillPack.status != PackStatus.ARCHIVED)
 
@@ -120,8 +140,25 @@ class SkillPackService:
         )
         return list(result.scalars().all()), total
 
-    async def get_pack(self, pack_id: str, org_id: str) -> SkillPack:
-        pack = await self.db.get(SkillPack, pack_id)
+    async def get_pack(self, pack_id: str, org_id: str, for_update: bool = False) -> SkillPack:
+        # for_update: row-lock + refresh to committed state (populate_existing)
+        # for mutators. Same stale-read-write class as the workflow-pack family
+        # (R70b): every mutation here was a db.get snapshot + unguarded ORM
+        # setattr under READ COMMITTED — reproduced the identical approval
+        # BYPASS (update_pack(visibility=public) passing its stale 'approved'
+        # gate while a concurrent card-change had already voided approval,
+        # publishing an unapproved pack to the registry). The lock serializes
+        # the writers; the loser re-reads fresh so its own gate fires.
+        if for_update:
+            result = await self.db.execute(
+                select(SkillPack)
+                .where(SkillPack.id == pack_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            pack = result.scalar_one_or_none()
+        else:
+            pack = await self.db.get(SkillPack, pack_id)
         if pack is None or pack.owner_org_id != org_id:
             raise PackNotFoundError()
         if pack.status == PackStatus.ARCHIVED:
@@ -129,13 +166,63 @@ class SkillPackService:
         return pack
 
     async def update_pack(self, pack_id: str, org_id: str, **fields) -> SkillPack:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
+        # Approval gate (mirror of WorkflowPackService.update_pack): PUBLIC
+        # visibility is only reachable via submit-review → approve. A direct
+        # PUT visibility=public on an unapproved pack would list it in the
+        # registry (which serves review_status IS NULL OR approved),
+        # bypassing review entirely.
+        requested_visibility = fields.get("visibility")
+        if (
+            requested_visibility in ("public", PackVisibility.PUBLIC)
+            and pack.review_status != "approved"
+        ):
+            raise AppError(
+                "APPROVAL_REQUIRED",
+                "Public visibility requires approval — submit for review first",
+                422,
+            )
         if fields.get("name"):
             slug = self._generate_slug(fields["name"])
             pack.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
+        # Card fields drive the public registry card — editing any on an
+        # APPROVED pack voids approval (else innocuous-approve then swap the
+        # public card past the gate), same as WorkflowPackService.
+        # MUST cover every field PublicSkillPackResponse serializes to the anon
+        # registry (R82): a hand-picked subset let estimated_minutes / language
+        # / learning_outcomes / provenance be swapped past the gate — all shown
+        # on the public card, all editable via UpdateSkillPackRequest, none
+        # previously void-triggering. Keep in sync with PublicSkillPackResponse.
+        _card_fields = (
+            "name",
+            "summary",
+            "description",
+            "scenario_tags",
+            "tool_tags",
+            "capability_tags",
+            "difficulty",
+            "cover_image_key",
+            "estimated_minutes",
+            "language",
+            "learning_outcomes",
+            "provenance",
+        )
+        card_changed = any(
+            key in _card_fields and value is not None and getattr(pack, key, None) != value
+            for key, value in fields.items()
+        )
         for k, v in fields.items():
             if v is not None and hasattr(pack, k):
                 setattr(pack, k, v)
+        # Void on approved OR pending (R84): a card edit while the pack is
+        # under review ('pending') would otherwise leave the reviewer approving
+        # stale content the author swapped after submitting — reset to draft so
+        # the swapped card must be re-submitted. (Public→unlisted only matters
+        # for the approved case; a pending pack is not yet public.)
+        if card_changed and pack.review_status in ("approved", "pending"):
+            pack.review_status = None
+            if pack.visibility == PackVisibility.PUBLIC:
+                pack.visibility = PackVisibility.UNLISTED
         try:
             await self.db.flush()
         except IntegrityError:
@@ -143,11 +230,12 @@ class SkillPackService:
             raise AppError("SLUG_CONFLICT", "A pack with this name already exists", 409) from None
         await self.db.refresh(pack)
         from app.core.cache import cache_delete_pattern
+
         await cache_delete_pattern("registry:*")
         return pack
 
     async def delete_pack(self, pack_id: str, org_id: str) -> None:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         pack.status = PackStatus.ARCHIVED
 
         # Clean up join-table references
@@ -156,16 +244,21 @@ class SkillPackService:
         from app.models.pack_share import PackShare
 
         await self.db.execute(sa_delete(SkillPackSkill).where(SkillPackSkill.pack_id == pack_id))
-        await self.db.execute(sa_delete(SkillPackTemplate).where(SkillPackTemplate.pack_id == pack_id))
+        await self.db.execute(
+            sa_delete(SkillPackTemplate).where(SkillPackTemplate.pack_id == pack_id)
+        )
         await self.db.execute(sa_delete(PackShare).where(PackShare.pack_id == pack_id))
 
         await self.db.flush()
         from app.core.cache import cache_delete_pattern
+
         await cache_delete_pattern("registry:*")
 
     # ── Pack Contents ──
 
-    async def add_skill(self, pack_id: str, skill_id: str, org_id: str, sort_order: int = 0) -> None:
+    async def add_skill(
+        self, pack_id: str, skill_id: str, org_id: str, sort_order: int = 0
+    ) -> None:
         await self.get_pack(pack_id, org_id)  # validates existence + ownership
 
         # Enforce skill count limit before insert
@@ -228,7 +321,9 @@ class SkillPackService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
-            raise AppError("TEMPLATE_ALREADY_IN_PACK", "Template already in this pack", 409) from None
+            raise AppError(
+                "TEMPLATE_ALREADY_IN_PACK", "Template already in this pack", 409
+            ) from None
 
     async def remove_template(self, pack_id: str, template_id: str, org_id: str) -> None:
         await self.get_pack(pack_id, org_id)
@@ -260,16 +355,18 @@ class SkillPackService:
 
     async def approve_pack(self, pack_id: str, org_id: str, actor_id: str) -> SkillPack:
         """Approve a pack for public visibility."""
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status != "pending":
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
         pack.review_status = "approved"
         pack.visibility = PackVisibility.PUBLIC
+        pack.rejection_reason = None  # R84: clear a stale prior-rejection note
         await self.db.flush()
         await self.db.refresh(pack)
 
         await self._record_approval_event(pack_id, "approved", actor_id)
         from app.core.cache import cache_delete_pattern
+
         await cache_delete_pattern("registry:*")
         log.info("pack_approved", pack_id=pack_id, org_id=org_id)
         return pack
@@ -278,7 +375,7 @@ class SkillPackService:
         self, pack_id: str, org_id: str, reason: str | None = None, actor_id: str | None = None
     ) -> SkillPack:
         """Reject a pack from public visibility."""
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status != "pending":
             raise AppError("NOT_PENDING", "Pack is not pending review", 422)
         pack.review_status = "rejected"
@@ -289,13 +386,14 @@ class SkillPackService:
         if actor_id:
             await self._record_approval_event(pack_id, "rejected", actor_id, reason)
         from app.core.cache import cache_delete_pattern
+
         await cache_delete_pattern("registry:*")
         log.info("pack_rejected", pack_id=pack_id, org_id=org_id, reason=reason)
         return pack
 
     async def submit_for_review(self, pack_id: str, org_id: str, actor_id: str) -> SkillPack:
         """Submit a pack for approval review."""
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
         if pack.review_status == "pending":
             raise AppError("ALREADY_PENDING", "Pack is already pending review", 409)
         if pack.review_status == "approved":
@@ -348,7 +446,7 @@ class SkillPackService:
         changelog: str | None,
         released_by: str,
     ) -> SkillPackRelease:
-        pack = await self.get_pack(pack_id, org_id)
+        pack = await self.get_pack(pack_id, org_id, for_update=True)
 
         # Validate semver
         if not re.match(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$", version):
@@ -385,7 +483,9 @@ class SkillPackService:
         if len(skill_entries) > MAX_SKILLS_PER_PACK:
             raise AppError("PACK_TOO_LARGE", f"Max {MAX_SKILLS_PER_PACK} skills per pack", 422)
         if len(tmpl_entries) > MAX_TEMPLATES_PER_PACK:
-            raise AppError("PACK_TOO_LARGE", f"Max {MAX_TEMPLATES_PER_PACK} templates per pack", 422)
+            raise AppError(
+                "PACK_TOO_LARGE", f"Max {MAX_TEMPLATES_PER_PACK} templates per pack", 422
+            )
 
         # Build manifest
         skill_ids = [sid for sid, _ in skill_entries]
@@ -404,9 +504,7 @@ class SkillPackService:
             raise AppError("PREREQUISITE_CYCLE", "Prerequisite graph contains a cycle", 422)
 
         # Batch load all skills
-        skills_r = await self.db.execute(
-            select(Skill).where(Skill.id.in_(skill_ids))
-        )
+        skills_r = await self.db.execute(select(Skill).where(Skill.id.in_(skill_ids)))
         skills_by_id = {s.id: s for s in skills_r.scalars().all()}
 
         # Batch load categories
@@ -464,51 +562,57 @@ class SkillPackService:
                     if prereq_skill:
                         skill_prereq_slugs.append(prereq_skill.slug)
 
-            skills_manifest.append({
-                "logical_id": skill.slug,
-                "category_logical_id": category.slug if category else None,
-                "name": skill.name,
-                "slug": skill.slug,
-                "description": skill.description,
-                "learning_content": skill.learning_content,
-                "difficulty": skill.difficulty.value if skill.difficulty else None,
-                "estimated_minutes": skill.estimated_minutes,
-                "tags": skill.tags or [],
-                "sort_order": sort,
-                "exercises": [
-                    {
-                        "logical_id": f"{skill.slug}/{ex.title.lower().replace(' ', '-')[:50]}",
-                        "title": ex.title,
-                        "description": ex.description,
-                        "type": ex.type.value,
-                        "config": ex.config,
-                        "max_score": ex.max_score,
-                        "sort_order": ex.sort_order,
-                    }
-                    for ex in exercises
-                ],
-                "prerequisites": skill_prereq_slugs,
-            })
+            skills_manifest.append(
+                {
+                    "logical_id": skill.slug,
+                    "category_logical_id": category.slug if category else None,
+                    "name": skill.name,
+                    "slug": skill.slug,
+                    "description": skill.description,
+                    "learning_content": skill.learning_content,
+                    "difficulty": skill.difficulty.value if skill.difficulty else None,
+                    "estimated_minutes": skill.estimated_minutes,
+                    "tags": skill.tags or [],
+                    "sort_order": sort,
+                    "exercises": [
+                        {
+                            "logical_id": f"{skill.slug}/{ex.title.lower().replace(' ', '-')[:50]}",
+                            "title": ex.title,
+                            "description": ex.description,
+                            "type": ex.type.value,
+                            "config": ex.config,
+                            "max_score": ex.max_score,
+                            "sort_order": ex.sort_order,
+                        }
+                        for ex in exercises
+                    ],
+                    "prerequisites": skill_prereq_slugs,
+                }
+            )
 
         templates_manifest: list[dict] = []
         for tid, sort in tmpl_entries:
             tmpl = tmpls_by_id.get(tid)
             if tmpl is None or tmpl.status == ContentStatus.ARCHIVED:
-                raise AppError("COMPONENT_ARCHIVED", f"Template '{tid}' is archived or missing", 422)
-            templates_manifest.append({
-                "logical_id": re.sub(r"[^a-z0-9]+", "-", tmpl.name.lower()).strip("-")[:100],
-                "name": tmpl.name,
-                "description": tmpl.description,
-                "instructions": tmpl.instructions,
-                "project_type": tmpl.project_type,
-                "difficulty": tmpl.difficulty.value if tmpl.difficulty else "intermediate",
-                "suggested_minutes": tmpl.suggested_minutes,
-                "max_score": tmpl.max_score,
-                "rubric": tmpl.rubric,
-                "deliverables": tmpl.deliverables or [],
-                "skill_names": tmpl.skill_names or [],
-                "sort_order": sort,
-            })
+                raise AppError(
+                    "COMPONENT_ARCHIVED", f"Template '{tid}' is archived or missing", 422
+                )
+            templates_manifest.append(
+                {
+                    "logical_id": re.sub(r"[^a-z0-9]+", "-", tmpl.name.lower()).strip("-")[:100],
+                    "name": tmpl.name,
+                    "description": tmpl.description,
+                    "instructions": tmpl.instructions,
+                    "project_type": tmpl.project_type,
+                    "difficulty": tmpl.difficulty.value if tmpl.difficulty else "intermediate",
+                    "suggested_minutes": tmpl.suggested_minutes,
+                    "max_score": tmpl.max_score,
+                    "rubric": tmpl.rubric,
+                    "deliverables": tmpl.deliverables or [],
+                    "skill_names": tmpl.skill_names or [],
+                    "sort_order": sort,
+                }
+            )
 
         # Validate logical_id uniqueness across all components
         all_logical_ids: list[str] = []
@@ -584,6 +688,17 @@ class SkillPackService:
         if pack.status == PackStatus.DRAFT:
             pack.status = PackStatus.PUBLISHED
 
+        # Publishing a NEW release on an already-approved OR pending pack
+        # changes the content the anon registry serves / the reviewer is
+        # examining — the preview/curriculum reads the LATEST release manifest
+        # (registry.get_pack_preview). Void approval (R83) and also reset a
+        # pending review (R84) so a post-submit release can't be approved as if
+        # it were the reviewed content.
+        if pack.review_status in ("approved", "pending"):
+            pack.review_status = None
+            if pack.visibility == PackVisibility.PUBLIC:
+                pack.visibility = PackVisibility.UNLISTED
+
         try:
             await self.db.flush()
         except IntegrityError:
@@ -592,10 +707,12 @@ class SkillPackService:
 
         # Invalidate registry cache after new release
         from app.core.cache import cache_delete_pattern
+
         await cache_delete_pattern("registry:*")
 
         # Recompute and persist badges for this pack
         from app.services.registry import RegistryService as _RegSvc
+
         await _RegSvc(self.db).recompute_pack_badges(pack_id)
 
         # Notify installing orgs' owners about the new version
@@ -632,7 +749,9 @@ class SkillPackService:
                     except Exception:
                         log.warning(
                             "notify_pack_update_failed_user",
-                            pack_id=pack_id, user_id=user_id, version=version,
+                            pack_id=pack_id,
+                            user_id=user_id,
+                            version=version,
                         )
         except Exception:
             log.warning("notify_pack_update_failed", pack_id=pack_id, version=version)
@@ -640,6 +759,7 @@ class SkillPackService:
         # Compute and persist quality score
         try:
             from app.services.registry import RegistryService as _RegSvc2
+
             reg_svc = _RegSvc2(self.db)
             pack.quality_score = await reg_svc.compute_quality_score(pack)
             await self.db.flush()
@@ -649,6 +769,7 @@ class SkillPackService:
         # Fire webhook event
         try:
             from app.services.webhook import WebhookService
+
             webhook_svc = WebhookService(self.db)
             await webhook_svc.trigger_event(
                 pack.owner_org_id,
@@ -656,7 +777,12 @@ class SkillPackService:
                 {"pack_id": pack_id, "version": version, "name": pack.name},
             )
         except Exception as exc:
-            log.warning("webhook_trigger_failed", pack_id=pack_id, webhook_event="pack.published", error=str(exc))
+            log.warning(
+                "webhook_trigger_failed",
+                pack_id=pack_id,
+                webhook_event="pack.published",
+                error=str(exc),
+            )
 
         log.info(
             "pack_released",
@@ -709,10 +835,7 @@ class SkillPackService:
             )
             .group_by(SkillPackInstallation.installed_version)
         )
-        installs_by_version = [
-            {"version": row[0], "count": row[1]}
-            for row in version_r.all()
-        ]
+        installs_by_version = [{"version": row[0], "count": row[1]} for row in version_r.all()]
 
         # Installs by day for the last 30 days
         today = date.today()
@@ -736,10 +859,12 @@ class SkillPackService:
         installs_by_day: list[dict] = []
         for offset in range(30):
             day = thirty_days_ago + timedelta(days=offset)
-            installs_by_day.append({
-                "date": day.isoformat(),
-                "count": db_days.get(day, 0),
-            })
+            installs_by_day.append(
+                {
+                    "date": day.isoformat(),
+                    "count": db_days.get(day, 0),
+                }
+            )
 
         return {
             "install_count": pack.install_count,

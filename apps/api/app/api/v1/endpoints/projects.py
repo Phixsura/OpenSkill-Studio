@@ -116,12 +116,16 @@ async def _read_limited(file: UploadFile, limit: int = 50 * 1024 * 1024) -> byte
 # ── Project CRUD ─────────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/projects", response_model=ListResponse[ProjectResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}/projects",
+    response_model=ListResponse[ProjectResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_projects(
     org_id: str,
     status: str | None = None,
     cohort_id: str | None = None,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -148,7 +152,9 @@ async def list_projects(
 
 
 @router.post(
-    "/orgs/{org_id}/projects", response_model=DataResponse[ProjectResponse], status_code=201,
+    "/orgs/{org_id}/projects",
+    response_model=DataResponse[ProjectResponse],
+    status_code=201,
     dependencies=[Depends(rate_limit(10, 60))],
 )
 async def create_project(
@@ -181,7 +187,8 @@ async def create_project(
 
 
 @router.get(
-    "/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectDetailResponse],
+    "/orgs/{org_id}/projects/{project_id}",
+    response_model=DataResponse[ProjectDetailResponse],
     dependencies=[Depends(rate_limit(30, 60))],
 )
 async def get_project(
@@ -208,7 +215,11 @@ async def get_project(
     return DataResponse(data=resp)
 
 
-@router.put("/orgs/{org_id}/projects/{project_id}", response_model=DataResponse[ProjectResponse], dependencies=[Depends(rate_limit(10, 60))])
+@router.put(
+    "/orgs/{org_id}/projects/{project_id}",
+    response_model=DataResponse[ProjectResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def update_project(
     org_id: str,
     project_id: str,
@@ -224,7 +235,11 @@ async def update_project(
     return DataResponse(data=ProjectResponse.model_validate(project))
 
 
-@router.delete("/orgs/{org_id}/projects/{project_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/projects/{project_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def delete_project(
     org_id: str,
     project_id: str,
@@ -239,7 +254,8 @@ async def delete_project(
 
 
 @router.post(
-    "/orgs/{org_id}/projects/{project_id}/publish", response_model=DataResponse[ProjectResponse],
+    "/orgs/{org_id}/projects/{project_id}/publish",
+    response_model=DataResponse[ProjectResponse],
     dependencies=[Depends(rate_limit(10, 60))],
 )
 async def publish_project(
@@ -257,7 +273,8 @@ async def publish_project(
 
 
 @router.post(
-    "/orgs/{org_id}/projects/{project_id}/unpublish", response_model=DataResponse[ProjectResponse],
+    "/orgs/{org_id}/projects/{project_id}/unpublish",
+    response_model=DataResponse[ProjectResponse],
     dependencies=[Depends(rate_limit(10, 60))],
 )
 async def unpublish_project(
@@ -274,7 +291,11 @@ async def unpublish_project(
     return DataResponse(data=ProjectResponse.model_validate(project))
 
 
-@router.put("/orgs/{org_id}/projects/{project_id}/skills", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.put(
+    "/orgs/{org_id}/projects/{project_id}/skills",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def set_project_skills(
     org_id: str,
     project_id: str,
@@ -387,7 +408,8 @@ async def update_deliverable(
 
 
 @router.delete(
-    "/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}", status_code=204,
+    "/orgs/{org_id}/projects/{project_id}/deliverables/{deliverable_id}",
+    status_code=204,
     dependencies=[Depends(rate_limit(10, 60))],
 )
 async def delete_deliverable(
@@ -418,7 +440,7 @@ async def delete_deliverable(
 async def list_submissions(
     org_id: str,
     project_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -461,7 +483,8 @@ async def create_submission(
     svc = ProjectService(db)
     project = await _verify_project_org(svc, project_id, org_id)
     # Students may only submit to a published project; instructors can submit
-    # to a draft to test the flow before publishing.
+    # to a draft to test the flow before publishing. (The cohort/creator gate
+    # is enforced in the service, shared with submit_draft — R92f.)
     from app.models.skill import ContentStatus
 
     if project.status != ContentStatus.PUBLISHED and member.role not in INSTRUCTOR_ROLES:
@@ -636,12 +659,16 @@ async def submit_draft(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
     sub = await _verify_submission_org(svc, submission_id, org_id)
     if sub.project_id != project_id:
         raise HTTPException(status_code=404, detail="Submission not found in this project")
-    sub = await svc.submit_draft(submission_id, user.id)
+    # R92f: a non-instructor may only submit to a PUBLISHED project; instructors
+    # may drive a draft submission to test the flow (mirrors create_submission).
+    sub = await svc.submit_draft(
+        submission_id, user.id, require_published=member.role not in INSTRUCTOR_ROLES
+    )
     await db.commit()
 
     # Auto-evaluate on submission when the org has enabled it — otherwise the
@@ -662,7 +689,11 @@ async def submit_draft(
     return DataResponse(data=SubmissionResponse.model_validate(sub))
 
 
-@router.delete("/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/projects/{project_id}/submissions/{submission_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def delete_submission(
     org_id: str,
     project_id: str,
@@ -718,7 +749,10 @@ async def upload_file(
     return DataResponse(data=FileResponse.model_validate(item))
 
 
-@router.get("/orgs/{org_id}/submissions/{submission_id}/files/{file_id}/download", dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}/submissions/{submission_id}/files/{file_id}/download",
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def download_file(
     org_id: str,
     submission_id: str,
@@ -747,7 +781,11 @@ async def download_file(
     return {"download_url": url}
 
 
-@router.delete("/orgs/{org_id}/submissions/{submission_id}/files/{file_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/submissions/{submission_id}/files/{file_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def delete_file(
     org_id: str,
     submission_id: str,
@@ -816,10 +854,14 @@ async def create_review(
 # ── Review Dashboard ─────────────────────────────────────
 
 
-@router.get("/orgs/{org_id}/reviews/pending", response_model=ListResponse[PendingReviewResponse], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}/reviews/pending",
+    response_model=ListResponse[PendingReviewResponse],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def pending_reviews(
     org_id: str,
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -878,7 +920,11 @@ def _template_response(t) -> TemplateResponse:  # noqa: ANN001
     )
 
 
-@router.get("/orgs/{org_id}/project-templates", response_model=DataResponse[list[TemplateResponse]], dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}/project-templates",
+    response_model=DataResponse[list[TemplateResponse]],
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def list_templates(
     org_id: str,
     user: User = Depends(get_current_user),
@@ -964,7 +1010,11 @@ async def update_template(
     return DataResponse(data=_template_response(template))
 
 
-@router.delete("/orgs/{org_id}/project-templates/{template_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/project-templates/{template_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def delete_template(
     org_id: str,
     template_id: str,
@@ -1056,7 +1106,10 @@ async def upload_asset(
     return DataResponse(data=AssetResponse.model_validate(asset))
 
 
-@router.get("/orgs/{org_id}/projects/{project_id}/assets/{asset_id}/download", dependencies=[Depends(rate_limit(30, 60))])
+@router.get(
+    "/orgs/{org_id}/projects/{project_id}/assets/{asset_id}/download",
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def download_asset(
     org_id: str,
     project_id: str,
@@ -1064,9 +1117,13 @@ async def download_asset(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await _verify_project_org(svc, project_id, org_id)
+    # R89d: a DRAFT project's assets (e.g. a confidential client brief) must not
+    # leak before publication. list_assets/get_asset use _verify_project_visible
+    # (draft -> 404 for non-instructors); download used org-only _verify_project_org,
+    # so a student could pull the asset's signed URL directly. Gate identically.
+    await _verify_project_visible(svc, project_id, org_id, member)
     asset = await svc.get_asset(asset_id, org_id)
     if asset.project_id != project_id:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -1074,7 +1131,11 @@ async def download_asset(
     return {"download_url": url}
 
 
-@router.delete("/orgs/{org_id}/projects/{project_id}/assets/{asset_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/projects/{project_id}/assets/{asset_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def delete_asset(
     org_id: str,
     project_id: str,
@@ -1219,7 +1280,11 @@ async def set_comment_completed(
     return DataResponse(data=CommentResponse.model_validate(comment))
 
 
-@router.delete("/orgs/{org_id}/comments/{comment_id}", status_code=204, dependencies=[Depends(rate_limit(10, 60))])
+@router.delete(
+    "/orgs/{org_id}/comments/{comment_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def delete_comment(
     org_id: str,
     comment_id: str,

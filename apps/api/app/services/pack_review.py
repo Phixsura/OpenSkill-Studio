@@ -45,9 +45,7 @@ class PackReviewService:
         lock, the subqueries re-execute with a fresh READ COMMITTED snapshot.
         """
         count_sq = (
-            select(func.count(PackReview.id))
-            .where(PackReview.pack_id == pack_id)
-            .scalar_subquery()
+            select(func.count(PackReview.id)).where(PackReview.pack_id == pack_id).scalar_subquery()
         )
         avg_sq = (
             select(func.avg(PackReview.rating))
@@ -71,9 +69,27 @@ class PackReviewService:
     ) -> PackReview:
         pack = await self._get_public_pack(pack_id)
 
-        # Prevent self-reviews
+        # Prevent self-reviews. Pack ownership is ORG-level (owner_org_id),
+        # and created_by is nullable (SET NULL on user delete), so gating on
+        # created_by alone let any OTHER member of the owning org inflate
+        # their pack's rating. Block every active member of the owner org.
         if pack.created_by == user_id:
             raise AppError("SELF_REVIEW_FORBIDDEN", "You cannot review your own pack", 422)
+        from app.models.organization import MemberStatus, OrgMember
+
+        own_member = await self.db.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == pack.owner_org_id,
+                OrgMember.user_id == user_id,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
+        )
+        if own_member.scalar_one_or_none() is not None:
+            raise AppError(
+                "SELF_REVIEW_FORBIDDEN",
+                "Members of the owning organization cannot review its pack",
+                422,
+            )
 
         review = PackReview(
             pack_id=pack_id,
@@ -169,9 +185,7 @@ class PackReviewService:
             order_clause = PackReview.created_at.desc()
 
         offset = (page - 1) * per_page
-        result = await self.db.execute(
-            base.order_by(order_clause).offset(offset).limit(per_page)
-        )
+        result = await self.db.execute(base.order_by(order_clause).offset(offset).limit(per_page))
         return list(result.scalars().all()), total
 
     async def delete_review(self, review_id: str, user_id: str, pack_id: str | None = None) -> None:
@@ -245,13 +259,19 @@ class PackReviewService:
             "distribution": distribution,
         }
 
-    async def toggle_helpful(self, review_id: str, user_id: str, pack_id: str | None = None) -> PackReview:
+    async def toggle_helpful(
+        self, review_id: str, user_id: str, pack_id: str | None = None
+    ) -> PackReview:
         """Toggle a helpful vote on a review."""
         review = await self.db.get(PackReview, review_id)
         if review is None:
             raise ReviewNotFoundError()
         if pack_id and review.pack_id != pack_id:
             raise ReviewNotFoundError()
+        # Every other review read/write gates on the pack being public+
+        # published (_get_public_pack); toggle_helpful skipped it, letting a
+        # vote land on a review of an archived/private pack. Apply the same gate.
+        await self._get_public_pack(review.pack_id)
 
         # Check if user already voted
         existing = await self.db.get(ReviewHelpfulVote, (user_id, review_id))
