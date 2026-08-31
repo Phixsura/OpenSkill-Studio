@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.exceptions import AppError
+from app.models.organization import Organization
 from app.models.provider import (
     OrgCredential,
     ProviderAdapter,
@@ -239,6 +240,27 @@ class WorkflowRuntimeService:
         install = await self.db.get(WorkflowPackInstallation, installation_id)
         if install is None or install.org_id != org_id or install.status == InstallStatus.REMOVED:
             raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
+
+        # Issue #27 §2.5: suspended tenants cannot start costed executions;
+        # active tenants are bounded by max_workflow_runs_month.
+        from app.controlplane import facade as cp_facade
+
+        tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+        cp_facade.require_tenant_active(tenant)
+        month_start = _now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        from app.models.organization import Organization as _Org
+
+        run_count = (
+            await self.db.execute(
+                select(func.count(WorkflowRun.id))
+                .join(_Org, _Org.id == WorkflowRun.org_id)
+                .where(
+                    _Org.tenant_id == tenant.id,
+                    WorkflowRun.created_at >= month_start,
+                )
+            )
+        ).scalar_one()
+        await cp_facade.check_quota(self.db, tenant, "max_workflow_runs_month", current=run_count)
 
         # Resolve the effective definition: forked local copy or release manifest
         definition = install.local_definition
@@ -889,6 +911,7 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
             )
             if result.rowcount:
                 db.add(WorkflowRunEvent(run_id=run_id, event_type="run_failed", payload={}))
+                await _emit_run_terminal(db, run, "failed")
         else:
             # Collect workflow outputs ({} is a valid output — only skip None)
             outputs = {}
@@ -903,7 +926,37 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
             )
             if result.rowcount:
                 db.add(WorkflowRunEvent(run_id=run_id, event_type="run_completed", payload={}))
+                await _emit_run_terminal(db, run, "completed")
     return False
+
+
+async def _emit_run_terminal(db: AsyncSession, run: WorkflowRun, status: str) -> None:
+    """Issue #27 §3.3b: one workflow_run usage event per run — BOTH outcomes,
+    metadata carries status (pricing may exclude failed via policy params).
+    Guarded by the terminal-transition rowcount + the idempotency key. Also
+    posts the run.terminal outbox message (reservation settlement, P5)."""
+    from app.controlplane import facade as cp_facade
+    from app.controlplane.models.outbox import enqueue
+
+    tenant_id = (
+        await db.execute(select(Organization.tenant_id).where(Organization.id == run.org_id))
+    ).scalar_one_or_none()
+    if tenant_id is None:
+        return
+    await cp_facade.emit_usage(
+        db,
+        tenant_id=tenant_id,
+        org_id=run.org_id,
+        usage_type="workflow_run",
+        quantity=1,
+        occurred_at=_now(),
+        source="workflow_runtime",
+        idempotency_key=f"wfrun:{run.id}",
+        workflow_run_id=run.id,
+        user_id=run.started_by,
+        metadata={"status": status},
+    )
+    enqueue(db, "run.terminal", {"run_id": run.id, "status": status})
 
 
 def _resolve_step_inputs(step: dict, run: WorkflowRun, edges: list, step_runs: dict) -> dict:
@@ -1386,6 +1439,41 @@ async def _execute_provider_action(
 
     if not isinstance(output, dict):
         output = {"result": str(output)[:8000]}
+
+    # Metering (Issue #27 §3.3a): strip the reserved __usage__ key BEFORE port
+    # mapping / _complete_step so it never reaches step output or the 48KB
+    # cap. Idempotency key carries the attempt — each real provider call
+    # meters once, retries never double-bill.
+    usage_items = output.pop("__usage__", None)
+    if isinstance(usage_items, list):
+        from app.controlplane import facade as cp_facade
+
+        tenant_id = (
+            await db.execute(select(Organization.tenant_id).where(Organization.id == run.org_id))
+        ).scalar_one_or_none()
+        if tenant_id is not None:
+            for i, item in enumerate(usage_items):
+                try:
+                    await cp_facade.emit_usage(
+                        db,
+                        tenant_id=tenant_id,
+                        org_id=run.org_id,
+                        usage_type=str(item.get("usage_type", "")),
+                        quantity=item.get("quantity", 0),
+                        occurred_at=_now(),
+                        source="workflow_runtime",
+                        idempotency_key=f"wfstep:{sr.id}:{claimed_attempt}:{i}",
+                        workflow_run_id=run.id,
+                        provider_connection_id=connection.id,
+                        provider=adapter_row.key if adapter_row else None,
+                        model_or_service=offering.model_name,
+                        user_id=run.started_by,
+                    )
+                except AppError:
+                    # A malformed usage element must never fail the step —
+                    # the provider work already succeeded. Log and continue.
+                    log.warning("wf_usage_emit_rejected", step_run_id=sr.id, item=str(item)[:200])
+
     # Map adapter output to declared output ports: adapter returns arbitrary
     # keys; declared ports pick matching keys, falling back to "result"
     ports = step.get("outputs", [])

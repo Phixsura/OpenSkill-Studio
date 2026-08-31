@@ -54,14 +54,37 @@ async def _create_admin(email: str, password: str, name: str) -> None:
     await engine.dispose()
 
 
+async def _run_sweep(name: str) -> None:
+    from app.controlplane.services import metering
+    from app.core.database import AsyncSessionLocal, engine
+
+    async with AsyncSessionLocal() as db:
+        if name == "storage":
+            n = await metering.sweep_storage(db)
+        elif name == "seats":
+            n = await metering.sweep_seats(db)
+        else:
+            n = await metering.flush_api_request_counters(db)
+        await db.commit()
+        print(f"sweep-{name}: {n} usage events emitted")
+    await engine.dispose()
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python -m app.cli <command>")
         print("Commands:")
         print("  create-admin   Create or promote an admin user")
+        print("  sweep-storage  Emit storage_gb_day usage events (Issue #27)")
+        print("  sweep-seats    Emit active_learner_seat usage events")
+        print("  flush-api      Land Redis api_request counters as usage events")
         sys.exit(1)
 
     command = sys.argv[1]
+
+    if command in ("sweep-storage", "sweep-seats", "flush-api"):
+        asyncio.run(_run_sweep(command.removeprefix("sweep-").removeprefix("flush-")))
+        return
 
     if command == "create-admin":
         email = os.environ.get("ADMIN_EMAIL") or input("Admin email: ").strip()

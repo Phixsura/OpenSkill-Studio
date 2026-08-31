@@ -237,6 +237,36 @@ class OrgService:
 
     # ── Members ──
 
+    async def _check_seat_quota(self, org_id: str, role: OrgRole) -> None:
+        """Issue #27 §2.5: enforce tenant seat entitlements. Single funnel —
+        add_member is the only row-creation path, so direct adds, invitation
+        accepts, and invite-link joins are all covered here."""
+        from app.controlplane import facade
+
+        key = (
+            "max_active_learners"
+            if role == OrgRole.STUDENT
+            else "max_instructors"  # INSTRUCTOR/ADMIN/OWNER all consume staff seats
+        )
+        tenant = await facade.get_tenant_for_org(self.db, org_id)
+        current_q = (
+            select(func.count(func.distinct(OrgMember.user_id)))
+            .select_from(OrgMember)
+            .join(Organization, Organization.id == OrgMember.org_id)
+            .where(
+                Organization.tenant_id == tenant.id,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
+        )
+        if role == OrgRole.STUDENT:
+            current_q = current_q.where(OrgMember.role == OrgRole.STUDENT)
+        else:
+            current_q = current_q.where(
+                OrgMember.role.in_([OrgRole.INSTRUCTOR, OrgRole.ADMIN, OrgRole.OWNER])
+            )
+        current = (await self.db.execute(current_q)).scalar_one()
+        await facade.check_quota(self.db, tenant, key, current=current)
+
     async def add_member(
         self, org_id: str, user_id: str, role: OrgRole, invited_by: str | None = None
     ) -> OrgMember:
@@ -252,12 +282,15 @@ class OrgService:
 
         if existing is not None:
             if existing.status == MemberStatus.ARCHIVED:
+                # Re-activation consumes a seat again — same quota gate
+                await self._check_seat_quota(org_id, role)
                 existing.status = MemberStatus.ACTIVE
                 existing.role = role
                 await self.db.flush()
                 return existing
             raise AlreadyMemberError()
 
+        await self._check_seat_quota(org_id, role)
         member = OrgMember(
             org_id=org_id,
             user_id=user_id,

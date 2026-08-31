@@ -68,13 +68,18 @@ async def process_outbox_once(db: AsyncSession, topics: list[str] | None = None)
     Each message is claimed with FOR UPDATE SKIP LOCKED so concurrent
     workers never double-consume.
     """
+    from sqlalchemy import func as _sql_func
+
     from app.controlplane.models.outbox import OutboxMessage
 
     q = (
         select(OutboxMessage)
         .where(
             OutboxMessage.status == "pending",
-            OutboxMessage.available_at <= _now(),
+            # DB-side clock: available_at defaults to the DB's now(), so the
+            # due-check must use the same clock — a few ms of app/DB skew
+            # otherwise makes freshly enqueued messages invisible (flake).
+            OutboxMessage.available_at <= _sql_func.now(),
         )
         .order_by(OutboxMessage.available_at)
         .limit(settings.outbox_batch_size)
@@ -167,6 +172,36 @@ async def _expire_trials(ctx: dict) -> None:
             log.info("cp_trials_expired", count=n)
 
 
+async def _sweep_storage(ctx: dict) -> None:
+    from app.controlplane.services.metering import sweep_storage
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_storage(db)
+        await db.commit()
+        log.info("cp_storage_swept", events=n)
+
+
+async def _sweep_seats(ctx: dict) -> None:
+    from app.controlplane.services.metering import sweep_seats
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_seats(db)
+        await db.commit()
+        log.info("cp_seats_swept", events=n)
+
+
+async def _flush_api_counters(ctx: dict) -> None:
+    from app.controlplane.services.metering import flush_api_request_counters
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        n = await flush_api_request_counters(db)
+        if n:
+            log.info("cp_api_counters_flushed", events=n)
+
+
 def _cron_jobs() -> list:
     """Cron registry — later phases append their sweeps here."""
     from arq.cron import cron
@@ -177,7 +212,11 @@ def _cron_jobs() -> list:
         cron(_reap_outbox, minute=set(range(0, 60, 10)), second=5, name="cp_outbox_reaper"),
         # Trial expiry: hourly at :12 (off-minute by design)
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
-        # P3: storage sweep (daily), seat sweep (monthly), api-request flush (hourly)
+        # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
+        # api-counter flush hourly at :05
+        cron(_sweep_storage, hour=3, minute=23, name="cp_storage_sweep"),
+        cron(_sweep_seats, day={1}, hour=4, minute=17, name="cp_seat_sweep"),
+        cron(_flush_api_counters, minute=5, name="cp_api_flush"),
         # P5: reservation expiry, promo credit expiry
         # P6: period close scan
         # P10: tls refresh

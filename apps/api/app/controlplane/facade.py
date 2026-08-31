@@ -74,6 +74,49 @@ async def emit_usage(db: AsyncSession, **kwargs):
     return await _impl(db, **kwargs)
 
 
+async def check_storage_quota(db: AsyncSession, org_id: str, incoming_bytes: int) -> None:
+    """Enforce max_storage_gb for the org's tenant before accepting an upload.
+
+    Live SUM at upload time (ADR-014 §2.5 decision) over submission_items +
+    project_assets across the tenant's orgs. Storage is soft-by-default —
+    check_quota resolves the soft path (warning, not rejection).
+    """
+    from decimal import Decimal
+
+    from sqlalchemy import func, select
+
+    from app.controlplane.services.entitlements import check_quota as _check
+    from app.controlplane.services.tenants import get_tenant_for_org as _tenant
+    from app.models.organization import Organization
+    from app.models.project import ProjectAsset, Submission, SubmissionItem
+
+    tenant = await _tenant(db, org_id)
+    org_ids = select(Organization.id).where(Organization.tenant_id == tenant.id)
+    item_bytes = (
+        await db.execute(
+            select(func.coalesce(func.sum(SubmissionItem.file_size), 0))
+            .join(Submission, Submission.id == SubmissionItem.submission_id)
+            .where(Submission.org_id.in_(org_ids))
+        )
+    ).scalar_one()
+    asset_bytes = (
+        await db.execute(
+            select(func.coalesce(func.sum(ProjectAsset.file_size), 0)).where(
+                ProjectAsset.org_id.in_(org_ids)
+            )
+        )
+    ).scalar_one()
+    current_gb = Decimal(item_bytes + asset_bytes) / Decimal(1073741824)
+    incoming_gb = Decimal(incoming_bytes) / Decimal(1073741824)
+    await _check(
+        db,
+        tenant,
+        "max_storage_gb",
+        current=current_gb.quantize(Decimal("0.000001")),
+        requested=incoming_gb.quantize(Decimal("0.000001")),
+    )
+
+
 async def check_install_license(db: AsyncSession, product_type: str, product_id: str, org) -> None:
     """Marketplace license gate for pack/path installation (P8)."""
     from app.controlplane.services.marketplace import check_install_license as _impl

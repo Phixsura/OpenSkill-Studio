@@ -11,6 +11,7 @@ from app.core.database import engine
 from app.core.logging import setup_logging
 from app.core.redis import redis_pool
 from app.exceptions import register_exception_handlers
+from app.middleware.api_metering import ApiRequestMeteringMiddleware
 from app.middleware.impersonation import ImpersonationGuardMiddleware
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.request_id import RequestIDMiddleware
@@ -105,6 +106,9 @@ app = FastAPI(
 # inside RequestID/Logging so blocked responses carry a request_id and are
 # access-logged like any other 403.
 app.add_middleware(ImpersonationGuardMiddleware)
+# API request metering (Issue #27): Redis hourly buckets, fail-open, zero DB
+# writes on the request path; 429 on daily-quota hard-over.
+app.add_middleware(ApiRequestMeteringMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)

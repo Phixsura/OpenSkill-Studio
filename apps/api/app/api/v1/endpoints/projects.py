@@ -736,6 +736,10 @@ async def upload_file(
     svc = ProjectService(db)
     await _verify_submission_org(svc, submission_id, org_id)
     content = await _read_limited(file)
+    # Issue #27: tenant storage entitlement (soft-by-default for storage)
+    from app.controlplane import facade as cp_facade
+
+    await cp_facade.check_storage_quota(db, org_id, len(content))
     item = await svc.upload_file(
         submission_id,
         deliverable_id,
@@ -1092,6 +1096,10 @@ async def upload_asset(
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
     content = await _read_limited(file)
+    # Issue #27: tenant storage entitlement
+    from app.controlplane import facade as cp_facade
+
+    await cp_facade.check_storage_quota(db, org_id, len(content))
     asset = await svc.upload_asset(
         org_id,
         project_id,

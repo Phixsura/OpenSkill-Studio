@@ -368,6 +368,10 @@ class EvaluationService:
             # Update monthly usage
             await self._update_monthly_usage(task)
 
+            # Issue #27 §3.3c: control-plane usage events (idempotent per
+            # task+retry). EvalUsageMonthly above stays for display.
+            await self._emit_usage_events(task)
+
             await self.db.flush()
 
             log.info(
@@ -835,6 +839,66 @@ Please evaluate the submission against the rubric above."""
             "strengths": data.get("strengths", []),
             "improvements": data.get("improvements", []),
         }
+
+    async def _emit_usage_events(self, task: EvaluationTask) -> None:
+        """Issue #27 §3.3c: multimodal_evaluation + LLM token usage events.
+
+        Idempotency keys carry task.retries so a UI-triggered retry (a real
+        second LLM spend) meters again, while replays of the same attempt
+        never double-bill. Emission failures must not fail the evaluation —
+        the LLM spend already happened.
+        """
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+
+        from app.controlplane import facade as cp_facade
+        from app.models.organization import Organization as _Org
+
+        tenant_id = (
+            await self.db.execute(select(_Org.tenant_id).where(_Org.id == task.org_id))
+        ).scalar_one_or_none()
+        if tenant_id is None:
+            return
+        now = _dt.now(_UTC)
+        common = {
+            "tenant_id": tenant_id,
+            "org_id": task.org_id,
+            "occurred_at": now,
+            "source": "evaluation",
+            "evaluation_task_id": task.id,
+            "provider": task.llm_provider,
+            "model_or_service": task.llm_model,
+        }
+        try:
+            await cp_facade.emit_usage(
+                self.db,
+                usage_type="multimodal_evaluation",
+                quantity=1,
+                idempotency_key=f"eval:{task.id}:{task.retries}:eval",
+                metadata={
+                    "eval_type": task.type.value,
+                    "cost_usd": str(task.cost_usd) if task.cost_usd is not None else None,
+                },
+                **common,
+            )
+            if task.input_tokens:
+                await cp_facade.emit_usage(
+                    self.db,
+                    usage_type="llm_input_tokens",
+                    quantity=task.input_tokens,
+                    idempotency_key=f"eval:{task.id}:{task.retries}:in",
+                    **common,
+                )
+            if task.output_tokens:
+                await cp_facade.emit_usage(
+                    self.db,
+                    usage_type="llm_output_tokens",
+                    quantity=task.output_tokens,
+                    idempotency_key=f"eval:{task.id}:{task.retries}:out",
+                    **common,
+                )
+        except Exception:  # noqa: BLE001 — never fail a completed eval on metering
+            log.warning("eval_usage_emit_failed", task_id=task.id, exc_info=True)
 
     async def _update_monthly_usage(self, task: EvaluationTask) -> None:
         """Upsert monthly usage stats with atomic SQL to prevent lost updates."""
