@@ -669,6 +669,15 @@ async def activate_rule(db: AsyncSession, rule: RevenueShareRule, *, actor: Acto
                 if rule.listing_id
                 else RevenueShareRule.listing_id.is_(None)
             ),
+            # country is part of the rule's identity (uq_cp_revshare_rule_version,
+            # rule_specificity +1 dim, resolved via tenant.country) — omitting it
+            # here made activating a v2 for one country wrongly retire the active
+            # rule of EVERY other country in the same dimension set (R35/C26).
+            (
+                RevenueShareRule.country == rule.country
+                if rule.country
+                else RevenueShareRule.country.is_(None)
+            ),
             RevenueShareRule.status == "active",
         )
         .values(status="retired", effective_until=rule.effective_from)

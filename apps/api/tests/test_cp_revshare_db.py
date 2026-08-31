@@ -217,6 +217,25 @@ async def test_suspended_partner_still_accrues(db):
 
 
 @pytest.mark.asyncio
+async def test_activate_rule_retires_only_same_country(db):
+    """R35/C26: country is part of rule identity. Activating a v2 for one
+    country must retire only that country's active rule, never collaterally
+    retire another country's active rule in the same dimension set."""
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    us1 = await _mk_rule(db, user, partner, rate="10", version=1, country="US")
+    gb1 = await _mk_rule(db, user, partner, rate="12", version=1, country="GB")
+    assert us1.status == "active" and gb1.status == "active"
+    # Activate a US v2 → retires US v1 only
+    await _mk_rule(db, user, partner, rate="15", version=2, country="US")
+    await db.refresh(us1)
+    await db.refresh(gb1)
+    assert us1.status == "retired"
+    assert gb1.status == "active"  # untouched — different country
+
+
+@pytest.mark.asyncio
 async def test_missing_fx_raises_not_silently_drops(db):
     """R35/C24: a missing FX rate for a cross-currency accrual must RAISE (so
     the outbox retries / dead-letters), not return None (which the worker
