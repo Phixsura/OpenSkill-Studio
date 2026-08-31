@@ -91,7 +91,12 @@ class OrgService:
     # ── CRUD ──
 
     async def create(
-        self, name: str, slug: str | None, description: str | None, created_by: str
+        self,
+        name: str,
+        slug: str | None,
+        description: str | None,
+        created_by: str,
+        tenant_id: str | None = None,
     ) -> Organization:
         if slug is None:
             slug = self._generate_slug(name)
@@ -101,7 +106,25 @@ class OrgService:
         if existing.scalar_one_or_none() is not None:
             raise SlugAlreadyExistsError() from None
 
+        # Issue #27: every org belongs to a TenantAccount. Standalone creation
+        # (no tenant context) auto-creates a TRIAL tenant owned by the creator;
+        # the tenant-scoped path (POST /tenants/{id}/orgs) passes tenant_id and
+        # enforces the max_organizations entitlement at the endpoint.
+        if tenant_id is None:
+            from app.controlplane.services.audit import Actor
+            from app.controlplane.services.tenants import create_tenant
+
+            tenant = await create_tenant(
+                self.db,
+                name=name,
+                slug=slug,
+                actor=Actor(user_id=created_by, type="tenant"),
+                owner_user_id=created_by,
+            )
+            tenant_id = tenant.id
+
         org = Organization(
+            tenant_id=tenant_id,
             name=name,
             slug=slug,
             description=description,

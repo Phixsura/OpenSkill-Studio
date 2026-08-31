@@ -13,6 +13,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models so Alembic can detect them
+import app.controlplane.models  # noqa: F401, E402 — cp_* model registration (Issue #27)
 from app.models import Base  # noqa: F401 — triggers model registration
 
 target_metadata = Base.metadata

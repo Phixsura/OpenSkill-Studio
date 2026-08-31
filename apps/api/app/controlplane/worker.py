@@ -156,6 +156,17 @@ async def _reap_outbox(ctx: dict) -> None:
             log.warning("outbox_reaped", count=n)
 
 
+async def _expire_trials(ctx: dict) -> None:
+    from app.controlplane.services.tenants import expire_trials
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        n = await expire_trials(db)
+        await db.commit()
+        if n:
+            log.info("cp_trials_expired", count=n)
+
+
 def _cron_jobs() -> list:
     """Cron registry — later phases append their sweeps here."""
     from arq.cron import cron
@@ -164,6 +175,8 @@ def _cron_jobs() -> list:
         # Outbox poll every 15s (arq cron supports second-level sets).
         cron(_poll_outbox, second={0, 15, 30, 45}, name="cp_outbox_poll"),
         cron(_reap_outbox, minute=set(range(0, 60, 10)), second=5, name="cp_outbox_reaper"),
+        # Trial expiry: hourly at :12 (off-minute by design)
+        cron(_expire_trials, minute=12, name="cp_trial_expiry"),
         # P3: storage sweep (daily), seat sweep (monthly), api-request flush (hourly)
         # P5: reservation expiry, promo credit expiry
         # P6: period close scan

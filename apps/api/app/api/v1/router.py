@@ -36,6 +36,8 @@ from app.api.v1.endpoints import (
     workflow_registry,
     workflow_runs,
 )
+from app.controlplane.api import platform as cp_platform
+from app.controlplane.api import tenants as cp_tenants
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(health.router)
@@ -72,3 +74,7 @@ api_v1_router.include_router(workflow_installations.router)
 api_v1_router.include_router(workflow_registry.router)
 api_v1_router.include_router(requirement_profiles.router)
 api_v1_router.include_router(matching.router)
+
+# ── Control plane (Issue #27) ──
+api_v1_router.include_router(cp_platform.router)
+api_v1_router.include_router(cp_tenants.router)

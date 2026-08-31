@@ -1,0 +1,441 @@
+"""P1 DB tests: tenant lifecycle, membership, impersonation, audit, outbox.
+
+Requires Postgres (make infra-up && make db-migrate). Follows the
+test_services_db.py session pattern.
+"""
+
+import asyncio
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import select
+from ulid import ULID
+
+from app.controlplane.models.audit import CommercialAuditEvent
+from app.controlplane.models.outbox import OutboxMessage, enqueue
+from app.controlplane.models.tenant import (
+    TenantAccount,
+    TenantStatus,
+)
+from app.controlplane.services import tenants as tenant_svc
+from app.controlplane.services.audit import Actor
+from app.controlplane.worker import HANDLERS, process_outbox_once, register_handler
+from app.core.database import AsyncSessionLocal
+from app.core.security import hash_password
+from app.exceptions import AppError
+from app.models.user import User, UserRole, UserStatus
+
+
+@pytest.fixture
+async def db():
+    from app.core.database import engine
+
+    async with AsyncSessionLocal() as session:
+        yield session
+        await session.rollback()
+    await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+async def _dispose_after_sessionless_tests():
+    """Tests that open their own AsyncSessionLocal sessions (outbox/concurrency)
+    still need the engine disposed per-test — the loop is per-function."""
+    yield
+    from app.core.database import engine
+
+    await engine.dispose()
+
+
+async def _mk_user(db, role=UserRole.STUDENT) -> User:
+    user = User(
+        email=f"cp-{ULID()}@test.com",
+        email_verified=True,
+        password_hash=hash_password("Test1234!"),
+        display_name="CP Test",
+        role=role,
+        status=UserStatus.ACTIVE,
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+def _actor(user) -> Actor:
+    return Actor(user_id=user.id, type="platform")
+
+
+async def _mk_tenant(db, user, **kw) -> TenantAccount:
+    return await tenant_svc.create_tenant(
+        db,
+        name=f"T {ULID()}",
+        slug=f"t-{str(ULID()).lower()}",
+        actor=_actor(user),
+        owner_user_id=user.id,
+        **kw,
+    )
+
+
+# ── Lifecycle ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_tenant_trial_with_owner(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    assert tenant.status == TenantStatus.TRIAL
+    assert tenant.trial_ends_at is not None
+    members = (
+        (
+            await db.execute(
+                select(tenant_svc.TenantMember).where(
+                    tenant_svc.TenantMember.tenant_id == tenant.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(members) == 1 and members[0].role == "owner"
+    # audit row written in same tx
+    audits = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.tenant_id == tenant.id,
+                    CommercialAuditEvent.action == "tenant.created",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(audits) == 1
+
+
+@pytest.mark.asyncio
+async def test_legal_transition_matrix(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await db.commit()
+    # trial → active → past_due → active → suspended → active → cancelled → archived
+    chain = [
+        TenantStatus.ACTIVE,
+        TenantStatus.PAST_DUE,
+        TenantStatus.ACTIVE,
+        TenantStatus.SUSPENDED,
+        TenantStatus.ACTIVE,
+        TenantStatus.CANCELLED,
+        TenantStatus.ARCHIVED,
+    ]
+    for target in chain:
+        tenant = await tenant_svc.transition_status(
+            db, tenant, target, actor=_actor(user), reason="test"
+        )
+        await db.commit()
+        assert tenant.status == target
+
+
+@pytest.mark.asyncio
+async def test_illegal_transition_rejected(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    with pytest.raises(AppError) as exc:
+        await tenant_svc.transition_status(db, tenant, TenantStatus.ARCHIVED, actor=_actor(user))
+    assert exc.value.code == "TENANT_STATUS_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_suspend_vs_reactivate_single_winner():
+    async with AsyncSessionLocal() as setup:
+        user = await _mk_user(setup)
+        tenant = await _mk_tenant(setup, user)
+        await tenant_svc.transition_status(setup, tenant, TenantStatus.ACTIVE, actor=_actor(user))
+        await setup.commit()
+        tid, uid = tenant.id, user.id
+
+    async def attempt(target):
+        async with AsyncSessionLocal() as s:
+            t = await s.get(TenantAccount, tid)
+            u = await s.get(User, uid)
+            try:
+                await tenant_svc.transition_status(s, t, target, actor=_actor(u), reason="race")
+                await s.commit()
+                return True
+            except AppError:
+                await s.rollback()
+                return False
+
+    results = await asyncio.gather(attempt(TenantStatus.SUSPENDED), attempt(TenantStatus.SUSPENDED))
+    # Exactly one concurrent suspend wins
+    assert sorted(results) == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_suspension_blocks_consumption(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await tenant_svc.transition_status(db, tenant, TenantStatus.ACTIVE, actor=_actor(user))
+    await tenant_svc.transition_status(
+        db, tenant, TenantStatus.SUSPENDED, actor=_actor(user), reason="test"
+    )
+    with pytest.raises(AppError) as exc:
+        tenant_svc.require_tenant_active(tenant)
+    assert exc.value.code == "TENANT_SUSPENDED"
+    # PAST_DUE passes
+    tenant.status = TenantStatus.PAST_DUE
+    tenant_svc.require_tenant_active(tenant)  # no raise
+
+
+@pytest.mark.asyncio
+async def test_trial_expiry_downgrade(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    tenant.trial_ends_at = datetime.now(UTC) - timedelta(days=1)
+    await db.flush()
+    n = await tenant_svc.expire_trials(db)
+    assert n >= 1
+    await db.refresh(tenant)
+    assert tenant.status == TenantStatus.ACTIVE  # settings default: downgrade
+
+
+# ── Membership / uniform 404 ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_non_member_gets_uniform_404(db):
+    owner = await _mk_user(db)
+    outsider = await _mk_user(db)
+    tenant = await _mk_tenant(db, owner)
+    with pytest.raises(AppError) as exc:
+        await tenant_svc.require_tenant_member(db, tenant.id, outsider)
+    assert exc.value.code == "TENANT_NOT_FOUND"
+    assert exc.value.status_code == 404
+    # Same error for a tenant that does not exist at all — no existence oracle
+    with pytest.raises(AppError) as exc2:
+        await tenant_svc.require_tenant_member(db, str(ULID()), outsider)
+    assert exc2.value.code == "TENANT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_role_mismatch_is_403(db):
+    owner = await _mk_user(db)
+    billing = await _mk_user(db)
+    tenant = await _mk_tenant(db, owner)
+    await tenant_svc.add_tenant_member(
+        db, tenant, user_id=billing.id, role="billing_admin", actor=_actor(owner)
+    )
+    with pytest.raises(AppError) as exc:
+        await tenant_svc.require_tenant_member(db, tenant.id, billing, "owner")
+    assert exc.value.code == "TENANT_FORBIDDEN"
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_last_owner_removal_blocked(db):
+    owner = await _mk_user(db)
+    tenant = await _mk_tenant(db, owner)
+    member = (
+        await db.execute(
+            select(tenant_svc.TenantMember).where(tenant_svc.TenantMember.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    with pytest.raises(AppError) as exc:
+        await tenant_svc.remove_tenant_member(db, tenant, member.id)
+    assert exc.value.code == "LAST_OWNER_REMOVAL"
+
+
+# ── Impersonation ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_impersonation_target_admin_rejected(db):
+    support = await _mk_user(db)
+    admin = await _mk_user(db, role=UserRole.ADMIN)
+    with pytest.raises(AppError) as exc:
+        await tenant_svc.create_impersonation_grant(
+            db,
+            platform_user=support,
+            target_user_id=admin.id,
+            tenant_id=None,
+            reason="should never work",
+            expires_in_minutes=30,
+            actor=_actor(support),
+        )
+    assert exc.value.code == "IMPERSONATION_TARGET_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_impersonation_token_carries_imp_claims(db):
+    import jwt as _jwt
+
+    from app.config import settings as app_settings
+
+    support = await _mk_user(db)
+    target = await _mk_user(db)
+    grant = await tenant_svc.create_impersonation_grant(
+        db,
+        platform_user=support,
+        target_user_id=target.id,
+        tenant_id=None,
+        reason="debug ticket #42",
+        expires_in_minutes=30,
+        actor=_actor(support),
+    )
+    token, expires_in = await tenant_svc.mint_impersonation_token(db, grant, actor=_actor(support))
+    payload = _jwt.decode(token, app_settings.jwt_secret, algorithms=["HS256"])
+    assert payload["sub"] == target.id
+    assert payload["type"] == "access"
+    assert payload["imp"] == support.id
+    assert payload["imp_grant"] == grant.id
+    assert grant.used_count == 1
+    assert 0 < expires_in <= 30 * 60
+
+
+@pytest.mark.asyncio
+async def test_expired_or_revoked_grant_cannot_mint(db):
+    support = await _mk_user(db)
+    target = await _mk_user(db)
+    grant = await tenant_svc.create_impersonation_grant(
+        db,
+        platform_user=support,
+        target_user_id=target.id,
+        tenant_id=None,
+        reason="debug ticket #43",
+        expires_in_minutes=30,
+        actor=_actor(support),
+    )
+    grant.revoked_at = datetime.now(UTC)
+    with pytest.raises(AppError) as exc:
+        await tenant_svc.mint_impersonation_token(db, grant, actor=_actor(support))
+    assert exc.value.code == "IMPERSONATION_EXPIRED"
+    grant.revoked_at = None
+    grant.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    with pytest.raises(AppError):
+        await tenant_svc.mint_impersonation_token(db, grant, actor=_actor(support))
+
+
+# ── Outbox ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_outbox_atomic_with_business_write():
+    """Rolled-back transaction leaves no outbox message."""
+    marker = f"test-{ULID()}"
+    async with AsyncSessionLocal() as db:
+        enqueue(db, "usage.recorded", {"marker": marker})
+        await db.flush()
+        await db.rollback()
+    async with AsyncSessionLocal() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(OutboxMessage).where(OutboxMessage.payload["marker"].astext == marker)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_outbox_handler_processes_and_is_idempotent():
+    calls: list[dict] = []
+    topic = f"test.topic{str(ULID()).lower()[:8]}"
+
+    @register_handler(topic)
+    async def _handler(db, payload):
+        calls.append(payload)
+
+    try:
+        async with AsyncSessionLocal() as db:
+            enqueue(db, topic, {"n": 1})
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            handled = await process_outbox_once(db, topics=[topic])
+            assert handled == 1
+        # Second pass: message is done — no reprocessing
+        async with AsyncSessionLocal() as db:
+            handled = await process_outbox_once(db, topics=[topic])
+            assert handled == 0
+        assert len(calls) == 1
+    finally:
+        HANDLERS.pop(topic, None)
+
+
+@pytest.mark.asyncio
+async def test_outbox_retry_backoff_and_dead_letter():
+    topic = f"test.fail{str(ULID()).lower()[:8]}"
+    attempts: list[int] = []
+
+    @register_handler(topic)
+    async def _handler(db, payload):
+        attempts.append(1)
+        raise RuntimeError("boom")
+
+    try:
+        async with AsyncSessionLocal() as db:
+            msg = enqueue(db, topic, {})
+            await db.commit()
+            msg_id = msg.id
+        async with AsyncSessionLocal() as db:
+            await process_outbox_once(db, topics=[topic])
+        async with AsyncSessionLocal() as db:
+            msg = await db.get(OutboxMessage, msg_id)
+            assert msg.status == "pending"
+            assert msg.attempts == 1
+            assert msg.available_at > datetime.now(UTC)  # backed off
+            assert "boom" in msg.last_error
+            # Fast-forward to dead-letter: exhaust remaining attempts
+            from app.config import settings as app_settings
+
+            msg.attempts = app_settings.outbox_max_attempts - 1
+            msg.available_at = datetime.now(UTC) - timedelta(seconds=1)
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            await process_outbox_once(db, topics=[topic])
+        async with AsyncSessionLocal() as db:
+            msg = await db.get(OutboxMessage, msg_id)
+            assert msg.status == "failed"
+    finally:
+        HANDLERS.pop(topic, None)
+
+
+@pytest.mark.asyncio
+async def test_outbox_concurrent_workers_no_double_consume():
+    topic = f"test.conc{str(ULID()).lower()[:8]}"
+    processed: list[str] = []
+
+    @register_handler(topic)
+    async def _handler(db, payload):
+        processed.append(payload["k"])
+        await asyncio.sleep(0.05)  # widen the race window
+
+    try:
+        async with AsyncSessionLocal() as db:
+            for i in range(6):
+                enqueue(db, topic, {"k": f"m{i}"})
+            await db.commit()
+
+        async def worker():
+            async with AsyncSessionLocal() as db:
+                return await process_outbox_once(db, topics=[topic])
+
+        counts = await asyncio.gather(worker(), worker())
+        assert sum(counts) == 6  # every message handled exactly once
+        assert sorted(processed) == [f"m{i}" for i in range(6)]
+    finally:
+        HANDLERS.pop(topic, None)
+
+
+# ── Backfill sanity (runs against the migrated dev DB) ───────
+
+
+@pytest.mark.asyncio
+async def test_backfill_left_no_orphan_orgs(db):
+    from sqlalchemy import text
+
+    null_count = (
+        await db.execute(text("SELECT COUNT(*) FROM organizations WHERE tenant_id IS NULL"))
+    ).scalar()
+    assert null_count == 0

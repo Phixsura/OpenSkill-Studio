@@ -184,11 +184,82 @@ async def logout(
 # ── Me ────────────────────────────────────────────────────
 
 
-@router.get(
-    "/me", response_model=DataResponse[UserResponse], dependencies=[Depends(rate_limit(60, 60))]
-)
-async def get_me(user: User = Depends(get_current_user)):
-    return DataResponse(data=UserResponse.model_validate(user))
+@router.get("/me", dependencies=[Depends(rate_limit(60, 60))])
+async def get_me(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """User profile + control-plane context (Issue #27 §1.6).
+
+    Extends the base UserResponse with platform roles, tenant/partner
+    memberships, and an impersonation banner flag. AuthResponse.user (login/
+    register) keeps the plain UserResponse — this endpoint only.
+    """
+    from sqlalchemy import select
+
+    from app.controlplane.models.tenant import (
+        PlatformRoleAssignment,
+        TenantAccount,
+        TenantMember,
+    )
+
+    base = UserResponse.model_validate(user).model_dump()
+
+    roles = (
+        (
+            await db.execute(
+                select(PlatformRoleAssignment.role).where(PlatformRoleAssignment.user_id == user.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    tenant_rows = (
+        await db.execute(
+            select(TenantAccount, TenantMember.role)
+            .join(TenantMember, TenantMember.tenant_id == TenantAccount.id)
+            .where(TenantMember.user_id == user.id)
+        )
+    ).all()
+    memberships = [
+        {
+            "tenant_id": t.id,
+            "slug": t.slug,
+            "name": t.name,
+            "role": role,
+            "status": t.status.value,
+        }
+        for t, role in tenant_rows
+    ]
+    partner_memberships: list[dict] = []  # populated when partners land (P7)
+
+    # Impersonation banner: decode the presented token's imp claims (the
+    # signature was already verified by get_current_user).
+    impersonation = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from app.core.security import decode_token
+
+            payload = decode_token(auth_header[7:])
+            if "imp" in payload:
+                impersonation = {
+                    "grant_id": payload.get("imp_grant"),
+                    "platform_user_id": payload.get("imp"),
+                }
+        except Exception:  # noqa: BLE001 — banner is best-effort
+            pass
+
+    return DataResponse(
+        data={
+            **base,
+            "platform_roles": sorted(roles),
+            "tenant_memberships": memberships,
+            "partner_memberships": partner_memberships,
+            "impersonation": impersonation,
+        }
+    )
 
 
 @router.put(
