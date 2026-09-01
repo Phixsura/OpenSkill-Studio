@@ -881,6 +881,57 @@ async def test_tenant_ai_ceiling_enforced_without_policy_row(db):
 
 
 @pytest.mark.asyncio
+async def test_eval_settings_writethrough_uses_tenant_currency(db):
+    """R63[10]: the org eval-budget write-through must denominate the policy in
+    the TENANT's currency, not a hardcoded USD × 100. For a JPY tenant, spend
+    is rated in JPY (minor mult 1), so a USD/×100 policy matched zero spend and
+    the limit was 100× too large."""
+    user = await _mk_user(db)
+    tenant = await tenant_svc.create_tenant(
+        db,
+        name=f"JP {ULID()}",
+        slug=f"jp-{str(ULID()).lower()}",
+        actor=_actor(user),
+        owner_user_id=user.id,
+        status=TenantStatus.ACTIVE,
+        with_trial=False,
+        currency="JPY",
+    )
+    await budget_svc.upsert_from_eval_settings(
+        db, tenant_id=tenant.id, org_id="01JORGORGORGORGORGORGORGOR", monthly_budget_usd=1000
+    )
+    policy = (
+        await db.execute(
+            select(BudgetPolicy).where(
+                BudgetPolicy.tenant_id == tenant.id, BudgetPolicy.scope_type == "org"
+            )
+        )
+    ).scalar_one()
+    # JPY minor multiplier is 1 → 1000, not 100000; currency is the tenant's.
+    assert policy.currency == "JPY"
+    assert policy.limit_minor == 1000
+
+
+@pytest.mark.asyncio
+async def test_create_budget_rejects_currency_mismatch(db):
+    """R63[11]: a budget whose currency != tenant.currency silently matches
+    zero spend (rating writes tenant-currency rows) — must be rejected."""
+    from app.controlplane.api.credits import BudgetPolicyRequest, create_budget
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)  # USD tenant
+    body = BudgetPolicyRequest(
+        scope_type="tenant",
+        period="monthly",
+        limit_minor=1000,
+        currency="EUR",  # mismatch
+    )
+    with pytest.raises(AppError) as exc:
+        await create_budget(tenant.id, body, user=user, db=db)
+    assert exc.value.code == "CURRENCY_MISMATCH"
+
+
+@pytest.mark.asyncio
 async def test_tenant_ai_ceiling_denominated_in_tenant_currency(db):
     """R32/C5: the implicit AI ceiling must be in the TENANT's currency, or a
     non-USD tenant's ceiling matches zero of its (tenant-currency) rated rows

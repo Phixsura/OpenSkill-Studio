@@ -242,8 +242,11 @@ class EvaluationService:
         if not eval_settings.get("enabled"):
             raise EvalNotEnabledError()
 
-        # Check budget
-        if not await self.check_budget(org_id):
+        # Check budget — thread the submission's project/user so project- and
+        # user-scoped policies match (R63).
+        if not await self.check_budget(
+            org_id, project_id=submission.project_id, user_id=submission.user_id
+        ):
             raise BudgetExceededError()
 
         task = EvaluationTask(
@@ -457,7 +460,12 @@ class EvaluationService:
         eval_settings = await self.get_eval_settings(task.org_id)
         if not eval_settings.get("enabled"):
             raise EvalNotEnabledError()
-        if not await self.check_budget(task.org_id):
+        retry_submission = await self.db.get(Submission, task.submission_id)
+        if not await self.check_budget(
+            task.org_id,
+            project_id=retry_submission.project_id if retry_submission else None,
+            user_id=retry_submission.user_id if retry_submission else None,
+        ):
             raise BudgetExceededError()
         task.status = EvalStatus.PENDING
         task.error = None
@@ -518,7 +526,14 @@ class EvaluationService:
             "budget_remaining": (budget - spent) if budget is not None else None,
         }
 
-    async def check_budget(self, org_id: str) -> bool:
+    async def check_budget(
+        self,
+        org_id: str,
+        *,
+        project_id: str | None = None,
+        user_id: str | None = None,
+        projected_minor: int = 0,
+    ) -> bool:
         """Return True if under budget (or no budget set).
 
         Issue #27 §17: the legacy settings check stays as the fast path (it
@@ -527,6 +542,11 @@ class EvaluationService:
         compatibility read. A legacy settings value with no policy row is
         lazily converted by update_eval_settings' write-through; until then
         both checks agree because upsert_from_eval_settings mirrors it.
+
+        project_id/user_id let project/user-scoped policies match (R63: the
+        single call site passed org_id only, so those scopes were dead), and
+        projected_minor is the estimated cost of the eval about to run so the
+        hard stop fires BEFORE the limit is breached, not one run after.
         """
         from app.models.organization import Organization
 
@@ -556,7 +576,28 @@ class EvaluationService:
             from app.controlplane.services.tenants import get_tenant_for_org
 
             tenant = await get_tenant_for_org(self.db, org_id)
-            await cp_budgets.check(self.db, tenant, org_id)
+            decision = await cp_budgets.check(
+                self.db,
+                tenant,
+                org_id,
+                project_id=project_id,
+                user_id=user_id,
+                usage_type="multimodal_evaluation",
+                projected_minor=projected_minor,
+            )
+            # R63: surface soft (hard_stop=False / threshold) budget warnings —
+            # previously the return value was discarded, so a soft policy was
+            # behaviorally identical to no policy. Log them for now (a
+            # notification path can consume the same structlog event later).
+            for w in decision.warnings:
+                log.warning(
+                    "cp_budget_warning",
+                    org_id=org_id,
+                    policy_id=w.get("policy_id"),
+                    scope=w.get("scope"),
+                    over=w.get("over", False),
+                    threshold=w.get("threshold", False),
+                )
         except AppError as exc:
             if exc.code == "BUDGET_EXCEEDED":
                 return False

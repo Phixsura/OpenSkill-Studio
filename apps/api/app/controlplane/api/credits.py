@@ -324,6 +324,28 @@ async def create_budget(
         raise AppError("VALIDATION_ERROR", "scope_id required for non-tenant scope", 422)
     if body.scope_type == "tenant" and body.scope_id is not None:
         raise AppError("VALIDATION_ERROR", "tenant scope takes no scope_id", 422)
+    # R63[11]: the currency must match the tenant's — rating writes RatedUsage
+    # in tenant.currency and _spent_minor filters spend on
+    # billable_currency == policy.currency, so a mismatched currency silently
+    # matches ZERO spend and the "hard cap" enforces nothing.
+    from app.controlplane.models.tenant import TenantAccount
+
+    tenant = await db.get(TenantAccount, tenant_id)
+    if body.currency != tenant.currency:
+        raise AppError(
+            "CURRENCY_MISMATCH",
+            f"Budget currency must be the tenant's currency ({tenant.currency})",
+            422,
+        )
+    # An org-scoped policy must reference an org that belongs to THIS tenant —
+    # a typo'd or foreign ULID otherwise silently matches nothing (org/user
+    # scopes resolve spend by scope_id).
+    if body.scope_type == "org":
+        from app.models.organization import Organization
+
+        org = await db.get(Organization, body.scope_id)
+        if org is None or org.tenant_id != tenant_id:
+            raise AppError("VALIDATION_ERROR", "scope_id is not an org of this tenant", 422)
     dup = (
         await db.execute(
             select(BudgetPolicy.id).where(

@@ -49,6 +49,40 @@ async def get_effective_entitlements(db: AsyncSession, tenant):
     return await _impl(db, tenant)
 
 
+async def check_budget(
+    db: AsyncSession,
+    tenant,
+    org_id: str | None,
+    *,
+    project_id: str | None = None,
+    cohort_id: str | None = None,
+    user_id: str | None = None,
+    capability: str | None = None,
+    usage_type: str | None = None,
+    projected_minor: int = 0,
+):
+    """Enforce all matching budget policies + the tenant AI ceiling (P5).
+
+    Hard-stop policies raise BUDGET_EXCEEDED (429); returns a BudgetDecision
+    whose `warnings` carry soft/threshold signals. Every costed product path
+    (workflow runs, evaluations) must call this — it was previously reachable
+    only from the evaluation service, leaving workflow spend unbounded (R63).
+    """
+    from app.controlplane.services.budgets import check as _impl
+
+    return await _impl(
+        db,
+        tenant,
+        org_id,
+        project_id=project_id,
+        cohort_id=cohort_id,
+        user_id=user_id,
+        capability=capability,
+        usage_type=usage_type,
+        projected_minor=projected_minor,
+    )
+
+
 async def check_quota(db: AsyncSession, tenant, key: str, *, current, requested=1):
     """Enforce a numeric entitlement; hard limits raise QUOTA_EXCEEDED (P2)."""
     from app.controlplane.services.entitlements import check_quota as _impl

@@ -204,9 +204,21 @@ async def upsert_from_eval_settings(
             await db.delete(existing)
             await db.flush()
         return
-    limit_minor = int(Decimal(str(monthly_budget_usd)) * 100)
+    # R63[10]/R32: denominate the policy in the TENANT's currency, not a
+    # hardcoded USD with a x100 multiplier. _spent_minor filters rated rows on
+    # billable_currency == policy.currency, and rating writes rows in the
+    # tenant's currency — a USD policy against a EUR/JPY tenant matched ZERO
+    # spend (inert) and, for zero-decimal currencies (JPY/KRW), x100 was a
+    # 100x limit. The "usd" in the field name is a legacy label; the number is
+    # a budget amount in the tenant's own currency.
+    from app.controlplane.models.pricing import minor_multiplier
+
+    tenant = await db.get(TenantAccount, tenant_id)
+    currency = tenant.currency if tenant is not None else "USD"
+    limit_minor = int(Decimal(str(monthly_budget_usd)) * minor_multiplier(currency))
     if existing is not None:
         existing.limit_minor = limit_minor
+        existing.currency = currency
         existing.is_active = True
     else:
         db.add(
@@ -216,7 +228,7 @@ async def upsert_from_eval_settings(
                 scope_id=org_id,
                 period="monthly",
                 limit_minor=limit_minor,
-                currency="USD",
+                currency=currency,
                 hard_stop=True,
                 metadata_={"source": "eval_settings"},
             )

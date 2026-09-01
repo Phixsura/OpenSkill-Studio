@@ -158,6 +158,27 @@ async def test_create_tenant_rejects_bad_currency(client):
     assert r.status_code in (401, 422)
 
 
+def test_tenant_schema_rejects_unknown_timezone():
+    """R63[13]: an unknown IANA tz (typo) must be rejected at the schema, not
+    accepted and silently fall back to UTC in budget/rating/usage period math.
+    Tested at the schema layer because route auth runs before body validation
+    for these endpoints (so an unauth'd request 401s before the tz is seen)."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.controlplane.schemas.tenant import CreateTenantRequest, UpdateTenantRequest
+
+    # Valid zones pass.
+    CreateTenantRequest(name="X", slug="x-tenant", timezone="Asia/Seoul")
+    UpdateTenantRequest(timezone="America/New_York")
+    UpdateTenantRequest(timezone=None)  # unset is fine
+    # Typos are rejected.
+    with _pytest.raises(ValidationError):
+        CreateTenantRequest(name="X", slug="x-tenant", timezone="Asia/Seul")
+    with _pytest.raises(ValidationError):
+        UpdateTenantRequest(timezone="Not/AZone")
+
+
 @pytest.mark.asyncio
 async def test_suspend_requires_reason(client):
     r = await client.post("/api/v1/platform/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/suspend", json={})

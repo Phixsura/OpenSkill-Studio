@@ -276,6 +276,23 @@ class WorkflowRuntimeService:
                 raise AppError("NO_DEFINITION", "Release no longer exists", 422)
             definition = release.manifest.get("definition", {})
 
+        # R63: enforce budget policies + the tenant AI ceiling on workflow runs.
+        # Workflow runs are the primary costed path (they emit per-step provider
+        # usage that rating turns into RatedUsage), yet budgets.check was only
+        # ever reached from the evaluation service — workflow spend blew past
+        # every policy unbounded. Project the run's estimated cost (tenant
+        # currency, same units budgets compare against) so the check fails
+        # BEFORE the limit is breached, not one full run after. Raised
+        # BUDGET_EXCEEDED aborts before the run row is created (same tx).
+        from app.controlplane.services import credits as _credits
+
+        projected = await _credits.estimate_run_cost_minor(
+            self.db, definition, org_id, tenant.currency
+        )
+        await cp_facade.check_budget(
+            self.db, tenant, org_id, usage_type="workflow_run", projected_minor=projected
+        )
+
         # Validate run inputs against the definition's input schema
         input_defs = {i["key"]: i for i in definition.get("inputs", [])}
         for key, idef in input_defs.items():
@@ -466,11 +483,8 @@ class WorkflowRuntimeService:
         # reserve (INSUFFICIENT_CREDIT 402) aborts the run atomically; the
         # run.terminal outbox handler settles ACTUAL usage or releases.
         if bool((tenant.metadata_ or {}).get("credit_enforcement")):
-            from app.controlplane.services import credits as _credits
-
-            estimate = await _credits.estimate_run_cost_minor(
-                self.db, definition, org_id, tenant.currency
-            )
+            # Reuse the estimate already computed for the budget check above.
+            estimate = projected
             if estimate > 0:
                 await _credits.reserve(
                     self.db,

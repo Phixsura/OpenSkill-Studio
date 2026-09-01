@@ -1,10 +1,25 @@
 """Tenant / platform-role / impersonation / audit schemas (ADR-014 §1)."""
 
 from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.schemas.base import reject_ctrl_str
+
+
+def _valid_timezone(v):
+    """Reject unknown IANA zones. Budget/rating/usage window math falls back to
+    UTC on an unknown tz (R63[13]), so a typo like 'Asia/Seul' silently shifts
+    every period boundary — catch it at the edge instead."""
+    if v is None:
+        return v
+    try:
+        ZoneInfo(v)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"Unknown timezone '{v}'") from exc
+    return v
+
 
 # ── Requests ─────────────────────────────────────────────────
 
@@ -23,6 +38,11 @@ class CreateTenantRequest(BaseModel):
     def _ctrl(cls, v, info):
         return reject_ctrl_str(v, info.field_name)
 
+    @field_validator("timezone")
+    @classmethod
+    def _tz(cls, v):
+        return _valid_timezone(v)
+
 
 class UpdateTenantRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -34,6 +54,11 @@ class UpdateTenantRequest(BaseModel):
     @classmethod
     def _ctrl(cls, v, info):
         return reject_ctrl_str(v, info.field_name)
+
+    @field_validator("timezone")
+    @classmethod
+    def _tz(cls, v):
+        return _valid_timezone(v)
 
 
 class SuspendTenantRequest(BaseModel):

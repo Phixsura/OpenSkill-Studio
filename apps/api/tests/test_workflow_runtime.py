@@ -2419,3 +2419,66 @@ async def test_open_review_queue_instructor_only(c):
     # a student is forbidden from the queue entirely
     r_student = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h_student)
     assert r_student.status_code == 403, r_student.text
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_enforces_budget_policy(c):
+    """R63 CRITICAL: workflow runs must be checked against BudgetPolicy — the
+    check was previously reachable only from the evaluation path, so workflow
+    spend blew past every budget unbounded. An org monthly hard_stop budget of
+    $0.50 with a $9.99/call offering must reject the run at create with 429
+    BUDGET_EXCEEDED (projected estimate 9.99×1.5 = $14.98 > $0.50)."""
+    from sqlalchemy import update as sa_update
+
+    from app.controlplane.models.credit import BudgetPolicy
+    from app.controlplane.services.tenants import get_tenant_for_org
+    from app.core.database import AsyncSessionLocal
+    from app.models.provider import ProviderModelOffering
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    offering_id = await _mock_offering(c, h, oid)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == offering_id)
+            .values(cost_per_call_usd=9.99)
+        )
+        tenant = await get_tenant_for_org(db, oid)
+        db.add(
+            BudgetPolicy(
+                tenant_id=tenant.id,
+                scope_type="org",
+                scope_id=oid,
+                period="monthly",
+                limit_minor=50,  # $0.50
+                currency=tenant.currency,
+                hard_stop=True,
+            )
+        )
+        await db.commit()
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "over budget"}},
+        headers=h,
+    )
+    assert r.status_code == 429, r.text
+    assert r.json()["error"]["code"] == "BUDGET_EXCEEDED"
+
+    # A generous budget lets the same run through.
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(BudgetPolicy)
+            .where(BudgetPolicy.scope_id == oid)
+            .values(limit_minor=10_000_000)
+        )
+        await db.commit()
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "under budget"}},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text
