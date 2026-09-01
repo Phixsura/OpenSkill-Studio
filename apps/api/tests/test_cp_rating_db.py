@@ -177,9 +177,71 @@ def test_policy_params_validation():
         ("fixed_unit_price", {"unit_price_minor": -1}),
         ("included_quota_then_overage", {"included_quota": "1"}),
         ("nope", {}),
+        # R52[12]: per_quantity=0 is a rating-time divisor → must be rejected.
+        ("fixed_unit_price", {"unit_price_minor": 3, "per_quantity": "0"}),
+        ("cost_plus_fixed", {"fixed_markup_minor": 5, "per_quantity": "0"}),
+        (
+            "included_quota_then_overage",
+            {"included_quota": "1", "overage_unit_price_minor": 2, "per_quantity": "0"},
+        ),
     ]:
         with pytest.raises(AppError):
             v(policy_type, params)
+
+
+def test_negative_adjustment_reverses_cleanly():
+    """R52[7,8,9]: a full-reversal adjustment (negative quantity) must produce
+    the exact negative of the original charge for every policy type — so the
+    two events net to zero. Previously minimum_fee flipped it positive, tiers
+    fell back to base rate, and cost_plus_fixed added a spurious +1 markup
+    block on the refund."""
+    ci = rating.compute_internal_cost_minor
+    f = rating.compute_billable_minor
+    tiers = [{"min_qty": "0", "unit_cost": "0.01"}, {"min_qty": "10000", "unit_cost": "0.005"}]
+
+    # [8] tiers: a -50000 reversal picks the SAME 0.005 tier as +50000 (by
+    # magnitude), so internal cost is an exact negation.
+    up = rating.apply_tiers(Decimal("0.01"), tiers, Decimal("50000"))
+    un = rating.apply_tiers(Decimal("0.01"), tiers, Decimal("-50000"))
+    assert up == un == Decimal("0.005")
+
+    # [7] minimum_fee floors a real (positive) charge but must NOT flip a
+    # negative reversal into a positive charge.
+    pos = ci(Decimal("0.01"), Decimal("10000"), "USD", 50)
+    neg = ci(Decimal("0.01"), Decimal("-10000"), "USD", 50)
+    assert pos == 10000 and neg == -10000
+
+    # [9] cost_plus_fixed: forward bills N markup blocks, reversal reverses
+    # exactly N — no spurious +1 block on the refund.
+    fwd = f(
+        "cost_plus_fixed",
+        {"fixed_markup_minor": 500, "per_quantity": "1000"},
+        internal_cost_minor=10000,
+        quantity=Decimal(1000),
+    )
+    rev = f(
+        "cost_plus_fixed",
+        {"fixed_markup_minor": 500, "per_quantity": "1000"},
+        internal_cost_minor=-10000,
+        quantity=Decimal(-1000),
+    )
+    assert fwd == 10500 and rev == -10500
+    assert fwd + rev == 0
+
+    # cost_plus_percentage nets to zero too.
+    pf = f(
+        "cost_plus_percentage",
+        {"percentage": "20"},
+        internal_cost_minor=10000,
+        quantity=Decimal(10000),
+    )
+    rf = f(
+        "cost_plus_percentage",
+        {"percentage": "20"},
+        internal_cost_minor=-10000,
+        quantity=Decimal(-10000),
+    )
+    assert pf + rf == 0
 
 
 # ── Cost ladder + effective dating ───────────────────────────
@@ -341,6 +403,59 @@ async def test_fx_missing_blocks_then_unblocks(db):
     # 10 images × 10 minor USD = 100 minor USD = $1.00 → ¥7.12 = 712 CNY minor
     assert rated2.billable_amount_minor == 712
     assert rated2.fx_rate_snapshot["rate"] == "7.12000000"
+
+
+@pytest.mark.asyncio
+async def test_cost_plus_bridges_cost_currency_to_policy_currency(db):
+    """R52[6] CRITICAL: for cost_plus_* the internal cost is in the COST rate's
+    currency, but billable is derived from it and then treated as the POLICY
+    currency. When cost currency != policy currency, the number must be bridged
+    (cost -> policy via FX) BEFORE the markup, else the markup is applied to raw
+    cost-currency minor units and the whole chain mis-bills.
+
+    Setup: cost rate in USD ($0.10/img), policy cost_plus_percentage 0% in JPY,
+    tenant in JPY. USD->JPY = 150. 10 images → $1.00 cost → ¥150 (JPY minor
+    mult 1) → +0% markup → ¥150 billable. The bug would treat the $1.00 = 100
+    USD-minor as ¥100 and bill ¥100."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, currency="JPY")
+    await pricing_svc.create_cost_rate(
+        db,
+        actor=_actor(user),
+        provider="brg",
+        model_or_service="m",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.10"),
+        effective_from=datetime.now(UTC) - timedelta(days=2),
+    )
+    await pricing_svc.create_price_policy(
+        db,
+        actor=_actor(user),
+        name=f"jpy-costplus {ULID()}",
+        policy_type="cost_plus_percentage",
+        usage_type="image_generation",
+        currency="JPY",
+        params={"percentage": "0"},
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        tenant_id=tenant.id,
+    )
+    await pricing_svc.create_fx_rate(
+        db,
+        actor=_actor(user),
+        base_currency="USD",
+        quote_currency="JPY",
+        rate=Decimal("150"),
+        effective_from=datetime.now(UTC) - timedelta(days=2),
+    )
+    event = await _mk_event(db, tenant, provider="brg", model_or_service="m", quantity=10)
+    rated = await rating.rate_event(db, event.id)
+    assert rated.status == "rated"
+    # $0.10 × 10 = $1.00 = 100 USD-minor internal; bridged ×150 → ¥150; +0% → 150.
+    assert rated.internal_cost_minor == 100
+    assert rated.internal_cost_currency == "USD"
+    assert rated.billable_amount_minor == 150, rated.billable_amount_minor
+    assert rated.billable_currency == "JPY"
 
 
 # ── Snapshot immutability (issue §13 acceptance) ─────────────

@@ -26,7 +26,7 @@ def validate_policy_params(policy_type: str, params: dict) -> dict:
     if policy_type not in POLICY_TYPES:
         raise AppError("INVALID_POLICY_PARAMS", f"Unknown policy type '{policy_type}'", 422)
 
-    def dec(key: str, *, positive: bool = True) -> Decimal:
+    def dec(key: str, *, positive: bool = True, nonzero: bool = False) -> Decimal:
         try:
             v = Decimal(str(params[key]))
         except (KeyError, InvalidOperation) as exc:
@@ -35,6 +35,12 @@ def validate_policy_params(policy_type: str, params: dict) -> dict:
             ) from exc
         if not v.is_finite() or (positive and v < 0):
             raise AppError("INVALID_POLICY_PARAMS", f"params.{key} must be non-negative", 422)
+        if nonzero and v == 0:
+            # per_quantity is a divisor at rating time — 0 passed the old
+            # non-negative check then raised DivisionByZero in rate_event,
+            # dead-lettering the tenant's rating + run.terminal settlement
+            # (R52[12]). Reject it at policy-create instead.
+            raise AppError("INVALID_POLICY_PARAMS", f"params.{key} must be positive", 422)
         return v
 
     def intval(key: str) -> int:
@@ -50,18 +56,18 @@ def validate_policy_params(policy_type: str, params: dict) -> dict:
     elif policy_type == "cost_plus_fixed":
         intval("fixed_markup_minor")
         if "per_quantity" in params:
-            dec("per_quantity")
+            dec("per_quantity", nonzero=True)
         allowed = {"fixed_markup_minor", "per_quantity", "exclude_failed"}
     elif policy_type == "fixed_unit_price":
         intval("unit_price_minor")
         if "per_quantity" in params:
-            dec("per_quantity")
+            dec("per_quantity", nonzero=True)
         allowed = {"unit_price_minor", "per_quantity", "exclude_failed"}
     else:  # included_quota_then_overage
         dec("included_quota")
         intval("overage_unit_price_minor")
         if "per_quantity" in params:
-            dec("per_quantity")
+            dec("per_quantity", nonzero=True)
         allowed = {"included_quota", "overage_unit_price_minor", "per_quantity", "exclude_failed"}
     extra = set(params.keys()) - allowed
     if extra:

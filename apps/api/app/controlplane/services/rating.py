@@ -29,9 +29,15 @@ log = structlog.get_logger()
 
 
 def apply_tiers(unit_cost: Decimal, tier_rules: list | None, quantity: Decimal) -> Decimal:
-    """Highest min_qty <= quantity wins; per-event, no monthly accumulation (ADR)."""
+    """Highest min_qty <= |quantity| wins; per-event, no monthly accumulation (ADR).
+
+    Tier selection uses the MAGNITUDE of quantity so a negative adjustment
+    (reversal) is priced at the SAME tier the original event used — otherwise
+    no tier matches a negative quantity (0 <= -N is False) and the reversal
+    falls back to the base rate, over/under-crediting the tenant (R52[8])."""
     if not tier_rules:
         return unit_cost
+    mag = abs(quantity)
     best = unit_cost
     best_min = Decimal("-1")
     for tier in tier_rules:
@@ -40,7 +46,7 @@ def apply_tiers(unit_cost: Decimal, tier_rules: list | None, quantity: Decimal) 
             tier_cost = Decimal(str(tier["unit_cost"]))
         except Exception:  # noqa: BLE001 — malformed tier ignored (validated at write)
             continue
-        if min_qty <= quantity and min_qty > best_min:
+        if min_qty <= mag and min_qty > best_min:
             best, best_min = tier_cost, min_qty
     return best
 
@@ -51,13 +57,21 @@ def compute_internal_cost_minor(
     currency: str,
     minimum_fee_minor: int | None,
 ) -> int:
-    raw = (unit_cost * quantity * minor_multiplier(currency)).quantize(
+    """Internal cost in `currency` minor units, sign-linear in quantity.
+
+    Computed on the MAGNITUDE then re-signed so rating(-N) == -rating(+N) — a
+    full reversal nets to zero (R52[7]). minimum_fee is a FLOOR on a real
+    (positive) charge, so it applies to the magnitude only; clamping a negative
+    reversal up to +minimum_fee would flip a credit into a charge."""
+    sign = -1 if quantity < 0 else 1
+    magnitude = abs(quantity)
+    raw = (unit_cost * magnitude * minor_multiplier(currency)).quantize(
         Decimal("1"), rounding=ROUND_HALF_UP
     )
     cost = int(raw)
-    if minimum_fee_minor is not None:
+    if minimum_fee_minor is not None and cost > 0:
         cost = max(cost, minimum_fee_minor)
-    return cost
+    return sign * cost
 
 
 def compute_billable_minor(
@@ -81,18 +95,29 @@ def compute_billable_minor(
         )
     if policy_type == "cost_plus_fixed":
         per = Decimal(str(params.get("per_quantity", "1")))
-        # markup applies per STARTED block → ceiling, not round (ADR §4.2:
-        # markup×⌈qty/per⌉). ROUND_HALF_UP under-billed any partial block
-        # (1400/1000 → 1 instead of 2).
-        units = int((quantity / per).to_integral_value(rounding=ROUND_CEILING)) if per else 1
-        return internal_cost_minor + int(params["fixed_markup_minor"]) * max(units, 1)
+        if per <= 0:
+            raise AppError("INVALID_POLICY_PARAMS", "per_quantity must be positive", 422)
+        # markup applies per STARTED block → ceiling on the MAGNITUDE, then
+        # re-signed. A positive event of 1400 over per=1000 bills 2 blocks; a
+        # reversal of -1400 reverses exactly 2 blocks (-2), so forward+reversal
+        # nets to zero. The old max(units, 1) on a signed ceiling forced +1
+        # block onto every refund (R52[9]).
+        sign = -1 if quantity < 0 else 1
+        blocks = int((abs(quantity) / per).to_integral_value(rounding=ROUND_CEILING))
+        if blocks == 0 and quantity != 0:
+            blocks = 1
+        return internal_cost_minor + sign * int(params["fixed_markup_minor"]) * blocks
     if policy_type == "fixed_unit_price":
         per = Decimal(str(params.get("per_quantity", "1")))
+        if per <= 0:
+            raise AppError("INVALID_POLICY_PARAMS", "per_quantity must be positive", 422)
         price = Decimal(int(params["unit_price_minor"]))
         return int((price * quantity / per).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     if policy_type == "included_quota_then_overage":
         included = Decimal(str(params["included_quota"]))
         per = Decimal(str(params.get("per_quantity", "1")))
+        if per <= 0:
+            raise AppError("INVALID_POLICY_PARAMS", "per_quantity must be positive", 422)
         price = Decimal(int(params["overage_unit_price_minor"]))
         already_over = max(prior_period_quantity - included, Decimal(0))
         total_over = max(prior_period_quantity + quantity - included, Decimal(0))
@@ -245,15 +270,27 @@ async def _resolve_cost_rate(
         ).scalar_one_or_none()
         if wildcard is not None:
             return wildcard, snap(wildcard, "provider_wildcard")
+    # Capability-level fallback: a provider-agnostic rate for this usage_type.
+    # Constrain to the event's OWN provider so an unrelated provider's
+    # capability rate can't price this event (R52[11]); a NULL-provider
+    # capability rate remains a legitimate cross-provider default. Deterministic
+    # tie-break on id keeps replays stable when two rates share effective_from.
     capability = (
         await db.execute(
             select(ProviderCostRate)
             .where(
                 ProviderCostRate.capability_key.is_not(None),
                 ProviderCostRate.usage_type == event.usage_type,
+                or_(
+                    ProviderCostRate.provider == event.provider,
+                    ProviderCostRate.provider.is_(None),
+                ),
                 window,
             )
-            .order_by(ProviderCostRate.effective_from.desc())
+            .order_by(
+                ProviderCostRate.effective_from.desc(),
+                ProviderCostRate.id.desc(),
+            )
             .limit(1)
         )
     ).scalar_one_or_none()
@@ -400,23 +437,83 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
         month_start = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         from sqlalchemy import func as _f
 
-        prior_qty = (
-            await db.execute(
-                select(_f.coalesce(_f.sum(UsageEvent.quantity), 0)).where(
-                    UsageEvent.tenant_id == tenant.id,
-                    UsageEvent.usage_type == event.usage_type,
-                    UsageEvent.occurred_at >= month_start,
-                    UsageEvent.occurred_at < event.occurred_at,
+        # "Prior" = everything in the period that logically precedes THIS event.
+        # Order by (occurred_at, created_at, id): a reversal adjustment shares
+        # the original's occurred_at but is created later, so ordering by
+        # created_at includes the original in prior_qty — without which the
+        # reversal always netted to 0 overage (R52[10], strict occurred_at<
+        # excluded the same-timestamp original).
+        precedes = or_(
+            UsageEvent.occurred_at < event.occurred_at,
+            and_(
+                UsageEvent.occurred_at == event.occurred_at,
+                or_(
+                    UsageEvent.created_at < event.created_at,
+                    and_(
+                        UsageEvent.created_at == event.created_at,
+                        UsageEvent.id < event.id,
+                    ),
+                ),
+            ),
+        )
+        q = (
+            select(_f.coalesce(_f.sum(UsageEvent.quantity), 0))
+            .select_from(UsageEvent)
+            .outerjoin(RatedUsage, RatedUsage.usage_event_id == UsageEvent.id)
+            .where(
+                UsageEvent.tenant_id == tenant.id,
+                UsageEvent.usage_type == event.usage_type,
+                UsageEvent.occurred_at >= month_start,
+                precedes,
+                # A voided rating means the event was struck from billing — it
+                # must not consume the included quota either (R52[13]).
+                or_(RatedUsage.id.is_(None), RatedUsage.status != "voided"),
+            )
+        )
+        # Failed events that the policy excludes from billing shouldn't consume
+        # the included quota either, else a burst of billed-0 failures silently
+        # pushes real usage into overage (R52[13]).
+        if policy.params.get("exclude_failed"):
+            q = q.where(
+                or_(
+                    UsageEvent.metadata_["status"].astext.is_(None),
+                    UsageEvent.metadata_["status"].astext != "failed",
                 )
             )
-        ).scalar_one()
-        prior_qty = Decimal(prior_qty)
+        prior_qty = Decimal((await db.execute(q)).scalar_one())
+
+    # Currency normalization + margin (platform currency). Do FX gap-collection
+    # up front because cost_plus_* policies need internal_cost expressed in the
+    # POLICY currency BEFORE computing billable (R52[6] CRITICAL: internal_cost
+    # is in the COST rate's currency; deriving billable from it yields a number
+    # in cost-currency minor units, but the downstream conversion treats it as
+    # policy currency and only bridges policy->tenant, never cost->policy).
+    fx_snapshot: dict | None = None
+    blocked_gaps: list[str] = []
 
     if policy is not None:
+        policy_currency = policy.currency
+        cost_for_billing = internal_cost
+        # cost_plus_* derive billable from internal cost → that input must be in
+        # the policy's currency. fixed_unit_price / included_quota price in the
+        # policy currency directly and ignore internal_cost, so no bridge needed.
+        if (
+            policy.policy_type in ("cost_plus_percentage", "cost_plus_fixed")
+            and internal_cost != 0
+            and cost_currency != policy_currency
+        ):
+            fx_cp = await resolve_fx(db, cost_currency, policy_currency, event.occurred_at)
+            if fx_cp is None:
+                blocked_gaps.append(f"{cost_currency}->{policy_currency}")
+                cost_for_billing = 0
+            else:
+                cost_for_billing = convert_minor(
+                    internal_cost, fx_cp[0], cost_currency, policy_currency
+                )
         billable_policy_ccy = compute_billable_minor(
             policy.policy_type,
             policy.params,
-            internal_cost_minor=internal_cost,
+            internal_cost_minor=cost_for_billing,
             quantity=event.quantity,
             prior_period_quantity=prior_qty,
             usage_metadata=event.metadata_,
@@ -437,17 +534,13 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
             "params": policy.params,
             "currency": policy.currency,
         }
-        policy_currency = policy.currency
     else:
         billable_policy_ccy = 0
         sell_snapshot = {"no_policy": True, "currency": tenant.currency}
         policy_currency = tenant.currency
         log.warning("cp_rating_no_policy", usage_event_id=event.id, tenant_id=tenant.id)
 
-    # 3. Currency normalization + margin (platform currency)
-    fx_snapshot: dict | None = None
-    blocked_gaps: list[str] = []
-
+    # 3. Convert billable from policy currency → tenant currency.
     billable_minor = billable_policy_ccy
     if policy_currency != tenant.currency:
         fx = await resolve_fx(db, policy_currency, tenant.currency, event.occurred_at)
