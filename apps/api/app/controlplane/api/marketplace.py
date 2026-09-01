@@ -341,7 +341,23 @@ async def purchase(
     provider_key = "stripe" if settings.stripe_secret_key else settings.billing_provider_default
     if provider_key == "manual":
         provider_key = "mock"
+    # R64[18]: never silently serve REAL paid checkouts through the mock
+    # provider in production — the buyer gets a dead mock-checkout URL, no
+    # money can ever be collected, and the purchase rots in 'pending'. Fail
+    # loudly so ops configures Stripe (or the buyer uses credit).
+    if provider_key == "mock" and settings.app_env == "production":
+        raise AppError(
+            "BILLING_PROVIDER_UNCONFIGURED",
+            "Checkout payments are not configured; pay with credit or contact support",
+            409,
+        )
     adapter = get_billing_provider(provider_key)
+    if adapter is None:
+        raise AppError(
+            "BILLING_PROVIDER_UNCONFIGURED",
+            f"Unknown billing provider '{provider_key}'",
+            409,
+        )
     session = await adapter.create_checkout_session(
         tenant=tenant,
         kind="purchase",

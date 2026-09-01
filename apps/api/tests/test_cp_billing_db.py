@@ -404,14 +404,19 @@ async def test_immediate_cancel_bills_final_period(db):
     await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False, actor=a)
     await db.refresh(sub)
     assert sub.status == "cancelled"
-    # A period.close_due was enqueued for the open period.
+    # A period.close_due was enqueued for THIS sub's period (scope the check —
+    # other tests' committed outbox rows are visible in a shared DB).
+    my_period = (
+        await db.execute(select(BillingPeriod.id).where(BillingPeriod.subscription_id == sub.id))
+    ).scalar_one()
     msg = (
         (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == "period.close_due")))
         .scalars()
         .all()
     )
-    assert msg, "immediate cancel must enqueue a final period close"
-    period_id = msg[-1].payload["billing_period_id"]
+    mine = [m for m in msg if m.payload.get("billing_period_id") == my_period]
+    assert mine, "immediate cancel must enqueue a final period close"
+    period_id = mine[-1].payload["billing_period_id"]
     inv = await billing_svc.close_period_and_invoice(db, period_id)
     assert inv is not None, "final partial period must be billable"
     # No new open period is created for a cancelled sub.
@@ -970,3 +975,157 @@ async def test_negative_invoice_balance_carried_forward_as_credit(db):
         assert bal.balance_minor == -inv.subtotal_minor, (
             f"residual {-inv.subtotal_minor} not carried forward, balance={bal.balance_minor}"
         )
+
+
+# ── R64: billing-provider correctness ─────────────────────────
+
+
+def test_subscription_ref_tolerates_basil_payloads():
+    """R64[19]: Stripe API 2025-03+ moved Invoice.subscription to
+    parent.subscription_details.subscription — read both shapes."""
+    from app.controlplane.services.billing import _subscription_ref
+
+    assert _subscription_ref({"subscription": "sub_1"}) == "sub_1"
+    assert _subscription_ref({"subscription": {"id": "sub_2"}}) == "sub_2"
+    assert (
+        _subscription_ref({"parent": {"subscription_details": {"subscription": "sub_3"}}})
+        == "sub_3"
+    )
+    assert (
+        _subscription_ref({"parent": {"subscription_details": {"subscription": {"id": "sub_4"}}}})
+        == "sub_4"
+    )
+    assert _subscription_ref({}) is None
+
+
+def test_mock_webhook_non_ascii_signature_is_401_not_500():
+    """R64[20]: hmac.compare_digest raises TypeError on non-ASCII str — an
+    unauthenticated request with a latin-1 header must 401, not 500."""
+    from app.controlplane.services.billing_providers.mock import MockProvider
+
+    with pytest.raises(AppError) as exc:
+        MockProvider().verify_webhook({"x-mock-signature": "\xff\xff"}, b"{}")
+    assert exc.value.code == "WEBHOOK_SIGNATURE_INVALID"
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_unpaid_checkout_session_delivers_nothing(db):
+    """R64[15]: checkout.session.completed with payment_status='unpaid'
+    (SEPA/ACH/boleto) must NOT deliver credits — delivery waits for
+    async_payment_succeeded."""
+    from types import SimpleNamespace
+
+    from app.controlplane.models.credit import TenantCreditBalance
+    from app.controlplane.services.billing import _apply_webhook_event
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    parsed = SimpleNamespace(
+        event_type="checkout.session.completed",
+        data={
+            "id": "cs_unpaid_1",
+            "payment_status": "unpaid",
+            "amount_total": 5000,
+            "metadata": {"tenant_id": tenant.id, "kind": "credit_topup"},
+        },
+    )
+    handled = await _apply_webhook_event(db, "stripe", parsed)
+    assert handled is True  # recorded, not an error
+    bal = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one_or_none()
+    assert bal is None or bal.balance_minor == 0, "unpaid session must not credit"
+    # The async success event later delivers.
+    parsed2 = SimpleNamespace(
+        event_type="checkout.session.async_payment_succeeded",
+        data={
+            "id": "cs_unpaid_1",
+            "payment_status": "paid",
+            "amount_total": 5000,
+            "metadata": {"tenant_id": tenant.id, "kind": "credit_topup"},
+        },
+    )
+    await _apply_webhook_event(db, "stripe", parsed2)
+    bal2 = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert bal2.balance_minor == 5000
+
+
+@pytest.mark.asyncio
+async def test_invoice_paid_reactivates_subscription_not_just_tenant(db):
+    """R64/R42[6]: invoice.paid must flip the SUBSCRIPTION out of past_due too,
+    not only the tenant — else the sub is permanently stuck."""
+    from types import SimpleNamespace
+
+    from app.controlplane.models.billing import Subscription
+    from app.controlplane.services.billing import _apply_webhook_event
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    sub.provider = "stripe"
+    sub.external_ref = "sub_pd_1"
+    sub.status = "past_due"
+    await db.flush()
+    parsed = SimpleNamespace(
+        event_type="invoice.paid",
+        data={"subscription": "sub_pd_1", "metadata": {}},
+    )
+    handled = await _apply_webhook_event(db, "stripe", parsed)
+    assert handled is True
+    refreshed = await db.get(Subscription, sub.id)
+    await db.refresh(refreshed)
+    assert refreshed.status == "active", refreshed.status
+
+
+@pytest.mark.asyncio
+async def test_duplicate_checkout_cancels_orphan_provider_subscription(db, monkeypatch):
+    """R64[17]: a second completed checkout session for a tenant that already
+    has a live subscription must cancel the orphan provider-side subscription
+    (it would double-bill with no platform record)."""
+    from app.controlplane.services import billing as bsvc
+    from app.controlplane.services.billing import activate_subscription_from_checkout
+    from app.controlplane.services.billing_providers.mock import MockProvider
+
+    cancelled: list = []
+
+    async def fake_cancel(self, external_ref, at_period_end):
+        cancelled.append((external_ref, at_period_end))
+
+    monkeypatch.setattr(MockProvider, "cancel_subscription", fake_cancel)
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    first = await activate_subscription_from_checkout(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="mock",
+        external_customer_ref="cus_1",
+        external_ref="mock_sub_1",
+    )
+    assert first.external_ref == "mock_sub_1"
+    # Second completed session with a DIFFERENT provider subscription ref.
+    again = await activate_subscription_from_checkout(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="mock",
+        external_customer_ref="cus_1",
+        external_ref="mock_sub_2",
+    )
+    assert again.id == first.id  # platform keeps the first
+    assert cancelled == [("mock_sub_2", False)], cancelled
+    _ = bsvc  # keep import for clarity

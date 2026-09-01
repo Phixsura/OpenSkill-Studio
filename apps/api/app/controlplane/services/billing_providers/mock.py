@@ -66,7 +66,11 @@ class MockProvider(BillingProviderBase):
         if not provided:
             raise AppError("WEBHOOK_SIGNATURE_INVALID", "Missing signature", 401)
         expected = hmac.new(mock_webhook_key(), raw_body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(provided, expected):
+        # Compare as bytes: hmac.compare_digest raises TypeError on non-ASCII
+        # str inputs, and Starlette decodes header bytes as latin-1 — a header
+        # like `X-Mock-Signature: \xff\xff` turned an unauthenticated request
+        # into a 500 instead of a 401 (R64[20]).
+        if not hmac.compare_digest(provided.encode("utf-8", errors="replace"), expected.encode()):
             raise AppError("WEBHOOK_SIGNATURE_INVALID", "Invalid signature", 401)
         try:
             payload = json.loads(raw_body)

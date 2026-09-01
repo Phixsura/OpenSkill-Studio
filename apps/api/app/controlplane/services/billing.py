@@ -229,6 +229,33 @@ async def activate_subscription_from_checkout(
     webhook-event unique key + the live-subscription partial index."""
     existing = await get_live_subscription(db, tenant.id)
     if existing is not None:
+        # R64[17]: a second completed checkout session (double-click, two tabs)
+        # creates a REAL second recurring subscription at the provider with no
+        # platform record — silently double-billing the customer forever.
+        # Cancel the orphan provider-side; the platform keeps the first.
+        if (
+            external_ref
+            and external_ref != existing.external_ref
+            and provider in ("mock", "stripe")
+        ):
+            from app.controlplane.services.billing_providers import get_billing_provider
+
+            adapter = get_billing_provider(provider)
+            if adapter is not None:
+                try:
+                    await adapter.cancel_subscription(external_ref, at_period_end=False)
+                    log.warning(
+                        "cp_orphan_subscription_cancelled",
+                        tenant_id=tenant.id,
+                        orphan_ref=external_ref,
+                        kept_ref=existing.external_ref,
+                    )
+                except Exception:  # noqa: BLE001 — orphan cleanup is best-effort
+                    log.error(
+                        "cp_orphan_subscription_cancel_failed",
+                        tenant_id=tenant.id,
+                        orphan_ref=external_ref,
+                    )
         return existing
     version, _price = await _resolve_plan_price(db, plan_key, tenant.currency, interval)
     now = _now()
@@ -321,6 +348,26 @@ async def change_plan(
     if mode == "immediate":
         sub.plan_version_id = new_version.id
         sub.seat_quantity = new_seats
+        # R64[16]: for provider-owned recurring billing (mock/stripe), the
+        # change must be pushed to the provider or it keeps invoicing the OLD
+        # price/quantity forever. Platform-side proration stays authoritative
+        # (the adapter disables provider proration).
+        if sub.provider in ("mock", "stripe") and sub.external_ref:
+            from app.controlplane.services.billing_providers import get_billing_provider
+
+            adapter = get_billing_provider(sub.provider)
+            if adapter is not None and new_price is not None:
+                if sub.provider == "stripe" and not new_price.external_price_ref:
+                    raise AppError(
+                        "PLAN_NOT_AVAILABLE",
+                        "Target plan price has no Stripe price configured",
+                        409,
+                    )
+                await adapter.change_subscription(
+                    sub.external_ref,
+                    new_price.external_price_ref or "",
+                    new_seats,
+                )
     await db.flush()
     await record_audit(
         db,
@@ -854,6 +901,36 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             change.invoiced = True
         if pending:
             await invalidate_cache(tenant.id)
+            # R64[16]: push the now-applied deferred change to the provider so
+            # its recurring billing follows the new plan/quantity. Best-effort:
+            # a provider hiccup must not abort the period close (the outbox
+            # retry would double-generate); ops sees the error log.
+            if sub.provider in ("mock", "stripe") and sub.external_ref:
+                from app.controlplane.services.billing_providers import get_billing_provider
+
+                adapter = get_billing_provider(sub.provider)
+                new_p = (
+                    await db.execute(
+                        select(PlanPrice).where(
+                            PlanPrice.plan_version_id == sub.plan_version_id,
+                            PlanPrice.currency == sub.currency,
+                            PlanPrice.interval == sub.interval,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if adapter is not None and new_p is not None:
+                    try:
+                        await adapter.change_subscription(
+                            sub.external_ref,
+                            new_p.external_price_ref or "",
+                            sub.seat_quantity,
+                        )
+                    except Exception:  # noqa: BLE001
+                        log.error(
+                            "cp_provider_change_push_failed",
+                            subscription_id=sub.id,
+                            provider=sub.provider,
+                        )
 
         next_start = period.period_end
         next_end = _add_interval(next_start, sub.interval)
@@ -1187,6 +1264,24 @@ async def process_webhook(
     return {"duplicate": False, "status": event.status}
 
 
+def _subscription_ref(data: dict) -> str | None:
+    """The subscription id from a Stripe payload, tolerant of API versions.
+
+    R64[19]: Stripe API 2025-03+ ("basil") moved Invoice.subscription to
+    parent.subscription_details.subscription; checkout sessions keep the
+    top-level field. Read both shapes so dunning transitions don't go dead
+    against a new-API webhook endpoint."""
+    ref = data.get("subscription")
+    if ref:
+        return ref if isinstance(ref, str) else ref.get("id")
+    parent = data.get("parent") or {}
+    details = parent.get("subscription_details") or {}
+    ref = details.get("subscription")
+    if ref:
+        return ref if isinstance(ref, str) else ref.get("id")
+    return None
+
+
 async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
     """Event map (§6.2). Tenant status changes go through the guarded
     transition table — provider state is never blindly trusted."""
@@ -1195,12 +1290,35 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
     meta = data.get("metadata") or {}
     tenant_id = meta.get("tenant_id")
 
-    if event_type in ("checkout.session.completed", "checkout.completed"):
+    if event_type in (
+        "checkout.session.completed",
+        "checkout.completed",
+        # R64[15]: delayed-notification payment methods settle later — Stripe
+        # signals the outcome with these; deliver on success, ignore failure
+        # (money never arrived, nothing was delivered).
+        "checkout.session.async_payment_succeeded",
+    ):
         if tenant_id is None:
             return False
         tenant = await db.get(TenantAccount, tenant_id)
         if tenant is None:
             return False
+        # R64[15]: Stripe fires checkout.session.completed the moment the
+        # checkout UI finishes, even with payment_status='unpaid' for
+        # delayed-notification methods (SEPA/ACH/boleto/OXXO). Delivering the
+        # goods (license, credits, subscription) before money settles is a free
+        # ride when the payment later fails. Only proceed for paid/no-cost
+        # sessions; an async-payment session completes via
+        # checkout.session.async_payment_succeeded (handled below). Events
+        # without the field (mock provider) keep the old behavior.
+        payment_status = data.get("payment_status")
+        if payment_status is not None and payment_status not in ("paid", "no_payment_required"):
+            log.info(
+                "cp_checkout_awaiting_async_payment",
+                session=data.get("id"),
+                payment_status=payment_status,
+            )
+            return True  # recorded; async_payment_succeeded will deliver
         kind = meta.get("kind", "subscription")
         if kind == "subscription":
             await activate_subscription_from_checkout(
@@ -1211,7 +1329,7 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
                 seats=int(meta.get("seats", "0") or 0),
                 provider=provider,
                 external_customer_ref=data.get("customer"),
-                external_ref=data.get("subscription") or data.get("id"),
+                external_ref=_subscription_ref(data) or data.get("id"),
             )
         elif kind == "credit_topup":
             await credit_svc.top_up(
@@ -1242,13 +1360,20 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
         sub = (
             await db.execute(
                 select(Subscription).where(
-                    Subscription.external_ref == (data.get("subscription") or ""),
+                    Subscription.external_ref == (_subscription_ref(data) or ""),
                     Subscription.status != "cancelled",
                 )
             )
         ).scalar_one_or_none()
         if sub is None:
             return False
+        # The subscription itself must leave past_due too — reactivating only
+        # the tenant left the sub permanently stuck (R42[6]).
+        await db.execute(
+            update(Subscription)
+            .where(Subscription.id == sub.id, Subscription.status == "past_due")
+            .values(status="active")
+        )
         tenant = await db.get(TenantAccount, sub.tenant_id)
         if tenant is not None and tenant.status == TenantStatus.PAST_DUE:
             from app.controlplane.services.tenants import transition_status
@@ -1260,7 +1385,7 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
         sub = (
             await db.execute(
                 select(Subscription).where(
-                    Subscription.external_ref == (data.get("subscription") or ""),
+                    Subscription.external_ref == (_subscription_ref(data) or ""),
                     Subscription.status != "cancelled",
                 )
             )
