@@ -79,6 +79,9 @@ AUDIT_ACTIONS = frozenset(
         "license.revoked",
         "purchase.refunded",
         "listing.commission_changed",
+        # R60[44]: listing lifecycle mutates the license gate — audited.
+        "listing.activated",
+        "listing.delisted",
     }
 )
 

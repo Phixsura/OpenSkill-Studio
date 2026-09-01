@@ -690,10 +690,20 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
         status=status,
     )
     if existing is not None:  # unblocking retry — update the blocked row in place
-        for k, v in values.items():
-            setattr(existing, k, v)
-        existing.rated_at = datetime.now(UTC)
-        await db.flush()
+        # R73[7]: guard the transition — only a row STILL blocked may be
+        # rewritten. The read-time check races void_rated (ops voiding an
+        # erroneous blocked row): the unguarded setattr overwrite resurrected
+        # the voided row to 'rated' and it got invoiced.
+        from sqlalchemy import update as _update
+
+        result = await db.execute(
+            _update(RatedUsage)
+            .where(RatedUsage.id == existing.id, RatedUsage.status == "blocked")
+            .values(**values, rated_at=datetime.now(UTC))
+        )
+        await db.refresh(existing)
+        if not result.rowcount:
+            return existing  # concurrently voided/handled — leave it be
         return existing
     from ulid import ULID
 
@@ -732,15 +742,31 @@ async def rate_pending(db: AsyncSession, tenant_id: str | None = None, limit: in
 
 
 async def void_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -> RatedUsage:
+    from sqlalchemy import update as _update
+
     from app.controlplane.services.audit import record_audit
 
     row = await db.get(RatedUsage, rated_id)
     if row is None:
         raise AppError("RATING_NOT_FOUND", "Rated usage not found", 404)
-    if row.status == "invoiced":
-        raise AppError("RATED_USAGE_INVOICED", "Cannot void an invoiced rating", 409)
-    row.status = "voided"
-    row.void_reason = reason
+    # R73[6]: a guarded transition, not a read-then-blind-setattr. The old code
+    # raced close_period_and_invoice: T1 read status='rated', T2 invoiced the
+    # row (guarded rated→invoiced) and committed, T1's unguarded UPDATE then
+    # overwrote 'invoiced'→'voided' while the amount stayed on the finalized
+    # invoice. 'settled' is likewise terminal here (paid via a credit
+    # reservation — voiding it would strand the debit with no reversal).
+    result = await db.execute(
+        _update(RatedUsage)
+        .where(RatedUsage.id == rated_id, RatedUsage.status.in_(["rated", "blocked"]))
+        .values(status="voided", void_reason=reason)
+    )
+    if not result.rowcount:
+        await db.refresh(row)
+        raise AppError(
+            "RATED_USAGE_INVOICED",
+            f"Cannot void a rating in status '{row.status}'",
+            409,
+        )
     await record_audit(
         db,
         actor=actor,
@@ -751,6 +777,7 @@ async def void_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -> 
         reason=reason,
     )
     await db.flush()
+    await db.refresh(row)
     return row
 
 

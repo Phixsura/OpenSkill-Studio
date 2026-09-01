@@ -586,3 +586,79 @@ def test_seller_rule_override_rebalances_split():
     partner = min(partner, fee)
     assert seller == 9000 and fee == 1000 and partner == 1000
     assert fee + seller <= amount and seller + partner <= amount
+
+
+@pytest.mark.asyncio
+async def test_second_manual_adjustment_no_unique_violation(db):
+    """R50[41]/R73: a SECOND manual adjustment on the same statement previously
+    violated uq_cp_revshare_natural (identical natural key) → 500. Each manual
+    adjustment now carries a distinct self-referencing adjustment_of_id."""
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="10")
+    invoice = await _mk_invoice(db, tenant, subtotal=10000)
+    await revshare_svc.accrue_for_invoice(db, invoice.id)
+    stmt = await revshare_svc.generate_statement(
+        db,
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        beneficiary_org_id=None,
+        period=invoice.finalized_at.strftime("%Y-%m"),
+        actor=_actor(user),
+    )
+    s1 = await revshare_svc.adjust_statement(
+        db, stmt, amount_minor=-100, reason="dispute 1", actor=_actor(user)
+    )
+    s2 = await revshare_svc.adjust_statement(
+        db, s1, amount_minor=-50, reason="dispute 2", actor=_actor(user)
+    )
+    assert s2.manual_adjustments_minor == -150
+
+
+@pytest.mark.asyncio
+async def test_void_rated_guarded_against_terminal_states(db):
+    """R73[6]: void_rated must be a guarded transition — an invoiced or settled
+    row can never be flipped to voided by a stale read."""
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services import rating
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    ev = UsageEvent(
+        id=str(ULID()),
+        tenant_id=tenant.id,
+        org_id=str(ULID()),
+        usage_type="image_generation",
+        quantity=1,
+        unit="images",
+        occurred_at=datetime.now(UTC),
+        source="manual",
+    )
+    db.add(ev)
+    await db.flush()
+    row = RatedUsage(
+        usage_event_id=ev.id,
+        tenant_id=tenant.id,
+        org_id=ev.org_id,
+        usage_type="image_generation",
+        quantity=1,
+        cost_rate_snapshot={},
+        internal_cost_minor=0,
+        internal_cost_currency="USD",
+        sell_rate_snapshot={},
+        billable_amount_minor=100,
+        billable_amount_exact=Decimal(100),
+        billable_currency="USD",
+        status="settled",  # terminal: paid via credit reservation
+        rated_at=datetime.now(UTC),
+    )
+    db.add(row)
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await rating.void_rated(db, row.id, reason="oops", actor=_actor(user))
+    assert exc.value.code == "RATED_USAGE_INVOICED"
+    await db.refresh(row)
+    assert row.status == "settled"  # untouched

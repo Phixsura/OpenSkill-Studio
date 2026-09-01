@@ -392,9 +392,15 @@ async def cancel_subscription(
     actor: Actor,
 ) -> Subscription:
     if at_period_end:
+        # R73[5]: include past_due — a dunning tenant must be able to schedule
+        # non-renewal (they got 409 and kept accruing). 'trial' stays for
+        # forward-compat even though no current path creates that status.
         result = await db.execute(
             update(Subscription)
-            .where(Subscription.id == sub.id, Subscription.status.in_(["trial", "active"]))
+            .where(
+                Subscription.id == sub.id,
+                Subscription.status.in_(["trial", "active", "past_due"]),
+            )
             .values(status="cancel_at_period_end", cancel_at_period_end=True)
         )
     else:

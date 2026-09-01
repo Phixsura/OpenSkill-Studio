@@ -610,7 +610,8 @@ async def generate_statement(
 
     existing = (
         await db.execute(
-            select(SettlementStatement).where(
+            select(SettlementStatement)
+            .where(
                 SettlementStatement.beneficiary_type == beneficiary_type,
                 (
                     SettlementStatement.partner_id == partner_id
@@ -624,6 +625,14 @@ async def generate_statement(
                 ),
                 SettlementStatement.period == period,
             )
+            # R73[8]: LOCK the statement row for the whole regenerate — the old
+            # read-time status check raced finalize/approve: ops A regenerated
+            # while ops B finalized, and A's unguarded total rewrites silently
+            # mutated a finalized statement. FOR UPDATE + populate_existing
+            # serializes generate against the transition endpoints (which now
+            # also contend on this row via their guarded UPDATEs).
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if existing is not None:
@@ -765,11 +774,30 @@ async def adjust_statement(
     reason: str,
     actor: Actor,
 ) -> SettlementStatement:
+    from ulid import ULID as _ULID
+
+    # R73[8]: re-read the statement LOCKED — the caller's copy may be stale
+    # (concurrent finalize/approve/mark-paid), and the total mutations below
+    # must not land on a statement that just left draft/finalized.
+    statement = (
+        await db.execute(
+            select(SettlementStatement)
+            .where(SettlementStatement.id == statement.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     if statement.status not in ("draft", "finalized"):
         raise AppError(
             "STATEMENT_STATUS_CONFLICT", "Only draft/finalized statements can be adjusted", 409
         )
+    # R50[41]: the natural-key unique index covers (source_type, source_id,
+    # beneficiary, adjustment_of_id) — a SECOND manual adjustment on the same
+    # statement collided (500). Pre-generate the entry id and self-reference it
+    # in adjustment_of_id so every manual adjustment carries a distinct key.
+    entry_id = str(_ULID())
     entry = RevenueShareEntry(
+        id=entry_id,
         beneficiary_type=statement.beneficiary_type,
         partner_id=statement.partner_id,
         beneficiary_org_id=statement.beneficiary_org_id,
@@ -782,6 +810,7 @@ async def adjust_statement(
         period=statement.period,
         status="adjusted",
         statement_id=statement.id,
+        adjustment_of_id=entry_id,
     )
     db.add(entry)
     statement.manual_adjustments_minor += amount_minor

@@ -192,6 +192,7 @@ async def create_listing(
 async def activate_listing(
     org_id: str,
     listing_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -199,8 +200,39 @@ async def activate_listing(
     listing = await db.get(MarketplaceListing, listing_id)
     if listing is None or listing.seller_org_id != org_id:
         raise AppError("LISTING_INVALID", "Listing not found", 404)
-    listing.status = "active"
+    # R73[4]: guarded transition — a platform-SUSPENDED listing must not be
+    # seller-reactivable, and the gates create_listing enforced (active tenant,
+    # paid_marketplace entitlement) must hold at reactivation too.
+    from sqlalchemy import update as _update
+
+    from app.controlplane import facade
+
+    tenant = await facade.get_tenant_for_org(db, org_id)
+    facade.require_tenant_active(tenant)
+    await facade.require_feature(db, tenant, "paid_marketplace")
+    result = await db.execute(
+        _update(MarketplaceListing)
+        .where(
+            MarketplaceListing.id == listing_id,
+            MarketplaceListing.status.in_(["draft", "delisted"]),
+        )
+        .values(status="active")
+    )
+    if not result.rowcount:
+        raise AppError(
+            "LISTING_INVALID", f"Cannot activate a listing in status '{listing.status}'", 409
+        )
+    # R60[44]: the license gate depends on listing status — audit the change.
+    await record_audit(
+        db,
+        actor=make_actor(request, user, "tenant"),
+        action="listing.activated",
+        target_type="listing",
+        target_id=listing.id,
+        tenant_id=tenant.id,
+    )
     await db.commit()
+    await db.refresh(listing)
     return DataResponse(data=_listing_response(listing))
 
 
@@ -211,6 +243,7 @@ async def activate_listing(
 async def delist_listing(
     org_id: str,
     listing_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -218,8 +251,35 @@ async def delist_listing(
     listing = await db.get(MarketplaceListing, listing_id)
     if listing is None or listing.seller_org_id != org_id:
         raise AppError("LISTING_INVALID", "Listing not found", 404)
-    listing.status = "delisted"
+    # R73[4]: guarded — only an active/draft listing can be seller-delisted; a
+    # platform-suspended listing stays suspended.
+    from sqlalchemy import update as _update
+
+    from app.controlplane import facade
+
+    tenant = await facade.get_tenant_for_org(db, org_id)
+    result = await db.execute(
+        _update(MarketplaceListing)
+        .where(
+            MarketplaceListing.id == listing_id,
+            MarketplaceListing.status.in_(["draft", "active"]),
+        )
+        .values(status="delisted")
+    )
+    if not result.rowcount:
+        raise AppError(
+            "LISTING_INVALID", f"Cannot delist a listing in status '{listing.status}'", 409
+        )
+    await record_audit(
+        db,
+        actor=make_actor(request, user, "tenant"),
+        action="listing.delisted",
+        target_type="listing",
+        target_id=listing.id,
+        tenant_id=tenant.id,
+    )
     await db.commit()
+    await db.refresh(listing)
     return DataResponse(data=_listing_response(listing))
 
 
