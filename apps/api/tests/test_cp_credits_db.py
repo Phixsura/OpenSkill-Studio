@@ -428,14 +428,19 @@ async def test_review_gated_reservation_extends_past_bounded_limit():
             user = await _mk_user(db)
             tenant = await _mk_tenant(db, user)
             org = Organization(
-                name="RG", slug=f"rg-{str(ULID()).lower()}", status=OrgStatus.ACTIVE,
-                tenant_id=tenant.id, created_by=user.id,
+                name="RG",
+                slug=f"rg-{str(ULID()).lower()}",
+                status=OrgStatus.ACTIVE,
+                tenant_id=tenant.id,
+                created_by=user.id,
             )
             db.add(org)
             await db.flush()
             db.add(
                 OrgMember(
-                    org_id=org.id, user_id=user.id, role=OrgRole.OWNER,
+                    org_id=org.id,
+                    user_id=user.id,
+                    role=OrgRole.OWNER,
                     status=MemberStatus.ACTIVE,
                 )
             )
@@ -443,14 +448,20 @@ async def test_review_gated_reservation_extends_past_bounded_limit():
 
             async def mk_run_hold(run_status):
                 run = WorkflowRun(
-                    org_id=org.id, definition_snapshot={"steps": []},
-                    status=run_status, started_by=user.id,
+                    org_id=org.id,
+                    definition_snapshot={"steps": []},
+                    status=run_status,
+                    started_by=user.id,
                 )
                 db.add(run)
                 await db.flush()
                 r = await credit_svc.reserve(
-                    db, tenant.id, "USD", 100,
-                    reference_type="workflow_run", reference_id=run.id,
+                    db,
+                    tenant.id,
+                    "USD",
+                    100,
+                    reference_type="workflow_run",
+                    reference_id=run.id,
                 )
                 r.expires_at = datetime.now(UTC) - timedelta(hours=1)
                 r.extension_count = 2  # already at the bounded limit
@@ -647,17 +658,31 @@ async def test_tenant_ai_ceiling_denominated_in_tenant_currency(db):
     eid = str(ULID())
     db.add(
         UsageEvent(
-            id=eid, tenant_id=tenant.id, org_id=org, usage_type="image_generation",
-            quantity=1, unit="images", occurred_at=datetime.now(UTC), source="manual",
+            id=eid,
+            tenant_id=tenant.id,
+            org_id=org,
+            usage_type="image_generation",
+            quantity=1,
+            unit="images",
+            occurred_at=datetime.now(UTC),
+            source="manual",
         )
     )
     await db.flush()
     db.add(
         RatedUsage(
-            usage_event_id=eid, tenant_id=tenant.id, org_id=org,
-            usage_type="image_generation", quantity=1, cost_rate_snapshot={},
-            internal_cost_minor=0, internal_cost_currency="EUR", sell_rate_snapshot={},
-            billable_amount_minor=100, billable_currency="EUR", status="rated",
+            usage_event_id=eid,
+            tenant_id=tenant.id,
+            org_id=org,
+            usage_type="image_generation",
+            quantity=1,
+            cost_rate_snapshot={},
+            internal_cost_minor=0,
+            internal_cost_currency="EUR",
+            sell_rate_snapshot={},
+            billable_amount_minor=100,
+            billable_currency="EUR",
+            status="rated",
             rated_at=datetime.now(UTC),
         )
     )
@@ -811,24 +836,38 @@ async def test_credit_settled_usage_not_reinvoiced():
             a = _actor(user)
             await credit_svc.top_up(db, tenant.id, "USD", 100000, actor=a)
             sub, _ = await billing_svc.start_subscription(
-                db, tenant, plan_key="school", interval="month", seats=0,
-                provider="manual", actor=a,
+                db,
+                tenant,
+                plan_key="school",
+                interval="month",
+                seats=0,
+                provider="manual",
+                actor=a,
             )
             await pricing_svc.create_price_policy(
-                db, actor=a, name=f"cs {ULID()}", policy_type="fixed_unit_price",
-                usage_type="image_generation", currency="USD",
+                db,
+                actor=a,
+                name=f"cs {ULID()}",
+                policy_type="fixed_unit_price",
+                usage_type="image_generation",
+                currency="USD",
                 params={"unit_price_minor": 50},
-                effective_from=datetime.now(UTC) - timedelta(days=1), tenant_id=tenant.id,
+                effective_from=datetime.now(UTC) - timedelta(days=1),
+                tenant_id=tenant.id,
             )
             run_id = str(ULID())
             await credit_svc.reserve(
                 db, tenant.id, "USD", 1000, reference_type="workflow_run", reference_id=run_id
             )
             await metering.emit_usage(
-                db, tenant_id=tenant.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
-                usage_type="image_generation", quantity=3,
+                db,
+                tenant_id=tenant.id,
+                org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                usage_type="image_generation",
+                quantity=3,
                 occurred_at=datetime.now(UTC) - timedelta(minutes=5),
-                source="workflow_runtime", idempotency_key=f"cs-{ULID()}",
+                source="workflow_runtime",
+                idempotency_key=f"cs-{ULID()}",
                 workflow_run_id=run_id,
             )
             enqueue(db, "run.terminal", {"run_id": run_id, "status": "completed"})
@@ -837,10 +876,7 @@ async def test_credit_settled_usage_not_reinvoiced():
         # settle via the handler (scoped drain)
         for _ in range(30):
             async with AsyncSessionLocal() as db:
-                if (
-                    await process_outbox_once(db, topics=["usage.recorded", "run.terminal"])
-                    == 0
-                ):
+                if await process_outbox_once(db, topics=["usage.recorded", "run.terminal"]) == 0:
                     break
         # force the period closed → invoice
         async with AsyncSessionLocal() as db:

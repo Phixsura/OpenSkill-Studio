@@ -411,8 +411,14 @@ async def test_seat_quota_not_bypassable_by_role_promotion(db):
     tenant = await db.get(TenantAccount, org.tenant_id)
     # Staff cap = 1 (the owner). Adding a student is fine (learner seat)...
     await plan_svc.set_override(
-        db, tenant.id, "max_instructors", value=1, enforcement="hard",
-        expires_at=None, reason="cap", actor=_actor(owner),
+        db,
+        tenant.id,
+        "max_instructors",
+        value=1,
+        enforcement="hard",
+        expires_at=None,
+        reason="cap",
+        actor=_actor(owner),
     )
     student = await _mk_user(db)
     await svc.add_member(org.id, student.id, OrgRole.STUDENT)
@@ -423,14 +429,26 @@ async def test_seat_quota_not_bypassable_by_role_promotion(db):
     # Demotion (staff → student) is never blocked by the staff cap
     # (raise the learner cap so the demotion's student-seat check passes)
     await plan_svc.set_override(
-        db, tenant.id, "max_active_learners", value=100, enforcement="hard",
-        expires_at=None, reason="cap", actor=_actor(owner),
+        db,
+        tenant.id,
+        "max_active_learners",
+        value=100,
+        enforcement="hard",
+        expires_at=None,
+        reason="cap",
+        actor=_actor(owner),
     )
     instr = await _mk_user(db)
     # free a staff seat first by lifting the cap, add an instructor, then demote
     await plan_svc.set_override(
-        db, tenant.id, "max_instructors", value=10, enforcement="hard",
-        expires_at=None, reason="cap", actor=_actor(owner),
+        db,
+        tenant.id,
+        "max_instructors",
+        value=10,
+        enforcement="hard",
+        expires_at=None,
+        reason="cap",
+        actor=_actor(owner),
     )
     await svc.add_member(org.id, instr.id, OrgRole.INSTRUCTOR)
     demoted = await svc.update_member_role(org.id, instr.id, OrgRole.STUDENT, owner.id)

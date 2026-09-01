@@ -357,17 +357,25 @@ async def test_provision_resume_tolerates_already_installed_packs(db, monkeypatc
     blueprint = TenantBlueprint(
         name=f"BPR {ULID()}",
         config=provision_svc.validate_blueprint_config(
-            {"skill_packs": [{"pack_id": "01JPACKAAAAAAAAAAAAAAAAAAA"},
-                             {"pack_id": "01JPACKBBBBBBBBBBBBBBBBBBB"}]}
+            {
+                "skill_packs": [
+                    {"pack_id": "01JPACKAAAAAAAAAAAAAAAAAAA"},
+                    {"pack_id": "01JPACKBBBBBBBBBBBBBBBBBBB"},
+                ]
+            }
         ),
         created_by=user.id,
     )
     db.add(blueprint)
     await db.flush()
     run = await provision_svc.create_provision_run(
-        db, blueprint_id=blueprint.id, name="Resume Already",
-        slug=f"ra-{str(ULID()).lower()[:10]}", idempotency_key=f"ra-{ULID()}",
-        partner_id=None, actor=_actor(user),
+        db,
+        blueprint_id=blueprint.id,
+        name="Resume Already",
+        slug=f"ra-{str(ULID()).lower()[:10]}",
+        idempotency_key=f"ra-{ULID()}",
+        partner_id=None,
+        actor=_actor(user),
     )
 
     installed: list[str] = []
