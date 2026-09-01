@@ -48,6 +48,15 @@ class IngestUsageRequest(BaseModel):
         reject_ctrl_json(v, "metadata")
         return v
 
+    @field_validator("occurred_at")
+    @classmethod
+    def _aware(cls, v):
+        # R58[35]: a naive occurred_at compared against aware now() raised
+        # TypeError → 500. Coerce to UTC like the rest of the codebase.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
+
 
 class AdjustUsageRequest(BaseModel):
     delta_quantity: str | int | float
@@ -130,12 +139,26 @@ async def ingest_usage(
         metadata=body.metadata,
     )
     if event is None:
-        # Duplicate — return the original (200 semantics via payload flag)
+        # Duplicate — return the original (200 semantics via payload flag).
+        # R70[42]: scope the lookup to THIS tenant — an unscoped match returned
+        # (and disclosed) another tenant's event when the client-supplied key
+        # collided across tenants.
         existing = (
             await db.execute(
-                select(UsageEvent).where(UsageEvent.idempotency_key == body.idempotency_key)
+                select(UsageEvent).where(
+                    UsageEvent.tenant_id == tenant.id,
+                    UsageEvent.idempotency_key == body.idempotency_key,
+                )
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if existing is None:
+            # Key collided with ANOTHER tenant's event — this tenant has no
+            # duplicate; reject rather than disclose or silently drop.
+            raise AppError(
+                "VALIDATION_ERROR",
+                "idempotency_key is already in use",
+                409,
+            )
         return DataResponse(
             data={**UsageEventResponse.from_row(existing).model_dump(), "duplicate": True}
         )
@@ -149,7 +172,7 @@ async def ingest_usage(
 )
 async def tenant_usage_aggregate(
     tenant_id: str,
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     org_id: str | None = Query(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -178,6 +201,10 @@ async def tenant_usage_aggregate(
         except Exception:  # noqa: BLE001 — bad tz falls back to UTC
             tz = UTC
         year, month = int(period[:4]), int(period[5:7])
+        # R58[36]: the regex bounds the month but '0000' is a valid 4-digit
+        # year that datetime() rejects (year 0 out of range) → 500.
+        if year < 1:
+            raise AppError("VALIDATION_ERROR", "period year out of range", 422)
         start = datetime(year, month, 1, tzinfo=tz)
         end = datetime(year + (month == 12), (month % 12) + 1, 1, tzinfo=tz)
         query = query.where(UsageEvent.occurred_at >= start, UsageEvent.occurred_at < end)

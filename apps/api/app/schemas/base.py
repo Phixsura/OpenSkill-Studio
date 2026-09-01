@@ -135,3 +135,16 @@ def reject_nonfinite_json(v, field_name: str):
         elif isinstance(cur, (list, tuple)):
             stack.extend(cur)
     return v
+
+
+def safe_decimal(v, field_name: str):
+    """Validator helper: parse a Decimal, mapping InvalidOperation to
+    ValueError. decimal.InvalidOperation is an ArithmeticError — pydantic only
+    wraps ValueError/AssertionError into 422s, so a raw Decimal('abc') in a
+    field_validator escaped as an unhandled 500 (R58[34])."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        return Decimal(v)
+    except (InvalidOperation, TypeError) as exc:
+        raise ValueError(f"{field_name} must be a valid decimal number") from exc

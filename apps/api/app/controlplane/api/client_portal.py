@@ -7,7 +7,7 @@ Two surfaces:
   (instructor+): members, guest links, shares.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, Header, Request
@@ -74,6 +74,19 @@ class ClientCommentRequest(BaseModel):
     duration_ms: int | None = Field(default=None, ge=0)
     region: dict | None = None
 
+    @field_validator("region")
+    @classmethod
+    def _region(cls, v):
+        # R58[33]: a ~300-level-deep nested dict stored to JSONB poisoned the
+        # whole comment thread with a persistent 500 (recursion at serialize).
+        # Same guard every other JSONB field uses.
+        from app.schemas.base import reject_ctrl_json, reject_deep_json
+
+        if v is not None:
+            reject_deep_json(v, "region", limit=16)
+            reject_ctrl_json(v, "region")
+        return v
+
     @field_validator("text")
     @classmethod
     def _ctrl(cls, v, info):
@@ -109,6 +122,16 @@ class CreateGuestLinkRequest(BaseModel):
     email: EmailStr | None = None
     role: str = Field(pattern=r"^(reviewer|approver)$")
     expires_at: datetime
+
+    @field_validator("expires_at")
+    @classmethod
+    def _aware(cls, v):
+        # R45[23]: a naive ISO datetime (no offset — the common client shape)
+        # crashed the service's aware-datetime comparison with a 500. Coerce to
+        # UTC like every other datetime schema in the codebase.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
 
     @field_validator("label")
     @classmethod

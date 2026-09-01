@@ -32,7 +32,13 @@ from app.controlplane.services.audit import record_audit
 from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.models.user import User
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta, reject_ctrl_str
+from app.schemas.base import (
+    DataResponse,
+    ListResponse,
+    PaginationMeta,
+    reject_ctrl_str,
+    safe_decimal,
+)
 
 log = structlog.get_logger()
 
@@ -103,12 +109,12 @@ class CreateRuleRequest(BaseModel):
 
     @field_validator("rate")
     @classmethod
-    def _rate(cls, v):
+    def _rate(cls, v, info):
         if v is None:
             return v
         # Column is Numeric(9,6): integer part < 10^3. A NaN/Infinity or an
         # over-range value would otherwise overflow the INSERT → 500.
-        d = Decimal(v)
+        d = safe_decimal(v, info.field_name)
         if not d.is_finite() or d < 0 or d >= Decimal("1000"):
             raise ValueError("rate must be non-negative and < 1000")
         return v
@@ -118,7 +124,7 @@ class StatementGenerateRequest(BaseModel):
     beneficiary_type: str = Field(pattern=r"^(partner|seller_org)$")
     partner_id: str | None = Field(default=None, min_length=26, max_length=26)
     beneficiary_org_id: str | None = Field(default=None, min_length=26, max_length=26)
-    period: str = Field(pattern=r"^\d{4}-\d{2}$")
+    period: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 class StatementAdjustRequest(BaseModel):
@@ -535,7 +541,7 @@ async def partner_tenants(
 )
 async def partner_entries(
     partner_id: str,
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=50, ge=1, le=200),

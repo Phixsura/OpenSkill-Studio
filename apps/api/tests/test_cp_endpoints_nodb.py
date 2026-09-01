@@ -397,3 +397,119 @@ async def test_impersonation_guard_allows_safe_and_whitelisted():
     passed, result = await _passed(_scope("POST", "/api/v1/tenants/01JFAKE/subscription/cancel"))
     assert not passed
     assert result.status_code == 403
+
+
+# ── R45/R58: input-robustness 500s ────────────────────────────
+
+
+def test_guest_link_naive_expires_at_coerced():
+    """R45[23]: a naive ISO expires_at (no offset) must be coerced to UTC at
+    the schema, not crash the aware-datetime comparison with a 500."""
+    from app.controlplane.api.client_portal import CreateGuestLinkRequest
+
+    req = CreateGuestLinkRequest.model_validate(
+        {"role": "approver", "expires_at": "2026-12-01T00:00:00"}
+    )
+    assert req.expires_at.tzinfo is not None
+
+
+def test_portal_comment_region_depth_capped():
+    """R58[33]: a deeply nested region dict must 422 at the schema, not poison
+    the comment thread with a persistent serialize-time 500."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.controlplane.api.client_portal import ClientCommentRequest
+
+    deep: dict = {}
+    cur = deep
+    for _ in range(300):
+        cur["a"] = {}
+        cur = cur["a"]
+    with _pytest.raises(ValidationError):
+        ClientCommentRequest.model_validate(
+            {"item_id": "0" * 26, "text": "x", "anchor_type": "region", "region": deep}
+        )
+    # A sane region passes.
+    ClientCommentRequest.model_validate(
+        {
+            "item_id": "0" * 26,
+            "text": "x",
+            "anchor_type": "region",
+            "region": {"x": 1, "y": 2, "w": 3, "h": 4},
+        }
+    )
+
+
+def test_comment_response_tolerates_null_author():
+    """R45[24]: guest portal comments store author_id=NULL — the response
+    schema must accept it (was a non-optional str → every instructor
+    comment-list 500'd once a guest commented)."""
+    from datetime import UTC, datetime
+
+    from app.schemas.project import CommentResponse
+
+    resp = CommentResponse(
+        id="0" * 26,
+        submission_id="0" * 26,
+        item_id="0" * 26,
+        author_id=None,
+        author_name="Client Reviewer",
+        parent_id=None,
+        text="looks great",
+        anchor_type="global",
+        timestamp_ms=None,
+        duration_ms=None,
+        region=None,
+        completed=False,
+        created_at=datetime.now(UTC),
+    )
+    assert resp.author_id is None
+
+
+def test_decimal_validators_reject_garbage_as_422():
+    """R58[34]: InvalidOperation is an ArithmeticError pydantic does NOT wrap —
+    Decimal('abc') in a validator escaped as a 500. safe_decimal maps it to
+    ValueError → 422."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.controlplane.api.pricing import CreateCostRateRequest
+
+    with _pytest.raises(ValidationError):
+        CreateCostRateRequest.model_validate(
+            {
+                "provider": "x",
+                "usage_type": "image_generation",
+                "currency": "USD",
+                "unit_cost": "1.2.3",
+                "effective_from": "2026-01-01T00:00:00+00:00",
+            }
+        )
+
+
+def test_ingest_usage_naive_occurred_at_coerced():
+    """R58[35]: naive occurred_at compared against aware now → TypeError 500.
+    Schema coerces to UTC."""
+    from app.controlplane.api.usage import IngestUsageRequest
+
+    req = IngestUsageRequest.model_validate(
+        {
+            "usage_type": "image_generation",
+            "quantity": 1,
+            "occurred_at": "2026-01-01T00:00:00",
+            "idempotency_key": "abcd1234",
+        }
+    )
+    assert req.occurred_at.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_period_month_13_rejected_not_500(client):
+    """R58[36]: '2026-13' passed the loose regex and blew up datetime() → 500.
+    The tightened pattern rejects it at the Query layer (422; 401 acceptable if
+    auth runs first — never 500)."""
+    for bad in ("2026-13", "2026-00"):
+        r = await client.get(f"/api/v1/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/usage?period={bad}")
+        assert r.status_code in (401, 422), f"{bad} → {r.status_code}"
+        assert r.status_code != 500

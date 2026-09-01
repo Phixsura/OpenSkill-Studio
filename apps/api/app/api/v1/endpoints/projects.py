@@ -1223,7 +1223,10 @@ async def list_comments(
     return DataResponse(
         data=[
             CommentResponse(
-                **CommentResponse.model_validate(cm).model_dump() | {"author_name": name}
+                **CommentResponse.model_validate(cm).model_dump()
+                # Guest portal comments have author_id=NULL; their identity is
+                # the client_author_label captured at post time (R45[24]).
+                | {"author_name": name or getattr(cm, "client_author_label", None)}
             )
             for cm, name in comments
         ]

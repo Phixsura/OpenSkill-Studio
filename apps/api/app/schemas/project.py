@@ -1021,7 +1021,10 @@ class CommentResponse(BaseModel):
     id: str
     submission_id: str
     item_id: str
-    author_id: str
+    # R45[24]: nullable since the client-portal migration — guest comments store
+    # author_id=NULL (identity is client_author_label). A non-optional str made
+    # every instructor comment-list 500 once a guest had commented.
+    author_id: str | None
     author_name: str | None = None
     parent_id: str | None
     text: str

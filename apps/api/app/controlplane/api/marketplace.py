@@ -438,7 +438,7 @@ async def tenant_purchases(
 @router.get("/orgs/{org_id}/marketplace/earnings", dependencies=[Depends(rate_limit(30, 60))])
 async def seller_earnings(
     org_id: str,
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

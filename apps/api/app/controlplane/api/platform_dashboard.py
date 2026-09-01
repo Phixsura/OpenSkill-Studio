@@ -70,7 +70,7 @@ def _period_bounds(period: str | None) -> tuple[str, datetime, datetime]:
 
 @router.get("/dashboard")
 async def platform_dashboard(
-    period: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     _user=Depends(require_platform_role(*READ_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -331,7 +331,7 @@ async def platform_invoices(
 @router.get("/settlements")
 async def platform_settlements(
     status: str | None = Query(None),
-    period: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     page: int = Query(1, ge=1, le=1_000_000),
     per_page: int = Query(50, ge=1, le=200),
     _user=Depends(require_platform_role(*READ_ROLES)),
