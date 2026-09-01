@@ -531,6 +531,55 @@ async def test_tenant_ai_ceiling_enforced_without_policy_row(db):
 
 
 @pytest.mark.asyncio
+async def test_tenant_ai_ceiling_denominated_in_tenant_currency(db):
+    """R32/C5: the implicit AI ceiling must be in the TENANT's currency, or a
+    non-USD tenant's ceiling matches zero of its (tenant-currency) rated rows
+    and never fires. EUR tenant, EUR-rated spend over a EUR ceiling → block."""
+    from app.controlplane.models.plan import TenantEntitlementOverride
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services.entitlements import invalidate_cache
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    tenant.currency = "EUR"
+    db.add(
+        TenantEntitlementOverride(
+            tenant_id=tenant.id,
+            key="max_ai_budget_usd_month",
+            value={"v": "0.5"},  # €0.50 ceiling
+            reason="cap",
+            enforcement="hard",
+        )
+    )
+    await db.flush()
+    await invalidate_cache(tenant.id)
+    org = "01JC5EURORGEURORGEURORGEUR"
+    # €1.00 (100 minor) of EUR-denominated rated spend > €0.50 ceiling
+    eid = str(ULID())
+    db.add(
+        UsageEvent(
+            id=eid, tenant_id=tenant.id, org_id=org, usage_type="image_generation",
+            quantity=1, unit="images", occurred_at=datetime.now(UTC), source="manual",
+        )
+    )
+    await db.flush()
+    db.add(
+        RatedUsage(
+            usage_event_id=eid, tenant_id=tenant.id, org_id=org,
+            usage_type="image_generation", quantity=1, cost_rate_snapshot={},
+            internal_cost_minor=0, internal_cost_currency="EUR", sell_rate_snapshot={},
+            billable_amount_minor=100, billable_currency="EUR", status="rated",
+            rated_at=datetime.now(UTC),
+        )
+    )
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await budget_svc.check(db, tenant, org)
+    assert exc.value.code == "BUDGET_EXCEEDED"
+
+
+@pytest.mark.asyncio
 async def test_eval_settings_write_through(db):
     """Issue §17: PUT settings/evaluation creates/updates/removes the policy."""
     user = await _mk_user(db)

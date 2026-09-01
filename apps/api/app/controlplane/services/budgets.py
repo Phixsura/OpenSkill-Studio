@@ -140,12 +140,22 @@ async def check(
     eff = await get_effective(db, tenant)
     ceiling = eff.get("max_ai_budget_usd_month")
     if ceiling is not None:
+        # R32/C5: denominate the implicit ceiling in the TENANT's currency, not
+        # a hardcoded "USD". _spent_minor filters rated rows on
+        # billable_currency == policy.currency, and rating always writes rows
+        # in tenant.currency — so a hardcoded "USD" policy against a non-USD
+        # tenant matched ZERO spend and the ceiling never fired. The
+        # entitlement is a monthly AI budget in the tenant's own currency
+        # (the "usd" in the key name is a legacy label; the number is minor
+        # units of tenant.currency, and the seed/backfill use USD tenants).
+        from app.controlplane.models.pricing import minor_multiplier
+
         implicit = BudgetPolicy(
             tenant_id=tenant.id,
             scope_type="tenant",
             period="monthly",
-            limit_minor=int(Decimal(str(ceiling)) * 100),
-            currency="USD",
+            limit_minor=int(Decimal(str(ceiling)) * minor_multiplier(tenant.currency)),
+            currency=tenant.currency,
             hard_stop=True,
             warning_threshold_pct=80,
         )
