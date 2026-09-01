@@ -630,5 +630,111 @@ async def test_run_terminal_settles_actual_usage():
             ).scalar_one()
             assert balance.reserved_minor == 0
             assert balance.balance_minor == 10000 - 150  # actual, not the 1000 hold
+        # R38/C11: the settled rows are marked 'settled' so a period invoice
+        # does NOT re-bill usage already paid by the reservation (no double
+        # charge).
+        async with AsyncSessionLocal() as db:
+            from app.controlplane.models.pricing import RatedUsage
+            from app.controlplane.models.usage import UsageEvent
+
+            rows = (
+                (
+                    await db.execute(
+                        select(RatedUsage)
+                        .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
+                        .where(UsageEvent.workflow_run_id == run_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert rows and all(r.status == "settled" for r in rows)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_credit_settled_usage_not_reinvoiced():
+    """R38/C11+C35: usage paid via a credit reservation (settle at
+    run.terminal) must NOT appear on the period invoice — the reservation IS
+    the payment. The rows are 'settled', which close_period_and_invoice's
+    'rated'-only usage-line query skips → no double charge."""
+    from app.controlplane.models.billing import BillingPeriod, InvoiceLine
+    from app.controlplane.models.outbox import enqueue
+    from app.controlplane.services import billing as billing_svc
+    from app.controlplane.services import metering
+    from app.controlplane.services import pricing as pricing_svc
+    from app.controlplane.worker import process_outbox_once
+    from app.core.database import engine
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await _mk_user(db)
+            tenant = await _mk_tenant(db, user)
+            a = _actor(user)
+            await credit_svc.top_up(db, tenant.id, "USD", 100000, actor=a)
+            sub, _ = await billing_svc.start_subscription(
+                db, tenant, plan_key="school", interval="month", seats=0,
+                provider="manual", actor=a,
+            )
+            await pricing_svc.create_price_policy(
+                db, actor=a, name=f"cs {ULID()}", policy_type="fixed_unit_price",
+                usage_type="image_generation", currency="USD",
+                params={"unit_price_minor": 50},
+                effective_from=datetime.now(UTC) - timedelta(days=1), tenant_id=tenant.id,
+            )
+            run_id = str(ULID())
+            await credit_svc.reserve(
+                db, tenant.id, "USD", 1000, reference_type="workflow_run", reference_id=run_id
+            )
+            await metering.emit_usage(
+                db, tenant_id=tenant.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                usage_type="image_generation", quantity=3,
+                occurred_at=datetime.now(UTC) - timedelta(minutes=5),
+                source="workflow_runtime", idempotency_key=f"cs-{ULID()}",
+                workflow_run_id=run_id,
+            )
+            enqueue(db, "run.terminal", {"run_id": run_id, "status": "completed"})
+            await db.commit()
+            tid, sub_id = tenant.id, sub.id
+        # settle via the handler (scoped drain)
+        for _ in range(30):
+            async with AsyncSessionLocal() as db:
+                if (
+                    await process_outbox_once(db, topics=["usage.recorded", "run.terminal"])
+                    == 0
+                ):
+                    break
+        # force the period closed → invoice
+        async with AsyncSessionLocal() as db:
+            period = (
+                await db.execute(
+                    select(BillingPeriod).where(BillingPeriod.subscription_id == sub_id)
+                )
+            ).scalar_one()
+            period.period_end = datetime.now(UTC) - timedelta(seconds=1)
+            await db.flush()
+            invoice = await billing_svc.close_period_and_invoice(db, period.id)
+            await db.commit()
+            inv_id = invoice.id
+        async with AsyncSessionLocal() as db:
+            lines = (
+                (await db.execute(select(InvoiceLine).where(InvoiceLine.invoice_id == inv_id)))
+                .scalars()
+                .all()
+            )
+            usage_lines = [ln for ln in lines if ln.line_type == "usage"]
+            # The credit-settled usage must NOT be re-billed as a usage line.
+            assert not usage_lines, [ln.amount_minor for ln in usage_lines]
+            # Credit balance = start − settle(150) − plan-line credit(19900).
+            # The 150 is charged exactly ONCE (the settle); the invoice draws
+            # credit only for its legitimate plan line, not the settled usage.
+            plan_line = next(ln for ln in lines if ln.line_type == "plan")
+            balance = (
+                await db.execute(
+                    select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tid)
+                )
+            ).scalar_one()
+            assert balance.balance_minor == 100000 - 150 - plan_line.amount_minor
     finally:
         await engine.dispose()

@@ -134,7 +134,9 @@ class RatedUsage(Base):
     rating_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     status: Mapped[str] = mapped_column(
         String(12), default="rated", server_default="rated"
-    )  # rated | invoiced | adjusted | voided | blocked
+    )  # rated | invoiced | settled | adjusted | voided | blocked
+    # 'settled' = paid via a credit reservation at run.terminal; excluded from
+    # period invoicing (already charged) but still real billable revenue.
     invoice_line_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     void_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     rated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

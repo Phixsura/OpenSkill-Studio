@@ -74,7 +74,9 @@ async def _spent_minor(db: AsyncSession, tenant: TenantAccount, policy: BudgetPo
         .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
         .where(
             RatedUsage.tenant_id == tenant.id,
-            RatedUsage.status.in_(["rated", "invoiced"]),
+            # 'settled' = paid via credit reservation; still real spend for
+            # budget purposes (only voided/blocked are excluded).
+            RatedUsage.status.in_(["rated", "invoiced", "settled"]),
             RatedUsage.billable_currency == policy.currency,
             RatedUsage.rated_at >= start,
         )
