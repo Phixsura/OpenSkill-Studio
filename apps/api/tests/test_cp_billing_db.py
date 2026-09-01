@@ -246,6 +246,185 @@ async def test_plan_change_and_cancel(db):
     assert sub.status == "cancel_at_period_end"
 
 
+async def _force_close(db, sub) -> "Invoice | None":
+    """Close the sub's open period → returns the invoice.
+
+    Does NOT truncate period_end: close_period_and_invoice doesn't check
+    due-ness, and truncating below a change's effective_at (next_period changes
+    are stamped at the ORIGINAL future period_end) would break the arrears +
+    proration ordering that holds in production, where close runs exactly when
+    the period naturally ends."""
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    return await billing_svc.close_period_and_invoice(db, period.id)
+
+
+def _plan_lines_total(lines, *types):
+    return sum(line.amount_minor for line in lines if line.line_type in types)
+
+
+async def _lines(db, invoice):
+    return (
+        (
+            await db.execute(
+                select(InvoiceLine)
+                .where(InvoiceLine.invoice_id == invoice.id)
+                .order_by(InvoiceLine.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+@pytest.mark.asyncio
+async def test_next_period_downgrade_actually_applies(db):
+    """R41[0] CRITICAL: a next_period downgrade must take effect at rollover.
+    Previously the SubscriptionChange was recorded but never applied — the sub
+    kept billing the old (higher) plan every subsequent period."""
+    from app.controlplane.models.plan import PlanVersion, ProductPlan
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+    )
+    res = await billing_svc.change_plan(
+        db, tenant, sub, plan_key="school", seats=None, proration_mode=None, actor=a
+    )
+    assert res["mode"] == "next_period"
+    await db.refresh(sub)
+    # Still growth until rollover.
+    v = await db.get(PlanVersion, sub.plan_version_id)
+    assert (await db.get(ProductPlan, v.plan_id)).key == "growth"
+    # Close the period → the downgrade must now be applied to the sub.
+    inv = await _force_close(db, sub)
+    assert inv is not None
+    await db.refresh(sub)
+    v = await db.get(PlanVersion, sub.plan_version_id)
+    assert (await db.get(ProductPlan, v.plan_id)).key == "school", (
+        "next_period downgrade not applied"
+    )
+    # The closed period billed the OLD (growth) plan in arrears: 49900.
+    assert _plan_lines_total(await _lines(db, inv), "plan") == 49900
+    # Next period now bills school.
+    inv2 = await _force_close(db, sub)
+    assert _plan_lines_total(await _lines(db, inv2), "plan") == 19900
+
+
+@pytest.mark.asyncio
+async def test_immediate_upgrade_no_double_charge(db):
+    """R41[1] CRITICAL: a mid-period immediate upgrade must bill the period-start
+    (old) plan in arrears PLUS a single proration delta — not the new plan's
+    full-period price AND the proration (which double-charged new−old)."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    # Immediate upgrade school→growth mid-period.
+    res = await billing_svc.change_plan(
+        db, tenant, sub, plan_key="growth", seats=None, proration_mode="immediate", actor=a
+    )
+    assert res["mode"] == "immediate"
+    inv = await _force_close(db, sub)
+    lines = await _lines(db, inv)
+    plan_total = _plan_lines_total(lines, "plan")
+    proration_total = _plan_lines_total(lines, "proration")
+    # Plan line must be the OLD school price (arrears on period-start plan).
+    assert plan_total == 19900, f"plan line should be old plan 19900, got {plan_total}"
+    # There is a proration line (net upgrade delta ≥ 0). The invoice must NOT
+    # contain growth's full 49900 as the plan line.
+    assert plan_total != 49900
+    # Total plan+proration is bounded by a full-period growth charge (49900) —
+    # never old-full + full-delta (which exceeded it under the bug).
+    assert plan_total + proration_total <= 49900 + 1, (plan_total, proration_total)
+
+
+@pytest.mark.asyncio
+async def test_void_reopens_period_and_uninvoices_changes(db):
+    """R41[3]: voiding a period invoice must reopen the period and un-invoice
+    its SubscriptionChanges so the next close regenerates the full invoice —
+    not silently drop the plan fee + proration."""
+    from app.controlplane.models.billing import SubscriptionChange
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="growth", seats=None, proration_mode="immediate", actor=a
+    )
+    inv = await _force_close(db, sub)
+    assert inv is not None
+    # The immediate change was consumed by this invoice.
+    chg = (
+        await db.execute(
+            select(SubscriptionChange).where(
+                SubscriptionChange.subscription_id == sub.id,
+                SubscriptionChange.change_type == "plan_change",
+            )
+        )
+    ).scalar_one()
+    assert chg.invoiced is True
+    period_id = inv.billing_period_id
+    # Void the invoice before payment.
+    await billing_svc.void_invoice(db, inv, reason="billing error", actor=a)
+    await db.refresh(chg)
+    period = await db.get(BillingPeriod, period_id)
+    assert period.status == "open", "voided invoice must reopen its period"
+    assert chg.invoiced is False, "voided invoice must un-invoice its changes"
+    # Re-closing regenerates a full invoice (plan fee present again).
+    inv2 = await billing_svc.close_period_and_invoice(db, period_id)
+    assert inv2 is not None and inv2.id != inv.id
+    assert _plan_lines_total(await _lines(db, inv2), "plan") == 19900
+
+
+@pytest.mark.asyncio
+async def test_immediate_cancel_bills_final_period(db):
+    """R41[4]: an immediate cancel must close + bill the current partial period
+    (via an enqueued period.close_due), not strand it open forever."""
+    from app.controlplane.models.outbox import OutboxMessage
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False, actor=a)
+    await db.refresh(sub)
+    assert sub.status == "cancelled"
+    # A period.close_due was enqueued for the open period.
+    msg = (
+        (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == "period.close_due")))
+        .scalars()
+        .all()
+    )
+    assert msg, "immediate cancel must enqueue a final period close"
+    period_id = msg[-1].payload["billing_period_id"]
+    inv = await billing_svc.close_period_and_invoice(db, period_id)
+    assert inv is not None, "final partial period must be billable"
+    # No new open period is created for a cancelled sub.
+    open_periods = (
+        await db.execute(
+            select(func.count(BillingPeriod.id)).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    assert open_periods == 0
+
+
 # ── Invoice generation ───────────────────────────────────────
 
 

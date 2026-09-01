@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 import structlog
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -37,17 +37,32 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _is_leap(year: int) -> bool:
+    """Proper Gregorian rule — 2100 is NOT a leap year (÷100 but not ÷400)."""
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+
 def _add_interval(start: datetime, interval: str) -> datetime:
     if interval == "year":
-        return start.replace(year=start.year + 1)
+        # start.replace(year=+1) raises on Feb 29 (no Feb 29 next year) → 500
+        # at subscription start and a poisoned period.close_due at rollover.
+        # Clamp the day to the target month's length, mirroring the month path.
+        target_year = start.year + 1
+        max_day = (
+            29
+            if (start.month == 2 and _is_leap(target_year))
+            else _month_len(target_year, start.month)
+        )
+        return start.replace(year=target_year, day=min(start.day, max_day))
     # month arithmetic without external deps
     year = start.year + (start.month == 12)
     month = (start.month % 12) + 1
-    day = min(
-        start.day,
-        [31, 29 if year % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1],
-    )
+    day = min(start.day, _month_len(year, month))
     return start.replace(year=year, month=month, day=day)
+
+
+def _month_len(year: int, month: int) -> int:
+    return [31, 29 if _is_leap(year) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
 
 
 # ── Proration (pure, unit-tested; ADR-014 §6.3) ──────────────
@@ -352,6 +367,30 @@ async def cancel_subscription(
             created_by=actor.user_id,
         )
     )
+    if not at_period_end:
+        # R41[4]: an immediate cancel flips status to 'cancelled', which
+        # scan_due_periods no longer selects (it only scans active /
+        # cancel_at_period_end / past_due). The current open period — holding
+        # the final partial plan fee, any un-invoiced immediate-change proration,
+        # and in-period rated usage — would otherwise never be closed or billed.
+        # Enqueue a close for it now so the final invoice is generated. Truncate
+        # the period to end now so the arrears plan/usage reflect only the used
+        # portion, and force the sub row to be visible to the handler by leaving
+        # the period selectable directly (the handler loads by id, not status).
+        open_period = (
+            await db.execute(
+                select(BillingPeriod).where(
+                    BillingPeriod.subscription_id == sub.id,
+                    BillingPeriod.status == "open",
+                )
+            )
+        ).scalar_one_or_none()
+        if open_period is not None:
+            now = _now()
+            if open_period.period_end > now:
+                open_period.period_end = now
+            await db.flush()
+            enqueue(db, "period.close_due", {"billing_period_id": open_period.id})
     if sub.provider in ("mock", "stripe") and sub.external_ref:
         from app.controlplane.services.billing_providers import get_billing_provider
 
@@ -398,7 +437,37 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         return None  # already closed/invoiced by a concurrent worker
     sub = await db.get(Subscription, period.subscription_id)
     tenant = await db.get(TenantAccount, period.tenant_id)
-    version = await db.get(PlanVersion, sub.plan_version_id)
+
+    # R41[1]/[2]: bill this closed period in arrears on the plan/seats that were
+    # in effect at its START, then let the proration lines below charge the delta
+    # for any mid-period immediate change. Using the CURRENT sub.plan_version_id
+    # (which an immediate change already advanced to the NEW plan) billed the new
+    # plan at full price for the whole period AND added the upgrade proration —
+    # double-charging the delta. The period-start plan is the `from_*` of the
+    # first immediate change inside this period; if none, the sub hasn't changed
+    # since the period opened, so its current plan/seats ARE the period-start
+    # values.
+    first_change = (
+        await db.execute(
+            select(SubscriptionChange)
+            .where(
+                SubscriptionChange.subscription_id == sub.id,
+                SubscriptionChange.proration_mode == "immediate",
+                SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
+                SubscriptionChange.effective_at >= period.period_start,
+                SubscriptionChange.effective_at < period.period_end,
+            )
+            .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    start_version_id = first_change.from_plan_version_id if first_change else sub.plan_version_id
+    start_seats = (
+        first_change.from_seats
+        if first_change and first_change.from_seats is not None
+        else sub.seat_quantity
+    )
+    version = await db.get(PlanVersion, start_version_id)
     plan = await db.get(ProductPlan, version.plan_id)
     price = (
         await db.execute(
@@ -474,7 +543,10 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             )
         )
     ).scalar_one()
-    billable_seats = max(live_seats, sub.seat_quantity)
+    # Use the PERIOD-START reserved floor, not the post-change sub.seat_quantity:
+    # a mid-period immediate seat increase is billed by the proration line below,
+    # so counting the raised floor here too double-charged the delta (R41[2]).
+    billable_seats = max(live_seats, start_seats)
     included = price.included_seats if price else 0
     overage_seats = max(billable_seats - included, 0)
     seat_price = (price.overage_seat_amount_minor or 0) if price else 0
@@ -721,7 +793,46 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .values(status="cancelled", cancelled_at=_now())
         )
         await invalidate_cache(tenant.id)
+    elif sub.status == "cancelled":
+        # R41[4]: this is the final partial-period invoice for an immediately
+        # cancelled subscription — bill it, but do NOT open a new period.
+        pass
     else:
+        # R41[0]: APPLY any scheduled next_period changes now. change_plan
+        # records a next_period change (effective_at = period_end) but only
+        # mutates the subscription for immediate changes — nothing ever applied
+        # the deferred plan/seat change, so a downgrade never took effect and the
+        # tenant was billed the old (higher) plan every subsequent period. At
+        # rollover, walk the pending next_period changes due by this period_end
+        # in order and fold them into the subscription, then mark them invoiced
+        # (they carry no proration line — the switch simply takes effect for the
+        # upcoming period, billed in arrears next close).
+        pending = (
+            (
+                await db.execute(
+                    select(SubscriptionChange)
+                    .where(
+                        SubscriptionChange.subscription_id == sub.id,
+                        SubscriptionChange.invoiced.is_(False),
+                        SubscriptionChange.proration_mode == "next_period",
+                        SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
+                        SubscriptionChange.effective_at <= period.period_end,
+                    )
+                    .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for change in pending:
+            if change.to_plan_version_id is not None:
+                sub.plan_version_id = change.to_plan_version_id
+            if change.to_seats is not None:
+                sub.seat_quantity = change.to_seats
+            change.invoiced = True
+        if pending:
+            await invalidate_cache(tenant.id)
+
         next_start = period.period_end
         next_end = _add_interval(next_start, sub.interval)
         sub.current_period_start = next_start
@@ -865,6 +976,56 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
             .where(RatedUsage.invoice_line_id.in_(line_ids))
             .values(status="rated", invoice_line_id=None)
         )
+    # R41[3]: a period invoice consumed its period's SubscriptionChange proration
+    # (flipped change.invoiced=True) and rolled the period to 'invoiced'. Voiding
+    # it only unbound usage rows — the plan fee, seat charges and proration were
+    # silently dropped and the change.invoiced flag stayed set, so the next close
+    # never re-billed them. Recover by rewinding the close: reopen this period,
+    # delete the forward period the close created, roll the subscription back to
+    # this period's window, and un-invoice its changes — so the next close cycle
+    # regenerates the full invoice and re-rolls cleanly. (Manual invoices have no
+    # billing_period_id — nothing to rewind.)
+    if invoice.billing_period_id is not None:
+        period = await db.get(BillingPeriod, invoice.billing_period_id)
+        if period is not None:
+            sub = await db.get(Subscription, period.subscription_id)
+            await db.execute(
+                update(BillingPeriod)
+                .where(BillingPeriod.id == period.id)
+                .values(status="open", closed_at=None)
+            )
+            if sub is not None:
+                # Delete the period the original close rolled forward to (any
+                # period of this sub starting at/after this period's end) so the
+                # re-close doesn't collide on uq_cp_period.
+                await db.execute(
+                    delete(BillingPeriod).where(
+                        BillingPeriod.subscription_id == sub.id,
+                        BillingPeriod.period_start >= period.period_end,
+                    )
+                )
+                # Un-invoice this period's immediate changes AND any next_period
+                # change the close applied at this period's rollover (effective_at
+                # == period_end), then roll the subscription window back so the
+                # arrears re-close bills this period again.
+                await db.execute(
+                    update(SubscriptionChange)
+                    .where(
+                        SubscriptionChange.subscription_id == sub.id,
+                        SubscriptionChange.invoiced.is_(True),
+                        SubscriptionChange.effective_at >= period.period_start,
+                        SubscriptionChange.effective_at <= period.period_end,
+                    )
+                    .values(invoiced=False)
+                )
+                sub.current_period_start = period.period_start
+                sub.current_period_end = period.period_end
+                # A sub cancelled by this period's close must go back to active so
+                # the re-close can run and roll it forward again.
+                if sub.status == "cancelled":
+                    sub.status = "active"
+                    sub.cancelled_at = None
+                await invalidate_cache(sub.tenant_id)
     await record_audit(
         db,
         actor=actor,
