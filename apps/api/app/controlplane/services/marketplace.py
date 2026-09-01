@@ -74,7 +74,11 @@ async def _load_product(db: AsyncSession, product_type: str, product_id: str):
         path = await db.get(LearningPath, product_id)
         if path is None:
             return None
-        return path, path.org_id, "published", "unlisted"
+        # R44[19]: report the path's REAL status — hardcoding "published" made
+        # create_listing's published-only gate vacuous (DRAFT/archived paths
+        # were listable and purchasable). Learning paths have no visibility
+        # dimension; "unlisted" remains the sale-compatible constant.
+        return path, path.org_id, path.status.value, "unlisted"
     return None
 
 
@@ -222,6 +226,14 @@ async def create_purchase(
         raise AppError(
             "LISTING_NOT_PURCHASABLE", "This listing is available to partner tenants only", 409
         )
+    # R44[22]: invoice billing is opt-in PER LISTING — the seller flags
+    # bill_via_invoice; buyers of other listings must pay up front.
+    if payment_method == "invoice" and not listing.bill_via_invoice:
+        raise AppError(
+            "LISTING_NOT_PURCHASABLE",
+            "This listing does not support invoice billing",
+            409,
+        )
     seller_tenant = await db.get(TenantAccount, listing.seller_tenant_id)
     # Suspended/cancelled/archived sellers can't sell (§8.9); TRIAL can —
     # listing creation already gates on the paid_marketplace entitlement.
@@ -236,11 +248,35 @@ async def create_purchase(
     )
     if covering is not None:
         raise AppError("ALREADY_LICENSED", "You already hold a license for this product", 409)
+    # R44[17]: the grant precheck only sees PAID purchases (grants are created
+    # at mark_paid) — nothing stopped a second purchase while the first was
+    # still pending (double-click, checkout retry), each independently payable.
+    # A pending purchase for the same (listing, buyer tenant) is returned
+    # as-is: the buyer resumes it instead of opening a parallel charge.
+    pending = (
+        await db.execute(
+            select(MarketplacePurchase)
+            .where(
+                MarketplacePurchase.listing_id == listing.id,
+                MarketplacePurchase.buyer_tenant_id == buyer_tenant.id,
+                MarketplacePurchase.status == "pending",
+            )
+            .order_by(MarketplacePurchase.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if pending is not None:
+        return pending
     if idempotency_key:
+        # R72[2]: scope the idempotency lookup to the BUYER — client-supplied
+        # keys share one table; an unscoped match returned ANOTHER tenant's
+        # purchase (cross-tenant data leak, and the credit path then debited
+        # the wrong tenant's balance).
         existing = (
             await db.execute(
                 select(MarketplacePurchase).where(
-                    MarketplacePurchase.idempotency_key == idempotency_key
+                    MarketplacePurchase.buyer_tenant_id == buyer_tenant.id,
+                    MarketplacePurchase.idempotency_key == idempotency_key,
                 )
             )
         ).scalar_one_or_none()
@@ -478,6 +514,10 @@ async def _find_covering_grant(
             continue
         if grant.scope == "tenant":
             return grant
+        # 'cohort' scope enforces at the ORG boundary by design (ADR-014 §8.4:
+        # cohort narrowing lives at the assignment layer — usage events don't
+        # carry a cohort dim in v1). grant.cohort_id records the intended
+        # cohort for that layer; it does not narrow the install gate.
         if grant.scope in ("organization", "seat_limited", "cohort") and (
             grant.org_id == org_id or grant.org_id is None
         ):
@@ -485,20 +525,39 @@ async def _find_covering_grant(
     return None
 
 
-async def check_install_license(db: AsyncSession, product_type: str, product_id: str, org) -> None:
+async def check_install_license(
+    db: AsyncSession,
+    product_type: str,
+    product_id: str,
+    org,
+    target_version: str | None = None,
+) -> None:
     """Install gate (wired into installation services + upgrade paths).
 
     free/no-listing → pass; own product → pass; private → uniform 404;
     included_with_plan → plan-key check + lazy grant; paid/partner_only →
     covering active grant required (seat occupancy approximated by org
-    active-student count — ADR decision)."""
+    active-student count — ADR decision).
+
+    target_version (when the caller knows which release it will install) also
+    enforces major_locked on FRESH installs — previously only /upgrade checked
+    majors, so uninstall→reinstall (or a fresh install resolving the latest
+    release) delivered any newer major on an old license (R44[18])."""
+    # R44[16]: the gate must consider EVERY listing (any status except draft) —
+    # delisting/suspending means "stop selling", not "give it away". The old
+    # status=='active' filter made the gate return None after a delist, turning
+    # paid content free and nullifying refund revocation (revoke the grant,
+    # delist the listing → anyone reinstalls unlicensed).
     listing = (
         await db.execute(
-            select(MarketplaceListing).where(
+            select(MarketplaceListing)
+            .where(
                 MarketplaceListing.product_type == product_type,
                 MarketplaceListing.product_id == product_id,
-                MarketplaceListing.status == "active",
+                MarketplaceListing.status != "draft",
             )
+            .order_by(MarketplaceListing.created_at.desc())
+            .limit(1)
         )
     ).scalar_one_or_none()
     if listing is None or listing.offer_type == "free":
@@ -563,6 +622,23 @@ async def check_install_license(db: AsyncSession, product_type: str, product_id:
                 f"License covers {grant.seat_limit} seats; organization has {occupancy}",
                 403,
             )
+    # R44[18]: major_locked applies to installs too, not just upgrades.
+    if (
+        target_version is not None
+        and listing.upgrade_policy == "major_locked"
+        and grant.purchased_major is not None
+    ):
+        try:
+            target_major = int(str(target_version).split(".")[0])
+        except ValueError:
+            target_major = None
+        if target_major is not None and target_major > grant.purchased_major:
+            raise AppError(
+                "LICENSE_UPGRADE_REQUIRED",
+                f"Your license covers major version {grant.purchased_major}; "
+                f"version {target_version} requires a new purchase",
+                403,
+            )
 
 
 async def check_upgrade_license(
@@ -616,9 +692,15 @@ async def manual_grant(
     org_id: str | None,
     expires_at: datetime | None,
     actor: Actor,
+    seat_limit: int | None = None,
 ) -> LicenseGrant:
     if product_type not in PRODUCT_TYPES or scope not in LICENSE_SCOPES:
         raise AppError("LISTING_INVALID", "Invalid product type or scope", 422)
+    # R44[20]: a seat_limited grant with no limit silently skipped the seat
+    # check (the gate is `if grant.seat_limit:`) — unlimited seats under a
+    # scope that promises a cap. Require the limit when the scope demands it.
+    if scope == "seat_limited" and (seat_limit is None or seat_limit <= 0):
+        raise AppError("LISTING_INVALID", "seat_limited grants require a positive seat_limit", 422)
     tenant = await db.get(TenantAccount, tenant_id)
     if tenant is None:
         raise AppError("TENANT_NOT_FOUND", "Tenant not found", 404)
@@ -628,6 +710,7 @@ async def manual_grant(
         tenant_id=tenant_id,
         org_id=org_id,
         scope=scope,
+        seat_limit=seat_limit if scope == "seat_limited" else None,
         source="manual_grant",
         granted_by=actor.user_id,
         expires_at=expires_at,

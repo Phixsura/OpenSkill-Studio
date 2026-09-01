@@ -129,6 +129,13 @@ class InstallationService:
         if release is None:
             raise AppError("RELEASE_NOT_FOUND", "No release found for this pack", 404)
 
+        # R44[18]: re-check with the RESOLVED version so major_locked licenses
+        # also gate fresh installs (uninstall→reinstall of a newer major).
+        if _org is not None:
+            await cp_facade.check_install_license(
+                self.db, "skill_pack", pack_id, _org, target_version=release.version
+            )
+
         # Check not already installed
         existing = await self.db.execute(
             select(SkillPackInstallation).where(

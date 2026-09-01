@@ -521,3 +521,203 @@ async def test_registry_listings_hides_private_and_draft(db):
     blob = _json.dumps(data)
     for leak in ("commission_pct", "seller_tenant_id", "bill_via_invoice", "seller_org_id"):
         assert leak not in blob, leak
+
+
+# ── R44/R72: license-gate + purchase dedup + idempotency scoping ──
+
+
+@pytest.mark.asyncio
+async def test_delisted_listing_keeps_license_gate(db):
+    """R44[16]: delisting means 'stop selling', not 'give it away' — the
+    install gate must still require a license after delist (else refund
+    revocation is nullified by delist+reinstall)."""
+    seller_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    buyer_user = await _mk_user(db)
+    buyer_org = await _mk_org(db, buyer_user)
+    # Gate blocks the unlicensed buyer while active.
+    with pytest.raises(AppError) as exc:
+        await market_svc.check_install_license(db, "skill_pack", listing.product_id, buyer_org)
+    assert exc.value.code == "LICENSE_REQUIRED"
+    # Delist → the gate must STILL block.
+    listing.status = "delisted"
+    await db.flush()
+    with pytest.raises(AppError) as exc2:
+        await market_svc.check_install_license(db, "skill_pack", listing.product_id, buyer_org)
+    assert exc2.value.code == "LICENSE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_pending_purchase_dedupes_not_double_charges(db):
+    """R44[17]: a second purchase attempt while the first is still pending must
+    return the SAME pending purchase, not open a parallel charge."""
+    seller_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    buyer_user = await _mk_user(db)
+    buyer_org = await _mk_org(db, buyer_user)
+    p1 = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="checkout",
+        idempotency_key=None,
+    )
+    assert p1.status == "pending"
+    p2 = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="checkout",
+        idempotency_key=None,
+    )
+    assert p2.id == p1.id, "second attempt must resume the pending purchase"
+
+
+@pytest.mark.asyncio
+async def test_purchase_idempotency_scoped_per_tenant(db):
+    """R72[2]: the same client idempotency key on two different buyer tenants
+    must produce two independent purchases — not return (and charge against)
+    the first tenant's row."""
+    seller_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    buyer1 = await _mk_user(db)
+    org1 = await _mk_org(db, buyer1)
+    buyer2 = await _mk_user(db)
+    org2 = await _mk_org(db, buyer2)
+    key = "checkout-shared-001"
+    p1 = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=org1.id,
+        purchaser=_actor(buyer1),
+        payment_method="checkout",
+        idempotency_key=key,
+    )
+    p2 = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=org2.id,
+        purchaser=_actor(buyer2),
+        payment_method="checkout",
+        idempotency_key=key,
+    )
+    assert p1.id != p2.id
+    assert p1.buyer_tenant_id != p2.buyer_tenant_id
+
+
+@pytest.mark.asyncio
+async def test_major_locked_blocks_fresh_install_of_newer_major(db):
+    """R44[18]: a major_locked license purchased at major 1 must block a FRESH
+    install of major 2 (uninstall→reinstall bypass), not just /upgrade."""
+    from app.controlplane.models.marketplace import LicenseGrant
+
+    seller_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    listing = await _mk_listing(db, seller_org, seller_user, upgrade_policy="major_locked")
+    buyer_user = await _mk_user(db)
+    buyer_org = await _mk_org(db, buyer_user)
+    db.add(
+        LicenseGrant(
+            listing_id=listing.id,
+            product_type="skill_pack",
+            product_id=listing.product_id,
+            tenant_id=buyer_org.tenant_id,
+            org_id=buyer_org.id,
+            scope="organization",
+            source="purchase",
+            purchased_major=1,
+        )
+    )
+    await db.flush()
+    # Same-major install passes.
+    await market_svc.check_install_license(
+        db, "skill_pack", listing.product_id, buyer_org, target_version="1.4.0"
+    )
+    # Newer-major FRESH install blocked.
+    with pytest.raises(AppError) as exc:
+        await market_svc.check_install_license(
+            db, "skill_pack", listing.product_id, buyer_org, target_version="2.0.0"
+        )
+    assert exc.value.code == "LICENSE_UPGRADE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_manual_seat_limited_grant_requires_limit(db):
+    """R44[20]: a seat_limited manual grant without a positive seat_limit must
+    be rejected — NULL silently disabled the seat check."""
+    user = await _mk_user(db)
+    org = await _mk_org(db, user)
+    with pytest.raises(AppError) as exc:
+        await market_svc.manual_grant(
+            db,
+            product_type="skill_pack",
+            product_id=str(ULID()),
+            tenant_id=org.tenant_id,
+            scope="seat_limited",
+            org_id=org.id,
+            expires_at=None,
+            actor=_actor(user),
+        )
+    assert exc.value.code == "LISTING_INVALID"
+    # With a limit it succeeds and stores it.
+    grant = await market_svc.manual_grant(
+        db,
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        tenant_id=org.tenant_id,
+        scope="seat_limited",
+        org_id=org.id,
+        expires_at=None,
+        actor=_actor(user),
+        seat_limit=25,
+    )
+    assert grant.seat_limit == 25
+
+
+@pytest.mark.asyncio
+async def test_invoice_billed_purchase_delivers_and_queues_line(db):
+    """R44[22]: payment_method='invoice' (bill_via_invoice listings only)
+    delivers the license immediately; the charge is picked up as a license
+    line at period close (payment_method='invoice', invoice_id NULL)."""
+    from app.controlplane.models.marketplace import LicenseGrant
+
+    seller_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    inv_listing = await _mk_listing(db, seller_org, seller_user, bill_via_invoice=True)
+    cash_listing = await _mk_listing(db, seller_org, seller_user)  # bill_via_invoice=False
+    buyer_user = await _mk_user(db)
+    buyer_org = await _mk_org(db, buyer_user)
+    # invoice billing rejected for a non-flagged listing
+    with pytest.raises(AppError) as exc:
+        await market_svc.create_purchase(
+            db,
+            listing_id=cash_listing.id,
+            buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user),
+            payment_method="invoice",
+            idempotency_key=None,
+        )
+    assert exc.value.code == "LISTING_NOT_PURCHASABLE"
+    # flagged listing: purchase → mark paid → grant exists, invoice_id NULL
+    p = await market_svc.create_purchase(
+        db,
+        listing_id=inv_listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="invoice",
+        idempotency_key=None,
+    )
+    paid = await market_svc.mark_purchase_paid(
+        db, purchase_id=p.id, payment_ref=None, actor=_actor(buyer_user)
+    )
+    assert paid.status == "paid" and paid.payment_method == "invoice"
+    assert paid.invoice_id is None  # awaits the period close license line
+    grant = (
+        await db.execute(select(LicenseGrant).where(LicenseGrant.purchase_id == p.id))
+    ).scalar_one()
+    assert grant.status == "active"

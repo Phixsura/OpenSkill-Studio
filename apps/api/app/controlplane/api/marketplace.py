@@ -51,7 +51,10 @@ class CreateListingRequest(BaseModel):
 
 class PurchaseRequest(BaseModel):
     listing_id: str = Field(min_length=26, max_length=26)
-    payment_method: str = Field(pattern=r"^(credit|checkout)$")
+    # 'invoice' is only accepted for listings flagged bill_via_invoice (R44[22]
+    # — the flag was stored but no path ever produced payment_method='invoice',
+    # so billing.py's license-line drafting was unreachable dead code).
+    payment_method: str = Field(pattern=r"^(credit|checkout|invoice)$")
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
 
 
@@ -62,6 +65,9 @@ class ManualGrantRequest(BaseModel):
     scope: str = Field(pattern=r"^(tenant|organization|cohort|seat_limited)$")
     org_id: str | None = Field(default=None, min_length=26, max_length=26)
     expires_at: datetime | None = None
+    # R44[20]: required (positive) when scope == seat_limited — a NULL limit
+    # silently disabled the seat check.
+    seat_limit: int | None = Field(default=None, ge=1, le=1_000_000)
 
 
 class ReasonRequest(BaseModel):
@@ -329,6 +335,17 @@ async def purchase(
             idempotency_key=f"purchase:{purchase_row.id}",
             created_by=user.id,
         )
+        purchase_row = await market_svc.mark_purchase_paid(
+            db, purchase_id=purchase_row.id, payment_ref=None, actor=actor
+        )
+        await db.commit()
+        return DataResponse(data=_purchase_response(purchase_row))
+    if body.payment_method == "invoice":
+        # R44[22]: bill_via_invoice — deliver the license now; the charge lands
+        # as a license line on the tenant's next period invoice (billing.py
+        # picks up paid purchases with payment_method='invoice' and no
+        # invoice_id at close). create_purchase already validated the listing
+        # allows invoice billing.
         purchase_row = await market_svc.mark_purchase_paid(
             db, purchase_id=purchase_row.id, payment_ref=None, actor=actor
         )

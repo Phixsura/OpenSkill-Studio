@@ -67,6 +67,7 @@ class MarketplacePurchase(Base):
     __table_args__ = (
         Index(
             "uq_cp_purchase_idem",
+            "buyer_tenant_id",
             "idempotency_key",
             unique=True,
             postgresql_where="idempotency_key IS NOT NULL",

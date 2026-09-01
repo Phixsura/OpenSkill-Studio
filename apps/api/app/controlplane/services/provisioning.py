@@ -122,7 +122,18 @@ async def create_provision_run(
         )
     ).scalar_one_or_none()
     if existing is not None:
-        if existing.requested_name != name or existing.blueprint_id != blueprint_id:
+        # R72[3]: the divergence guard must compare EVERY requested parameter.
+        # Ignoring requested_slug silently swallowed an operator's corrected
+        # slug on retry (the old run resumed with the colliding slug), and
+        # ignoring partner_id let a different partner reusing the same key
+        # read another partner's run (cross-partner disclosure — the key is
+        # globally unique, not partner-scoped).
+        if (
+            existing.requested_name != name
+            or existing.blueprint_id != blueprint_id
+            or existing.requested_slug != slug
+            or existing.partner_id != partner_id
+        ):
             raise AppError(
                 "PROVISION_CONFLICT",
                 "This idempotency key was used with different parameters",

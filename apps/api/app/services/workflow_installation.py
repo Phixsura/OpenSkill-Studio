@@ -68,7 +68,11 @@ class WorkflowInstallationService:
 
         _org = await self.db.get(_CpOrg, org_id)
         if _org is not None:
-            await cp_facade.check_install_license(self.db, "workflow_pack", pack_id, _org)
+            # target_version enforces major_locked on fresh installs too
+            # (R44[18] — uninstall→reinstall of a newer major).
+            await cp_facade.check_install_license(
+                self.db, "workflow_pack", pack_id, _org, target_version=release.version
+            )
 
         # ── Capability gate (ADR-011): hard failure, never auto-connect ──
         await self._capability_gate(org_id, release)

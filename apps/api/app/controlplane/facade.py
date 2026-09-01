@@ -151,8 +151,14 @@ async def check_storage_quota(db: AsyncSession, org_id: str, incoming_bytes: int
     )
 
 
-async def check_install_license(db: AsyncSession, product_type: str, product_id: str, org) -> None:
+async def check_install_license(
+    db: AsyncSession,
+    product_type: str,
+    product_id: str,
+    org,
+    target_version: str | None = None,
+) -> None:
     """Marketplace license gate for pack/path installation (P8)."""
     from app.controlplane.services.marketplace import check_install_license as _impl
 
-    await _impl(db, product_type, product_id, org)
+    await _impl(db, product_type, product_id, org, target_version=target_version)
