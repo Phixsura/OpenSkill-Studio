@@ -289,3 +289,90 @@ async def test_all_cp_page_params_are_capped(client):
         # bound is declared regardless). Never 500.
         assert r.status_code in (401, 422), f"{path} → {r.status_code}"
         assert r.status_code != 500
+
+
+# ── R71: impersonation read-only guard scheme-casing bypass ──
+
+
+def _imp_token():
+    """Mint an access token carrying an `imp` claim, exactly as
+    mint_impersonation_token does (type=access, imp/imp_grant present)."""
+    import jwt
+
+    from app.config import settings
+    from app.core.security import ALGORITHM
+
+    payload = {
+        "sub": "01JFAKETARGETUSERFAKEFAKEA",
+        "role": "instructor",
+        "type": "access",
+        "imp": "01JFAKESUPPORTUSERFAKEFAKE",
+        "imp_grant": "01JFAKEGRANTFAKEFAKEFAKEFA",
+        "exp": 9999999999,
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
+
+
+@pytest.mark.asyncio
+async def test_impersonation_guard_blocks_all_scheme_casings(client):
+    """R71 CRITICAL: the read-only impersonation guard parsed the auth scheme
+    case-sensitively (`startswith("Bearer ")`), while FastAPI's OAuth2 parses
+    it case-insensitively. A lowercase `bearer` (or extra whitespace) skipped
+    the guard while the route still authenticated the token — a full read-only
+    bypass. Every casing/spacing variant of a bearer scheme carrying an `imp`
+    token must be blocked with 403 IMPERSONATION_FORBIDDEN on a non-whitelisted
+    write."""
+    token = _imp_token()
+    # A control-plane write that is NOT in the guard's whitelist.
+    path = "/api/v1/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/subscription/cancel"
+    for scheme in ("Bearer", "bearer", "BEARER", "BeArEr"):
+        r = await client.post(path, headers={"Authorization": f"{scheme} {token}"}, json={})
+        assert r.status_code == 403, f"scheme={scheme!r} → {r.status_code}"
+        assert r.json()["error"]["code"] == "IMPERSONATION_FORBIDDEN"
+    # Extra whitespace between scheme and token must also be caught (guard must
+    # not fail open by choking on the token).
+    r = await client.post(path, headers={"Authorization": f"Bearer  {token}"}, json={})
+    assert r.status_code == 403, f"double-space → {r.status_code}"
+    assert r.json()["error"]["code"] == "IMPERSONATION_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_impersonation_guard_allows_safe_and_whitelisted():
+    """The guard must still let impersonated GETs and whitelisted writes through
+    (fail-closed on writes, not on reads). Unit-tested against the middleware's
+    dispatch directly so no DB-backed route is touched."""
+    from starlette.requests import Request
+
+    from app.middleware.impersonation import ImpersonationGuardMiddleware
+
+    mw = ImpersonationGuardMiddleware(app=None)
+    token = _imp_token()
+
+    async def _passed(scope):
+        called = {"v": False}
+
+        async def call_next(_req):
+            called["v"] = True
+            return "PASSED"
+
+        result = await mw.dispatch(Request(scope), call_next)
+        return called["v"], result
+
+    def _scope(method, path):
+        return {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": [(b"authorization", f"bearer {token}".encode())],
+        }
+
+    # GET (safe method) passes through even with a lowercase-scheme imp token.
+    passed, _ = await _passed(_scope("GET", "/api/v1/tenants/01JFAKE"))
+    assert passed
+    # Whitelisted notification write passes the guard.
+    passed, _ = await _passed(_scope("POST", "/api/v1/notifications/01JFAKE/read"))
+    assert passed
+    # A non-whitelisted write with the same lowercase-scheme imp token is blocked.
+    passed, result = await _passed(_scope("POST", "/api/v1/tenants/01JFAKE/subscription/cancel"))
+    assert not passed
+    assert result.status_code == 403

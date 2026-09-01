@@ -34,9 +34,18 @@ class ImpersonationGuardMiddleware(BaseHTTPMiddleware):
         if request.method in _SAFE_METHODS:
             return await call_next(request)
         auth = request.headers.get("authorization", "")
-        if not auth.startswith("Bearer "):
+        # Parse the scheme exactly the way FastAPI's OAuth2PasswordBearer does
+        # (case-insensitive, single partition on the first space) so this guard
+        # sees the bearer token on EVERY request the route will authenticate.
+        # A naive `auth.startswith("Bearer ")` was case-sensitive: a lowercase
+        # `bearer <imp-token>` (or extra whitespace) slipped past the guard while
+        # the route still authenticated it — a full read-only-impersonation
+        # bypass. token.strip() keeps us at least as lenient as route auth so we
+        # never fail open (over-blocking a request the route would 401 is safe).
+        scheme, _, token = auth.partition(" ")
+        if scheme.lower() != "bearer":
             return await call_next(request)
-        token = auth[7:]
+        token = token.strip()
         try:
             payload = _jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM])
         except Exception:  # noqa: BLE001 — invalid tokens are the route auth's problem

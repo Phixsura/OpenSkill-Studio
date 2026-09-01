@@ -68,10 +68,14 @@ class ApiRequestMeteringMiddleware(BaseHTTPMiddleware):
         if target is None:
             return await call_next(request)
         auth = request.headers.get("authorization", "")
-        if not auth.startswith("Bearer "):
+        # Match FastAPI's case-insensitive scheme parse so a lowercase `bearer`
+        # (or extra whitespace) can't skip metering + daily-quota enforcement
+        # while the route still authenticates the token.
+        scheme, _, token = auth.partition(" ")
+        if scheme.lower() != "bearer":
             return await call_next(request)
         try:
-            _jwt.decode(auth[7:], settings.jwt_secret, algorithms=[ALGORITHM])
+            _jwt.decode(token.strip(), settings.jwt_secret, algorithms=[ALGORITHM])
         except Exception:  # noqa: BLE001 — invalid token → route auth's problem, not counted
             return await call_next(request)
 
