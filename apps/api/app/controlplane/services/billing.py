@@ -194,6 +194,15 @@ async def start_subscription(
             from app.controlplane.services.tenants import transition_status
 
             await transition_status(db, tenant, TenantStatus.ACTIVE, actor=actor)
+        await record_audit(
+            db,
+            actor=actor,
+            action="subscription.started",
+            target_type="subscription",
+            target_id=sub.id,
+            tenant_id=tenant.id,
+            after={"plan_key": plan_key, "interval": interval, "provider": provider},
+        )
         await invalidate_cache(tenant.id)
         return sub, None
 
@@ -318,6 +327,10 @@ async def change_plan(
         else (old_version, old_price)
     )
     new_seats = seats if seats is not None else sub.seat_quantity
+    # R60[40]: capture the PRE-change seat count before the immediate branch
+    # mutates sub.seat_quantity — the audit 'before' payload read the mutated
+    # value, so before.seats always equaled after.seats.
+    old_seats = sub.seat_quantity
     upgrade = (new_price.amount_minor if new_price else 0) >= (
         old_price.amount_minor if old_price else 0
     )
@@ -376,7 +389,7 @@ async def change_plan(
         target_type="subscription",
         target_id=sub.id,
         tenant_id=tenant.id,
-        before={"plan_version_id": old_version.id, "seats": sub.seat_quantity},
+        before={"plan_version_id": old_version.id, "seats": old_seats},
         after={"plan_version_id": new_version.id, "seats": new_seats, "mode": mode},
     )
     await invalidate_cache(tenant.id)
@@ -450,6 +463,15 @@ async def cancel_subscription(
         adapter = get_billing_provider(sub.provider)
         if adapter is not None:
             await adapter.cancel_subscription(sub.external_ref, at_period_end)
+    await record_audit(
+        db,
+        actor=actor,
+        action="subscription.cancelled",
+        target_type="subscription",
+        target_id=sub.id,
+        tenant_id=tenant.id,
+        after={"at_period_end": at_period_end},
+    )
     await invalidate_cache(tenant.id)
     await db.refresh(sub)
     return sub

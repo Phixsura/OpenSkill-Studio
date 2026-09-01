@@ -24,6 +24,9 @@ AUDIT_ACTIONS = frozenset(
         "tenant.provisioned",
         "tenant.export_created",
         "tenant.currency_changed",
+        # R60[46]: owner PATCH of pricing-relevant fields (country is a
+        # rev-share rule dimension; timezone shifts budget/period boundaries).
+        "tenant.updated",
         "tenant.attribution_set",
         "tenant.attribution_cleared",
         # platform roles
@@ -32,6 +35,10 @@ AUDIT_ACTIONS = frozenset(
         # plans / entitlements
         "plan.version_activated",
         "subscription.plan_changed",
+        # R60[43]: subscription start/cancel change what a tenant is billed —
+        # they must be reconstructible from the audit trail.
+        "subscription.started",
+        "subscription.cancelled",
         "entitlement.override_set",
         "entitlement.override_removed",
         # pricing
@@ -66,6 +73,8 @@ AUDIT_ACTIONS = frozenset(
         "domain.verified",
         "domain.activated",
         "domain.disabled",
+        # R60[45]: hard delete frees the hostname for anyone — audited.
+        "domain.deleted",
         "branding.updated",
         # impersonation
         "impersonation.grant_created",
@@ -78,6 +87,8 @@ AUDIT_ACTIONS = frozenset(
         "license.granted_manually",
         "license.revoked",
         "purchase.refunded",
+        # R60[42]: platform mark-paid grants a license + triggers accrual.
+        "purchase.marked_paid",
         "listing.commission_changed",
         # R60[44]: listing lifecycle mutates the license gate — audited.
         "listing.activated",
@@ -140,7 +151,10 @@ TENANT_VISIBLE_ACTIONS = frozenset(
         "tenant.reactivated",
         "tenant.status_changed",
         "tenant.currency_changed",
+        "tenant.updated",
         "subscription.plan_changed",
+        "subscription.started",
+        "subscription.cancelled",
         "entitlement.override_set",
         "entitlement.override_removed",
         "credit.topped_up",
@@ -161,5 +175,9 @@ TENANT_VISIBLE_ACTIONS = frozenset(
         "license.granted_manually",
         "license.revoked",
         "purchase.refunded",
+        "purchase.marked_paid",
+        "domain.deleted",
+        "listing.activated",
+        "listing.delisted",
     }
 )

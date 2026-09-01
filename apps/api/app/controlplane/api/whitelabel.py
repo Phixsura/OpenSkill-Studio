@@ -21,6 +21,7 @@ from app.controlplane.services import branding as branding_svc
 from app.controlplane.services import domains as domain_svc
 from app.controlplane.services import provisioning as provision_svc
 from app.controlplane.services import tenants as tenant_svc
+from app.controlplane.services.audit import record_audit
 from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.models.user import User
@@ -316,12 +317,25 @@ async def disable_domain(
 async def delete_domain(
     tenant_id: str,
     domain_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await tenant_svc.require_tenant_member(db, tenant_id, user, "owner")
     domain = await _tenant_domain(db, tenant_id, domain_id)
+    hostname = domain.hostname
     await db.delete(domain)  # frees the hostname
+    # R60[45]: the hard delete frees the hostname for ANY tenant to register —
+    # the only domain transition that wasn't audited.
+    await record_audit(
+        db,
+        actor=make_actor(request, user, "tenant"),
+        action="domain.deleted",
+        target_type="domain",
+        target_id=domain_id,
+        tenant_id=tenant_id,
+        before={"hostname": hostname},
+    )
     await db.commit()
 
 

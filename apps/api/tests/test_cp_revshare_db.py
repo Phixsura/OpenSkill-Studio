@@ -662,3 +662,73 @@ async def test_void_rated_guarded_against_terminal_states(db):
     assert exc.value.code == "RATED_USAGE_INVOICED"
     await db.refresh(row)
     assert row.status == "settled"  # untouched
+
+
+# ── R60: margin leak + audit completeness ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_partner_entry_response_hides_margin_base(db):
+    """R60[39]: for percentage_of_margin rules, revenue_base_minor IS the
+    platform's internal margin — partner-facing responses and the CSV export
+    must not expose it. Percentage-of-gross entries keep their base."""
+    from app.controlplane.api.partners import _entry_response, _margin_based
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    margin_entry = RevenueShareEntry(
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        source_type="invoice",
+        source_id=str(ULID()),
+        rule_snapshot={"rule_type": "percentage_of_margin", "rate": "30"},
+        revenue_base_minor=15000,  # internal margin — must not leak
+        share_amount_minor=4500,
+        currency="USD",
+        period="2026-09",
+    )
+    gross_entry = RevenueShareEntry(
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        source_type="invoice",
+        source_id=str(ULID()),
+        rule_snapshot={"rule_type": "percentage_of_gross_revenue", "rate": "10"},
+        revenue_base_minor=100000,
+        share_amount_minor=10000,
+        currency="USD",
+        period="2026-09",
+    )
+    db.add_all([margin_entry, gross_entry])
+    await db.flush()
+    await db.refresh(margin_entry)
+    await db.refresh(gross_entry)
+    assert _margin_based(margin_entry) is True
+    assert _entry_response(margin_entry)["revenue_base_minor"] is None
+    assert _entry_response(gross_entry)["revenue_base_minor"] == 100000
+
+
+@pytest.mark.asyncio
+async def test_rule_retirement_is_audited(db):
+    """R60[41]: activating v2 retires v1 — the retirement must be audited with
+    the RETIRED rule as target (registry action revshare.rule_retired had zero
+    emit sites)."""
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    r1 = await _mk_rule(db, user, partner, rate="10", version=1)
+    await _mk_rule(db, user, partner, rate="12", version=2)
+    events = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "revshare.rule_retired",
+                    CommercialAuditEvent.target_id == r1.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].after["superseded_by"] is not None

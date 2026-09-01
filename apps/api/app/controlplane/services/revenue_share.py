@@ -836,7 +836,7 @@ async def activate_rule(db: AsyncSession, rule: RevenueShareRule, *, actor: Acto
     if rule.status != "draft":
         raise AppError("RULE_IMMUTABLE", "Only draft rules can be activated", 409)
     # Retire the previous active version of the same dimension set
-    await db.execute(
+    retired = await db.execute(
         update(RevenueShareRule)
         .where(
             RevenueShareRule.beneficiary_type == rule.beneficiary_type,
@@ -873,7 +873,9 @@ async def activate_rule(db: AsyncSession, rule: RevenueShareRule, *, actor: Acto
             RevenueShareRule.status == "active",
         )
         .values(status="retired", effective_until=rule.effective_from)
+        .returning(RevenueShareRule.id, RevenueShareRule.version)
     )
+    retired_rows = retired.all()
     result = await db.execute(
         update(RevenueShareRule)
         .where(RevenueShareRule.id == rule.id, RevenueShareRule.status == "draft")
@@ -881,6 +883,19 @@ async def activate_rule(db: AsyncSession, rule: RevenueShareRule, *, actor: Acto
     )
     if not result.rowcount:
         raise AppError("RULE_IMMUTABLE", "Rule state changed concurrently", 409)
+    # R60[41]: each retirement is a payout-affecting transition in its own
+    # right — audit it with the RETIRED rule as the target (the activation
+    # event below only carries the new rule's id).
+    for retired_id, retired_version in retired_rows:
+        await record_audit(
+            db,
+            actor=actor,
+            action="revshare.rule_retired",
+            target_type="revshare_rule",
+            target_id=retired_id,
+            partner_id=rule.partner_id,
+            after={"version": retired_version, "superseded_by": rule.id},
+        )
     await record_audit(
         db,
         actor=actor,

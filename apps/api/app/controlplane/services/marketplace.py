@@ -432,6 +432,18 @@ async def mark_purchase_paid(
         metadata={"listing_id": listing.id, "purchase_id": purchase.id},
     )
     enqueue(db, "purchase.paid", {"purchase_id": purchase.id})
+    # R60[42]: mark-paid delivers a license and triggers rev-share accrual —
+    # the actor (buyer via credit/invoice, SYSTEM via webhook, billing_admin
+    # via /platform/purchases/{id}/mark-paid) must be reconstructible.
+    await record_audit(
+        db,
+        actor=actor,
+        action="purchase.marked_paid",
+        target_type="purchase",
+        target_id=purchase.id,
+        tenant_id=purchase.buyer_tenant_id,
+        after={"amount_minor": purchase.amount_minor, "currency": purchase.currency},
+    )
     await db.flush()
     return purchase
 

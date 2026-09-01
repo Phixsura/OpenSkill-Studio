@@ -160,6 +160,12 @@ def _partner_response(p: Partner) -> dict:
     }
 
 
+def _margin_based(e: RevenueShareEntry) -> bool:
+    """R60[39]: for percentage_of_margin rules revenue_base_minor IS the
+    platform's internal margin (billable − cost) — never partner-visible."""
+    return (e.rule_snapshot or {}).get("rule_type") == "percentage_of_margin"
+
+
 def _entry_response(e: RevenueShareEntry) -> dict:
     return {
         "id": e.id,
@@ -167,7 +173,7 @@ def _entry_response(e: RevenueShareEntry) -> dict:
         "source_type": e.source_type,
         "source_id": e.source_id,
         "rule_snapshot": e.rule_snapshot,
-        "revenue_base_minor": e.revenue_base_minor,
+        "revenue_base_minor": None if _margin_based(e) else e.revenue_base_minor,
         "share_amount_minor": e.share_amount_minor,
         "currency": e.currency,
         "period": e.period,
@@ -677,7 +683,8 @@ async def export_statement_csv(
                 e.source_id,
                 (e.rule_snapshot or {}).get("rule_type", ""),
                 (e.rule_snapshot or {}).get("version", ""),
-                e.revenue_base_minor,
+                # R60[39]: margin-based entries' base IS the platform margin.
+                "" if _margin_based(e) else e.revenue_base_minor,
                 e.share_amount_minor,
                 e.currency,
                 e.status,

@@ -20,7 +20,7 @@ from app.controlplane.schemas.tenant import (
     UpdateTenantRequest,
 )
 from app.controlplane.services import tenants as tenant_svc
-from app.controlplane.services.audit import TENANT_VISIBLE_ACTIONS
+from app.controlplane.services.audit import TENANT_VISIBLE_ACTIONS, record_audit
 from app.core.rate_limit import rate_limit
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -81,14 +81,30 @@ async def get_tenant(
 async def update_tenant(
     tenant_id: str,
     body: UpdateTenantRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await tenant_svc.require_tenant_member(db, tenant_id, user, "owner")
     tenant = await db.get(TenantAccount, tenant_id)
     updates = body.model_dump(exclude_unset=True)
+    # R60[46]: capture pre-change values — country is a rev-share rule
+    # dimension and timezone shifts budget/rating period boundaries; a silent
+    # flip must be reconstructible from the audit trail.
+    before = {field: getattr(tenant, field) for field in updates}
     for field, value in updates.items():
         setattr(tenant, field, value)
+    if updates:
+        await record_audit(
+            db,
+            actor=make_actor(request, user, "tenant"),
+            action="tenant.updated",
+            target_type="tenant",
+            target_id=tenant.id,
+            tenant_id=tenant.id,
+            before=before,
+            after=updates,
+        )
     await db.commit()
     await db.refresh(tenant)
     return DataResponse(data=TenantResponse.model_validate(tenant))
