@@ -478,6 +478,15 @@ class WorkflowRuntimeService:
                     reference_type="workflow_run",
                     reference_id=run.id,
                 )
+            else:
+                # R31/C13: estimate rounds to 0 when offerings have NULL
+                # cost_per_call (auto-selection even prefers them), yet the run
+                # can still incur real billable usage that settle would floor
+                # at the balance. credit_enforcement means prepay — a run must
+                # not start with no credit on file. Require a positive
+                # available balance (the estimate is unknown, so this is the
+                # minimum viable gate; actual is reconciled at settle).
+                await _credits.require_available(self.db, tenant.id, tenant.currency)
 
         # Pre-create all step runs as PENDING
         for step in definition.get("steps", []):

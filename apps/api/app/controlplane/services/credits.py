@@ -323,6 +323,23 @@ async def reserve(
     return reservation
 
 
+async def require_available(db: AsyncSession, tenant_id: str, currency: str) -> None:
+    """Assert the tenant has SOME available (unreserved) credit in `currency`.
+
+    Used by credit-enforced runs whose cost estimate rounds to 0 (NULL-cost
+    offerings) — we can't size a reservation, but a prepay tenant with zero
+    balance must not start a run that will incur billable usage (R31/C13).
+    Raises INSUFFICIENT_CREDIT (402) when nothing is available.
+    """
+    balance = await _locked_balance(db, tenant_id, currency)
+    if balance.balance_minor - balance.reserved_minor <= 0:
+        raise AppError(
+            "INSUFFICIENT_CREDIT",
+            "No available credit for this run under credit enforcement",
+            402,
+        )
+
+
 async def settle(db: AsyncSession, reservation_id: str, actual_minor: int) -> CreditReservation:
     """held → settled; debit ACTUAL usage only (issue §16 — a failed provider
     call must not consume the estimate). actual may exceed the hold but is
@@ -410,17 +427,28 @@ async def expire_stale_reservations(db: AsyncSession) -> int:
     )
     handled = 0
     for reservation in stale:
-        still_running = False
+        run = None
         if reservation.reference_type == "workflow_run":
             from app.models.workflow_run import RunStatus, WorkflowRun
 
             run = await db.get(WorkflowRun, reservation.reference_id)
-            still_running = run is not None and run.status in (
-                RunStatus.PENDING,
-                RunStatus.RUNNING,
-                RunStatus.WAITING_REVIEW,
-            )
-        if still_running and reservation.extension_count < 2:
+
+        # R31/C9: a run parked at a review gate legitimately waits up to
+        # settings.review_due_days (1–30d) — the bounded 2×6h extension used
+        # to release its hold at ~36h, so on approval the run resumed with no
+        # reservation and its usage went uncharged. Keep extending a
+        # WAITING_REVIEW run indefinitely (the gate is the natural bound; a
+        # review-expiry/ cancel emits run.terminal which settles). Keep the
+        # small bounded extension only for PENDING/RUNNING, which should never
+        # linger — a genuinely stuck executor is then released as before.
+        if run is not None and run.status == RunStatus.WAITING_REVIEW:
+            reservation.extension_count += 1
+            reservation.expires_at = now + timedelta(hours=24)
+        elif (
+            run is not None
+            and run.status in (RunStatus.PENDING, RunStatus.RUNNING)
+            and reservation.extension_count < 2
+        ):
             reservation.extension_count += 1
             reservation.expires_at = now + timedelta(hours=6)
         else:

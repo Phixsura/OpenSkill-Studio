@@ -383,6 +383,94 @@ async def test_expire_stale_reservations(db):
     assert balance.reserved_minor == 200  # only the stale hold freed
 
 
+@pytest.mark.asyncio
+async def test_require_available_blocks_zero_balance(db):
+    """R31/C13: a credit-enforced run whose estimate rounds to 0 (NULL-cost
+    offering) still calls require_available — a prepay tenant with no credit
+    must not start a run that will incur billable usage."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    # zero balance → blocked
+    with pytest.raises(AppError) as exc:
+        await credit_svc.require_available(db, tenant.id, "USD")
+    assert exc.value.code == "INSUFFICIENT_CREDIT"
+    # some available credit → passes
+    await credit_svc.top_up(db, tenant.id, "USD", 100, actor=_actor(user))
+    await credit_svc.require_available(db, tenant.id, "USD")  # no raise
+    # fully reserved (no available) → blocked again
+    await credit_svc.reserve(
+        db, tenant.id, "USD", 100, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    with pytest.raises(AppError) as exc2:
+        await credit_svc.require_available(db, tenant.id, "USD")
+    assert exc2.value.code == "INSUFFICIENT_CREDIT"
+
+
+@pytest.mark.asyncio
+async def test_review_gated_reservation_extends_past_bounded_limit():
+    """R31/C9: a run parked at a review gate can wait up to review_due_days
+    (1-30d). Its reservation must keep extending past the 2×6h bounded limit
+    (used for stuck PENDING/RUNNING) — else on approval the run resumes with
+    no hold and its usage goes uncharged. A stuck RUNNING run past the bound
+    is still released."""
+    from app.core.database import engine
+    from app.models.organization import (
+        MemberStatus,
+        Organization,
+        OrgMember,
+        OrgRole,
+        OrgStatus,
+    )
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await _mk_user(db)
+            tenant = await _mk_tenant(db, user)
+            org = Organization(
+                name="RG", slug=f"rg-{str(ULID()).lower()}", status=OrgStatus.ACTIVE,
+                tenant_id=tenant.id, created_by=user.id,
+            )
+            db.add(org)
+            await db.flush()
+            db.add(
+                OrgMember(
+                    org_id=org.id, user_id=user.id, role=OrgRole.OWNER,
+                    status=MemberStatus.ACTIVE,
+                )
+            )
+            await credit_svc.top_up(db, tenant.id, "USD", 5000, actor=_actor(user))
+
+            async def mk_run_hold(run_status):
+                run = WorkflowRun(
+                    org_id=org.id, definition_snapshot={"steps": []},
+                    status=run_status, started_by=user.id,
+                )
+                db.add(run)
+                await db.flush()
+                r = await credit_svc.reserve(
+                    db, tenant.id, "USD", 100,
+                    reference_type="workflow_run", reference_id=run.id,
+                )
+                r.expires_at = datetime.now(UTC) - timedelta(hours=1)
+                r.extension_count = 2  # already at the bounded limit
+                await db.flush()
+                return r
+
+            review_hold = await mk_run_hold(RunStatus.WAITING_REVIEW)
+            running_hold = await mk_run_hold(RunStatus.RUNNING)
+            await credit_svc.expire_stale_reservations(db)
+            await db.refresh(review_hold)
+            await db.refresh(running_hold)
+            # review-gated: extended (still held), count advanced past 2
+            assert review_hold.status == "held"
+            assert review_hold.extension_count == 3
+            # stuck RUNNING past the bound: released
+            assert running_hold.status == "released"
+    finally:
+        await engine.dispose()
+
+
 # ── Budgets ──────────────────────────────────────────────────
 
 
