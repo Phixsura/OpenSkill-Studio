@@ -204,6 +204,79 @@ def convert_minor(amount_minor: int, rate: Decimal, from_cur: str, to_cur: str) 
     )
 
 
+def convert_exact(amount_exact: Decimal, rate: Decimal, from_cur: str, to_cur: str) -> Decimal:
+    """FX-convert an EXACT fractional minor amount without rounding (R75).
+
+    Same math as convert_minor but keeps full Decimal precision so the invoice
+    can round the SUM once instead of each converted event."""
+    major = amount_exact / minor_multiplier(from_cur)
+    return major * rate * minor_multiplier(to_cur)
+
+
+def compute_internal_cost_exact(
+    unit_cost: Decimal, quantity: Decimal, currency: str, minimum_fee_minor: int | None
+) -> Decimal:
+    """Unrounded internal cost in `currency` minor units (R75). Mirrors
+    compute_internal_cost_minor's sign/minimum-fee handling but does not
+    quantize — the per-event remainder is preserved so charging rounds the
+    accumulated sum once."""
+    sign = Decimal(-1) if quantity < 0 else Decimal(1)
+    magnitude = abs(quantity)
+    raw = unit_cost * magnitude * minor_multiplier(currency)
+    if minimum_fee_minor is not None and raw > 0:
+        raw = max(raw, Decimal(minimum_fee_minor))
+    return sign * raw
+
+
+def compute_billable_exact(
+    policy_type: str,
+    params: dict,
+    *,
+    internal_cost_exact: Decimal,
+    quantity: Decimal,
+    prior_period_quantity: Decimal = Decimal(0),
+    usage_metadata: dict | None = None,
+) -> Decimal:
+    """Unrounded per-event billable in the POLICY's currency (R75).
+
+    Mirrors compute_billable_minor exactly, minus the per-event quantize — a
+    fixed_unit_price of $1/1M tokens on a 4000-token event yields Decimal('0.4')
+    here (accumulated), not 0 (rounded away per event). cost_plus_fixed's block
+    markup is inherently integer, so only its internal-cost component carries a
+    fraction."""
+    if params.get("exclude_failed") and (usage_metadata or {}).get("status") == "failed":
+        return Decimal(0)
+    if policy_type == "cost_plus_percentage":
+        pct = Decimal(str(params["percentage"]))
+        return internal_cost_exact * (1 + pct / 100)
+    if policy_type == "cost_plus_fixed":
+        per = Decimal(str(params.get("per_quantity", "1")))
+        if per <= 0:
+            raise AppError("INVALID_POLICY_PARAMS", "per_quantity must be positive", 422)
+        sign = Decimal(-1) if quantity < 0 else Decimal(1)
+        blocks = int((abs(quantity) / per).to_integral_value(rounding=ROUND_CEILING))
+        if blocks == 0 and quantity != 0:
+            blocks = 1
+        return internal_cost_exact + sign * Decimal(int(params["fixed_markup_minor"])) * blocks
+    if policy_type == "fixed_unit_price":
+        per = Decimal(str(params.get("per_quantity", "1")))
+        if per <= 0:
+            raise AppError("INVALID_POLICY_PARAMS", "per_quantity must be positive", 422)
+        price = Decimal(int(params["unit_price_minor"]))
+        return price * quantity / per
+    if policy_type == "included_quota_then_overage":
+        included = Decimal(str(params["included_quota"]))
+        per = Decimal(str(params.get("per_quantity", "1")))
+        if per <= 0:
+            raise AppError("INVALID_POLICY_PARAMS", "per_quantity must be positive", 422)
+        price = Decimal(int(params["overage_unit_price_minor"]))
+        already_over = max(prior_period_quantity - included, Decimal(0))
+        total_over = max(prior_period_quantity + quantity - included, Decimal(0))
+        billable_qty = total_over - already_over
+        return price * billable_qty / per
+    raise AppError("INVALID_POLICY_PARAMS", f"Unknown policy type '{policy_type}'", 422)
+
+
 # ── Resolution ───────────────────────────────────────────────
 
 
@@ -415,12 +488,19 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
         internal_cost = compute_internal_cost_minor(
             unit_cost, event.quantity, cost_currency, rate_row.minimum_fee_minor
         )
+        internal_cost_exact = compute_internal_cost_exact(
+            unit_cost, event.quantity, cost_currency, rate_row.minimum_fee_minor
+        )
     elif "unit_cost" in cost_snapshot:  # offering fallback
         internal_cost = compute_internal_cost_minor(
             Decimal(cost_snapshot["unit_cost"]), Decimal(1), cost_currency, None
         )
+        internal_cost_exact = compute_internal_cost_exact(
+            Decimal(cost_snapshot["unit_cost"]), Decimal(1), cost_currency, None
+        )
     else:  # no_rate
         internal_cost = 0
+        internal_cost_exact = Decimal(0)
 
     # 2. Sell policy
     policy = await _resolve_sell_policy(db, event, tenant)
@@ -494,6 +574,7 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
     if policy is not None:
         policy_currency = policy.currency
         cost_for_billing = internal_cost
+        cost_for_billing_exact = internal_cost_exact
         # cost_plus_* derive billable from internal cost → that input must be in
         # the policy's currency. fixed_unit_price / included_quota price in the
         # policy currency directly and ignore internal_cost, so no bridge needed.
@@ -506,14 +587,26 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
             if fx_cp is None:
                 blocked_gaps.append(f"{cost_currency}->{policy_currency}")
                 cost_for_billing = 0
+                cost_for_billing_exact = Decimal(0)
             else:
                 cost_for_billing = convert_minor(
                     internal_cost, fx_cp[0], cost_currency, policy_currency
+                )
+                cost_for_billing_exact = convert_exact(
+                    internal_cost_exact, fx_cp[0], cost_currency, policy_currency
                 )
         billable_policy_ccy = compute_billable_minor(
             policy.policy_type,
             policy.params,
             internal_cost_minor=cost_for_billing,
+            quantity=event.quantity,
+            prior_period_quantity=prior_qty,
+            usage_metadata=event.metadata_,
+        )
+        billable_policy_exact = compute_billable_exact(
+            policy.policy_type,
+            policy.params,
+            internal_cost_exact=cost_for_billing_exact,
             quantity=event.quantity,
             prior_period_quantity=prior_qty,
             usage_metadata=event.metadata_,
@@ -536,12 +629,16 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
         }
     else:
         billable_policy_ccy = 0
+        billable_policy_exact = Decimal(0)
         sell_snapshot = {"no_policy": True, "currency": tenant.currency}
         policy_currency = tenant.currency
         log.warning("cp_rating_no_policy", usage_event_id=event.id, tenant_id=tenant.id)
 
-    # 3. Convert billable from policy currency → tenant currency.
+    # 3. Convert billable from policy currency → tenant currency (both the
+    # rounded and EXACT columns — R75: the exact column is summed and rounded
+    # once at invoice time to avoid per-event rounding to 0).
     billable_minor = billable_policy_ccy
+    billable_exact = billable_policy_exact
     if policy_currency != tenant.currency:
         fx = await resolve_fx(db, policy_currency, tenant.currency, event.occurred_at)
         if fx is None:
@@ -550,6 +647,9 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
             rate, fx_snapshot = fx
             billable_minor = convert_minor(
                 billable_policy_ccy, rate, policy_currency, tenant.currency
+            )
+            billable_exact = convert_exact(
+                billable_policy_exact, rate, policy_currency, tenant.currency
             )
 
     margin: int | None = None
@@ -574,12 +674,16 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
         cost_rate_id=rate_row.id if rate_row else None,
         cost_rate_snapshot=cost_snapshot,
         internal_cost_minor=internal_cost,
+        # Exact cost is in the SAME currency as internal_cost_minor
+        # (internal_cost_currency) — parallel to the rounded column.
+        internal_cost_exact=Decimal(0) if blocked_gaps else internal_cost_exact,
         internal_cost_currency=cost_currency,
         price_policy_id=policy.id if policy else None,
         sell_rate_snapshot=(
             {**sell_snapshot, "fx_gaps": blocked_gaps} if blocked_gaps else sell_snapshot
         ),
         billable_amount_minor=0 if blocked_gaps else billable_minor,
+        billable_amount_exact=Decimal(0) if blocked_gaps else billable_exact,
         billable_currency=tenant.currency,
         fx_rate_snapshot=fx_snapshot,
         margin_minor=margin,

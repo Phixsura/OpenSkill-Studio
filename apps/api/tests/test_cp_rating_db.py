@@ -458,6 +458,83 @@ async def test_cost_plus_bridges_cost_currency_to_policy_currency(db):
     assert rated.billable_currency == "JPY"
 
 
+@pytest.mark.asyncio
+async def test_sub_half_minor_events_accumulate_not_round_to_zero(db):
+    """R75 CRITICAL: fixed_unit_price $1.00 per 1M tokens. Each 4000-token event
+    is worth 0.4 minor — the per-event rounded integer is 0, but the EXACT
+    column carries 0.4. 250 such events (1M tokens) must bill 100 minor
+    (round-of-sum), not 0 (sum-of-rounded)."""
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.services import metering, rating
+    from app.controlplane.services import pricing as pricing_svc
+    from app.models.organization import (
+        MemberStatus,
+        Organization,
+        OrgMember,
+        OrgRole,
+        OrgStatus,
+    )
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    org = Organization(
+        name="R75",
+        slug=f"r75-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
+    db.add(org)
+    await db.flush()
+    db.add(
+        OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.OWNER, status=MemberStatus.ACTIVE)
+    )
+    await pricing_svc.create_price_policy(
+        db,
+        actor=_actor(user),
+        name=f"submin {ULID()}",
+        policy_type="fixed_unit_price",
+        usage_type="llm_input_tokens",
+        currency="USD",
+        params={"unit_price_minor": 100, "per_quantity": "1000000"},
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        tenant_id=tenant.id,
+    )
+    exacts = []
+    for i in range(250):
+        ev = await metering.emit_usage(
+            db,
+            tenant_id=tenant.id,
+            org_id=org.id,
+            usage_type="llm_input_tokens",
+            quantity=4000,
+            occurred_at=datetime.now(UTC),
+            source="manual",
+            idempotency_key=f"submin-{i}-{ULID()}",
+        )
+        r = await rating.rate_event(db, ev.id)
+        exacts.append(r)
+    # Each event's rounded integer is 0 (0.4 → 0) but exact is 0.4.
+    assert all(r.billable_amount_minor == 0 for r in exacts)
+    assert all(
+        abs(Decimal(r.billable_amount_exact) - Decimal("0.4")) < Decimal("0.0001") for r in exacts
+    )
+    # Sum of exact = 250 × 0.4 = 100.0 minor.
+    total_exact = sum(Decimal(r.billable_amount_exact) for r in exacts)
+    assert total_exact == Decimal(100)
+    # The invoice usage-line rounds the SUM once → 100, not sum-of-rounded 0.
+    from sqlalchemy import func as _f
+
+    invoice_amount = (
+        await db.execute(
+            select(_f.coalesce(_f.sum(RatedUsage.billable_amount_exact), 0)).where(
+                RatedUsage.tenant_id == tenant.id
+            )
+        )
+    ).scalar_one()
+    assert int(Decimal(invoice_amount).quantize(Decimal("1"))) == 100
+
+
 # ── Snapshot immutability (issue §13 acceptance) ─────────────
 
 

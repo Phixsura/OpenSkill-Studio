@@ -564,6 +564,7 @@ async def test_invoice_excludes_foreign_currency_usage_and_credit(db):
                 internal_cost_currency="USD",
                 sell_rate_snapshot={},
                 billable_amount_minor=billable,
+                billable_amount_exact=Decimal(billable),
                 billable_currency=currency,
                 status="rated",
                 rated_at=now,
@@ -901,3 +902,71 @@ def test_stripe_checkout_and_subscription_mapping(monkeypatch):
     import asyncio
 
     asyncio.get_event_loop().run_until_complete(run()) if False else asyncio.run(run())
+
+
+def test_stripe_unit_amount_currency_convention():
+    """R75[15]: the platform stores money as major×minor_multiplier (×1 for
+    JPY/KRW, ×100 otherwise), but Stripe's smallest-unit convention differs —
+    VND-class is zero-decimal, KWD-class three-decimal. The boundary must
+    convert both ways so a top-up isn't 100× over- or 10× under-charged."""
+    from app.controlplane.services.billing_providers.stripe import (
+        _platform_minor_from_stripe,
+        _stripe_unit_amount,
+    )
+
+    # USD: platform 5000 minor ($50.00) → Stripe 5000 (two-decimal) → back 5000.
+    assert _stripe_unit_amount(5000, "USD") == 5000
+    assert _platform_minor_from_stripe(5000, "USD") == 5000
+    # VND (zero-decimal on Stripe): platform stores 1000.00 VND as 100000 minor
+    # (×100 default), Stripe wants 1000 → not 100000 (the 100× overcharge).
+    assert _stripe_unit_amount(100000, "VND") == 1000
+    assert _platform_minor_from_stripe(1000, "VND") == 100000
+    # KWD (three-decimal on Stripe): platform 10.00 KWD = 1000 minor (×100),
+    # Stripe wants 10000 → not 1000 (the 10× undercharge).
+    assert _stripe_unit_amount(1000, "KWD") == 10000
+    assert _platform_minor_from_stripe(10000, "KWD") == 1000
+    # JPY (zero-decimal both sides): platform 500 minor (×1) → Stripe 500.
+    assert _stripe_unit_amount(500, "JPY") == 500
+    assert _platform_minor_from_stripe(500, "JPY") == 500
+
+
+@pytest.mark.asyncio
+async def test_negative_invoice_balance_carried_forward_as_credit(db):
+    """R75[14]: a net-negative period subtotal (large immediate-downgrade
+    credit) is money owed to the tenant — it must be refunded to the credit
+    ledger, not clamped to 0 and lost."""
+    from app.controlplane.models.credit import TenantCreditBalance
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    # Start on growth, immediately downgrade to community (free) near period
+    # start → a large negative proration credit dwarfs the tiny arrears.
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+    )
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="community", seats=None, proration_mode="immediate", actor=a
+    )
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    inv = await billing_svc.close_period_and_invoice(db, period.id)
+    assert inv is not None
+    # amount_due clamped at 0 (can't owe a negative), but the residual credit
+    # landed in the ledger as a refund carry-forward.
+    assert inv.amount_due_minor == 0
+    if inv.subtotal_minor < 0:
+        bal = (
+            await db.execute(
+                select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+            )
+        ).scalar_one_or_none()
+        assert bal is not None
+        assert bal.balance_minor == -inv.subtotal_minor, (
+            f"residual {-inv.subtotal_minor} not carried forward, balance={bal.balance_minor}"
+        )

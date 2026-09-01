@@ -6,9 +6,12 @@ stripe.Webhook.construct_event with a fake secret.
 Card data never touches the platform — only refs are stored.
 """
 
+from decimal import ROUND_HALF_UP, Decimal
+
 import structlog
 
 from app.config import settings
+from app.controlplane.models.pricing import minor_multiplier
 from app.controlplane.services.billing_providers.base import (
     BillingProviderBase,
     CheckoutSession,
@@ -28,6 +31,61 @@ def _stripe():
         raise AppError("BILLING_PROVIDER_UNCONFIGURED", "Stripe is not configured", 409)
     _sdk.api_key = settings.stripe_secret_key
     return _sdk
+
+
+# R75[15]: Stripe's smallest-currency-unit convention differs from the
+# platform's minor_multiplier (which only treats JPY/KRW as zero-decimal).
+# Stripe treats a larger set as zero-decimal, and a few as three-decimal —
+# passing our amount_minor as Stripe's unit_amount for those currencies
+# over/under-charged by 10-100x. Convert to Stripe's convention at the boundary.
+# Sources: Stripe "zero-decimal" and "three-decimal" currency lists.
+_STRIPE_ZERO_DECIMAL = frozenset(
+    {
+        "BIF",
+        "CLP",
+        "DJF",
+        "GNF",
+        "JPY",
+        "KMF",
+        "KRW",
+        "MGA",
+        "PYG",
+        "RWF",
+        "UGX",
+        "VND",
+        "VUV",
+        "XAF",
+        "XOF",
+        "XPF",
+    }
+)
+_STRIPE_THREE_DECIMAL = frozenset({"BHD", "JOD", "KWD", "OMR", "TND"})
+
+
+def _stripe_unit_amount(amount_minor: int, currency: str) -> int:
+    """Convert a platform amount_minor into Stripe's smallest-unit amount.
+
+    The platform stores money as major × minor_multiplier(currency) where
+    minor_multiplier is 1 for JPY/KRW and 100 otherwise. Recover the major
+    amount, then re-express it in Stripe's convention for this currency:
+    ×1 (zero-decimal), ×1000 (three-decimal), or ×100 (default two-decimal)."""
+    major = Decimal(amount_minor) / Decimal(minor_multiplier(currency))
+    return int((major * _stripe_factor(currency)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _stripe_factor(currency: str) -> Decimal:
+    cur = currency.upper()
+    if cur in _STRIPE_ZERO_DECIMAL:
+        return Decimal(1)
+    if cur in _STRIPE_THREE_DECIMAL:
+        return Decimal(1000)
+    return Decimal(100)
+
+
+def _platform_minor_from_stripe(stripe_amount: int, currency: str) -> int:
+    """Inverse of _stripe_unit_amount: Stripe smallest-unit → platform minor."""
+    major = Decimal(stripe_amount) / _stripe_factor(currency)
+    return int((major * minor_multiplier(currency)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 class StripeProvider(BillingProviderBase):
@@ -77,7 +135,7 @@ class StripeProvider(BillingProviderBase):
                     {
                         "price_data": {
                             "currency": currency.lower(),
-                            "unit_amount": amount_minor,
+                            "unit_amount": _stripe_unit_amount(amount_minor, currency),
                             "product_data": {"name": f"OpenSkill {kind.replace('_', ' ')}"},
                         },
                         "quantity": 1,
@@ -130,6 +188,14 @@ class StripeProvider(BillingProviderBase):
             raise AppError("WEBHOOK_SIGNATURE_INVALID", "Invalid signature", 401) from exc
         obj = event["data"]["object"]
         data = obj.to_dict() if hasattr(obj, "to_dict") else dict(obj)
+        # R75[15]: amount_total comes back in Stripe's smallest unit — normalize
+        # it to the platform's amount_minor convention so downstream credit
+        # top-ups store the right figure (a VND top-up otherwise credited 1/100
+        # of the paid amount; KWD 10×). Inverse of _stripe_unit_amount.
+        amt = data.get("amount_total")
+        cur = data.get("currency")
+        if amt is not None and cur:
+            data["amount_total"] = _platform_minor_from_stripe(int(amt), cur)
         return ParsedWebhookEvent(
             external_event_id=event["id"],
             event_type=event["type"],

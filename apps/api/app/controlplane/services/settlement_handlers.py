@@ -55,7 +55,15 @@ async def handle_run_terminal(db: AsyncSession, payload: dict) -> None:
         .scalars()
         .all()
     )
-    actual = sum(r.billable_amount_minor for r in rated_rows)
+    # R75: settle the round-of-sum of exact per-event amounts, not the sum of
+    # per-event rounded integers (sub-half-minor events would settle as 0).
+    from decimal import ROUND_HALF_UP, Decimal
+
+    actual = int(
+        sum((Decimal(r.billable_amount_exact) for r in rated_rows), Decimal(0)).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
 
     if status == "cancelled" and actual == 0:
         await credit_svc.release(db, reservation.id)

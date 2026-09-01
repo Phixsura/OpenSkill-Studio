@@ -128,6 +128,17 @@ class RatedUsage(Base):
     price_policy_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     sell_rate_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     billable_amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # R75: EXACT fractional minor amounts, unrounded per event. billable/cost
+    # *_minor above are the rounded-per-event integers kept for display/back-
+    # compat, but any event whose marginal charge is < 0.5 minor rounds to 0 —
+    # so charging must sum the EXACT columns and round ONCE (round-of-sum), not
+    # sum the already-rounded integers (sum-of-rounded, which under-bills to 0).
+    billable_amount_exact: Mapped[Decimal] = mapped_column(
+        Numeric(24, 8), nullable=False, default=0, server_default="0"
+    )
+    internal_cost_exact: Mapped[Decimal] = mapped_column(
+        Numeric(24, 8), nullable=False, default=0, server_default="0"
+    )
     billable_currency: Mapped[str] = mapped_column(String(3), nullable=False)
     fx_rate_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     margin_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
@@ -983,6 +984,7 @@ async def test_tenant_ai_ceiling_denominated_in_tenant_currency(db):
             internal_cost_currency="EUR",
             sell_rate_snapshot={},
             billable_amount_minor=100,
+            billable_amount_exact=Decimal(100),
             billable_currency="EUR",
             status="rated",
             rated_at=datetime.now(UTC),

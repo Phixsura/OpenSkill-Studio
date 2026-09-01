@@ -571,7 +571,11 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         await db.execute(
             select(
                 RatedUsage.usage_type,
-                func.sum(RatedUsage.billable_amount_minor).label("amount"),
+                # R75: bill the SUM of exact per-event amounts, rounded ONCE
+                # here (round-of-sum). Summing the per-event rounded integers
+                # (billable_amount_minor) drops every event whose marginal
+                # charge was < 0.5 minor to 0 — unbounded under-billing.
+                func.sum(RatedUsage.billable_amount_exact).label("amount_exact"),
                 func.sum(RatedUsage.quantity).label("qty"),
                 func.count(RatedUsage.id).label("events"),
             )
@@ -588,14 +592,15 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         )
     ).all()
     for row in usage_rows:
-        if row.amount == 0:
+        amount = int(Decimal(row.amount_exact or 0).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        if amount == 0:
             continue
         line = InvoiceLine(
             invoice_id=invoice.id,
             line_type="usage",
             description=f"Usage: {row.usage_type.replace('_', ' ')}",
             quantity=row.qty,
-            amount_minor=int(row.amount),
+            amount_minor=amount,
             usage_summary={
                 "usage_type": row.usage_type,
                 "event_count": int(row.events),
@@ -735,7 +740,24 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         )
     ).scalar_one()
     invoice.subtotal_minor = subtotal
+    # R75[14]: a net-negative subtotal (e.g. a large immediate-downgrade credit
+    # exceeding the period's charges) is money OWED to the tenant, not zero.
+    # Clamping total to 0 silently discarded it — the change rows are already
+    # flagged invoiced, so it was never carried forward or refunded. Instead,
+    # refund the residual to the credit ledger as a carry-forward and bill 0.
     total = max(subtotal, 0)
+    if subtotal < 0:
+        await credit_svc.refund(
+            db,
+            tenant.id,
+            sub.currency,
+            -subtotal,
+            reference_type="invoice",
+            reference_id=invoice.id,
+            reason="Negative invoice balance carried forward as credit",
+            actor=SYSTEM_ACTOR,
+            idempotency_key=f"invneg:{invoice.id}",
+        )
     from app.controlplane.models.credit import TenantCreditBalance
 
     # Lock the balance row while we read available credit and decide how much to

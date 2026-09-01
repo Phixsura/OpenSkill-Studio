@@ -6,7 +6,7 @@ most-specific-only). Spent amounts come from RatedUsage billable sums.
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -69,7 +69,10 @@ def policy_matches(
 async def _spent_minor(db: AsyncSession, tenant: TenantAccount, policy: BudgetPolicy) -> int:
     start = _period_start(policy.period, tenant.timezone)
     q = (
-        select(func.coalesce(func.sum(RatedUsage.billable_amount_minor), 0))
+        # R75: sum the EXACT per-event amounts and round once — summing the
+        # per-event rounded integers under-counts spend (sub-half-minor events
+        # rounded to 0), letting a tenant creep past the budget invisibly.
+        select(func.coalesce(func.sum(RatedUsage.billable_amount_exact), 0))
         .select_from(RatedUsage)
         .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
         .where(
@@ -91,7 +94,8 @@ async def _spent_minor(db: AsyncSession, tenant: TenantAccount, policy: BudgetPo
     # usage events; enforced only when project→cohort linkage exists (ADR note)
     if policy.usage_type is not None:
         q = q.where(RatedUsage.usage_type == policy.usage_type)
-    return (await db.execute(q)).scalar_one()
+    total_exact = (await db.execute(q)).scalar_one()
+    return int(Decimal(total_exact or 0).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 async def check(
