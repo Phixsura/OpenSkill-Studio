@@ -41,6 +41,15 @@ async def _locked_balance(db: AsyncSession, tenant_id: str, currency: str) -> Te
                 TenantCreditBalance.currency == currency,
             )
             .with_for_update()
+            # populate_existing forces the ORM to overwrite a cached identity-map
+            # copy with the freshly-locked row bytes. Without it, a caller that
+            # read this balance UNLOCKED earlier in the same session (e.g.
+            # close_period_and_invoice computing credit_available) would keep the
+            # stale copy even though FOR UPDATE returned newer values — a
+            # concurrently-committed top-up/debit would be silently overwritten
+            # (lost update) and the ledger balance_after chain would stop
+            # replaying. This is THE serialization point; it must read fresh.
+            .execution_options(populate_existing=True)
         )
     ).scalar_one()
 
@@ -63,10 +72,18 @@ async def _append_entry(
     if entry_type not in CREDIT_ENTRY_TYPES:
         raise AppError("VALIDATION_ERROR", f"Unknown entry type '{entry_type}'", 422)
     if idempotency_key is not None:
+        # Scope the dedup by tenant: idempotency keys are per-tenant, and a
+        # client-supplied key on POST /platform/tenants/{id}/credits/adjust
+        # shares this namespace with internal namespaced keys. An unscoped
+        # check let the same client key on tenant B match tenant A's entry and
+        # silently drop B's adjustment (or 500 on the old global unique index).
         dup = (
             await db.execute(
                 select(CreditLedgerEntry.id)
-                .where(CreditLedgerEntry.idempotency_key == idempotency_key)
+                .where(
+                    CreditLedgerEntry.tenant_id == balance.tenant_id,
+                    CreditLedgerEntry.idempotency_key == idempotency_key,
+                )
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -356,16 +373,41 @@ async def settle(db: AsyncSession, reservation_id: str, actual_minor: int) -> Cr
         )
     )
     if not result.rowcount:
-        # Already terminal — idempotent no-op for retried handlers
-        existing = await db.get(CreditReservation, reservation_id)
+        # Already terminal — idempotent no-op for retried handlers. Return the
+        # row with its TRUE current status (populate_existing defeats a stale
+        # identity-map copy) so callers can tell a real settle from a reservation
+        # the expiry cron already released out from under us (R51: marking usage
+        # 'settled' after a release charges it nowhere).
+        existing = (
+            await db.execute(
+                select(CreditReservation)
+                .where(CreditReservation.id == reservation_id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
         if existing is None:
             raise AppError("RESERVATION_CONFLICT", "Reservation not found", 404)
         return existing
-    reservation = await db.get(CreditReservation, reservation_id)
+    reservation = (
+        await db.execute(
+            select(CreditReservation)
+            .where(CreditReservation.id == reservation_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     balance = await _locked_balance(db, reservation.tenant_id, reservation.currency)
     balance.reserved_minor = max(0, balance.reserved_minor - reservation.amount_minor)
     if actual_minor > 0:
-        chargeable = min(actual_minor, balance.balance_minor)
+        # Floor the charge at what's AVAILABLE after releasing this run's own
+        # hold — i.e. balance minus the holds still outstanding for OTHER
+        # reservations. Flooring at balance_minor alone (ignoring reserved_minor)
+        # let an overage charge drop the balance below the other holds, which
+        # _append_entry hard-rejects with INSUFFICIENT_CREDIT 402 — settle() is
+        # supposed to never fail (issue §16), so that 402 dead-lettered the
+        # run.terminal handler. available >= this run's hold always, so a
+        # within-estimate settle is unaffected; only overage is capped.
+        available = balance.balance_minor - balance.reserved_minor
+        chargeable = min(actual_minor, max(0, available))
         if chargeable < actual_minor:
             log.warning(
                 "cp_settle_shortfall",
@@ -481,23 +523,42 @@ async def expire_promotional(db: AsyncSession) -> int:
     )
     expired = 0
     for lot in lots:
-        balance = await _locked_balance(db, lot.tenant_id, lot.currency)
-        expire_amount = min(lot.amount_minor, balance.balance_minor)
-        if expire_amount > 0:
-            entry = await _append_entry(
-                db,
-                balance,
-                entry_type="expiration",
-                amount_minor=-expire_amount,
-                reference_type="promotional_lot",
-                reference_id=lot.id,
-                idempotency_key=f"expire:{lot.id}",
-            )
-            if entry is not None:
-                lot.consumed_expiration_id = entry.id
-                expired += 1
-        else:
-            lot.consumed_expiration_id = lot.id  # nothing left to expire; mark done
+        # Isolate each lot in a SAVEPOINT: one tenant whose lot can't be expired
+        # (or any other per-lot error) must not abort the whole platform-wide
+        # daily cron and retry forever. A failed lot is left unconsumed and
+        # retried on the next run.
+        try:
+            async with db.begin_nested():
+                balance = await _locked_balance(db, lot.tenant_id, lot.currency)
+                # Expire at most the UNRESERVED balance: reserved credit is
+                # spoken for by a live hold, and _append_entry rejects any entry
+                # that would drop balance below reserved (402). Promo credit that
+                # is currently reserved simply isn't expired this pass — the hold
+                # will settle/release and a later cron run expires the remainder
+                # (the lot stays unconsumed until fully handled).
+                available = balance.balance_minor - balance.reserved_minor
+                expire_amount = min(lot.amount_minor, max(0, available))
+                if expire_amount > 0:
+                    entry = await _append_entry(
+                        db,
+                        balance,
+                        entry_type="expiration",
+                        amount_minor=-expire_amount,
+                        reference_type="promotional_lot",
+                        reference_id=lot.id,
+                        idempotency_key=f"expire:{lot.id}",
+                    )
+                    # Only mark the lot fully consumed when we expired its whole
+                    # face value; a partial expiry (reserved remainder) leaves it
+                    # open for a later pass.
+                    if entry is not None and expire_amount >= lot.amount_minor:
+                        lot.consumed_expiration_id = entry.id
+                    expired += 1
+                elif balance.balance_minor <= 0:
+                    lot.consumed_expiration_id = lot.id  # nothing left; mark done
+        except Exception:  # noqa: BLE001 — one bad lot must not wedge the cron
+            log.warning("cp_promo_expiry_lot_failed", lot_id=lot.id, exc_info=True)
+            continue
     await db.flush()
     return expired
 
@@ -505,12 +566,24 @@ async def expire_promotional(db: AsyncSession) -> int:
 # ── Run estimation (reservation sizing) ──────────────────────
 
 
-async def estimate_run_cost_minor(db: AsyncSession, definition: dict, org_id: str) -> int:
-    """Rough reservation estimate: Σ provider_action steps × resolved offering
-    cost × global markup. Missing data → 0 for that step (pure best-effort)."""
+async def estimate_run_cost_minor(
+    db: AsyncSession, definition: dict, org_id: str, currency: str = "USD"
+) -> int:
+    """Rough reservation estimate, in minor units of `currency` (the tenant's
+    balance currency the hold will be placed against).
+
+    Σ provider_action steps × resolved offering cost (USD) × global markup,
+    then FX-converted to `currency` and scaled by that currency's minor
+    multiplier. Missing data → 0 for that step (pure best-effort). Offering
+    cost_per_call_usd is a USD amount; a hold sized in USD-cents but placed
+    against a non-USD balance under-reserved by the FX factor (e.g. ~1300× for
+    KRW), so the conversion is mandatory."""
+    from app.controlplane.models.pricing import minor_multiplier
     from app.models.provider import ProviderConnection, ProviderModelOffering
 
-    total = Decimal(0)
+    from .rating import resolve_fx
+
+    total_usd = Decimal(0)
     for step in definition.get("steps", []):
         if step.get("type") != "provider_action":
             continue
@@ -533,6 +606,17 @@ async def estimate_run_cost_minor(db: AsyncSession, definition: dict, org_id: st
             )
         ).scalar_one_or_none()
         if offering is not None and offering.cost_per_call_usd is not None:
-            total += Decimal(str(offering.cost_per_call_usd))
-    # Global fallback markup mirrors the seeded cost+50% policy
-    return int(total * 100 * Decimal("1.5"))
+            total_usd += Decimal(str(offering.cost_per_call_usd))
+    # Global fallback markup mirrors the seeded cost+50% policy.
+    total_usd *= Decimal("1.5")
+    if total_usd <= 0:
+        return 0
+    # Convert USD major → tenant currency major, then to minor units. A missing
+    # FX rate falls back to a 1:1 factor (best-effort estimate; the run.terminal
+    # settle reconciles ACTUAL usage in tenant currency regardless).
+    if currency != "USD":
+        fx = await resolve_fx(db, "USD", currency, datetime.now(UTC))
+        rate = fx[0] if fx is not None else Decimal(1)
+    else:
+        rate = Decimal(1)
+    return int(total_usd * rate * minor_multiplier(currency))

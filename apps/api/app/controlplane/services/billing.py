@@ -666,12 +666,23 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     total = max(subtotal, 0)
     from app.controlplane.models.credit import TenantCreditBalance
 
+    # Lock the balance row while we read available credit and decide how much to
+    # apply, and hold it through the debit below. A previous UNLOCKED read here
+    # computed credit_to_apply from a stale copy: a concurrent top-up/debit
+    # between this read and the debit could make us under-apply credit (tenant
+    # over-billed) or trip the debit's INSUFFICIENT_CREDIT check and abort the
+    # whole close. FOR UPDATE + populate_existing serializes credit application
+    # against concurrent balance mutations; the debit below re-locks the same
+    # row reentrantly within this transaction.
     balance = (
         await db.execute(
-            select(TenantCreditBalance).where(
+            select(TenantCreditBalance)
+            .where(
                 TenantCreditBalance.tenant_id == tenant.id,
                 TenantCreditBalance.currency == sub.currency,
             )
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     credit_available = (balance.balance_minor - balance.reserved_minor) if balance else 0

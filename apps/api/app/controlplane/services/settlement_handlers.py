@@ -61,18 +61,29 @@ async def handle_run_terminal(db: AsyncSession, payload: dict) -> None:
         await credit_svc.release(db, reservation.id)
         log.info("cp_reservation_released", run_id=run_id)
     else:
-        await credit_svc.settle(db, reservation.id, int(actual))
-        # R38/C11+C35: mark these rows 'settled' so close_period_and_invoice's
-        # usage-line query (status == 'rated') no longer picks them up. Without
-        # this, credit-enforced usage was BOTH debited from the credit balance
-        # here AND billed again on the period invoice — a double charge. A
-        # credit reservation IS the payment for that usage; the invoice must
-        # not re-bill it.
-        settled_ids = [r.id for r in rated_rows]
-        if settled_ids:
-            await db.execute(
-                update(RatedUsage)
-                .where(RatedUsage.id.in_(settled_ids), RatedUsage.status == "rated")
-                .values(status="settled")
+        settled = await credit_svc.settle(db, reservation.id, int(actual))
+        # R51: only mark the run's rated rows 'settled' (which excludes them
+        # from the period invoice) when settle() ACTUALLY debited the credit
+        # balance — i.e. the reservation transitioned held→settled here. If the
+        # expiry cron already released the hold (settle is now a no-op that
+        # charges nothing), the usage must stay 'rated' so close_period_and_
+        # invoice bills it on the invoice instead. Flipping to 'settled' after a
+        # release would charge the usage NOWHERE (silent revenue loss).
+        if settled.status == "settled":
+            settled_ids = [r.id for r in rated_rows]
+            if settled_ids:
+                await db.execute(
+                    update(RatedUsage)
+                    .where(RatedUsage.id.in_(settled_ids), RatedUsage.status == "rated")
+                    .values(status="settled")
+                )
+            log.info("cp_reservation_settled", run_id=run_id, actual=int(actual))
+        else:
+            # Reservation was already released/expired — usage stays billable on
+            # the invoice. Log so the mismatch is observable.
+            log.warning(
+                "cp_reservation_not_settled",
+                run_id=run_id,
+                reservation_status=settled.status,
+                actual=int(actual),
             )
-        log.info("cp_reservation_settled", run_id=run_id, actual=int(actual))

@@ -192,6 +192,83 @@ async def test_concurrent_debits_never_negative():
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_locked_balance_reads_fresh_after_stale_cache():
+    """R51 CRITICAL: _locked_balance must return the freshly-locked row, not a
+    stale identity-map copy read earlier UNLOCKED in the same session. Without
+    populate_existing, a session that read the balance before another session
+    committed a top-up would keep the old value, and its next debit/mutation
+    would silently overwrite the committed top-up (lost update) and break the
+    ledger balance_after chain.
+
+    Repro: session A reads the balance unlocked (caches balance_minor=1000);
+    session B tops up +500 and commits (DB row now 1500); session A then debits
+    100 through the credit service. With the bug, A's debit computes from the
+    stale 1000 → writes 900, erasing B's +500. With the fix, A re-reads 1500
+    under the lock → writes 1400."""
+    from app.core.database import AsyncSessionLocal, engine
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup)
+            tenant = await _mk_tenant(setup, user)
+            await credit_svc.top_up(setup, tenant.id, "USD", 1000, actor=_actor(user))
+            await setup.commit()
+            tid = tenant.id
+
+        async with AsyncSessionLocal() as sess_a:
+            # A reads the balance UNLOCKED first → caches balance_minor=1000 in
+            # its identity map (mirrors close_period_and_invoice's old pre-read).
+            cached = (
+                await sess_a.execute(
+                    select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tid)
+                )
+            ).scalar_one()
+            assert cached.balance_minor == 1000
+
+            # B commits a concurrent top-up of +500 in its own session.
+            async with AsyncSessionLocal() as sess_b:
+                await credit_svc.top_up(sess_b, tid, "USD", 500, actor=_actor(user))
+                await sess_b.commit()
+
+            # A now debits 100 through the credit service. _locked_balance must
+            # re-read 1500 under the lock (populate_existing) → 1400, not 900.
+            await credit_svc.debit(
+                sess_a, tid, "USD", 100, reference_type="manual", reference_id=str(ULID())
+            )
+            await sess_a.commit()
+
+        async with AsyncSessionLocal() as check:
+            final = (
+                await check.execute(
+                    select(TenantCreditBalance.balance_minor).where(
+                        TenantCreditBalance.tenant_id == tid
+                    )
+                )
+            ).scalar_one()
+            assert final == 1400, f"lost update: expected 1400, got {final}"
+            # A's debit must have landed on the fresh 1500 → balance_after 1400.
+            # The stale-read bug's signature is a 900 entry (1000 − 100) and a
+            # final balance of 900; assert neither exists. (We don't assert
+            # created_at ordering — it defaults to transaction-start time, which
+            # doesn't reflect commit order for overlapping transactions.)
+            afters = set(
+                (
+                    await check.execute(
+                        select(CreditLedgerEntry.balance_after_minor).where(
+                            CreditLedgerEntry.tenant_id == tid
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert 1400 in afters, f"A's debit did not see the fresh balance: {afters}"
+            assert 900 not in afters, f"stale-read signature present: {afters}"
+    finally:
+        await engine.dispose()
+
+
 # ── Reservations ─────────────────────────────────────────────
 
 
@@ -258,6 +335,180 @@ async def test_settle_over_hold_floors_at_balance(db):
         )
     ).scalar_one()
     assert "shortfall" in (entry.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_settle_overage_floors_at_available_not_balance(db):
+    """R51[2]: an overage settle must floor at AVAILABLE (balance − other
+    holds), not balance_minor. Two runs each hold 50 of a 100 balance; run A
+    settles with actual 80 (overage). Flooring at balance (100) would try to
+    debit 80, dropping balance to 20 < the 50 still held by run B, which
+    _append_entry rejects with 402 — dead-lettering the handler. Flooring at
+    available (100−50=50 after A's own hold releases) charges 50, logs the
+    shortfall, and never fails."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await credit_svc.top_up(db, tenant.id, "USD", 100, actor=_actor(user))
+    ra = await credit_svc.reserve(
+        db, tenant.id, "USD", 50, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    await credit_svc.reserve(
+        db, tenant.id, "USD", 50, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    # A settles with an overage of 80 — must NOT raise, charges only available.
+    settled = await credit_svc.settle(db, ra.id, 80)
+    assert settled.status == "settled"
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    # A's hold (50) released; charged min(80, available 50) = 50 → balance 50,
+    # still >= run B's 50 hold. Never negative, never below reserved.
+    assert balance.balance_minor == 50
+    assert balance.reserved_minor == 50
+
+
+@pytest.mark.asyncio
+async def test_expire_promotional_skips_reserved_and_isolates_lots(db):
+    """R51[3]: expire_promotional must not try to expire credit that is
+    currently RESERVED (that would drop balance below reserved → 402), and a
+    single failing lot must not abort the whole cron. A promo lot of 100 fully
+    reserved by a live hold is left unconsumed this pass (no 402, cron does not
+    wedge); once released, a later pass expires it."""
+    from datetime import UTC, datetime, timedelta
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    # Promo grant already expired, then fully reserved by a live hold.
+    await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        100,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        reason="welcome",
+        actor=_actor(user),
+    )
+    hold = await credit_svc.reserve(
+        db, tenant.id, "USD", 100, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    # Must not raise despite the reserved balance.
+    await credit_svc.expire_promotional(db)
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    # Nothing expired yet — all 100 is reserved.
+    assert balance.balance_minor == 100
+    assert balance.reserved_minor == 100
+    # Release the hold, run expiry again → the lot now expires fully.
+    await credit_svc.release(db, hold.id)
+    await credit_svc.expire_promotional(db)
+    await db.refresh(balance)
+    assert balance.balance_minor == 0
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_scoped_per_tenant(db):
+    """R51[5]: a client-supplied adjust idempotency key must be unique PER
+    TENANT, not globally. The same key on two different tenants must produce
+    two independent entries — not silently drop the second."""
+    user = await _mk_user(db)
+    t1 = await _mk_tenant(db, user)
+    t2 = await _mk_tenant(db, user)
+    key = "recon-2026-08-31"
+    e1 = await credit_svc.adjust(
+        db, t1.id, "USD", 500, reason="recon", actor=_actor(user), idempotency_key=key
+    )
+    e2 = await credit_svc.adjust(
+        db, t2.id, "USD", 700, reason="recon", actor=_actor(user), idempotency_key=key
+    )
+    assert e1 is not None and e2 is not None
+    assert e1.id != e2.id
+    assert e1.tenant_id == t1.id and e2.tenant_id == t2.id
+    # Same key on the SAME tenant is still idempotent (drops the duplicate).
+    dup = await credit_svc.adjust(
+        db, t1.id, "USD", 999, reason="recon", actor=_actor(user), idempotency_key=key
+    )
+    assert dup is None
+
+
+@pytest.mark.asyncio
+async def test_estimate_run_cost_converts_to_tenant_currency(db):
+    """R51[4]: estimate_run_cost_minor returns minor units of the tenant's
+    currency, FX-converted from USD offering costs. A KRW estimate must be
+    scaled by the USD→KRW rate and KRW's minor multiplier (1), not returned as
+    raw USD-cents."""
+    from decimal import Decimal
+
+    from app.controlplane.models.pricing import FxRate
+    from app.models.organization import (
+        MemberStatus,
+        Organization,
+        OrgMember,
+        OrgRole,
+        OrgStatus,
+    )
+    from app.models.provider import (
+        ProviderAdapter,
+        ProviderConnection,
+        ProviderModelOffering,
+    )
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    org = Organization(
+        name="EstOrg",
+        slug=f"est-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
+    db.add(org)
+    await db.flush()
+    db.add(
+        OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.OWNER, status=MemberStatus.ACTIVE)
+    )
+    adapter = ProviderAdapter(key=f"mock-{str(ULID()).lower()}", name="Mock")
+    db.add(adapter)
+    await db.flush()
+    conn = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="c", created_by=user.id)
+    db.add(conn)
+    await db.flush()
+    db.add(
+        ProviderModelOffering(
+            connection_id=conn.id,
+            capability_key="text_generation",
+            model_name="m",
+            is_active=True,
+            cost_per_call_usd=Decimal("10"),
+        )
+    )
+    # USD→KRW = 1300; effective now.
+    db.add(
+        FxRate(
+            base_currency="USD",
+            quote_currency="KRW",
+            rate=Decimal("1300"),
+            effective_from=datetime.now(UTC) - timedelta(days=1),
+            created_by=user.id,
+        )
+    )
+    await db.flush()
+
+    definition = {
+        "steps": [
+            {"id": "s1", "type": "provider_action", "config": {"capability": "text_generation"}}
+        ]
+    }
+    est = await credit_svc.estimate_run_cost_minor(db, definition, org.id, "KRW")
+    # $10 × 1.5 markup = $15 → ×1300 KRW/USD × minor_multiplier(KRW)=1 = 19500.
+    assert est == 19500, f"expected 19500 KRW minor, got {est}"
+    # USD path unchanged: $15 × ×100 = 1500 cents.
+    est_usd = await credit_svc.estimate_run_cost_minor(db, definition, org.id, "USD")
+    assert est_usd == 1500
 
 
 @pytest.mark.asyncio

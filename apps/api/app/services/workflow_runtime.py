@@ -468,7 +468,9 @@ class WorkflowRuntimeService:
         if bool((tenant.metadata_ or {}).get("credit_enforcement")):
             from app.controlplane.services import credits as _credits
 
-            estimate = await _credits.estimate_run_cost_minor(self.db, definition, org_id)
+            estimate = await _credits.estimate_run_cost_minor(
+                self.db, definition, org_id, tenant.currency
+            )
             if estimate > 0:
                 await _credits.reserve(
                     self.db,
