@@ -436,3 +436,153 @@ async def test_cross_partner_uniform_404(db):
     with pytest.raises(AppError) as exc3:
         await require_partner_member(db, partner_a.id, member_user, "admin")
     assert exc3.value.code == "PARTNER_FORBIDDEN"
+
+
+# ── R56: currency correctness + typed base + split rebalance ──
+
+
+@pytest.mark.asyncio
+async def test_revenue_type_scoped_rule_accrues_on_typed_base(db):
+    """R56[23]: a rule scoped to revenue_type='usage' must accrue on the usage
+    lines only — not the whole subtotal (which mixes plan/seats/license)."""
+    from app.controlplane.models.billing import InvoiceLine
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="30", revenue_type="usage")
+    invoice = await _mk_invoice(db, tenant, subtotal=110000)
+    db.add_all(
+        [
+            InvoiceLine(
+                invoice_id=invoice.id,
+                line_type="plan",
+                description="plan",
+                quantity=1,
+                amount_minor=100000,
+            ),
+            InvoiceLine(
+                invoice_id=invoice.id,
+                line_type="usage",
+                description="usage",
+                quantity=1,
+                amount_minor=10000,
+            ),
+        ]
+    )
+    await db.flush()
+    entry = await revshare_svc.accrue_for_invoice(db, invoice.id)
+    assert entry is not None
+    # 30% of the USAGE slice (10000) = 3000 — not 30% of 110000 = 33000.
+    assert entry.share_amount_minor == 3000, entry.share_amount_minor
+    assert entry.revenue_base_minor == 10000
+
+
+@pytest.mark.asyncio
+async def test_purchase_partner_entry_converted_to_partner_currency(db):
+    """R56[22]: a marketplace-purchase partner entry must be denominated in the
+    PARTNER's settlement currency (statements are single-currency)."""
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+    from app.controlplane.services import pricing as pricing_svc
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)  # USD partner
+    tenant = await _mk_tenant(db, user, partner)
+    # Buyer paid in JPY; partner settles in USD. 1 USD = 150 JPY.
+    await pricing_svc.create_fx_rate(
+        db,
+        actor=_actor(user),
+        base_currency="JPY",
+        quote_currency="USD",
+        rate=Decimal("0.0066667"),
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+    )
+    listing = MarketplaceListing(
+        product_type="workflow_pack",
+        product_id=str(ULID()),
+        seller_org_id=str(ULID()),
+        seller_tenant_id=str(ULID()),
+        offer_type="paid",
+        price_minor=150000,
+        currency="JPY",
+        platform_commission_pct=Decimal("20"),
+        status="active",
+        created_by=user.id,
+    )
+    db.add(listing)
+    await db.flush()
+    purchase = MarketplacePurchase(
+        listing_id=listing.id,
+        buyer_tenant_id=tenant.id,
+        buyer_org_id=str(ULID()),
+        purchaser_user_id=user.id,
+        status="paid",
+        amount_minor=150000,  # ¥150,000
+        currency="JPY",
+        platform_fee_minor=30000,
+        seller_share_minor=120000,
+        partner_share_minor=15000,  # ¥15,000
+        economics_snapshot={
+            "partner_id": partner.id,
+            "seller_org_id": None,
+        },
+    )
+    db.add(purchase)
+    await db.flush()
+    created = await revshare_svc.accrue_for_purchase(db, purchase.id)
+    assert created == 1
+    entry = (
+        await db.execute(
+            select(RevenueShareEntry).where(
+                RevenueShareEntry.source_id == purchase.id,
+                RevenueShareEntry.beneficiary_type == "partner",
+            )
+        )
+    ).scalar_one()
+    # ¥15,000 (JPY minor ×1) → $100.00 → 10000 USD minor (cents).
+    assert entry.currency == "USD"
+    assert abs(entry.share_amount_minor - 10000) <= 2, entry.share_amount_minor
+
+
+@pytest.mark.asyncio
+async def test_void_invoice_reverses_accrual(db):
+    """R56[24]: voiding an invoice must negate its accrued entries so the
+    re-invoice doesn't double-pay the partner."""
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="20")
+    invoice = await _mk_invoice(db, tenant, subtotal=10000)
+    entry = await revshare_svc.accrue_for_invoice(db, invoice.id)
+    assert entry is not None and entry.share_amount_minor == 2000
+    reversed_n = await revshare_svc.reverse_invoice_accruals(db, invoice.id)
+    assert reversed_n == 1
+    entries = (
+        (
+            await db.execute(
+                select(RevenueShareEntry).where(RevenueShareEntry.source_id == invoice.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert sum(e.share_amount_minor for e in entries) == 0
+    # Idempotent — a second reversal creates nothing.
+    assert await revshare_svc.reverse_invoice_accruals(db, invoice.id) == 0
+
+
+def test_seller_rule_override_rebalances_split():
+    """R56[25]: a seller-specific rate override must rebalance the whole split
+    (fee = amount − seller; partner capped at fee) — payouts can never exceed
+    the amount collected."""
+    from app.controlplane.services.marketplace import split_economics
+
+    amount = 10000
+    fee, seller, partner = split_economics(amount, Decimal("20"), Decimal("15"))
+    assert fee == 2000 and seller == 8000 and partner == 1500
+    # Simulate the create_purchase override math with a 90% seller rule:
+    seller = min(int(Decimal(amount) * Decimal("90") / 100), amount)
+    fee = amount - seller
+    partner = min(partner, fee)
+    assert seller == 9000 and fee == 1000 and partner == 1000
+    assert fee + seller <= amount and seller + partner <= amount

@@ -179,6 +179,54 @@ async def _insert_entry(db: AsyncSession, **values) -> RevenueShareEntry | None:
 # ── Accrual handlers ─────────────────────────────────────────
 
 
+def _revenue_base(invoice: Invoice) -> int:
+    """Gross revenue base for percentage/fixed rules: the invoice subtotal."""
+    return invoice.subtotal_minor
+
+
+async def _current_plan_id(db: AsyncSession, tenant_id: str) -> str | None:
+    """The tenant's current plan id (for plan-scoped rule matching, R56[27]).
+
+    Rules may carry a plan_id dimension (+4 specificity), but accrue_for_invoice
+    never passed one, so every plan-scoped rule was disqualified forever."""
+    try:
+        from app.controlplane.models.billing import Subscription
+        from app.controlplane.models.plan import PlanVersion
+
+        row = (
+            await db.execute(
+                select(PlanVersion.plan_id)
+                .join(Subscription, Subscription.plan_version_id == PlanVersion.id)
+                .where(
+                    Subscription.tenant_id == tenant_id,
+                    Subscription.status != "cancelled",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return row
+    except ImportError:
+        return None
+
+
+async def _typed_base(db: AsyncSession, invoice: Invoice, revenue_type: str) -> int:
+    """The slice of the invoice base a revenue_type-scoped rule accrues on
+    (R56[23]): 'subscription' = plan + seats + proration lines; 'usage' = usage
+    lines. A rule scoped to one type must not accrue on the whole subtotal —
+    a 30% usage rule on a ¥100k-plan + ¥10k-usage invoice owes ¥3,000, not
+    ¥33,000 (and license lines already accrue via the purchase path)."""
+    line_types = ("plan", "seats", "proration") if revenue_type == "subscription" else ("usage",)
+    total = (
+        await db.execute(
+            select(func.coalesce(func.sum(InvoiceLine.amount_minor), 0)).where(
+                InvoiceLine.invoice_id == invoice.id,
+                InvoiceLine.line_type.in_(line_types),
+            )
+        )
+    ).scalar_one()
+    return int(total)
+
+
 async def accrue_for_invoice(db: AsyncSession, invoice_id: str) -> RevenueShareEntry | None:
     invoice = await db.get(Invoice, invoice_id)
     if invoice is None or invoice.status not in ("open", "paid"):
@@ -200,18 +248,27 @@ async def accrue_for_invoice(db: AsyncSession, invoice_id: str) -> RevenueShareE
         revenue_types=["subscription", "usage"],
         at=at,
         tenant_id=tenant.id,
+        plan_id=await _current_plan_id(db, tenant.id),
         country=tenant.country,
     )
     if rule is None:
         return None
-    # Base per rule type
+    # Base per rule type. base_currency tracks which currency the base is
+    # denominated in — margin_minor is computed in the PLATFORM currency
+    # (rating converts both sides to platform_currency before subtracting),
+    # while every invoice-line figure is in invoice.currency. Treating the
+    # margin sum as invoice-currency mislabeled/misconverted it whenever the
+    # two differ (R56[21]).
+    base_currency = invoice.currency
     if rule.rule_type == "percentage_of_gross_revenue":
-        base = invoice.subtotal_minor
+        base = _revenue_base(invoice)
         units = Decimal(1)
     elif rule.rule_type == "percentage_of_net_revenue":
         base = invoice.total_minor - invoice.tax_minor
         units = Decimal(1)
     elif rule.rule_type == "percentage_of_margin":
+        from app.config import settings as _settings
+
         margin = (
             await db.execute(
                 select(func.coalesce(func.sum(RatedUsage.margin_minor), 0))
@@ -220,6 +277,7 @@ async def accrue_for_invoice(db: AsyncSession, invoice_id: str) -> RevenueShareE
             )
         ).scalar_one()
         base = int(margin)  # NULL margins excluded by the SUM (count 0, ADR)
+        base_currency = _settings.platform_currency
         units = Decimal(1)
     elif rule.rule_type == "fixed_amount_per_seat":
         seats = (
@@ -230,28 +288,59 @@ async def accrue_for_invoice(db: AsyncSession, invoice_id: str) -> RevenueShareE
                 )
             )
         ).scalar_one()
-        base = invoice.subtotal_minor
+        base = _revenue_base(invoice)
         units = Decimal(seats)
     else:  # fixed_amount_per_unit — one unit per invoice
-        base = invoice.subtotal_minor
+        base = _revenue_base(invoice)
         units = Decimal(1)
+
+    # R56[23]: a rule scoped to ONE revenue_type must accrue on that slice of
+    # the invoice, not the whole subtotal. "all" (and net/margin bases) keep
+    # the full base.
+    if rule.revenue_type in ("subscription", "usage") and rule.rule_type in (
+        "percentage_of_gross_revenue",
+        "fixed_amount_per_unit",
+        "fixed_amount_per_seat",
+    ):
+        base = await _typed_base(db, invoice, rule.revenue_type)
+
+    # R56[26]: fixed_amount rules carry their own amount_currency — honor it by
+    # converting the fixed amount into the base currency before computing, so
+    # $5.00/seat means $5.00/seat regardless of the invoice currency.
+    amount_minor = rule.amount_minor
+    if (
+        rule.rule_type in ("fixed_amount_per_unit", "fixed_amount_per_seat")
+        and rule.amount_minor is not None
+        and rule.amount_currency
+        and rule.amount_currency != base_currency
+    ):
+        fx_amt = await resolve_fx(db, rule.amount_currency, base_currency, at)
+        if fx_amt is None:
+            raise AppError(
+                "REVSHARE_FX_MISSING",
+                f"No FX rate {rule.amount_currency}->{base_currency} for fixed-amount rule",
+                409,
+            )
+        amount_minor = convert_minor(
+            rule.amount_minor, fx_amt[0], rule.amount_currency, base_currency
+        )
 
     share = compute_share_minor(
         rule.rule_type,
         rate=rule.rate,
-        amount_minor=rule.amount_minor,
+        amount_minor=amount_minor,
         base_minor=base,
         units=units,
     )
     # Convert to the partner's settlement currency at accrual time
     fx_snapshot = None
-    if invoice.currency != partner.currency:
-        fx = await resolve_fx(db, invoice.currency, partner.currency, at)
+    if base_currency != partner.currency:
+        fx = await resolve_fx(db, base_currency, partner.currency, at)
         if fx is None:
             log.warning(
                 "cp_revshare_fx_missing",
                 invoice_id=invoice.id,
-                pair=f"{invoice.currency}->{partner.currency}",
+                pair=f"{base_currency}->{partner.currency}",
             )
             # RAISE, don't return None: a None return signals "nothing to do"
             # and the outbox marks the message done → the accrual would be
@@ -262,12 +351,12 @@ async def accrue_for_invoice(db: AsyncSession, invoice_id: str) -> RevenueShareE
             # no-ops (unattributed / no rule / inactive partner) and stay.
             raise AppError(
                 "REVSHARE_FX_MISSING",
-                f"No FX rate {invoice.currency}->{partner.currency} for invoice accrual",
+                f"No FX rate {base_currency}->{partner.currency} for invoice accrual",
                 409,
             )
         rate_val, fx_snapshot = fx
-        share = convert_minor(share, rate_val, invoice.currency, partner.currency)
-        base = convert_minor(base, rate_val, invoice.currency, partner.currency)
+        share = convert_minor(share, rate_val, base_currency, partner.currency)
+        base = convert_minor(base, rate_val, base_currency, partner.currency)
     return await _insert_entry(
         db,
         beneficiary_type="partner",
@@ -315,6 +404,28 @@ async def accrue_for_purchase(db: AsyncSession, purchase_id: str) -> int:
         created += 1 if entry else 0
     partner_id = snapshot.get("partner_id")
     if partner_id and purchase.partner_share_minor:
+        # R56[22]: partner entries must be denominated in the PARTNER's
+        # settlement currency (ADR-014 Decision 8 — statements are
+        # single-currency). accrue_for_invoice converts; this path wrote
+        # buyer-currency figures that generate_statement then summed into a
+        # partner-currency statement unconverted.
+        partner = await db.get(Partner, partner_id)
+        share = purchase.partner_share_minor
+        base = purchase.amount_minor
+        fx_snapshot = None
+        entry_currency = purchase.currency
+        if partner is not None and partner.currency != purchase.currency:
+            fx = await resolve_fx(db, purchase.currency, partner.currency, _now())
+            if fx is None:
+                raise AppError(
+                    "REVSHARE_FX_MISSING",
+                    f"No FX rate {purchase.currency}->{partner.currency} for purchase accrual",
+                    409,
+                )
+            rate_val, fx_snapshot = fx
+            share = convert_minor(share, rate_val, purchase.currency, partner.currency)
+            base = convert_minor(base, rate_val, purchase.currency, partner.currency)
+            entry_currency = partner.currency
         entry = await _insert_entry(
             db,
             beneficiary_type="partner",
@@ -324,9 +435,10 @@ async def accrue_for_purchase(db: AsyncSession, purchase_id: str) -> int:
             rule_id=(snapshot.get("partner_rule_snapshot") or {}).get("rule_id"),
             rule_snapshot=snapshot.get("partner_rule_snapshot")
             or {"from_economics_snapshot": True},
-            revenue_base_minor=purchase.amount_minor,
-            share_amount_minor=purchase.partner_share_minor,
-            currency=purchase.currency,
+            revenue_base_minor=base,
+            share_amount_minor=share,
+            currency=entry_currency,
+            fx_rate_snapshot=fx_snapshot,
             period=period,
         )
         created += 1 if entry else 0
@@ -371,6 +483,47 @@ async def accrue_refund(db: AsyncSession, purchase_id: str) -> int:
     return created
 
 
+async def reverse_invoice_accruals(db: AsyncSession, invoice_id: str) -> int:
+    """Void-invoice reversal (R56[24]): negate every accrued entry sourced from
+    this invoice. Without this, voiding + re-invoicing the same usage accrued
+    the partner share twice (invoice.finalized fires again on the re-close).
+    Natural-key idempotent via adjustment_of_id, like accrue_refund."""
+    originals = (
+        (
+            await db.execute(
+                select(RevenueShareEntry).where(
+                    RevenueShareEntry.source_type == "invoice",
+                    RevenueShareEntry.source_id == invoice_id,
+                    RevenueShareEntry.adjustment_of_id.is_(None),
+                    RevenueShareEntry.share_amount_minor > 0,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    created = 0
+    for original in originals:
+        entry = await _insert_entry(
+            db,
+            beneficiary_type=original.beneficiary_type,
+            partner_id=original.partner_id,
+            beneficiary_org_id=original.beneficiary_org_id,
+            source_type=original.source_type,
+            source_id=original.source_id,
+            rule_id=original.rule_id,
+            rule_snapshot=original.rule_snapshot,
+            revenue_base_minor=-original.revenue_base_minor,
+            share_amount_minor=-original.share_amount_minor,
+            currency=original.currency,
+            period=_now().strftime("%Y-%m"),
+            status="adjusted",
+            adjustment_of_id=original.id,
+        )
+        created += 1 if entry else 0
+    return created
+
+
 async def accrue_credit_note(db: AsyncSession, credit_note_id: str, invoice_id: str) -> int:
     """Credit note → proportional negative adjustment on invoice accruals."""
     from app.controlplane.models.billing import CreditNote
@@ -403,6 +556,16 @@ async def accrue_credit_note(db: AsyncSession, credit_note_id: str, invoice_id: 
         )
         if delta == 0:
             continue
+        # R56[28]: the adjustment's base must be in the ENTRY's currency (the
+        # partner settlement currency the original was converted to), not the
+        # raw invoice-currency note amount. Scale the original's (already
+        # converted) base by the same ratio so refunds_minor sums stay
+        # currency-consistent on the statement.
+        base_delta = -int(
+            (Decimal(original.revenue_base_minor) * ratio).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
         entry = await _insert_entry(
             db,
             beneficiary_type=original.beneficiary_type,
@@ -412,7 +575,7 @@ async def accrue_credit_note(db: AsyncSession, credit_note_id: str, invoice_id: 
             source_id=note.id,
             rule_id=original.rule_id,
             rule_snapshot=original.rule_snapshot,
-            revenue_base_minor=-note.amount_minor,
+            revenue_base_minor=base_delta,
             share_amount_minor=delta,
             currency=original.currency,
             period=_now().strftime("%Y-%m"),

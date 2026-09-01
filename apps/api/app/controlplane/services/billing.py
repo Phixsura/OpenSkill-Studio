@@ -998,6 +998,13 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
             .where(RatedUsage.invoice_line_id.in_(line_ids))
             .values(status="rated", invoice_line_id=None)
         )
+    # R56[24]: reverse any revenue-share accrual sourced from this invoice —
+    # the re-invoice will accrue afresh at its own finalize, so leaving the
+    # original entry standing double-paid the partner.
+    from app.controlplane.services.revenue_share import reverse_invoice_accruals
+
+    await reverse_invoice_accruals(db, invoice.id)
+
     # R41[3]: a period invoice consumed its period's SubscriptionChange proration
     # (flipped change.invoiced=True) and rolled the period to 'invoiced'. Voiding
     # it only unbound usage rows — the plan fee, seat charges and proration were

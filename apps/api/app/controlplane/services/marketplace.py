@@ -292,13 +292,24 @@ async def create_purchase(
         listing.platform_commission_pct,
         partner_rule.rate if partner_rule else None,
     )
-    # A seller-specific rule overrides the default (amount − fee) split
+    # A seller-specific rule overrides the default (amount − fee) split.
+    # R56[25]: the override must REBALANCE the whole split, not just replace
+    # seller_share — otherwise fee stays at the commission cut and
+    # fee + seller + partner can exceed the amount collected (e.g. 90% seller
+    # rule on a 20% commission distributed 125% of gross). The invariant is
+    # seller + fee == amount with partner paid OUT of the fee; a seller rule
+    # simply moves the seller/fee boundary.
     if seller_rule is not None and seller_rule.rate is not None:
-        seller_share = int(
-            (Decimal(amount) * seller_rule.rate / 100).quantize(
-                Decimal("1"), rounding=ROUND_HALF_UP
-            )
+        seller_share = min(
+            int(
+                (Decimal(amount) * seller_rule.rate / 100).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+            ),
+            amount,
         )
+        fee = amount - seller_share
+        partner_share = min(partner_share, fee)  # partner still capped at the fee
     purchase = MarketplacePurchase(
         listing_id=listing.id,
         buyer_tenant_id=buyer_tenant.id,
