@@ -1,7 +1,9 @@
 import { cn } from "@/lib/utils";
 import { StatusBadgeClass } from "@/lib/cp";
 
-export function StatusBadge({ status, className }: { status: string; className?: string }) {
+export function StatusBadge({ status, className }: { status?: string | null; className?: string }) {
+  // A missing status must never unmount the whole page tree (React render crash)
+  if (!status) return null;
   return (
     <span
       className={cn(

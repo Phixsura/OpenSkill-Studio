@@ -27,6 +27,13 @@ interface PlatformTenantDetail {
   created_at: string;
 }
 
+interface TenantOrgSummary {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+}
+
 export default function PlatformTenantDetailPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
   const queryClient = useQueryClient();
@@ -36,9 +43,14 @@ export default function PlatformTenantDetailPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["platform-tenant", tenantId],
-    queryFn: () => apiWithAuth<{ data: PlatformTenantDetail }>(`/platform/tenants/${tenantId}`),
+    queryFn: () =>
+      apiWithAuth<{ data: { tenant: PlatformTenantDetail; organizations: TenantOrgSummary[] } }>(
+        `/platform/tenants/${tenantId}`,
+      ),
   });
-  const tenant = data?.data;
+  // Detail endpoint nests the tenant beside its organizations
+  const tenant = data?.data?.tenant;
+  const orgs = data?.data?.organizations ?? [];
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["platform-tenant", tenantId] });
@@ -173,6 +185,25 @@ export default function PlatformTenantDetailPage() {
           Positive credits, negative debits. Every adjustment lands in the tenant&apos;s ledger and
           the audit log.
         </p>
+      </section>
+
+      <section className="space-y-3 rounded-lg border p-4">
+        <h2 className="font-semibold">Organizations</h2>
+        {orgs.length === 0 ? (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">No organizations.</p>
+        ) : (
+          <ul className="space-y-2">
+            {orgs.map((o) => (
+              <li key={o.id} className="flex items-center gap-3 text-sm">
+                <span className="font-medium">{o.name}</span>
+                <span className="font-mono text-xs text-[hsl(var(--muted-foreground))]">
+                  {o.slug}
+                </span>
+                <StatusBadge status={o.status} />
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );
