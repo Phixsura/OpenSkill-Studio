@@ -66,6 +66,13 @@ async def handle_run_terminal(db: AsyncSession, payload: dict) -> None:
 
     # Select the run's rated rows for the settle sum. Only rows still 'rated'
     # (not yet invoiced/voided) are settleable against the reservation.
+    # R80[1]: FOR UPDATE — this select races close_period_and_invoice's
+    # locked usage-line sweep. Unlocked, A read row R as 'rated' and debited
+    # the reservation for it while B concurrently invoiced it (guarded
+    # rated→invoiced): the same usage charged from credit AND on the invoice.
+    # With the lock, whoever wins serializes the loser; under READ COMMITTED
+    # FOR UPDATE re-evaluates the predicate after the wait, so rows the
+    # winner flipped drop out of the loser's set (and out of its sum).
     rated_rows = (
         (
             await db.execute(
@@ -76,6 +83,7 @@ async def handle_run_terminal(db: AsyncSession, payload: dict) -> None:
                     RatedUsage.billable_currency == reservation.currency,
                     RatedUsage.status == "rated",
                 )
+                .with_for_update(of=RatedUsage)
             )
         )
         .scalars()

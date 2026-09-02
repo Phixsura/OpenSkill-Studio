@@ -12,6 +12,7 @@ from app.controlplane.models.billing import (
     BillingPeriod,
     Invoice,
     InvoiceLine,
+    Subscription,
 )
 from app.controlplane.models.tenant import TenantAccount, TenantStatus
 from app.controlplane.services import billing as billing_svc
@@ -1336,3 +1337,365 @@ async def test_archived_org_students_not_billed_as_seats(db):
     assert seat_lines == [], (
         f"archived-org students billed as seats: {[(sl.description, sl.amount_minor) for sl in seat_lines]}"
     )
+
+
+# ── R80: cross-cutting races ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_checkout_completion_honors_pinned_version(db):
+    """R80[2]: the completion webhook re-resolved the CURRENT active plan
+    version — racing a version activation bound the paid customer to a
+    version/price they never saw. The checkout pins the version and the
+    completion honors the pin."""
+    from app.controlplane.models.plan import PlanVersion, ProductPlan
+    from app.controlplane.services import plans as plan_svc
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.TRIAL)
+    # Resolve the CURRENT active school version (what the customer saw)
+    seen_version = (
+        await db.execute(
+            select(PlanVersion)
+            .join(ProductPlan, ProductPlan.id == PlanVersion.plan_id)
+            .where(ProductPlan.key == "school", PlanVersion.status == "active")
+        )
+    ).scalar_one()
+    seen_version_id = seen_version.id
+    plan_id = seen_version.plan_id
+    # Ops activates a NEW version while the payment settles
+    plan = await db.get(ProductPlan, plan_id)
+    draft = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    new_version = await plan_svc.activate_version(db, draft, actor=_actor(user))
+    assert new_version.id != seen_version_id
+    try:
+        # Webhook completion with the pin → binds the SEEN version
+        sub = await billing_svc.activate_subscription_from_checkout(
+            db,
+            tenant,
+            plan_key="school",
+            interval="month",
+            seats=0,
+            provider="mock",
+            external_customer_ref="mock_cus_pin",
+            external_ref=f"mock_sub_pin_{tenant.id}",
+            pinned_version_id=seen_version_id,
+        )
+        assert sub.plan_version_id == seen_version_id, (
+            "customer must get the version they paid for, not the newly activated one"
+        )
+    finally:
+        # restore original active version for other tests
+        await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_refund_returns_money_for_all_payment_methods(db):
+    """R80[3]: refund_purchase returned money ONLY for credit-paid purchases —
+    checkout (real charge) and invoiced purchases were refunded in name only
+    (license revoked, money kept). Non-credit payments now come back as
+    platform credit."""
+    from app.controlplane.models.credit import CreditLedgerEntry
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+    from app.controlplane.services import marketplace as market_svc
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    listing = MarketplaceListing(
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        seller_org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        seller_tenant_id=tenant.id,
+        offer_type="paid",
+        price_minor=9900,
+        currency="USD",
+        license_scope="organization",
+        platform_commission_pct=30,
+        status="active",
+        created_by=user.id,
+    )
+    db.add(listing)
+    await db.flush()
+    purchase = MarketplacePurchase(
+        listing_id=listing.id,
+        buyer_tenant_id=tenant.id,
+        buyer_org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        purchaser_user_id=user.id,
+        status="paid",
+        amount_minor=9900,
+        currency="USD",
+        economics_snapshot={},
+        payment_method="checkout",
+        payment_ref="pi_fake",
+    )
+    db.add(purchase)
+    await db.flush()
+    await market_svc.refund_purchase(db, purchase.id, reason="defective", actor=_actor(user))
+    entry = (
+        await db.execute(
+            select(CreditLedgerEntry).where(
+                CreditLedgerEntry.reference_type == "purchase",
+                CreditLedgerEntry.reference_id == purchase.id,
+                CreditLedgerEntry.entry_type == "refund",
+            )
+        )
+    ).scalar_one_or_none()
+    assert entry is not None, "checkout-paid refund must credit the buyer"
+    assert entry.amount_minor == 9900
+
+    # Un-invoiced bill_via_invoice purchase: nothing was charged → no credit
+    purchase2 = MarketplacePurchase(
+        listing_id=listing.id,
+        buyer_tenant_id=tenant.id,
+        buyer_org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        purchaser_user_id=user.id,
+        status="paid",
+        amount_minor=5000,
+        currency="USD",
+        economics_snapshot={},
+        payment_method="invoice",
+        invoice_id=None,
+    )
+    db.add(purchase2)
+    await db.flush()
+    await market_svc.refund_purchase(db, purchase2.id, reason="cancel", actor=_actor(user))
+    entry2 = (
+        await db.execute(
+            select(CreditLedgerEntry).where(
+                CreditLedgerEntry.reference_id == purchase2.id,
+                CreditLedgerEntry.entry_type == "refund",
+            )
+        )
+    ).scalar_one_or_none()
+    assert entry2 is None, "uncharged invoice purchase must not mint credit"
+
+
+@pytest.mark.asyncio
+async def test_settle_vs_period_close_never_double_charges():
+    """R80[1]: handle_run_terminal's rated-row select was unlocked — racing
+    close_period_and_invoice, the same rated usage was debited from credit
+    AND billed on the invoice. Both sides now take FOR UPDATE on the rows;
+    whoever wins excludes the rows from the loser (status flip re-evaluated
+    under the lock). Deterministic: close holds its lock while settle runs."""
+    import asyncio as _asyncio
+
+    from app.controlplane.models.credit import CreditLedgerEntry, CreditReservation
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.services import credits as credit_svc
+    from app.controlplane.services.settlement_handlers import handle_run_terminal
+    from app.core.database import AsyncSessionLocal, engine
+
+    try:
+        run_id = str(ULID())
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup)
+            tenant = await _mk_tenant(setup, user, status=TenantStatus.ACTIVE)
+            await credit_svc.top_up(
+                setup,
+                tenant.id,
+                "USD",
+                100_000,
+                actor=_actor(user),
+                idempotency_key=f"r80-{ULID()}",
+            )
+            sub, _ = await billing_svc.start_subscription(
+                setup,
+                tenant,
+                plan_key="school",
+                interval="month",
+                seats=0,
+                provider="manual",
+                actor=_actor(user),
+            )
+            # One rated row tied to the run, in-period
+            from app.controlplane.services import metering
+
+            event = await metering.emit_usage(
+                setup,
+                tenant_id=tenant.id,
+                org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                usage_type="image_generation",
+                quantity=1,
+                occurred_at=datetime.now(UTC),
+                source="workflow_runtime",
+                workflow_run_id=run_id,
+                idempotency_key=f"r80evt-{ULID()}",
+            )
+            setup.add(
+                RatedUsage(
+                    usage_event_id=event.id,
+                    tenant_id=tenant.id,
+                    org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                    usage_type="image_generation",
+                    quantity=1,
+                    cost_rate_snapshot={},
+                    internal_cost_minor=0,
+                    internal_cost_currency="USD",
+                    sell_rate_snapshot={},
+                    billable_amount_minor=500,
+                    billable_amount_exact=500,
+                    internal_cost_exact=0,
+                    billable_currency="USD",
+                    status="rated",
+                )
+            )
+            await setup.flush()
+            await credit_svc.reserve(
+                setup,
+                tenant.id,
+                "USD",
+                500,
+                reference_type="workflow_run",
+                reference_id=run_id,
+            )
+            await setup.commit()
+            tenant_id, sub_id = tenant.id, sub.id
+
+        # Session A: close the period and HOLD the row lock (no commit yet)
+        async with AsyncSessionLocal() as a:
+            period = (
+                await a.execute(
+                    select(BillingPeriod).where(
+                        BillingPeriod.subscription_id == sub_id,
+                        BillingPeriod.status == "open",
+                    )
+                )
+            ).scalar_one()
+            invoice = await billing_svc.close_period_and_invoice(a, period.id)
+            assert invoice is not None
+
+            # B: settle concurrently — must BLOCK on the row lock, then see
+            # the rows as invoiced (excluded), settling 0.
+            async def settle():
+                async with AsyncSessionLocal() as b:
+                    await handle_run_terminal(b, {"run_id": run_id, "status": "completed"})
+                    await b.commit()
+
+            task = _asyncio.create_task(settle())
+            await _asyncio.sleep(0.3)
+            await a.commit()
+            await _asyncio.wait_for(task, timeout=15)
+
+        async with AsyncSessionLocal() as check:
+            # The reservation settled at 0 (released the hold, charged nothing)
+            reservation = (
+                await check.execute(
+                    select(CreditReservation).where(
+                        CreditReservation.reference_type == "workflow_run",
+                        CreditReservation.reference_id == run_id,
+                    )
+                )
+            ).scalar_one()
+            assert reservation.status == "settled"
+            # The rows were invoiced by the close — the settle must have
+            # charged NOTHING against the reservation (0-settle releases the
+            # hold). settled_amount is the exact double-charge detector: any
+            # positive value here is the same usage charged twice (the
+            # invoice's own credit application is a separate, legitimate
+            # ledger entry).
+            assert (reservation.settled_amount_minor or 0) == 0, (
+                "usage charged on the invoice AND from the reservation"
+            )
+            debits = (
+                (
+                    await check.execute(
+                        select(CreditLedgerEntry).where(
+                            CreditLedgerEntry.tenant_id == tenant_id,
+                            CreditLedgerEntry.entry_type == "reservation_settle",
+                            CreditLedgerEntry.reference_id == run_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert sum(-e.amount_minor for e in debits) == 0, (
+                "reservation-side debit landed despite invoice billing"
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_racing_period_close_no_extra_period():
+    """R80[4]: close read sub.status unlocked — a cancel(at_period_end)
+    landing mid-close was rolled into a NEW open period (extra full period
+    billed). The close now locks the subscription; the racing cancel waits
+    and the rollover branch sees the fresh status.
+
+    Serialization test (cancel must WAIT on the close's sub lock and land on
+    post-rollover state: one open period, cancel_at_period_end). The exact
+    stale-read window is INSIDE close_period_and_invoice and not reachable
+    without mid-function hooks, so this is not revert-provable — the FOR
+    UPDATE + populate_existing pattern is the same one revert-proven in
+    R73[8] (adjust_statement) and R80[1] (settlement select)."""
+    import asyncio as _asyncio
+
+    from app.core.database import AsyncSessionLocal, engine
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup)
+            tenant = await _mk_tenant(setup, user, status=TenantStatus.ACTIVE)
+            sub, _ = await billing_svc.start_subscription(
+                setup,
+                tenant,
+                plan_key="school",
+                interval="month",
+                seats=0,
+                provider="manual",
+                actor=_actor(user),
+            )
+            await setup.commit()
+            tenant_id, sub_id, user_id = tenant.id, sub.id, user.id
+
+        async with AsyncSessionLocal() as a:
+            period = (
+                await a.execute(
+                    select(BillingPeriod).where(
+                        BillingPeriod.subscription_id == sub_id,
+                        BillingPeriod.status == "open",
+                    )
+                )
+            ).scalar_one()
+            # A holds the close (sub row locked) while B cancels
+            invoice = await billing_svc.close_period_and_invoice(a, period.id)
+            assert invoice is not None
+
+            async def cancel():
+                async with AsyncSessionLocal() as b:
+                    t = await b.get(TenantAccount, tenant_id)
+                    s = await b.get(Subscription, sub_id)
+                    u = await b.get(User, user_id)
+                    await billing_svc.cancel_subscription(
+                        b, t, s, at_period_end=True, actor=_actor(u)
+                    )
+                    await b.commit()
+
+            task = _asyncio.create_task(cancel())
+            await _asyncio.sleep(0.3)
+            await a.commit()
+            await _asyncio.wait_for(task, timeout=15)
+
+        async with AsyncSessionLocal() as check:
+            fresh = await check.get(Subscription, sub_id)
+            open_periods = (
+                (
+                    await check.execute(
+                        select(BillingPeriod).where(
+                            BillingPeriod.subscription_id == sub_id,
+                            BillingPeriod.status == "open",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            # The close rolled a new period BEFORE the cancel landed — that's
+            # the correct serialization (cancel waited). The cancel then
+            # flagged at_period_end on the NEW period: exactly one open
+            # period, sub in cancel_at_period_end.
+            assert fresh.status == "cancel_at_period_end"
+            assert len(open_periods) == 1
+    finally:
+        await engine.dispose()

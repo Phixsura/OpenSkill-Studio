@@ -218,7 +218,17 @@ async def start_subscription(
         currency=tenant.currency,
         success_url=f"{settings.frontend_url}/dashboard/tenant/{tenant.id}/billing?ok=1",
         cancel_url=f"{settings.frontend_url}/dashboard/tenant/{tenant.id}/billing?cancelled=1",
-        metadata={"plan_key": plan_key, "interval": interval, "seats": str(seats)},
+        metadata={
+            "plan_key": plan_key,
+            "interval": interval,
+            "seats": str(seats),
+            # R80[2]: pin the version the CUSTOMER SAW at checkout. The
+            # completion webhook can land minutes-to-days later (async
+            # payment methods); re-resolving "current active" then races
+            # plan-version activation and binds the paid customer to a
+            # version/price they never agreed to.
+            "plan_version_id": version.id,
+        },
     )
     return None, session.url
 
@@ -233,6 +243,7 @@ async def activate_subscription_from_checkout(
     provider: str,
     external_customer_ref: str | None,
     external_ref: str | None,
+    pinned_version_id: str | None = None,
 ) -> Subscription:
     """Webhook completion path — guarded against duplicates by the caller's
     webhook-event unique key + the live-subscription partial index."""
@@ -266,7 +277,17 @@ async def activate_subscription_from_checkout(
                         orphan_ref=external_ref,
                     )
         return existing
-    version, _price = await _resolve_plan_price(db, plan_key, tenant.currency, interval)
+    version = None
+    if pinned_version_id:
+        # R80[2]: bind to the version pinned at checkout time (what the
+        # customer actually saw and paid for), even if ops activated a newer
+        # version while the payment settled. Fall back to re-resolution only
+        # when the pin is absent (legacy sessions) or dangling.
+        version = await db.get(PlanVersion, pinned_version_id)
+        if version is not None and version.status == "draft":
+            version = None  # a draft was never purchasable — resolve fresh
+    if version is None:
+        version, _price = await _resolve_plan_price(db, plan_key, tenant.currency, interval)
     now = _now()
     sub = Subscription(
         tenant_id=tenant.id,
@@ -520,7 +541,22 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     )
     if not result.rowcount:
         return None  # already closed/invoiced by a concurrent worker
-    sub = await db.get(Subscription, period.subscription_id)
+    # R80[4]: LOCK the subscription for the whole close. The terminal branch
+    # at the end reads sub.status — an unlocked read is stale against a
+    # concurrent cancel(at_period_end) landing mid-close: the close rolled
+    # the freshly-cancelled sub into a NEW open period (an extra full period
+    # billed), or conversely finalized totals off a plan a concurrent
+    # immediate-change just swapped. FOR UPDATE + populate_existing makes
+    # cancel/change (guarded UPDATEs on this row) wait until the close
+    # commits, and the close itself sees the latest committed state.
+    sub = (
+        await db.execute(
+            select(Subscription)
+            .where(Subscription.id == period.subscription_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
     tenant = await db.get(TenantAccount, period.tenant_id)
 
     # R41[1]/[2]: bill this closed period in arrears on the plan/seats that were
@@ -1486,6 +1522,7 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
                 provider=provider,
                 external_customer_ref=data.get("customer"),
                 external_ref=_subscription_ref(data) or data.get("id"),
+                pinned_version_id=meta.get("plan_version_id"),
             )
         elif kind == "credit_topup":
             await credit_svc.top_up(

@@ -467,9 +467,19 @@ async def refund_purchase(
         .where(LicenseGrant.purchase_id == purchase.id, LicenseGrant.status == "active")
         .values(status="revoked", revoked_at=_now(), revoke_reason=f"refund: {reason}")
     )
-    if purchase.payment_method == "credit":
-        from app.controlplane.services import credits as credit_svc
+    # R80[3]: money must come back for EVERY payment method — the old branch
+    # refunded only credit-paid purchases; checkout (real card charge) and
+    # invoice-billed purchases were "refunded" in name only (license revoked,
+    # money kept). v1 has no provider-side refund API, so non-credit payments
+    # are returned as PLATFORM CREDIT to the buyer's balance (spendable on
+    # anything; ADR-noted v1 policy — provider-native refunds are a later
+    # adapter capability). Skip only invoice-billed purchases whose license
+    # line was never invoiced (nothing was ever charged) — mark_purchase_paid
+    # sets invoice_id when the line lands.
+    from app.controlplane.services import credits as credit_svc
 
+    charged = purchase.payment_method != "invoice" or purchase.invoice_id is not None
+    if charged:
         await credit_svc.refund(
             db,
             purchase.buyer_tenant_id,
@@ -481,6 +491,10 @@ async def refund_purchase(
             actor=actor,
             idempotency_key=f"refund:{purchase.id}",
         )
+    else:
+        # Un-invoiced bill_via_invoice purchase: clear the pending charge so
+        # period close never bills it (nothing to give back).
+        log.info("cp_refund_uncharged_invoice_purchase", purchase_id=purchase.id)
     enqueue(db, "purchase.refunded", {"purchase_id": purchase.id})
     await record_audit(
         db,
