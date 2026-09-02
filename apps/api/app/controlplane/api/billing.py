@@ -446,6 +446,18 @@ async def create_manual_invoice(
     tenant = await db.get(TenantAccount, tenant_id)
     if tenant is None:
         raise AppError("TENANT_NOT_FOUND", "Tenant not found", 404)
+    # R43[15]: manual invoices must not be raised against cancelled/archived
+    # tenants (finalize triggers rev-share accrual and dunning against an
+    # account that can never pay). Suspended tenants stay invoiceable — debt
+    # collection is exactly why they're suspended.
+    from app.controlplane.models.tenant import TenantStatus as _TS
+
+    if tenant.status in (_TS.CANCELLED, _TS.ARCHIVED):
+        raise AppError(
+            "TENANT_STATUS_CONFLICT",
+            f"Cannot invoice a {tenant.status.value} tenant",
+            409,
+        )
     invoice = Invoice(
         tenant_id=tenant_id,
         currency=tenant.currency,

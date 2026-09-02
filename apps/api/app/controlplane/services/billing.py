@@ -639,20 +639,22 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         )
         sort += 1
 
-    # c. usage lines: un-invoiced rated usage grouped by type
+    # c. usage lines: un-invoiced rated usage grouped by type.
+    # R43[14]: materialize the EXACT row set FIRST (id + amounts, FOR UPDATE)
+    # and aggregate in Python — the old SUM-then-rebind ran two separate
+    # queries, so a row rated between them was flipped to 'invoiced' by the
+    # bind UPDATE without its amount ever being summed into the line (silently
+    # billed 0). The lock also serializes against concurrent rating/settlement
+    # touching these rows.
     from app.controlplane.models.usage import UsageEvent
 
-    usage_rows = (
+    billable_rows = (
         await db.execute(
             select(
+                RatedUsage.id,
                 RatedUsage.usage_type,
-                # R75: bill the SUM of exact per-event amounts, rounded ONCE
-                # here (round-of-sum). Summing the per-event rounded integers
-                # (billable_amount_minor) drops every event whose marginal
-                # charge was < 0.5 minor to 0 — unbounded under-billing.
-                func.sum(RatedUsage.billable_amount_exact).label("amount_exact"),
-                func.sum(RatedUsage.quantity).label("qty"),
-                func.count(RatedUsage.id).label("events"),
+                RatedUsage.billable_amount_exact,
+                RatedUsage.quantity,
             )
             .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
             .where(
@@ -663,51 +665,54 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                 # occurring after period end waits for the next invoice.
                 UsageEvent.occurred_at < period.period_end,
             )
-            .group_by(RatedUsage.usage_type)
+            .with_for_update(of=RatedUsage)
         )
     ).all()
-    for row in usage_rows:
-        amount = int(Decimal(row.amount_exact or 0).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    by_type: dict[str, dict] = {}
+    for rid, utype, amount_exact, qty in billable_rows:
+        agg = by_type.setdefault(utype, {"ids": [], "amount_exact": Decimal(0), "qty": Decimal(0)})
+        agg["ids"].append(rid)
+        # R75: round-of-sum — accumulate exact amounts, round ONCE per line.
+        agg["amount_exact"] += Decimal(amount_exact or 0)
+        agg["qty"] += Decimal(qty or 0)
+    usage_line_ids: dict[str, list[str]] = {}
+    for utype in sorted(by_type):
+        agg = by_type[utype]
+        amount = int(agg["amount_exact"].quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         if amount == 0:
             continue
         line = InvoiceLine(
             invoice_id=invoice.id,
             line_type="usage",
-            description=f"Usage: {row.usage_type.replace('_', ' ')}",
-            quantity=row.qty,
+            description=f"Usage: {utype.replace('_', ' ')}",
+            quantity=agg["qty"],
             amount_minor=amount,
             usage_summary={
-                "usage_type": row.usage_type,
-                "event_count": int(row.events),
-                "total_quantity": str(row.qty),
+                "usage_type": utype,
+                "event_count": len(agg["ids"]),
+                "total_quantity": str(agg["qty"]),
                 "period_start": period.period_start.isoformat(),
                 "period_end": period.period_end.isoformat(),
             },
             sort_order=sort,
         )
         lines.append(line)
+        usage_line_ids[utype] = agg["ids"]
         sort += 1
     for line in lines:
         db.add(line)
     await db.flush()
-    # Bind rated rows to their usage lines
+    # Bind EXACTLY the rows that were summed — by id, not by re-querying.
     for line in lines:
         if line.line_type != "usage":
             continue
-        in_period_event_ids = select(UsageEvent.id).where(
-            UsageEvent.occurred_at < period.period_end
-        )
-        await db.execute(
-            update(RatedUsage)
-            .where(
-                RatedUsage.tenant_id == tenant.id,
-                RatedUsage.status == "rated",
-                RatedUsage.usage_type == line.usage_summary["usage_type"],
-                RatedUsage.billable_currency == sub.currency,
-                RatedUsage.usage_event_id.in_(in_period_event_ids),
+        ids = usage_line_ids.get(line.usage_summary["usage_type"], [])
+        if ids:
+            await db.execute(
+                update(RatedUsage)
+                .where(RatedUsage.id.in_(ids), RatedUsage.status == "rated")
+                .values(status="invoiced", invoice_line_id=line.id)
             )
-            .values(status="invoiced", invoice_line_id=line.id)
-        )
 
     # d. license lines (bill_via_invoice purchases — P8 wires the flag)
     try:
@@ -1028,8 +1033,39 @@ async def record_payment(
     received_at: datetime | None,
     actor: Actor,
 ) -> PaymentRecord:
+    # R43[13]: lock the invoice — two concurrent partial payments both read a
+    # stale paid_total, both crossed the threshold, and the past_due→active
+    # transition fired twice. FOR UPDATE serializes the sum + transition.
+    invoice = (
+        await db.execute(
+            select(Invoice)
+            .where(Invoice.id == invoice.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     if invoice.status not in ("open", "paid"):
         raise AppError("INVOICE_NOT_OPEN", "Invoice is not open for payment", 409)
+    # R50[47]: uq_cp_payment_external (external_ref, method) is the provider
+    # double-delivery guard — a duplicate manual entry hit it as an unhandled
+    # IntegrityError 500. Pre-check and return a clean 409.
+    if external_ref:
+        dup = (
+            await db.execute(
+                select(PaymentRecord.id)
+                .where(
+                    PaymentRecord.external_ref == external_ref,
+                    PaymentRecord.method == method,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if dup is not None:
+            raise AppError(
+                "PAYMENT_INVALID",
+                f"A {method} payment with external_ref '{external_ref}' already exists",
+                409,
+            )
     payment = PaymentRecord(
         invoice_id=invoice.id,
         tenant_id=invoice.tenant_id,
@@ -1103,6 +1139,35 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
             .where(RatedUsage.invoice_line_id.in_(line_ids))
             .values(status="rated", invoice_line_id=None)
         )
+    # R43[8] CRITICAL: the close debited the tenant's credit balance for
+    # credit_applied_minor and the void re-queues the same usage for the next
+    # invoice — without refunding, the credit is permanently lost AND the usage
+    # is billed again at full price (double charge). Refund exactly what was
+    # applied (idempotent per invoice).
+    if invoice.credit_applied_minor and invoice.credit_applied_minor > 0:
+        await credit_svc.refund(
+            db,
+            invoice.tenant_id,
+            invoice.currency,
+            invoice.credit_applied_minor,
+            reference_type="invoice",
+            reference_id=invoice.id,
+            reason="Credit returned on invoice void",
+            actor=actor,
+            idempotency_key=f"invvoid:{invoice.id}",
+        )
+    # R43[11]: unbind invoice-billed license purchases so the re-close can pick
+    # them up again (their license line died with this invoice).
+    try:
+        from app.controlplane.models.marketplace import MarketplacePurchase
+
+        await db.execute(
+            update(MarketplacePurchase)
+            .where(MarketplacePurchase.invoice_id == invoice.id)
+            .values(invoice_id=None)
+        )
+    except ImportError:
+        pass
     # R56[24]: reverse any revenue-share accrual sourced from this invoice —
     # the re-invoice will accrue afresh at its own finalize, so leaving the
     # original entry standing double-paid the partner.
@@ -1178,10 +1243,37 @@ async def issue_credit_note(
 ) -> CreditNote:
     """The ONLY correction path for finalized invoices: an explicit credit
     note that lands as a credit-ledger refund for the next cycle."""
+    # R43[13]/[10]: lock the invoice row — the cumulative cap below and
+    # record_payment's paid-total check must not race concurrent notes/payments.
+    invoice = (
+        await db.execute(
+            select(Invoice)
+            .where(Invoice.id == invoice.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     if invoice.status not in ("open", "paid"):
         raise AppError("INVOICE_NOT_OPEN", "Credit notes apply to finalized invoices", 409)
     if amount_minor <= 0 or amount_minor > invoice.total_minor:
         raise AppError("PAYMENT_INVALID", "Credit note exceeds invoice total", 422)
+    # R43[10]: cap CUMULATIVELY — each note was only checked against the
+    # invoice total, so N notes could refund N× the invoice.
+    prior_notes = (
+        await db.execute(
+            select(func.coalesce(func.sum(CreditNote.amount_minor), 0)).where(
+                CreditNote.invoice_id == invoice.id,
+                CreditNote.status == "applied",
+            )
+        )
+    ).scalar_one()
+    if prior_notes + amount_minor > invoice.total_minor:
+        raise AppError(
+            "PAYMENT_INVALID",
+            f"Credit notes may not exceed the invoice total "
+            f"(already issued {prior_notes} of {invoice.total_minor})",
+            422,
+        )
     note = CreditNote(
         invoice_id=invoice.id,
         tenant_id=invoice.tenant_id,
@@ -1192,18 +1284,32 @@ async def issue_credit_note(
         created_by=actor.user_id,
     )
     db.add(note)
+    # R43[12]: on a still-OPEN (unpaid) invoice, the note reduces what the
+    # tenant OWES — a ledger refund on top was a double benefit (debt reduced
+    # AND spendable credit granted). The ledger refund is the correction
+    # mechanism for PAID invoices only (money already collected).
+    was_open = invoice.status == "open"
+    if was_open:
+        invoice.amount_due_minor = max(0, invoice.amount_due_minor - amount_minor)
+        if invoice.amount_due_minor == 0:
+            await db.execute(
+                update(Invoice)
+                .where(Invoice.id == invoice.id, Invoice.status == "open")
+                .values(status="paid", paid_at=_now())
+            )
     await db.flush()
-    await credit_svc.refund(
-        db,
-        invoice.tenant_id,
-        invoice.currency,
-        amount_minor,
-        reference_type="credit_note",
-        reference_id=note.id,
-        reason=reason,
-        actor=actor,
-        idempotency_key=f"cn:{note.id}",
-    )
+    if not was_open:  # paid invoice → refund the collected money as credit
+        await credit_svc.refund(
+            db,
+            invoice.tenant_id,
+            invoice.currency,
+            amount_minor,
+            reference_type="credit_note",
+            reference_id=note.id,
+            reason=reason,
+            actor=actor,
+            idempotency_key=f"cn:{note.id}",
+        )
     await record_audit(
         db,
         actor=actor,
@@ -1281,7 +1387,14 @@ async def process_webhook(
         return {"duplicate": True}  # replay — single-effect guarantee
     event = await db.get(BillingWebhookEvent, event_id)
     try:
-        handled = await _apply_webhook_event(db, provider_key, parsed)
+        # R42[7]: run the handler inside a SAVEPOINT (like the outbox worker)
+        # so a DB-abort inside it (IntegrityError etc.) rolls back only the
+        # handler's writes — NOT the just-inserted BillingWebhookEvent row.
+        # Without it, the failed-status write below hit an aborted transaction,
+        # the event row vanished with the rollback, and the provider's retry
+        # re-processed a possibly half-applied event.
+        async with db.begin_nested():
+            handled = await _apply_webhook_event(db, provider_key, parsed)
         event.status = "processed" if handled else "ignored"
         event.processed_at = _now()
     except Exception as exc:  # noqa: BLE001 — recorded for manual replay

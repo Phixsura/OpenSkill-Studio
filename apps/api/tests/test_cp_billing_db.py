@@ -1129,3 +1129,150 @@ async def test_duplicate_checkout_cancels_orphan_provider_subscription(db, monke
     assert again.id == first.id  # platform keeps the first
     assert cancelled == [("mock_sub_2", False)], cancelled
     _ = bsvc  # keep import for clarity
+
+
+# ── R42/R43: invoice lifecycle correctness ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_void_refunds_applied_credit(db):
+    """R43[8] CRITICAL: voiding an invoice that consumed credit must refund
+    the applied credit — the usage re-bills next cycle, so losing the credit
+    was a double charge."""
+    from app.controlplane.models.credit import TenantCreditBalance
+    from app.controlplane.services import metering, rating
+    from app.controlplane.services import pricing as pricing_svc
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    await credit_svc.top_up(db, tenant.id, "USD", 5000, actor=a)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    await pricing_svc.create_price_policy(
+        db,
+        actor=a,
+        name=f"v8 {ULID()}",
+        policy_type="fixed_unit_price",
+        usage_type="image_generation",
+        currency="USD",
+        params={"unit_price_minor": 30},
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        tenant_id=tenant.id,
+    )
+    ev = await metering.emit_usage(
+        db,
+        tenant_id=tenant.id,
+        org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        usage_type="image_generation",
+        quantity=10,
+        occurred_at=datetime.now(UTC) - timedelta(minutes=5),
+        source="manual",
+        idempotency_key=f"v8-{ULID()}",
+    )
+    await rating.rate_event(db, ev.id)
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    inv = await billing_svc.close_period_and_invoice(db, period.id)
+    assert inv is not None and inv.credit_applied_minor == 5000
+    bal = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert bal.balance_minor == 0  # consumed by the close
+    await billing_svc.void_invoice(db, inv, reason="billing error", actor=a)
+    await db.refresh(bal)
+    assert bal.balance_minor == 5000, "voided credit must be refunded"
+
+
+@pytest.mark.asyncio
+async def test_credit_note_cumulative_cap_and_open_invoice_reduces_due(db):
+    """R43[10]+[12]: notes cap CUMULATIVELY at the invoice total, and a note on
+    an OPEN invoice reduces amount_due (no ledger refund — that would be a
+    double benefit)."""
+    from app.controlplane.models.credit import TenantCreditBalance
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    # Manual open invoice of 10000.
+    inv = Invoice(
+        tenant_id=tenant.id,
+        currency="USD",
+        status="open",
+        subtotal_minor=10000,
+        total_minor=10000,
+        amount_due_minor=10000,
+        finalized_at=datetime.now(UTC),
+    )
+    db.add(inv)
+    await db.flush()
+    n1 = await billing_svc.issue_credit_note(
+        db, inv, amount_minor=6000, reason="partial dispute", actor=a
+    )
+    assert n1 is not None
+    await db.refresh(inv)
+    assert inv.amount_due_minor == 4000  # reduced, not refunded
+    bal = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one_or_none()
+    assert bal is None or bal.balance_minor == 0, "open-invoice note must not refund ledger"
+    # Cumulative cap: 6000 issued of 10000 → a 5000 second note exceeds it.
+    with pytest.raises(AppError) as exc:
+        await billing_svc.issue_credit_note(db, inv, amount_minor=5000, reason="too much", actor=a)
+    assert exc.value.code == "PAYMENT_INVALID"
+    # 4000 exactly reaches the cap and closes the invoice as paid.
+    await billing_svc.issue_credit_note(db, inv, amount_minor=4000, reason="rest", actor=a)
+    await db.refresh(inv)
+    assert inv.amount_due_minor == 0 and inv.status == "paid"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_external_ref_payment_409_not_500(db):
+    """R50[47]: a duplicate (external_ref, method) manual payment must be a
+    clean 409, not an unhandled unique-violation 500."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    inv = Invoice(
+        tenant_id=tenant.id,
+        currency="USD",
+        status="open",
+        subtotal_minor=10000,
+        total_minor=10000,
+        amount_due_minor=10000,
+        finalized_at=datetime.now(UTC),
+    )
+    db.add(inv)
+    await db.flush()
+    await billing_svc.record_payment(
+        db,
+        inv,
+        amount_minor=5000,
+        method="manual_bank_transfer",
+        external_ref=f"wire-{inv.id}",
+        reference_note=None,
+        received_at=None,
+        actor=a,
+    )
+    with pytest.raises(AppError) as exc:
+        await billing_svc.record_payment(
+            db,
+            inv,
+            amount_minor=5000,
+            method="manual_bank_transfer",
+            external_ref=f"wire-{inv.id}",
+            reference_note=None,
+            received_at=None,
+            actor=a,
+        )
+    assert exc.value.code == "PAYMENT_INVALID" and exc.value.status_code == 409
