@@ -1,7 +1,7 @@
 """Usage metering: emit_usage, adjustments, sweeps (ADR-014 §3)."""
 
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 import structlog
@@ -273,7 +273,16 @@ async def flush_api_request_counters(db: AsyncSession) -> int:
 
     try:
         r = redis_pool()
-        now_bucket = datetime.now(UTC).strftime("%Y%m%d%H")
+        now = datetime.now(UTC)
+        now_bucket = now.strftime("%Y%m%d%H")
+        # R53[1]: deleting a flushed bucket destroyed the live day window the
+        # quota middleware MGETs — by late day most buckets were gone and
+        # tenants sailed past max_api_requests_day. Keep buckets until they
+        # can no longer be part of ANY tenant's current local day (a local
+        # day never reaches back more than 24h; 25h matches the key TTL).
+        # Re-scanning kept buckets is harmless: the emit idempotency key
+        # (apireq:{tenant}:{bucket}) makes re-emission a no-op.
+        delete_cutoff = (now - timedelta(hours=25)).strftime("%Y%m%d%H")
         emitted = 0
         async for key in r.scan_iter(match="cp:apireq:*", count=500):
             key_s = key.decode() if isinstance(key, bytes) else key
@@ -306,7 +315,8 @@ async def flush_api_request_counters(db: AsyncSession) -> int:
                     if event is not None:
                         emitted += 1
             await db.commit()
-            await r.delete(key_s)
+            if bucket < delete_cutoff:
+                await r.delete(key_s)
         return emitted
     except Exception:  # noqa: BLE001 — Redis outage: flush retries next hour
         log.warning("cp_api_flush_skipped", exc_info=True)

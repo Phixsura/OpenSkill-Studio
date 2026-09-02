@@ -106,6 +106,12 @@ async def update_tenant(
             after=updates,
         )
     await db.commit()
+    # R55[2]/R53[2]: timezone rides the middleware's quota cache — drop both
+    # caches so a tz change moves the daily window within seconds, not 5 min.
+    if updates:
+        from app.controlplane.services.entitlements import invalidate_cache
+
+        await invalidate_cache(tenant_id)
     await db.refresh(tenant)
     return DataResponse(data=TenantResponse.model_validate(tenant))
 

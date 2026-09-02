@@ -54,6 +54,20 @@ async def _mk_tenant(db, user) -> TenantAccount:
     )
 
 
+async def _fresh_redis():
+    """redis_pool() is a process singleton whose connections bind to the
+    creating test's event loop — reset it so THIS test's loop owns it."""
+    import contextlib
+
+    import app.core.redis as _redis_mod
+
+    if _redis_mod._redis is not None:
+        with contextlib.suppress(Exception):
+            await _redis_mod._redis.aclose()
+        _redis_mod._redis = None
+    return _redis_mod.redis_pool()
+
+
 def _now():
     return datetime.now(UTC)
 
@@ -393,3 +407,125 @@ async def test_failed_eval_still_meters_token_spend(db):
     # (retries was bumped after emission).
     assert by_type["llm_input_tokens"].idempotency_key == f"eval:{task.id}:0:in"
     assert task.retries == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_keeps_todays_buckets_for_quota_window(db):
+    """R53[1]: the hourly flush DELETEd each landed bucket, destroying the
+    live day-window the quota middleware MGETs — by late day the sum was
+    near-zero and tenants sailed past max_api_requests_day. Flush must land
+    the events but keep buckets younger than 25h; only ancient buckets go."""
+    from datetime import timedelta
+
+    from app.controlplane.services.metering import flush_api_request_counters
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    from app.models.organization import Organization
+
+    org = Organization(
+        name=f"F {ULID()}",
+        slug=f"fl-{str(ULID()).lower()}",
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
+    db.add(org)
+    await db.flush()
+    await db.commit()  # flush_api_request_counters commits per key
+
+    r = await _fresh_redis()
+    now = datetime.now(UTC)
+    recent_bucket = (now - timedelta(hours=2)).strftime("%Y%m%d%H")
+    ancient_bucket = (now - timedelta(hours=30)).strftime("%Y%m%d%H")
+    recent_key = f"cp:apireq:{tenant.id}:{recent_bucket}"
+    ancient_key = f"cp:apireq:{tenant.id}:{ancient_bucket}"
+    await r.set(recent_key, 42, ex=90_000)
+    await r.set(ancient_key, 7, ex=90_000)
+    try:
+        emitted = await flush_api_request_counters(db)
+        assert emitted >= 2
+        # Recent bucket SURVIVES (still part of someone's current local day)
+        assert await r.get(recent_key) is not None, "recent bucket must not be deleted"
+        # Ancient bucket is gone
+        assert await r.get(ancient_key) is None
+        # Both landed as events exactly once; a re-run doesn't double-land
+        emitted2 = await flush_api_request_counters(db)
+        assert emitted2 == 0
+        events = (
+            (
+                await db.execute(
+                    select(UsageEvent).where(
+                        UsageEvent.tenant_id == tenant.id,
+                        UsageEvent.usage_type == "api_request",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert {int(e.quantity) for e in events} == {42, 7}
+    finally:
+        await r.delete(recent_key, ancient_key)
+
+
+def test_local_day_buckets_follow_tenant_timezone():
+    """R53[2]: the daily quota window is the tenant-local calendar day mapped
+    onto UTC hour buckets — not the UTC day."""
+    from app.middleware.api_metering import _local_day_buckets
+
+    # 2026-08-31 23:30 UTC = 2026-09-01 11:30 in Auckland (NZST, UTC+12):
+    # Auckland's day spans Aug 31 12:00 UTC .. Sep 1 12:00 UTC.
+    now = datetime(2026, 8, 31, 23, 30, tzinfo=UTC)
+    nz = _local_day_buckets("Pacific/Auckland", now)
+    assert len(nz) == 24
+    assert nz[0] == "2026083112"
+    assert nz[-1] == "2026090111"
+    # UTC tenant: plain UTC day.
+    utc = _local_day_buckets("UTC", now)
+    assert utc[0] == "2026083100" and utc[-1] == "2026083123"
+    # Bad tz falls back to UTC.
+    assert _local_day_buckets("Nope/Zone", now) == utc
+
+
+@pytest.mark.asyncio
+async def test_quota_cache_dropped_on_entitlement_invalidation(db):
+    """R55[2]: the middleware's cp:apiquota cache was never invalidated —
+    plan changes kept 429ing at the old limit for up to 5 minutes.
+    invalidate_cache now drops it together with cp:ent."""
+    from app.controlplane.services.entitlements import invalidate_cache
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    r = await _fresh_redis()
+    quota_key = f"cp:apiquota:{tenant.id}"
+    await r.set(quota_key, "10000|UTC", ex=300)
+    await invalidate_cache(tenant.id)
+    assert await r.get(quota_key) is None
+
+
+@pytest.mark.asyncio
+async def test_entitlement_cache_tombstone_blocks_stale_repopulate(db):
+    """R55[1]: invalidate_cache runs BEFORE the mutation's commit — a reader
+    racing that window recomputed from the pre-write snapshot and re-cached
+    the stale value for the full TTL. The dirty tombstone lets readers
+    compute but blocks the cache write until the mutation is safely past."""
+    from app.controlplane.services.entitlements import get_effective, invalidate_cache
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    r = await _fresh_redis()
+    ent_key = f"cp:ent:{tenant.id}"
+    try:
+        # Mutation-side: invalidate (tombstone set, cache dropped)
+        await invalidate_cache(tenant.id)
+        assert await r.get(ent_key) is None
+        # Racing reader: computes fine but must NOT re-populate the cache
+        eff = await get_effective(db, tenant)
+        assert eff.values  # reader still gets a full answer
+        assert await r.get(ent_key) is None, "stale re-populate not blocked"
+        # After the tombstone expires, caching resumes
+        await r.delete(f"cp:entdirty:{tenant.id}")
+        await get_effective(db, tenant)
+        assert await r.get(ent_key) is not None
+    finally:
+        await r.delete(ent_key, f"cp:entdirty:{tenant.id}", f"cp:apiquota:{tenant.id}")

@@ -28,6 +28,12 @@ from app.exceptions import AppError
 log = structlog.get_logger()
 
 CACHE_KEY = "cp:ent:{tenant_id}"
+# R55[1]: invalidation tombstone — while present, get_effective computes from
+# DB but does NOT re-cache (a reader racing an uncommitted mutation would
+# otherwise re-populate the stale value for the full TTL). The TTL only needs
+# to outlive the mutation's commit window.
+DIRTY_KEY = "cp:entdirty:{tenant_id}"
+DIRTY_TTL_SECONDS = 5
 CACHE_TTL_SECONDS = 60
 
 # The plan trials run on (ADR-014 §1.3) and the no-subscription fallback.
@@ -249,6 +255,13 @@ async def get_effective(db: AsyncSession, tenant: TenantAccount) -> EffectiveEnt
         from app.core.redis import redis_pool
 
         r = redis_pool()
+        # R55[1]: services invalidate BEFORE the router commits — a concurrent
+        # reader could recompute from the pre-write DB snapshot and re-cache
+        # the STALE value for the full TTL. invalidate_cache leaves a short
+        # dirty tombstone; while it lives, readers compute from DB but never
+        # write the cache, so nothing stale outlives the mutation's commit.
+        if await r.get(DIRTY_KEY.format(tenant_id=tenant.id)):
+            return eff
         await r.set(
             key,
             json.dumps(
@@ -275,7 +288,15 @@ async def invalidate_cache(tenant_id: str) -> None:
         from app.core.redis import redis_pool
 
         r = redis_pool()
+        # R55[1]: tombstone first (see get_effective) so a reader racing the
+        # not-yet-committed mutation can't re-populate the stale value.
+        await r.set(DIRTY_KEY.format(tenant_id=tenant_id), "1", ex=DIRTY_TTL_SECONDS)
         await r.delete(CACHE_KEY.format(tenant_id=tenant_id))
+        # R55[2]: the API-metering middleware keeps a SECOND cache of the
+        # resolved max_api_requests_day (cp:apiquota:*, 300s) that nothing
+        # ever invalidated — plan upgrades kept 429ing at the old limit for
+        # up to 5 minutes. Every entitlement-cache invalidation drops it too.
+        await r.delete(f"cp:apiquota:{tenant_id}")
     except Exception:  # noqa: BLE001
         log.debug("cp_ent_cache_invalidate_skipped", tenant_id=tenant_id)
 

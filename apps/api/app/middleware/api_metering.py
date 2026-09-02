@@ -43,6 +43,26 @@ COUNTER_KEY = "cp:apireq:{tenant_id}:{bucket}"
 QUOTA_CACHE_KEY = "cp:apiquota:{tenant_id}"
 
 
+def _local_day_buckets(tz_name: str, now: datetime) -> list[str]:
+    """UTC hour-bucket names covering the tenant-local calendar day of `now`.
+
+    R53[2]: the quota window is the TENANT-local day (matches rating/budget
+    period conventions). Counters stay keyed by UTC hour — this maps the
+    local day [00:00, 24:00) onto the UTC hour buckets it spans. Pure logic,
+    unit-testable. Bad tz falls back to UTC.
+    """
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001
+        tz = UTC
+    local = now.astimezone(tz)
+    day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+    return [(day_start + timedelta(hours=h)).strftime("%Y%m%d%H") for h in range(24)]
+
+
 def classify_path(path: str) -> str | None:
     """Return 'org:<id>' / 'tenant:<id>' / None (not counted). Pure logic —
     unit-tested without Redis."""
@@ -143,7 +163,11 @@ class ApiRequestMeteringMiddleware(BaseHTTPMiddleware):
         quota_raw = await r.get(QUOTA_CACHE_KEY.format(tenant_id=tenant_id))
         if quota_raw is None:
             # Quota resolution requires the entitlement engine (DB). Cache it
-            # for 5 minutes; "unlimited" cached as -1.
+            # for 5 minutes; "unlimited" cached as -1. R53[2]: the tenant's
+            # timezone rides the same cache entry ("quota|tz") — the daily
+            # window is the TENANT-local calendar day (period convention),
+            # not the UTC day, which reset mid-business-day for most of the
+            # world and mis-sized the quota around midnight.
             from app.controlplane.models.tenant import TenantAccount
             from app.controlplane.services.entitlements import get_effective
             from app.core.database import AsyncSessionLocal
@@ -154,14 +178,20 @@ class ApiRequestMeteringMiddleware(BaseHTTPMiddleware):
                     return False
                 eff = await get_effective(db, tenant)
                 limit = eff.get("max_api_requests_day")
+                tz_name = tenant.timezone
             quota = -1 if limit is None else int(limit)
-            await r.set(QUOTA_CACHE_KEY.format(tenant_id=tenant_id), quota, ex=300)
+            await r.set(QUOTA_CACHE_KEY.format(tenant_id=tenant_id), f"{quota}|{tz_name}", ex=300)
         else:
-            quota = int(quota_raw)
+            raw = quota_raw.decode() if isinstance(quota_raw, bytes) else str(quota_raw)
+            quota_s, _, tz_name = raw.partition("|")
+            quota = int(quota_s)
+            tz_name = tz_name or "UTC"
         if quota < 0:
             return False
-        day = now.strftime("%Y%m%d")
-        keys = [COUNTER_KEY.format(tenant_id=tenant_id, bucket=f"{day}{h:02d}") for h in range(24)]
+        keys = [
+            COUNTER_KEY.format(tenant_id=tenant_id, bucket=b)
+            for b in _local_day_buckets(tz_name, now)
+        ]
         values = await r.mget(keys)
         total = sum(int(v) for v in values if v)
         return total > quota
