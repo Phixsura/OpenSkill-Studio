@@ -255,6 +255,30 @@ async def _flush_api_counters(ctx: dict) -> None:
             log.info("cp_api_counters_flushed", events=n)
 
 
+async def _sweep_workflow_runtime(ctx: dict) -> None:
+    """R66[2]: sweep_stale is the ONLY code that expires overdue reviews and
+    recovers stalled runs, but it ran only lazily (on run detail reads) and
+    via a manual admin endpoint. An unviewed WAITING_REVIEW run's due_at
+    never fired autonomously — 'timeout' semantics that require someone to
+    look at the run are not timeouts. Run it on a schedule."""
+    from app.core.database import AsyncSessionLocal
+    from app.services.workflow_runtime import dispatch_advance, sweep_stale
+
+    async with AsyncSessionLocal() as db:
+        stats = await sweep_stale(db)
+        await db.commit()
+    # sweep only repairs step state; each touched run must be re-advanced.
+    for run_id in stats.get("run_ids", []):
+        dispatch_advance(run_id)
+    if stats.get("expired_leases") or stats.get("expired_reviews") or stats.get("stalled_runs"):
+        log.info(
+            "cp_workflow_sweep",
+            expired_leases=stats.get("expired_leases", 0),
+            expired_reviews=stats.get("expired_reviews", 0),
+            stalled_runs=stats.get("stalled_runs", 0),
+        )
+
+
 def _cron_jobs() -> list:
     """Cron registry — later phases append their sweeps here."""
     from arq.cron import cron
@@ -275,6 +299,9 @@ def _cron_jobs() -> list:
         cron(_expire_promos, hour=2, minute=37, name="cp_promo_expiry"),
         # P6: billing period close scan hourly at :47
         cron(_scan_periods, minute=47, name="cp_period_scan"),
+        # R66[2]: workflow sweeper (review due_at expiry + stalled-run
+        # recovery) every 5 minutes — off-minute by design.
+        cron(_sweep_workflow_runtime, minute=set(range(3, 60, 5)), name="cp_workflow_sweep"),
         # P10: tls refresh
     ]
 

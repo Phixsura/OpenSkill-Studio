@@ -887,6 +887,25 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
     if run is None:
         return False
 
+    # R66[1]: require_tenant_active fired only at create_run — a run parked at
+    # a review gate (or WAITING_RETRY, or recovered by the sweeper) happily
+    # resumed provider spending AFTER the tenant was suspended/cancelled.
+    # This is THE choke point every resume path funnels through (review
+    # decision, lazy redispatch, sweeper, executor loop), so gate here: a
+    # blocked tenant's run simply makes no progress (and resumes intact on
+    # reactivation — suspension pauses, it doesn't cancel).
+    from app.controlplane import facade as cp_facade
+    from app.controlplane.models.tenant import TENANT_BLOCKED_STATUSES
+
+    _tenant = await cp_facade.get_tenant_for_org(db, run.org_id)
+    if _tenant.status in TENANT_BLOCKED_STATUSES:
+        log.warning(
+            "workflow_advance_blocked_tenant",
+            run_id=run_id,
+            tenant_status=_tenant.status.value,
+        )
+        return False
+
     # PENDING → RUNNING (conditional)
     if run.status == RunStatus.PENDING:
         result = await db.execute(

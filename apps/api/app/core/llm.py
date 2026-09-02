@@ -215,9 +215,22 @@ PRICING: dict[str, dict[str, dict[str, float]]] = {
 }
 
 
+# R67[6]: fallback rates for models absent from PRICING. default_model is an
+# org-selectable free string — an unknown-but-served model previously costed
+# $0, silently exempting the org from every budget while real provider spend
+# accrued. Charging at the flagship tier is conservative for the platform:
+# over-counting throttles earlier, never bills less than reality.
+_FALLBACK_PRICES: dict[str, float] = {"input": 3.00, "output": 15.00}
+
+
 def calculate_cost(response: LLMResponse) -> float:
     """Calculate USD cost from token counts."""
-    prices = PRICING.get(response.provider, {}).get(response.model, {})
+    prices = PRICING.get(response.provider, {}).get(response.model)
+    if prices is None:
+        logger.warning(
+            "llm_cost_unknown_model provider=%s model=%s", response.provider, response.model
+        )
+        prices = _FALLBACK_PRICES
     input_cost = response.input_tokens * prices.get("input", 0) / 1_000_000
     output_cost = response.output_tokens * prices.get("output", 0) / 1_000_000
     return round(input_cost + output_cost, 6)

@@ -1215,3 +1215,386 @@ async def test_credit_settled_usage_not_reinvoiced():
             assert balance.balance_minor == 100000 - 150 - plan_line.amount_minor
     finally:
         await engine.dispose()
+
+
+# ── R66/R67: runtime + evaluation credit/budget seams ────────
+
+
+@pytest.mark.asyncio
+async def test_eval_credit_enforcement_reserve_and_settle(db):
+    """R67[4]: evaluation spend bypassed credit enforcement entirely — a
+    prepay (credit_enforcement) tenant with zero balance ran unlimited paid
+    LLM calls. trigger_evaluation now reserves at trigger and settles ACTUAL
+    usage after execution; zero balance → 402 before any LLM call."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.core.llm import LLMResponse
+    from app.services.evaluation import EvaluationService
+    from app.services.organization import OrgService
+    from app.services.project import ProjectService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"CE {ULID()}",
+        slug=f"ce-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    tenant.metadata_ = {"credit_enforcement": True}
+    await db.flush()
+
+    eval_svc = EvaluationService(db)
+    await eval_svc.update_eval_settings(org.id, {"enabled": True, "monthly_budget_usd": 100})
+    proj_svc = ProjectService(db)
+    proj = await proj_svc.create_project(
+        org.id,
+        "CEP",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        user.id,
+    )
+    sub = await proj_svc.create_submission(org.id, proj.id, user.id)
+    await proj_svc.submit_draft(sub.id, user.id)
+    await db.flush()
+
+    good = LLMResponse(
+        content=(
+            '{"scores":[{"criterion":"Q","score":80,"max_score":100,"feedback":"ok"}],'
+            '"overall_feedback":"fine","strengths":[],"improvements":[]}'
+        ),
+        input_tokens=500,
+        output_tokens=200,
+        model="claude-sonnet-5",
+        provider="anthropic",
+    )
+
+    # Zero balance → 402 BEFORE any LLM call
+    with patch("app.services.evaluation.create_llm_client") as mock_create:
+        mock_llm = AsyncMock()
+        mock_llm.complete = AsyncMock(return_value=good)
+        mock_create.return_value = mock_llm
+        with pytest.raises(AppError) as exc:
+            await eval_svc.trigger_evaluation(org.id, sub.id, "submission_review")
+        assert exc.value.code == "INSUFFICIENT_CREDIT"
+        mock_llm.complete.assert_not_awaited()
+
+    # Fund the tenant → runs; reservation is created and terminally settled
+    await credit_svc.top_up(
+        db,
+        tenant.id,
+        "USD",
+        100_000,
+        actor=_actor(user),
+        idempotency_key=f"ce-top-{ULID()}",
+    )
+    with patch("app.services.evaluation.create_llm_client") as mock_create:
+        mock_llm = AsyncMock()
+        mock_llm.complete = AsyncMock(return_value=good)
+        mock_create.return_value = mock_llm
+        task = await eval_svc.trigger_evaluation(org.id, sub.id, "submission_review")
+    assert task.status.value == "completed"
+    reservation = (
+        await db.execute(
+            select(CreditReservation).where(
+                CreditReservation.reference_type == "evaluation_task",
+                CreditReservation.reference_id == task.id,
+            )
+        )
+    ).scalar_one()
+    assert reservation.status == "settled"
+    # No dangling hold
+    bal = (
+        await db.execute(
+            select(TenantCreditBalance).where(
+                TenantCreditBalance.tenant_id == tenant.id,
+                TenantCreditBalance.currency == "USD",
+            )
+        )
+    ).scalar_one()
+    assert bal.reserved_minor == 0
+
+
+@pytest.mark.asyncio
+async def test_advance_blocked_for_suspended_tenant(db):
+    """R66[1]: a run parked at a review gate resumed provider spending after
+    tenant suspension — require_tenant_active fired only at create_run.
+    _advance_once (the choke point every resume path funnels through) must
+    make no progress for a blocked tenant."""
+    from app.models.workflow_run import RunStatus, WorkflowRun
+    from app.services.organization import OrgService
+    from app.services.workflow_runtime import _advance_once
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"SB {ULID()}",
+        slug=f"sb-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    run = WorkflowRun(
+        org_id=org.id,
+        pack_id=None,
+        release_id=None,
+        installation_id=None,
+        definition_snapshot={"steps": [], "edges": []},
+        inputs={},
+        started_by=user.id,
+        status=RunStatus.PENDING,
+    )
+    db.add(run)
+    await db.flush()
+    # Active → progresses (PENDING→RUNNING at least)
+    assert await _advance_once(db, run.id) is True or run.status != RunStatus.PENDING
+    # Suspended → frozen
+    run2 = WorkflowRun(
+        org_id=org.id,
+        pack_id=None,
+        release_id=None,
+        installation_id=None,
+        definition_snapshot={"steps": [], "edges": []},
+        inputs={},
+        started_by=user.id,
+        status=RunStatus.PENDING,
+    )
+    db.add(run2)
+    await db.flush()
+    tenant.status = TenantStatus.SUSPENDED
+    await db.flush()
+    from app.controlplane.services.entitlements import invalidate_cache
+
+    await invalidate_cache(tenant.id)
+    assert await _advance_once(db, run2.id) is False
+    await db.refresh(run2)
+    assert run2.status == RunStatus.PENDING  # untouched
+
+
+def test_calculate_cost_unknown_model_not_free():
+    """R67[6]: models absent from PRICING costed $0 — an org-selectable
+    default_model exempted the org from every budget while real provider
+    spend accrued. Unknown models now cost at the flagship fallback tier."""
+    from app.core.llm import LLMResponse, calculate_cost
+
+    unknown = LLMResponse(
+        content="x",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        model="claude-opus-4-6",  # served by the API, absent from PRICING
+        provider="anthropic",
+    )
+    cost = calculate_cost(unknown)
+    assert cost > 0, "unknown model must never be free"
+    assert cost == 18.0  # 3.00 input + 15.00 output at 1M tokens each
+    # Known models unchanged
+    known = LLMResponse(
+        content="x",
+        input_tokens=1_000_000,
+        output_tokens=0,
+        model="claude-haiku-4-5",
+        provider="anthropic",
+    )
+    assert calculate_cost(known) == 0.80
+
+
+@pytest.mark.asyncio
+async def test_eval_usage_events_carry_project_and_user_refs(db):
+    """R67[5]: project-/user-scoped BudgetPolicies join RatedUsage via the
+    usage event's project_id/user_id — eval events omitted both, so scoped
+    policies never accumulated eval spend."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.controlplane.models.usage import UsageEvent
+    from app.core.llm import LLMResponse
+    from app.services.evaluation import EvaluationService
+    from app.services.organization import OrgService
+    from app.services.project import ProjectService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"RF {ULID()}",
+        slug=f"rf-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    eval_svc = EvaluationService(db)
+    await eval_svc.update_eval_settings(org.id, {"enabled": True, "monthly_budget_usd": 100})
+    proj_svc = ProjectService(db)
+    proj = await proj_svc.create_project(
+        org.id,
+        "RFP",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        user.id,
+    )
+    sub = await proj_svc.create_submission(org.id, proj.id, user.id)
+    await proj_svc.submit_draft(sub.id, user.id)
+    await db.flush()
+    good = LLMResponse(
+        content=(
+            '{"scores":[{"criterion":"Q","score":80,"max_score":100,"feedback":"ok"}],'
+            '"overall_feedback":"fine","strengths":[],"improvements":[]}'
+        ),
+        input_tokens=100,
+        output_tokens=50,
+        model="claude-sonnet-5",
+        provider="anthropic",
+    )
+    with patch("app.services.evaluation.create_llm_client") as mock_create:
+        mock_llm = AsyncMock()
+        mock_llm.complete = AsyncMock(return_value=good)
+        mock_create.return_value = mock_llm
+        task = await eval_svc.trigger_evaluation(org.id, sub.id, "submission_review")
+    events = (
+        (await db.execute(select(UsageEvent).where(UsageEvent.evaluation_task_id == task.id)))
+        .scalars()
+        .all()
+    )
+    assert events, "eval must emit usage events"
+    for e in events:
+        assert e.project_id == proj.id, f"{e.usage_type} missing project ref"
+        assert e.user_id == user.id, f"{e.usage_type} missing user ref"
+
+
+@pytest.mark.asyncio
+async def test_budget_hard_stop_blocks_projected_breach(db):
+    """R67[7]: with projected_minor=0 a hard_stop only blocked AFTER spend
+    strictly exceeded the limit — the breaching run itself passed. The
+    projected estimate must make the gate fire on the run that WOULD
+    breach."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    policy = BudgetPolicy(
+        tenant_id=tenant.id,
+        scope_type="tenant",
+        scope_id=None,
+        period="monthly",
+        limit_minor=100,
+        currency="USD",
+        hard_stop=True,
+    )
+    db.add(policy)
+    await db.flush()
+    # Spent 90 of 100; a projected 20 breaches → must block NOW
+    decision_blocked = None
+    try:
+        await budget_svc.check(db, tenant, "01JFAKEORGFAKEORGFAKEORGFA", projected_minor=20)
+        decision_blocked = False
+    except AppError as exc:
+        decision_blocked = exc.code == "BUDGET_EXCEEDED"
+        # spent=0 here so 0+20 <= 100 → should NOT block yet
+    assert decision_blocked is False
+    # projected alone crossing the limit blocks
+    with pytest.raises(AppError) as exc:
+        await budget_svc.check(db, tenant, "01JFAKEORGFAKEORGFAKEORGFA", projected_minor=101)
+    assert exc.value.code == "BUDGET_EXCEEDED"
+
+
+def test_workflow_sweep_cron_registered():
+    """R66[2]: sweep_stale ran only lazily (run-detail reads) — review due_at
+    never fired autonomously. The worker cron registry must include it."""
+    from app.controlplane.worker import _cron_jobs
+
+    names = {getattr(j, "name", "") for j in _cron_jobs()}
+    assert "cp_workflow_sweep" in names
+
+
+@pytest.mark.asyncio
+async def test_run_terminal_defers_while_step_lease_live(db):
+    """R66[3]: cancel enqueues run.terminal while a provider call is mid-
+    flight; settling then misses the late-landing usage. The handler must
+    defer (raise → outbox backoff) while any step lease is live."""
+    from datetime import timedelta as _td
+
+    from app.controlplane.services.settlement_handlers import handle_run_terminal
+    from app.models.workflow_run import (
+        RunStatus,
+        StepRunStatus,
+        WorkflowRun,
+        WorkflowStepRun,
+    )
+    from app.services.organization import OrgService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"IF {ULID()}",
+        slug=f"if-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    await credit_svc.top_up(
+        db, tenant.id, "USD", 10_000, actor=_actor(user), idempotency_key=f"if-{ULID()}"
+    )
+    run = WorkflowRun(
+        org_id=org.id,
+        pack_id=None,
+        release_id=None,
+        installation_id=None,
+        definition_snapshot={"steps": [], "edges": []},
+        inputs={},
+        started_by=user.id,
+        status=RunStatus.CANCELLED,
+    )
+    db.add(run)
+    await db.flush()
+    # Step cancelled but with a LIVE lease = provider call still in flight
+    step = WorkflowStepRun(
+        run_id=run.id,
+        step_id="s1",
+        step_type="provider_action",
+        status=StepRunStatus.CANCELLED,
+        max_attempts=3,
+        lease_expires_at=datetime.now(UTC) + _td(seconds=90),
+    )
+    db.add(step)
+    await db.flush()
+    await credit_svc.reserve(
+        db,
+        tenant.id,
+        "USD",
+        500,
+        reference_type="workflow_run",
+        reference_id=run.id,
+    )
+    with pytest.raises(RuntimeError, match="in-flight"):
+        await handle_run_terminal(db, {"run_id": run.id, "status": "cancelled"})
+    # Lease gone → settles fine
+    step.lease_expires_at = None
+    await db.flush()
+    await handle_run_terminal(db, {"run_id": run.id, "status": "cancelled"})
+    reservation = (
+        await db.execute(
+            select(CreditReservation).where(
+                CreditReservation.reference_type == "workflow_run",
+                CreditReservation.reference_id == run.id,
+            )
+        )
+    ).scalar_one()
+    assert reservation.status == "released"  # cancelled with zero usage

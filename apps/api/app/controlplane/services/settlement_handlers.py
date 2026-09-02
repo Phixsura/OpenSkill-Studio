@@ -23,6 +23,32 @@ async def handle_run_terminal(db: AsyncSession, payload: dict) -> None:
     """
     run_id = payload["run_id"]
     status = payload.get("status", "completed")
+    # R66[3]: cancel_run enqueues run.terminal while a provider_action may
+    # still be mid-flight (up to workflow_step_timeout_seconds); that step's
+    # __usage__ lands only AFTER the adapter returns. Settling now would miss
+    # the in-flight spend (reservation settled short, usage charged nowhere).
+    # The live LEASE is the in-flight signal: cancel flips status but does NOT
+    # clear lease_expires_at, while every executor completion path does.
+    # Defer by raising — outbox backoff retries until the lease is gone or
+    # expired, so the settle sum includes late-landing events.
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from app.models.workflow_run import WorkflowStepRun
+
+    inflight = (
+        await db.execute(
+            select(WorkflowStepRun.id)
+            .where(
+                WorkflowStepRun.run_id == run_id,
+                WorkflowStepRun.lease_expires_at.isnot(None),
+                WorkflowStepRun.lease_expires_at > _dt.now(_UTC),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if inflight is not None:
+        raise RuntimeError(f"run {run_id} still has an in-flight step; retrying settlement")
     reservation = (
         await db.execute(
             select(CreditReservation).where(
