@@ -87,6 +87,7 @@ AUDIT_ACTIONS = frozenset(
         "impersonation.grant_revoked",
         # client portal
         "client_link.created",
+        "client_approval.final_voided",
         "client_link.revoked",
         # marketplace
         "license.granted_manually",

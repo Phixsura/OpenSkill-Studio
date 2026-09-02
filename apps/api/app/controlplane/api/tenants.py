@@ -231,12 +231,39 @@ async def tenant_audit_events(
         .scalars()
         .all()
     )
+    data = []
+    for e in rows:
+        resp = AuditEventResponse.model_validate(e)
+        # R70[2]: before/after are platform-written JSONB blobs — shape and
+        # content vary by action and may embed internal values a tenant must
+        # not see verbatim (nested payloads, refs, platform notes). Flatten
+        # to one level of short scalars: enough for "what changed", nothing
+        # else survives.
+        resp.before = _scalar_summary(resp.before)
+        resp.after = _scalar_summary(resp.after)
+        data.append(resp)
     return ListResponse(
-        data=[AuditEventResponse.model_validate(e) for e in rows],
+        data=data,
         meta=PaginationMeta(
             total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
         ),
     )
+
+
+def _scalar_summary(blob: dict | None) -> dict | None:
+    """One level of short scalar values; nested structures become '[…]'."""
+    if blob is None:
+        return None
+    out: dict = {}
+    for k, v in list(blob.items())[:20]:
+        key = str(k)[:60]
+        if v is None or isinstance(v, (bool, int, float)):
+            out[key] = v
+        elif isinstance(v, str):
+            out[key] = v[:200]
+        else:
+            out[key] = "[…]"
+    return out
 
 
 # ── Org creation under a tenant ──────────────────────────────

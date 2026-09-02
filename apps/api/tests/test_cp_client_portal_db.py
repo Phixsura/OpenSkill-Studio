@@ -435,3 +435,175 @@ async def test_user_delete_nulls_comment_authorship(db):
     await db.refresh(comment)
     assert comment.author_id is None
     assert comment.text == "left by soon-deleted user"
+
+
+# ── R69/R70: decision integrity + principal liveness + audit shape ──
+
+
+@pytest.mark.asyncio
+async def test_decisions_require_reviewable_status(db):
+    """R69[1]: approve/final-accept accepted DRAFT / REVISION_REQUESTED
+    submissions — final-accept then completed the whole brief off a draft
+    the client never saw in reviewable form. Both now 409 on non-reviewable
+    statuses; request_revision on REVISION_REQUESTED stays a no-op record."""
+    user = await _mk_user(db)
+    org, tenant, brief, project, submission = await _mk_project_env(db, user)
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
+    await db.flush()
+    auth = await _guest_auth(db, project, user, role="approver")
+    principal = await portal_svc.get_client_principal(db, project.id, auth)
+
+    submission.status = SubmissionStatus.DRAFT
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await portal_svc.approve(db, principal, submission.id, "nice draft")
+    assert exc.value.code == "SUBMISSION_NOT_REVIEWABLE"
+    with pytest.raises(AppError) as exc:
+        await portal_svc.final_accept(db, principal, submission.id, "ship the draft")
+    assert exc.value.code == "SUBMISSION_NOT_REVIEWABLE"
+    await db.refresh(brief)
+    assert brief.status != BriefStatus.COMPLETED
+    # SUBMITTED → both work
+    submission.status = SubmissionStatus.SUBMITTED
+    await db.flush()
+    approved = await portal_svc.approve(db, principal, submission.id, "ok")
+    assert approved.action == "approved"
+
+
+@pytest.mark.asyncio
+async def test_repeated_decision_is_idempotent_no_notification_spam(db):
+    """R69[4]: every repeated identical approve inserted another append-only
+    record and re-fanned org notifications. Same-version repeats now return
+    the prior record."""
+    from sqlalchemy import func as _f
+
+    from app.controlplane.models.client_portal import ClientApprovalRecord
+
+    user = await _mk_user(db)
+    org, tenant, brief, project, submission = await _mk_project_env(db, user)
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
+    await db.flush()
+    auth = await _guest_auth(db, project, user, role="approver")
+    principal = await portal_svc.get_client_principal(db, project.id, auth)
+
+    first = await portal_svc.approve(db, principal, submission.id, "great")
+    again = await portal_svc.approve(db, principal, submission.id, "great again")
+    assert again.id == first.id  # prior record returned, nothing inserted
+    n = (
+        await db.execute(
+            select(_f.count(ClientApprovalRecord.id)).where(
+                ClientApprovalRecord.submission_id == submission.id,
+                ClientApprovalRecord.action == "approved",
+            )
+        )
+    ).scalar_one()
+    assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_deactivated_member_loses_portal_access(db):
+    """R69[2]: the member principal skipped user.is_active — a deactivated/
+    banned account kept full client access for the token lifetime."""
+    from app.models.user import UserStatus as ClientUserStatus
+
+    user = await _mk_user(db)
+    client_user = await _mk_user(db)
+    _, _, _, project, _ = await _mk_project_env(db, user)
+    db.add(
+        ClientPortalMember(
+            project_id=project.id,
+            user_id=client_user.id,
+            role="reviewer",
+            invited_by=user.id,
+        )
+    )
+    await db.flush()
+    auth = f"Bearer {create_access_token(client_user.id, client_user.email, 'student')}"
+    principal = await portal_svc.get_client_principal(db, project.id, auth)
+    assert principal.kind == "member"
+    client_user.status = ClientUserStatus.SUSPENDED
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await portal_svc.get_client_principal(db, project.id, auth)
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_void_final_acceptance_unwedges_review_flow(db):
+    """R69[3]: a final acceptance wedged the client review flow project-wide
+    forever (every later decision 409s) with no recovery. Org staff can now
+    void it — history preserved as final_accept_voided — and decisions
+    resume."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.client_portal import ClientApprovalRecord
+    from app.main import app
+
+    user = await _mk_user(db)
+    org, tenant, brief, project, submission = await _mk_project_env(db, user)
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
+    await db.flush()
+    auth = await _guest_auth(db, project, user, role="approver")
+    principal = await portal_svc.get_client_principal(db, project.id, auth)
+    final = await portal_svc.final_accept(db, principal, submission.id, "done")
+    assert final.action == "final_accepted"
+    with pytest.raises(AppError):
+        await portal_svc.request_revision(db, principal, submission.id, "wait, no")
+    # capture ids BEFORE commit expires the ORM objects
+    final_id = final.id
+    submission_id = submission.id
+    org_id, project_id = org.id, project.id
+    token = create_access_token(user.id, user.email, user.role.value)
+    await db.commit()
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/orgs/{org_id}/projects/{project_id}/client-approvals/void-final",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["data"]["action"] == "final_accept_voided"
+    finally:
+        app.router.lifespan_context = orig
+    db.expire_all()
+    # history preserved, flow unwedged
+    rec = await db.get(ClientApprovalRecord, final_id)
+    assert rec.action == "final_accept_voided"
+    submission2 = await db.get(Submission, submission_id)
+    submission2.status = SubmissionStatus.SUBMITTED
+    await db.flush()
+    record = await portal_svc.request_revision(db, principal, submission_id, "resume")
+    assert record.action == "revision_requested"
+
+
+@pytest.mark.asyncio
+async def test_tenant_audit_endpoint_flattens_jsonb(db):
+    """R70[2]: before/after JSONB echoed verbatim to tenant members — nested
+    platform-written payloads leaked internals. The endpoint now flattens to
+    one level of short scalars."""
+    from app.controlplane.api.tenants import _scalar_summary
+
+    nested = {
+        "plain": "ok",
+        "long": "x" * 500,
+        "n": 42,
+        "flag": True,
+        "nested": {"secret_ref": "internal"},
+        "arr": [1, 2, 3],
+    }
+    out = _scalar_summary(nested)
+    assert out["plain"] == "ok"
+    assert len(out["long"]) == 200
+    assert out["n"] == 42 and out["flag"] is True
+    assert out["nested"] == "[…]"
+    assert out["arr"] == "[…]"
+    assert _scalar_summary(None) is None

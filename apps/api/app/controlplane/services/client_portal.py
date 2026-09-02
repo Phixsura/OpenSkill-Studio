@@ -189,10 +189,15 @@ async def get_client_principal(
         from app.models.user import User
 
         user = await db.get(User, user_id)
+        # R69[2]: the portal re-implements token handling and dropped the
+        # user liveness check get_current_user enforces — a deactivated/
+        # deleted account kept full client access for the token's lifetime.
+        if user is None or not user.is_active:
+            raise AppError("CLIENT_ACCESS_DENIED", "Account is not active", 401)
         return ClientPrincipal(
             kind="member",
             role=member.role,
-            label=user.display_name if user else "Client",
+            label=user.display_name,
             project_id=project_id,
             user_id=user_id,
         )
@@ -273,6 +278,21 @@ async def request_revision(
 ) -> ClientApprovalRecord:
     submission = await assert_shared(db, principal.project_id, submission_id)
     await _assert_no_final(db, principal.project_id)
+    # R69[4]: same-version repeat is a no-op (comment traffic belongs in
+    # comments; the DECISION for this version is already recorded).
+    prior = (
+        await db.execute(
+            select(ClientApprovalRecord)
+            .where(
+                ClientApprovalRecord.submission_id == submission.id,
+                ClientApprovalRecord.version == submission.version,
+                ClientApprovalRecord.action == "revision_requested",
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if prior is not None:
+        return prior
     record = _record(principal, submission, "revision_requested", comment)
     db.add(record)
     # Guarded status transition: only a SUBMITTED/APPROVED submission moves
@@ -289,6 +309,20 @@ async def request_revision(
     return record
 
 
+def _assert_decidable(submission: Submission, action: str) -> None:
+    """R69[1]: client decisions are only meaningful on work the creator has
+    actually submitted. Approving/final-accepting a DRAFT (or an already
+    revision-requested version the creator is still editing) recorded a
+    decision on content the client never saw in reviewable form — and
+    final-accept then completed the whole brief off a draft."""
+    if submission.status not in (SubmissionStatus.SUBMITTED, SubmissionStatus.APPROVED):
+        raise AppError(
+            "SUBMISSION_NOT_REVIEWABLE",
+            f"Cannot {action} a submission in status '{submission.status.value}'",
+            409,
+        )
+
+
 async def approve(
     db: AsyncSession,
     principal: ClientPrincipal,
@@ -296,7 +330,24 @@ async def approve(
     comment: str | None,
 ) -> ClientApprovalRecord:
     submission = await assert_shared(db, principal.project_id, submission_id)
+    _assert_decidable(submission, "approve")
     await _assert_no_final(db, principal.project_id)
+    # R69[4]: repeated identical decisions are idempotent no-ops — each call
+    # previously inserted another append-only record and re-fanned up to 50
+    # org notifications (unbounded spam from one client clicking approve).
+    prior = (
+        await db.execute(
+            select(ClientApprovalRecord)
+            .where(
+                ClientApprovalRecord.submission_id == submission.id,
+                ClientApprovalRecord.version == submission.version,
+                ClientApprovalRecord.action == "approved",
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if prior is not None:
+        return prior
     record = _record(principal, submission, "approved", comment)
     db.add(record)
     await _notify_org(db, principal, submission, "client_approved")
@@ -313,6 +364,7 @@ async def final_accept(
     """Single final acceptance per project (partial unique index — a losing
     racer gets IntegrityError mapped to 409). Completes the client brief."""
     submission = await assert_shared(db, principal.project_id, submission_id)
+    _assert_decidable(submission, "final-accept")
     record = _record(principal, submission, "final_accepted", comment)
     from sqlalchemy.exc import IntegrityError
 

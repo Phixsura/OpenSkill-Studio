@@ -763,3 +763,57 @@ async def unshare_submission(
         raise AppError("PROJECT_NOT_FOUND", "Share not found", 404)
     await db.delete(share)
     await db.commit()
+
+
+@router.post(
+    "/orgs/{org_id}/projects/{project_id}/client-approvals/void-final",
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def void_final_acceptance(
+    org_id: str,
+    project_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """R69[3]: a final acceptance permanently wedged the project's client
+    review flow — unshare, new versions, everything after it 409'd on
+    _assert_no_final with no recovery path. Org staff can void it (audited);
+    the partial unique index frees up and the review flow resumes. The
+    decision history is preserved: the record's action flips to
+    'final_accept_voided', it is never deleted."""
+    from sqlalchemy import update as _sa_update
+
+    from app.controlplane.models.client_portal import ClientApprovalRecord
+
+    await _staff_project(db, org_id, project_id, user)
+    result = await db.execute(
+        _sa_update(ClientApprovalRecord)
+        .where(
+            ClientApprovalRecord.project_id == project_id,
+            ClientApprovalRecord.action == "final_accepted",
+        )
+        .values(action="final_accept_voided")
+        .returning(ClientApprovalRecord.id)
+    )
+    voided_id = result.scalar_one_or_none()
+    if voided_id is None:
+        raise AppError("PROJECT_NOT_FOUND", "No final acceptance to void", 404)
+    import contextlib
+
+    tenant = None
+    from app.controlplane.services.tenants import get_tenant_for_org
+
+    with contextlib.suppress(AppError):
+        tenant = await get_tenant_for_org(db, org_id)
+    await record_audit(
+        db,
+        actor=make_actor(request, user, "tenant"),
+        action="client_approval.final_voided",
+        target_type="client_approval",
+        target_id=voided_id,
+        tenant_id=tenant.id if tenant else None,
+        after={"project_id": project_id},
+    )
+    await db.commit()
+    return {"data": {"id": voided_id, "action": "final_accept_voided"}}
