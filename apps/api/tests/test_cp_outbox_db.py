@@ -328,7 +328,6 @@ async def test_product_service_rollback_does_not_poison_batch(test_topic):
             name="Taken", slug=taken_slug, description=None, created_by=user.id
         )
         await setup.commit()
-        user_id = user.id
         tenant_id = seed_org.tenant_id
 
     clean_topic = f"test.{str(ULID()).lower()[-8:]}"
