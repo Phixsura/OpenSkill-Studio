@@ -15,6 +15,15 @@ fresh live API and `browser_e2e_commercial.mjs` 19/19 (zero JS console errors),
 with the API log monitored throughout — **zero 500s, zero tracebacks**; the
 only error-level log lines were the intentional `cp_rating_no_cost_rate`
 alerts added by R91-100-H12.
+**Full UI-driven browser E2E:** new `browser_e2e_full_lifecycle.mjs` drives the
+issue-§12.4 chain through the actual UI — provision wizard, platform console
+ops, MarketplacePanel credit purchase, invoice pages, §37 trace drawer,
+settlement state machine, client-portal guest decision flow, audit explorer —
+**60/60 checks, zero 500s, zero JS errors**. It caught one real frontend bug:
+the platform tenant-detail page parsed the API's `{tenant, organizations}`
+response as a flat object, crashing StatusBadge (`undefined.replace`) and
+unmounting the entire page — the page had never rendered. Fixed + StatusBadge
+hardened to render null on missing status.
 
 Every defect below was **verified against the real code** (finder + independent
 adversarial verifier, then personally re-confirmed before fixing), fixed with a
