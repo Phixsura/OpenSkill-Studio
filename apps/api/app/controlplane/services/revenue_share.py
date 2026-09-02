@@ -641,10 +641,18 @@ async def generate_statement(
                 "STATEMENT_STATUS_CONFLICT", "Statement already finalized for this period", 409
             )
         statement = existing
-        # Regeneration: unbind previously collected rows
+        # Regeneration: unbind previously collected rows.
+        # R50[42]: manual_adjustment entries stay bound — they are represented
+        # in net solely by manual_adjustments_minor. Unbinding them made the
+        # re-collect sweep them into share_total (status='adjusted', period
+        # matches) while manual_adjustments_minor still carried them → every
+        # regenerate after an adjustment double-counted it.
         await db.execute(
             update(RevenueShareEntry)
-            .where(RevenueShareEntry.statement_id == statement.id)
+            .where(
+                RevenueShareEntry.statement_id == statement.id,
+                RevenueShareEntry.source_type != "manual_adjustment",
+            )
             .values(statement_id=None)
         )
     else:
@@ -672,6 +680,8 @@ async def generate_statement(
         ),
         RevenueShareEntry.statement_id.is_(None),
         RevenueShareEntry.status.in_(["accrued", "adjusted"]),
+        # R50[42]: defensive — manual adjustments are never collectible.
+        RevenueShareEntry.source_type != "manual_adjustment",
     ]
     # Current-period entries + late adjustments from earlier periods (opening)
     current = (

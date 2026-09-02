@@ -152,6 +152,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # R50[46]: guest comments have author_id=NULL (client_author_label is
+    # their only authorship record). Restoring NOT NULL with such rows
+    # present fails mid-downgrade — after the label column was already
+    # destroyed. Remove guest comments FIRST (they are portal-only data
+    # that cannot exist in the pre-portal schema), then drop the columns.
+    op.execute("DELETE FROM submission_comments WHERE author_id IS NULL")
     op.drop_column("submission_comments", "client_author_label")
     op.drop_column("submission_comments", "client_visible")
     op.alter_column("submission_comments", "author_id", nullable=False)

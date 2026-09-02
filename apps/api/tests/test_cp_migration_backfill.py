@@ -146,3 +146,45 @@ async def test_org_auto_creates_trial_tenant(db):
     tenant = await db.get(TenantAccount, org.tenant_id)
     assert tenant.status.value == "trial"
     assert tenant.trial_ends_at is not None
+
+
+def test_cp09_downgrade_clears_guest_comments_before_not_null():
+    """R50[46]: portal guests create comments with author_id=NULL. cp09's
+    downgrade restores NOT NULL on author_id — with guest rows present it
+    failed midway, AFTER client_author_label (their only authorship record)
+    was already dropped. The downgrade must delete author-less comments
+    BEFORE dropping the label column and restoring the constraint.
+
+    Live downgrade runs are excluded here by design (see module docstring:
+    concurrent DDL on the shared dev DB deadlocks), so assert the ordering
+    property on the migration source.
+    """
+    from pathlib import Path
+
+    src = Path("migrations/versions/cp09c0000009_client_portal.py").read_text()
+    dg = src.split("def downgrade()")[1]
+    delete_pos = dg.find("DELETE FROM submission_comments WHERE author_id IS NULL")
+    drop_label_pos = dg.find('drop_column("submission_comments", "client_author_label")')
+    not_null_pos = dg.find('alter_column("submission_comments", "author_id", nullable=False)')
+    assert delete_pos != -1, "guest-comment cleanup missing from cp09 downgrade"
+    assert drop_label_pos != -1 and not_null_pos != -1
+    assert delete_pos < drop_label_pos < not_null_pos, (
+        "cleanup must precede label drop and NOT NULL restore"
+    )
+
+
+@pytest.mark.asyncio
+async def test_settlement_hot_path_indexes_exist(db):
+    """R50[43]/[44]: run-terminal settlement filters cp_usage_events by
+    workflow_run_id; void_invoice / margin accrual / invoice trace filter
+    cp_rated_usage by invoice_line_id. Both were unindexed full scans on
+    append-only tables. cp14 adds partial indexes — assert they exist."""
+    rows = (
+        await db.execute(
+            text(
+                "SELECT indexname FROM pg_indexes WHERE indexname IN "
+                "('ix_cp_usage_workflow_run', 'ix_cp_rated_invoice_line')"
+            )
+        )
+    ).fetchall()
+    assert {r[0] for r in rows} == {"ix_cp_usage_workflow_run", "ix_cp_rated_invoice_line"}

@@ -391,3 +391,47 @@ async def test_portal_disabled_when_entitlement_off(db):
     with pytest.raises(AppError) as exc:
         await portal_svc.require_portal_enabled(db, project)
     assert exc.value.code == "PORTAL_NOT_ENABLED"
+
+
+@pytest.mark.asyncio
+async def test_user_delete_nulls_comment_authorship(db):
+    """R50[45]: the DB FK on submission_comments.author_id was created with NO
+    ACTION while the model declares SET NULL — deleting a user with comments
+    raised an FK violation. cp14 recreates the FK; deleting the author must
+    null authorship, not error, and the comment survives."""
+    from sqlalchemy import delete as sa_delete
+
+    from app.models.project import DeliverableType, ItemType, ProjectDeliverable
+    from app.models.user import User as _User
+
+    user = await _mk_user(db)
+    author = await _mk_user(db)
+    org, _, _, project, submission = await _mk_project_env(db, user)
+    deliverable = ProjectDeliverable(project_id=project.id, name="D", type=DeliverableType.TEXT)
+    db.add(deliverable)
+    await db.flush()
+    item = SubmissionItem(
+        submission_id=submission.id,
+        deliverable_id=deliverable.id,
+        type=ItemType.TEXT,
+        content="t",
+        uploaded_by=user.id,
+    )
+    db.add(item)
+    await db.flush()
+    comment = SubmissionComment(
+        org_id=org.id,
+        submission_id=submission.id,
+        item_id=item.id,
+        author_id=author.id,
+        text="left by soon-deleted user",
+    )
+    db.add(comment)
+    await db.flush()
+    # Hard-delete the author — must not raise, comment survives author-less
+    await db.execute(sa_delete(_User).where(_User.id == author.id))
+    await db.flush()
+    db.expire(comment)
+    await db.refresh(comment)
+    assert comment.author_id is None
+    assert comment.text == "left by soon-deleted user"

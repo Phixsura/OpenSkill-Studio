@@ -320,7 +320,11 @@ async def test_statement_lifecycle_and_totals(db):
         db, statement, amount_minor=-1500, reason="chargeback share", actor=_actor(user)
     )
     assert statement.net_amount_minor == 13500
-    # Regeneration in draft keeps totals reproducible (manual adj entry persists)
+    # R50[42]: regeneration must NOT double-count the manual adjustment.
+    # The old unbind released the manual entry into the collectible pool, so
+    # share_total absorbed it (13500) while manual_adjustments_minor still
+    # carried it → net dropped to 12000. Manual entries stay bound: share_total
+    # remains the accrual sum and net is reproducible across regenerations.
     statement = await revshare_svc.generate_statement(
         db,
         beneficiary_type="partner",
@@ -329,7 +333,19 @@ async def test_statement_lifecycle_and_totals(db):
         period=period,
         actor=_actor(user),
     )
-    assert statement.share_total_minor == 15000 - 1500  # manual entry now in-period
+    assert statement.share_total_minor == 15000
+    assert statement.manual_adjustments_minor == -1500
+    assert statement.net_amount_minor == 13500
+    # Regenerating again is idempotent on totals
+    statement = await revshare_svc.generate_statement(
+        db,
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        beneficiary_org_id=None,
+        period=period,
+        actor=_actor(user),
+    )
+    assert statement.net_amount_minor == 13500
     # finalize → approve → mark-paid
     statement = await revshare_svc.transition_statement(
         db, statement, "finalize", actor=_actor(user)

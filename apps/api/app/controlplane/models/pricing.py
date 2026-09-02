@@ -113,6 +113,13 @@ class RatedUsage(Base):
             "status",
             postgresql_where="status = 'blocked'",
         ),
+        # R50[44]: void_invoice unbind, margin accrual and invoice trace
+        # all filter on invoice_line_id
+        Index(
+            "ix_cp_rated_invoice_line",
+            "invoice_line_id",
+            postgresql_where="invoice_line_id IS NOT NULL",
+        ),
     )
 
     id: Mapped[str] = ulid_pk()

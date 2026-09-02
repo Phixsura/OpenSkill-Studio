@@ -56,6 +56,12 @@ class UsageEvent(Base):
         Index("ix_cp_usage_tenant_time", "tenant_id", "occurred_at"),
         Index("ix_cp_usage_org_time", "org_id", "occurred_at"),
         Index("ix_cp_usage_type_time", "usage_type", "occurred_at"),
+        # R50[43]: run-terminal settlement selects by workflow_run_id
+        Index(
+            "ix_cp_usage_workflow_run",
+            "workflow_run_id",
+            postgresql_where="workflow_run_id IS NOT NULL",
+        ),
     )
 
     id: Mapped[str] = ulid_pk()
