@@ -260,26 +260,47 @@ class WorkflowRuntimeService:
         if install is None or install.org_id != org_id or install.status == InstallStatus.REMOVED:
             raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
 
+        # R74[2]: an idempotent RETRY of an already-accepted run must not be
+        # re-gated — the run was admitted when it was created; hitting the
+        # monthly cap (which the accepted run itself may have consumed) or a
+        # subsequent suspension on the retry turns "safe to retry" into a
+        # 403/409 lottery. Probe cheaply here; the full validation (same
+        # member, same inputs) still runs at the main lookup below.
+        _is_idempotent_retry = False
+        if idempotency_key:
+            _probe = await self.db.execute(
+                select(WorkflowRun.id)
+                .where(
+                    WorkflowRun.org_id == org_id,
+                    WorkflowRun.idempotency_key == idempotency_key,
+                )
+                .limit(1)
+            )
+            _is_idempotent_retry = _probe.scalar_one_or_none() is not None
+
         # Issue #27 §2.5: suspended tenants cannot start costed executions;
         # active tenants are bounded by max_workflow_runs_month.
         from app.controlplane import facade as cp_facade
 
         tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
-        cp_facade.require_tenant_active(tenant)
-        month_start = _tenant_month_start(tenant.timezone, _now())
-        from app.models.organization import Organization as _Org
+        if not _is_idempotent_retry:
+            cp_facade.require_tenant_active(tenant)
+            month_start = _tenant_month_start(tenant.timezone, _now())
+            from app.models.organization import Organization as _Org
 
-        run_count = (
-            await self.db.execute(
-                select(func.count(WorkflowRun.id))
-                .join(_Org, _Org.id == WorkflowRun.org_id)
-                .where(
-                    _Org.tenant_id == tenant.id,
-                    WorkflowRun.created_at >= month_start,
+            run_count = (
+                await self.db.execute(
+                    select(func.count(WorkflowRun.id))
+                    .join(_Org, _Org.id == WorkflowRun.org_id)
+                    .where(
+                        _Org.tenant_id == tenant.id,
+                        WorkflowRun.created_at >= month_start,
+                    )
                 )
+            ).scalar_one()
+            await cp_facade.check_quota(
+                self.db, tenant, "max_workflow_runs_month", current=run_count
             )
-        ).scalar_one()
-        await cp_facade.check_quota(self.db, tenant, "max_workflow_runs_month", current=run_count)
 
         # Resolve the effective definition: forked local copy or release manifest
         definition = install.local_definition
@@ -308,9 +329,12 @@ class WorkflowRuntimeService:
         projected = await _credits.estimate_run_cost_minor(
             self.db, definition, org_id, tenant.currency
         )
-        await cp_facade.check_budget(
-            self.db, tenant, org_id, usage_type="workflow_run", projected_minor=projected
-        )
+        # R74[2]: budget gate also skipped on idempotent retries (the accepted
+        # run's own projected spend must not re-block its retry).
+        if not _is_idempotent_retry:
+            await cp_facade.check_budget(
+                self.db, tenant, org_id, usage_type="workflow_run", projected_minor=projected
+            )
 
         # Validate run inputs against the definition's input schema
         input_defs = {i["key"]: i for i in definition.get("inputs", [])}

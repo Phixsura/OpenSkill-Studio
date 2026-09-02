@@ -255,7 +255,7 @@ class OrgService:
 
     # ── Members ──
 
-    async def _check_seat_quota(self, org_id: str, role: OrgRole) -> None:
+    async def _check_seat_quota(self, org_id: str, role: OrgRole, user_id: str) -> None:
         """Issue #27 §2.5: enforce tenant seat entitlements. Single funnel —
         add_member is the only row-creation path, so direct adds, invitation
         accepts, and invite-link joins are all covered here."""
@@ -299,7 +299,30 @@ class OrgService:
                 OrgMember.role.in_([OrgRole.INSTRUCTOR, OrgRole.ADMIN, OrgRole.OWNER])
             )
         current = (await self.db.execute(current_q)).scalar_one()
-        await facade.check_quota(self.db, tenant, key, current=current)
+        # R74[1]: current counts DISTINCT users tenant-wide (matching billing's
+        # live-seats), but requested was always 1 — adding a user who ALREADY
+        # holds a seat in a sibling org (same role class) was falsely rejected
+        # at the cap even though the addition consumes no new seat.
+        already_counted_q = (
+            select(func.count(OrgMember.id))
+            .select_from(OrgMember)
+            .join(Organization, Organization.id == OrgMember.org_id)
+            .where(
+                Organization.tenant_id == tenant.id,
+                OrgMember.status == MemberStatus.ACTIVE,
+                OrgMember.user_id == user_id,
+            )
+        )
+        if role == OrgRole.STUDENT:
+            already_counted_q = already_counted_q.where(OrgMember.role == OrgRole.STUDENT)
+        else:
+            already_counted_q = already_counted_q.where(
+                OrgMember.role.in_([OrgRole.INSTRUCTOR, OrgRole.ADMIN, OrgRole.OWNER])
+            )
+        already_counted = (await self.db.execute(already_counted_q)).scalar_one() > 0
+        await facade.check_quota(
+            self.db, tenant, key, current=current, requested=0 if already_counted else 1
+        )
 
     async def add_member(
         self, org_id: str, user_id: str, role: OrgRole, invited_by: str | None = None
@@ -317,14 +340,14 @@ class OrgService:
         if existing is not None:
             if existing.status == MemberStatus.ARCHIVED:
                 # Re-activation consumes a seat again — same quota gate
-                await self._check_seat_quota(org_id, role)
+                await self._check_seat_quota(org_id, role, user_id)
                 existing.status = MemberStatus.ACTIVE
                 existing.role = role
                 await self.db.flush()
                 return existing
             raise AlreadyMemberError()
 
-        await self._check_seat_quota(org_id, role)
+        await self._check_seat_quota(org_id, role, user_id)
         member = OrgMember(
             org_id=org_id,
             user_id=user_id,
@@ -383,9 +406,9 @@ class OrgService:
         old_staff = old_role in staff_roles
         new_staff = new_role in staff_roles
         if new_staff and not old_staff:
-            await self._check_seat_quota(org_id, new_role)  # student → staff
+            await self._check_seat_quota(org_id, new_role, user_id)  # student → staff
         elif new_role == OrgRole.STUDENT and old_role != OrgRole.STUDENT:
-            await self._check_seat_quota(org_id, OrgRole.STUDENT)  # staff → student
+            await self._check_seat_quota(org_id, OrgRole.STUDENT, user_id)  # staff → student
 
         # Prevent removing the last owner — lock owner rows to serialize
         # concurrent demotions and prevent TOCTOU race to zero owners

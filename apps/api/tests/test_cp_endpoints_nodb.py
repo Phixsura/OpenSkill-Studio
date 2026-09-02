@@ -523,3 +523,24 @@ async def test_learning_path_install_requires_auth(client):
         json={"listing_id": "01JBLPLISTING0000000000000"},
     )
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_paginated_lists_accept_page_params(client):
+    """R76[3]: payments/purchases/partners/rules lists had a hidden fixed
+    LIMIT and fabricated meta — records past the cap were unreachable.
+    They now accept page/per_page (401 here proves routing, bounds via 422)."""
+    for path in (
+        "/api/v1/tenants/01JX0000000000000000000000/payments?page=2&per_page=10",
+        "/api/v1/tenants/01JX0000000000000000000000/purchases?page=2&per_page=10",
+        "/api/v1/platform/partners?page=2&per_page=10",
+        "/api/v1/platform/revenue-share-rules?page=2&per_page=10",
+        "/api/v1/partners/01JX0000000000000000000000/tenants?page=2&per_page=10",
+    ):
+        r = await client.get(path)
+        assert r.status_code == 401, f"{path} → {r.status_code}"
+    # Out-of-bounds page params are clean 422s, not 500s
+    r = await client.get(
+        "/api/v1/tenants/01JX0000000000000000000000/payments?page=0&per_page=100000"
+    )
+    assert r.status_code in (401, 422)

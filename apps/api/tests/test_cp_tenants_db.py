@@ -636,3 +636,69 @@ async def test_revoked_grant_kills_minted_token(db):
     finally:
         app.router.lifespan_context = orig
         await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_org_create_under_tenant_respects_cap():
+    """R74[3]: count-then-insert raced — two concurrent POST /tenants/{id}/orgs
+    both counted under max_organizations and both inserted. FOR UPDATE on the
+    tenant row serializes; exactly one wins at the cap.
+
+    NOTE: ASGITransport serializes requests on one loop, so this exercises
+    the cap logic sequentially — the FOR UPDATE itself is the concurrency
+    defense (same pattern proven under true concurrency in
+    test_concurrent_seat_join_single_winner)."""
+    import asyncio as _asyncio
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.plan import TenantEntitlementOverride
+    from app.controlplane.services.entitlements import invalidate_cache
+    from app.core.database import AsyncSessionLocal, engine
+    from app.core.security import create_access_token
+    from app.main import app
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            owner = await _mk_user(setup)
+            tenant = await _mk_tenant(setup, owner)
+            await tenant_svc.transition_status(
+                setup, tenant, TenantStatus.ACTIVE, actor=_actor(owner)
+            )
+            # cap orgs at 1 — tenant has 0, so exactly one create may pass
+            setup.add(
+                TenantEntitlementOverride(
+                    tenant_id=tenant.id,
+                    key="max_organizations",
+                    value={"v": 1},
+                    reason="r74 race",
+                )
+            )
+            await setup.commit()
+            tenant_id = tenant.id
+            token = create_access_token(owner.id, owner.email, owner.role.value)
+        await invalidate_cache(tenant_id)
+
+        @asynccontextmanager
+        async def _noop(a):
+            yield
+
+        async def create(n):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+                r = await c.post(
+                    f"/api/v1/tenants/{tenant_id}/orgs",
+                    json={"name": f"Race {n}", "slug": f"rc74-{n}-{str(ULID()).lower()}"},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                return r.status_code
+
+        orig = app.router.lifespan_context
+        app.router.lifespan_context = _noop
+        try:
+            s1, s2 = await _asyncio.gather(create(1), create(2))
+        finally:
+            app.router.lifespan_context = orig
+        assert sorted([s1, s2]) == [201, 403], (s1, s2)
+    finally:
+        await engine.dispose()

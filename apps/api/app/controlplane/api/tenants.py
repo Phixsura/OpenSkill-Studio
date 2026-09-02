@@ -284,6 +284,14 @@ async def create_org_under_tenant(
     tenant = await db.get(TenantAccount, tenant_id)
     tenant_svc.require_tenant_active(tenant)
 
+    # R74[3]: count-then-insert raced — two concurrent creates both counted
+    # under max_organizations and both inserted. FOR UPDATE on the tenant row
+    # serializes the check+insert (same serialization point the plan-version
+    # activation and seat-quota paths use).
+    await db.execute(
+        select(TenantAccount.id).where(TenantAccount.id == tenant_id).with_for_update()
+    )
+
     # Entitlement: max_organizations (facade — engine lands in P2, the stub
     # counts and passes; wire is in place from day one)
     from sqlalchemy import func as _f

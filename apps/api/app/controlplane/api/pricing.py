@@ -591,6 +591,9 @@ async def create_recon_report(
     db: AsyncSession = Depends(get_db),
 ):
     year, month = int(body.period[:4]), int(body.period[5:7])
+    # R76[2]: '0000' passes the regex but datetime rejects year 0 → 500.
+    if year < 1:
+        raise AppError("VALIDATION_ERROR", "period year out of range", 422)
     start = datetime(year, month, 1, tzinfo=UTC)
     end = datetime(year + (month == 12), (month % 12) + 1, 1, tzinfo=UTC)
     # R61[4]: platform_cost summed internal_cost_minor across rows whose

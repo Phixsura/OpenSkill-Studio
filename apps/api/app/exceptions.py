@@ -23,6 +23,13 @@ _INPUT_SQLSTATES = frozenset(
         "22P02",  # invalid_text_representation (NaN/Infinity in JSONB)
         "22001",  # string_data_right_truncation (value too long for VARCHAR(N))
         "22003",  # numeric_value_out_of_range (Numeric(p,s) overflow — reaches PG)
+        # R76[1]: asyncpg's timestamptz encoder calls .astimezone(utc) which
+        # OverflowErrors for extreme-but-Pydantic-valid datetimes (year 1 at
+        # +14:00); asyncpg wraps it in DataError with the GENERIC sqlstate
+        # 22000 — the earlier no-sqlstate arm never matched, so every
+        # datetime filter param was a 500 vector.
+        "22000",  # data_exception (generic — asyncpg client-side encode faults)
+        "22008",  # datetime_field_overflow (server-side variant)
     }
 )
 

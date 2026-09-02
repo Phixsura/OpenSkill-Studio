@@ -873,3 +873,55 @@ async def test_concurrent_same_slug_org_create_clean_conflict():
         assert other in ("SLUG_ALREADY_EXISTS", "TENANT_SLUG_TAKEN", "ok"), (r1, r2)
     finally:
         await engine.dispose()
+
+
+# ── R74: quota-counting semantics ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_already_seated_user_joins_second_org_at_cap(db):
+    """R74[1]: current counts DISTINCT users tenant-wide but requested was
+    always 1 — adding a user who already holds a seat in a sibling org was
+    falsely rejected at the cap even though no new seat is consumed."""
+    from app.models.organization import OrgRole
+    from app.services.organization import OrgService
+
+    owner = await _mk_user(db)
+    svc = OrgService(db)
+    org_a = await svc.create(
+        name=f"A74 {ULID()}",
+        slug=f"a74-{str(ULID()).lower()}",
+        description=None,
+        created_by=owner.id,
+    )
+    tenant = await db.get(TenantAccount, org_a.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    org_b = await svc.create(
+        name=f"B74 {ULID()}",
+        slug=f"b74-{str(ULID()).lower()}",
+        description=None,
+        created_by=owner.id,
+        tenant_id=tenant.id,
+    )
+    await plan_svc.set_override(
+        db,
+        tenant.id,
+        "max_active_learners",
+        value=1,
+        enforcement="hard",
+        expires_at=None,
+        reason="cap",
+        actor=_actor(owner),
+    )
+    await invalidate_cache(tenant.id)
+    student = await _mk_user(db)
+    await svc.add_member(org_a.id, student.id, OrgRole.STUDENT)  # consumes THE seat
+    # Same user joins org B — distinct count stays 1, must pass at cap=1
+    member_b = await svc.add_member(org_b.id, student.id, OrgRole.STUDENT)
+    assert member_b.org_id == org_b.id
+    # A DIFFERENT user is properly rejected
+    other = await _mk_user(db)
+    with pytest.raises(AppError) as exc:
+        await svc.add_member(org_a.id, other.id, OrgRole.STUDENT)
+    assert exc.value.code == "QUOTA_EXCEEDED"

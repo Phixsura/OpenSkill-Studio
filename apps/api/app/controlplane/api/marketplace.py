@@ -470,17 +470,29 @@ async def tenant_licenses(
 @router.get("/tenants/{tenant_id}/purchases", dependencies=[Depends(rate_limit(30, 60))])
 async def tenant_purchases(
     tenant_id: str,
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await tenant_svc.require_tenant_member(db, tenant_id, user)
+    # R76[3]: hard limit(100) + fabricated meta hid everything past the cap.
+    total = (
+        await db.execute(
+            select(func.count(MarketplacePurchase.id)).where(
+                MarketplacePurchase.buyer_tenant_id == tenant_id
+            )
+        )
+    ).scalar_one()
+    offset = (page - 1) * per_page
     rows = (
         (
             await db.execute(
                 select(MarketplacePurchase)
                 .where(MarketplacePurchase.buyer_tenant_id == tenant_id)
-                .order_by(MarketplacePurchase.created_at.desc())
-                .limit(100)
+                .order_by(MarketplacePurchase.created_at.desc(), MarketplacePurchase.id.desc())
+                .offset(offset)
+                .limit(per_page)
             )
         )
         .scalars()
@@ -488,7 +500,9 @@ async def tenant_purchases(
     )
     return ListResponse(
         data=[_purchase_response(p) for p in rows],
-        meta=PaginationMeta(total=len(rows), page=1, per_page=len(rows) or 1, has_more=False),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
+        ),
     )
 
 

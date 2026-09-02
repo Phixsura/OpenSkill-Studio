@@ -227,17 +227,31 @@ async def create_partner(
 
 @router.get("/platform/partners", dependencies=[Depends(rate_limit(30, 60))])
 async def list_partners(
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(require_platform_role(*_BILLING_ROLES, "platform_support")),
     db: AsyncSession = Depends(get_db),
 ):
+    # R76[3]: fixed limit(200) + fabricated meta hid partners past the cap.
+    total = (await db.execute(select(func.count(Partner.id)))).scalar_one()
+    offset = (page - 1) * per_page
     rows = (
-        (await db.execute(select(Partner).order_by(Partner.created_at.desc()).limit(200)))
+        (
+            await db.execute(
+                select(Partner)
+                .order_by(Partner.created_at.desc(), Partner.id.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+        )
         .scalars()
         .all()
     )
     return ListResponse(
         data=[_partner_response(p) for p in rows],
-        meta=PaginationMeta(total=len(rows), page=1, per_page=len(rows) or 1, has_more=False),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
+        ),
     )
 
 
@@ -430,14 +444,25 @@ async def activate_rule(
 @router.get("/platform/revenue-share-rules", dependencies=[Depends(rate_limit(30, 60))])
 async def list_rules(
     partner_id: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(require_platform_role(*_BILLING_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(RevenueShareRule)
     if partner_id:
         q = q.where(RevenueShareRule.partner_id == partner_id)
+    # R76[3]: fixed limit(200) + fabricated meta hid rules past the cap.
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+    offset = (page - 1) * per_page
     rows = (
-        (await db.execute(q.order_by(RevenueShareRule.created_at.desc()).limit(200)))
+        (
+            await db.execute(
+                q.order_by(RevenueShareRule.created_at.desc(), RevenueShareRule.id.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+        )
         .scalars()
         .all()
     )
@@ -458,7 +483,9 @@ async def list_rules(
     ]
     return ListResponse(
         data=data,
-        meta=PaginationMeta(total=len(data), page=1, per_page=len(data) or 1, has_more=False),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
+        ),
     )
 
 
@@ -498,46 +525,54 @@ async def get_partner(
 @router.get("/partners/{partner_id}/tenants", dependencies=[Depends(rate_limit(30, 60))])
 async def partner_tenants(
     partner_id: str,
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Attributed tenants — COMMERCIAL METADATA ONLY (name/status/plan/created);
     no usage or revenue detail (issue §22)."""
     await require_partner_member(db, partner_id, user, "admin")
-    rows = (
-        (
-            await db.execute(
-                select(TenantAccount)
-                .where(TenantAccount.partner_id == partner_id)
-                .order_by(TenantAccount.created_at.desc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    data = []
-    for t in rows:
-        from app.controlplane.services.billing import get_live_subscription
+    # R76[4]: was unbounded (no LIMIT) with 3 queries per row (live sub,
+    # version, plan) — a big-book partner degraded into hundreds of point
+    # lookups per request. Paginate + resolve the plan key in ONE joined
+    # query for the page.
+    from app.controlplane.models.billing import Subscription
 
-        sub = await get_live_subscription(db, t.id)
-        plan_key = None
-        if sub is not None:
-            version = await db.get(PlanVersion, sub.plan_version_id)
-            plan = await db.get(ProductPlan, version.plan_id) if version else None
-            plan_key = plan.key if plan else None
-        data.append(
-            {
-                "tenant_id": t.id,
-                "name": t.name,
-                "slug": t.slug,
-                "status": t.status.value,
-                "plan_key": plan_key,
-                "created_at": t.created_at.isoformat(),
-            }
+    base = select(TenantAccount).where(TenantAccount.partner_id == partner_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    offset = (page - 1) * per_page
+    rows = (
+        await db.execute(
+            select(TenantAccount, ProductPlan.key)
+            .outerjoin(
+                Subscription,
+                (Subscription.tenant_id == TenantAccount.id) & (Subscription.status != "cancelled"),
+            )
+            .outerjoin(PlanVersion, PlanVersion.id == Subscription.plan_version_id)
+            .outerjoin(ProductPlan, ProductPlan.id == PlanVersion.plan_id)
+            .where(TenantAccount.partner_id == partner_id)
+            .order_by(TenantAccount.created_at.desc(), TenantAccount.id.desc())
+            .offset(offset)
+            .limit(per_page)
         )
+    ).all()
+    data = [
+        {
+            "tenant_id": t.id,
+            "name": t.name,
+            "slug": t.slug,
+            "status": t.status.value,
+            "plan_key": plan_key,
+            "created_at": t.created_at.isoformat(),
+        }
+        for t, plan_key in rows
+    ]
     return ListResponse(
         data=data,
-        meta=PaginationMeta(total=len(data), page=1, per_page=len(data) or 1, has_more=False),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
+        ),
     )
 
 

@@ -392,17 +392,29 @@ async def get_invoice(
 @router.get("/tenants/{tenant_id}/payments", dependencies=[Depends(rate_limit(30, 60))])
 async def list_payments(
     tenant_id: str,
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await tenant_svc.require_tenant_member(db, tenant_id, user)
+    # R76[3]: a hard limit(100) with meta fabricated from the truncated slice
+    # (total=len, has_more=False) made records beyond the cap silently
+    # unreachable — the API lied about completeness. Real pagination.
+    total = (
+        await db.execute(
+            select(func.count(PaymentRecord.id)).where(PaymentRecord.tenant_id == tenant_id)
+        )
+    ).scalar_one()
+    offset = (page - 1) * per_page
     rows = (
         (
             await db.execute(
                 select(PaymentRecord)
                 .where(PaymentRecord.tenant_id == tenant_id)
-                .order_by(PaymentRecord.created_at.desc())
-                .limit(100)
+                .order_by(PaymentRecord.created_at.desc(), PaymentRecord.id.desc())
+                .offset(offset)
+                .limit(per_page)
             )
         )
         .scalars()
@@ -422,7 +434,9 @@ async def list_payments(
     ]
     return ListResponse(
         data=data,
-        meta=PaginationMeta(total=len(data), page=1, per_page=len(data) or 1, has_more=False),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
+        ),
     )
 
 

@@ -316,3 +316,43 @@ async def test_dashboard_reports_mrr_per_currency(db):
     assert data["mrr_minor"] == data["mrr_by_currency"].get("USD", 0)
     # usage totals expose per-currency billable, never a mixed grand total.
     assert "billable_by_currency" in data["totals"]
+
+
+@pytest.mark.asyncio
+async def test_extreme_datetime_filter_returns_422_not_500(db):
+    """R76[1]: asyncpg's timestamptz encoder OverflowErrors on extreme-but-
+    Pydantic-valid datetimes (year 1 at +14:00) and wraps it in DataError
+    with GENERIC sqlstate 22000 — which the DBAPIError backstop didn't map,
+    so every datetime filter param was a 500 vector. 22000/22008 now → 422."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.get(
+                "/api/v1/platform/usage-events",
+                params={"from": "0001-01-01T00:00:00+14:00"},
+                headers=hdr,
+            )
+            assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text[:200]}"
+            assert r.json()["error"]["code"] == "INVALID_VALUE"
+    finally:
+        app.router.lifespan_context = orig
+        await db.rollback()
