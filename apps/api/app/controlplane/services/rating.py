@@ -185,6 +185,12 @@ async def resolve_fx(
     ).scalar_one_or_none()
     if inverse is not None and inverse.rate != 0:
         rate = (Decimal(1) / inverse.rate).quantize(Decimal("0.00000001"))
+        # R61[3]: a hyperinflated stored rate (>1e8) inverts to Decimal 0 at
+        # 8dp — a zero rate silently rates every conversion to 0 (free usage).
+        # Treat an unrepresentable inverse as "no rate": the row blocks and
+        # ops must enter the direct rate for the pair.
+        if rate <= 0:
+            return None
         return rate, {
             "fx_rate_id": inverse.id,
             "base": base,
@@ -791,15 +797,40 @@ async def _handle_usage_recorded(db: AsyncSession, payload: dict) -> None:
 
 @register_handler("fx.rate_created")
 async def _handle_fx_created(db: AsyncSession, payload: dict) -> None:
-    """Retry blocked ratings once a new rate lands."""
-    blocked = (
-        (
-            await db.execute(
-                select(RatedUsage.usage_event_id).where(RatedUsage.status == "blocked").limit(500)
+    """Retry blocked ratings once a new rate lands.
+
+    R61[2]: the old version selected 500 ARBITRARY blocked rows (no pair
+    filter, no ORDER BY, no continuation): with 600 rows blocked on a pair
+    that still has no rate, the 500 it picked could all be unfixable — the
+    rows the new rate WOULD fix were never reached and stayed blocked until
+    an unrelated manual rating run. Filter to rows whose recorded fx_gap
+    mentions the created pair (either direction — resolve_fx uses inverses),
+    order deterministically, and page through ALL of them.
+    """
+    fx = await db.get(FxRate, payload.get("fx_rate_id", "")) if payload else None
+    q = select(RatedUsage.usage_event_id, RatedUsage.id).where(RatedUsage.status == "blocked")
+    if fx is not None:
+        gap = f"{fx.base_currency}->{fx.quote_currency}"
+        inv = f"{fx.quote_currency}->{fx.base_currency}"
+        # fx_gaps is recorded inside sell_rate_snapshot (JSONB list of strings)
+        q = q.where(
+            or_(
+                RatedUsage.sell_rate_snapshot["fx_gaps"].contains([gap]),
+                RatedUsage.sell_rate_snapshot["fx_gaps"].contains([inv]),
             )
         )
-        .scalars()
-        .all()
-    )
-    for event_id in blocked:
-        await rate_event(db, event_id)
+    # Keyset pagination on id: rate_event flips FIXED rows out of 'blocked'
+    # (shrinking the result set), so OFFSET would skip rows — the id cursor
+    # advances past both fixed and still-unfixable rows exactly once.
+    last_id = ""
+    while True:
+        batch = (
+            await db.execute(q.where(RatedUsage.id > last_id).order_by(RatedUsage.id).limit(500))
+        ).all()
+        if not batch:
+            break
+        for event_id, row_id in batch:
+            await rate_event(db, event_id)
+            last_id = row_id
+        if len(batch) < 500:
+            break

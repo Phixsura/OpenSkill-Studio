@@ -50,6 +50,7 @@ AUDIT_ACTIONS = frozenset(
         "pricing.cost_rate_created",
         "pricing.cost_rate_superseded",
         "fx.rate_created",
+        "fx.rate_superseded",
         # usage
         "usage.adjusted",
         "rated_usage.voided",

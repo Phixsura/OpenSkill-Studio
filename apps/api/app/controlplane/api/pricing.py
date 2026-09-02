@@ -593,10 +593,23 @@ async def create_recon_report(
     year, month = int(body.period[:4]), int(body.period[5:7])
     start = datetime(year, month, 1, tzinfo=UTC)
     end = datetime(year + (month == 12), (month % 12) + 1, 1, tzinfo=UTC)
+    # R61[4]: platform_cost summed internal_cost_minor across rows whose
+    # internal_cost_currency may differ (nothing pins a provider to one
+    # currency — a superseding EUR cost rate mid-month splits the rows), and
+    # the delta compared that mixed sum against a single-currency provider
+    # figure. Quantity aggregates over ALL rows; cost aggregates ONLY rows in
+    # the report's currency, and rows in other currencies are surfaced as a
+    # count so the delta is never silently polluted.
     q = (
         select(
             func.coalesce(func.sum(UsageEvent.quantity), 0),
-            func.coalesce(func.sum(RatedUsage.internal_cost_minor), 0),
+            func.coalesce(
+                func.sum(RatedUsage.internal_cost_minor).filter(
+                    RatedUsage.internal_cost_currency == body.currency
+                ),
+                0,
+            ),
+            func.count(RatedUsage.id).filter(RatedUsage.internal_cost_currency != body.currency),
         )
         .select_from(UsageEvent)
         .outerjoin(RatedUsage, RatedUsage.usage_event_id == UsageEvent.id)
@@ -609,7 +622,8 @@ async def create_recon_report(
     )
     if body.model_or_service:
         q = q.where(UsageEvent.model_or_service == body.model_or_service)
-    platform_qty, platform_cost = (await db.execute(q)).one()
+    platform_qty, platform_cost, other_currency_rows = (await db.execute(q)).one()
+    platform_cost = int(platform_cost)  # SUM+FILTER yields Decimal; the column is BigInteger
     report = ReconciliationReport(
         provider=body.provider,
         model_or_service=body.model_or_service,
@@ -622,7 +636,12 @@ async def create_recon_report(
         platform_cost_minor=platform_cost,
         delta_quantity=Decimal(body.provider_reported_quantity) - Decimal(platform_qty),
         delta_cost_minor=body.provider_reported_cost_minor - platform_cost,
-        note=body.note,
+        note=(
+            f"[{other_currency_rows} rated rows in other currencies excluded from cost] "
+            f"{body.note or ''}"
+        ).strip()[:500]
+        if other_currency_rows
+        else body.note,
         created_by=user.id,
     )
     db.add(report)
@@ -635,6 +654,7 @@ async def create_recon_report(
             "platform_cost_minor": report.platform_cost_minor,
             "delta_quantity": str(report.delta_quantity),
             "delta_cost_minor": report.delta_cost_minor,
+            "other_currency_rows": other_currency_rows,
             "status": report.status,
         }
     )

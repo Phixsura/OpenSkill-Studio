@@ -684,13 +684,265 @@ async def test_usage_recorded_handler_rates_via_outbox():
             event = await _mk_event(db, tenant)
             await db.commit()
             event_id = event.id
-        async with AsyncSessionLocal() as db:
-            await process_outbox_once(db, topics=["usage.recorded"])
-        async with AsyncSessionLocal() as db:
-            rated = (
-                await db.execute(select(RatedUsage).where(RatedUsage.usage_event_id == event_id))
-            ).scalar_one_or_none()
-            assert rated is not None
-            assert rated.status == "rated"
+        # The shared dev DB accumulates pending usage.recorded debris from
+        # other test runs; one 50-row batch may not reach OUR message. Drain
+        # in bounded batches until our event is rated (available_at ordering
+        # guarantees progress toward it).
+        rated = None
+        for _ in range(80):
+            async with AsyncSessionLocal() as db:
+                handled = await process_outbox_once(db, topics=["usage.recorded"])
+                await db.commit()
+            async with AsyncSessionLocal() as db:
+                rated = (
+                    await db.execute(
+                        select(RatedUsage).where(RatedUsage.usage_event_id == event_id)
+                    )
+                ).scalar_one_or_none()
+                if rated is not None:
+                    break
+            if handled == 0:
+                break
+        assert rated is not None
+        assert rated.status == "rated"
     finally:
         await engine.dispose()
+
+
+# ── R61: FX lifecycle + unblock targeting ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_fx_rate_supersede_open_ended(db):
+    """R61[1]: an open-ended FX rate blocked every future rate for the pair
+    forever (no supersede path). Creating a newer rate now auto-closes the
+    live open-ended window at the new effective_from; point-in-time reads
+    still resolve the old rate for old timestamps."""
+    user = await _mk_user(db)
+    pair = dict(base_currency="USD", quote_currency="SEK")
+    old_rate = await pricing_svc.create_fx_rate(
+        db,
+        actor=_actor(user),
+        rate=Decimal("10.5"),
+        effective_from=datetime.now(UTC) - timedelta(days=30),
+        **pair,
+    )
+    assert old_rate.effective_until is None
+    cutover = datetime.now(UTC) - timedelta(days=1)
+    new_rate = await pricing_svc.create_fx_rate(
+        db, actor=_actor(user), rate=Decimal("11.2"), effective_from=cutover, **pair
+    )
+    await db.refresh(old_rate)
+    assert old_rate.effective_until == cutover  # auto-closed
+    # Point-in-time: 10 days ago → old rate; now → new rate
+    r_old, snap_old = await rating.resolve_fx(
+        db, "USD", "SEK", datetime.now(UTC) - timedelta(days=10)
+    )
+    assert snap_old["fx_rate_id"] == old_rate.id
+    r_new, snap_new = await rating.resolve_fx(db, "USD", "SEK", datetime.now(UTC))
+    assert snap_new["fx_rate_id"] == new_rate.id
+    # A BACKDATED overlapping window is still rejected (history immutable)
+    with pytest.raises(AppError) as exc:
+        await pricing_svc.create_fx_rate(
+            db,
+            actor=_actor(user),
+            rate=Decimal("9"),
+            effective_from=datetime.now(UTC) - timedelta(days=10),
+            effective_until=datetime.now(UTC) - timedelta(days=5),
+            **pair,
+        )
+    assert exc.value.code == "FX_RATE_OVERLAP"
+
+
+@pytest.mark.asyncio
+async def test_inverse_fx_zero_guard(db):
+    """R61[3]: a hyperinflated stored rate inverts to Decimal 0 at 8dp — a
+    zero rate silently made every conversion free. Unrepresentable inverse
+    must resolve as 'no rate' (row blocks) instead."""
+    user = await _mk_user(db)
+    await pricing_svc.create_fx_rate(
+        db,
+        actor=_actor(user),
+        base_currency="USD",
+        quote_currency="VES",
+        rate=Decimal("300000000"),
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+    )
+    # Forward still works
+    fwd = await rating.resolve_fx(db, "USD", "VES", datetime.now(UTC))
+    assert fwd is not None and fwd[0] == Decimal("300000000")
+    # Inverse would quantize to 0 → treated as missing
+    inv = await rating.resolve_fx(db, "VES", "USD", datetime.now(UTC))
+    assert inv is None
+    # Sanity: a representable inverse still resolves
+    await pricing_svc.create_fx_rate(
+        db,
+        actor=_actor(user),
+        base_currency="USD",
+        quote_currency="NOK",
+        rate=Decimal("10"),
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+    )
+    inv2 = await rating.resolve_fx(db, "NOK", "USD", datetime.now(UTC))
+    assert inv2 is not None and inv2[0] == Decimal("0.1")
+
+
+@pytest.mark.asyncio
+async def test_fx_unblock_targets_created_pair(db):
+    """R61[2]: the fx.rate_created handler retried 500 ARBITRARY blocked rows
+    (no pair filter/order/continuation) — the rows the new rate would fix
+    could be starved forever behind unfixable ones. The handler now filters
+    on the recorded fx_gap of the created pair and pages through all of it."""
+    user = await _mk_user(db)
+    # Tenant billed in CZK; two policies price in HUF and PLN → two gap kinds
+    tenant = await _mk_tenant(db, user, currency="CZK")
+    for cur in ("HUF", "PLN"):
+        await pricing_svc.create_price_policy(
+            db,
+            actor=_actor(user),
+            name=f"p-{cur} {ULID()}",
+            policy_type="fixed_unit_price",
+            usage_type="image_generation" if cur == "HUF" else "voice_generation",
+            currency=cur,
+            params={"unit_price_minor": 10},
+            effective_from=datetime.now(UTC) - timedelta(days=1),
+            tenant_id=tenant.id,
+        )
+    ev_fixable = await _mk_event(db, tenant, usage_type="image_generation", quantity=1)
+    ev_unfixable = await _mk_event(db, tenant, usage_type="voice_generation", quantity=1)
+    r1 = await rating.rate_event(db, ev_fixable.id)
+    r2 = await rating.rate_event(db, ev_unfixable.id)
+    assert r1.status == "blocked" and "HUF->CZK" in r1.sell_rate_snapshot["fx_gaps"]
+    assert r2.status == "blocked" and "PLN->CZK" in r2.sell_rate_snapshot["fx_gaps"]
+    # Create ONLY the HUF->CZK rate and drive the handler with its id
+    fx = await pricing_svc.create_fx_rate(
+        db,
+        actor=_actor(user),
+        base_currency="HUF",
+        quote_currency="CZK",
+        rate=Decimal("0.06"),
+        effective_from=datetime.now(UTC) - timedelta(days=2),
+    )
+    # Record WHICH rows the handler retries — the starvation failure mode is
+    # "the fixable row never gets picked because unrelated rows fill the
+    # batch", so the pair filter must retry ONLY pair-matched rows.
+    retried: list[str] = []
+    real_rate_event = rating.rate_event
+
+    async def recording_rate_event(db_, event_id):
+        retried.append(event_id)
+        return await real_rate_event(db_, event_id)
+
+    rating.rate_event = recording_rate_event
+    try:
+        await rating._handle_fx_created(db, {"fx_rate_id": fx.id})
+    finally:
+        rating.rate_event = real_rate_event
+    await db.refresh(r1)
+    await db.refresh(r2)
+    assert r1.status == "rated", "the fixable pair-matched row must unblock"
+    assert r2.status == "blocked", "unrelated pair must not be touched"
+    assert ev_fixable.id in retried
+    assert ev_unfixable.id not in retried, (
+        "handler must target the created pair, not sweep arbitrary blocked rows"
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_cost_scoped_to_report_currency(db):
+    """R61[4]: platform_cost summed internal_cost_minor across rows in MIXED
+    internal_cost_currency (a superseding EUR cost rate mid-month splits the
+    rows) and diffed the polluted sum against a single-currency provider
+    figure. Cost now aggregates only rows in the report's currency; foreign-
+    currency rows are surfaced as a count."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    provider = f"rcn{str(ULID()).lower()[-6:]}"
+    # USD cost rate then EUR successor — one event rated under each
+    # Anchor both events INSIDE one calendar month (the report period) with
+    # the currency cutover between them.
+    t0 = datetime.now(UTC) - timedelta(hours=3)
+    if (t0 + timedelta(hours=2)).month != t0.month:
+        t0 -= timedelta(hours=3)  # avoid straddling a month boundary
+    cutover = t0 + timedelta(hours=1)
+    usd_rate = await pricing_svc.create_cost_rate(
+        db,
+        actor=_actor(user),
+        provider=provider,
+        model_or_service="m",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.10"),
+        effective_from=t0 - timedelta(days=10),
+    )
+    await pricing_svc.supersede_cost_rate(
+        db,
+        usd_rate,
+        effective_until=cutover,
+        successor={"currency": "EUR", "unit_cost": Decimal("0.09")},
+        actor=_actor(user),
+    )
+    ev_usd = await _mk_event(
+        db,
+        tenant,
+        provider=provider,
+        model_or_service="m",
+        quantity=10,
+        occurred_at=t0,
+    )
+    ev_eur = await _mk_event(
+        db,
+        tenant,
+        provider=provider,
+        model_or_service="m",
+        quantity=10,
+        occurred_at=cutover + timedelta(hours=1),
+    )
+    r_usd = await rating.rate_event(db, ev_usd.id)
+    r_eur = await rating.rate_event(db, ev_eur.id)
+    assert r_usd.internal_cost_currency == "USD" and r_usd.internal_cost_minor == 100
+    assert r_eur.internal_cost_currency == "EUR" and r_eur.internal_cost_minor == 90
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+    period = t0.strftime("%Y-%m")
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/v1/platform/reconciliation/reports",
+                json={
+                    "provider": provider,
+                    "usage_type": "image_generation",
+                    "period": period,
+                    "provider_reported_quantity": "20",
+                    "provider_reported_cost_minor": 100,
+                    "currency": "USD",
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 201, r.text
+            data = r.json()["data"]
+            # Cost: ONLY the USD row (100), not USD+EUR (190)
+            assert int(data["platform_cost_minor"]) == 100
+            assert int(data["delta_cost_minor"]) == 0
+            assert int(data["other_currency_rows"]) == 1
+    finally:
+        app.router.lifespan_context = orig
+        await db.rollback()

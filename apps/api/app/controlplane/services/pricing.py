@@ -244,6 +244,36 @@ async def create_fx_rate(db: AsyncSession, *, actor: Actor, **fields) -> FxRate:
     rate_val = Decimal(str(fields["rate"]))
     if not rate_val.is_finite() or rate_val <= 0:
         raise AppError("FX_RATE_INVALID", "rate must be a positive finite number", 422)
+    # R61[1]: FX rates were PERMANENTLY immutable — an open-ended rate blocked
+    # every future rate for the pair and no supersede path existed, so a pair,
+    # once entered, could never track the market again. Mirror the cost-rate
+    # supersede semantics: a live open-ended rate whose window started before
+    # the new rate is auto-closed at the new effective_from (the only legal
+    # mutation, audited). Point-in-time reads stay correct: old timestamps
+    # still resolve the old rate; snapshots on rated rows are untouched.
+    open_ended = (
+        await db.execute(
+            select(FxRate)
+            .where(
+                FxRate.base_currency == base,
+                FxRate.quote_currency == quote,
+                FxRate.effective_until.is_(None),
+                FxRate.effective_from < fields["effective_from"],
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if open_ended is not None:
+        open_ended.effective_until = fields["effective_from"]
+        await db.flush()
+        await record_audit(
+            db,
+            actor=actor,
+            action="fx.rate_superseded",
+            target_type="fx_rate",
+            target_id=open_ended.id,
+            after={"pair": f"{base}/{quote}", "closed_at": str(fields["effective_from"])},
+        )
     conds = [
         FxRate.base_currency == base,
         FxRate.quote_currency == quote,
