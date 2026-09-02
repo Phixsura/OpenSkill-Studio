@@ -544,3 +544,80 @@ async def test_provision_org_slug_collision_suffixes(db):
     org = await db.get(Organization, org_step["org_id"])
     assert org.slug != taken_slug
     assert org.slug.startswith(taken_slug[:20]) or "-" in org.slug
+
+
+def test_reserved_domain_whitespace_in_config(monkeypatch):
+    """R79[1]: platform_base_domains entries with surrounding whitespace
+    (' openskill.app' from a hand-edited JSON env) never matched — the
+    platform apex and every subdomain became registrable by any tenant."""
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(
+        app_settings, "platform_base_domains", [" openskill.app ", "", "  .Padded.IO"]
+    )
+    for host in ("openskill.app", "evil.openskill.app", "x.padded.io"):
+        with pytest.raises(AppError) as exc:
+            domain_svc.check_reserved(host)
+        assert exc.value.code == "DOMAIN_RESERVED", host
+    domain_svc.check_reserved("unrelated-school.com")  # still fine
+
+
+@pytest.mark.asyncio
+async def test_webhook_delivery_gated_by_entitlement(db):
+    """R77[2]: 'webhooks' was enforced only at subscription CREATE —
+    suspended tenants (SUSPENSION_MASKED_KEYS masks webhooks) kept
+    delivering through pre-existing subscriptions. The delivery path itself
+    now checks the effective entitlement."""
+    from app.controlplane.services.entitlements import invalidate_cache
+    from app.models.webhook import WebhookSubscription
+    from app.services.organization import OrgService
+    from app.services.webhook import WebhookService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"WH {ULID()}",
+        slug=f"wh-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    await invalidate_cache(tenant.id)
+    sub = WebhookSubscription(
+        org_id=org.id,
+        url="https://example.com/hook",
+        secret="s" * 32,
+        events=["pack.installed"],
+        active=True,
+    )
+    db.add(sub)
+    await db.flush()
+
+    svc = WebhookService(db)
+    scheduled: list = []
+
+    async def counting_deliver(url, secret, webhook_id, event_type, payload):
+        scheduled.append(webhook_id)
+
+    from unittest.mock import patch as _patch
+
+    from app.services.webhook import WebhookService as WhSvc
+
+    with _patch.object(WhSvc, "_deliver_background", staticmethod(counting_deliver)):
+        # Active tenant → delivery scheduled
+        await svc.trigger_event(org.id, "pack.installed", {"x": 1})
+        import asyncio as _asyncio
+
+        await _asyncio.sleep(0.05)  # let the fire-and-forget task run
+        assert scheduled == [sub.id]
+        # Suspended tenant (webhooks masked) → NOTHING scheduled
+        tenant.status = TenantStatus.SUSPENDED
+        await db.flush()
+        await invalidate_cache(tenant.id)
+        await svc.trigger_event(org.id, "pack.installed", {"x": 1})
+        await _asyncio.sleep(0.05)
+        assert scheduled == [sub.id], "suspended tenant must not deliver"
+    # The subscription row is untouched (still active) — only delivery gated
+    await db.refresh(sub)
+    assert sub.active is True

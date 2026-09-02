@@ -59,7 +59,12 @@ def check_reserved(host: str) -> None:
     if host == "localhost" or host.endswith(".localhost"):
         raise AppError("DOMAIN_RESERVED", "Reserved hostname", 422)
     for base in settings.platform_base_domains:
-        base = base.lower().lstrip(".")
+        # R79[1]: JSON env parsing preserves whitespace inside entries —
+        # ' openskill.app' never matched, silently unreserving the platform
+        # apex and every subdomain (takeover of app.openskill.app etc.).
+        base = base.strip().lower().lstrip(".")
+        if not base:
+            continue
         if host == base or host.endswith(f".{base}"):
             raise AppError("DOMAIN_RESERVED", "This domain is reserved by the platform", 422)
     # Punycode homographs: warn + audit-visible, not rejected (legit IDNs exist)

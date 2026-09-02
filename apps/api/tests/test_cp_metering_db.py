@@ -529,3 +529,85 @@ async def test_entitlement_cache_tombstone_blocks_stale_repopulate(db):
         assert await r.get(ent_key) is not None
     finally:
         await r.delete(ent_key, f"cp:entdirty:{tenant.id}", f"cp:apiquota:{tenant.id}")
+
+
+@pytest.mark.asyncio
+async def test_emit_failure_does_not_poison_completed_eval(db):
+    """R77[1]: _emit_usage_events swallowed exceptions WITHOUT a savepoint —
+    a DB error during emit left the outer transaction aborted, and the
+    caller's next flush raised PendingRollbackError, rolling back a paid
+    COMPLETED evaluation. The emissions are now savepoint-isolated."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.core.llm import LLMResponse
+    from app.models.evaluation import EvaluationTask
+    from app.services.evaluation import EvaluationService
+    from app.services.organization import OrgService
+    from app.services.project import ProjectService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"PZ {ULID()}",
+        slug=f"pz-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    eval_svc = EvaluationService(db)
+    await eval_svc.update_eval_settings(org.id, {"enabled": True, "monthly_budget_usd": 100})
+    proj_svc = ProjectService(db)
+    proj = await proj_svc.create_project(
+        org.id,
+        "PZP",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        user.id,
+    )
+    sub = await proj_svc.create_submission(org.id, proj.id, user.id)
+    await proj_svc.submit_draft(sub.id, user.id)
+    await db.flush()
+
+    good = LLMResponse(
+        content=(
+            '{"scores":[{"criterion":"Q","score":80,"max_score":100,"feedback":"ok"}],'
+            '"overall_feedback":"fine","strengths":[],"improvements":[]}'
+        ),
+        input_tokens=100,
+        output_tokens=50,
+        model="claude-sonnet-5",
+        provider="anthropic",
+    )
+
+    async def poisoned_emit(db_, **kw):
+        # Simulate a DB-level failure INSIDE the caller's session: execute
+        # broken SQL so the (sub)transaction aborts — exactly what a bad
+        # metering write does.
+        from sqlalchemy import text as _text
+
+        await db_.execute(_text("SELECT 1/0"))
+
+    with (
+        patch("app.services.evaluation.create_llm_client") as mock_create,
+        patch("app.controlplane.facade.emit_usage", side_effect=poisoned_emit),
+    ):
+        mock_llm = AsyncMock()
+        mock_llm.complete = AsyncMock(return_value=good)
+        mock_create.return_value = mock_llm
+        task = await eval_svc.trigger_evaluation(org.id, sub.id, "submission_review")
+        # The outer transaction must still be usable and the eval COMPLETED
+        await db.flush()
+    assert task.status.value == "completed"
+    # The row survives a further roundtrip through the same session
+    row = await db.get(EvaluationTask, task.id)
+    assert row is not None and row.status.value == "completed"

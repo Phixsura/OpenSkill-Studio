@@ -1170,34 +1170,42 @@ Please evaluate the submission against the rubric above."""
             "user_id": submission.user_id if submission else None,
         }
         try:
-            if not tokens_only:
-                await cp_facade.emit_usage(
-                    self.db,
-                    usage_type="multimodal_evaluation",
-                    quantity=1,
-                    idempotency_key=f"eval:{task.id}:{task.retries}:eval",
-                    metadata={
-                        "eval_type": task.type.value,
-                        "cost_usd": str(task.cost_usd) if task.cost_usd is not None else None,
-                    },
-                    **common,
-                )
-            if task.input_tokens:
-                await cp_facade.emit_usage(
-                    self.db,
-                    usage_type="llm_input_tokens",
-                    quantity=task.input_tokens,
-                    idempotency_key=f"eval:{task.id}:{task.retries}:in",
-                    **common,
-                )
-            if task.output_tokens:
-                await cp_facade.emit_usage(
-                    self.db,
-                    usage_type="llm_output_tokens",
-                    quantity=task.output_tokens,
-                    idempotency_key=f"eval:{task.id}:{task.retries}:out",
-                    **common,
-                )
+            # R77[1]: the swallow below is only safe when a DB error cannot
+            # poison the OUTER transaction. emit_usage flushes in the
+            # caller's session — a failed flush left the tx aborted, and the
+            # caller's next flush raised PendingRollbackError, converting a
+            # metering hiccup into a rolled-back COMPLETED evaluation (paid
+            # LLM call, no review, no task row). SAVEPOINT-isolate the
+            # emissions so only they roll back.
+            async with self.db.begin_nested():
+                if not tokens_only:
+                    await cp_facade.emit_usage(
+                        self.db,
+                        usage_type="multimodal_evaluation",
+                        quantity=1,
+                        idempotency_key=f"eval:{task.id}:{task.retries}:eval",
+                        metadata={
+                            "eval_type": task.type.value,
+                            "cost_usd": str(task.cost_usd) if task.cost_usd is not None else None,
+                        },
+                        **common,
+                    )
+                if task.input_tokens:
+                    await cp_facade.emit_usage(
+                        self.db,
+                        usage_type="llm_input_tokens",
+                        quantity=task.input_tokens,
+                        idempotency_key=f"eval:{task.id}:{task.retries}:in",
+                        **common,
+                    )
+                if task.output_tokens:
+                    await cp_facade.emit_usage(
+                        self.db,
+                        usage_type="llm_output_tokens",
+                        quantity=task.output_tokens,
+                        idempotency_key=f"eval:{task.id}:{task.retries}:out",
+                        **common,
+                    )
         except Exception:  # noqa: BLE001 — never fail a completed eval on metering
             log.warning("eval_usage_emit_failed", task_id=task.id, exc_info=True)
 
