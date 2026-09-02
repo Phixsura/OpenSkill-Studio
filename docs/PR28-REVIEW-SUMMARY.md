@@ -24,6 +24,16 @@ the platform tenant-detail page parsed the API's `{tenant, organizations}`
 response as a flat object, crashing StatusBadge (`undefined.replace`) and
 unmounting the entire page — the page had never rendered. Fixed + StatusBadge
 hardened to render null on missing status.
+**Browser E2E part 2** (`browser_e2e_full_lifecycle_part2.mjs`, **42/42**):
+domain wizard end-to-end (one-time token → verify → activate → site-context →
+disable), plan-change dialog with live proration preview, white_label gate,
+budgets/members CRUD, platform plan version activate, suspend → tenant-UI
+banner → costed-path 403 → reactivate, portal reviewer role gate, guest-link
+revoke mid-session, pricing/usage explorers. Caught a second real bug: the
+per-request recheck raised **403** for a revoked guest link while the portal
+UI ends sessions only on **401** — a revoked client was stranded on a dead
+page instead of bounced to the access screen. Fixed (dead credential = 401)
+and guard-proven.
 
 Every defect below was **verified against the real code** (finder + independent
 adversarial verifier, then personally re-confirmed before fixing), fixed with a
