@@ -112,6 +112,11 @@ async def update_draft(
         )
         for p in existing:
             await db.delete(p)
+        # R62[1]: flush the DELETEs BEFORE adding replacements. SQLAlchemy
+        # orders INSERTs before DELETEs within one flush, so re-adding the
+        # same (currency, interval) — the normal "edit the amount" PATCH —
+        # hit uq_cp_plan_price as an unhandled IntegrityError 500.
+        await db.flush()
         for p in prices:
             db.add(
                 PlanPrice(
@@ -134,6 +139,15 @@ async def activate_version(db: AsyncSession, version: PlanVersion, *, actor: Act
     a deterministic 409 instead of two active versions.
     """
     _require_draft(version)
+    # R62[3]: serialize concurrent activations of DIFFERENT drafts on the
+    # PLAN row. Under READ COMMITTED, B's retire-UPDATE scan does not pick up
+    # A's newly-activated row, so B's insert of a second 'active' hit
+    # uq_cp_plan_active as an unhandled IntegrityError 500 instead of the
+    # documented 409. With the plan lock, B re-reads AFTER A commits, retires
+    # A's version cleanly, and the last activation deterministically wins.
+    await db.execute(
+        select(ProductPlan.id).where(ProductPlan.id == version.plan_id).with_for_update()
+    )
     # Retire current active (guarded — 0 rows is fine, plan may have none)
     await db.execute(
         update(PlanVersion)

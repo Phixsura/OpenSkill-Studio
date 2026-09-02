@@ -15,6 +15,7 @@ from app.controlplane.schemas.plan import (
     PlanPriceResponse,
     PlanResponse,
     PlanVersionResponse,
+    SetExternalRefRequest,
     SetOverrideRequest,
     UpdateDraftVersionRequest,
 )
@@ -173,6 +174,49 @@ async def update_draft_version(
     )
     await db.commit()
     return DataResponse(data=await _version_with_prices(db, version))
+
+
+@router.put(
+    "/platform/plan-prices/{price_id}/external-ref",
+    dependencies=[Depends(rate_limit(20, 60))],
+)
+async def set_plan_price_external_ref(
+    price_id: str,
+    body: SetExternalRefRequest,
+    request: Request,
+    user: User = Depends(require_platform_role("platform_admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """R62[2]: external_price_ref is the ADR-designated ONE mutable field on an
+    active version (backfilled after creating the price in Stripe) — but no
+    write path existed, so Stripe subscription checkout was permanently
+    unreachable (every attempt 409'd on the missing ref)."""
+    from app.controlplane.models.plan import PlanPrice
+    from app.controlplane.services.audit import record_audit
+
+    price = await db.get(PlanPrice, price_id)
+    if price is None:
+        raise AppError("PLAN_NOT_FOUND", "Plan price not found", 404)
+    before = price.external_price_ref
+    price.external_price_ref = body.external_price_ref
+    await record_audit(
+        db,
+        actor=make_actor(request, user),
+        action="plan.price_external_ref_set",
+        target_type="plan_price",
+        target_id=price.id,
+        before={"external_price_ref": before},
+        after={"external_price_ref": body.external_price_ref},
+    )
+    await db.commit()
+    return DataResponse(
+        data={
+            "id": price.id,
+            "currency": price.currency,
+            "interval": price.interval,
+            "external_price_ref": price.external_price_ref,
+        }
+    )
 
 
 @router.post(

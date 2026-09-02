@@ -36,6 +36,13 @@ class UpdateDraftVersionRequest(BaseModel):
         return reject_deep_json(v, "entitlements", limit=4)
 
 
+class SetExternalRefRequest(BaseModel):
+    """R62[2]: backfill the provider price id (the one ADR-noted mutable
+    field on an active version). None clears it."""
+
+    external_price_ref: str | None = Field(default=None, max_length=100)
+
+
 class SetOverrideRequest(BaseModel):
     value: bool | int | str | None
     enforcement: str = Field(default="hard", pattern=r"^(hard|soft)$")

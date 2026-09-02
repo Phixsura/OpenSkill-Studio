@@ -308,6 +308,8 @@ async def test_concurrent_activate_single_winner():
             await setup.commit()
             ids = (d1.id, d2.id, user.id)
 
+        outcomes: list[str] = []
+
         async def activate(vid):
             async with AsyncSessionLocal() as s:
                 v = await s.get(PlanVersion, vid)
@@ -315,14 +317,24 @@ async def test_concurrent_activate_single_winner():
                 try:
                     await plan_svc.activate_version(s, v, actor=_actor(u))
                     await s.commit()
+                    outcomes.append("ok")
                     return True
-                except Exception:
+                except AppError:
                     await s.rollback()
+                    outcomes.append("409")
+                    return False
+                except Exception as exc:  # noqa: BLE001
+                    await s.rollback()
+                    outcomes.append(type(exc).__name__)
                     return False
 
         r1, r2 = await asyncio.gather(activate(ids[0]), activate(ids[1]))
-        # Both CAN succeed sequentially (second retires first) — but never
-        # two simultaneously-active versions:
+        # R62[3]: two DIFFERENT drafts racing must resolve as clean outcomes
+        # (both may succeed sequentially — the second retires the first — or
+        # one gets the documented 409). An IntegrityError 500 on
+        # uq_cp_plan_active is the bug.
+        assert all(o in ("ok", "409") for o in outcomes), outcomes
+        # Never two simultaneously-active versions:
         async with AsyncSessionLocal() as s:
             v1 = await s.get(PlanVersion, ids[0])
             active_count = sum(
@@ -509,3 +521,161 @@ async def test_storage_quota_gate_blocks_suspended_tenant(db):
     with pytest.raises(AppError) as exc:
         await cp_facade.check_storage_quota(db, org.id, 1024)
     assert exc.value.code == "TENANT_SUSPENDED"
+
+
+@pytest.mark.asyncio
+async def test_draft_price_edit_same_currency_interval(db):
+    """R62[1]: PATCHing a draft's prices with the SAME (currency, interval) —
+    the normal 'edit the amount' operation — 500'd on uq_cp_plan_price
+    because SQLAlchemy flushes INSERTs before DELETEs. The replace-all now
+    flushes deletes first."""
+    from ulid import ULID as _ULID
+
+    from app.controlplane.models.plan import PlanPrice
+
+    user = await _mk_user(db)
+    plan = await plan_svc.create_plan(
+        db,
+        key=f"pe-{str(_ULID()).lower()[:8]}",
+        name="PriceEdit",
+        description=None,
+        actor=_actor(user),
+    )
+    draft = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    await plan_svc.update_draft(
+        db,
+        draft,
+        prices=[{"currency": "USD", "interval": "month", "amount_minor": 19900}],
+    )
+    # The edit: same (USD, month), new amount — must not 500
+    await plan_svc.update_draft(
+        db,
+        draft,
+        prices=[{"currency": "USD", "interval": "month", "amount_minor": 24900}],
+    )
+    rows = (
+        (await db.execute(select(PlanPrice).where(PlanPrice.plan_version_id == draft.id)))
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1 and rows[0].amount_minor == 24900
+
+
+@pytest.mark.asyncio
+async def test_external_price_ref_write_path(db):
+    """R62[2]: external_price_ref (the ADR-designated one mutable field on an
+    active version) had NO write path — Stripe checkout was permanently
+    unreachable. PUT /platform/plan-prices/{id}/external-ref backfills it."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+    from ulid import ULID as _ULID
+
+    from app.controlplane.models.plan import PlanPrice
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    user = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=user.id, role="platform_admin"))
+    plan = await plan_svc.create_plan(
+        db,
+        key=f"xr-{str(_ULID()).lower()[:8]}",
+        name="XRef",
+        description=None,
+        actor=_actor(user),
+    )
+    draft = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    await plan_svc.update_draft(
+        db,
+        draft,
+        prices=[{"currency": "USD", "interval": "month", "amount_minor": 19900}],
+    )
+    await plan_svc.activate_version(db, draft, actor=_actor(user))
+    price = (
+        await db.execute(select(PlanPrice).where(PlanPrice.plan_version_id == draft.id))
+    ).scalar_one()
+    price_id = price.id
+    token = create_access_token(user.id, user.email, user.role.value)
+    await db.commit()
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.put(
+                f"/api/v1/platform/plan-prices/{price_id}/external-ref",
+                json={"external_price_ref": "price_1QstripeXYZ"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["data"]["external_price_ref"] == "price_1QstripeXYZ"
+    finally:
+        app.router.lifespan_context = orig
+    db.expire_all()
+    fresh = await db.get(PlanPrice, price_id)
+    assert fresh.external_price_ref == "price_1QstripeXYZ"
+
+
+@pytest.mark.asyncio
+async def test_two_draft_activation_race_deterministic():
+    """R62[3] deterministic repro: A activates draft1 and HOLDS its tx; B
+    activates draft2 and must wait. Without the plan-row lock, B's retire
+    scan (READ COMMITTED) misses A's newly-active row and B's insert dies on
+    uq_cp_plan_active as an IntegrityError 500. With the lock, B serializes
+    BEFORE its retire scan and resolves cleanly (win or documented 409)."""
+    from app.core.database import engine
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup, role=UserRole.ADMIN)
+            plan = await plan_svc.create_plan(
+                setup,
+                key=f"drace-{str(ULID()).lower()[:8]}",
+                name="DRace",
+                description=None,
+                actor=_actor(user),
+            )
+            d1 = await plan_svc.create_draft_version(setup, plan, created_by=user.id)
+            d2 = await plan_svc.create_draft_version(setup, plan, created_by=user.id)
+            await setup.commit()
+            d1_id, d2_id, user_id = d1.id, d2.id, user.id
+
+        async def b_activate():
+            async with AsyncSessionLocal() as s:
+                v = await s.get(PlanVersion, d2_id)
+                u = await s.get(User, user_id)
+                try:
+                    await plan_svc.activate_version(s, v, actor=_actor(u))
+                    await s.commit()
+                    return "ok"
+                except AppError:
+                    await s.rollback()
+                    return "409"
+                except Exception as exc:  # noqa: BLE001
+                    await s.rollback()
+                    return type(exc).__name__
+
+        async with AsyncSessionLocal() as a:
+            va = await a.get(PlanVersion, d1_id)
+            ua = await a.get(User, user_id)
+            await plan_svc.activate_version(a, va, actor=_actor(ua))
+            # A holds its uncommitted activation while B starts
+            b_task = asyncio.create_task(b_activate())
+            await asyncio.sleep(0.3)  # let B reach the blocking point
+            await a.commit()
+        outcome = await asyncio.wait_for(b_task, timeout=10)
+        assert outcome in ("ok", "409"), f"unhandled {outcome} — the 500 bug"
+        # Exactly one active version remains
+        async with AsyncSessionLocal() as s:
+            statuses = []
+            for vid in (d1_id, d2_id):
+                v = await s.get(PlanVersion, vid)
+                statuses.append(v.status)
+            assert statuses.count("active") == 1, statuses
+    finally:
+        await engine.dispose()

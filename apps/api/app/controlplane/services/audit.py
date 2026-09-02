@@ -37,6 +37,7 @@ AUDIT_ACTIONS = frozenset(
         "platform_role.revoked",
         # plans / entitlements
         "plan.version_activated",
+        "plan.price_external_ref_set",
         "subscription.plan_changed",
         # R60[43]: subscription start/cancel change what a tenant is billed —
         # they must be reconstructible from the audit trail.
