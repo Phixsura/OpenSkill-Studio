@@ -46,6 +46,10 @@ router = APIRouter(prefix="/platform", tags=["Platform Ops"])
 _PERIOD_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 READ_ROLES = ("platform_admin", "platform_support", "billing_admin")
+# R48[30]: internal cost/margin/rate snapshots are billing data — the ADR role
+# matrix gives platform_support operational read (tenants, runs, attention),
+# NOT financial internals. Dashboard economics + trace endpoints require these.
+FINANCE_ROLES = ("platform_admin", "billing_admin")
 
 
 def _period_bounds(period: str | None) -> tuple[str, datetime, datetime]:
@@ -71,7 +75,7 @@ def _period_bounds(period: str | None) -> tuple[str, datetime, datetime]:
 @router.get("/dashboard")
 async def platform_dashboard(
     period: str | None = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
-    _user=Depends(require_platform_role(*READ_ROLES)),
+    _user=Depends(require_platform_role(*FINANCE_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     period, start, end = _period_bounds(period)
@@ -86,10 +90,21 @@ async def platform_dashboard(
     ).all()
     by_status = {status.value: count for status, count in tenant_rows}
 
-    # MRR: active subscriptions monthly-normalized (yearly ÷ 12)
+    # MRR: active subscriptions monthly-normalized (yearly ÷ 12).
+    # R48[31]: report PER CURRENCY — summing JPY minor (×1) with USD cents (×100)
+    # into one number was meaningless. R48[32]: include the recurring
+    # reserved-seat overage (seat_quantity beyond included_seats × seat price),
+    # which is invoiced every period and belongs in MRR.
     mrr_rows = (
         await db.execute(
-            select(PlanPrice.amount_minor, PlanPrice.interval)
+            select(
+                Subscription.currency,
+                PlanPrice.amount_minor,
+                PlanPrice.interval,
+                PlanPrice.included_seats,
+                PlanPrice.overage_seat_amount_minor,
+                Subscription.seat_quantity,
+            )
             .select_from(Subscription)
             .join(PlanVersion, PlanVersion.id == Subscription.plan_version_id)
             .join(
@@ -101,30 +116,49 @@ async def platform_dashboard(
             .where(Subscription.status.in_(("active", "past_due", "cancel_at_period_end")))
         )
     ).all()
-    mrr_minor = sum(amount // 12 if interval == "year" else amount for amount, interval in mrr_rows)
+    mrr_by_currency: dict[str, int] = {}
+    for currency, amount, interval, included, seat_price, seats in mrr_rows:
+        monthly = amount // 12 if interval == "year" else amount
+        overage_seats = max((seats or 0) - (included or 0), 0)
+        monthly += overage_seats * (seat_price or 0)
+        mrr_by_currency[currency] = mrr_by_currency.get(currency, 0) + monthly
+    # Back-compat scalar: the platform-currency slice (other currencies are
+    # reported separately, never silently mixed in).
+    from app.config import settings as _settings
 
-    # Usage + economics by type for the period
+    mrr_minor = mrr_by_currency.get(_settings.platform_currency, 0)
+
+    # Usage + economics by type for the period.
+    # R48[31]: billable is grouped by (type, billable_currency) — never summed
+    # across currencies. Margin is uniformly platform-currency (rating converts
+    # both sides before subtracting), so its sum stays a single number.
+    # R48[33]: window on the underlying event's occurred_at, not rated_at —
+    # the FX-unblock retry resets rated_at to now(), shifting revenue into the
+    # wrong period on the dashboard.
     usage_rows = (
         await db.execute(
             select(
                 RatedUsage.usage_type,
+                RatedUsage.billable_currency,
                 func.sum(RatedUsage.quantity).label("quantity"),
                 func.sum(RatedUsage.billable_amount_minor).label("billable"),
                 func.sum(RatedUsage.internal_cost_minor).label("cost"),
                 func.sum(RatedUsage.margin_minor).label("margin"),
             )
+            .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
             .where(
-                RatedUsage.rated_at >= start,
-                RatedUsage.rated_at < end,
+                UsageEvent.occurred_at >= start,
+                UsageEvent.occurred_at < end,
                 RatedUsage.status != "voided",
             )
-            .group_by(RatedUsage.usage_type)
+            .group_by(RatedUsage.usage_type, RatedUsage.billable_currency)
             .order_by(func.sum(RatedUsage.billable_amount_minor).desc())
         )
     ).all()
     usage_by_type = [
         {
             "usage_type": r.usage_type,
+            "currency": r.billable_currency,
             "quantity": str(r.quantity or 0),
             "billable_minor": int(r.billable or 0),
             "cost_minor": int(r.cost or 0),
@@ -132,8 +166,16 @@ async def platform_dashboard(
         }
         for r in usage_rows
     ]
+    # Totals: billable per currency (no cross-currency sum); margin is
+    # platform-currency-uniform so a single sum is meaningful.
+    billable_by_currency: dict[str, int] = {}
+    for u in usage_by_type:
+        billable_by_currency[u["currency"]] = (
+            billable_by_currency.get(u["currency"], 0) + u["billable_minor"]
+        )
     totals = {
-        "billable_minor": sum(u["billable_minor"] for u in usage_by_type),
+        "billable_by_currency": billable_by_currency,
+        "billable_minor": billable_by_currency.get(_settings.platform_currency, 0),
         "internal_cost_minor": sum(u["cost_minor"] for u in usage_by_type),
         "margin_minor": sum(u["margin_minor"] or 0 for u in usage_by_type),
     }
@@ -230,6 +272,7 @@ async def platform_dashboard(
             "period": period,
             "tenants": {"by_status": by_status, "total": sum(by_status.values())},
             "mrr_minor": mrr_minor,
+            "mrr_by_currency": mrr_by_currency,
             "usage": {"by_type": usage_by_type},
             "totals": totals,
             "credits_outstanding": credits_outstanding,
@@ -395,7 +438,7 @@ async def trace_invoice_line(
     line_id: str,
     page: int = Query(1, ge=1, le=1_000_000),
     per_page: int = Query(100, ge=1, le=500),
-    _user=Depends(require_platform_role(*READ_ROLES)),
+    _user=Depends(require_platform_role(*FINANCE_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     line = await db.get(InvoiceLine, line_id)
@@ -501,7 +544,7 @@ async def trace_invoice_line(
 @router.get("/trace/settlement-entries/{entry_id}")
 async def trace_settlement_entry(
     entry_id: str,
-    _user=Depends(require_platform_role(*READ_ROLES)),
+    _user=Depends(require_platform_role(*FINANCE_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     entry = await db.get(RevenueShareEntry, entry_id)
@@ -512,8 +555,18 @@ async def trace_settlement_entry(
     if entry.source_type in ("invoice", "invoice_line"):
         invoice_id = entry.source_id
         if entry.source_type == "invoice_line":
-            src_line = await db.get(InvoiceLine, entry.source_id)
-            invoice_id = src_line.invoice_id if src_line else None
+            # R48[34]: credit-note adjustments write source_type='invoice_line'
+            # with source_id = the CREDIT NOTE's id (a distinct natural key from
+            # the original invoice entry) — resolving it as an InvoiceLine
+            # always yielded null. Try the note first, fall back to a real line.
+            from app.controlplane.models.billing import CreditNote
+
+            note = await db.get(CreditNote, entry.source_id)
+            if note is not None:
+                invoice_id = note.invoice_id
+            else:
+                src_line = await db.get(InvoiceLine, entry.source_id)
+                invoice_id = src_line.invoice_id if src_line else None
         invoice = await db.get(Invoice, invoice_id) if invoice_id else None
         if invoice is not None:
             source = {

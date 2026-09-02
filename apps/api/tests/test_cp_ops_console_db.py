@@ -250,3 +250,69 @@ async def test_trace_settlement_entry_chain(db):
     data = (await ops.trace_settlement_entry(entry.id, _user=user, db=db))["data"]
     assert data["statement"]["id"] == stmt.id
     assert data["statement"]["net_amount_minor"] == stmt.net_amount_minor
+
+
+# ── R48: finance-role gating + currency separation ────────────
+
+
+@pytest.mark.asyncio
+async def test_dashboard_and_traces_deny_platform_support(db):
+    """R48[30]: platform_support has operational read, NOT financial internals —
+    the dashboard economics and both trace endpoints must 403 for support."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    support = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=support.id, role="platform_support"))
+    await db.commit()
+    token = create_access_token(support.id, support.email, support.role.value)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            for path in (
+                "/api/v1/platform/dashboard",
+                "/api/v1/platform/trace/invoice-lines/01JFAKEFAKEFAKEFAKEFAKEFAK",
+                "/api/v1/platform/trace/settlement-entries/01JFAKEFAKEFAKEFAKEFAKEFAK",
+            ):
+                r = await c.get(path, headers=hdr)
+                assert r.status_code == 403, f"{path} → {r.status_code}"
+    finally:
+        app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_dashboard_reports_mrr_per_currency(db):
+    """R48[31]: MRR must never mix currencies into one number — a JPY sub and a
+    USD sub are reported separately."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    from app.controlplane.services import billing as billing_svc
+
+    await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
+    data = (await ops.platform_dashboard(period=None, _user=user, db=db))["data"]
+    assert "mrr_by_currency" in data
+    assert data["mrr_by_currency"].get("USD", 0) >= 19900
+    # The scalar is the platform-currency slice only.
+    assert data["mrr_minor"] == data["mrr_by_currency"].get("USD", 0)
+    # usage totals expose per-currency billable, never a mixed grand total.
+    assert "billable_by_currency" in data["totals"]

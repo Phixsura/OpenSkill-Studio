@@ -27,7 +27,9 @@ MAX_LEGAL_LINKS = 5
 def validate_theme_tokens(tokens: dict) -> dict:
     for key, value in tokens.items():
         if key == "radius":
-            if value not in THEME_RADIUS_VALUES:
+            # R47[29]: `value not in <set>` raises TypeError for unhashable
+            # values (a dict/list radius) → 500 instead of 422. Type-check first.
+            if not isinstance(value, str) or value not in THEME_RADIUS_VALUES:
                 raise AppError(
                     "BRANDING_INVALID",
                     f"radius must be one of {sorted(THEME_RADIUS_VALUES)}",
