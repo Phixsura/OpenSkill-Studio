@@ -10,6 +10,11 @@ platform ops console (ADR-014).
 files; one known cross-file event-loop teardown flake passes in isolation);
 product suites (evaluation / skill_packs / installations / organizations /
 projects) 214 passed; ruff check + format clean.
+**E2E re-run post-remediation:** `e2e_commercial_lifecycle.py` 52/52 against a
+fresh live API and `browser_e2e_commercial.mjs` 19/19 (zero JS console errors),
+with the API log monitored throughout — **zero 500s, zero tracebacks**; the
+only error-level log lines were the intentional `cp_rating_no_cost_rate`
+alerts added by R91-100-H12.
 
 Every defect below was **verified against the real code** (finder + independent
 adversarial verifier, then personally re-confirmed before fixing), fixed with a
