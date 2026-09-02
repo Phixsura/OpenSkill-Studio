@@ -679,3 +679,197 @@ async def test_two_draft_activation_race_deterministic():
             assert statuses.count("active") == 1, statuses
     finally:
         await engine.dispose()
+
+
+# ── R68: seat lifecycle + org deletion ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_deleted_org_frees_seats_everywhere(db):
+    """R68[1]/[2]: deleting an org left its member rows ACTIVE — they kept
+    consuming the tenant seat quota (blocking adds in sibling orgs) and were
+    billed as live seats forever. delete_org must archive member rows."""
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+    from app.services.organization import OrgService
+
+    owner = await _mk_user(db)
+    svc = OrgService(db)
+    org_a = await svc.create(
+        name=f"A {ULID()}", slug=f"a68-{str(ULID()).lower()}", description=None, created_by=owner.id
+    )
+    tenant = await db.get(TenantAccount, org_a.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    student = await _mk_user(db)
+    await svc.add_member(org_a.id, student.id, OrgRole.STUDENT)
+    await svc.delete_org(org_a.id, owner.id)
+    rows = (
+        (
+            await db.execute(
+                select(OrgMember).where(
+                    OrgMember.org_id == org_a.id, OrgMember.user_id == student.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows and all(m.status == MemberStatus.ARCHIVED for m in rows)
+
+
+@pytest.mark.asyncio
+async def test_blocked_tenant_cannot_grow_seats(db):
+    """R68[5]: a suspended/cancelled tenant kept adding billable seats via
+    pre-existing invite links — add_member (the single member-creation
+    funnel) now requires an active tenant."""
+    from app.models.organization import OrgRole
+    from app.services.organization import OrgService
+
+    owner = await _mk_user(db)
+    svc = OrgService(db)
+    org = await svc.create(
+        name=f"S68 {ULID()}",
+        slug=f"s68-{str(ULID()).lower()}",
+        description=None,
+        created_by=owner.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.SUSPENDED
+    await db.flush()
+    await invalidate_cache(tenant.id)
+    student = await _mk_user(db)
+    with pytest.raises(AppError) as exc:
+        await svc.add_member(org.id, student.id, OrgRole.STUDENT)
+    assert exc.value.code == "TENANT_SUSPENDED"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_seat_join_single_winner():
+    """R68[3] TOCTOU: two concurrent joins with ONE seat left both counted
+    under the cap and both inserted. The tenant-scoped advisory lock
+    serializes count→insert; exactly one wins."""
+    from app.core.database import engine
+    from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole
+    from app.services.organization import OrgService
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            owner = await _mk_user(setup)
+            svc = OrgService(setup)
+            org = await svc.create(
+                name=f"R68 {ULID()}",
+                slug=f"r68-{str(ULID()).lower()}",
+                description=None,
+                created_by=owner.id,
+            )
+            tenant = await setup.get(TenantAccount, org.tenant_id)
+            tenant.status = TenantStatus.ACTIVE
+            await setup.flush()
+            await plan_svc.set_override(
+                setup,
+                tenant.id,
+                "max_active_learners",
+                value=1,
+                enforcement="hard",
+                expires_at=None,
+                reason="race test",
+                actor=_actor(owner),
+            )
+            u1 = await _mk_user(setup)
+            u2 = await _mk_user(setup)
+            await setup.commit()
+            org_id, t_id = org.id, tenant.id
+            u1_id, u2_id = u1.id, u2.id
+        await invalidate_cache(t_id)
+
+        # Deterministically widen the count→insert window: a delayed
+        # check_quota guarantees both joins overlap there. With the advisory
+        # lock the second join BLOCKS until the first commits (then counts 1
+        # and 409s); without it both count 0 and both insert.
+        from unittest.mock import patch as _patch
+
+        from app.controlplane import facade as _facade
+
+        real_check_quota = _facade.check_quota
+
+        async def slow_check_quota(*a, **kw):
+            result = await real_check_quota(*a, **kw)
+            await asyncio.sleep(0.4)
+            return result
+
+        async def join(uid):
+            async with AsyncSessionLocal() as s:
+                try:
+                    await OrgService(s).add_member(org_id, uid, OrgRole.STUDENT)
+                    await s.commit()
+                    return "ok"
+                except AppError as exc:
+                    await s.rollback()
+                    return exc.code
+                except Exception as exc:  # noqa: BLE001
+                    await s.rollback()
+                    return type(exc).__name__
+
+        with _patch.object(_facade, "check_quota", slow_check_quota):
+            r1, r2 = await asyncio.gather(join(u1_id), join(u2_id))
+        assert sorted([r1, r2]) == ["QUOTA_EXCEEDED", "ok"], (r1, r2)
+        from sqlalchemy import func as _f
+
+        async with AsyncSessionLocal() as s:
+            n = (
+                await s.execute(
+                    select(_f.count(OrgMember.id))
+                    .select_from(OrgMember)
+                    .join(Organization, Organization.id == OrgMember.org_id)
+                    .where(
+                        Organization.tenant_id == t_id,
+                        OrgMember.role == OrgRole.STUDENT,
+                        OrgMember.status == MemberStatus.ACTIVE,
+                    )
+                )
+            ).scalar_one()
+            assert n == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_same_slug_org_create_clean_conflict():
+    """R68[4]: two concurrent POST /orgs with the same slug both passed the
+    existence SELECTs; the loser 500'd on the tenant slug unique index.
+    The insert is now savepoint-isolated: suffix retry or clean 409."""
+    from app.core.database import engine
+    from app.services.organization import OrgService
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            u1 = await _mk_user(setup)
+            u2 = await _mk_user(setup)
+            await setup.commit()
+            ids = (u1.id, u2.id)
+        slug = f"clash-{str(ULID()).lower()}"
+
+        async def create(uid):
+            async with AsyncSessionLocal() as s:
+                try:
+                    await OrgService(s).create(
+                        name="Clash", slug=slug, description=None, created_by=uid
+                    )
+                    await s.commit()
+                    return "ok"
+                except AppError as exc:
+                    await s.rollback()
+                    return exc.code
+                except Exception as exc:  # noqa: BLE001
+                    await s.rollback()
+                    return type(exc).__name__
+
+        r1, r2 = await asyncio.gather(create(ids[0]), create(ids[1]))
+        # One wins; the other gets a clean AppError (org-slug or tenant-slug
+        # conflict depending on which SELECT catches it) — never a 500-class
+        # IntegrityError.
+        assert "ok" in (r1, r2), (r1, r2)
+        other = r2 if r1 == "ok" else r1
+        assert other in ("SLUG_ALREADY_EXISTS", "TENANT_SLUG_TAKEN", "ok"), (r1, r2)
+    finally:
+        await engine.dispose()

@@ -614,7 +614,7 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     sort += 1
 
     # b. seats line: max(actual peak, reserved floor) minus included
-    from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole
+    from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole, OrgStatus
 
     live_seats = (
         await db.execute(
@@ -623,6 +623,11 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .join(Organization, Organization.id == OrgMember.org_id)
             .where(
                 Organization.tenant_id == tenant.id,
+                # R68[2]: members of archived (deleted) orgs are not live
+                # seats — without this filter a deleted org's students were
+                # billed every period forever (delete_org now archives member
+                # rows too, but the org filter also covers historic data).
+                Organization.status != OrgStatus.ARCHIVED,
                 OrgMember.status == MemberStatus.ACTIVE,
                 OrgMember.role == OrgRole.STUDENT,
             )

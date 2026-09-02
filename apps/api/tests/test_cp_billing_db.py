@@ -1276,3 +1276,63 @@ async def test_duplicate_external_ref_payment_409_not_500(db):
             actor=a,
         )
     assert exc.value.code == "PAYMENT_INVALID" and exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_archived_org_students_not_billed_as_seats(db):
+    """R68[2]: the invoice seats line counted ACTIVE members of ARCHIVED
+    (deleted) orgs — a deleted org's students were billed every period
+    forever. The live-seats query must exclude archived orgs."""
+    from app.models.organization import (
+        MemberStatus,
+        Organization,
+        OrgMember,
+        OrgRole,
+        OrgStatus,
+    )
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
+    # An ARCHIVED org with 205 historic ACTIVE member rows (pre-fix debris) —
+    # above the school plan's 200 included seats, so counting them WOULD
+    # produce an overage line.
+    org = Organization(
+        name=f"Dead {ULID()}",
+        slug=f"dead-{str(ULID()).lower()}",
+        tenant_id=tenant.id,
+        status=OrgStatus.ARCHIVED,
+        created_by=user.id,
+    )
+    db.add(org)
+    await db.flush()
+    for _ in range(205):
+        member_user = await _mk_user(db)
+        db.add(
+            OrgMember(
+                org_id=org.id,
+                user_id=member_user.id,
+                role=OrgRole.STUDENT,
+                status=MemberStatus.ACTIVE,
+            )
+        )
+    await db.flush()
+    invoice = await _force_close(db, sub)
+    assert invoice is not None
+    lines = (
+        (await db.execute(select(InvoiceLine).where(InvoiceLine.invoice_id == invoice.id)))
+        .scalars()
+        .all()
+    )
+    seat_lines = [line for line in lines if line.line_type == "seats"]
+    assert seat_lines == [], (
+        f"archived-org students billed as seats: {[(sl.description, sl.amount_minor) for sl in seat_lines]}"
+    )

@@ -206,9 +206,19 @@ class OrgService:
             raise InsufficientOrgPermissionError()
 
         org.status = OrgStatus.ARCHIVED
+        # R68[1]: archive the org's MEMBER rows too — they stayed ACTIVE and
+        # kept consuming the tenant-wide seat quota (blocking adds in sibling
+        # orgs) and were billed as live seats at period close. Rejoining a
+        # future org re-activates via the normal quota-gated path.
+        from sqlalchemy import update as sa_update
+
+        await self.db.execute(
+            sa_update(OrgMember)
+            .where(OrgMember.org_id == org_id, OrgMember.status == MemberStatus.ACTIVE)
+            .values(status=MemberStatus.ARCHIVED)
+        )
 
         # Archive all packs owned by this org so they're removed from registry
-        from sqlalchemy import update as sa_update
 
         from app.models.skill_pack import PackStatus, SkillPack
         from app.models.workflow_pack import WorkflowPack
@@ -257,6 +267,22 @@ class OrgService:
             else "max_instructors"  # INSTRUCTOR/ADMIN/OWNER all consume staff seats
         )
         tenant = await facade.get_tenant_for_org(self.db, org_id)
+        # R68[5]: joining consumes a billable seat — a costed action. Blocked
+        # tenants (suspension for non-payment, cancellation) must not keep
+        # growing seats via pre-existing invite links/invites; every member-
+        # creation path funnels through this check.
+        facade.require_tenant_active(tenant)
+        # R68[3] seat TOCTOU: two concurrent joins with one seat left both
+        # counted 9<10 and both inserted (over-cap, over-billed). A tenant-
+        # scoped transaction advisory lock serializes count→insert across all
+        # of the tenant's orgs; it releases at commit/rollback automatically.
+        from sqlalchemy import text as _text
+
+        await self.db.execute(
+            _text("SELECT pg_advisory_xact_lock(hashtext(:k))").bindparams(
+                k=f"cp_seats:{tenant.id}"
+            )
+        )
         current_q = (
             select(func.count(func.distinct(OrgMember.user_id)))
             .select_from(OrgMember)

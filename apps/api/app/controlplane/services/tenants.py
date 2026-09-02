@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import structlog
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -110,8 +111,18 @@ async def create_tenant(
             attributed_at=datetime.now(UTC) if partner_id else None,
             created_by=actor.user_id,
         )
-        db.add(tenant)
-        await db.flush()
+        # R68[4]: two concurrent creates with the same slug both pass the
+        # existence SELECT (neither is committed) — the loser's flush hit the
+        # unique index as an unhandled IntegrityError 500. SAVEPOINT-isolate
+        # the insert and treat a constraint loss like the existence check:
+        # try the next suffixed candidate, else 409.
+        try:
+            async with db.begin_nested():
+                db.add(tenant)
+                await db.flush()
+        except IntegrityError:
+            last_exc = AppError("TENANT_SLUG_TAKEN", "Tenant slug already in use", 409)
+            continue
         if owner_user_id:
             db.add(
                 TenantMember(
