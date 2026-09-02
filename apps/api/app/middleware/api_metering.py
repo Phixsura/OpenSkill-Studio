@@ -180,7 +180,15 @@ class ApiRequestMeteringMiddleware(BaseHTTPMiddleware):
                 limit = eff.get("max_api_requests_day")
                 tz_name = tenant.timezone
             quota = -1 if limit is None else int(limit)
-            await r.set(QUOTA_CACHE_KEY.format(tenant_id=tenant_id), f"{quota}|{tz_name}", ex=300)
+            # R92[m2]: honor the entitlement dirty tombstone — a metered
+            # request racing a pre-commit mutation otherwise re-cached the
+            # STALE quota for 300s (get_effective computes from the pre-write
+            # snapshot while the tombstone lives; the ent-cache respects it,
+            # this secondary cache didn't).
+            if not await r.get(f"cp:entdirty:{tenant_id}"):
+                await r.set(
+                    QUOTA_CACHE_KEY.format(tenant_id=tenant_id), f"{quota}|{tz_name}", ex=300
+                )
         else:
             raw = quota_raw.decode() if isinstance(quota_raw, bytes) else str(quota_raw)
             quota_s, _, tz_name = raw.partition("|")

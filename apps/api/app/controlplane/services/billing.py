@@ -342,6 +342,18 @@ async def change_plan(
 ) -> dict:
     """Plan/seat change. Upgrades default immediate (entitlements now, net on
     next invoice); downgrades default next_period."""
+    # R97[m12]: lock the sub row and refresh — the caller's copy may be stale
+    # (concurrent immediate change / period close, which both lock this row).
+    # Two unserialized changes recorded stale from_seats/from_plan in their
+    # SubscriptionChange rows, corrupting the proration basis at close.
+    sub = (
+        await db.execute(
+            select(Subscription)
+            .where(Subscription.id == sub.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     old_version = await db.get(PlanVersion, sub.plan_version_id)
     old_price = (
         await db.execute(
@@ -425,6 +437,59 @@ async def change_plan(
     )
     await invalidate_cache(tenant.id)
     return {"proration": preview, "mode": mode}
+
+
+async def reactivate_subscription(
+    db: AsyncSession,
+    tenant: TenantAccount,
+    sub: Subscription,
+    *,
+    actor: Actor,
+) -> Subscription:
+    """R82[M0]: cancel_at_period_end was IRREVERSIBLE — nothing cleared the
+    flag, start_subscription 409'd on the live-sub partial index, and the
+    customer who changed their mind had to wait out the period and re-onboard.
+    Guarded un-cancel; the provider-side flag is cleared too."""
+    result = await db.execute(
+        update(Subscription)
+        .where(Subscription.id == sub.id, Subscription.status == "cancel_at_period_end")
+        .values(status="active", cancel_at_period_end=False)
+    )
+    if not result.rowcount:
+        raise AppError(
+            "SUBSCRIPTION_STATUS_CONFLICT",
+            "Only a pending-cancellation subscription can be reactivated",
+            409,
+        )
+    db.add(
+        SubscriptionChange(
+            subscription_id=sub.id,
+            change_type="reactivate",
+            effective_at=_now(),
+            proration_mode="immediate",
+            created_by=actor.user_id,
+        )
+    )
+    if sub.provider in ("mock", "stripe") and sub.external_ref:
+        from app.controlplane.services.billing_providers import get_billing_provider
+
+        adapter = get_billing_provider(sub.provider)
+        if adapter is not None:
+            try:
+                await adapter.change_subscription(sub.external_ref, "", sub.seat_quantity)
+            except Exception:  # noqa: BLE001 — best-effort; outbox push covers it
+                enqueue(db, "subscription.push_provider", {"subscription_id": sub.id})
+    await record_audit(
+        db,
+        actor=actor,
+        action="subscription.reactivated",
+        target_type="subscription",
+        target_id=sub.id,
+        tenant_id=tenant.id,
+    )
+    await invalidate_cache(tenant.id)
+    await db.refresh(sub)
+    return sub
 
 
 async def cancel_subscription(
@@ -694,7 +759,13 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     # Use the PERIOD-START reserved floor, not the post-change sub.seat_quantity:
     # a mid-period immediate seat increase is billed by the proration line below,
     # so counting the raised floor here too double-charged the delta (R41[2]).
+    # R82[M1]: when the seats line already bills the CURRENT live count for
+    # the full period (live > start), a mid-period reserved-seat increase
+    # must NOT also add its proration line — the live-count charge fully
+    # covers the raised floor. Bill max(live, start); mark whether live won
+    # so the proration walk skips the seat delta it would double-charge.
     billable_seats = max(live_seats, start_seats)
+    live_covers_increase = live_seats >= sub.seat_quantity
     included = price.included_seats if price else 0
     overage_seats = max(billable_seats - included, 0)
     seat_price = (price.overage_seat_amount_minor or 0) if price else 0
@@ -791,15 +862,22 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     try:
         from app.controlplane.models.marketplace import MarketplacePurchase
 
+        # R97[H8]: FOR UPDATE — this select raced refund_purchase (guarded
+        # paid→refunded): the close read the purchase as 'paid', the refund
+        # committed (license revoked), then the close billed the refunded
+        # purchase anyway. The lock serializes: whoever wins excludes the row
+        # from the loser (status predicate re-evaluated under the lock).
         pending_licenses = (
             (
                 await db.execute(
-                    select(MarketplacePurchase).where(
+                    select(MarketplacePurchase)
+                    .where(
                         MarketplacePurchase.buyer_tenant_id == tenant.id,
                         MarketplacePurchase.status == "paid",
                         MarketplacePurchase.invoice_id.is_(None),
                         MarketplacePurchase.payment_method == "invoice",
                     )
+                    .with_for_update()
                 )
             )
             .scalars()
@@ -856,6 +934,14 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                 )
             )
         ).scalar_one_or_none()
+        # R82[M1]: when the seats line already billed the CURRENT live count
+        # for the full period (live >= raised floor), the seat delta's
+        # proration would double-charge those seats — the full-period
+        # live-count charge subsumes it. Zero the seat component; the plan
+        # component still prorates.
+        seat_price = (new_p.overage_seat_amount_minor or 0) if new_p else 0
+        if live_covers_increase:
+            seat_price = 0
         preview = proration_preview(
             period_start=period.period_start,
             period_end=period.period_end,
@@ -864,7 +950,7 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             new_amount_minor=new_p.amount_minor if new_p else 0,
             old_seats=change.from_seats or 0,
             new_seats=change.to_seats or 0,
-            seat_price_minor=(new_p.overage_seat_amount_minor or 0) if new_p else 0,
+            seat_price_minor=seat_price,
         )
         if preview["net_minor"] != 0:
             db.add(
@@ -1010,36 +1096,15 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             change.invoiced = True
         if pending:
             await invalidate_cache(tenant.id)
-            # R64[16]: push the now-applied deferred change to the provider so
-            # its recurring billing follows the new plan/quantity. Best-effort:
-            # a provider hiccup must not abort the period close (the outbox
-            # retry would double-generate); ops sees the error log.
+            # R64[16]/R94[H4]: push the now-applied deferred change to the
+            # provider — but NOT inline: this transaction holds the
+            # Subscription FOR UPDATE, the GLOBAL InvoiceSequence lock and the
+            # tenant's credit-balance lock; an un-timed Stripe HTTP call here
+            # stalled EVERY concurrent invoice finalize platform-wide.
+            # Decouple via the outbox (own retry/backoff; handler idempotent
+            # — it pushes the sub's CURRENT state).
             if sub.provider in ("mock", "stripe") and sub.external_ref:
-                from app.controlplane.services.billing_providers import get_billing_provider
-
-                adapter = get_billing_provider(sub.provider)
-                new_p = (
-                    await db.execute(
-                        select(PlanPrice).where(
-                            PlanPrice.plan_version_id == sub.plan_version_id,
-                            PlanPrice.currency == sub.currency,
-                            PlanPrice.interval == sub.interval,
-                        )
-                    )
-                ).scalar_one_or_none()
-                if adapter is not None and new_p is not None:
-                    try:
-                        await adapter.change_subscription(
-                            sub.external_ref,
-                            new_p.external_price_ref or "",
-                            sub.seat_quantity,
-                        )
-                    except Exception:  # noqa: BLE001
-                        log.error(
-                            "cp_provider_change_push_failed",
-                            subscription_id=sub.id,
-                            provider=sub.provider,
-                        )
+                enqueue(db, "subscription.push_provider", {"subscription_id": sub.id})
 
         next_start = period.period_end
         next_end = _add_interval(next_start, sub.interval)
@@ -1534,6 +1599,44 @@ def _subscription_ref(data: dict) -> str | None:
     return None
 
 
+async def _notify_tenant_owners(
+    db: AsyncSession, tenant_id: str, *, notification_type: str, title: str, body: str | None
+) -> None:
+    """R95[m10]: billing lifecycle events (payment failed, subscription
+    cancelled by provider) were completely silent — the tenant discovered
+    past_due only by noticing broken features. Notify tenant owners; a
+    notification failure never fails the webhook (savepoint + swallow)."""
+    try:
+        async with db.begin_nested():
+            from app.controlplane.models.tenant import TenantMember
+            from app.services.notification import NotificationService
+
+            owner_ids = (
+                (
+                    await db.execute(
+                        select(TenantMember.user_id)
+                        .where(
+                            TenantMember.tenant_id == tenant_id,
+                            TenantMember.role.in_(["owner", "billing_admin"]),
+                        )
+                        .limit(20)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            svc = NotificationService(db)
+            for uid in owner_ids:
+                await svc.create(
+                    user_id=uid,
+                    notification_type=notification_type,
+                    title=title,
+                    body=body,
+                )
+    except Exception:  # noqa: BLE001
+        log.warning("cp_billing_notify_failed", tenant_id=tenant_id, type=notification_type)
+
+
 async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
     """Event map (§6.2). Tenant status changes go through the guarded
     transition table — provider state is never blindly trusted."""
@@ -1657,6 +1760,13 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
                 .where(Subscription.id == sub.id, Subscription.status == "active")
                 .values(status="past_due")
             )
+            await _notify_tenant_owners(
+                db,
+                tenant.id,
+                notification_type="billing.payment_failed",
+                title="Payment failed — account is past due",
+                body="A subscription payment failed. Update your payment method to avoid interruption.",
+            )
         return True
 
     if event_type == "customer.subscription.deleted":
@@ -1679,3 +1789,43 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
         return True
 
     return False  # unknown event type → ignored (200, no retry storm)
+
+
+@register_handler("subscription.push_provider")
+async def handle_subscription_push_provider(db: AsyncSession, payload: dict) -> None:
+    """R94[H4]: push the subscription's CURRENT plan/seats to the billing
+    provider — decoupled from close_period_and_invoice so the un-timed
+    provider HTTP call never runs while the close holds the Subscription,
+    global InvoiceSequence and credit-balance locks. Idempotent: pushes
+    current state; a duplicate push is a no-op provider-side."""
+    sub = await db.get(Subscription, payload["subscription_id"])
+    if sub is None or sub.provider not in ("mock", "stripe") or not sub.external_ref:
+        return
+    from app.controlplane.services.billing_providers import get_billing_provider
+
+    adapter = get_billing_provider(sub.provider)
+    if adapter is None:
+        return
+    new_p = (
+        await db.execute(
+            select(PlanPrice).where(
+                PlanPrice.plan_version_id == sub.plan_version_id,
+                PlanPrice.currency == sub.currency,
+                PlanPrice.interval == sub.interval,
+            )
+        )
+    ).scalar_one_or_none()
+    if new_p is None:
+        log.error(
+            "cp_provider_change_push_no_price",
+            subscription_id=sub.id,
+            provider=sub.provider,
+        )
+        return
+    # R98[30]: let failures RAISE — the outbox retries with backoff and
+    # dead-letters visibly, instead of the old one-shot swallowed log line.
+    await adapter.change_subscription(
+        sub.external_ref,
+        new_p.external_price_ref or "",
+        sub.seat_quantity,
+    )

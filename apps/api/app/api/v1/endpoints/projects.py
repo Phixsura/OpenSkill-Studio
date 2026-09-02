@@ -1302,9 +1302,15 @@ async def delete_comment(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await svc.delete_comment(comment_id, org_id, user.id)
+    await svc.delete_comment(
+        comment_id,
+        org_id,
+        user.id,
+        # R87[M12]: staff may moderate (guest comments are authorless)
+        is_staff=member.role in INSTRUCTOR_ROLES,
+    )
     await db.commit()
 
 

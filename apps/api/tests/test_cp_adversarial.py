@@ -529,9 +529,23 @@ async def test_refund_immutable_sources(db):
     buyer_tenant = await _mk_tenant(db, buyer_user)
     buyer_org = await _mk_org(db, buyer_tenant, buyer_user)
 
+    # R86[M8]: create_purchase now re-checks product liveness — the listing
+    # needs a real PUBLISHED public pack behind it.
+    from app.models.skill_pack import PackStatus, PackVisibility, SkillPack
+
+    _pack = SkillPack(
+        owner_org_id=seller_org.id,
+        name=f"RP {ULID()}",
+        slug=f"rp-{str(ULID()).lower()}",
+        status=PackStatus.PUBLISHED,
+        visibility=PackVisibility.PUBLIC,
+        created_by=user.id,
+    )
+    db.add(_pack)
+    await db.flush()
     listing = MarketplaceListing(
         product_type="skill_pack",
-        product_id=str(ULID()),
+        product_id=_pack.id,
         seller_org_id=seller_org.id,
         seller_tenant_id=seller_tenant.id,
         offer_type="paid",

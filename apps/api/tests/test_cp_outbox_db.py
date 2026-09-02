@@ -132,7 +132,13 @@ async def test_failure_backs_off_then_dead_letters(test_topic, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unknown_topic_backs_off_without_burning_attempts():
+async def test_unknown_topic_backs_off_then_dead_letters():
+    """R98[m15]: unknown topics used to spin FOREVER with zero log and no
+    attempts increment — a typo'd enqueue was invisible. They now count
+    attempts (backing off each pass) and dead-letter at the standard
+    threshold, recoverable via the failed-outbox requeue endpoint once a
+    deploy registers the topic."""
+    from app.config import settings as app_settings
     from app.core.database import engine
 
     topic = f"test.unknown.{str(ULID()).lower()[-8:]}"
@@ -147,7 +153,20 @@ async def test_unknown_topic_backs_off_without_burning_attempts():
             msg = (
                 await db.execute(select(OutboxMessage).where(OutboxMessage.topic == topic))
             ).scalar_one()
-            assert msg.status == "pending" and msg.attempts == 0
+            assert msg.status == "pending" and msg.attempts == 1
+            assert msg.available_at > datetime.now(UTC)  # backed off
+            # Fast-forward to the dead-letter threshold
+            msg.attempts = app_settings.outbox_max_attempts - 1
+            msg.available_at = datetime.now(UTC) - timedelta(seconds=1)
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            await process_outbox_once(db, topics=[topic])
+        async with AsyncSessionLocal() as db:
+            msg = (
+                await db.execute(select(OutboxMessage).where(OutboxMessage.topic == topic))
+            ).scalar_one()
+            assert msg.status == "failed"
+            assert "no handler registered" in (msg.last_error or "")
     finally:
         await engine.dispose()
 

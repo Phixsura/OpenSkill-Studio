@@ -68,6 +68,10 @@ class WorkflowInstallationService:
 
         _org = await self.db.get(_CpOrg, org_id)
         if _org is not None:
+            # R91[m1]: installs are consuming actions — suspended tenants
+            # must not keep installing (parity with learning-path install).
+            tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+            cp_facade.require_tenant_active(tenant)
             # target_version enforces major_locked on fresh installs too
             # (R44[18] — uninstall→reinstall of a newer major).
             await cp_facade.check_install_license(

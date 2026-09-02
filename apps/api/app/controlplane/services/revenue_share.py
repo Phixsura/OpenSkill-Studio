@@ -497,7 +497,10 @@ async def accrue_refund(db: AsyncSession, purchase_id: str) -> int:
             source_type=original.source_type,
             source_id=original.source_id,
             rule_id=original.rule_id,
-            rule_snapshot=original.rule_snapshot,  # copied — never re-resolved
+            rule_snapshot={
+                **(original.rule_snapshot or {}),
+                "void_reversal": True,
+            },  # copied — never re-resolved
             revenue_base_minor=-original.revenue_base_minor,
             share_amount_minor=-original.share_amount_minor,
             currency=original.currency,
@@ -514,14 +517,31 @@ async def reverse_invoice_accruals(db: AsyncSession, invoice_id: str) -> int:
     this invoice. Without this, voiding + re-invoicing the same usage accrued
     the partner share twice (invoice.finalized fires again on the re-close).
     Natural-key idempotent via adjustment_of_id, like accrue_refund."""
+    # R97[m13]: reverse EVERY live entry sourced from this invoice — the old
+    # filter (adjustment_of_id IS NULL, share>0) reversed only the original
+    # accrual, so a partial credit note's negative adjustment stayed standing:
+    # after the void + re-close, the partner's net for the same revenue was
+    # original − note + re-accrual = under-paid by the note amount.
+    # Selecting all non-reversal entries and negating each nets the invoice's
+    # rev-share history to exactly zero before the re-accrual.
+    already_reversed = select(RevenueShareEntry.adjustment_of_id).where(
+        RevenueShareEntry.source_type == "invoice",
+        RevenueShareEntry.source_id == invoice_id,
+        RevenueShareEntry.adjustment_of_id.is_not(None),
+        RevenueShareEntry.rule_snapshot["void_reversal"].as_boolean().is_(True),
+    )
     originals = (
         (
             await db.execute(
                 select(RevenueShareEntry).where(
                     RevenueShareEntry.source_type == "invoice",
                     RevenueShareEntry.source_id == invoice_id,
-                    RevenueShareEntry.adjustment_of_id.is_(None),
-                    RevenueShareEntry.share_amount_minor > 0,
+                    RevenueShareEntry.id.not_in(already_reversed),
+                    # never reverse a reversal
+                    ~(
+                        RevenueShareEntry.adjustment_of_id.is_not(None)
+                        & RevenueShareEntry.rule_snapshot["void_reversal"].as_boolean().is_(True)
+                    ),
                 )
             )
         )
@@ -538,7 +558,7 @@ async def reverse_invoice_accruals(db: AsyncSession, invoice_id: str) -> int:
             source_type=original.source_type,
             source_id=original.source_id,
             rule_id=original.rule_id,
-            rule_snapshot=original.rule_snapshot,
+            rule_snapshot={**(original.rule_snapshot or {}), "void_reversal": True},
             revenue_base_minor=-original.revenue_base_minor,
             share_amount_minor=-original.share_amount_minor,
             currency=original.currency,

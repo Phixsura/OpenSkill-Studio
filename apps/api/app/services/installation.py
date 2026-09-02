@@ -106,6 +106,11 @@ class InstallationService:
 
         _org = await self.db.get(_CpOrg, org_id)
         if _org is not None:
+            # R91[m1]: installs copy content into the org (a consuming
+            # action, ADR-014 §10.4) — suspended/cancelled tenants must not
+            # keep installing. The learning-path sibling already gates.
+            tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+            cp_facade.require_tenant_active(tenant)
             await cp_facade.check_install_license(self.db, "skill_pack", pack_id, _org)
 
         # Get release (latest if no version specified)

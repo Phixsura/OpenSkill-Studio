@@ -35,8 +35,19 @@ def normalize_hostname(raw: str) -> str:
     if not host or len(host) > 253:
         raise AppError("DOMAIN_INVALID", "Invalid hostname", 422)
     try:
-        host = host.encode("idna").decode("ascii")
-    except (UnicodeError, UnicodeDecodeError) as exc:
+        # R83[M3]: the stdlib codec is IDNA2003 (transitional) — it folds
+        # 'straße.de' to 'strasse.de', DIVERGING from browsers/registries
+        # (IDNA2008-UTS46 → xn--strae-oqa.de): the tenant verified and
+        # activated a hostname browsers never resolve to us, and the fold
+        # could collide with another tenant's real domain. Use the idna
+        # package (UTS46, browser-compatible); pure-ASCII hosts skip it.
+        if host.isascii():
+            host = host.encode("ascii").decode("ascii")
+        else:
+            import idna as _idna
+
+            host = _idna.encode(host, uts46=True).decode("ascii")
+    except (UnicodeError, UnicodeDecodeError, Exception) as exc:  # noqa: B014 — idna.IDNAError
         raise AppError("DOMAIN_INVALID", "Hostname cannot be IDNA-encoded", 422) from exc
     labels = host.split(".")
     if len(labels) < 2:
@@ -157,12 +168,30 @@ async def create_domain(
     """Returns (domain, RAW verification token) — token shown once."""
     host = normalize_hostname(hostname)
     check_reserved(host)
-    taken = (
-        await db.execute(select(TenantDomain.id).where(TenantDomain.hostname == host).limit(1))
+    # R83[M2]: never-verified pending rows held the GLOBAL hostname unique
+    # forever — squat any tenant's future domain by registering it first and
+    # never verifying (verified/active rows keep anti-sniping semantics).
+    # A stale pending_verification claim (>7 days, never verified) is evicted
+    # in favor of the new registrant.
+    from datetime import timedelta as _td
+
+    existing = (
+        await db.execute(select(TenantDomain).where(TenantDomain.hostname == host).limit(1))
     ).scalar_one_or_none()
-    if taken is not None:
-        # Uniform message — never reveals WHICH tenant holds it
-        raise AppError("DOMAIN_TAKEN", "This domain is already registered", 409)
+    if existing is not None:
+        stale_pending = (
+            existing.status == "pending_verification"
+            and existing.created_at < datetime.now(UTC) - _td(days=7)
+        )
+        if stale_pending and existing.tenant_id != tenant_id:
+            await db.delete(existing)
+            await db.flush()
+            log.info(
+                "cp_domain_stale_claim_evicted", hostname=host, prior_tenant=existing.tenant_id
+            )
+        else:
+            # Uniform message — never reveals WHICH tenant holds it
+            raise AppError("DOMAIN_TAKEN", "This domain is already registered", 409)
     # Mock verifier passes tokens prefixed "ok-": issue such tokens in mock
     # mode so the dev/E2E flow can complete without DNS. The sha256-hash
     # equality check still runs first, so forged "ok-" tokens are rejected.

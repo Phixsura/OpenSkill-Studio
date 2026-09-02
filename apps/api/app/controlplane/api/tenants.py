@@ -22,6 +22,7 @@ from app.controlplane.schemas.tenant import (
 from app.controlplane.services import tenants as tenant_svc
 from app.controlplane.services.audit import TENANT_VISIBLE_ACTIONS, record_audit
 from app.core.rate_limit import rate_limit
+from app.exceptions import AppError
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 
@@ -88,6 +89,13 @@ async def update_tenant(
     await tenant_svc.require_tenant_member(db, tenant_id, user, "owner")
     tenant = await db.get(TenantAccount, tenant_id)
     updates = body.model_dump(exclude_unset=True)
+    # R99[m20]: an explicit null ({"name": null}) survives exclude_unset and
+    # setattr'd None onto NOT NULL columns (name/timezone) → IntegrityError
+    # 500 at commit. name/timezone/currency are never nullable; an explicit
+    # null on billing_email/country legitimately clears them.
+    for field in ("name", "timezone", "currency"):
+        if field in updates and updates[field] is None:
+            raise AppError("VALIDATION_ERROR", f"{field} cannot be null", 422)
     # R60[46]: capture pre-change values — country is a rev-share rule
     # dimension and timezone shifts budget/rating period boundaries; a silent
     # flip must be reconstructible from the audit trail.

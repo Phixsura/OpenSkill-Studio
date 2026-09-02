@@ -62,10 +62,27 @@ class BlueprintConfig(BaseModel):
 
 
 def validate_blueprint_config(config: dict) -> dict:
+    from pydantic import ValidationError
+
     from app.controlplane.services.branding import validate_theme_tokens
     from app.controlplane.services.entitlements import validate_entitlement_value
+    from app.schemas.base import reject_deep_json
 
-    parsed = BlueprintConfig.model_validate(config)
+    # R99[H14]: feature_settings and entitlement_overrides are open dicts —
+    # a ≥260-level-deep nested config STORED fine but permanently 500'd every
+    # blueprint list endpoint (recursion limit at serialization). Cap depth
+    # like every other JSONB request field.
+    reject_deep_json(config.get("feature_settings"), "feature_settings", limit=4)
+    reject_deep_json(config.get("entitlement_overrides"), "entitlement_overrides", limit=3)
+    try:
+        parsed = BlueprintConfig.model_validate(config)
+    except ValidationError as exc:
+        # R99[33]: pydantic ValidationError is a ValueError subclass but NOT
+        # wrapped by FastAPI outside request-model parsing — a malformed
+        # blueprint config 500'd instead of 422.
+        raise AppError(
+            "BLUEPRINT_INVALID", f"Invalid blueprint config: {exc.errors()[:3]}", 422
+        ) from exc
     for key, value in parsed.entitlement_overrides.items():
         validate_entitlement_value(key, value)
     if parsed.branding is not None:
@@ -187,7 +204,15 @@ async def execute_provision_run(db: AsyncSession, run_id: str) -> None:
             config = validate_blueprint_config(blueprint.config if blueprint else {})
             _mark(run, "snapshot_config", "done", config=config)
             await db.flush()
-        config = next(s["config"] for s in run.steps if s["step"] == "snapshot_config")
+        # R84[M5]: match on step name AND status=done AND the config key — a
+        # FAILED snapshot_config entry (from a prior crashed attempt) has no
+        # 'config' key, and next() hard-subscripting it KeyError'd every
+        # resume, permanently wedging the run.
+        config = next(
+            s["config"]
+            for s in run.steps
+            if s.get("step") == "snapshot_config" and s.get("status") == "done" and "config" in s
+        )
 
         # 1. tenant (ACTIVE — blueprint provisioning is a commercial act, ADR)
         if not _step_done(run, "create_tenant"):
@@ -417,7 +442,7 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
     from app.controlplane.models.marketplace import LicenseGrant
     from app.controlplane.models.usage import UsageEvent
     from app.models.organization import MemberStatus, Organization, OrgMember
-    from app.models.user import User
+    from app.models.user import User, UserStatus
 
     bundle: dict = {
         "export_schema": EXPORT_SCHEMA_VERSION,
@@ -442,7 +467,15 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
             await db.execute(
                 select(OrgMember.role, User.email, User.display_name)
                 .join(User, User.id == OrgMember.user_id)
-                .where(OrgMember.org_id == org.id, OrgMember.status == MemberStatus.ACTIVE)
+                .where(
+                    OrgMember.org_id == org.id,
+                    OrgMember.status == MemberStatus.ACTIVE,
+                    # R85[M6]: admin user-deletion soft-deletes the User row
+                    # but never archives OrgMember — the export kept bundling
+                    # DELETED users' emails/names (PII of people who asked to
+                    # be removed).
+                    User.status != UserStatus.DELETED,
+                )
             )
         ).all()
         bundle["organizations"].append(
@@ -596,6 +629,14 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
     bundle["domains"] = [{"hostname": d.hostname, "status": d.status} for d in domains]
     if truncated:
         bundle["truncated_collections"] = truncated
+
+    # R94[m6]: the bundle is fully assembled — END the REPEATABLE READ
+    # transaction (and release its pool connection + any snapshot pins)
+    # BEFORE the multi-MB S3 upload. Holding the tx across un-timed network
+    # I/O pinned a connection and blocked vacuum for the upload's duration.
+    # The export row committed here is status='pending'; the status flip
+    # below commits separately at the endpoint.
+    await db.commit()
 
     # Upload to S3
     try:

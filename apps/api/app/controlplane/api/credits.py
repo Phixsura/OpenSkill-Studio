@@ -397,6 +397,12 @@ async def update_budget(
     if policy is None or policy.tenant_id != tenant_id:
         raise AppError("BUDGET_POLICY_NOT_FOUND", "Budget policy not found", 404)
     for field_name, value in body.model_dump(exclude_unset=True).items():
+        # R99[m21]: every field is `X | None` — an explicit null reached
+        # setattr and hit the NOT NULL column as IntegrityError 500 (and
+        # {"limit_minor": null} intending 'unlimited' is not a concept here;
+        # deactivate or delete the policy instead).
+        if value is None:
+            raise AppError("VALIDATION_ERROR", f"{field_name} cannot be null", 422)
         setattr(policy, field_name, value)
     await db.commit()
     return DataResponse(data=_budget_response(policy))

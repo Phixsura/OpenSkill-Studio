@@ -358,6 +358,16 @@ class EvaluationService:
                 system = SYSTEM_PROMPT
 
             llm = create_llm_client(org_settings.get("default_model"))
+            # R94[H5]: commit BEFORE the (up to 120s) LLM call — the same R13
+            # pattern workflow_runtime uses before provider calls. Without it,
+            # a credit-enforced trigger held the tenant's TenantCreditBalance
+            # FOR UPDATE (reserve) plus an idle-in-transaction pool connection
+            # for the whole call, blocking every settle/top-up/debit for the
+            # tenant and starving the pool under concurrent evals.
+            # expire_on_commit=False keeps task/submission/project populated;
+            # a read-committed re-read hazard is acceptable here (the task row
+            # is only ever written by this request).
+            await self.db.commit()
             try:
                 response = await asyncio.wait_for(
                     llm.complete(
@@ -474,15 +484,40 @@ class EvaluationService:
             log.warning("eval_parse_failed", task_id=task.id, retries=task.retries)
 
         except Exception as e:
-            task.status = EvalStatus.FAILED
-            # Sanitize error: don't expose internal details (connection strings,
-            # file paths, API keys) to the client. Log the full error server-side.
-            task.error = "Evaluation failed due to an internal error"
-            task.completed_at = datetime.now(UTC)
-            # R49[40]: input/output_tokens are set iff the LLM call completed
-            # before the exception; _emit_usage_events no-ops on zero tokens.
-            await self._emit_usage_events(task, tokens_only=True)
-            await self.db.flush()
+            # R94[H6]: if the failure was a DB error (e.g. NUL in the LLM
+            # feedback aborting the flush), the session is in a failed
+            # transaction — every statement below would raise
+            # PendingRollbackError, 500 the request AND roll back the task
+            # row + metering (paid spend recorded nowhere). Roll back first;
+            # the pre-LLM commit (R94[H5]) preserved the task row, and
+            # expire_on_commit=False keeps the ORM objects usable. Re-attach
+            # the task since the rollback may have detached pending state.
+            if self.db.in_transaction() and not self.db.is_active:
+                await self.db.rollback()
+            try:
+                task.status = EvalStatus.FAILED
+                # Sanitize error: don't expose internal details (connection
+                # strings, file paths, API keys) to the client.
+                task.error = "Evaluation failed due to an internal error"
+                task.completed_at = datetime.now(UTC)
+                # R49[40]: input/output_tokens are set iff the LLM call
+                # completed; _emit_usage_events no-ops on zero tokens.
+                await self._emit_usage_events(task, tokens_only=True)
+                # R91[m0]: bump retries AFTER emitting (same contract as the
+                # parse-failure branch) — without it a UI retry's REAL second
+                # LLM spend re-used eval:{id}:0:* keys and its token events
+                # were silently dropped as duplicates (unrated, unbilled).
+                task.retries += 1
+                await self.db.flush()
+            except Exception:  # noqa: BLE001 — aborted session: recover once
+                await self.db.rollback()
+                task.status = EvalStatus.FAILED
+                task.error = "Evaluation failed due to an internal error"
+                task.completed_at = datetime.now(UTC)
+                self.db.add(task)
+                await self._emit_usage_events(task, tokens_only=True)
+                task.retries += 1
+                await self.db.flush()
             log.error("eval_failed", task_id=task.id, error=str(e))
 
     # ── Task CRUD ──
@@ -671,7 +706,10 @@ class EvaluationService:
         Mirrors handle_run_terminal: rate the task's events inline, sum the
         exact billable in the reservation currency, settle (guarded). Failure
         to settle must never fail the evaluation — the sweep cron releases
-        stale holds.
+        stale holds. R94[m5]: the whole body is SAVEPOINT-isolated — the
+        swallow below is only safe if a DB error inside (rate_pending /
+        settle / row flips) cannot leave the outer transaction aborted
+        (same class as R77[1]).
         """
         try:
             from app.controlplane.models.credit import CreditReservation
@@ -680,50 +718,56 @@ class EvaluationService:
             from app.controlplane.services import credits as _credits
             from app.controlplane.services.rating import rate_pending
 
-            reservation = (
-                await self.db.execute(
-                    select(CreditReservation).where(
-                        CreditReservation.reference_type == "evaluation_task",
-                        CreditReservation.reference_id == task.id,
-                        CreditReservation.status == "held",
-                    )
-                )
-            ).scalar_one_or_none()
-            if reservation is None:
-                return
-            await rate_pending(self.db, tenant_id=reservation.tenant_id)
-            rows = (
-                (
+            async with self.db.begin_nested():
+                reservation = (
                     await self.db.execute(
-                        select(RatedUsage)
-                        .join(CpUsageEvent, CpUsageEvent.id == RatedUsage.usage_event_id)
-                        .where(
-                            CpUsageEvent.evaluation_task_id == task.id,
-                            RatedUsage.billable_currency == reservation.currency,
-                            RatedUsage.status == "rated",
+                        select(CreditReservation).where(
+                            CreditReservation.reference_type == "evaluation_task",
+                            CreditReservation.reference_id == task.id,
+                            CreditReservation.status == "held",
                         )
                     )
-                )
-                .scalars()
-                .all()
-            )
-            actual = int(
-                sum((Decimal(r.billable_amount_exact) for r in rows), Decimal(0)).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-            )
-            settled = await _credits.settle(self.db, reservation.id, actual)
-            if settled.status == "settled" and rows:
-                from sqlalchemy import update as _sa_update
-
-                await self.db.execute(
-                    _sa_update(RatedUsage)
-                    .where(
-                        RatedUsage.id.in_([r.id for r in rows]),
-                        RatedUsage.status == "rated",
+                ).scalar_one_or_none()
+                if reservation is None:
+                    return
+                await rate_pending(self.db, tenant_id=reservation.tenant_id)
+                # R98[H11]: FOR UPDATE — same double-charge race R80[1] closed
+                # for workflow runs: unlocked, this select raced close_period's
+                # locked usage-line sweep and the same rated rows were settled
+                # against the reservation AND billed on the invoice.
+                rows = (
+                    (
+                        await self.db.execute(
+                            select(RatedUsage)
+                            .join(CpUsageEvent, CpUsageEvent.id == RatedUsage.usage_event_id)
+                            .where(
+                                CpUsageEvent.evaluation_task_id == task.id,
+                                RatedUsage.billable_currency == reservation.currency,
+                                RatedUsage.status == "rated",
+                            )
+                            .with_for_update(of=RatedUsage)
+                        )
                     )
-                    .values(status="settled")
+                    .scalars()
+                    .all()
                 )
+                actual = int(
+                    sum((Decimal(r.billable_amount_exact) for r in rows), Decimal(0)).quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP
+                    )
+                )
+                settled = await _credits.settle(self.db, reservation.id, actual)
+                if settled.status == "settled" and rows:
+                    from sqlalchemy import update as _sa_update
+
+                    await self.db.execute(
+                        _sa_update(RatedUsage)
+                        .where(
+                            RatedUsage.id.in_([r.id for r in rows]),
+                            RatedUsage.status == "rated",
+                        )
+                        .values(status="settled")
+                    )
             await self.db.flush()
         except Exception:  # noqa: BLE001 — never fail the eval on settlement
             log.warning("eval_reservation_settle_failed", task_id=task.id, exc_info=True)

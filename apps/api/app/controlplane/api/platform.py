@@ -110,12 +110,16 @@ async def search_tenants(
                 "VALIDATION_ERROR", f"Unknown account_type '{account_type}'", 422
             ) from exc
     if q:
-        like = f"%{q}%"
+        # R96[m11]: escape LIKE wildcards — a raw '%'/'_' in q matched
+        # everything (pattern probing + pathological-pattern DoS on long
+        # alternating wildcards).
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
         query = query.where(
             or_(
-                TenantAccount.name.ilike(like),
-                TenantAccount.slug.ilike(like),
-                TenantAccount.billing_email.ilike(like),
+                TenantAccount.name.ilike(like, escape="\\"),
+                TenantAccount.slug.ilike(like, escape="\\"),
+                TenantAccount.billing_email.ilike(like, escape="\\"),
             )
         )
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()

@@ -112,8 +112,24 @@ async def process_outbox_once(db: AsyncSession, topics: list[str] | None = None)
     claimable = []
     for msg in rows:
         if HANDLERS.get(msg.topic) is None:
-            # Unknown topic — a later deploy may know it; back off, don't burn attempts
-            msg.available_at = _now() + timedelta(minutes=5)
+            # R98[m15]: unknown topics spun FOREVER with zero log and no
+            # attempts increment (a typo'd enqueue was invisible). Log, count
+            # the attempt, and dead-letter at the same threshold as failing
+            # handlers — a later deploy that knows the topic can requeue via
+            # the failed-outbox ops endpoint.
+            msg.attempts += 1
+            if msg.attempts >= settings.outbox_max_attempts:
+                msg.status = "failed"
+                msg.last_error = f"no handler registered for topic '{msg.topic}'"
+                log.error("outbox_unknown_topic_dead_letter", topic=msg.topic, message_id=msg.id)
+            else:
+                msg.available_at = _now() + timedelta(minutes=5)
+                log.warning(
+                    "outbox_unknown_topic",
+                    topic=msg.topic,
+                    message_id=msg.id,
+                    attempts=msg.attempts,
+                )
             continue
         msg.status = "processing"
         msg.locked_by = _worker_id()
@@ -344,6 +360,14 @@ class WorkerSettings:
 
     @staticmethod
     async def on_shutdown(ctx: dict) -> None:
+        # R89[M15]: the sweep cron spawns fire-and-forget advance_run tasks
+        # (dispatch_advance) that arq's shutdown does NOT wait for — a worker
+        # restart cancelled them mid-provider-call, leaving RUNNING steps for
+        # the sweeper to recover a full cron cycle later. Drain like the API
+        # lifespan does.
+        from app.services.workflow_runtime import drain_workflow_tasks
+
+        await drain_workflow_tasks(timeout=30.0)
         log.info("cp_worker_stopped")
 
     functions = [_poll_outbox]

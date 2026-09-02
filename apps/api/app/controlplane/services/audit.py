@@ -23,6 +23,7 @@ AUDIT_ACTIONS = frozenset(
         "tenant.status_changed",
         "tenant.provisioned",
         "tenant.export_created",
+        "tenant.export_downloaded",
         "tenant.currency_changed",
         # R60[46]: owner PATCH of pricing-relevant fields (country is a
         # rev-share rule dimension; timezone shifts budget/period boundaries).
@@ -43,6 +44,7 @@ AUDIT_ACTIONS = frozenset(
         # they must be reconstructible from the audit trail.
         "subscription.started",
         "subscription.cancelled",
+        "subscription.reactivated",
         "entitlement.override_set",
         "entitlement.override_removed",
         # pricing

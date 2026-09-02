@@ -140,8 +140,15 @@ def upgrade() -> None:
     for row in rows:
         try:
             limit_minor = int(float(row.budget) * 100)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
+        # R93[m3]: jsonb numerics are arbitrary-precision — a historical
+        # budget of 1e20 converted to a limit_minor beyond BIGINT and the
+        # INSERT crashed the ENTIRE upgrade (asyncpg DataError, out of range
+        # for int8). Clamp to the int8-safe money ceiling; a nonsensical
+        # legacy value becomes a very-large-but-valid cap instead of a
+        # deploy-blocking migration failure.
+        limit_minor = min(limit_minor, 1_000_000_000_000_000)  # 10^15
         if limit_minor <= 0:
             continue
         bind.execute(

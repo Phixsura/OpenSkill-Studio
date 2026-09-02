@@ -33,7 +33,11 @@ CACHE_KEY = "cp:ent:{tenant_id}"
 # otherwise re-populate the stale value for the full TTL). The TTL only needs
 # to outlive the mutation's commit window.
 DIRTY_KEY = "cp:entdirty:{tenant_id}"
-DIRTY_TTL_SECONDS = 5
+# R97[m14]: 5s assumed request-scale commits; outbox handlers can run tens of
+# seconds between invalidate and their per-message commit (rating batches,
+# provider calls). 30s covers the per-message commit window (R89[12]) with
+# margin while keeping the no-cache penalty short.
+DIRTY_TTL_SECONDS = 30
 CACHE_TTL_SECONDS = 60
 
 # The plan trials run on (ADR-014 §1.3) and the no-subscription fallback.

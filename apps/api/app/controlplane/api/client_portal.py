@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 import structlog
 from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -70,22 +70,20 @@ class ClientCommentRequest(BaseModel):
     item_id: str = Field(min_length=26, max_length=26)
     text: str = Field(min_length=1, max_length=5000)
     anchor_type: str = Field(default="global", pattern=r"^(global|time|region)$")
-    timestamp_ms: int | None = Field(default=None, ge=0)
-    duration_ms: int | None = Field(default=None, ge=0)
+    # R87[M11]/R90[M19]: parity with the internal comment schema writing the
+    # SAME columns — time anchors bounded (24h in ms), region validated as
+    # normalized W3C geometry (shape whitelist, [0,1] bounds, unknown keys
+    # dropped) instead of any depth-16 blob.
+    timestamp_ms: int | None = Field(default=None, ge=0, le=86_400_000)
+    duration_ms: int | None = Field(default=None, ge=0, le=86_400_000)
     region: dict | None = None
 
     @field_validator("region")
     @classmethod
     def _region(cls, v):
-        # R58[33]: a ~300-level-deep nested dict stored to JSONB poisoned the
-        # whole comment thread with a persistent 500 (recursion at serialize).
-        # Same guard every other JSONB field uses.
-        from app.schemas.base import reject_ctrl_json, reject_deep_json
+        from app.schemas.project import CreateCommentRequest as _Internal
 
-        if v is not None:
-            reject_deep_json(v, "region", limit=16)
-            reject_ctrl_json(v, "region")
-        return v
+        return _Internal.validate_region(v)
 
     @field_validator("text")
     @classmethod
@@ -326,7 +324,9 @@ async def portal_list_comments(
                     # Hard filter: internal comments NEVER reach the portal
                     SubmissionComment.client_visible.is_(True),
                 )
-                .order_by(SubmissionComment.created_at)
+                .order_by(SubmissionComment.created_at, SubmissionComment.id)
+                # R87[M13]: bounded — matches the create-side cap.
+                .limit(500)
             )
         )
         .scalars()
@@ -376,6 +376,22 @@ async def portal_create_comment(
     item = await db.get(SubmissionItem, body.item_id)
     if item is None or item.submission_id != submission_id:
         raise AppError("SUBMISSION_NOT_SHARED", "Item not found", 404)
+    # R87[M13]: the only throttle was the per-IP rate limit — a guest link is
+    # a shareable bearer credential, so per-IP scales with IPs. Hard cap the
+    # client-visible comment count per submission (spam ceiling; internal
+    # comments unaffected).
+    client_comment_count = (
+        await db.execute(
+            select(func.count(SubmissionComment.id)).where(
+                SubmissionComment.submission_id == submission_id,
+                SubmissionComment.client_visible.is_(True),
+            )
+        )
+    ).scalar_one()
+    if client_comment_count >= 500:
+        raise AppError(
+            "COMMENT_LIMIT_REACHED", "This submission has reached its comment limit", 422
+        )
     comment = SubmissionComment(
         org_id=submission.org_id,
         submission_id=submission_id,

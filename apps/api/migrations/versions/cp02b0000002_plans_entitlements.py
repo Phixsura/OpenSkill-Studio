@@ -324,6 +324,37 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # R93[m4]: cp02's upgrade CONSUMED cp01's grandfather metadata (converted
+    # to override rows, then deleted from tenant metadata). Dropping the
+    # overrides table without restoring the metadata made downgrade+re-upgrade
+    # silently destroy every grandfathered entitlement (tenants over community
+    # defaults suddenly hard-capped). Reverse the handoff: write the override
+    # rows back into metadata['grandfather_overrides'] first.
+    bind = op.get_bind()
+    rows = bind.execute(
+        sa.text(
+            "SELECT tenant_id, key, value FROM cp_entitlement_overrides "
+            "WHERE reason = 'migration grandfathering'"
+        )
+    ).fetchall()
+    from collections import defaultdict
+
+    by_tenant: dict = defaultdict(dict)
+    for row in rows:
+        val = row.value.get("v") if isinstance(row.value, dict) else row.value
+        by_tenant[row.tenant_id][row.key] = val
+    import json as _json
+
+    for tid, overrides in by_tenant.items():
+        bind.execute(
+            sa.text(
+                "UPDATE cp_tenant_accounts SET metadata = "
+                "coalesce(metadata, '{}'::jsonb) || "
+                "jsonb_build_object('grandfather_overrides', CAST(:ov AS jsonb)) "
+                "WHERE id = :tid"
+            ),
+            {"tid": tid, "ov": _json.dumps(overrides)},
+        )
     op.drop_table("cp_entitlement_overrides")
     op.drop_table("cp_plan_prices")
     op.drop_table("cp_plan_versions")

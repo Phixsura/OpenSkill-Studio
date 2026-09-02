@@ -507,6 +507,18 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
     else:  # no_rate
         internal_cost = 0
         internal_cost_exact = Decimal(0)
+        # R98[H12]: a missing cost rate silently rated the event at cost=0 —
+        # cost_plus policies then BILLED 0 (revenue loss invisible until
+        # reconciliation, if ever filed). Loud, actionable log with the exact
+        # dimensions ops must create a rate for.
+        log.error(
+            "cp_rating_no_cost_rate",
+            usage_event_id=event.id,
+            tenant_id=event.tenant_id,
+            provider=event.provider,
+            model_or_service=event.model_or_service,
+            usage_type=event.usage_type,
+        )
 
     # 2. Sell policy
     policy = await _resolve_sell_policy(db, event, tenant)

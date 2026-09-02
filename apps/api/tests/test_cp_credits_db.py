@@ -1598,3 +1598,125 @@ async def test_run_terminal_defers_while_step_lease_live(db):
         )
     ).scalar_one()
     assert reservation.status == "released"  # cancelled with zero usage
+
+
+# ── R91-R100: extraction gates + promo remainder ─────────────
+
+
+@pytest.mark.asyncio
+async def test_extraction_gated_and_metered(db):
+    """R91[H0]: requirement-profile extraction was the only platform-key LLM
+    consumer with ZERO facade gates — suspended tenants burned unmetered paid
+    calls. Now: tenant-active gate + budget check + token metering."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.config import settings as app_settings
+    from app.controlplane.models.usage import UsageEvent
+    from app.core.llm import LLMResponse
+    from app.services.organization import OrgService
+    from app.services.requirement_profile import RequirementProfileService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"EX {ULID()}",
+        slug=f"ex-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+
+    good = LLMResponse(
+        content='{"goal": "make product videos"}',
+        input_tokens=200,
+        output_tokens=80,
+        model="claude-haiku-4-5",
+        provider="anthropic",
+    )
+    svc = RequirementProfileService(db)
+    with (
+        patch.object(app_settings, "extraction_enabled", True),
+        patch("app.core.llm.create_llm_client") as mock_create,
+    ):
+        mock_llm = AsyncMock()
+        mock_llm.complete = AsyncMock(return_value=good)
+        mock_create.return_value = mock_llm
+        profile = await svc.extract_from_text(
+            org_id=org.id,
+            user_id=user.id,
+            raw_request="I need product videos",
+            context_type="production",
+            created_by=user.id,
+        )
+        # Metered
+        events = (
+            (
+                await db.execute(
+                    select(UsageEvent).where(
+                        UsageEvent.idempotency_key.in_(
+                            [f"rpx:{profile.id}:in", f"rpx:{profile.id}:out"]
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(events) == 2, "extraction token spend must be metered"
+        # Suspended tenant → blocked BEFORE the LLM call
+        tenant.status = TenantStatus.SUSPENDED
+        await db.flush()
+        from app.controlplane.services.entitlements import invalidate_cache
+
+        await invalidate_cache(tenant.id)
+        mock_llm.complete.reset_mock()
+        with pytest.raises(AppError) as exc:
+            await svc.extract_from_text(
+                org_id=org.id,
+                user_id=user.id,
+                raw_request="more videos",
+                context_type="production",
+                created_by=user.id,
+            )
+        assert exc.value.code == "TENANT_SUSPENDED"
+        mock_llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_partial_promo_expiry_completes_later(db):
+    """R98[H10]: a partial promo expiry (reserved remainder) wedged the lot
+    forever — the fixed idempotency key deduped every later pass. The
+    cumulative-offset key lets the remainder expire once the hold clears."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        1000,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        reason="promo",
+        actor=_actor(user),
+    )
+    # Reserve 600 → only 400 available to expire on pass 1
+    reservation = await credit_svc.reserve(
+        db, tenant.id, "USD", 600, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    n1 = await credit_svc.expire_promotional(db)
+    assert n1 == 1
+    bal = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert bal.balance_minor == 600  # 400 expired, 600 still held
+    # Hold releases → pass 2 must expire the remainder (was wedged forever)
+    await credit_svc.release(db, reservation.id)
+    n2 = await credit_svc.expire_promotional(db)
+    assert n2 == 1, "remainder must expire on the next pass"
+    await db.refresh(bal)
+    assert bal.balance_minor == 0
+    # pass 3: no-op
+    n3 = await credit_svc.expire_promotional(db)
+    assert n3 == 0

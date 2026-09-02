@@ -317,6 +317,29 @@ async def cancel_subscription(
     return DataResponse(data=await _subscription_response(db, sub))
 
 
+@router.post(
+    "/tenants/{tenant_id}/subscription/reactivate",
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def reactivate_subscription(
+    tenant_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """R82[M0]: un-cancel a pending cancellation before the period ends."""
+    await tenant_svc.require_tenant_member(db, tenant_id, user, "owner")
+    tenant = await db.get(TenantAccount, tenant_id)
+    sub = await billing_svc.get_live_subscription(db, tenant_id)
+    if sub is None:
+        raise AppError("SUBSCRIPTION_NOT_FOUND", "No live subscription", 404)
+    sub = await billing_svc.reactivate_subscription(
+        db, tenant, sub, actor=make_actor(request, user, "tenant")
+    )
+    await db.commit()
+    return DataResponse(data=await _subscription_response(db, sub))
+
+
 # ── Tenant invoices / payments ───────────────────────────────
 
 
@@ -609,6 +632,59 @@ async def close_due_periods(
     count = await billing_svc.scan_due_periods(db)
     await db.commit()
     return DataResponse(data={"enqueued": count})
+
+
+@router.get(
+    "/platform/billing/webhook-events",
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def list_webhook_events(
+    status: str | None = Query(
+        default=None, pattern=r"^(received|processed|failed|duplicate|ignored)$"
+    ),
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=50, ge=1, le=200),
+    user: User = Depends(require_platform_role(*_BILLING_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """R98[m16]: failed webhook events were unlistable — the replay endpoint
+    needs the internal event id, but nothing exposed it (ops couldn't find
+    the failed checkout.session.completed a paying customer was stuck on)."""
+    from app.controlplane.models.billing import BillingWebhookEvent
+
+    q = select(BillingWebhookEvent)
+    if status:
+        q = q.where(BillingWebhookEvent.status == status)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+    offset = (page - 1) * per_page
+    rows = (
+        (
+            await db.execute(
+                q.order_by(BillingWebhookEvent.created_at.desc(), BillingWebhookEvent.id.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return ListResponse(
+        data=[
+            {
+                "id": e.id,
+                "provider": e.provider,
+                "external_event_id": e.external_event_id,
+                "event_type": e.event_type,
+                "status": e.status,
+                "error": e.error,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in rows
+        ],
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
+        ),
+    )
 
 
 @router.post(

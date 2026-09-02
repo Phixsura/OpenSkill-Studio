@@ -351,16 +351,25 @@ async def license_status(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db)
-    from app.controlplane import facade
-
-    tenant = await facade.get_tenant_for_org(db, org_id)
     ids = [i.strip() for i in product_ids.split(",") if i.strip()][:50]
     data = {}
+    from app.models.organization import Organization as _Org
+
+    org = await db.get(_Org, org_id)
     for product_id in ids:
-        grant = await market_svc._find_covering_grant(
-            db, product_type, product_id, tenant.id, org_id
-        )
-        data[product_id] = {"licensed": grant is not None}
+        # R86[M9]: answer with the SAME semantics the install gate applies —
+        # a grant row is only one of the ways an org is licensed. Own
+        # products, free/no-listing products and included_with_plan all
+        # install fine, but the badge said "unlicensed" and pushed the buyer
+        # toward paying for what they already have.
+        licensed = False
+        try:
+            if org is not None:
+                await market_svc.check_install_license(db, product_type, product_id, org)
+                licensed = True
+        except AppError:
+            licensed = False
+        data[product_id] = {"licensed": licensed}
     return DataResponse(data=data)
 
 

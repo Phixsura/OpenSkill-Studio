@@ -47,6 +47,13 @@ def validate_policy_params(policy_type: str, params: dict) -> dict:
         v = params.get(key)
         if isinstance(v, bool) or not isinstance(v, int) or v < 0:
             raise AppError("INVALID_POLICY_PARAMS", f"params.{key} must be a non-negative int", 422)
+        # R99[m22]: no ceiling let 10^19 params store fine and overflow int8
+        # at rating time (asyncpg DataError on every matching event forever).
+        # Same money ceiling as the endpoint-level minor fields (R88).
+        if v > 1_000_000_000_000_000:
+            raise AppError(
+                "INVALID_POLICY_PARAMS", f"params.{key} exceeds the maximum (10^15)", 422
+            )
         return v
 
     allowed: set[str]

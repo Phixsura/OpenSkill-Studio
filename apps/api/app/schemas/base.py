@@ -80,6 +80,19 @@ def reject_ctrl_str(v, field_name: str):
     return v
 
 
+_HEADER_CTRL_RE = _re.compile(r"[\x00-\x1f\x7f]")
+
+
+def reject_header_str(v, field_name: str):
+    """R95[m7/m8]: strict variant for values that reach EMAIL/HTTP HEADER
+    context (From display-name, Subject interpolation). reject_ctrl_str
+    deliberately allows \t\n\r for multi-line body fields — but a CR/LF in
+    a header value is header injection (extra headers, BCC smuggling)."""
+    if v is not None and _HEADER_CTRL_RE.search(v):
+        raise ValueError(f"{field_name} contains control characters that are not allowed")
+    return v
+
+
 def reject_ctrl_json(v, field_name: str):
     """Validator helper: reject NUL/control chars in ANY string nested in an
     open dict/list field. json.loads materializes a valid-JSON \\u0000 escape

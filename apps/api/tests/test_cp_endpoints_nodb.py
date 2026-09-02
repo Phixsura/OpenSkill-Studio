@@ -430,15 +430,31 @@ def test_portal_comment_region_depth_capped():
         ClientCommentRequest.model_validate(
             {"item_id": "0" * 26, "text": "x", "anchor_type": "region", "region": deep}
         )
-    # A sane region passes.
-    ClientCommentRequest.model_validate(
+    # A sane region passes (R87[M11]: now the W3C-normalized shape, matching
+    # the internal comment schema; unknown keys are dropped).
+    r = ClientCommentRequest.model_validate(
         {
             "item_id": "0" * 26,
             "text": "x",
             "anchor_type": "region",
-            "region": {"x": 1, "y": 2, "w": 3, "h": 4},
+            "region": {
+                "type": "rectangle",
+                "bounds": {"minX": 0.1, "minY": 0.1, "maxX": 0.9, "maxY": 0.9},
+                "junk": "dropped",
+            },
         }
     )
+    assert "junk" not in r.region
+    # The old free-form shape is now rejected (parity with the product path).
+    with _pytest.raises(ValidationError):
+        ClientCommentRequest.model_validate(
+            {
+                "item_id": "0" * 26,
+                "text": "x",
+                "anchor_type": "region",
+                "region": {"x": 1, "y": 2, "w": 3, "h": 4},
+            }
+        )
 
 
 def test_comment_response_tolerates_null_author():

@@ -272,6 +272,35 @@ class SkillPackService:
         if skill is None or skill.org_id != org_id:
             raise AppError("SKILL_NOT_FOUND", "Skill not found in this organization", 404)
 
+        # R91[H1]: a skill INSTALLED from someone else's paid pack carries
+        # origin_pack_id and passes the org-ownership check above (install
+        # copies it into the buyer org) — repackaging it into a new pack and
+        # publishing redistributed paid content license-free. Licensed-in
+        # content is usable, not redistributable: block re-packing when the
+        # origin pack is paid and not the org's own product.
+        if skill.origin_pack_id is not None:
+            from app.controlplane.models.marketplace import MarketplaceListing
+
+            origin_listing = (
+                await self.db.execute(
+                    select(MarketplaceListing)
+                    .where(
+                        MarketplaceListing.product_type == "skill_pack",
+                        MarketplaceListing.product_id == skill.origin_pack_id,
+                        MarketplaceListing.status != "draft",
+                        MarketplaceListing.offer_type.in_(("paid", "partner_only")),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if origin_listing is not None and origin_listing.seller_org_id != org_id:
+                raise AppError(
+                    "LICENSED_CONTENT_NOT_REDISTRIBUTABLE",
+                    "This skill was installed from a paid pack and cannot be "
+                    "republished in another pack",
+                    403,
+                )
+
         entry = SkillPackSkill(pack_id=pack_id, skill_id=skill_id, sort_order=sort_order)
         self.db.add(entry)
         try:
@@ -728,12 +757,20 @@ class SkillPackService:
             )
             org_ids = [row[0] for row in install_r.all()]
             if org_ids:
+                # R95[H7]: cap the fan-out — a popular pack's publish
+                # otherwise did an unbounded per-recipient create+flush loop
+                # inline in the request (thousands of installs = thousands of
+                # sequential statements before the publisher's request
+                # returns). 200 owner notifications is the v1 ceiling; the
+                # registry badge is the durable signal for the rest.
                 owner_r = await self.db.execute(
-                    select(OrgMember.user_id, OrgMember.org_id).where(
+                    select(OrgMember.user_id, OrgMember.org_id)
+                    .where(
                         OrgMember.org_id.in_(org_ids),
                         OrgMember.role == OrgRole.OWNER,
                         OrgMember.status == MemberStatus.ACTIVE,
                     )
+                    .limit(200)
                 )
                 notif_svc = NotificationService(self.db)
                 for user_id, org_id_val in owner_r.all():

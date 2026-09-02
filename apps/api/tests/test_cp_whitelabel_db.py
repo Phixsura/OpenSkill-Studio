@@ -110,9 +110,9 @@ def test_legal_links_and_urls():
 
 
 def test_blueprint_config_rejects_runtime_data_keys():
-    """Issue §8 red line: the schema structurally rejects user/credential keys."""
-    from pydantic import ValidationError
-
+    """Issue §8 red line: the schema structurally rejects user/credential keys.
+    R99[33]: rejection now surfaces as AppError 422 (pydantic ValidationError
+    escaped FastAPI's request-model wrapping and 500'd)."""
     v = provision_svc.validate_blueprint_config
     v({"plan_key": "school", "org": {"name_template": "{tenant_name} Campus"}})
     for bad in (
@@ -122,8 +122,9 @@ def test_blueprint_config_rejects_runtime_data_keys():
         {"billing_records": []},
         {"org": {"name_template": "x", "members": []}},
     ):
-        with pytest.raises(ValidationError):  # extra=forbid
+        with pytest.raises(AppError) as exc:  # extra=forbid → clean 422
             v(bad)
+        assert exc.value.status_code == 422
 
 
 # ── Domain lifecycle ─────────────────────────────────────────
@@ -688,3 +689,63 @@ async def test_site_context_dark_for_terminal_tenants(db):
     await db.flush()
     ctx = await domain_svc.resolve_site_context(db, host)
     assert ctx["tenant_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_stale_pending_domain_claim_evicted(db):
+    """R83[M2]: never-verified pending rows held the global hostname unique
+    forever — squat any tenant's future domain by registering first. A stale
+    (>7d) pending claim is evicted for a new registrant; verified/active
+    claims keep anti-sniping semantics."""
+
+    from app.controlplane.models.branding import TenantDomain
+
+    user = await _mk_user(db)
+    squatter = await _mk_tenant(db, user)
+    victim = await _mk_tenant(db, user)
+    host = f"squatted-{str(ULID()).lower()[:8]}.example-live.com"
+    # Squatter registered 8 days ago, never verified
+    stale = TenantDomain(
+        tenant_id=squatter.id,
+        hostname=host,
+        status="pending_verification",
+        verification_token_hash="x" * 64,
+        created_by=user.id,
+    )
+    db.add(stale)
+    await db.flush()
+    from sqlalchemy import text as _text
+
+    await db.execute(
+        _text("UPDATE cp_tenant_domains SET created_at = now() - interval '8 days' WHERE id = :i"),
+        {"i": stale.id},
+    )
+    db.expire(stale)  # the service re-reads the row; drop the stale identity-map copy
+    # Victim can now claim it
+    domain, raw = await domain_svc.create_domain(
+        db, tenant_id=victim.id, hostname=host, actor=_actor(user)
+    )
+    assert domain.tenant_id == victim.id
+    # A FRESH pending claim is NOT evicted
+    host2 = f"fresh-{str(ULID()).lower()[:8]}.example-live.com"
+    await domain_svc.create_domain(db, tenant_id=squatter.id, hostname=host2, actor=_actor(user))
+    with pytest.raises(AppError) as exc:
+        await domain_svc.create_domain(db, tenant_id=victim.id, hostname=host2, actor=_actor(user))
+    assert exc.value.code == "DOMAIN_TAKEN"
+    # An ACTIVE claim is never evicted regardless of age
+    host3 = f"act-{str(ULID()).lower()[:8]}.example-live.com"
+    active = TenantDomain(
+        tenant_id=squatter.id,
+        hostname=host3,
+        status="active",
+        verification_token_hash="y" * 64,
+        created_by=user.id,
+    )
+    db.add(active)
+    await db.flush()
+    await db.execute(
+        _text("UPDATE cp_tenant_domains SET created_at = now() - interval '90 days' WHERE id = :i"),
+        {"i": active.id},
+    )
+    with pytest.raises(AppError):
+        await domain_svc.create_domain(db, tenant_id=victim.id, hostname=host3, actor=_actor(user))

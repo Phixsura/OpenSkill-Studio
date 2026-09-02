@@ -277,6 +277,11 @@ async def request_revision(
     comment: str,
 ) -> ClientApprovalRecord:
     submission = await assert_shared(db, principal.project_id, submission_id)
+    # R87[M10]: the only decision path missing the R69[1] gate — the guarded
+    # status UPDATE below correctly no-ops on DRAFT, but the append-only
+    # RECORD still landed (a decision on unreviewable content polluting the
+    # approval history and the notification stream).
+    _assert_decidable(submission, "request revision on")
     await _assert_no_final(db, principal.project_id)
     # R69[4]: same-version repeat is a no-op (comment traffic belongs in
     # comments; the DECISION for this version is already recorded).
@@ -421,7 +426,14 @@ async def _notify_org(
             .all()
         )
         svc = NotificationService(db)
-        for user_id in recipients[:50]:
+        # R95[m9]: the submission CREATOR is the person who must act on a
+        # revision request (their submission just flipped to
+        # REVISION_REQUESTED) — they were never notified unless they happened
+        # to hold a staff role. Always include them first.
+        notify_ids = list(recipients[:50])
+        if submission.user_id and submission.user_id not in notify_ids:
+            notify_ids.insert(0, submission.user_id)
+        for user_id in notify_ids:
             await svc.create(
                 user_id=user_id,
                 notification_type=event,

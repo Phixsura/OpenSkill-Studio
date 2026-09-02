@@ -58,6 +58,15 @@ class CreateCostRateRequest(BaseModel):
     effective_until: datetime | None = None
     source_note: str | None = Field(default=None, max_length=500)
 
+    @field_validator("effective_from", "effective_until")
+    @classmethod
+    def _tz_aware(cls, v):
+        # R99[m19]: naive datetimes compared against aware now() in the
+        # overlap/point-in-time queries raised TypeError → 500. Coerce.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
+
     @field_validator("source_note", "provider")
     @classmethod
     def _ctrl(cls, v, info):
@@ -80,14 +89,31 @@ class CreateCostRateRequest(BaseModel):
             return v
         reject_deep_json(v, "tier_rules", limit=3)
         for tier in v:
-            safe_decimal(str(tier.get("min_qty", "0")), "tier_rules.min_qty")
-            safe_decimal(str(tier.get("unit_cost")), "tier_rules.unit_cost")
+            # R99[H13]: safe_decimal only catches PARSE failures —
+            # Decimal('NaN')/'Infinity' parse fine, and a poisoned tier then
+            # crashed rate_event with uncaught InvalidOperation on every
+            # matching usage event forever. Enforce finite + bounded, same
+            # rules as the unit_cost validator above.
+            mq = safe_decimal(str(tier.get("min_qty", "0")), "tier_rules.min_qty")
+            uc = safe_decimal(str(tier.get("unit_cost")), "tier_rules.unit_cost")
+            for name, d in (("min_qty", mq), ("unit_cost", uc)):
+                if not d.is_finite() or d < 0 or d >= Decimal("10000000000"):
+                    raise ValueError(f"tier_rules.{name} must be finite, non-negative and < 10^10")
         return v
 
 
 class SupersedeCostRateRequest(BaseModel):
     effective_until: datetime
     successor: CreateCostRateRequest
+
+    @field_validator("effective_until")
+    @classmethod
+    def _tz_aware(cls, v):
+        # R99[m19]: supersede_cost_rate compares this against the aware
+        # effective_from — a naive value 500'd on TypeError.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
 
 
 class CreatePricePolicyRequest(BaseModel):
@@ -103,6 +129,15 @@ class CreatePricePolicyRequest(BaseModel):
     priority: int = Field(default=0, ge=-1000, le=1000)
     effective_from: datetime
     effective_until: datetime | None = None
+
+    @field_validator("effective_from", "effective_until")
+    @classmethod
+    def _tz_aware(cls, v):
+        # R99[m19]: naive datetimes compared against aware now() in the
+        # overlap/point-in-time queries raised TypeError → 500. Coerce.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
 
     @field_validator("name")
     @classmethod
@@ -122,6 +157,15 @@ class CreateFxRateRequest(BaseModel):
     rate: str
     effective_from: datetime
     effective_until: datetime | None = None
+
+    @field_validator("effective_from", "effective_until")
+    @classmethod
+    def _tz_aware(cls, v):
+        # R99[m19]: naive datetimes compared against aware now() in the
+        # overlap/point-in-time queries raised TypeError → 500. Coerce.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
 
     @field_validator("rate")
     @classmethod
@@ -443,11 +487,23 @@ async def deactivate_price_policy(
 
 @router.get("/platform/fx-rates", dependencies=[Depends(rate_limit(30, 60))])
 async def list_fx_rates(
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(require_platform_role(*_BILLING_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
+    # R90[M17]: fixed limit(200) + fabricated meta hid append-only history.
+    total = (await db.execute(select(func.count(FxRate.id)))).scalar_one()
+    offset = (page - 1) * per_page
     rows = (
-        (await db.execute(select(FxRate).order_by(FxRate.effective_from.desc()).limit(200)))
+        (
+            await db.execute(
+                select(FxRate)
+                .order_by(FxRate.effective_from.desc(), FxRate.id.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+        )
         .scalars()
         .all()
     )
@@ -464,7 +520,9 @@ async def list_fx_rates(
     ]
     return ListResponse(
         data=data,
-        meta=PaginationMeta(total=len(data), page=1, per_page=len(data) or 1, has_more=False),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
+        ),
     )
 
 
@@ -681,15 +739,26 @@ async def create_recon_report(
 
 @router.get("/platform/reconciliation/reports", dependencies=[Depends(rate_limit(30, 60))])
 async def list_recon_reports(
-    status: str | None = Query(default=None),
+    status: str | None = Query(default=None, pattern=r"^(open|resolved)$"),
+    page: int = Query(default=1, ge=1, le=1_000_000),
+    per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(require_platform_role(*_BILLING_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(ReconciliationReport)
     if status:
         q = q.where(ReconciliationReport.status == status)
+    # R90[M17]: fixed limit(100) + fabricated meta hid older reports.
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+    offset = (page - 1) * per_page
     rows = (
-        (await db.execute(q.order_by(ReconciliationReport.created_at.desc()).limit(100)))
+        (
+            await db.execute(
+                q.order_by(ReconciliationReport.created_at.desc(), ReconciliationReport.id.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+        )
         .scalars()
         .all()
     )
@@ -707,7 +776,9 @@ async def list_recon_reports(
     ]
     return ListResponse(
         data=data,
-        meta=PaginationMeta(total=len(data), page=1, per_page=len(data) or 1, has_more=False),
+        meta=PaginationMeta(
+            total=total, page=page, per_page=per_page, has_more=(offset + per_page) < total
+        ),
     )
 
 

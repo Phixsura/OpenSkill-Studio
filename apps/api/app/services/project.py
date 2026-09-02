@@ -1842,9 +1842,15 @@ class ProjectService:
         await self.db.flush()
         return comment
 
-    async def delete_comment(self, comment_id: str, org_id: str, user_id: str) -> None:
+    async def delete_comment(
+        self, comment_id: str, org_id: str, user_id: str, *, is_staff: bool = False
+    ) -> None:
         comment = await self.get_comment(comment_id, org_id)
-        if comment.author_id != user_id:
+        # R87[M12]: guest portal comments have author_id=NULL — author-only
+        # deletion made them permanently undeletable (spam/abusive guest
+        # comments stuck on the record). Org staff may moderate any comment;
+        # authorless comments are deletable ONLY by staff.
+        if comment.author_id != user_id and not is_staff:
             raise AppError("PERMISSION_DENIED", "Only the author can delete a comment", 403)
         await self.db.delete(comment)
         await self.db.flush()

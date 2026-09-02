@@ -25,7 +25,13 @@ from app.controlplane.services.audit import record_audit
 from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.models.user import User
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta, reject_ctrl_str
+from app.schemas.base import (
+    DataResponse,
+    ListResponse,
+    PaginationMeta,
+    reject_ctrl_str,
+    reject_header_str,
+)
 
 log = structlog.get_logger()
 
@@ -48,13 +54,21 @@ class BrandingRequest(BaseModel):
     @field_validator(
         "product_display_name",
         "login_tagline",
-        "email_from_name",
         "email_footer",
         "certificate_footer",
     )
     @classmethod
     def _ctrl(cls, v, info):
         return reject_ctrl_str(v, info.field_name)
+
+    @field_validator("email_from_name")
+    @classmethod
+    def _hdr(cls, v, info):
+        # R95[m7]: this value lands in the email From display-name — a
+        # HEADER context. reject_ctrl_str allows \r\n (multi-line body
+        # semantics); a CRLF here is header injection (BCC smuggling,
+        # extra headers). Header-strict validator.
+        return reject_header_str(v, info.field_name)
 
 
 class CreateDomainRequest(BaseModel):
@@ -342,7 +356,12 @@ async def delete_domain(
 # ── Public site-context (white-label resolution) ─────────────
 
 
-@router.get("/public/site-context", dependencies=[Depends(rate_limit(60, 60))])
+# R83[M4]: 60/min keyed by client IP throttled the SINGLE Next.js server IP
+# that proxies ALL end-user traffic for every white-label host — one busy
+# tenant's cache-miss burst dark-branded every other tenant for the window.
+# The endpoint is a cheap indexed point-read served through the frontend's
+# 300s revalidate cache; 600/min absorbs multi-tenant cache-miss bursts.
+@router.get("/public/site-context", dependencies=[Depends(rate_limit(600, 60))])
 async def site_context(
     host: str = Query(min_length=1, max_length=253),
     db: AsyncSession = Depends(get_db),
@@ -545,7 +564,7 @@ async def get_provision_run(
 ):
     run = await db.get(TenantProvisionRun, run_id)
     if run is None:
-        raise AppError("PROVISION_CONFLICT", "Provision run not found", 404)
+        raise AppError("PROVISION_RUN_NOT_FOUND", "Provision run not found", 404)
     return DataResponse(data=_run_response(run))
 
 
@@ -564,7 +583,7 @@ async def get_partner_provision_run(
     await require_partner_member(db, partner_id, user)
     run = await db.get(TenantProvisionRun, run_id)
     if run is None or run.partner_id != partner_id:
-        raise AppError("PROVISION_CONFLICT", "Provision run not found", 404)
+        raise AppError("PROVISION_RUN_NOT_FOUND", "Provision run not found", 404)
     return DataResponse(data=_run_response(run))
 
 
@@ -581,7 +600,7 @@ async def retry_provision_run(
 
     run = await db.get(TenantProvisionRun, run_id)
     if run is None:
-        raise AppError("PROVISION_CONFLICT", "Provision run not found", 404)
+        raise AppError("PROVISION_RUN_NOT_FOUND", "Provision run not found", 404)
     if run.status != "failed":
         raise AppError("PROVISION_CONFLICT", "Only failed runs can be retried", 409)
     enqueue(db, "provision.run", {"run_id": run.id})
@@ -615,6 +634,7 @@ async def create_export(
 async def get_export(
     tenant_id: str,
     export_id: str,
+    request: Request,
     user: User = Depends(require_platform_role("platform_admin")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -633,6 +653,18 @@ async def get_export(
                 Params={"Bucket": app_settings.s3_export_bucket, "Key": export.file_key},
                 ExpiresIn=900,
             )
+        # R85[M7]: only export CREATION was audited — every presign mint
+        # (each a fresh 15-min URL to the full PII bundle) was invisible.
+        # WHO pulled a tenant's data and WHEN must be reconstructible.
+        await record_audit(
+            db,
+            actor=make_actor(request, user),
+            action="tenant.export_downloaded",
+            target_type="tenant_export",
+            target_id=export.id,
+            tenant_id=tenant_id,
+        )
+        await db.commit()
     return DataResponse(
         data={"id": export.id, "status": export.status, "download_url": download_url}
     )

@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -537,8 +537,31 @@ async def expire_promotional(db: AsyncSession) -> int:
                 # will settle/release and a later cron run expires the remainder
                 # (the lot stays unconsumed until fully handled).
                 available = balance.balance_minor - balance.reserved_minor
-                expire_amount = min(lot.amount_minor, max(0, available))
-                if expire_amount > 0:
+                # R98[H10]: a PARTIAL expiry (reserved remainder) left the lot
+                # open, but the fixed idempotency key 'expire:{lot.id}' made
+                # every later pass a dedup no-op — the remainder never
+                # expired (wedged forever as spendable credit). Track what
+                # this lot already expired (sum of its expiration entries)
+                # and key each pass by that cumulative offset — distinct per
+                # pass, stable across crash-retries of the SAME pass.
+                already_expired = int(
+                    (
+                        await db.execute(
+                            select(
+                                func.coalesce(func.sum(-CreditLedgerEntry.amount_minor), 0)
+                            ).where(
+                                CreditLedgerEntry.entry_type == "expiration",
+                                CreditLedgerEntry.reference_type == "promotional_lot",
+                                CreditLedgerEntry.reference_id == lot.id,
+                            )
+                        )
+                    ).scalar_one()
+                )
+                remaining_face = max(lot.amount_minor - already_expired, 0)
+                expire_amount = min(remaining_face, max(0, available))
+                if remaining_face <= 0:
+                    lot.consumed_expiration_id = lot.id  # fully expired earlier
+                elif expire_amount > 0:
                     entry = await _append_entry(
                         db,
                         balance,
@@ -546,12 +569,11 @@ async def expire_promotional(db: AsyncSession) -> int:
                         amount_minor=-expire_amount,
                         reference_type="promotional_lot",
                         reference_id=lot.id,
-                        idempotency_key=f"expire:{lot.id}",
+                        idempotency_key=f"expire:{lot.id}:{already_expired}",
                     )
-                    # Only mark the lot fully consumed when we expired its whole
-                    # face value; a partial expiry (reserved remainder) leaves it
-                    # open for a later pass.
-                    if entry is not None and expire_amount >= lot.amount_minor:
+                    # Fully consumed only when the cumulative expiry reaches
+                    # the face value; partial leaves it open for a later pass.
+                    if entry is not None and already_expired + expire_amount >= lot.amount_minor:
                         lot.consumed_expiration_id = entry.id
                     expired += 1
                 elif balance.balance_minor <= 0:

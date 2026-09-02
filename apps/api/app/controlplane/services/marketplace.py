@@ -141,7 +141,7 @@ async def create_listing(
         )
     ).scalar_one_or_none()
     if dup is not None:
-        raise AppError("LISTING_INVALID", "Product already has a listing", 409)
+        raise AppError("LISTING_EXISTS", "Product already has a listing", 409)
     from app.config import settings
 
     listing = MarketplaceListing(
@@ -219,6 +219,15 @@ async def create_purchase(
         raise AppError("LISTING_NOT_PURCHASABLE", "Listing is not available", 409)
     if listing.offer_type not in ("paid", "partner_only"):
         raise AppError("LISTING_NOT_PURCHASABLE", "Listing is not purchasable", 409)
+    # R86[M8]: nothing delists a listing when its product dies — buyers paid
+    # for archived (uninstallable) packs. Re-check product liveness with the
+    # same rules the install gate applies.
+    product = await _load_product(db, listing.product_type, listing.product_id)
+    if product is None:
+        raise AppError("LISTING_NOT_PURCHASABLE", "Listing is not available", 409)
+    _p, _owner, p_status, p_visibility = product
+    if p_status != "published" or p_visibility not in ("public", "unlisted"):
+        raise AppError("LISTING_NOT_PURCHASABLE", "Listing is not available", 409)
     buyer_tenant = await get_tenant_for_org(db, buyer_org_id)
     if buyer_tenant.id == listing.seller_tenant_id:
         raise AppError("ALREADY_OWNED", "Cannot purchase your own product", 409)
@@ -400,7 +409,7 @@ async def mark_purchase_paid(
     if not result.rowcount:
         existing = await db.get(MarketplacePurchase, purchase_id)
         if existing is None:
-            raise AppError("PURCHASE_STATUS_CONFLICT", "Purchase not found", 404)
+            raise AppError("PURCHASE_NOT_FOUND", "Purchase not found", 404)
         return existing  # already paid — idempotent for webhook replays
     purchase = await db.get(MarketplacePurchase, purchase_id)
     listing = await db.get(MarketplaceListing, purchase.listing_id)
