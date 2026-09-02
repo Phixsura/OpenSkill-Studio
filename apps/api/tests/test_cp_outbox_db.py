@@ -559,3 +559,54 @@ async def test_failed_outbox_list_and_requeue(test_topic):
     from app.core.database import engine
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_per_message_commit_bounds_timeout_loss(test_topic):
+    """R89[12]: one commit per 50-message batch meant an arq job_timeout
+    cancelled and rolled back the WHOLE batch — retried identically forever
+    (billing livelock). Two-phase now: claim commits first, then each message
+    commits individually — a mid-batch crash keeps every message already
+    processed."""
+
+    processed: list[int] = []
+
+    @register_handler(test_topic)
+    async def handler(db, payload):  # noqa: ARG001
+        n = payload["n"]
+        if n == 3:
+            # Simulate the arq cancellation mid-batch
+            raise asyncio.CancelledError()
+        processed.append(n)
+
+    try:
+        async with AsyncSessionLocal() as db:
+            for n in range(5):
+                m = enqueue(db, test_topic, {"n": n})
+                m.available_at = datetime.now(UTC) - timedelta(seconds=10 - n)
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            with pytest.raises(asyncio.CancelledError):
+                await process_outbox_once(db, topics=[test_topic])
+        # Messages 0..2 committed as done BEFORE the cancellation
+        async with AsyncSessionLocal() as check:
+            msgs = (
+                (
+                    await check.execute(
+                        select(OutboxMessage)
+                        .where(OutboxMessage.topic == test_topic)
+                        .order_by(OutboxMessage.available_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            statuses = [m.status for m in msgs]
+            assert statuses[:3] == ["done", "done", "done"], f"pre-cancel messages lost: {statuses}"
+            # message 3 (in-flight) + 4 (unreached) stay processing → reaper
+            assert all(s in ("processing", "pending") for s in statuses[3:]), statuses
+        assert processed == [0, 1, 2]
+    finally:
+        from app.core.database import engine as _e
+
+        await _e.dispose()

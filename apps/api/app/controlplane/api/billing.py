@@ -333,7 +333,13 @@ async def list_invoices(
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
     offset = (page - 1) * per_page
     rows = (
-        (await db.execute(q.order_by(Invoice.created_at.desc()).offset(offset).limit(per_page)))
+        (
+            await db.execute(
+                q.order_by(Invoice.created_at.desc(), Invoice.id.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+        )
         .scalars()
         .all()
     )

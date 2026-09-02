@@ -383,6 +383,8 @@ async def _handle_provision(db: AsyncSession, payload: dict) -> None:
 # ── Tenant export (ADR-014 §10.4) ────────────────────────────
 
 EXPORT_SCHEMA_VERSION = 1
+# R85[6]: per-collection row cap — an export must never OOM the API process.
+EXPORT_MAX_ROWS = 50_000
 
 
 async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> TenantExport:
@@ -472,44 +474,60 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
         if sub
         else None
     )
-    invoices = (
-        (await db.execute(select(Invoice).where(Invoice.tenant_id == tenant_id))).scalars().all()
-    )
-    bundle["invoices"] = []
-    for invoice in invoices:
-        lines = (
-            (await db.execute(select(InvoiceLine).where(InvoiceLine.invoice_id == invoice.id)))
-            .scalars()
-            .all()
+    # R85[6]: was one SELECT per invoice for its lines (100k invoices = 100k
+    # sequential round-trips inside one HTTP request holding a REPEATABLE
+    # READ tx) and every collection unbounded in RAM. One LEFT-JOINed query,
+    # ordered, with a hard row cap per collection; a truncated export says so
+    # in the bundle instead of OOMing the API process.
+    truncated: list[str] = []
+    inv_rows = (
+        await db.execute(
+            select(Invoice, InvoiceLine)
+            .outerjoin(InvoiceLine, InvoiceLine.invoice_id == Invoice.id)
+            .where(Invoice.tenant_id == tenant_id)
+            .order_by(Invoice.created_at, Invoice.id, InvoiceLine.sort_order)
+            .limit(EXPORT_MAX_ROWS)
         )
-        bundle["invoices"].append(
-            {
+    ).all()
+    if len(inv_rows) >= EXPORT_MAX_ROWS:
+        truncated.append("invoices")
+    bundle["invoices"] = []
+    _by_inv: dict = {}
+    for invoice, line in inv_rows:
+        entry = _by_inv.get(invoice.id)
+        if entry is None:
+            entry = {
                 "number": invoice.number,
                 "status": invoice.status,
                 "currency": invoice.currency,
                 "total_minor": invoice.total_minor,
                 "issued_at": invoice.issued_at.isoformat() if invoice.issued_at else None,
-                "lines": [
-                    {
-                        "type": line.line_type,
-                        "description": line.description,
-                        "amount_minor": line.amount_minor,
-                    }
-                    for line in lines
-                ],
+                "lines": [],
             }
-        )
+            _by_inv[invoice.id] = entry
+            bundle["invoices"].append(entry)
+        if line is not None:
+            entry["lines"].append(
+                {
+                    "type": line.line_type,
+                    "description": line.description,
+                    "amount_minor": line.amount_minor,
+                }
+            )
     ledger = (
         (
             await db.execute(
                 select(CreditLedgerEntry)
                 .where(CreditLedgerEntry.tenant_id == tenant_id)
-                .order_by(CreditLedgerEntry.created_at)
+                .order_by(CreditLedgerEntry.created_at, CreditLedgerEntry.id)
+                .limit(EXPORT_MAX_ROWS)
             )
         )
         .scalars()
         .all()
     )
+    if len(ledger) >= EXPORT_MAX_ROWS:
+        truncated.append("credit_ledger")
     bundle["credit_ledger"] = [
         {
             "entry_type": e.entry_type,
@@ -521,10 +539,19 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
         for e in ledger
     ]
     grants = (
-        (await db.execute(select(LicenseGrant).where(LicenseGrant.tenant_id == tenant_id)))
+        (
+            await db.execute(
+                select(LicenseGrant)
+                .where(LicenseGrant.tenant_id == tenant_id)
+                .order_by(LicenseGrant.created_at, LicenseGrant.id)
+                .limit(EXPORT_MAX_ROWS)
+            )
+        )
         .scalars()
         .all()
     )
+    if len(grants) >= EXPORT_MAX_ROWS:
+        truncated.append("licenses")
     bundle["licenses"] = [
         {
             "product_type": g.product_type,
@@ -567,6 +594,8 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
         .all()
     )
     bundle["domains"] = [{"hostname": d.hostname, "status": d.status} for d in domains]
+    if truncated:
+        bundle["truncated_collections"] = truncated
 
     # Upload to S3
     try:

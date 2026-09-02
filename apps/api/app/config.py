@@ -93,6 +93,19 @@ class Settings(BaseSettings):
             return json.loads(v)
         return v
 
+    @field_validator("domain_verifier")
+    @classmethod
+    def validate_domain_verifier(cls, v: str, info: Any) -> str:
+        # R83[4]: 'mock' issues 'ok-'-prefixed tokens that ALWAYS verify —
+        # in production that is a complete domain-ownership bypass (any
+        # tenant activates any hostname, incl. lookalikes of other tenants).
+        # Same boot-guard pattern as jwt_secret/s3_secret_key: refuse to
+        # start production with the dev default.
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if app_env not in ("development", "test") and v == "mock":
+            raise ValueError("DOMAIN_VERIFIER must be 'dns' in production (mock always verifies)")
+        return v
+
     @field_validator("jwt_secret")
     @classmethod
     def validate_jwt_secret(cls, v: str, info: Any) -> str:

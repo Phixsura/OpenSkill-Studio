@@ -621,3 +621,70 @@ async def test_webhook_delivery_gated_by_entitlement(db):
     # The subscription row is untouched (still active) — only delivery gated
     await db.refresh(sub)
     assert sub.active is True
+
+
+# ── R83: domain verifier boot guard + terminal-tenant darkening ──
+
+
+def test_domain_verifier_production_boot_guard():
+    """R83[4]: 'mock' always verifies — production boot must refuse it, the
+    same way it refuses the default jwt_secret."""
+    import pydantic
+    import pytest as _pytest
+
+    from app.config import Settings
+
+    with _pytest.raises(pydantic.ValidationError, match="DOMAIN_VERIFIER"):
+        Settings(
+            app_env="production",
+            jwt_secret="x" * 40,
+            s3_secret_key="not-default",
+            database_url="postgresql+asyncpg://u:p@h/db",
+            credential_encryption_key="",
+            domain_verifier="mock",
+        )
+    # dns passes the guard (other validators may still object to other fields)
+    s = Settings(
+        app_env="development",
+        domain_verifier="mock",
+    )
+    assert s.domain_verifier == "mock"  # dev keeps the convenient default
+
+
+@pytest.mark.asyncio
+async def test_site_context_dark_for_terminal_tenants(db):
+    """R83[5]: CANCELLED/ARCHIVED tenants kept resolving white-label branding
+    forever. Terminal states go dark; SUSPENDED keeps resolving (ADR §10.7)."""
+    from app.controlplane.models.branding import TenantDomain
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    tenant.status = TenantStatus.ACTIVE
+    host = f"school-{str(ULID()).lower()[:8]}.example-live.com"
+    db.add(
+        TenantDomain(
+            tenant_id=tenant.id,
+            hostname=host,
+            status="active",
+            verification_token_hash="x" * 64,
+            created_by=user.id,
+        )
+    )
+    await db.flush()
+    ctx = await domain_svc.resolve_site_context(db, host)
+    assert ctx["tenant_id"] == tenant.id
+    # SUSPENDED keeps resolving
+    tenant.status = TenantStatus.SUSPENDED
+    await db.flush()
+    ctx = await domain_svc.resolve_site_context(db, host)
+    assert ctx["tenant_id"] == tenant.id
+    # CANCELLED goes dark
+    tenant.status = TenantStatus.CANCELLED
+    await db.flush()
+    ctx = await domain_svc.resolve_site_context(db, host)
+    assert ctx["tenant_id"] is None
+    # ARCHIVED stays dark
+    tenant.status = TenantStatus.ARCHIVED
+    await db.flush()
+    ctx = await domain_svc.resolve_site_context(db, host)
+    assert ctx["tenant_id"] is None

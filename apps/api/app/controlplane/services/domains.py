@@ -282,6 +282,18 @@ async def resolve_site_context(db: AsyncSession, host: str) -> dict:
     ).scalar_one_or_none()
     if domain is None:
         return {"tenant_id": None}
+    # R83[5]: CANCELLED/ARCHIVED tenants kept their white-label domains
+    # resolving FOREVER — a terminated tenant's hostname still returned
+    # tenant_id + full branding. Terminal states go dark. SUSPENDED keeps
+    # resolving by ADR §10.7 (branding is harmless; consumption is blocked
+    # elsewhere), and plan downgrades follow no-eviction (§2.9).
+    from app.controlplane.models.tenant import TenantAccount, TenantStatus
+
+    t_status = (
+        await db.execute(select(TenantAccount.status).where(TenantAccount.id == domain.tenant_id))
+    ).scalar_one_or_none()
+    if t_status in (TenantStatus.CANCELLED, TenantStatus.ARCHIVED, None):
+        return {"tenant_id": None}
     branding = (
         await db.execute(select(TenantBranding).where(TenantBranding.tenant_id == domain.tenant_id))
     ).scalar_one_or_none()

@@ -576,7 +576,15 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                 SubscriptionChange.proration_mode == "immediate",
                 SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
                 SubscriptionChange.effective_at >= period.period_start,
-                SubscriptionChange.effective_at < period.period_end,
+                # R81/R82[1]: NO upper bound. The hourly close runs up to ~1h
+                # after period_end; an immediate change landing in that gap
+                # already mutated sub.plan_version_id/seat_quantity, so the
+                # fallback below would bill the ENTIRE just-ended period at
+                # the NEW plan/seats. The earliest immediate change since
+                # period_start — wherever it lands — carries the true
+                # period-start values in its from_*. (Gap changes are
+                # prorated in the NEXT period, whose window they fall into;
+                # this period must simply bill the old plan unprorated.)
             )
             .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
             .limit(1)
@@ -633,6 +641,20 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
 
     # a. plan line(s) — per change-log segments (single line when unchanged)
     plan_amount = price.amount_minor if price else 0
+    # R82[2]: an immediate cancel truncates period_end to now — the flat
+    # amount then charged the FULL interval fee for a partial period (cancel
+    # on day 2 of a monthly plan billed all 30 days). Prorate by the actual
+    # period length over the natural interval length. Untruncated periods
+    # compute a ratio of exactly 1 (period_end == natural end), so the
+    # normal path is numerically unchanged.
+    natural_end = _add_interval(period.period_start, sub.interval)
+    natural_seconds = (natural_end - period.period_start).total_seconds()
+    actual_seconds = (period.period_end - period.period_start).total_seconds()
+    if natural_seconds > 0 and actual_seconds < natural_seconds:
+        ratio = max(Decimal(actual_seconds), Decimal(0)) / Decimal(natural_seconds)
+        plan_amount = int(
+            (Decimal(plan_amount) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
     lines.append(
         InvoiceLine(
             invoice_id=invoice.id,
@@ -870,6 +892,9 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             )
         )
     ).scalar_one()
+    # func.sum on BigInteger yields Decimal — coerce, or the negative-carry
+    # refund below feeds a Decimal into the audit JSONB (500 at close).
+    subtotal = int(subtotal)
     invoice.subtotal_minor = subtotal
     # R75[14]: a net-negative subtotal (e.g. a large immediate-downgrade credit
     # exceeding the period's charges) is money OWED to the tenant, not zero.
@@ -1237,7 +1262,34 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
     # billing_period_id — nothing to rewind.)
     if invoice.billing_period_id is not None:
         period = await db.get(BillingPeriod, invoice.billing_period_id)
+        # R82[3]: the rewind assumes this is the sub's LATEST period — its
+        # forward-delete removes every period starting at/after this one's
+        # end WITHOUT a status filter, so voiding an OLDER open invoice
+        # (disputed June voided in August) deleted July's already-INVOICED
+        # (even PAID) period and re-billed it at the next close cycle —
+        # double-charging every subsequent period. Rewind only when no later
+        # non-open period exists; otherwise void plainly (usage rows were
+        # already unbound above) and corrections go through credit notes.
+        later_locked = None
         if period is not None:
+            later_locked = (
+                await db.execute(
+                    select(BillingPeriod.id)
+                    .where(
+                        BillingPeriod.subscription_id == period.subscription_id,
+                        BillingPeriod.period_start >= period.period_end,
+                        BillingPeriod.status != "open",
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if period is not None and later_locked is not None:
+            log.warning(
+                "cp_void_no_rewind_later_period",
+                invoice_id=invoice.id,
+                period_id=period.id,
+            )
+        if period is not None and later_locked is None:
             sub = await db.get(Subscription, period.subscription_id)
             await db.execute(
                 update(BillingPeriod)
@@ -1338,10 +1390,18 @@ async def issue_credit_note(
     # R43[12]: on a still-OPEN (unpaid) invoice, the note reduces what the
     # tenant OWES — a ledger refund on top was a double benefit (debt reduced
     # AND spendable credit granted). The ledger refund is the correction
-    # mechanism for PAID invoices only (money already collected).
+    # mechanism for money already COLLECTED.
+    # R88[10]: but an open invoice may already have collected money — credit
+    # applied at close (ledger debited) and/or partial payments. A note
+    # larger than amount_due covers part of that COLLECTED money; silently
+    # flooring at 0 kept it. Split: reduce the debt by min(note, due), and
+    # refund the remainder (the collected portion) to the ledger.
     was_open = invoice.status == "open"
+    refund_amount = amount_minor
     if was_open:
-        invoice.amount_due_minor = max(0, invoice.amount_due_minor - amount_minor)
+        debt_reduction = min(invoice.amount_due_minor, amount_minor)
+        refund_amount = amount_minor - debt_reduction
+        invoice.amount_due_minor = invoice.amount_due_minor - debt_reduction
         if invoice.amount_due_minor == 0:
             await db.execute(
                 update(Invoice)
@@ -1349,12 +1409,12 @@ async def issue_credit_note(
                 .values(status="paid", paid_at=_now())
             )
     await db.flush()
-    if not was_open:  # paid invoice → refund the collected money as credit
+    if refund_amount > 0:  # collected money → refund as credit
         await credit_svc.refund(
             db,
             invoice.tenant_id,
             invoice.currency,
-            amount_minor,
+            refund_amount,
             reference_type="credit_note",
             reference_id=note.id,
             reason=reason,

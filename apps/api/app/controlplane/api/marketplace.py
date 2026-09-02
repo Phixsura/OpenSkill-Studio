@@ -313,14 +313,28 @@ async def registry_listings(
         .scalars()
         .all()
     )
-    from app.models.organization import Organization
+    from app.models.organization import Organization, OrgStatus
 
     data = {}
     for listing in rows:
+        # R86[7]: the badge filtered ONLY listing columns — nothing delists a
+        # listing when its product is archived/turned private or its seller
+        # org is deleted, so the public endpoint kept exposing existence,
+        # price and seller name of dead/private packs (enumeration oracle).
+        # Re-check the underlying product with the same rules the install
+        # gate applies: PUBLISHED + public/unlisted visibility.
+        product = await market_svc._load_product(db, listing.product_type, listing.product_id)
+        if product is None:
+            continue
+        _p, _owner, p_status, p_visibility = product
+        if p_status != "published" or p_visibility not in ("public", "unlisted"):
+            continue
         seller = await db.get(Organization, listing.seller_org_id)
+        if seller is None or seller.status == OrgStatus.ARCHIVED:
+            continue
         data[listing.product_id] = {
             **_listing_response(listing, public=True),
-            "seller_org_name": seller.name if seller else None,
+            "seller_org_name": seller.name,
         }
     return DataResponse(data=data)
 

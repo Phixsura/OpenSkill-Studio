@@ -101,16 +101,31 @@ async def process_outbox_once(db: AsyncSession, topics: list[str] | None = None)
 
     rows = (await db.execute(q)).scalars().all()
     handled = 0
+    # R89[12] phase 1 — CLAIM the whole batch in one short transaction:
+    # every row flips to processing/locked (or gets its unknown-topic
+    # backoff) and the claim commits immediately. This releases the row
+    # locks while keeping concurrent pollers out via the status filter, so
+    # phase 2 can commit PER MESSAGE without re-exposing the rest of the
+    # batch. Previously one commit covered the entire batch under arq's
+    # 300s job_timeout — a heavy batch (period close × N tenants) was
+    # cancelled, fully rolled back, and retried identically forever.
+    claimable = []
     for msg in rows:
-        handler = HANDLERS.get(msg.topic)
-        if handler is None:
+        if HANDLERS.get(msg.topic) is None:
             # Unknown topic — a later deploy may know it; back off, don't burn attempts
             msg.available_at = _now() + timedelta(minutes=5)
             continue
         msg.status = "processing"
         msg.locked_by = _worker_id()
         msg.locked_at = _now()
-        await db.flush()
+        claimable.append(msg)
+    await db.commit()
+
+    # Phase 2 — process each claimed message, committing per message so a
+    # timeout/crash loses at most the in-flight one (reaper + idempotent
+    # handlers cover that window).
+    for msg in claimable:
+        handler = HANDLERS.get(msg.topic)
         try:
             # Isolate each handler in a SAVEPOINT: a handler that hits a
             # DB-level error (e.g. revenue_share._insert_entry's documented
@@ -140,7 +155,10 @@ async def process_outbox_once(db: AsyncSession, topics: list[str] | None = None)
             handled += 1
         msg.locked_by = None
         msg.locked_at = None
-    await db.commit()
+        # Per-message commit (phase 1 already released the batch row locks;
+        # concurrent pollers skip 'processing' rows via the status filter, so
+        # this loop stays the sole writer of each claimed message).
+        await db.commit()
     return handled
 
 

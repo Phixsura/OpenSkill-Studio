@@ -32,7 +32,11 @@ DEFAULT_MINOR = 100
 
 
 def minor_multiplier(currency: str) -> int:
-    return CURRENCY_MINOR.get(currency, DEFAULT_MINOR)
+    # R81[0]: normalize case — Stripe webhooks send LOWERCASE currency codes
+    # ('jpy'), and a raw dict miss fell through to ×100, over-crediting
+    # zero-decimal (JPY/KRW) top-ups 100x. _stripe_factor already uppercases;
+    # this side must match.
+    return CURRENCY_MINOR.get(currency.upper(), DEFAULT_MINOR)
 
 
 POLICY_TYPES = frozenset(

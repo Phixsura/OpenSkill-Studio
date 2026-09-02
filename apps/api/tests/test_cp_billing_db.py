@@ -474,6 +474,11 @@ async def test_period_close_generates_invoice_lines(db):
     period = (
         await db.execute(select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
     ).scalar_one()
+    # Window ending "now" that is LONGER than one natural month: R82[2]'s
+    # truncation proration only fires when actual < natural, so a normal
+    # (non-truncated) close keeps the full fee, and in-window usage
+    # (occurred minutes ago) still bills here.
+    period.period_start = datetime.now(UTC) - timedelta(days=32)
     period.period_end = datetime.now(UTC) - timedelta(seconds=1)
     await db.flush()
     invoice = await billing_svc.close_period_and_invoice(db, period.id)
@@ -585,6 +590,11 @@ async def test_invoice_excludes_foreign_currency_usage_and_credit(db):
     period = (
         await db.execute(select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
     ).scalar_one()
+    # Window ending "now" that is LONGER than one natural month: R82[2]'s
+    # truncation proration only fires when actual < natural, so a normal
+    # (non-truncated) close keeps the full fee, and in-window usage
+    # (occurred minutes ago) still bills here.
+    period.period_start = datetime.now(UTC) - timedelta(days=32)
     period.period_end = datetime.now(UTC) - timedelta(seconds=1)
     await db.flush()
     invoice = await billing_svc.close_period_and_invoice(db, period.id)
@@ -1699,3 +1709,390 @@ async def test_cancel_racing_period_close_no_extra_period():
             assert len(open_periods) == 1
     finally:
         await engine.dispose()
+
+
+# ── R81/R82: stripe currency case + proration gap/truncation + void rewind ──
+
+
+def test_minor_multiplier_case_insensitive():
+    """R81[0]: Stripe webhooks send LOWERCASE currency ('jpy'); a raw dict
+    miss fell through to ×100, over-crediting JPY/KRW top-ups 100x."""
+    from app.controlplane.models.pricing import minor_multiplier
+    from app.controlplane.services.billing_providers.stripe import (
+        _platform_minor_from_stripe,
+    )
+
+    assert minor_multiplier("jpy") == 1
+    assert minor_multiplier("JPY") == 1
+    assert minor_multiplier("krw") == 1
+    assert minor_multiplier("usd") == 100
+    # end-to-end: ¥1000 webhook → 1000 platform minor, not 100000
+    assert _platform_minor_from_stripe(1000, "jpy") == 1000
+    assert _platform_minor_from_stripe(50000, "krw") == 50000
+    assert _platform_minor_from_stripe(1000, "usd") == 1000  # $10.00 both sides
+
+
+@pytest.mark.asyncio
+async def test_gap_change_bills_ended_period_at_old_plan(db):
+    """R82[1]: an immediate change landing AFTER period_end but BEFORE the
+    hourly close billed the entire just-ended period at the NEW plan. The
+    first_change query must have no upper bound — the earliest immediate
+    change since period_start carries the true period-start plan."""
+    from datetime import timedelta as _td
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
+    # End the period in the past (simulates the cron gap: period over,
+    # close not yet run)
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    from app.controlplane.services.billing import _add_interval
+
+    # Anchor an exact natural month fully in the past (truncation proration
+    # ratio == 1), leaving a gap between period_end and "now" for the change.
+    period.period_start = datetime.now(UTC) - _td(days=40)
+    period.period_end = _add_interval(period.period_start, "month")
+    sub.current_period_end = period.period_end
+    sub.current_period_start = period.period_start
+    await db.flush()
+    # Gap change: immediate upgrade school -> growth NOW (after period_end)
+    await billing_svc.change_plan(
+        db,
+        tenant,
+        sub,
+        plan_key="growth",
+        seats=None,
+        proration_mode="immediate",
+        actor=_actor(user),
+    )
+    invoice = await billing_svc.close_period_and_invoice(db, period.id)
+    assert invoice is not None
+    lines = (
+        (await db.execute(select(InvoiceLine).where(InvoiceLine.invoice_id == invoice.id)))
+        .scalars()
+        .all()
+    )
+    plan_lines = [line for line in lines if line.line_type == "plan"]
+    assert len(plan_lines) == 1
+    # school monthly = 19900; growth = 49900. The ended period must bill school.
+    assert plan_lines[0].amount_minor == 19900, (
+        f"gap change billed the ended period at the NEW plan: {plan_lines[0].amount_minor}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_immediate_cancel_prorates_final_partial_period(db):
+    """R82[2]: an immediate cancel truncates the period to now, but the plan
+    line charged the FULL interval fee. The final partial period must be
+    prorated by actual/natural length."""
+    from datetime import timedelta as _td
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    # Simulate: subscribed 10 days ago, cancel now (period truncated to now)
+    period.period_start = datetime.now(UTC) - _td(days=10)
+    sub.current_period_start = period.period_start
+    await db.flush()
+    sub = await billing_svc.cancel_subscription(
+        db, tenant, sub, at_period_end=False, actor=_actor(user)
+    )
+    await db.refresh(period)
+    assert period.period_end <= datetime.now(UTC) + _td(seconds=5)
+    invoice = await billing_svc.close_period_and_invoice(db, period.id)
+    assert invoice is not None
+    lines = (
+        (await db.execute(select(InvoiceLine).where(InvoiceLine.invoice_id == invoice.id)))
+        .scalars()
+        .all()
+    )
+    plan_lines = [line for line in lines if line.line_type == "plan"]
+    assert len(plan_lines) == 1
+    # ~10 of ~30-31 days: roughly a third of 19900, definitely NOT the full fee
+    assert plan_lines[0].amount_minor < 19900, "full fee charged for a truncated period"
+    assert 4000 < plan_lines[0].amount_minor < 8000, plan_lines[0].amount_minor
+
+
+@pytest.mark.asyncio
+async def test_void_older_invoice_does_not_rewind_later_periods(db):
+    """R82[3]: voiding an OLDER open invoice deleted already-INVOICED (even
+    paid) forward periods and re-billed them. Rewind only fires when no
+    later non-open period exists."""
+    from datetime import timedelta as _td
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
+    # Close period 1 → invoice A (open), sub rolls to period 2
+    p1 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    p1.period_end = datetime.now(UTC) - _td(days=31)
+    p1.period_start = p1.period_end - _td(days=30)
+    await db.flush()
+    inv_a = await billing_svc.close_period_and_invoice(db, p1.id)
+    assert inv_a is not None
+    # Close period 2 → invoice B, sub rolls to period 3
+    p2 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    p2.period_end = datetime.now(UTC) - _td(days=1)
+    await db.flush()
+    inv_b = await billing_svc.close_period_and_invoice(db, p2.id)
+    assert inv_b is not None
+    p2_id = p2.id
+    # Void the OLDER invoice A — p2 (invoiced) must survive, no rewind
+    await billing_svc.void_invoice(db, inv_a, reason="disputed", actor=_actor(user))
+    p2_after = await db.get(BillingPeriod, p2_id)
+    assert p2_after is not None, "void of older invoice deleted a later invoiced period"
+    assert p2_after.status == "invoiced"
+    # Sub window not rolled back to p1
+    await db.refresh(sub)
+    assert sub.current_period_start >= p2_after.period_end
+
+
+@pytest.mark.asyncio
+async def test_credit_note_on_open_invoice_refunds_collected_portion(db):
+    """R88[10]: on an open invoice, a note larger than amount_due covers
+    money already COLLECTED (credit applied at close / partial payments) —
+    flooring at 0 silently kept it. The excess must come back as a ledger
+    refund."""
+    from datetime import timedelta as _td
+
+    from app.controlplane.models.credit import CreditLedgerEntry
+    from app.controlplane.services import credits as credit_svc
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    # Give credit so the close applies it (collected money on the invoice)
+    await credit_svc.top_up(
+        db, tenant.id, "USD", 5000, actor=_actor(user), idempotency_key=f"cn88-{ULID()}"
+    )
+    sub, _ = await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
+    from app.controlplane.services.billing import _add_interval
+
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    period.period_start = datetime.now(UTC) - _td(days=40)
+    period.period_end = _add_interval(period.period_start, "month")
+    sub.current_period_start = period.period_start
+    sub.current_period_end = period.period_end
+    await db.flush()
+    invoice = await billing_svc.close_period_and_invoice(db, period.id)
+    assert invoice is not None
+    await db.refresh(invoice)
+    # total 19900, credit applied 5000 → due 14900, still open
+    assert invoice.status == "open"
+    assert invoice.credit_applied_minor == 5000
+    assert invoice.amount_due_minor == 14900
+    # Full credit note 19900: 14900 kills the debt, 5000 (collected) refunds
+    note = await billing_svc.issue_credit_note(
+        db, invoice, amount_minor=19900, reason="full refund", actor=_actor(user)
+    )
+    await db.refresh(invoice)
+    assert invoice.amount_due_minor == 0
+    refund = (
+        await db.execute(
+            select(CreditLedgerEntry).where(
+                CreditLedgerEntry.reference_type == "credit_note",
+                CreditLedgerEntry.reference_id == note.id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert refund is not None, "collected portion must come back as credit"
+    assert refund.amount_minor == 5000
+
+
+@pytest.mark.asyncio
+async def test_refund_invoiced_purchase_only_when_collected(db):
+    """R88[11]: refunding a purchase whose license line sits on a still-OPEN
+    invoice minted credit for money never received. Refund mints only when
+    the invoice actually collected (paid)."""
+    from app.controlplane.models.credit import CreditLedgerEntry
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+    from app.controlplane.services import marketplace as market_svc
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    listing = MarketplaceListing(
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        seller_org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        seller_tenant_id=tenant.id,
+        offer_type="paid",
+        price_minor=5000,
+        currency="USD",
+        license_scope="organization",
+        platform_commission_pct=30,
+        status="active",
+        created_by=user.id,
+        bill_via_invoice=True,
+    )
+    db.add(listing)
+    await db.flush()
+    # invoiced on an OPEN invoice
+    inv = Invoice(tenant_id=tenant.id, status="open", currency="USD", total_minor=5000)
+    db.add(inv)
+    await db.flush()
+    purchase = MarketplacePurchase(
+        listing_id=listing.id,
+        buyer_tenant_id=tenant.id,
+        buyer_org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        purchaser_user_id=user.id,
+        status="paid",
+        amount_minor=5000,
+        currency="USD",
+        economics_snapshot={},
+        payment_method="invoice",
+        invoice_id=inv.id,
+    )
+    db.add(purchase)
+    await db.flush()
+    await market_svc.refund_purchase(db, purchase.id, reason="open-inv", actor=_actor(user))
+    minted = (
+        await db.execute(
+            select(CreditLedgerEntry).where(
+                CreditLedgerEntry.reference_id == purchase.id,
+                CreditLedgerEntry.entry_type == "refund",
+            )
+        )
+    ).scalar_one_or_none()
+    assert minted is None, "refund minted credit for uncollected invoice money"
+    # PAID invoice → refund mints
+    inv2 = Invoice(tenant_id=tenant.id, status="paid", currency="USD", total_minor=5000)
+    db.add(inv2)
+    await db.flush()
+    purchase2 = MarketplacePurchase(
+        listing_id=listing.id,
+        buyer_tenant_id=tenant.id,
+        buyer_org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        purchaser_user_id=user.id,
+        status="paid",
+        amount_minor=5000,
+        currency="USD",
+        economics_snapshot={},
+        payment_method="invoice",
+        invoice_id=inv2.id,
+    )
+    db.add(purchase2)
+    await db.flush()
+    await market_svc.refund_purchase(db, purchase2.id, reason="paid-inv", actor=_actor(user))
+    minted2 = (
+        await db.execute(
+            select(CreditLedgerEntry).where(
+                CreditLedgerEntry.reference_id == purchase2.id,
+                CreditLedgerEntry.entry_type == "refund",
+            )
+        )
+    ).scalar_one_or_none()
+    assert minted2 is not None and minted2.amount_minor == 5000
+
+
+def test_stripe_sdk_calls_offloaded_to_thread(monkeypatch):
+    """R89[13]: the sync stripe SDK was called inline in async methods —
+    every Stripe HTTP round-trip froze the whole event loop. Each SDK call
+    must run OFF the event-loop thread (asyncio.to_thread)."""
+    import asyncio as _asyncio
+    import threading
+    import types
+
+    from app.config import settings as app_settings
+    from app.controlplane.services.billing_providers.stripe import StripeProvider
+
+    monkeypatch.setattr(app_settings, "stripe_secret_key", "sk_test_x")
+    call_threads: dict = {}
+
+    def cap(name, ret):
+        def f(*a, **kw):
+            call_threads[name] = threading.current_thread()
+            return ret
+
+        return f
+
+    fake = types.ModuleType("stripe")
+    fake.api_key = None
+    fake.Customer = types.SimpleNamespace(create=cap("customer", {"id": "cus_1"}))
+    fake.checkout = types.SimpleNamespace(
+        Session=types.SimpleNamespace(
+            create=cap("checkout", {"id": "cs_1", "url": "https://pay"}),
+            retrieve=cap("session", {"payment_status": "paid"}),
+        )
+    )
+    fake.Subscription = types.SimpleNamespace(
+        retrieve=cap("sub_get", {"items": {"data": [{"id": "si_1"}]}}),
+        modify=cap("sub_mod", {"id": "sub_1"}),
+        cancel=cap("sub_cancel", {"id": "sub_1"}),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "stripe", fake)
+
+    p = StripeProvider()
+    tenant = types.SimpleNamespace(id="01TENANT", name="Acme", billing_email="a@b.c")
+
+    async def run():
+        main_thread = threading.current_thread()
+        await p.create_customer(tenant)
+        await p.change_subscription("sub_1", "price_x", 3)
+        await p.cancel_subscription("sub_1", at_period_end=True)
+        await p.fetch_payment_status("cs_1")
+        for name, t in call_threads.items():
+            assert t is not main_thread, f"SDK call '{name}' ran ON the event loop thread"
+
+    _asyncio.run(run())

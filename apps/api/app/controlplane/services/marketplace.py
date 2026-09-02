@@ -478,7 +478,28 @@ async def refund_purchase(
     # sets invoice_id when the line lands.
     from app.controlplane.services import credits as credit_svc
 
-    charged = purchase.payment_method != "invoice" or purchase.invoice_id is not None
+    charged = purchase.payment_method != "invoice"
+    if purchase.payment_method == "invoice" and purchase.invoice_id is not None:
+        # R88[11]: an invoiced-but-UNPAID purchase (license line on a still-
+        # open invoice) has collected NOTHING — refunding it minted spendable
+        # credit for money never received (buy → invoice closes → refund →
+        # free credit; the debt stayed on the open invoice too). Money only
+        # comes back when the invoice actually collected: status 'paid'.
+        # For open invoices the correction is a credit NOTE on that invoice
+        # (reduces the debt), issued by ops alongside this refund.
+        from app.controlplane.models.billing import Invoice as _Inv
+
+        inv_status = (
+            await db.execute(select(_Inv.status).where(_Inv.id == purchase.invoice_id))
+        ).scalar_one_or_none()
+        charged = inv_status == "paid"
+        if not charged:
+            log.warning(
+                "cp_refund_invoice_not_collected",
+                purchase_id=purchase.id,
+                invoice_id=purchase.invoice_id,
+                invoice_status=inv_status,
+            )
     if charged:
         await credit_svc.refund(
             db,
@@ -492,8 +513,8 @@ async def refund_purchase(
             idempotency_key=f"refund:{purchase.id}",
         )
     else:
-        # Un-invoiced bill_via_invoice purchase: clear the pending charge so
-        # period close never bills it (nothing to give back).
+        # Nothing collected (un-invoiced pending charge, or open invoice) —
+        # no ledger refund; the status flip stops future billing.
         log.info("cp_refund_uncharged_invoice_purchase", purchase_id=purchase.id)
     enqueue(db, "purchase.refunded", {"purchase_id": purchase.id})
     await record_audit(

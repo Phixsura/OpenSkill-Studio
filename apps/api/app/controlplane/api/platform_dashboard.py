@@ -313,7 +313,7 @@ async def platform_invoices(
     rows = (
         (
             await db.execute(
-                query.order_by(Invoice.created_at.desc())
+                query.order_by(Invoice.created_at.desc(), Invoice.id.desc())
                 .offset((page - 1) * per_page)
                 .limit(per_page)
             )
@@ -659,7 +659,7 @@ async def list_failed_outbox(
     rows = (
         (
             await db.execute(
-                query.order_by(OutboxMessage.created_at.desc())
+                query.order_by(OutboxMessage.created_at.desc(), OutboxMessage.id.desc())
                 .offset((page - 1) * per_page)
                 .limit(per_page)
             )

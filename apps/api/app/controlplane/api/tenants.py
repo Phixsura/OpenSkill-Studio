@@ -223,7 +223,9 @@ async def tenant_audit_events(
     rows = (
         (
             await db.execute(
-                query.order_by(CommercialAuditEvent.created_at.desc())
+                query.order_by(
+                    CommercialAuditEvent.created_at.desc(), CommercialAuditEvent.id.desc()
+                )
                 .offset(offset)
                 .limit(per_page)
             )

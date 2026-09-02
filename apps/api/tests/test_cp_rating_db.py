@@ -946,3 +946,69 @@ async def test_reconciliation_cost_scoped_to_report_currency(db):
     finally:
         app.router.lifespan_context = orig
         await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_rated_usage_pagination_stable_across_identical_timestamps(db):
+    """R90[14]: batch rating writes hundreds of rows with the SAME rated_at
+    (pg now() is tx-fixed); ordering by rated_at alone made offset pages
+    duplicate/skip rows. The id tiebreaker makes the order total."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    db.add(PlatformRoleAssignment(user_id=user.id, role="billing_admin"))
+    # 25 rows in ONE tx → identical rated_at server_default
+    for i in range(25):
+        ev = await _mk_event(db, tenant, quantity=i + 1)
+        db.add(
+            RatedUsage(
+                usage_event_id=ev.id,
+                tenant_id=tenant.id,
+                org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                usage_type="image_generation",
+                quantity=i + 1,
+                cost_rate_snapshot={},
+                internal_cost_minor=0,
+                internal_cost_currency="USD",
+                sell_rate_snapshot={},
+                billable_amount_minor=i,
+                billable_amount_exact=i,
+                internal_cost_exact=0,
+                billable_currency="USD",
+                status="rated",
+            )
+        )
+    await db.commit()
+    token = create_access_token(user.id, user.email, user.role.value)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        seen: list[str] = []
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            for page in (1, 2, 3):
+                r = await c.get(
+                    "/api/v1/platform/rated-usage",
+                    params={"tenant_id": tenant.id, "page": page, "per_page": 10},
+                    headers=hdr,
+                )
+                assert r.status_code == 200, r.text
+                seen.extend(row["id"] for row in r.json()["data"])
+        assert len(seen) == 25
+        assert len(set(seen)) == 25, "pages duplicated/skipped rows on tied timestamps"
+    finally:
+        app.router.lifespan_context = orig
+        await db.rollback()

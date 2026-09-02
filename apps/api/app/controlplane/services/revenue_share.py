@@ -388,6 +388,31 @@ async def accrue_for_purchase(db: AsyncSession, purchase_id: str) -> int:
     created = 0
     seller_org_id = snapshot.get("seller_org_id")
     if seller_org_id and purchase.seller_share_minor:
+        # R88[9] CRITICAL: seller entries were written in BUYER currency but
+        # generate_statement hardcodes seller_org statements to the platform
+        # currency and sums UNCONVERTED — a ¥1,040,000 KRW share settled as
+        # $1,040,000 USD (or silently mixed currencies in one total). Mirror
+        # the partner branch: convert to the settlement currency at accrual,
+        # FX snapshotted; missing rate → 409 (same policy as partner path).
+        from app.config import settings as _settings
+
+        seller_share = purchase.seller_share_minor
+        seller_base = purchase.amount_minor
+        seller_fx_snapshot = None
+        seller_currency = purchase.currency
+        platform_cur = _settings.platform_currency
+        if purchase.currency != platform_cur:
+            fx = await resolve_fx(db, purchase.currency, platform_cur, _now())
+            if fx is None:
+                raise AppError(
+                    "REVSHARE_FX_MISSING",
+                    f"No FX rate {purchase.currency}->{platform_cur} for seller accrual",
+                    409,
+                )
+            rate_val, seller_fx_snapshot = fx
+            seller_share = convert_minor(seller_share, rate_val, purchase.currency, platform_cur)
+            seller_base = convert_minor(seller_base, rate_val, purchase.currency, platform_cur)
+            seller_currency = platform_cur
         entry = await _insert_entry(
             db,
             beneficiary_type="seller_org",
@@ -396,9 +421,10 @@ async def accrue_for_purchase(db: AsyncSession, purchase_id: str) -> int:
             source_id=purchase.id,
             rule_id=(snapshot.get("seller_rule_snapshot") or {}).get("rule_id"),
             rule_snapshot=snapshot.get("seller_rule_snapshot") or {"from_economics_snapshot": True},
-            revenue_base_minor=purchase.amount_minor,
-            share_amount_minor=purchase.seller_share_minor,
-            currency=purchase.currency,
+            revenue_base_minor=seller_base,
+            share_amount_minor=seller_share,
+            currency=seller_currency,
+            fx_rate_snapshot=seller_fx_snapshot,
             period=period,
         )
         created += 1 if entry else 0
@@ -606,7 +632,9 @@ async def generate_statement(
     else:
         if not beneficiary_org_id:
             raise AppError("VALIDATION_ERROR", "beneficiary_org_id required", 422)
-        currency = "USD"  # seller orgs settle in platform currency (v1, ADR)
+        from app.config import settings as _settings
+
+        currency = _settings.platform_currency  # seller orgs settle in platform currency (v1, ADR)
 
     existing = (
         await db.execute(

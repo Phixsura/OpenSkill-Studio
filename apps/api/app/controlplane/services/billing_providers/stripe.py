@@ -6,6 +6,7 @@ stripe.Webhook.construct_event with a fake secret.
 Card data never touches the platform — only refs are stored.
 """
 
+import asyncio
 from decimal import ROUND_HALF_UP, Decimal
 
 import structlog
@@ -91,9 +92,16 @@ def _platform_minor_from_stripe(stripe_amount: int, currency: str) -> int:
 class StripeProvider(BillingProviderBase):
     key = "stripe"
 
+    # R89[13]: the stripe-python SDK is SYNCHRONOUS — calling it inline in
+    # async methods froze the whole event loop for the duration of every
+    # Stripe HTTP round-trip (worker: outbox poll, all crons, every in-flight
+    # advance task; API: every concurrent request). Offload each SDK call to
+    # a thread with asyncio.to_thread.
+
     async def create_customer(self, tenant) -> str:
         sdk = _stripe()
-        customer = sdk.Customer.create(
+        customer = await asyncio.to_thread(
+            sdk.Customer.create,
             name=tenant.name,
             email=tenant.billing_email,
             metadata={"tenant_id": tenant.id},
@@ -121,7 +129,8 @@ class StripeProvider(BillingProviderBase):
                     "This plan price has no Stripe price configured",
                     409,
                 )
-            session = sdk.checkout.Session.create(
+            session = await asyncio.to_thread(
+                sdk.checkout.Session.create,
                 mode="subscription",
                 line_items=[{"price": plan_price.external_price_ref, "quantity": 1}],
                 success_url=success_url,
@@ -129,7 +138,8 @@ class StripeProvider(BillingProviderBase):
                 metadata=meta,
             )
         else:  # credit_topup | purchase — one-off payment
-            session = sdk.checkout.Session.create(
+            session = await asyncio.to_thread(
+                sdk.checkout.Session.create,
                 mode="payment",
                 line_items=[
                     {
@@ -151,8 +161,9 @@ class StripeProvider(BillingProviderBase):
         self, external_ref: str, new_price_ref: str, seat_quantity: int
     ) -> None:
         sdk = _stripe()
-        sub = sdk.Subscription.retrieve(external_ref)
-        sdk.Subscription.modify(
+        sub = await asyncio.to_thread(sdk.Subscription.retrieve, external_ref)
+        await asyncio.to_thread(
+            sdk.Subscription.modify,
             external_ref,
             items=[
                 {
@@ -167,13 +178,15 @@ class StripeProvider(BillingProviderBase):
     async def cancel_subscription(self, external_ref: str, at_period_end: bool) -> None:
         sdk = _stripe()
         if at_period_end:
-            sdk.Subscription.modify(external_ref, cancel_at_period_end=True)
+            await asyncio.to_thread(
+                sdk.Subscription.modify, external_ref, cancel_at_period_end=True
+            )
         else:
-            sdk.Subscription.cancel(external_ref)
+            await asyncio.to_thread(sdk.Subscription.cancel, external_ref)
 
     async def fetch_payment_status(self, external_ref: str) -> str:
         sdk = _stripe()
-        session = sdk.checkout.Session.retrieve(external_ref)
+        session = await asyncio.to_thread(sdk.checkout.Session.retrieve, external_ref)
         return session.get("payment_status", "unknown")
 
     def verify_webhook(self, headers: dict, raw_body: bytes) -> ParsedWebhookEvent:

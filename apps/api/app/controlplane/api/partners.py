@@ -600,7 +600,9 @@ async def partner_entries(
     rows = (
         (
             await db.execute(
-                q.order_by(RevenueShareEntry.created_at.desc()).offset(offset).limit(per_page)
+                q.order_by(RevenueShareEntry.created_at.desc(), RevenueShareEntry.id.desc())
+                .offset(offset)
+                .limit(per_page)
             )
         )
         .scalars()

@@ -736,6 +736,14 @@ class ProjectService:
         if timing == "closed":
             raise DeadlinePassedError()
 
+        # R87[8]: a RESUBMISSION after revision-requested is a NEW version of
+        # the work — bump the counter. The client portal's decision
+        # idempotency is keyed on (submission, version, action); without the
+        # bump, a revise→resubmit cycle kept the same version and the
+        # client's decision on the NEW work was silently swallowed by the
+        # prior-version record (returned as "already decided").
+        if sub.status == SubmissionStatus.REVISION_REQUESTED:
+            sub.version += 1
         sub.status = SubmissionStatus.SUBMITTED
         sub.submitted_at = datetime.now(UTC)
         sub.is_late = timing == "late"

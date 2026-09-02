@@ -261,7 +261,9 @@ async def platform_usage_explorer(
     rows = (
         (
             await db.execute(
-                query.order_by(UsageEvent.occurred_at.desc()).offset(offset).limit(per_page)
+                query.order_by(UsageEvent.occurred_at.desc(), UsageEvent.id.desc())
+                .offset(offset)
+                .limit(per_page)
             )
         )
         .scalars()

@@ -160,7 +160,9 @@ async def credit_ledger(
     rows = (
         (
             await db.execute(
-                q.order_by(CreditLedgerEntry.created_at.desc()).offset(offset).limit(per_page)
+                q.order_by(CreditLedgerEntry.created_at.desc(), CreditLedgerEntry.id.desc())
+                .offset(offset)
+                .limit(per_page)
             )
         )
         .scalars()
@@ -192,7 +194,9 @@ async def list_reservations(
     rows = (
         (
             await db.execute(
-                q.order_by(CreditReservation.created_at.desc()).offset(offset).limit(per_page)
+                q.order_by(CreditReservation.created_at.desc(), CreditReservation.id.desc())
+                .offset(offset)
+                .limit(per_page)
             )
         )
         .scalars()

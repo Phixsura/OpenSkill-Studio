@@ -889,3 +889,166 @@ async def test_learning_path_install_blocks_missing_workflow_deps(db):
     await db.flush()
     copy = await lp_svc.install_from_listing(buyer_org.id, listing.id, buyer_user.id)
     assert copy.org_id == buyer_org.id
+
+
+# ── R86/R87/R88: registry re-check, resubmit version, seller currency ──
+
+
+@pytest.mark.asyncio
+async def test_registry_badge_rechecks_product_liveness(db):
+    """R86[7]: the public badge endpoint filtered only listing columns —
+    archived/private products and deleted seller orgs kept leaking
+    existence + price + seller name. The endpoint re-checks the product."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+    from app.models.skill_pack import PackStatus, PackVisibility
+
+    seller_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    pack_id = listing.product_id
+    await db.commit()
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    async def badge(pid):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get(
+                "/api/v1/registry/listings",
+                params={"product_type": "skill_pack", "product_ids": pid},
+            )
+            assert r.status_code == 200, r.text
+            return r.json()["data"]
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        # published+public → badge present
+        data = await badge(pack_id)
+        assert pack_id in data
+        # archive the pack (listing untouched — the old bug's setup)
+        pack = await db.get(SkillPack, pack_id)
+        pack.status = PackStatus.ARCHIVED
+        await db.commit()
+        data = await badge(pack_id)
+        assert pack_id not in data, "archived product still exposed by public badge"
+        # restore, then flip private
+        pack.status = PackStatus.PUBLISHED
+        pack.visibility = PackVisibility.PRIVATE
+        await db.commit()
+        data = await badge(pack_id)
+        assert pack_id not in data, "private product still exposed by public badge"
+    finally:
+        app.router.lifespan_context = orig
+        # restore for other tests
+        pack = await db.get(SkillPack, pack_id)
+        pack.status = PackStatus.PUBLISHED
+        pack.visibility = PackVisibility.PUBLIC
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_resubmission_bumps_version_and_new_decision_lands(db):
+    """R87[8]: submit_draft resubmitted the SAME version after
+    REVISION_REQUESTED, so the portal decision-idempotency key never changed
+    and the client's decision on the NEW work was swallowed. Resubmit now
+    bumps version."""
+    from app.models.project import SubmissionStatus
+    from app.services.project import ProjectService
+
+    user = await _mk_user(db)
+    org = await _mk_org(db, user)
+    svc = ProjectService(db)
+    proj = await svc.create_project(
+        org.id,
+        "RSB",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        user.id,
+    )
+    sub = await svc.create_submission(org.id, proj.id, user.id)
+    await svc.submit_draft(sub.id, user.id)
+    assert sub.version == 1
+    sub.status = SubmissionStatus.REVISION_REQUESTED
+    await db.flush()
+    await svc.submit_draft(sub.id, user.id)  # resubmit after revision
+    assert sub.version == 2, "resubmission must bump the version"
+
+
+@pytest.mark.asyncio
+async def test_seller_accrual_converted_to_platform_currency(db):
+    """R88[9] CRITICAL: seller entries were written in BUYER currency while
+    seller_org statements hardcode the platform currency and sum
+    unconverted — a KRW share settled as the same number of USD cents.
+    Seller accrual now converts at purchase time (FX snapshotted)."""
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from app.controlplane.models.marketplace import MarketplacePurchase
+    from app.controlplane.models.partner import RevenueShareEntry
+    from app.controlplane.services import pricing as pricing_svc
+    from app.controlplane.services import revenue_share as revshare_svc
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    # KRW buyer tenant
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    buyer_tenant.currency = "KRW"
+    await db.flush()
+    listing = await _mk_listing(db, seller_org, seller_user, price_minor=1_300_000, currency="KRW")
+    # FX: KRW -> USD
+    from datetime import timedelta as _tdel
+
+    await pricing_svc.create_fx_rate(
+        db,
+        actor=_actor(seller_user),
+        base_currency="KRW",
+        quote_currency="USD",
+        rate=Decimal("0.00077"),
+        effective_from=_dt.now(_UTC) - _tdel(days=1),
+    )
+    purchase = MarketplacePurchase(
+        listing_id=listing.id,
+        buyer_tenant_id=buyer_tenant.id,
+        buyer_org_id=buyer_org.id,
+        purchaser_user_id=buyer_user.id,
+        status="paid",
+        amount_minor=1_300_000,
+        currency="KRW",
+        seller_share_minor=1_040_000,
+        platform_fee_minor=260_000,
+        economics_snapshot={"seller_org_id": seller_org.id},
+        payment_method="credit",
+    )
+    db.add(purchase)
+    await db.flush()
+    created = await revshare_svc.accrue_for_purchase(db, purchase.id)
+    assert created == 1
+    entry = (
+        await db.execute(
+            select(RevenueShareEntry).where(
+                RevenueShareEntry.source_id == purchase.id,
+                RevenueShareEntry.beneficiary_type == "seller_org",
+            )
+        )
+    ).scalar_one()
+    assert entry.currency == "USD", "seller entry must be in the settlement currency"
+    # ₩1,040,000 (KRW minor mult 1) × 0.00077 = $800.80 → 80080 USD minor
+    assert entry.share_amount_minor == 80080, entry.share_amount_minor
+    assert entry.fx_rate_snapshot is not None

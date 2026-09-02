@@ -290,7 +290,9 @@ async def list_cost_rates(
     rows = (
         (
             await db.execute(
-                q.order_by(ProviderCostRate.effective_from.desc()).offset(offset).limit(per_page)
+                q.order_by(ProviderCostRate.effective_from.desc(), ProviderCostRate.id.desc())
+                .offset(offset)
+                .limit(per_page)
             )
         )
         .scalars()
@@ -384,7 +386,9 @@ async def list_price_policies(
     rows = (
         (
             await db.execute(
-                q.order_by(PricePolicy.effective_from.desc()).offset(offset).limit(per_page)
+                q.order_by(PricePolicy.effective_from.desc(), PricePolicy.id.desc())
+                .offset(offset)
+                .limit(per_page)
             )
         )
         .scalars()
@@ -509,7 +513,13 @@ async def platform_rated_usage(
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
     offset = (page - 1) * per_page
     rows = (
-        (await db.execute(q.order_by(RatedUsage.rated_at.desc()).offset(offset).limit(per_page)))
+        (
+            await db.execute(
+                q.order_by(RatedUsage.rated_at.desc(), RatedUsage.id.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+        )
         .scalars()
         .all()
     )
@@ -539,7 +549,13 @@ async def tenant_rated_usage(
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
     offset = (page - 1) * per_page
     rows = (
-        (await db.execute(q.order_by(RatedUsage.rated_at.desc()).offset(offset).limit(per_page)))
+        (
+            await db.execute(
+                q.order_by(RatedUsage.rated_at.desc(), RatedUsage.id.desc())
+                .offset(offset)
+                .limit(per_page)
+            )
+        )
         .scalars()
         .all()
     )
