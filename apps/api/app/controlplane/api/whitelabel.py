@@ -443,6 +443,17 @@ async def create_partner_blueprint(
 
     await require_partner_member(db, partner_id, user, "admin")
     config = provision_svc.validate_blueprint_config(body.config)
+    # R46[25]: entitlement overrides are a PLATFORM power (PUT /platform/
+    # tenants/{id}/entitlements requires platform_admin). A partner admin
+    # authoring them into a blueprint and provisioning it escalated arbitrary
+    # hard overrides (unlimited seats/orgs/AI budget) with no platform review.
+    if config.get("entitlement_overrides"):
+        raise AppError(
+            "BLUEPRINT_INVALID",
+            "Partner blueprints cannot set entitlement overrides — "
+            "contact the platform to configure plan entitlements",
+            422,
+        )
     # Partner blueprints may only reference publicly installable packs —
     # smuggling another tenant's private content is rejected at provision
     # time by the install gates anyway (defense in depth).
@@ -501,8 +512,18 @@ async def partner_provision(
     db: AsyncSession = Depends(get_db),
 ):
     from app.controlplane.api.partners import require_partner_member
+    from app.controlplane.models.partner import Partner
 
     await require_partner_member(db, partner_id, user, "admin")
+    # R46[27]: a suspended/terminated partner must not provision new attributed
+    # tenants — membership alone never checked partner.status.
+    partner = await db.get(Partner, partner_id)
+    if partner is None or partner.status != "active":
+        raise AppError(
+            "PARTNER_FORBIDDEN",
+            "Partner account is not active",
+            403,
+        )
     run = await provision_svc.create_provision_run(
         db,
         blueprint_id=body.blueprint_id,
@@ -608,7 +629,8 @@ async def get_export(
         async for client in get_s3_client():
             download_url = await client.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": app_settings.s3_bucket, "Key": export.file_key},
+                # R65[23]: exports live in the dedicated private bucket.
+                Params={"Bucket": app_settings.s3_export_bucket, "Key": export.file_key},
                 ExpiresIn=900,
             )
     return DataResponse(

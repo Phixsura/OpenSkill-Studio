@@ -216,17 +216,30 @@ async def execute_provision_run(db: AsyncSession, run_id: str) -> None:
         # 2. org
         org_id = next((s.get("org_id") for s in run.steps if s["step"] == "create_org"), None)
         if not _step_done(run, "create_org"):
+            from sqlalchemy import select as _select
+            from ulid import ULID as _ULID
+
+            from app.models.organization import Organization as _Org
             from app.services.organization import OrgService
 
             org_name = config["org"]["name_template"].replace("{tenant_name}", run.requested_name)[
                 :100
             ]
+            # R46[26]: Organization.slug is GLOBALLY unique, and the operator's
+            # requested_slug can collide with any existing org — the verbatim
+            # insert died on the unique index with no fallback, wedging the run.
+            # Probe and suffix (same -tXXXX pattern as tenant auto-create).
+            org_slug = run.requested_slug[:100]
+            for _attempt in range(3):
+                taken = (
+                    await db.execute(_select(_Org.id).where(_Org.slug == org_slug).limit(1))
+                ).scalar_one_or_none()
+                if taken is None:
+                    break
+                org_slug = f"{run.requested_slug[:92]}-{str(_ULID()).lower()[-4:]}"
             org = await OrgService(db).create(
                 name=org_name,
-                # Slug from the run's unique requested_slug, NOT the name
-                # template — two runs of the same blueprint would otherwise
-                # collide on the derived slug.
-                slug=run.requested_slug[:100],
+                slug=org_slug,
                 description=None,
                 created_by=creator,
                 tenant_id=tenant.id,
@@ -293,9 +306,15 @@ async def execute_provision_run(db: AsyncSession, run_id: str) -> None:
             for ref in config.get("skill_packs", []):
                 version = None if ref["version"] == "latest" else ref["version"]
                 try:
-                    await InstallationService(db).install_pack(
-                        org_id, ref["pack_id"], version, creator
-                    )
+                    # R46[28]: each pack install runs in a SAVEPOINT so a
+                    # mid-copy failure rolls back THAT pack's partial content
+                    # (categories/skills already flushed) instead of committing
+                    # it — the retry then re-installs cleanly rather than
+                    # duplicating the committed half.
+                    async with db.begin_nested():
+                        await InstallationService(db).install_pack(
+                            org_id, ref["pack_id"], version, creator
+                        )
                 except AppError as exc:
                     # Resume-safe: this step has no per-pack progress marker, so
                     # a retry re-runs the whole loop. Packs installed before an
@@ -317,9 +336,10 @@ async def execute_provision_run(db: AsyncSession, run_id: str) -> None:
             for ref in config.get("workflow_packs", []):
                 version = None if ref["version"] == "latest" else ref["version"]
                 try:
-                    await WorkflowInstallationService(db).install(
-                        org_id, ref["pack_id"], version, creator
-                    )
+                    async with db.begin_nested():  # R46[28] — see skill packs
+                        await WorkflowInstallationService(db).install(
+                            org_id, ref["pack_id"], version, creator
+                        )
                 except AppError as exc:
                     if exc.code == "ALREADY_INSTALLED":
                         continue  # resume-safe (see install_skill_packs above)
@@ -369,6 +389,17 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
     """Whitelist-constructed JSON bundle → S3. Structurally excluded:
     credentials, cost rates, rated internal-cost fields, other tenants' rows,
     token hashes, platform-only audit actions. No SELECT * anywhere."""
+    # R65[21]: snapshot-consistent reads — the bundle is assembled across many
+    # queries; under READ COMMITTED a concurrent invoice finalize/credit write
+    # produced an internally torn export (e.g. an invoice whose lines were read
+    # after a void). REPEATABLE READ pins one snapshot for the whole build.
+    # SET TRANSACTION must be the FIRST statement of a transaction, and the
+    # endpoint's auth dependency has already queried — commit to close the
+    # current tx, then upgrade the fresh one.
+    from sqlalchemy import text as _text
+
+    await db.commit()
+    await db.execute(_text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
     tenant = await db.get(TenantAccount, tenant_id)
     if tenant is None:
         raise AppError("TENANT_NOT_FOUND", "Tenant not found", 404)
@@ -544,8 +575,15 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
 
         file_key = f"exports/{tenant_id}/{export.id}.json"
         async for client in get_s3_client():
+            # R65[23]: dedicated PRIVATE bucket — the shared s3_bucket also
+            # serves portfolio covers via unsigned direct URLs, so a guessable
+            # key prefix on the same bucket policy risked exposing PII bundles.
+            try:
+                await client.head_bucket(Bucket=app_settings.s3_export_bucket)
+            except Exception:  # noqa: BLE001 — first use creates it
+                await client.create_bucket(Bucket=app_settings.s3_export_bucket)
             await client.put_object(
-                Bucket=app_settings.s3_bucket,
+                Bucket=app_settings.s3_export_bucket,
                 Key=file_key,
                 Body=json.dumps(bundle, ensure_ascii=False).encode(),
                 ContentType="application/json",

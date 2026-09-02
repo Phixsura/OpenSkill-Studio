@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "openskill"
+    # R65[23]: tenant-export PII bundles must not share a bucket with
+    # publicly-served assets (portfolio covers use direct URLs on s3_bucket).
+    # Exports go to a dedicated private bucket, presigned-GET only.
+    s3_export_bucket: str = "openskill-exports"
     s3_region: str = "us-east-1"
 
     # Auth / JWT

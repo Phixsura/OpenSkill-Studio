@@ -407,9 +407,16 @@ async def test_export_whitelist_excludes_sensitive_data(db, monkeypatch):
 
     async def fake_s3():
         class FakeClient:
+            async def head_bucket(self, **kw):  # R65[23] private export bucket
+                return {}
+
+            async def create_bucket(self, **kw):
+                return {}
+
             async def put_object(self, **kw):
                 captured["body"] = kw["Body"].decode()
                 captured["key"] = kw["Key"]
+                captured["bucket"] = kw["Bucket"]
 
         yield FakeClient()
 
@@ -450,3 +457,90 @@ async def test_suspension_blocks_costed_surfaces(db):
     # Reactivate restores with no rebuild
     await tenant_svc.transition_status(db, tenant, TenantStatus.ACTIVE, actor=_actor(user))
     tenant_svc.require_tenant_active(tenant)  # no raise
+
+
+# ── R46: provisioning hardening ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_partner_blueprint_rejects_entitlement_overrides(db):
+    """R46[25]: entitlement overrides are a platform power — a partner admin
+    authoring them into a blueprint escalated arbitrary hard overrides."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.partner import Partner, PartnerMember
+    from app.core.security import create_access_token
+    from app.main import app
+
+    user = await _mk_user(db)
+    partner = Partner(
+        name=f"BP {ULID()}",
+        slug=f"bp-{str(ULID()).lower()}",
+        partner_type="reseller",
+        currency="USD",
+        created_by=user.id,
+    )
+    db.add(partner)
+    await db.flush()
+    db.add(PartnerMember(partner_id=partner.id, user_id=user.id, role="admin", created_by=user.id))
+    await db.commit()
+    token = create_access_token(user.id, user.email, user.role.value)
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/partners/{partner.id}/blueprints",
+                json={
+                    "name": "Escalate",
+                    "config": {"entitlement_overrides": {"max_organizations": 999999}},
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "BLUEPRINT_INVALID"
+    finally:
+        app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_provision_org_slug_collision_suffixes(db):
+    """R46[26]: the create_org step must fall back to a suffixed slug when the
+    requested slug collides with any existing org (globally unique)."""
+    from app.controlplane.models.branding import TenantBlueprint, TenantProvisionRun
+    from app.controlplane.services import provisioning as prov_svc
+    from app.models.organization import Organization
+    from app.services.organization import OrgService
+
+    user = await _mk_user(db)
+    taken_slug = f"prov-{str(ULID()).lower()}"
+    await OrgService(db).create(name="Taken", slug=taken_slug, description=None, created_by=user.id)
+    bp = TenantBlueprint(
+        name=f"B {ULID()}",
+        config={"org": {"name_template": "{tenant_name} Campus"}},
+        created_by=user.id,
+    )
+    db.add(bp)
+    await db.flush()
+    run = TenantProvisionRun(
+        blueprint_id=bp.id,
+        requested_name=f"Prov {ULID()}",
+        requested_slug=taken_slug,  # collides
+        idempotency_key=f"prov-{ULID()}",
+        created_by=user.id,
+    )
+    db.add(run)
+    await db.flush()
+    await prov_svc.execute_provision_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "completed", run.steps
+    org_step = next(s for s in run.steps if s["step"] == "create_org")
+    org = await db.get(Organization, org_step["org_id"])
+    assert org.slug != taken_slug
+    assert org.slug.startswith(taken_slug[:20]) or "-" in org.slug
