@@ -202,6 +202,114 @@ class LearningPathService:
         )
         return list(result.scalars().all())
 
+    # ── Marketplace install (ADR-014 §8.5) ──
+
+    async def install_from_listing(
+        self, org_id: str, listing_id: str, user_id: str
+    ) -> LearningPath:
+        """Cross-org copy of a purchased learning path (R49[36]).
+
+        learning_path is a purchasable product type, but until now nothing
+        consumed the license — buyers paid and received a LicenseGrant with no
+        way to obtain the content. This is the §8.5 mechanism: license-gated
+        fork of the path + items into the buyer org. Copy = fork; later seller
+        edits don't sync (v1).
+        """
+        from app.controlplane import facade as cp_facade
+        from app.controlplane.models.marketplace import MarketplaceListing
+        from app.models.organization import Organization
+
+        org = await self.db.get(Organization, org_id)
+        if org is None:
+            raise AppError("ORG_NOT_FOUND", "Organization not found", 404)
+        listing = await self.db.get(MarketplaceListing, listing_id)
+        if listing is None or listing.product_type != "learning_path":
+            raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+
+        # The license gate (covering grant / included plan / own product);
+        # uniform 404 for private listings, LICENSE_REQUIRED 403 otherwise.
+        await cp_facade.check_install_license(self.db, "learning_path", listing.product_id, org)
+
+        source = await self.db.get(LearningPath, listing.product_id)
+        if source is None or source.status != ContentStatus.PUBLISHED:
+            raise AppError("PATH_NOT_AVAILABLE", "Learning path is not available", 404)
+
+        # Items referencing workflow packs the buyer hasn't installed are a
+        # hard 422 listing the gaps — a silently broken curriculum is worse.
+        items = await self.list_items(source.id)
+        from app.models.skill_pack import InstallStatus
+        from app.models.workflow_pack import WorkflowPackInstallation
+
+        needed = {i.workflow_pack_id for i in items if i.workflow_pack_id}
+        if needed:
+            installed = set(
+                (
+                    await self.db.execute(
+                        select(WorkflowPackInstallation.pack_id).where(
+                            WorkflowPackInstallation.org_id == org_id,
+                            WorkflowPackInstallation.pack_id.in_(needed),
+                            WorkflowPackInstallation.status != InstallStatus.REMOVED,
+                        )
+                    )
+                ).scalars()
+            )
+            missing = sorted(needed - installed)
+            if missing:
+                raise AppError(
+                    "PATH_DEPENDENCY_MISSING",
+                    f"Install these workflow packs first: {', '.join(missing)}",
+                    422,
+                )
+
+        copy = LearningPath(
+            org_id=org_id,
+            name=source.name,
+            slug=f"{source.slug[:190]}-{secrets.token_hex(3)}",
+            description=source.description,
+            status=ContentStatus.PUBLISHED,
+            estimated_minutes=source.estimated_minutes,
+            created_by=user_id,
+        )
+        self.db.add(copy)
+        await self.db.flush()
+        for item in items:
+            # skill/project refs are org-scoped rows that don't exist in the
+            # buyer org — degrade them to informational section headings (ADR)
+            # rather than carrying dangling foreign refs.
+            if item.item_type in (PathItemType.SKILL, PathItemType.PROJECT):
+                self.db.add(
+                    LearningPathItem(
+                        path_id=copy.id,
+                        item_type=PathItemType.SECTION,
+                        section_title=(item.section_title or f"[{item.item_type.value}]")[:200],
+                        sort_order=item.sort_order,
+                        required=False,
+                        unlock_rule=item.unlock_rule,
+                    )
+                )
+            else:
+                self.db.add(
+                    LearningPathItem(
+                        path_id=copy.id,
+                        item_type=item.item_type,
+                        section_title=item.section_title,
+                        workflow_pack_id=item.workflow_pack_id,
+                        sort_order=item.sort_order,
+                        required=item.required,
+                        unlock_rule=item.unlock_rule,
+                        drip_schedule=item.drip_schedule,
+                    )
+                )
+        await self.db.flush()
+        log.info(
+            "path_installed_from_listing",
+            path_id=copy.id,
+            source_path_id=source.id,
+            listing_id=listing_id,
+            org_id=org_id,
+        )
+        return copy
+
     # ── Cohort Assignment ──
 
     async def _verify_cohort_org(self, cohort_id: str, org_id: str) -> None:

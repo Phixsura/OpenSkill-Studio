@@ -721,3 +721,171 @@ async def test_invoice_billed_purchase_delivers_and_queues_line(db):
         await db.execute(select(LicenseGrant).where(LicenseGrant.purchase_id == p.id))
     ).scalar_one()
     assert grant.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_learning_path_install_consumes_license(db):
+    """R49[36]: learning_path is purchasable but nothing consumed the license —
+    buyers paid and had no way to obtain the content. install_from_listing is
+    the §8.5 mechanism: license-gated cross-org fork of the path + items."""
+    from app.models.learning_path import LearningPath, LearningPathItem, PathItemType
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    lp_svc = LearningPathService(db)
+    path = await lp_svc.create_path(seller_org.id, seller_user.id, name="Video Mastery")
+    path.status = ContentStatus.PUBLISHED
+    await db.flush()
+    await lp_svc.add_item(path.id, seller_org.id, "section", section_title="Week 1", sort_order=0)
+
+    listing = await market_svc.create_listing(
+        db,
+        seller_org_id=seller_org.id,
+        product_type="learning_path",
+        product_id=path.id,
+        offer_type="paid",
+        price_minor=9900,
+        currency="USD",
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(seller_user),
+    )
+    listing.status = "active"
+    await db.flush()
+
+    # Unlicensed buyer → LICENSE_REQUIRED, nothing copied
+    with pytest.raises(AppError) as exc:
+        await lp_svc.install_from_listing(buyer_org.id, listing.id, buyer_user.id)
+    assert exc.value.code == "LICENSE_REQUIRED"
+
+    # Grant a license (manual grant = the paid path's outcome)
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    copy = await lp_svc.install_from_listing(buyer_org.id, listing.id, buyer_user.id)
+    assert copy.org_id == buyer_org.id
+    assert copy.id != path.id
+    assert copy.name == "Video Mastery"
+    items = (
+        (await db.execute(select(LearningPathItem).where(LearningPathItem.path_id == copy.id)))
+        .scalars()
+        .all()
+    )
+    assert len(items) == 1 and items[0].item_type == PathItemType.SECTION
+    # Source path untouched
+    src = await db.get(LearningPath, path.id)
+    assert src.org_id == seller_org.id
+
+
+@pytest.mark.asyncio
+async def test_learning_path_install_blocks_missing_workflow_deps(db):
+    """R49[36]: items referencing workflow packs the buyer hasn't installed →
+    hard 422 listing the gaps, nothing copied."""
+    from app.models.learning_path import LearningPath
+    from app.models.skill import ContentStatus
+    from app.models.skill_pack import InstallStatus
+    from app.models.workflow_pack import WorkflowPack, WorkflowPackInstallation
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    wf_pack = WorkflowPack(
+        owner_org_id=seller_org.id,
+        name=f"WF {ULID()}",
+        slug=f"wf-{str(ULID()).lower()}",
+        visibility=PackVisibility.PUBLIC,
+        created_by=seller_user.id,
+    )
+    db.add(wf_pack)
+    await db.flush()
+    # Seller org has it "installed" so add_item passes
+    db.add(
+        WorkflowPackInstallation(
+            org_id=seller_org.id,
+            pack_id=wf_pack.id,
+            installed_version="1.0.0",
+            status=InstallStatus.ACTIVE,
+            installed_by=seller_user.id,
+        )
+    )
+    await db.flush()
+
+    lp_svc = LearningPathService(db)
+    path = await lp_svc.create_path(seller_org.id, seller_user.id, name="WF Path")
+    path.status = ContentStatus.PUBLISHED
+    await db.flush()
+    await lp_svc.add_item(
+        path.id, seller_org.id, "workflow_pack", workflow_pack_id=wf_pack.id, sort_order=0
+    )
+
+    listing = await market_svc.create_listing(
+        db,
+        seller_org_id=seller_org.id,
+        product_type="learning_path",
+        product_id=path.id,
+        offer_type="paid",
+        price_minor=5000,
+        currency="USD",
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(seller_user),
+    )
+    listing.status = "active"
+    await db.flush()
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+
+    with pytest.raises(AppError) as exc:
+        await lp_svc.install_from_listing(buyer_org.id, listing.id, buyer_user.id)
+    assert exc.value.code == "PATH_DEPENDENCY_MISSING"
+    assert wf_pack.id in exc.value.message
+    # nothing copied
+    count = (
+        await db.execute(
+            select(func.count(LearningPath.id)).where(LearningPath.org_id == buyer_org.id)
+        )
+    ).scalar_one()
+    assert count == 0
+
+    # Buyer installs the dependency → copy succeeds with the wf item intact
+    db.add(
+        WorkflowPackInstallation(
+            org_id=buyer_org.id,
+            pack_id=wf_pack.id,
+            installed_version="1.0.0",
+            status=InstallStatus.ACTIVE,
+            installed_by=buyer_user.id,
+        )
+    )
+    await db.flush()
+    copy = await lp_svc.install_from_listing(buyer_org.id, listing.id, buyer_user.id)
+    assert copy.org_id == buyer_org.id

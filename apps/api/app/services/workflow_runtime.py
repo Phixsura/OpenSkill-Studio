@@ -219,6 +219,25 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _tenant_month_start(tz_name: str, at: datetime) -> datetime:
+    """UTC instant where the tenant-timezone calendar month containing `at` begins.
+
+    R49[39]: the run quota window must match the control plane's period
+    convention — the TENANT-timezone calendar month (rating and budgets both
+    use it). A naive UTC month start over-/under-counts runs near month
+    boundaries for non-UTC tenants (a UTC+13 tenant's new-month quota arrived
+    up to 13 hours late).
+    """
+    from zoneinfo import ZoneInfo
+
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001 — bad tz falls back to UTC
+        tz = UTC
+    local = at.astimezone(tz)
+    return local.replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+
 class WorkflowRuntimeService:
     """Request-session operations: create, read, decide, cancel."""
 
@@ -247,7 +266,7 @@ class WorkflowRuntimeService:
 
         tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
         cp_facade.require_tenant_active(tenant)
-        month_start = _now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_start = _tenant_month_start(tenant.timezone, _now())
         from app.models.organization import Organization as _Org
 
         run_count = (

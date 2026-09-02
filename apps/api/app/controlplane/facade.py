@@ -114,6 +114,12 @@ async def check_storage_quota(db: AsyncSession, org_id: str, incoming_bytes: int
     Live SUM at upload time (ADR-014 §2.5 decision) over submission_items +
     project_assets across the tenant's orgs. Storage is soft-by-default —
     check_quota resolves the soft path (warning, not rejection).
+
+    R49[38]: also enforces require_tenant_active. Uploads are a costed,
+    storage-growing action (ADR-014 §10.4 suspension surface), but the upload
+    endpoints gated only through this quota check — and max_storage_gb resolves
+    SOFT by default, so a suspended tenant kept growing storage unbounded.
+    Baking the active gate in here covers every current and future caller.
     """
     from decimal import Decimal
 
@@ -125,6 +131,7 @@ async def check_storage_quota(db: AsyncSession, org_id: str, incoming_bytes: int
     from app.models.project import ProjectAsset, Submission, SubmissionItem
 
     tenant = await _tenant(db, org_id)
+    require_tenant_active(tenant)
     org_ids = select(Organization.id).where(Organization.tenant_id == tenant.id)
     item_bytes = (
         await db.execute(

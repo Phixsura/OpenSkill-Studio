@@ -453,3 +453,59 @@ async def test_seat_quota_not_bypassable_by_role_promotion(db):
     await svc.add_member(org.id, instr.id, OrgRole.INSTRUCTOR)
     demoted = await svc.update_member_role(org.id, instr.id, OrgRole.STUDENT, owner.id)
     assert demoted.role == OrgRole.STUDENT
+
+
+@pytest.mark.asyncio
+async def test_blocked_status_mask_covers_cancelled_and_archived(db):
+    """R49[35]: consumption entitlements must be masked for EVERY blocked
+    status (SUSPENDED, CANCELLED, ARCHIVED) — not just SUSPENDED. A cancelled
+    tenant previously kept webhooks/api_access/client_portal/paid_marketplace
+    open because only SUSPENDED triggered the mask."""
+    from app.controlplane.services.entitlements import SUSPENSION_MASKED_KEYS
+
+    user = await _mk_user(db)
+    for status in (TenantStatus.SUSPENDED, TenantStatus.CANCELLED, TenantStatus.ARCHIVED):
+        tenant = await _mk_tenant(db, user)
+        tenant.status = status
+        await db.flush()
+        await invalidate_cache(tenant.id)
+        eff = await get_effective(db, tenant)
+        for key in SUSPENSION_MASKED_KEYS:
+            assert eff.values[key] is False, f"{key} not masked for {status}"
+            assert eff.sources[key] == "suspension"
+        with pytest.raises(AppError) as exc:
+            await require_feature(db, tenant, "webhooks")
+        assert exc.value.code == "FEATURE_NOT_AVAILABLE"
+    # ACTIVE keeps defaults (webhooks/api_access default True)
+    active = await _mk_tenant(db, user)
+    active.status = TenantStatus.ACTIVE
+    await db.flush()
+    await invalidate_cache(active.id)
+    eff = await get_effective(db, active)
+    assert eff.values["webhooks"] is True
+    assert eff.values["api_access"] is True
+
+
+@pytest.mark.asyncio
+async def test_storage_quota_gate_blocks_suspended_tenant(db):
+    """R49[38]: uploads gate only through check_storage_quota, and storage is
+    SOFT by default — so a suspended tenant kept growing storage. The facade
+    now enforces require_tenant_active before the quota math."""
+    from app.controlplane import facade as cp_facade
+    from app.services.organization import OrgService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"S {ULID()}", slug=f"sq-{str(ULID()).lower()}", description=None, created_by=user.id
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    # Active → passes (soft storage default never rejects)
+    await cp_facade.check_storage_quota(db, org.id, 1024)
+    # Suspended → blocked before any quota math
+    tenant.status = TenantStatus.SUSPENDED
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await cp_facade.check_storage_quota(db, org.id, 1024)
+    assert exc.value.code == "TENANT_SUSPENDED"

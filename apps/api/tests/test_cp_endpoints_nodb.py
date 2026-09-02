@@ -513,3 +513,13 @@ async def test_period_month_13_rejected_not_500(client):
         r = await client.get(f"/api/v1/tenants/01JFAKEFAKEFAKEFAKEFAKEFAK/usage?period={bad}")
         assert r.status_code in (401, 422), f"{bad} → {r.status_code}"
         assert r.status_code != 500
+
+
+@pytest.mark.asyncio
+async def test_learning_path_install_requires_auth(client):
+    """R49[36]: the §8.5 install endpoint is auth-gated."""
+    r = await client.post(
+        "/api/v1/orgs/01JBLPINSTALL0000000000000/learning-paths/install",
+        json={"listing_id": "01JBLPLISTING0000000000000"},
+    )
+    assert r.status_code == 401

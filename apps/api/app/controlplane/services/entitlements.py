@@ -18,7 +18,11 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.controlplane.models.tenant import TenantAccount, TenantStatus
+from app.controlplane.models.tenant import (
+    TENANT_BLOCKED_STATUSES,
+    TenantAccount,
+    TenantStatus,
+)
 from app.exceptions import AppError
 
 log = structlog.get_logger()
@@ -207,7 +211,12 @@ async def _compute_effective(db: AsyncSession, tenant: TenantAccount) -> Effecti
         sources[o.key] = "override"
         enforcement[o.key] = o.enforcement
 
-    if tenant.status == TenantStatus.SUSPENDED:
+    # R49[35]: the mask must cover every blocked status. TENANT_BLOCKED_STATUSES
+    # is {SUSPENDED, CANCELLED, ARCHIVED} — a cancelled/archived tenant kept
+    # webhooks/api_access/client_portal/paid_marketplace open because only
+    # SUSPENDED was checked here, so endpoints gated purely by entitlements
+    # (not require_tenant_active) stayed live after cancellation.
+    if tenant.status in TENANT_BLOCKED_STATUSES:
         for k in SUSPENSION_MASKED_KEYS:
             values[k] = False
             sources[k] = "suspension"

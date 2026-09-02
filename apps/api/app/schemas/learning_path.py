@@ -33,6 +33,12 @@ class CreateLearningPathRequest(BaseModel):
         return v
 
 
+class InstallPathRequest(BaseModel):
+    """ADR-014 §8.5: install a purchased learning path from its listing."""
+
+    listing_id: str = Field(min_length=26, max_length=26)
+
+
 class UpdateLearningPathRequest(BaseModel):
     name: str | None = None
     description: str | None = None

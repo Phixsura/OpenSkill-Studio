@@ -313,3 +313,83 @@ def test_api_metering_path_classification():
         "/health",
     ):
         assert classify_path(path) is None, path
+
+
+@pytest.mark.asyncio
+async def test_failed_eval_still_meters_token_spend(db):
+    """R49[40]: a parse-failed evaluation already consumed real LLM tokens —
+    the provider charged for them. The failure branch must emit the token
+    usage events (but NOT multimodal_evaluation — no evaluation was produced).
+    Previously only the success path metered, so failed evals were free."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.core.llm import LLMResponse
+    from app.services.evaluation import EvaluationService
+    from app.services.organization import OrgService
+    from app.services.project import ProjectService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"EF {ULID()}",
+        slug=f"ef-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+
+    eval_svc = EvaluationService(db)
+    await eval_svc.update_eval_settings(org.id, {"enabled": True, "monthly_budget_usd": 100})
+    proj_svc = ProjectService(db)
+    proj = await proj_svc.create_project(
+        org.id,
+        "EFP",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
+        [{"criterion": "Q", "max_score": 100}],
+        None,
+        None,
+        0,
+        0,
+        None,
+        user.id,
+    )
+    sub = await proj_svc.create_submission(org.id, proj.id, user.id)
+    await proj_svc.submit_draft(sub.id, user.id)
+    await db.flush()
+
+    bad = LLMResponse(
+        content="not json at all",
+        input_tokens=123,
+        output_tokens=45,
+        model="claude-sonnet-5",
+        provider="anthropic",
+    )
+    with patch("app.services.evaluation.create_llm_client") as mock_create:
+        mock_llm = AsyncMock()
+        mock_llm.complete = AsyncMock(return_value=bad)
+        mock_create.return_value = mock_llm
+        task = await eval_svc.trigger_evaluation(org.id, sub.id, "submission_review")
+        await db.flush()
+
+    assert task.status.value == "failed"
+    events = (
+        (await db.execute(select(UsageEvent).where(UsageEvent.evaluation_task_id == task.id)))
+        .scalars()
+        .all()
+    )
+    by_type = {e.usage_type: e for e in events}
+    assert "llm_input_tokens" in by_type, "input tokens not metered on parse failure"
+    assert "llm_output_tokens" in by_type
+    assert int(by_type["llm_input_tokens"].quantity) == 123
+    assert int(by_type["llm_output_tokens"].quantity) == 45
+    # No evaluation was produced — no multimodal_evaluation event
+    assert "multimodal_evaluation" not in by_type
+    # A UI retry is a NEW spend — its keys must not collide with this one
+    # (retries was bumped after emission).
+    assert by_type["llm_input_tokens"].idempotency_key == f"eval:{task.id}:0:in"
+    assert task.retries == 1

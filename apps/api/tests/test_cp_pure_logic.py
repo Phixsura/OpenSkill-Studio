@@ -243,3 +243,27 @@ def test_decimal_string_fields_reject_nan_and_overflow():
         with pytest.raises((ValidationError, ValueError)):
             recon(bad)
     recon("1834")
+
+
+# ── R49[39]: workflow-run quota month window is tenant-tz ────
+
+
+def test_tenant_month_start_uses_tenant_timezone():
+    from datetime import UTC, datetime
+
+    from app.services.workflow_runtime import _tenant_month_start
+
+    # 2026-08-31 23:00 UTC = 2026-09-01 11:00 in Auckland (NZST, UTC+12) —
+    # Auckland is already in September, so its month started Aug 31 12:00 UTC.
+    at = datetime(2026, 8, 31, 23, 0, tzinfo=UTC)
+    nz = _tenant_month_start("Pacific/Auckland", at)
+    assert nz == datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+    # The same instant in UTC is still August.
+    utc = _tenant_month_start("UTC", at)
+    assert utc == datetime(2026, 8, 1, 0, 0, tzinfo=UTC)
+    # US/Pacific (UTC-7 PDT) is Aug 31 16:00 local — month started Aug 1 07:00 UTC.
+    la = _tenant_month_start("America/Los_Angeles", at)
+    assert la == datetime(2026, 8, 1, 7, 0, tzinfo=UTC)
+    # Bad tz name falls back to UTC instead of crashing.
+    bad = _tenant_month_start("Not/AZone", at)
+    assert bad == utc

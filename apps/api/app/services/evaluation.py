@@ -323,6 +323,18 @@ class EvaluationService:
                 )
                 return
 
+            # R49[40]: the provider charged for this response regardless of
+            # what happens next (parse failure, any downstream exception).
+            # Stamp the spend on the task NOW so the failure branches can
+            # meter it — previously only the success path emitted usage
+            # events, so parse-failed evals were free (internal cost with
+            # zero billable, silent margin leak).
+            task.llm_provider = response.provider
+            task.llm_model = response.model
+            task.input_tokens = response.input_tokens
+            task.output_tokens = response.output_tokens
+            task.cost_usd = Decimal(str(calculate_cost(response)))
+
             # Parse result
             result = self._parse_evaluation_response(response.content, project.rubric)
             total_score = result.get("total_score", 0)
@@ -392,6 +404,13 @@ class EvaluationService:
             )
 
         except json.JSONDecodeError:
+            # R49[40]: the LLM call already returned — real tokens were spent.
+            # Meter them even though the evaluation failed (token events only;
+            # no multimodal_evaluation event since no evaluation was produced).
+            # Emit BEFORE the retries bump: the key carries this attempt's
+            # number; a later UI retry executes under the incremented value,
+            # so its own emission never collides with this one.
+            await self._emit_usage_events(task, tokens_only=True)
             task.retries += 1
             # Always set to FAILED — no background worker picks up PENDING tasks
             task.status = EvalStatus.FAILED
@@ -405,6 +424,9 @@ class EvaluationService:
             # file paths, API keys) to the client. Log the full error server-side.
             task.error = "Evaluation failed due to an internal error"
             task.completed_at = datetime.now(UTC)
+            # R49[40]: input/output_tokens are set iff the LLM call completed
+            # before the exception; _emit_usage_events no-ops on zero tokens.
+            await self._emit_usage_events(task, tokens_only=True)
             await self.db.flush()
             log.error("eval_failed", task_id=task.id, error=str(e))
 
@@ -928,13 +950,17 @@ Please evaluate the submission against the rubric above."""
             "improvements": data.get("improvements", []),
         }
 
-    async def _emit_usage_events(self, task: EvaluationTask) -> None:
+    async def _emit_usage_events(self, task: EvaluationTask, *, tokens_only: bool = False) -> None:
         """Issue #27 §3.3c: multimodal_evaluation + LLM token usage events.
 
         Idempotency keys carry task.retries so a UI-triggered retry (a real
         second LLM spend) meters again, while replays of the same attempt
         never double-bill. Emission failures must not fail the evaluation —
         the LLM spend already happened.
+
+        tokens_only=True (R49[40]): failure paths meter the token spend the
+        provider already charged for, without a multimodal_evaluation event
+        (no evaluation was actually produced).
         """
         from datetime import UTC as _UTC
         from datetime import datetime as _dt
@@ -958,17 +984,18 @@ Please evaluate the submission against the rubric above."""
             "model_or_service": task.llm_model,
         }
         try:
-            await cp_facade.emit_usage(
-                self.db,
-                usage_type="multimodal_evaluation",
-                quantity=1,
-                idempotency_key=f"eval:{task.id}:{task.retries}:eval",
-                metadata={
-                    "eval_type": task.type.value,
-                    "cost_usd": str(task.cost_usd) if task.cost_usd is not None else None,
-                },
-                **common,
-            )
+            if not tokens_only:
+                await cp_facade.emit_usage(
+                    self.db,
+                    usage_type="multimodal_evaluation",
+                    quantity=1,
+                    idempotency_key=f"eval:{task.id}:{task.retries}:eval",
+                    metadata={
+                        "eval_type": task.type.value,
+                        "cost_usd": str(task.cost_usd) if task.cost_usd is not None else None,
+                    },
+                    **common,
+                )
             if task.input_tokens:
                 await cp_facade.emit_usage(
                     self.db,
