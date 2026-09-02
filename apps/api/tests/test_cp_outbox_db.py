@@ -292,3 +292,271 @@ def test_all_production_handlers_registered():
         "provision.run",
     }
     assert expected <= set(HANDLERS.keys())
+
+
+# ── R57: worker resilience + dead-letter ops ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_product_service_rollback_does_not_poison_batch(test_topic):
+    """R57[1]: product services (OrgService.create, install_pack, add_item)
+    call session.rollback() on IntegrityError. Inside an outbox-handler
+    SAVEPOINT that rolled back the ROOT batch transaction — silently WIPING
+    every earlier sibling's uncommitted writes in the same batch (handler A
+    lands rev-share entries, handler B hits a slug collision → A's money rows
+    vanish while A is still marked done). The services now skip the session
+    rollback when nested; the AppError unwinds only B's savepoint."""
+    from app.models.user import User, UserRole, UserStatus
+    from app.services.organization import OrgService
+
+    # Seed a user + an org whose slug we will collide with
+    async with AsyncSessionLocal() as setup:
+        from app.core.security import hash_password
+
+        user = User(
+            email=f"obx-{ULID()}@test.com",
+            email_verified=True,
+            password_hash=hash_password("Test1234!"),
+            display_name="OBX",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
+        setup.add(user)
+        await setup.flush()
+        taken_slug = f"obx-{str(ULID()).lower()}"
+        seed_org = await OrgService(setup).create(
+            name="Taken", slug=taken_slug, description=None, created_by=user.id
+        )
+        await setup.commit()
+        user_id = user.id
+        tenant_id = seed_org.tenant_id
+
+    clean_topic = f"test.{str(ULID()).lower()[-8:]}"
+    marker_topic = f"test.{str(ULID()).lower()[-8:]}"
+
+    @register_handler(clean_topic)
+    async def clean_handler(db, payload):  # noqa: ARG001
+        # A real business write (INSERT) — must survive the sibling's failure.
+        enqueue(db, marker_topic, {"landed": True})
+
+    @register_handler(test_topic)
+    async def colliding_handler(db, payload):  # noqa: ARG001
+        # Reproduces the provisioning path: product service raises
+        # IntegrityError→rollback inside the handler savepoint. A slug dupe
+        # is caught by create()'s pre-check SELECT, so hit the created_by FK
+        # on the ORG insert itself (tenant_id given → no auto-tenant, the
+        # wrapped flush is the failing one and the except branch fires).
+        await OrgService(db).create(
+            name="Dup",
+            slug=f"dup-{str(ULID()).lower()}",
+            description=None,
+            created_by="01JBNOSUCHUSER000000000000",
+            tenant_id=tenant_id,
+        )
+
+    try:
+        # Clean FIRST (strictly earlier available_at — pg now() is
+        # tx-constant, so the server default would tie and make the poll
+        # order unstable), colliding second: the collision must hit while
+        # the clean handler's writes are still uncommitted in the root tx.
+        async with AsyncSessionLocal() as db:
+            m1 = enqueue(db, clean_topic, {})
+            m1.available_at = datetime.now(UTC) - timedelta(seconds=10)
+            m2 = enqueue(db, test_topic, {})
+            m2.available_at = datetime.now(UTC) - timedelta(seconds=5)
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            await process_outbox_once(db, topics=[clean_topic, test_topic])
+            await db.commit()
+        async with AsyncSessionLocal() as check:
+            # The clean sibling's business write SURVIVED the collision.
+            marker = (
+                (
+                    await check.execute(
+                        select(OutboxMessage).where(OutboxMessage.topic == marker_topic)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(marker) == 1, "sibling's write wiped by product-service rollback"
+            msgs = {
+                m.topic: m
+                for m in (
+                    (
+                        await check.execute(
+                            select(OutboxMessage).where(
+                                OutboxMessage.topic.in_([test_topic, clean_topic])
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            }
+            assert msgs[clean_topic].status == "done"
+            assert msgs[test_topic].status == "pending"
+            assert msgs[test_topic].attempts == 1
+    finally:
+        HANDLERS.pop(clean_topic, None)
+        HANDLERS.pop(marker_topic, None)
+        from app.core.database import engine
+
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_flush_keeps_bucket_when_tenant_has_no_org():
+    """R57[3]: the hourly flush deleted the Redis bucket even when the tenant
+    had no org to attribute the event to — billable usage silently lost.
+    The bucket must survive and land once an org exists."""
+    from datetime import timedelta as _td
+
+    import app.core.redis as _redis_mod
+    from app.controlplane.models.tenant import TenantStatus
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services import tenants as tenant_svc
+    from app.controlplane.services.audit import Actor
+    from app.controlplane.services.metering import flush_api_request_counters
+    from app.core.security import hash_password
+    from app.models.organization import Organization
+    from app.models.user import User, UserRole, UserStatus
+
+    if _redis_mod._redis is not None:
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            await _redis_mod._redis.aclose()
+        _redis_mod._redis = None
+    r = _redis_mod.redis_pool()
+
+    async with AsyncSessionLocal() as db:
+        user = User(
+            email=f"obx2-{ULID()}@test.com",
+            email_verified=True,
+            password_hash=hash_password("Test1234!"),
+            display_name="OBX2",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
+        db.add(user)
+        await db.flush()
+        tenant = await tenant_svc.create_tenant(
+            db,
+            name=f"NoOrg {ULID()}",
+            slug=f"no-{str(ULID()).lower()}",
+            actor=Actor(user_id=user.id, type="platform"),
+            owner_user_id=user.id,
+            status=TenantStatus.ACTIVE,
+            with_trial=False,
+        )
+        await db.commit()
+        tenant_id = tenant.id
+        user_id = user.id
+
+    # Bucket old enough to pass the 25h delete cutoff — the ONLY thing that
+    # may keep it alive is the org-less guard.
+    bucket = (datetime.now(UTC) - _td(hours=30)).strftime("%Y%m%d%H")
+    key = f"cp:apireq:{tenant_id}:{bucket}"
+    await r.set(key, 17, ex=90_000)
+    try:
+        async with AsyncSessionLocal() as db:
+            await flush_api_request_counters(db)
+        assert await r.get(key) is not None, "org-less tenant's bucket must survive"
+        # Org appears → next flush lands it and may delete the bucket
+        async with AsyncSessionLocal() as db:
+            db.add(
+                Organization(
+                    name=f"Late {ULID()}",
+                    slug=f"lt-{str(ULID()).lower()}",
+                    tenant_id=tenant_id,
+                    created_by=user_id,
+                )
+            )
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            await flush_api_request_counters(db)
+        assert await r.get(key) is None  # landed + old → deleted
+        async with AsyncSessionLocal() as db:
+            ev = (
+                await db.execute(
+                    select(UsageEvent).where(
+                        UsageEvent.tenant_id == tenant_id,
+                        UsageEvent.usage_type == "api_request",
+                    )
+                )
+            ).scalar_one()
+            assert int(ev.quantity) == 17
+    finally:
+        await r.delete(key)
+        from app.core.database import engine
+
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_failed_outbox_list_and_requeue(test_topic):
+    """R57[4]: dead-lettered messages were invisible and unrecoverable. The
+    ops endpoints list them and requeue (guarded failed→pending, audited)."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token, hash_password
+    from app.main import app
+    from app.models.user import User, UserRole, UserStatus
+
+    @register_handler(test_topic)
+    async def always_fails(db, payload):  # noqa: ARG001
+        raise RuntimeError("boom")
+
+    async with AsyncSessionLocal() as db:
+        admin = User(
+            email=f"obx3-{ULID()}@test.com",
+            email_verified=True,
+            password_hash=hash_password("Test1234!"),
+            display_name="OBX3",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
+        db.add(admin)
+        await db.flush()
+        db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+        msg = OutboxMessage(topic=test_topic, payload={"x": 1}, status="failed", attempts=8)
+        msg.last_error = "boom"
+        db.add(msg)
+        await db.commit()
+        admin_id, admin_email, admin_role = admin.id, admin.email, admin.role.value
+        msg_id = msg.id
+
+    token = create_access_token(admin_id, admin_email, admin_role)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.get(f"/api/v1/platform/outbox/failed?topic={test_topic}", headers=hdr)
+            assert r.status_code == 200, r.text
+            ids = [m["id"] for m in r.json()["data"]]
+            assert msg_id in ids
+            r = await c.post(f"/api/v1/platform/outbox/{msg_id}/requeue", headers=hdr)
+            assert r.status_code == 200, r.text
+            # Second requeue of the now-pending row → 409 (guarded)
+            r = await c.post(f"/api/v1/platform/outbox/{msg_id}/requeue", headers=hdr)
+            assert r.status_code == 409
+    finally:
+        app.router.lifespan_context = orig
+
+    async with AsyncSessionLocal() as check:
+        row = await check.get(OutboxMessage, msg_id)
+        assert row.status == "pending"
+        assert row.attempts == 0 and row.last_error is None
+    from app.core.database import engine
+
+    await engine.dispose()

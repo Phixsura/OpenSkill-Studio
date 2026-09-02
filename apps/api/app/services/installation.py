@@ -305,7 +305,15 @@ class InstallationService:
         try:
             await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
+            # R57[1]: when running inside an outbox-handler SAVEPOINT
+            # (worker isolation, provisioning steps), session.rollback()
+            # rolls back the ROOT batch transaction — poisoning every
+            # sibling message and un-claiming rows mid-flight. Inside a
+            # nested transaction we only raise: the enclosing
+            # begin_nested() unwinds to the savepoint and the root stays
+            # usable. On the plain request path behavior is unchanged.
+            if not self.db.in_nested_transaction():
+                await self.db.rollback()
             raise AppError(
                 "ALREADY_INSTALLED", "Pack already installed in this organization", 409
             ) from None

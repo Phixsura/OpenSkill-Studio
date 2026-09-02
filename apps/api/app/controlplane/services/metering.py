@@ -290,6 +290,7 @@ async def flush_api_request_counters(db: AsyncSession) -> int:
             if bucket >= now_bucket:
                 continue  # current hour still accumulating
             count = int(await r.get(key_s) or 0)
+            landed = count <= 0  # empty bucket = nothing to land
             if count > 0:
                 # Attribution org: not tracked per-bucket — use the tenant's
                 # first org for the org_id column (aggregate-level metric).
@@ -312,10 +313,21 @@ async def flush_api_request_counters(db: AsyncSession) -> int:
                         source="api_metering",
                         idempotency_key=f"apireq:{tenant_id}:{bucket}",
                     )
+                    landed = True
                     if event is not None:
                         emitted += 1
+                else:
+                    # R57[3]: an org-less tenant (freshly provisioned, counted
+                    # via /tenants/{id}/... paths) has metered usage but no
+                    # attribution org YET. Deleting the bucket would silently
+                    # lose billable usage — keep it; a later run lands it once
+                    # the org exists (TTL bounds the wait at 25h, an accepted
+                    # loss only if the tenant never gains an org).
+                    log.warning(
+                        "cp_api_flush_no_org", tenant_id=tenant_id, bucket=bucket, count=count
+                    )
             await db.commit()
-            if bucket < delete_cutoff:
+            if landed and bucket < delete_cutoff:
                 await r.delete(key_s)
         return emitted
     except Exception:  # noqa: BLE001 — Redis outage: flush retries next hour

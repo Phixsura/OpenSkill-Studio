@@ -13,7 +13,7 @@ import re
 from datetime import UTC, datetime
 
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -631,3 +631,101 @@ async def trace_settlement_entry(
             else None,
         }
     }
+
+
+# ── R57[4]: dead-letter outbox ops ───────────────────────────
+# A message that exhausts outbox_max_attempts flips to status='failed' with
+# only a log line — the dashboard showed an aggregate count and NOTHING could
+# list or requeue the rows. A dead run.terminal (reservation never settles),
+# invoice.finalized (rev-share never accrues) or usage.recorded (never rated)
+# silently drops money on the floor. Handlers are idempotent by design, so
+# requeue is always safe.
+
+
+@router.get("/outbox/failed")
+async def list_failed_outbox(
+    topic: str | None = Query(None, max_length=40),
+    page: int = Query(1, ge=1, le=1_000_000),
+    per_page: int = Query(50, ge=1, le=200),
+    _user=Depends(require_platform_role("platform_admin", "billing_admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(OutboxMessage).where(OutboxMessage.status == "failed")
+    count_q = select(func.count(OutboxMessage.id)).where(OutboxMessage.status == "failed")
+    if topic:
+        query = query.where(OutboxMessage.topic == topic)
+        count_q = count_q.where(OutboxMessage.topic == topic)
+    total = (await db.execute(count_q)).scalar_one()
+    rows = (
+        (
+            await db.execute(
+                query.order_by(OutboxMessage.created_at.desc())
+                .offset((page - 1) * per_page)
+                .limit(per_page)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "data": [
+            {
+                "id": m.id,
+                "topic": m.topic,
+                "payload": m.payload,
+                "attempts": m.attempts,
+                "last_error": m.last_error,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in rows
+        ],
+        "meta": {
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "has_more": page * per_page < total,
+        },
+    }
+
+
+@router.post("/outbox/{message_id}/requeue")
+async def requeue_outbox_message(
+    message_id: str,
+    request: Request,
+    user=Depends(require_platform_role("platform_admin", "billing_admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import update as _update
+
+    from app.controlplane.api.deps import make_actor
+    from app.controlplane.services.audit import record_audit
+
+    msg = await db.get(OutboxMessage, message_id)
+    if msg is None:
+        raise AppError("OUTBOX_MESSAGE_NOT_FOUND", "Outbox message not found", 404)
+    # Guarded: only failed rows are requeueable (a pending/processing row is
+    # already owned by the worker loop).
+    result = await db.execute(
+        _update(OutboxMessage)
+        .where(OutboxMessage.id == message_id, OutboxMessage.status == "failed")
+        .values(
+            status="pending",
+            attempts=0,
+            available_at=datetime.now(UTC),
+            last_error=None,
+            locked_by=None,
+            locked_at=None,
+        )
+    )
+    if not result.rowcount:
+        raise AppError("OUTBOX_NOT_FAILED", "Only failed messages can be requeued", 409)
+    await record_audit(
+        db,
+        actor=make_actor(request, user),
+        action="outbox.requeued",
+        target_type="outbox_message",
+        target_id=message_id,
+        after={"topic": msg.topic},
+    )
+    await db.commit()
+    return {"data": {"id": message_id, "status": "pending"}}

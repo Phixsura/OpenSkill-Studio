@@ -29,6 +29,7 @@ AUDIT_ACTIONS = frozenset(
         "tenant.updated",
         "tenant.member_added",
         "tenant.member_removed",
+        "outbox.requeued",
         "tenant.attribution_set",
         "tenant.attribution_cleared",
         # platform roles
