@@ -240,7 +240,7 @@ async def test_last_owner_removal_blocked(db):
         )
     ).scalar_one()
     with pytest.raises(AppError) as exc:
-        await tenant_svc.remove_tenant_member(db, tenant, member.id)
+        await tenant_svc.remove_tenant_member(db, tenant, member.id, actor=_actor(owner))
     assert exc.value.code == "LAST_OWNER_REMOVAL"
 
 
@@ -439,3 +439,200 @@ async def test_backfill_left_no_orphan_orgs(db):
         await db.execute(text("SELECT COUNT(*) FROM organizations WHERE tenant_id IS NULL"))
     ).scalar()
     assert null_count == 0
+
+
+@pytest.mark.asyncio
+async def test_mint_recheck_blocks_promoted_target(db):
+    """R54[1] TOCTOU: the privileged-target check ran only at grant creation.
+    Grant against a plain user, promote the user, then mint = a support
+    member wearing an admin's identity. The mint must re-run the check."""
+    support = await _mk_user(db)
+    target = await _mk_user(db)
+    grant = await tenant_svc.create_impersonation_grant(
+        db,
+        platform_user=support,
+        target_user_id=target.id,
+        tenant_id=None,
+        reason="debug ticket #44",
+        expires_in_minutes=30,
+        actor=_actor(support),
+    )
+    # Promotion path A: product-admin role
+    target.role = UserRole.ADMIN
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await tenant_svc.mint_impersonation_token(db, grant, actor=_actor(support))
+    assert exc.value.code == "IMPERSONATION_TARGET_FORBIDDEN"
+    # Promotion path B: platform role assignment
+    target.role = UserRole.STUDENT
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+
+    db.add(PlatformRoleAssignment(user_id=target.id, role="billing_admin"))
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await tenant_svc.mint_impersonation_token(db, grant, actor=_actor(support))
+    assert exc.value.code == "IMPERSONATION_TARGET_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_tenant_membership_changes_audited(db):
+    """R54[3]: tenant owner/billing_admin grants are privilege changes —
+    both add and remove must land in the audit trail."""
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    owner = await _mk_user(db)
+    other = await _mk_user(db)
+    tenant = await _mk_tenant(db, owner)
+    member = await tenant_svc.add_tenant_member(
+        db, tenant, user_id=other.id, role="billing_admin", actor=_actor(owner)
+    )
+    added = (
+        await db.execute(
+            select(CommercialAuditEvent).where(
+                CommercialAuditEvent.action == "tenant.member_added",
+                CommercialAuditEvent.target_id == member.id,
+            )
+        )
+    ).scalar_one()
+    assert added.after == {"user_id": other.id, "role": "billing_admin"}
+    await tenant_svc.remove_tenant_member(db, tenant, member.id, actor=_actor(owner))
+    removed = (
+        await db.execute(
+            select(CommercialAuditEvent).where(
+                CommercialAuditEvent.action == "tenant.member_removed",
+                CommercialAuditEvent.target_id == member.id,
+            )
+        )
+    ).scalar_one()
+    assert removed.before == {"user_id": other.id, "role": "billing_admin"}
+
+
+@pytest.mark.asyncio
+async def test_checkout_rescues_trial_expiry_suspension(db):
+    """R54[2]: with trial_expiry_action='suspend', the cron could suspend a
+    still-TRIAL tenant DURING checkout; the webhook completion only handled
+    TRIAL and stranded a paying customer. It must rescue exactly the cron's
+    suspension (reason='trial expired') — never admin suspensions."""
+    from app.controlplane.services import billing as billing_svc
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    # Simulate cron suspension mid-checkout
+    await tenant_svc.transition_status(
+        db, tenant, TenantStatus.SUSPENDED, actor=_actor(user), reason="trial expired"
+    )
+    await db.refresh(tenant)
+    sub = await billing_svc.activate_subscription_from_checkout(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="mock",
+        external_customer_ref="mock_cus_x",
+        external_ref=f"mock_sub_{tenant.id}",
+    )
+    assert sub.status == "active"
+    await db.refresh(tenant)
+    assert tenant.status == TenantStatus.ACTIVE
+    # Admin suspension is NOT rescued by payment
+    user2 = await _mk_user(db)
+    tenant2 = await _mk_tenant(db, user2)
+    await tenant_svc.transition_status(db, tenant2, TenantStatus.ACTIVE, actor=_actor(user2))
+    await tenant_svc.transition_status(
+        db, tenant2, TenantStatus.SUSPENDED, actor=_actor(user2), reason="abuse investigation"
+    )
+    await db.refresh(tenant2)
+    await billing_svc.activate_subscription_from_checkout(
+        db,
+        tenant2,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="mock",
+        external_customer_ref="mock_cus_y",
+        external_ref=f"mock_sub_{tenant2.id}",
+    )
+    await db.refresh(tenant2)
+    assert tenant2.status == TenantStatus.SUSPENDED
+
+
+@pytest.mark.asyncio
+async def test_create_org_under_tenant_works_end_to_end(db):
+    """R59[4]: the endpoint imported a nonexistent `OrganizationService` —
+    every authorized call 500'd. Verify the full path returns 201."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.security import create_access_token
+    from app.main import app
+
+    owner = await _mk_user(db)
+    tenant = await _mk_tenant(db, owner)
+    await tenant_svc.transition_status(db, tenant, TenantStatus.ACTIVE, actor=_actor(owner))
+    await db.commit()
+    token = create_access_token(owner.id, owner.email, owner.role.value)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/tenants/{tenant.id}/orgs",
+                json={"name": "Second Org", "slug": f"so-{str(ULID()).lower()}"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 201, r.text
+            assert r.json()["data"]["tenant_id"] == tenant.id
+    finally:
+        app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_revoked_grant_kills_minted_token(db):
+    """R59[5]: revoking a grant left already-minted tokens valid for up to 15
+    minutes. get_current_user now rejects any token whose imp_grant is
+    revoked/expired — revocation is immediate."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    support = await _mk_user(db)
+    target = await _mk_user(db)
+    grant = await tenant_svc.create_impersonation_grant(
+        db,
+        platform_user=support,
+        target_user_id=target.id,
+        tenant_id=None,
+        reason="debug ticket #45",
+        expires_in_minutes=30,
+        actor=_actor(support),
+    )
+    token, _ = await tenant_svc.mint_impersonation_token(db, grant, actor=_actor(support))
+    await db.commit()
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.get("/api/v1/auth/me", headers=hdr)
+            assert r.status_code == 200  # token works pre-revocation
+            grant.revoked_at = datetime.now(UTC)
+            await db.commit()
+            r = await c.get("/api/v1/auth/me", headers=hdr)
+            assert r.status_code == 401, r.text  # dead immediately
+    finally:
+        app.router.lifespan_context = orig
+        await db.rollback()

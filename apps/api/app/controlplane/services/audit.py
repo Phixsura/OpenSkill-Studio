@@ -27,6 +27,8 @@ AUDIT_ACTIONS = frozenset(
         # R60[46]: owner PATCH of pricing-relevant fields (country is a
         # rev-share rule dimension; timezone shifts budget/period boundaries).
         "tenant.updated",
+        "tenant.member_added",
+        "tenant.member_removed",
         "tenant.attribution_set",
         "tenant.attribution_cleared",
         # platform roles

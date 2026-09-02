@@ -296,10 +296,23 @@ async def add_tenant_member(
     member = TenantMember(tenant_id=tenant.id, user_id=user_id, role=role, created_by=actor.user_id)
     db.add(member)
     await db.flush()
+    # R54[3]: granting tenant owner/billing_admin is a privilege change —
+    # it must be reconstructible from the audit trail.
+    await record_audit(
+        db,
+        actor=actor,
+        action="tenant.member_added",
+        target_type="tenant_member",
+        target_id=member.id,
+        tenant_id=tenant.id,
+        after={"user_id": user_id, "role": role},
+    )
     return member
 
 
-async def remove_tenant_member(db: AsyncSession, tenant: TenantAccount, member_id: str) -> None:
+async def remove_tenant_member(
+    db: AsyncSession, tenant: TenantAccount, member_id: str, *, actor: Actor
+) -> None:
     member = await db.get(TenantMember, member_id)
     if member is None or member.tenant_id != tenant.id:
         raise AppError("TENANT_NOT_FOUND", "Tenant member not found", 404)
@@ -311,8 +324,19 @@ async def remove_tenant_member(db: AsyncSession, tenant: TenantAccount, member_i
         )
         if owners.scalar_one() <= 1:
             raise AppError("LAST_OWNER_REMOVAL", "Cannot remove the last tenant owner", 409)
+    removed = {"user_id": member.user_id, "role": member.role}
     await db.delete(member)
     await db.flush()
+    # R54[3]: symmetric with member_added.
+    await record_audit(
+        db,
+        actor=actor,
+        action="tenant.member_removed",
+        target_type="tenant_member",
+        target_id=member_id,
+        tenant_id=tenant.id,
+        before=removed,
+    )
 
 
 # ── Impersonation ────────────────────────────────────────────
@@ -376,6 +400,18 @@ async def mint_impersonation_token(
     target = await db.get(User, grant.target_user_id)
     if target is None or not target.is_active:
         raise AppError("USER_NOT_FOUND", "Target user not found", 404)
+    # R54[1] TOCTOU: the privileged-target check ran only at grant CREATION.
+    # Grant against a plain user → promote the user (org flow / platform-role
+    # grant) → mint = a support member impersonating an admin. Re-run the
+    # same check at every mint.
+    if target.role == UserRole.ADMIN or await has_platform_role(
+        db, target, "platform_admin", "platform_support", "billing_admin"
+    ):
+        raise AppError(
+            "IMPERSONATION_TARGET_FORBIDDEN",
+            "Cannot impersonate platform or admin users",
+            422,
+        )
     exp = min(grant.expires_at, now + timedelta(minutes=settings.access_token_expire_minutes))
     from ulid import ULID
 

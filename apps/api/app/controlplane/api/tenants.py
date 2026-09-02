@@ -181,12 +181,15 @@ async def add_member(
 async def remove_member(
     tenant_id: str,
     member_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await tenant_svc.require_tenant_member(db, tenant_id, user, "owner")
     tenant = await db.get(TenantAccount, tenant_id)
-    await tenant_svc.remove_tenant_member(db, tenant, member_id)
+    await tenant_svc.remove_tenant_member(
+        db, tenant, member_id, actor=make_actor(request, user, "tenant")
+    )
     await db.commit()
 
 
@@ -271,9 +274,11 @@ async def create_org_under_tenant(
     ).scalar_one()
     await facade.check_quota(db, tenant, "max_organizations", current=current)
 
-    from app.services.organization import OrganizationService
+    # R59[4]: this imported a nonexistent `OrganizationService` — every call
+    # that passed authz + quota then 500'd. The class is `OrgService`.
+    from app.services.organization import OrgService
 
-    svc = OrganizationService(db)
+    svc = OrgService(db)
     org = await svc.create(
         name=body.name,
         slug=body.slug,

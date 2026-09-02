@@ -295,6 +295,16 @@ async def activate_subscription_from_checkout(
         from app.controlplane.services.tenants import transition_status
 
         await transition_status(db, tenant, TenantStatus.ACTIVE, actor=SYSTEM_ACTOR)
+    elif tenant.status == TenantStatus.SUSPENDED and tenant.suspension_reason == "trial expired":
+        # R54[2]: with trial_expiry_action='suspend', the hourly cron could
+        # suspend a still-TRIAL tenant DURING their checkout — the webhook
+        # then only handled TRIAL, stranding a PAYING customer in suspension
+        # (provider billing live, platform dark). Rescue exactly the cron's
+        # suspension; admin suspensions (abuse) are never self-serviceable
+        # by payment, hence the reason match.
+        from app.controlplane.services.tenants import transition_status
+
+        await transition_status(db, tenant, TenantStatus.ACTIVE, actor=SYSTEM_ACTOR)
     await invalidate_cache(tenant.id)
     return sub
 
