@@ -450,9 +450,9 @@ async def create_manual_invoice(
     # tenants (finalize triggers rev-share accrual and dunning against an
     # account that can never pay). Suspended tenants stay invoiceable — debt
     # collection is exactly why they're suspended.
-    from app.controlplane.models.tenant import TenantStatus as _TS
+    from app.controlplane.models.tenant import TenantStatus
 
-    if tenant.status in (_TS.CANCELLED, _TS.ARCHIVED):
+    if tenant.status in (TenantStatus.CANCELLED, TenantStatus.ARCHIVED):
         raise AppError(
             "TENANT_STATUS_CONFLICT",
             f"Cannot invoice a {tenant.status.value} tenant",
