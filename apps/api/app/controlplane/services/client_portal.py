@@ -160,7 +160,11 @@ async def get_client_principal(
             raise not_found  # cross-project token → uniform 404
         link = await db.get(ClientGuestLink, payload.get("sub", ""))
         if link is None or link.revoked_at is not None or link.expires_at <= _now():
-            raise AppError("CLIENT_ACCESS_DENIED", "Access has been revoked", 403)
+            # 401, not 403: a revoked/expired link is a dead credential (same
+            # class as an expired token) — the portal UI bounces 401s back to
+            # the access page, while 403 is reserved for live sessions hitting
+            # a role gate and must NOT end the session.
+            raise AppError("CLIENT_ACCESS_DENIED", "Access has been revoked", 401)
         return ClientPrincipal(
             kind="guest",
             role=link.role,

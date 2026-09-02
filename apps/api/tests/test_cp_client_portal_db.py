@@ -192,6 +192,9 @@ async def test_revocation_is_immediate(db):
     with pytest.raises(AppError) as exc:
         await portal_svc.get_client_principal(db, project.id, auth)
     assert exc.value.code == "CLIENT_ACCESS_DENIED"
+    # 401 (dead credential → UI bounces to access page), NOT 403 (role gate
+    # on a live session) — the portal frontend only ends the session on 401.
+    assert exc.value.status_code == 401
 
 
 @pytest.mark.asyncio
