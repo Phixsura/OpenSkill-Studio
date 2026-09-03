@@ -319,6 +319,38 @@ claims, **165 confirmed by independent adversarial verification (1 refuted),
   fired per-keystroke against 30/60s rate limits (debounce); role-blind
   rendering (useImpersonation/useTenantRole hooks gate mutation controls).
 
+### 2.11 R113–R128: regression hunting on the remediation itself
+
+Two further campaigns targeted the newest code — the R101/R113 fixes
+themselves — plus never-scanned surfaces (migration chain, outbox ×
+state-machine matrix, timezone boundaries, learning-path install, worker
+crash matrix, cross-cutting money invariants, e2e gap analysis):
+
+- **R113–R122**: 61 confirmed (64 raw, 4 refuted). Caught **two R101
+  regressions**: the H17 fix hardcoded `cancel_at_period_end=False` into
+  every Stripe push (any seat change silently un-cancelled a customer's
+  pending cancellation — billed forever), and the H22 seat-proration rework
+  flipped an under-charge into an over-charge on increase-then-decrease.
+  Also: learning-path resale had NO origin gate (H1 class complete for
+  paths, cp15 migration), manual usage backfill could zero-out
+  included-quota overage, terminated partners kept earning purchase
+  rev-share, production email was silently console-only, and the
+  usage-event idempotency index was still global (the exact cross-tenant
+  collision cp11/cp13 fixed for its siblings — cp16).
+- **R123–R128**: 44 confirmed (49 raw). Caught an **R113 regression**
+  (guard-proven): the segment seat-walk didn't reprice the seat band when a
+  mid-period plan change altered included_seats — over-billing the exact
+  upgrade that bought more included seats. Also: truncated-period closes
+  inflated proration deltas and charged full-interval seat overage; voids
+  with partial payments kept the collected cash; delisting stranded paid
+  license holders; a pending checkout purchase could double-charge (card +
+  credits) against the Stripe webhook; cancel-provider replays re-armed
+  cancelled-then-reactivated subs; owners could re-anchor quota windows by
+  flipping timezone mid-month.
+- One find was caught **live by the browser E2E** mid-hunt (the portal
+  multi-error redirect race bounced a guest to /login) — fixed within the
+  same session, demonstrating the pinning value of the UI suites.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
@@ -343,9 +375,10 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~320 confirmed defects fixed across 46 remediation commits**: ~230 from
-  R1–R100 (backend) + 89 from R101–R112 (frontend/integration/fix-of-fix),
-  on top of the 12-phase feature delivery.
+- **~425 confirmed defects fixed across 50 remediation commits**: ~230 from
+  R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
+  R113–R122 and 44 from R123–R128 (fix-of-fix + fresh surfaces), on top of
+  the 12-phase feature delivery.
 - 13 critical money bugs found and fixed, including three that billed or
   credited at 100×/wrong-currency scale, two that billed customers forever,
   and one that silently kept collected cash on credit notes.
