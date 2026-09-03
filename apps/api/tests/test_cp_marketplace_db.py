@@ -1052,3 +1052,180 @@ async def test_seller_accrual_converted_to_platform_currency(db):
     # ₩1,040,000 (KRW minor mult 1) × 0.00077 = $800.80 → 80080 USD minor
     assert entry.share_amount_minor == 80080, entry.share_amount_minor
     assert entry.fx_rate_snapshot is not None
+
+
+# ── R129 batch regressions ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_listingless_install_requires_active_grant(db):
+    """R129[C0]: a product_id with NO listing must NOT free-pass — any org
+    could copy any tenant's published learning path (cross-tenant content
+    theft). The listing-less path is legitimate only under a manual grant."""
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    thief_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    thief_org = await _mk_org(db, thief_user)
+
+    lp_svc = LearningPathService(db)
+    path = await lp_svc.create_path(seller_org.id, seller_user.id, name="Unlisted Gold")
+    path.status = ContentStatus.PUBLISHED
+    await db.flush()
+
+    # No listing, no grant → uniform 404 (never LICENSE_REQUIRED — that
+    # would confirm the path exists).
+    with pytest.raises(AppError) as exc:
+        await lp_svc.install_from_listing(thief_org.id, None, thief_user.id, product_id=path.id)
+    assert exc.value.code == "LISTING_NOT_FOUND"
+
+    # With an active manual grant the same call succeeds.
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=thief_org.tenant_id,
+        scope="organization",
+        org_id=thief_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    copy = await lp_svc.install_from_listing(thief_org.id, None, thief_user.id, product_id=path.id)
+    assert copy.org_id == thief_org.id
+    assert copy.origin_source_path_id == path.id
+
+
+@pytest.mark.asyncio
+async def test_listingless_install_dedupe_not_by_name(db):
+    """R129[M2]: listing-less dedupe keys on origin_source_path_id — an org's
+    own locally-authored path with the SAME NAME must not be returned as the
+    'installed copy', and a retry must return the true copy, not mint another."""
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    lp_svc = LearningPathService(db)
+    src = await lp_svc.create_path(seller_org.id, seller_user.id, name="Same Name")
+    src.status = ContentStatus.PUBLISHED
+    # Buyer already has a LOCAL path with the identical name.
+    local = await lp_svc.create_path(buyer_org.id, buyer_user.id, name="Same Name")
+    await db.flush()
+
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=src.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    copy = await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=src.id)
+    assert copy.id != local.id, "dedupe must not match the org's local same-named path"
+    assert copy.origin_source_path_id == src.id
+    # Retry returns the SAME copy (idempotent), still not the local one.
+    again = await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=src.id)
+    assert again.id == copy.id
+
+
+@pytest.mark.asyncio
+async def test_draft_listing_does_not_strand_manual_grant(db):
+    """R129[M3]: a DRAFT listing on the product must not capture the
+    product_id resolve and 404 a legit manual-grant redemption."""
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    lp_svc = LearningPathService(db)
+    path = await lp_svc.create_path(seller_org.id, seller_user.id, name="Draft Listed")
+    path.status = ContentStatus.PUBLISHED
+    await db.flush()
+    # A draft listing exists (seller preparing a sale) but is not active.
+    await market_svc.create_listing(
+        db,
+        seller_org_id=seller_org.id,
+        product_type="learning_path",
+        product_id=path.id,
+        offer_type="paid",
+        price_minor=9900,
+        currency="USD",
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(seller_user),
+    )
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    copy = await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=path.id)
+    assert copy.org_id == buyer_org.id
+
+
+@pytest.mark.asyncio
+async def test_mark_paid_skips_grant_when_already_licensed(db):
+    """R129[H0]: a stale checkout completing AFTER the tenant already holds an
+    active grant (e.g. from an earlier purchase) must not mint a second
+    grant for the same product."""
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    await credit_svc.top_up(db, buyer_tenant.id, "USD", 100000, actor=_actor(buyer_user))
+
+    # Two pending purchases: DIFFERENT payment methods so the R123[H8]
+    # same-method pending-resume doesn't collapse them (checkout tab left
+    # stale while the buyer completes via credit — the exact H0 shape).
+    p1 = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="credit",
+        idempotency_key=f"h0a-{ULID()}",
+    )
+    p2 = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="checkout",
+        idempotency_key=f"h0b-{ULID()}",
+    )
+    await market_svc.mark_purchase_paid(
+        db, purchase_id=p1.id, payment_ref="sess1", actor=_actor(buyer_user)
+    )
+    await market_svc.mark_purchase_paid(
+        db, purchase_id=p2.id, payment_ref="sess2", actor=_actor(buyer_user)
+    )
+    grants = (
+        await db.execute(
+            select(func.count(LicenseGrant.id)).where(
+                LicenseGrant.tenant_id == buyer_tenant.id,
+                LicenseGrant.product_id == listing.product_id,
+                LicenseGrant.status == "active",
+            )
+        )
+    ).scalar_one()
+    assert grants == 1, "duplicate checkout completion must not mint a second grant"

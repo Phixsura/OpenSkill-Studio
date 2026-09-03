@@ -748,3 +748,41 @@ async def test_rule_retirement_is_audited(db):
     )
     assert len(events) == 1
     assert events[0].after["superseded_by"] is not None
+
+
+@pytest.mark.asyncio
+async def test_credit_note_retry_covers_dead_lettered_finalize(db):
+    """R129[M7]: the credit_note.applied outrun retry (R123[H7]) counted only
+    pending/processing invoice.finalized rows — a DEAD-LETTERED finalize let
+    the reversal complete as done, and after ops requeued the finalize the
+    negative adjustment was permanently undriveable. The gate must also retry
+    over a 'failed' finalize so the pair stays requeueable together."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.controlplane.services.revenue_share import _handle_credit_note
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    invoice = Invoice(
+        tenant_id=tenant.id,
+        status="open",
+        currency="USD",
+        subtotal_minor=10000,
+        total_minor=10000,
+        amount_due_minor=10000,
+    )
+    db.add(invoice)
+    await db.flush()
+    # The finalize accrual dead-lettered before running (no entries exist).
+    db.add(
+        OutboxMessage(
+            topic="invoice.finalized",
+            payload={"invoice_id": invoice.id},
+            status="failed",
+            attempts=8,
+        )
+    )
+    await db.flush()
+    with pytest.raises(RuntimeError, match="not yet processed"):
+        await _handle_credit_note(
+            db, {"credit_note_id": "01JBLNOTE0000000000000000X", "invoice_id": invoice.id}
+        )

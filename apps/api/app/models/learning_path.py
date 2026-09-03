@@ -56,6 +56,10 @@ class LearningPath(Base):
     # R113[H0]: paid-content provenance — set when the path was installed from
     # a marketplace listing; the create_listing gate blocks re-selling copies.
     origin_listing_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    # R129[M2]: the SOURCE path this copy was forked from — the reliable
+    # idempotency key for listing-less (manual-grant) installs, which have no
+    # origin_listing_id and must not be deduped by name (collides with local).
+    origin_source_path_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

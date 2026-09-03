@@ -79,6 +79,10 @@ def proration_preview(
     new_seats: int = 0,
     seat_price_minor: int = 0,
     natural_days: int | None = None,
+    billable_seats: int | None = None,
+    old_included_seats: int = 0,
+    new_included_seats: int = 0,
+    old_seat_price_minor: int | None = None,
 ) -> dict:
     """Per-day segment walk. Upgrade = immediate; the preview returns the
     credit for the unused old plan + charge for the remaining new plan.
@@ -104,10 +108,31 @@ def proration_preview(
     charge_new_remaining = int(
         (per_day(new_amount_minor) * days_left).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     )
-    seat_delta = (new_seats - old_seats) * seat_price_minor
-    seat_proration = int(
-        (per_day(max(seat_delta, 0)) * days_left).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    )
+    if billable_seats is not None:
+        # R129[M5]: mirror the close's R123[C0] seat-band repricing so the
+        # number the customer APPROVES matches the invoice. Per the segment
+        # walk: the base line covers max(billable, old_floor) − old_included
+        # at the old price for the whole period; the change segment owes
+        # max(new_floor, billable) − new_included at the new price. The
+        # remaining-days delta between them is the seat component — the old
+        # (new−old)×price delta ignored included_seats changes entirely and
+        # could show a credit where the invoice charges (or vice versa).
+        old_price_eff = seat_price_minor if old_seat_price_minor is None else old_seat_price_minor
+        # band = max(live count, period floor) — matches the close's
+        # billable_seats; the change segment then owes max(new floor, band)
+        # (a mid-period seat DECREASE never refunds the floor at close, so
+        # the preview must not show that credit either).
+        band = max(billable_seats, old_seats)
+        covered = max(band - old_included_seats, 0) * old_price_eff
+        correct = max(max(new_seats, band) - new_included_seats, 0) * seat_price_minor
+        seat_proration = int(
+            (per_day(correct - covered) * days_left).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+    else:
+        seat_delta = (new_seats - old_seats) * seat_price_minor
+        seat_proration = int(
+            (per_day(max(seat_delta, 0)) * days_left).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
     net = charge_new_remaining - credit_unused_old + seat_proration
     return {
         "total_days": total_days,
@@ -121,6 +146,27 @@ def proration_preview(
 
 
 # ── Subscription lifecycle ───────────────────────────────────
+
+
+async def _live_student_seats(db: AsyncSession, tenant_id: str) -> int:
+    """Current distinct active-student count across the tenant's live orgs —
+    the 'actual peak' input to the seats line and (R129[M5]) the previews."""
+    from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole, OrgStatus
+
+    return (
+        await db.execute(
+            select(func.count(func.distinct(OrgMember.user_id)))
+            .select_from(OrgMember)
+            .join(Organization, Organization.id == OrgMember.org_id)
+            .where(
+                Organization.tenant_id == tenant_id,
+                # R68[2]: archived orgs' members are not live seats.
+                Organization.status != OrgStatus.ARCHIVED,
+                OrgMember.status == MemberStatus.ACTIVE,
+                OrgMember.role == OrgRole.STUDENT,
+            )
+        )
+    ).scalar_one()
 
 
 async def _resolve_plan_price(
@@ -397,6 +443,12 @@ async def change_plan(
         old_seats=sub.seat_quantity,
         new_seats=new_seats,
         seat_price_minor=(new_price.overage_seat_amount_minor or 0) if new_price else 0,
+        # R129[M5]: band-aware seat math (see proration_preview) so the shown
+        # net matches the invoice's R123[C0] segment repricing.
+        billable_seats=await _live_student_seats(db, tenant.id),
+        old_included_seats=old_price.included_seats if old_price else 0,
+        new_included_seats=new_price.included_seats if new_price else 0,
+        old_seat_price_minor=(old_price.overage_seat_amount_minor or 0) if old_price else 0,
     )
     db.add(
         SubscriptionChange(
@@ -1137,7 +1189,10 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                     # R123[L11]: zero-billable rows (no_rate fallback, free
                     # types) are never invoiced by design — counting them made
                     # the warning fire on nearly every final close (noise).
-                    RatedUsage.billable_amount_minor > 0,
+                    # R129[L4]: != 0 not > 0 — NEGATIVE rated rows (adjustment
+                    # reversals rated after the close's lock) are credit owed
+                    # BACK to the tenant; hiding them silently evaporates it.
+                    RatedUsage.billable_amount_minor != 0,
                 )
             )
         ).scalar_one()
@@ -1519,12 +1574,34 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
                     )
                     .values(invoiced=False)
                 )
+                # R129[L12] (reworked): the restore of current_period_end depends
+                # on which close branch produced this invoice. A ROLLOVER close
+                # advanced the window (start >= this period's end) — its end is
+                # the NEXT period's end and must be rewound to this period's end,
+                # or the re-close prorates the plan fee against a doubled natural
+                # interval (19900 → 9787 on a 30-day period inside a 61-day
+                # window). A TERMINAL close (cancel) never rolled — its end still
+                # holds the natural anchor-extended end a truncated period's
+                # proration needs, so keep it (widen only if somehow smaller).
+                rolled = sub.current_period_start >= period.period_end
                 sub.current_period_start = period.period_start
-                sub.current_period_end = period.period_end
-                # A sub cancelled by this period's close must go back to active so
-                # the re-close can run and roll it forward again.
+                if rolled or period.period_end > sub.current_period_end:
+                    sub.current_period_end = period.period_end
+                # R129[C1] CRITICAL: a sub cancelled by this period's close must
+                # be resurrected to a state the re-close will RE-CANCEL — not to
+                # plain 'active', which the rollover branch (status not in
+                # cancel_at_period_end/cancelled) turns into a brand-new period,
+                # perpetually re-billing a departed customer. Restore to
+                # 'cancel_at_period_end' so the re-close's terminal branch
+                # re-cancels without rolling forward. The uq_cp_sub_live partial
+                # index (status != 'cancelled') tolerates this transient state.
                 if sub.status == "cancelled":
-                    sub.status = "active"
+                    # Distinguish immediate cancel (no future period ever existed;
+                    # the final invoice IS terminal) from at-period-end. Either
+                    # way the re-close must end cancelled: cancel_at_period_end
+                    # rolls to cancelled without opening a new period.
+                    sub.status = "cancel_at_period_end"
+                    sub.cancel_at_period_end = True
                     sub.cancelled_at = None
                 await invalidate_cache(sub.tenant_id)
     await record_audit(

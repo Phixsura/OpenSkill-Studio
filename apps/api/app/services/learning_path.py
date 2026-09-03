@@ -243,16 +243,48 @@ class LearningPathService:
         else:
             if product_id is None:
                 raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+            # R129[M3]: exclude DRAFT listings from the product→listing
+            # resolve — a draft is not a real sale surface, and picking one
+            # here made the downstream draft-404 strand a legit manual-grant
+            # redemption (the grant path below handles a listing-less product).
             listing = (
                 await self.db.execute(
                     select(MarketplaceListing)
                     .where(
                         MarketplaceListing.product_type == "learning_path",
                         MarketplaceListing.product_id == product_id,
+                        MarketplaceListing.status != "draft",
                     )
                     .limit(1)
                 )
             ).scalar_one_or_none()
+            # R129[C0] CRITICAL (fix of R123[H1]): a product_id with NO listing
+            # relies solely on check_install_license — but that gate FREE-PASSES
+            # products with no listing (marketplace.py "free/no-listing → pass").
+            # So any org could copy ANY tenant's published learning path by
+            # passing its product_id (cross-tenant content theft, no license,
+            # no ownership). The listing-less path is only legitimate for a
+            # MANUAL grant — require an active LicenseGrant covering this org
+            # before proceeding when no listing exists.
+            if listing is None:
+                from app.controlplane.models.marketplace import LicenseGrant
+
+                tenant_id = getattr(org, "tenant_id", None)
+                grant = (
+                    await self.db.execute(
+                        select(LicenseGrant.id)
+                        .where(
+                            LicenseGrant.product_type == "learning_path",
+                            LicenseGrant.product_id == product_id,
+                            LicenseGrant.status == "active",
+                            LicenseGrant.tenant_id == tenant_id,
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if grant is None:
+                    # uniform 404 — never reveal the path exists to a non-licensee
+                    raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
         source_product_id = listing.product_id if listing is not None else product_id
         assert source_product_id is not None  # by the request model's one-of rule
 
@@ -268,6 +300,29 @@ class LearningPathService:
                     .where(
                         LearningPath.org_id == org_id,
                         LearningPath.origin_listing_id == listing.id,
+                        LearningPath.status != ContentStatus.ARCHIVED,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if prior is not None:
+                return prior
+        else:
+            # R129[M2]: NO name-based dedupe for the listing-less (manual-grant)
+            # path — matching on name==source.name would false-positive on the
+            # org's OWN locally-authored same-named path (also origin=NULL,
+            # created_by set) and return the wrong path. Dedupe instead on the
+            # exact source linkage recorded in metadata (origin_source_path_id,
+            # stamped on the copy below), which cannot collide with local
+            # content. Manual grants are rare; a genuine double-click without
+            # this marker yet is accepted as a possible duplicate (documented).
+            prior = (
+                await self.db.execute(
+                    select(LearningPath)
+                    .where(
+                        LearningPath.org_id == org_id,
+                        LearningPath.origin_listing_id.is_(None),
+                        LearningPath.origin_source_path_id == source_product_id,
                         LearningPath.status != ContentStatus.ARCHIVED,
                     )
                     .limit(1)
@@ -341,6 +396,7 @@ class LearningPathService:
             # R113[H0]: provenance — create_listing refuses to sell a copy
             # installed from someone else's paid listing (H1 class for paths).
             origin_listing_id=listing.id if listing is not None else None,
+            origin_source_path_id=source_product_id,  # R129[M2] dedupe key
             created_by=user_id,
         )
         # R123[L6/L14]: the M1 idempotency pre-check is SELECT-only — two
@@ -352,20 +408,27 @@ class LearningPathService:
                 self.db.add(copy)
                 await self.db.flush()
         except IntegrityError:
+            # R123[L6/L14] + R129[L6]: whichever unique index fired (listing
+            # copies → uq_paths_org_origin_live; manual-grant copies →
+            # uq_paths_org_source_live), return the concurrent winner's row.
             if listing is not None:
-                winner = (
-                    await self.db.execute(
-                        select(LearningPath)
-                        .where(
-                            LearningPath.org_id == org_id,
-                            LearningPath.origin_listing_id == listing.id,
-                            LearningPath.status != ContentStatus.ARCHIVED,
-                        )
-                        .limit(1)
-                    )
-                ).scalar_one_or_none()
-                if winner is not None:
-                    return winner
+                winner_where = [
+                    LearningPath.org_id == org_id,
+                    LearningPath.origin_listing_id == listing.id,
+                    LearningPath.status != ContentStatus.ARCHIVED,
+                ]
+            else:
+                winner_where = [
+                    LearningPath.org_id == org_id,
+                    LearningPath.origin_listing_id.is_(None),
+                    LearningPath.origin_source_path_id == source_product_id,
+                    LearningPath.status != ContentStatus.ARCHIVED,
+                ]
+            winner = (
+                await self.db.execute(select(LearningPath).where(*winner_where).limit(1))
+            ).scalar_one_or_none()
+            if winner is not None:
+                return winner
             raise
         # R113[M2]: skill/project items carry no section_title (the CHECK
         # constraint only demands the FK), so degraded copies collapsed to

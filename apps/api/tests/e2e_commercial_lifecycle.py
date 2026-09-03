@@ -84,7 +84,12 @@ async def force_period_due(tenant_id: str) -> None:
                 )
             )
         ).scalar_one()
-        period.period_end = datetime.now(UTC) - timedelta(seconds=1)
+        # R129[L5]: 10ms not 1s — Phase 7 ingests occurred_at=now moments
+        # before this call, and the close bills strictly occurred_at <
+        # period_end. A 1s backdate excluded the just-ingested event on fast
+        # local runs (usage line missing); 10ms still satisfies the scan's
+        # period_end <= now.
+        period.period_end = datetime.now(UTC) - timedelta(milliseconds=10)
         await db.commit()
 
 
@@ -524,9 +529,15 @@ async def main() -> bool:  # noqa: PLR0915
             json={
                 "usage_type": "image_generation",
                 "quantity": "10",
-                # R123[M1]: relative — a hardcoded date hard-crashes once the R113[H2]
-                # 30-day past bound overtakes it
-                "occurred_at": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+                # R129[L5]: occurred_at must sit INSIDE the tenant's open
+                # billing period — now()-1d precedes period_start (and on the
+                # 1st of a month even the month-start floor), and any backdate
+                # can fall before the provisioning trial-sliver's invoiced end
+                # (the past bound). Plain now() clears the past bound and stays
+                # under close's strict occurred_at < period_end because
+                # force_period_due backdates by only 10ms, with several HTTP
+                # round-trips between this ingest and that call.
+                "occurred_at": datetime.now(UTC).isoformat(),
                 "idempotency_key": f"e2e-usage-{uid()}",
                 "provider": "mock",
                 "model_or_service": "mock-image-1",

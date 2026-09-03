@@ -280,16 +280,29 @@ async def accrue_for_invoice(db: AsyncSession, invoice_id: str) -> RevenueShareE
         base_currency = _settings.platform_currency
         units = Decimal(1)
     elif rule.rule_type == "fixed_amount_per_seat":
-        seats = (
+        # R129[H5]: on a TRUNCATED period the seats line's amount_minor is
+        # prorated (R123[H3]) but quantity stays the full seat count — paying
+        # per-seat rev-share on the full quantity over-paid the partner for a
+        # partial period. Derive effective units from amount/unit_price so the
+        # accrual tracks what was actually billed.
+        seat_rows = (
             await db.execute(
-                select(func.coalesce(func.sum(InvoiceLine.quantity), 0)).where(
+                select(
+                    InvoiceLine.quantity, InvoiceLine.unit_amount_minor, InvoiceLine.amount_minor
+                ).where(
                     InvoiceLine.invoice_id == invoice.id,
                     InvoiceLine.line_type == "seats",
                 )
             )
-        ).scalar_one()
+        ).all()
+        eff_units = Decimal(0)
+        for qty, unit_amt, amt in seat_rows:
+            if unit_amt:
+                eff_units += Decimal(amt) / Decimal(unit_amt)  # prorated-aware
+            else:
+                eff_units += Decimal(qty or 0)
         base = _revenue_base(invoice)
-        units = Decimal(seats)
+        units = eff_units
     else:  # fixed_amount_per_unit — one unit per invoice
         base = _revenue_base(invoice)
         units = Decimal(1)
@@ -1020,7 +1033,12 @@ async def _handle_purchase_refunded(db: AsyncSession, payload: dict) -> None:
                 .select_from(OutboxMessage)
                 .where(
                     OutboxMessage.topic == "purchase.paid",
-                    OutboxMessage.status.in_(("pending", "processing")),
+                    # R129[M7]: include dead-lettered ("failed") originals —
+                    # marking this reversal done while the accrual is only
+                    # requeue-able ops-side drops the reversal permanently
+                    # (requeue rejects done rows). Retrying until we also
+                    # dead-letter keeps both requeueable together.
+                    OutboxMessage.status.in_(("pending", "processing", "failed")),
                     OutboxMessage.payload["purchase_id"].astext == payload["purchase_id"],
                 )
             )
@@ -1048,7 +1066,14 @@ async def _handle_credit_note(db: AsyncSession, payload: dict) -> None:
                 .select_from(OutboxMessage)
                 .where(
                     OutboxMessage.topic == "invoice.finalized",
-                    OutboxMessage.status.in_(("pending", "processing")),
+                    # R129[M7]: also retry over a dead-lettered ("failed")
+                    # finalize accrual — if this reversal completes as done
+                    # while the original is failed, an ops requeue of the
+                    # original creates the positive entries with the negative
+                    # adjustment permanently undriveable (requeue endpoint
+                    # only accepts failed rows). Dead-lettering BOTH keeps
+                    # the pair requeueable in order.
+                    OutboxMessage.status.in_(("pending", "processing", "failed")),
                     OutboxMessage.payload["invoice_id"].astext == payload["invoice_id"],
                 )
             )

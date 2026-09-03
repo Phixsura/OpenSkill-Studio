@@ -56,14 +56,31 @@ export default function TenantLicensesPage() {
   const licenses = licensesQuery.data?.data ?? [];
   const purchases = purchasesQuery.data?.data ?? [];
 
-  // R113[L0]: learning_path licenses were dead rows — no UI could redeem
-  // them (the install endpoint existed but nothing called it).
+  // R113[L0]/R129[H2/H3]: learning_path licenses were dead rows. The install
+  // button renders for every active learning_path grant, but tenant-scope
+  // grants carry org_id=NULL and manual grants carry listing_id=NULL — so the
+  // mutation must (1) pick an admin org the user actually belongs to when the
+  // grant has none, and (2) send product_id when there is no listing_id.
+  const orgsQuery = useQuery({
+    queryKey: ["my-orgs"],
+    queryFn: () =>
+      apiWithAuth<{ data: { id: string; name: string; role: string | null }[] }>("/orgs"),
+  });
+  const adminOrgs = (orgsQuery.data?.data ?? []).filter(
+    (o) => o.role === "owner" || o.role === "admin",
+  );
   const installPath = useMutation({
-    mutationFn: (g: LicenseGrant) =>
-      apiWithAuth(`/orgs/${g.org_id}/learning-paths/install`, {
+    mutationFn: (g: LicenseGrant) => {
+      const targetOrg = g.org_id ?? adminOrgs[0]?.id;
+      if (!targetOrg) {
+        throw new ApiError(0, "NO_ORG", "You must be an org owner/admin to install");
+      }
+      const body = g.listing_id ? { listing_id: g.listing_id } : { product_id: g.product_id };
+      return apiWithAuth(`/orgs/${targetOrg}/learning-paths/install`, {
         method: "POST",
-        body: JSON.stringify({ listing_id: g.listing_id }),
-      }),
+        body: JSON.stringify(body),
+      });
+    },
     onSuccess: () => toast.success("Learning path installed into the organization"),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Install failed"),
   });

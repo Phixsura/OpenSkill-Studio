@@ -840,23 +840,25 @@ async def _handle_fx_created(db: AsyncSession, payload: dict) -> None:
     # Keyset pagination on id: rate_event flips FIXED rows out of 'blocked'
     # (shrinking the result set), so OFFSET would skip rows — the id cursor
     # advances past both fixed and still-unfixable rows exactly once.
-    # R123[M13]: commit per page — the whole backlog previously ran inside the
-    # single per-message transaction; an arq 300s timeout rolled back EVERY
-    # page and the retry restarted from row zero (all-or-nothing livelock on
-    # large backlogs). Per-page commits make progress durable; rate_event is
-    # idempotent, so the interrupted page simply re-runs. (This handler
-    # intentionally breaks the outer savepoint pattern — safe because it only
-    # flips blocked→rated rows and never partially writes a single row.)
-    last_id = ""
-    while True:
-        batch = (
-            await db.execute(q.where(RatedUsage.id > last_id).order_by(RatedUsage.id).limit(500))
-        ).all()
-        if not batch:
-            break
-        for event_id, row_id in batch:
-            await rate_event(db, event_id)
-            last_id = row_id
-        await db.commit()
-        if len(batch) < 500:
-            break
+    # R129[H4] (fix of R123[M13]): process ONE bounded chunk per message and
+    # RE-ENQUEUE for the rest — never db.commit() here. The M13 per-page
+    # commit ran inside the worker's `async with db.begin_nested()` savepoint
+    # (worker.py), where a commit closes the transaction and the next SELECT
+    # raises InvalidRequestError — crashing every backlog >= one page and
+    # eventually dead-lettering, leaving rows blocked forever. Instead: rate up
+    # to CHUNK rows in this message's own transaction (the worker commits it
+    # per-message), then if more remain enqueue another fx.rate_created for the
+    # same pair so the outbox drains the backlog across messages. rate_event is
+    # idempotent, so a retry of this message re-rates at most CHUNK rows.
+    chunk = 500
+    rows = (
+        await db.execute(q.where(RatedUsage.id > "").order_by(RatedUsage.id).limit(chunk))
+    ).all()
+    for event_id, _row_id in rows:
+        await rate_event(db, event_id)
+    if len(rows) == chunk and payload:
+        # More may remain — the same filter re-selects still-blocked rows next
+        # round (rated ones drop out of status=='blocked'), so no cursor needed.
+        from app.controlplane.models.outbox import enqueue
+
+        enqueue(db, "fx.rate_created", payload)

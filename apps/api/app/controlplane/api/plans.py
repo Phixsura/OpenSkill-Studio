@@ -198,7 +198,9 @@ async def set_plan_price_external_ref(
     if price is None:
         raise AppError("PLAN_NOT_FOUND", "Plan price not found", 404)
     before = price.external_price_ref
-    price.external_price_ref = body.external_price_ref
+    # R129[L3]: normalize "" (an admin clearing the ref) to NULL so the
+    # checkout pre-check and the adapter's truthiness gate agree.
+    price.external_price_ref = body.external_price_ref or None
     await record_audit(
         db,
         actor=make_actor(request, user),

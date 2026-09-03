@@ -133,7 +133,9 @@ async def go():
         p = (await db.execute(select(BillingPeriod).where(
             BillingPeriod.tenant_id == "${tenantId}", BillingPeriod.status == "open"
         ))).scalar_one()
-        p.period_end = datetime.now(UTC) - timedelta(seconds=1)
+        # R129[L5]: 10ms not 1s — usage is ingested at occurred_at=now moments
+        # before this backdate; close bills strictly occurred_at < period_end.
+        p.period_end = datetime.now(UTC) - timedelta(milliseconds=10)
         await db.commit()
     await engine.dispose()
     print("ok")
@@ -428,7 +430,10 @@ try {
     body: {
       usage_type: "image_generation",
       quantity: "40",
-      occurred_at: new Date(Date.now() - 60000).toISOString(),
+      // R129[L5]: must sit inside the just-created open billing period —
+      // now()-60s precedes its start (subscribe ran seconds ago) and 422s
+      // on the backfill bound. now() always qualifies (+5min future bound).
+      occurred_at: new Date().toISOString(),
       idempotency_key: `bfl-usage-${uid()}`,
       provider: "mock",
       model_or_service: "mock-image-1",

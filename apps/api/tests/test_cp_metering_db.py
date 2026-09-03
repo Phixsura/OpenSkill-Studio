@@ -611,3 +611,103 @@ async def test_emit_failure_does_not_poison_completed_eval(db):
     # The row survives a further roundtrip through the same session
     row = await db.get(EvaluationTask, task.id)
     assert row is not None and row.status.value == "completed"
+
+
+@pytest.mark.asyncio
+async def test_backfill_bound_open_period_accepted_closed_rejected(db):
+    """R129[H8/M4]: the manual-ingest past bound is the last CLOSED period's
+    end — falling back to the OPEN period's start (not the current calendar
+    month) when no closed period exists. Backfill inside the tenant's own
+    open (never-invoiced) window must land; anything inside a closed
+    (invoiced) window must 422."""
+    from datetime import timedelta
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.billing import BillingPeriod
+    from app.controlplane.services import billing as billing_svc
+    from app.core.security import create_access_token
+    from app.main import app
+    from app.services.organization import OrgService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"MB {ULID()}",
+        slug=f"mb-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    sub, _ = await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=Actor(user_id=user.id, type="platform"),
+    )
+    now = datetime.now(UTC)
+    # Rewrite the auto-created open period to start 40 days ago (a long
+    # overdue first period spanning at least one month boundary) and add an
+    # older invoiced period before it.
+    open_period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    open_period.period_start = now - timedelta(days=40)
+    await db.commit()
+
+    token = create_access_token(user.id, user.email, user.role.value)
+    hdrs = {"Authorization": f"Bearer {token}"}
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _noop(_):
+        yield
+
+    app.router.lifespan_context = _noop
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # 35 days ago: inside the OPEN first period (and always before the
+        # current calendar month start — the exact H8 false-reject shape).
+        r = await c.post(
+            f"/api/v1/orgs/{org.id}/usage-events",
+            json={
+                "usage_type": "image_generation",
+                "quantity": "3",
+                "occurred_at": (now - timedelta(days=35)).isoformat(),
+                "idempotency_key": f"h8-open-{ULID()}",
+            },
+            headers=hdrs,
+        )
+        assert r.status_code == 201, r.text
+        # Now record an INVOICED period before the open one — 50 days ago
+        # falls inside it → rejected.
+        async with AsyncSessionLocal() as s2:
+            s2.add(
+                BillingPeriod(
+                    tenant_id=tenant.id,
+                    subscription_id=sub.id,
+                    period_start=now - timedelta(days=70),
+                    period_end=now - timedelta(days=40),
+                    status="invoiced",
+                )
+            )
+            await s2.commit()
+        r = await c.post(
+            f"/api/v1/orgs/{org.id}/usage-events",
+            json={
+                "usage_type": "image_generation",
+                "quantity": "3",
+                "occurred_at": (now - timedelta(days=50)).isoformat(),
+                "idempotency_key": f"h8-closed-{ULID()}",
+            },
+            headers=hdrs,
+        )
+        assert r.status_code == 422, r.text
+        assert "already-invoiced" in r.json()["error"]["message"]

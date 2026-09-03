@@ -153,19 +153,42 @@ async def ingest_usage(
         )
     ).scalar_one_or_none()
     if closed_end is None:
-        # No invoiced history: quota parking is only exploitable across
-        # calendar months (the included-quota accumulator windows per tenant-tz
-        # month) — floor at the current month start.
-        from zoneinfo import ZoneInfo
+        # R129[H8/M4]: no invoiced history. The floor must NOT be the current
+        # calendar-month start — that both rejects legit backfill inside a
+        # tenant's still-open FIRST period spanning a month boundary AND still
+        # admits cross-month quota-parking for the first ~29 days. Use the
+        # OPEN billing period's start when one exists (the window the first
+        # close will bill and rating will accumulate quota over); only the
+        # truly subscription-less tenant falls back to the current month.
+        open_start = (
+            await db.execute(
+                select(BillingPeriod.period_start)
+                .where(
+                    BillingPeriod.tenant_id == tenant.id,
+                    BillingPeriod.status == "open",
+                )
+                .order_by(BillingPeriod.period_start.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if open_start is not None:
+            closed_end = open_start
+        else:
+            from zoneinfo import ZoneInfo
 
-        try:
-            tz = ZoneInfo(tenant.timezone)
-        except Exception:  # noqa: BLE001
-            tz = UTC
-        local_now = datetime.now(UTC).astimezone(tz)
-        closed_end = local_now.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        ).astimezone(UTC)
+            try:
+                tz = ZoneInfo(tenant.timezone)
+            except Exception:  # noqa: BLE001
+                tz = UTC
+            local_now = datetime.now(UTC).astimezone(tz)
+            closed_end = local_now.replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            ).astimezone(UTC)
+    # Residual (accepted): occurred_at inside the open period but in a PRIOR
+    # calendar month rates against that month's quota window (rating windows
+    # by calendar month, periods anchor at subscribe). A tenant "parking"
+    # usage there gains nothing over simply not reporting it — manual ingest
+    # is self-attestation — so honest late backfill wins over a tighter bound.
     if body.occurred_at < closed_end:
         raise AppError(
             "INVALID_QUANTITY",

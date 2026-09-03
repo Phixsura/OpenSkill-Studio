@@ -267,3 +267,18 @@ def test_tenant_month_start_uses_tenant_timezone():
     # Bad tz name falls back to UTC instead of crashing.
     bad = _tenant_month_start("Not/AZone", at)
     assert bad == utc
+
+
+def test_manual_invoice_line_quantity_bound_validated():
+    """R129[L0]: quantity is written verbatim into a Numeric(18,6) column —
+    non-numeric crashes at flush (asyncpg DataError → 500 past the R88
+    backstop) and 'NaN' is silently STORED and rendered NaN in the FE."""
+    from pydantic import ValidationError
+
+    from app.controlplane.api.billing import ManualInvoiceLineInput
+
+    ok = ManualInvoiceLineInput(description="consulting", amount_minor=50000, quantity="2.5")
+    assert ok.quantity == "2.5"
+    for bad in ("two", "1,5", "NaN", "Infinity", "-Infinity", "0", "-3", "1e13"):
+        with pytest.raises(ValidationError):
+            ManualInvoiceLineInput(description="x", amount_minor=1, quantity=bad)

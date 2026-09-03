@@ -493,20 +493,47 @@ async def mark_purchase_paid(
         return existing  # already paid — idempotent for webhook replays
     purchase = await db.get(MarketplacePurchase, purchase_id)
     listing = await db.get(MarketplaceListing, purchase.listing_id)
-    grant = LicenseGrant(
-        listing_id=listing.id,
-        product_type=listing.product_type,
-        product_id=listing.product_id,
-        # Attribution ONLY from the purchase row (IDOR-proof)
-        tenant_id=purchase.buyer_tenant_id,
-        org_id=purchase.buyer_org_id if listing.license_scope != "tenant" else None,
-        scope=listing.license_scope,
-        seat_limit=listing.seat_limit,
-        source="purchase",
-        purchase_id=purchase.id,
-        purchased_major=(purchase.economics_snapshot or {}).get("purchased_major"),
-    )
-    db.add(grant)
+    # R129[H0]: a stale pending CHECKOUT purchase can complete via the Stripe
+    # webhook AFTER the buyer already licensed the product another way (a
+    # credit purchase for the same listing). The create_purchase ALREADY_
+    # LICENSED precheck does not cover this webhook-driven path. Skip minting a
+    # duplicate active grant for the same (tenant/org, product) — the payment
+    # is recorded (paid) so ops can refund the redundant charge; the license
+    # already exists.
+    scope_org = purchase.buyer_org_id if listing.license_scope != "tenant" else None
+    existing_grant = (
+        await db.execute(
+            select(LicenseGrant.id).where(
+                LicenseGrant.product_type == listing.product_type,
+                LicenseGrant.product_id == listing.product_id,
+                LicenseGrant.tenant_id == purchase.buyer_tenant_id,
+                LicenseGrant.org_id == scope_org,
+                LicenseGrant.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_grant is None:
+        grant = LicenseGrant(
+            listing_id=listing.id,
+            product_type=listing.product_type,
+            product_id=listing.product_id,
+            # Attribution ONLY from the purchase row (IDOR-proof)
+            tenant_id=purchase.buyer_tenant_id,
+            org_id=scope_org,
+            scope=listing.license_scope,
+            seat_limit=listing.seat_limit,
+            source="purchase",
+            purchase_id=purchase.id,
+            purchased_major=(purchase.economics_snapshot or {}).get("purchased_major"),
+        )
+        db.add(grant)
+    else:
+        log.warning(
+            "cp_purchase_paid_duplicate_license",
+            purchase_id=purchase.id,
+            existing_grant_id=existing_grant,
+            detail="paid purchase for an already-licensed product — refund candidate",
+        )
     from app.controlplane.services.metering import emit_usage
 
     await emit_usage(

@@ -19,18 +19,24 @@ depends_on = None
 
 def upgrade() -> None:
     # Pre-existing duplicate copies (the race this index closes) would abort
-    # the CREATE — suffix all but the newest per (org, listing) first.
+    # the CREATE. R129: ARCHIVE all but the newest per (org, listing) — the
+    # earlier draft NULLed origin_listing_id, which re-opened the H0 resale
+    # gate for exactly those rows; archiving keeps provenance intact and
+    # drops them out of the partial index predicate.
     op.execute(
         sa.text(
             """
-            UPDATE learning_paths lp SET origin_listing_id = NULL
+            UPDATE learning_paths lp SET status = 'ARCHIVED'
             WHERE lp.origin_listing_id IS NOT NULL
               AND lp.status != 'ARCHIVED'
               AND lp.id NOT IN (
+                -- R129[M1]: keep the OLDEST copy, not the newest — the first
+                -- install is the one admins already assigned to cohorts;
+                -- archiving it would sever those assignments.
                 SELECT DISTINCT ON (org_id, origin_listing_id) id
                 FROM learning_paths
                 WHERE origin_listing_id IS NOT NULL AND status != 'ARCHIVED'
-                ORDER BY org_id, origin_listing_id, created_at DESC
+                ORDER BY org_id, origin_listing_id, created_at ASC
               )
             """
         )

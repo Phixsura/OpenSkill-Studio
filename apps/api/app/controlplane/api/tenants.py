@@ -114,7 +114,13 @@ async def update_tenant(
                     CommercialAuditEvent.tenant_id == tenant_id,
                     CommercialAuditEvent.action == "tenant.updated",
                     CommercialAuditEvent.created_at > datetime.now(UTC) - timedelta(days=30),
-                    CommercialAuditEvent.after.has_key("timezone"),
+                    # R129[M6]: `after` records the PATCH body verbatim, so a
+                    # settings form that round-trips the unchanged timezone
+                    # poisons has_key for 30 days. Only rows where the value
+                    # actually CHANGED (after != before) count as a change.
+                    CommercialAuditEvent.after["timezone"].astext.isnot(None),
+                    CommercialAuditEvent.after["timezone"].astext
+                    != CommercialAuditEvent.before["timezone"].astext,
                 )
                 .limit(1)
             )

@@ -2,6 +2,7 @@
 (ADR-014 §6.6)."""
 
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 import structlog
 from fastapi import APIRouter, Depends, Query, Request
@@ -94,6 +95,24 @@ class ManualInvoiceLineInput(BaseModel):
     @classmethod
     def _ctrl(cls, v, info):
         return reject_ctrl_str(v, info.field_name)
+
+    @field_validator("quantity")
+    @classmethod
+    def _qty(cls, v):
+        # R129[L0]: the string is written verbatim into a Numeric(18,6)
+        # column — non-numeric ("two", "1,5") crashes at flush (asyncpg
+        # DataError, no sqlstate → 500 past the R88 backstop), and "NaN" is
+        # accepted by Postgres numeric and then rendered as NaN in every
+        # invoice response. Bound-validate at the import boundary.
+        try:
+            d = Decimal(v)
+        except InvalidOperation:
+            raise ValueError("quantity must be a decimal number") from None
+        if not d.is_finite():
+            raise ValueError("quantity must be finite")
+        if d <= 0 or d >= Decimal("1000000000000"):
+            raise ValueError("quantity out of range")
+        return v
 
 
 class ManualInvoiceRequest(BaseModel):
@@ -223,7 +242,12 @@ async def start_subscription(
                         PlanVersion.status == "active",
                         PlanPrice.currency == tenant.currency,
                         PlanPrice.interval == body.interval,
+                        # R129[L3]: match downstream truthiness gates — an
+                        # empty-string ref (the natural "cleared" payload)
+                        # must route to the fallback, not to Stripe where
+                        # the adapter rejects it deep with a 409.
                         PlanPrice.external_price_ref.isnot(None),
+                        PlanPrice.external_price_ref != "",
                     )
                     .limit(1)
                 )
@@ -297,6 +321,12 @@ async def change_preview(
         old_seats=sub.seat_quantity,
         new_seats=body.seats if body.seats is not None else sub.seat_quantity,
         seat_price_minor=(new_price.overage_seat_amount_minor or 0) if new_price else 0,
+        # R129[M5]: band-aware seat math — the preview must show the same
+        # seat component the close's R123[C0] segment walk will invoice.
+        billable_seats=await billing_svc._live_student_seats(db, tenant_id),
+        old_included_seats=old_price.included_seats if old_price else 0,
+        new_included_seats=new_price.included_seats if new_price else 0,
+        old_seat_price_minor=(old_price.overage_seat_amount_minor or 0) if old_price else 0,
     )
     return DataResponse(data=preview)
 

@@ -702,3 +702,50 @@ async def test_concurrent_org_create_under_tenant_respects_cap():
         assert sorted([s1, s2]) == [201, 403], (s1, s2)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_noop_timezone_patch_does_not_poison_tz_gate(db):
+    """R129[M6]: a settings form that round-trips the UNCHANGED timezone in a
+    prior PATCH must not trip the 30-day tz-change gate — only rows where the
+    value actually changed (after != before) count."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.security import create_access_token
+    from app.main import app
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await db.commit()  # endpoint uses its own session
+    token = create_access_token(user.id, user.email, user.role.value)
+    hdrs = {"Authorization": f"Bearer {token}"}
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _noop(_):
+        yield
+
+    app.router.lifespan_context = _noop
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # Day 1: full-object PATCH including the CURRENT timezone (no-op).
+        r = await c.patch(
+            f"/api/v1/tenants/{tenant.id}",
+            json={"billing_email": "a@b.co", "timezone": tenant.timezone},
+            headers=hdrs,
+        )
+        assert r.status_code == 200, r.text
+        # First REAL tz change must not be blocked by the no-op row.
+        r = await c.patch(
+            f"/api/v1/tenants/{tenant.id}",
+            json={"timezone": "America/New_York"},
+            headers=hdrs,
+        )
+        assert r.status_code == 200, r.text
+        # A second real change IS blocked (the gate still works).
+        r = await c.patch(
+            f"/api/v1/tenants/{tenant.id}",
+            json={"timezone": "Asia/Tokyo"},
+            headers=hdrs,
+        )
+        assert r.status_code == 422, r.text
+        assert "30 days" in r.json()["error"]["message"]

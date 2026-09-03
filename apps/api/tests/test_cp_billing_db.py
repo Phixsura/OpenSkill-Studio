@@ -2268,3 +2268,104 @@ async def test_plan_change_reprices_seat_band_per_segment(db):
         expected_fee_delta,
         expected_seat_credit,
     )
+
+
+# ── R129 batch regressions ───────────────────────────────────
+
+
+def test_preview_band_repricing_matches_close_walk():
+    """R129[M5]: the preview's seat component must mirror the close's
+    R123[C0] band repricing — a plan change that shrinks included_seats
+    CHARGES the newly exposed band even when the reserved floor is unchanged.
+    Plan A: fee 10000, included 10, seat 500; live 10 seats. Change to plan
+    B: fee 8000, included 2, seat 500, floor unchanged at day 15/30. Legacy
+    delta math showed -1000 (credit); the invoice charges +1000."""
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    end = datetime(2026, 10, 1, tzinfo=UTC)
+    at = datetime(2026, 9, 16, tzinfo=UTC)  # 15 days left
+    p = billing_svc.proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=10000,
+        new_amount_minor=8000,
+        old_seats=10,
+        new_seats=10,
+        seat_price_minor=500,
+        billable_seats=10,
+        old_included_seats=10,
+        new_included_seats=2,
+        old_seat_price_minor=500,
+    )
+    # fee delta (8000-10000)×15/30 = -1000; band delta (8×500 - 0)×15/30 = +2000
+    assert p["seat_proration_minor"] == 2000
+    assert p["net_minor"] == 1000
+    # And the reverse (band widens) shows the credit the invoice grants.
+    p2 = billing_svc.proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=8000,
+        new_amount_minor=10000,
+        old_seats=10,
+        new_seats=10,
+        seat_price_minor=500,
+        billable_seats=10,
+        old_included_seats=2,
+        new_included_seats=10,
+        old_seat_price_minor=500,
+    )
+    assert p2["seat_proration_minor"] == -2000
+    # Legacy path (no billable_seats) still uses the floor-delta math.
+    p3 = billing_svc.proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=0,
+        new_amount_minor=0,
+        old_seats=10,
+        new_seats=20,
+        seat_price_minor=500,
+    )
+    assert p3["seat_proration_minor"] == 2500
+
+
+@pytest.mark.asyncio
+async def test_void_after_cancel_close_recancels_not_rebills(db):
+    """R129[C1]: voiding the FINAL invoice of a cancelled sub must resurrect
+    it to cancel_at_period_end (re-close re-cancels, no new period) — the
+    earlier restore-to-'active' turned the re-close into a rollover that
+    opened a fresh period and re-billed a departed customer forever."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=True, actor=a)
+    inv = await _force_close(db, sub)
+    assert inv is not None
+    await db.refresh(sub)
+    assert sub.status == "cancelled"
+    period_id = inv.billing_period_id
+
+    await billing_svc.void_invoice(db, inv, reason="final invoice dispute", actor=a)
+    await db.refresh(sub)
+    assert sub.status == "cancel_at_period_end", "void must resurrect to a re-cancellable state"
+    assert sub.cancel_at_period_end is True
+
+    inv2 = await billing_svc.close_period_and_invoice(db, period_id)
+    assert inv2 is not None and inv2.id != inv.id
+    # Re-close must terminate again — cancelled, and NO new open period.
+    await db.refresh(sub)
+    assert sub.status == "cancelled"
+    open_periods = (
+        await db.execute(
+            select(func.count(BillingPeriod.id)).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    assert open_periods == 0
+    # And the regenerated invoice bills the same period's plan fee once.
+    assert _plan_lines_total(await _lines(db, inv2), "plan") == 19900
