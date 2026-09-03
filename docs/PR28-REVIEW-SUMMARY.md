@@ -350,6 +350,19 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
 - One find was caught **live by the browser E2E** mid-hunt (the portal
   multi-error redirect race bounced a guest to /login) — fixed within the
   same session, demonstrating the pinning value of the UI suites.
+- **R129**: 25 confirmed — a dedicated fix-of-fix pass over R123–R128.
+  Caught **two criticals in day-old code**: the R123[H1] listing-less
+  learning-path resolver free-passed the license gate (any org could fork
+  ANY tenant's published path by product_id — cross-tenant content theft),
+  and the void-rewind resurrected a cancelled sub to `active` so the
+  re-close rolled a fresh period and re-billed a departed customer forever.
+  Also: the R123[M13] fx per-page commit itself crashed inside the worker's
+  savepoint (rewritten to chunk+re-enqueue), the R123[M15] backfill bound
+  rejected legit first-period backfill across month rollover, the R123[C0]
+  seat-band repricing was invisible to both change-previews (customer
+  approves a credit, invoice charges), the tz-gate has_key matched no-op
+  round-trips, and both outrun retries went silent over dead-lettered
+  originals. Three fixes carry double-sided guard-proofs.
 
 ## 4. Convergence
 
@@ -375,13 +388,14 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~425 confirmed defects fixed across 50 remediation commits**: ~230 from
+- **~450 confirmed defects fixed across 51 remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
-  R113–R122 and 44 from R123–R128 (fix-of-fix + fresh surfaces), on top of
-  the 12-phase feature delivery.
-- 13 critical money bugs found and fixed, including three that billed or
-  credited at 100×/wrong-currency scale, two that billed customers forever,
-  and one that silently kept collected cash on credit notes.
+  R113–R122, 44 from R123–R128 and 25 from R129 (fix-of-fix + fresh
+  surfaces), on top of the 12-phase feature delivery.
+- 15 critical money/content bugs found and fixed, including three that
+  billed or credited at 100×/wrong-currency scale, three that billed
+  customers forever, one that silently kept collected cash on credit
+  notes, and one cross-tenant content-theft hole.
 - Every backend fix carries a regression test; silent-failure fixes are
   guard-proven; frontend fixes verified by tsc/eslint/vitest plus both
   browser E2E suites re-run green (60/60 + 42/42, zero 500s).
