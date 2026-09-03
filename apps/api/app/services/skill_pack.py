@@ -278,28 +278,7 @@ class SkillPackService:
         # publishing redistributed paid content license-free. Licensed-in
         # content is usable, not redistributable: block re-packing when the
         # origin pack is paid and not the org's own product.
-        if skill.origin_pack_id is not None:
-            from app.controlplane.models.marketplace import MarketplaceListing
-
-            origin_listing = (
-                await self.db.execute(
-                    select(MarketplaceListing)
-                    .where(
-                        MarketplaceListing.product_type == "skill_pack",
-                        MarketplaceListing.product_id == skill.origin_pack_id,
-                        MarketplaceListing.status != "draft",
-                        MarketplaceListing.offer_type.in_(("paid", "partner_only")),
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if origin_listing is not None and origin_listing.seller_org_id != org_id:
-                raise AppError(
-                    "LICENSED_CONTENT_NOT_REDISTRIBUTABLE",
-                    "This skill was installed from a paid pack and cannot be "
-                    "republished in another pack",
-                    403,
-                )
+        await self._assert_origin_redistributable(skill.origin_pack_id, org_id, "skill")
 
         entry = SkillPackSkill(pack_id=pack_id, skill_id=skill_id, sort_order=sort_order)
         self.db.add(entry)
@@ -308,6 +287,40 @@ class SkillPackService:
         except IntegrityError:
             await self.db.rollback()
             raise AppError("SKILL_ALREADY_IN_PACK", "Skill already in this pack", 409) from None
+
+    async def _assert_origin_redistributable(
+        self, origin_pack_id: str | None, org_id: str, kind: str
+    ) -> None:
+        """R91[H1]+R101[H19]: licensed-in content is usable, not resellable.
+
+        Content installed from another org's paid/partner_only pack carries
+        origin_pack_id; blocking only skills left templates (and any other
+        origin-carrying content) freely repackagable — same hole, one door
+        over. Shared gate for every add-to-pack path.
+        """
+        if origin_pack_id is None:
+            return
+        from app.controlplane.models.marketplace import MarketplaceListing
+
+        origin_listing = (
+            await self.db.execute(
+                select(MarketplaceListing)
+                .where(
+                    MarketplaceListing.product_type == "skill_pack",
+                    MarketplaceListing.product_id == origin_pack_id,
+                    MarketplaceListing.status != "draft",
+                    MarketplaceListing.offer_type.in_(("paid", "partner_only")),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if origin_listing is not None and origin_listing.seller_org_id != org_id:
+            raise AppError(
+                "LICENSED_CONTENT_NOT_REDISTRIBUTABLE",
+                f"This {kind} was installed from a paid pack and cannot be "
+                "republished in another pack",
+                403,
+            )
 
     async def remove_skill(self, pack_id: str, skill_id: str, org_id: str) -> None:
         await self.get_pack(pack_id, org_id)
@@ -343,6 +356,10 @@ class SkillPackService:
         tmpl = await self.db.get(ProjectTemplate, template_id)
         if tmpl is None or tmpl.org_id != org_id:
             raise AppError("TEMPLATE_NOT_FOUND", "Template not found in this organization", 404)
+
+        # R101[H19]: templates installed from a paid pack were freely
+        # repackagable — the R91[H1] gate covered only skills.
+        await self._assert_origin_redistributable(tmpl.origin_pack_id, org_id, "template")
 
         entry = SkillPackTemplate(pack_id=pack_id, template_id=template_id, sort_order=sort_order)
         self.db.add(entry)

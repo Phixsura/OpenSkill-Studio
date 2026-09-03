@@ -9,6 +9,8 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { api, sharedRefresh } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
+import { useQueryClient } from "@tanstack/react-query";
+
 import { useMe } from "@/lib/use-me";
 import { NotificationBell } from "@/components/notification-bell";
 
@@ -23,6 +25,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Role-conditional navigation: tenant admin / partner portal / platform
   // console links appear only for users holding those memberships (#27 §11.2)
   const { data: meData } = useMe();
+  const queryClient = useQueryClient();
   const me = meData?.data;
   const tenantMemberships = me?.tenant_memberships ?? [];
   const partnerMemberships = me?.partner_memberships ?? [];
@@ -74,6 +77,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       // Logout should succeed even if the API call fails
     } finally {
       clearAuth();
+      // R101[H12]: drop EVERY cached query — the next user on this browser
+      // tab otherwise saw the previous user's data (amounts, memberships,
+      // role-gated nav) served from the warm React Query cache.
+      queryClient.clear();
       router.push("/login");
     }
   };

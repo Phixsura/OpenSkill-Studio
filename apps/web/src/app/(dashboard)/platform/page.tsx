@@ -10,9 +10,14 @@ interface Dashboard {
   period: string;
   tenants: { by_status: Record<string, number>; total: number };
   mrr_minor: number;
+  // R101[H5]: mrr_minor is only the platform-currency slice — the full book
+  mrr_by_currency: Record<string, number>;
   usage: {
     by_type: {
       usage_type: string;
+      // R101[H4]: rows are grouped per (type, billable_currency, cost_currency)
+      currency: string;
+      cost_currency: string;
       quantity: string;
       billable_minor: number;
       cost_minor: number;
@@ -21,7 +26,9 @@ interface Dashboard {
   };
   totals: {
     billable_minor: number;
+    billable_by_currency: Record<string, number>;
     internal_cost_minor: number;
+    cost_by_currency: Record<string, number>;
     margin_minor: number;
     unrated_events: number;
     blocked_rated: number;
@@ -29,12 +36,23 @@ interface Dashboard {
   credits_outstanding: { currency: string; balance_minor: number; reserved_minor: number }[];
   settlement_liabilities: { currency: string; accrued_minor: number }[];
   marketplace_gmv_minor: number;
+  marketplace_gmv_by_currency: Record<string, number>;
   attention: {
     past_due: { tenant_id: string; name: string; slug: string }[];
     suspended: { tenant_id: string; name: string; slug: string }[];
     failed_webhooks: number;
     dead_outbox: number;
   };
+}
+
+/** Render a per-currency map ("$5,000.00 · ¥6,000,000"); platform currency first. */
+function multiCurrency(map: Record<string, number> | undefined, fallback: string): string {
+  const entries = Object.entries(map ?? {});
+  if (entries.length === 0) return fallback;
+  return entries
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([cur, minor]) => formatMinor(minor, cur))
+    .join(" · ");
 }
 
 export default function PlatformDashboardPage() {
@@ -59,15 +77,30 @@ export default function PlatformDashboardPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card label="MRR" value={formatMinor(d.mrr_minor, "USD")} />
+        <Card
+          label="MRR"
+          value={multiCurrency(d.mrr_by_currency, formatMinor(d.mrr_minor, "USD"))}
+        />
         <Card label="Tenants" value={String(d.tenants.total)} />
-        <Card label="Billable (period)" value={formatMinor(d.totals.billable_minor, "USD")} />
+        <Card
+          label="Billable (period)"
+          value={multiCurrency(
+            d.totals.billable_by_currency,
+            formatMinor(d.totals.billable_minor, "USD"),
+          )}
+        />
         <Card
           label="Margin (period)"
           value={formatMinor(d.totals.margin_minor, "USD")}
-          sub={`cost ${formatMinor(d.totals.internal_cost_minor, "USD")}`}
+          sub={`cost ${multiCurrency(d.totals.cost_by_currency, formatMinor(d.totals.internal_cost_minor, "USD"))}`}
         />
-        <Card label="Marketplace GMV" value={formatMinor(d.marketplace_gmv_minor, "USD")} />
+        <Card
+          label="Marketplace GMV"
+          value={multiCurrency(
+            d.marketplace_gmv_by_currency,
+            formatMinor(d.marketplace_gmv_minor, "USD"),
+          )}
+        />
         <Card
           label="Credits outstanding"
           value={
@@ -128,14 +161,17 @@ export default function PlatformDashboardPage() {
               </thead>
               <tbody>
                 {d.usage.by_type.map((u) => (
-                  <tr key={u.usage_type} className="border-b last:border-0">
+                  <tr
+                    key={`${u.usage_type}:${u.currency}:${u.cost_currency}`}
+                    className="border-b last:border-0"
+                  >
                     <td className="px-4 py-2 font-mono text-xs">{u.usage_type}</td>
                     <td className="px-4 py-2 text-right">{u.quantity}</td>
                     <td className="px-4 py-2 text-right font-mono">
-                      {formatMinor(u.billable_minor, "USD")}
+                      {formatMinor(u.billable_minor, u.currency)}
                     </td>
                     <td className="px-4 py-2 text-right font-mono">
-                      {formatMinor(u.cost_minor, "USD")}
+                      {formatMinor(u.cost_minor, u.cost_currency)}
                     </td>
                     <td className="px-4 py-2 text-right font-mono">
                       {u.margin_minor != null ? formatMinor(u.margin_minor, "USD") : "—"}

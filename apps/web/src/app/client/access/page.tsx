@@ -40,11 +40,17 @@ export default function ClientAccessPage() {
       sessionStorage.setItem("client_portal_label", session.label);
       router.push(`/client/${session.project.id}`);
     } catch (err) {
-      setError(
-        err instanceof ApiError && err.status === 401
-          ? "This link is invalid or has expired. Ask your contact for a new one."
-          : "Something went wrong. Please try again.",
-      );
+      // R101[L2]: 422 (malformed code / bad email shape) and 429 (rate
+      // limited) collapsed into a generic message with no actionable detail.
+      if (err instanceof ApiError && err.status === 401) {
+        setError("This link is invalid or has expired. Ask your contact for a new one.");
+      } else if (err instanceof ApiError && err.status === 429) {
+        setError("Too many attempts — wait a minute and try again.");
+      } else if (err instanceof ApiError && err.status === 422) {
+        setError(err.message || "The access code or email looks malformed.");
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
     } finally {
       setLoading(false);
     }

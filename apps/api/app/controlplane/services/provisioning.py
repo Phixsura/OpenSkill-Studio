@@ -72,8 +72,14 @@ def validate_blueprint_config(config: dict) -> dict:
     # a ≥260-level-deep nested config STORED fine but permanently 500'd every
     # blueprint list endpoint (recursion limit at serialization). Cap depth
     # like every other JSONB request field.
-    reject_deep_json(config.get("feature_settings"), "feature_settings", limit=4)
-    reject_deep_json(config.get("entitlement_overrides"), "entitlement_overrides", limit=3)
+    # R101[M37]: reject_deep_json raises a BARE ValueError (it's written for
+    # pydantic validator contexts) — outside the try it escaped the H14
+    # AppError wrap and still 500'd. Same 422 contract for depth bombs.
+    try:
+        reject_deep_json(config.get("feature_settings"), "feature_settings", limit=4)
+        reject_deep_json(config.get("entitlement_overrides"), "entitlement_overrides", limit=3)
+    except ValueError as exc:
+        raise AppError("BLUEPRINT_INVALID", str(exc), 422) from exc
     try:
         parsed = BlueprintConfig.model_validate(config)
     except ValidationError as exc:
@@ -156,6 +162,11 @@ async def create_provision_run(
                 "This idempotency key was used with different parameters",
                 409,
             )
+        # R101[H7]: an identical replay of a FAILED run must actually retry —
+        # returning the dead run as-is was a silent no-op the UI toasted as
+        # "started" (same semantics as the platform retry endpoint).
+        if existing.status == "failed":
+            enqueue(db, "provision.run", {"run_id": existing.id})
         return existing  # idempotent replay returns the run
     blueprint = await db.get(TenantBlueprint, blueprint_id)
     if blueprint is None or not blueprint.is_active:

@@ -402,7 +402,10 @@ async def list_audit_events(
     rows = (
         (
             await db.execute(
-                query.order_by(CommercialAuditEvent.created_at.desc())
+                # R101[L21]: id tiebreak — same-tx audit rows share created_at
+                query.order_by(
+                    CommercialAuditEvent.created_at.desc(), CommercialAuditEvent.id.desc()
+                )
                 .offset(offset)
                 .limit(per_page)
             )

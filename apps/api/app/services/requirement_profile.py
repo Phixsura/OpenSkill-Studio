@@ -171,13 +171,21 @@ class RequirementProfileService:
 
         tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
         cp_facade.require_tenant_active(tenant)
+        # R101[L23]: a hardcoded 5 MINOR units means $0.05 for USD but ₩5
+        # (≈$0.004) for KRW — an order of magnitude less conservative for
+        # zero-decimal currencies. Without an FX lookup here, approximate the
+        # ~$0.05 ceiling: decimal currencies 5 minor, zero-decimal 50 minor
+        # (¥50/₩50 both land within the same order as five US cents).
+        from app.controlplane.models.pricing import minor_multiplier
+
+        projected = 5 if minor_multiplier(tenant.currency) == 100 else 50
         await cp_facade.check_budget(
             self.db,
             tenant,
             org_id,
             user_id=user_id,
             usage_type="llm_output_tokens",
-            projected_minor=5,  # ~$0.05 ceiling per extraction — conservative
+            projected_minor=projected,
         )
         clean_raw = sanitize_untrusted_text(raw_request, 4000)
         capability_keys = await self._capability_keys()

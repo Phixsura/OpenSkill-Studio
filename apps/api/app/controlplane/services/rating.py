@@ -717,7 +717,13 @@ async def rate_event(db: AsyncSession, usage_event_id: str) -> RatedUsage | None
         result = await db.execute(
             _update(RatedUsage)
             .where(RatedUsage.id == existing.id, RatedUsage.status == "blocked")
-            .values(**values, rated_at=datetime.now(UTC))
+            # R101[L19]: bump rating_version on re-rate — the snapshot audit
+            # trail otherwise showed a silently overwritten "version 1".
+            .values(
+                **values,
+                rated_at=datetime.now(UTC),
+                rating_version=RatedUsage.rating_version + 1,
+            )
         )
         await db.refresh(existing)
         if not result.rowcount:

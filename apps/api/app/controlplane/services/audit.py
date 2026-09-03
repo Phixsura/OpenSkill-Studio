@@ -24,7 +24,8 @@ AUDIT_ACTIONS = frozenset(
         "tenant.provisioned",
         "tenant.export_created",
         "tenant.export_downloaded",
-        "tenant.currency_changed",
+        # R101[L20]: tenant.currency_changed removed — no currency-change
+        # endpoint exists (registry entries must map to real emit sites).
         # R60[46]: owner PATCH of pricing-relevant fields (country is a
         # rev-share rule dimension; timezone shifts budget/period boundaries).
         "tenant.updated",
@@ -70,7 +71,8 @@ AUDIT_ACTIONS = frozenset(
         # revenue share / settlements
         "revshare.rule_activated",
         "revshare.rule_retired",
-        "revshare.entry_adjusted",
+        # R101[L20]: revshare.entry_adjusted removed — manual statement
+        # adjustments audit as settlement.adjusted (the only emit site).
         "settlement.finalized",
         "settlement.approved",
         "settlement.marked_paid",
@@ -158,7 +160,6 @@ TENANT_VISIBLE_ACTIONS = frozenset(
         "tenant.suspended",
         "tenant.reactivated",
         "tenant.status_changed",
-        "tenant.currency_changed",
         "tenant.updated",
         "subscription.plan_changed",
         "subscription.started",

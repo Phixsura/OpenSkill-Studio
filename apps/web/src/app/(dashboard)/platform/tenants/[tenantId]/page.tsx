@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth, ApiError } from "@/lib/api";
-import { formatDate } from "@/lib/cp";
+import { formatDate, majorToMinor } from "@/lib/cp";
 
 interface PlatformTenantDetail {
   id: string;
@@ -85,7 +85,9 @@ export default function PlatformTenantDetailPage() {
       apiWithAuth(`/platform/tenants/${tenantId}/credits/adjust`, {
         method: "POST",
         body: JSON.stringify({
-          amount_minor: Math.round(parseFloat(adjustAmount) * 100),
+          // R101: minor-unit factor is per-currency (JPY/KRW = 1) — the
+          // hardcoded *100 credited zero-decimal tenants 100x the intent.
+          amount_minor: majorToMinor(adjustAmount, tenant?.currency ?? "USD"),
           currency: tenant?.currency ?? "USD",
           reason: adjustReason,
         }),
@@ -94,6 +96,11 @@ export default function PlatformTenantDetailPage() {
       toast.success("Credit adjusted");
       setAdjustAmount("");
       setAdjustReason("");
+      // R101[M22]: the ledger/balances views (tenant credits page, platform
+      // detail) rendered stale money until manual reload.
+      queryClient.invalidateQueries({ queryKey: ["tenant-credits", tenantId] });
+      queryClient.invalidateQueries({ queryKey: ["tenant-credit-ledger", tenantId] });
+      invalidate();
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Adjust failed"),
   });
@@ -131,7 +138,12 @@ export default function PlatformTenantDetailPage() {
 
       <section className="space-y-3 rounded-lg border p-4">
         <h2 className="font-semibold">Lifecycle</h2>
-        {tenant.status !== "suspended" ? (
+        {/* R101[L18]: cancelled/archived cannot transition — hide both controls */}
+        {["cancelled", "archived"].includes(tenant.status) ? (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            This tenant is {tenant.status} — no lifecycle actions available.
+          </p>
+        ) : tenant.status !== "suspended" ? (
           <div className="flex flex-wrap gap-2">
             <Input
               className="max-w-sm"

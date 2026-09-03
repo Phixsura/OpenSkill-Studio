@@ -281,16 +281,34 @@ async def create_purchase(
         # keys share one table; an unscoped match returned ANOTHER tenant's
         # purchase (cross-tenant data leak, and the credit path then debited
         # the wrong tenant's balance).
+        # R101[H0]: only LIVE purchases resume through the key — a refunded or
+        # failed purchase matching the (stable) client key returned the dead
+        # row as "success", permanently blocking re-purchase after a refund.
         existing = (
             await db.execute(
                 select(MarketplacePurchase).where(
                     MarketplacePurchase.buyer_tenant_id == buyer_tenant.id,
                     MarketplacePurchase.idempotency_key == idempotency_key,
+                    MarketplacePurchase.status.in_(("pending", "paid")),
                 )
             )
         ).scalar_one_or_none()
         if existing is not None:
             return existing
+        # A DEAD purchase (refunded/failed) still holds the unique key — free
+        # it (history row keeps a suffixed copy) so the fresh purchase can
+        # reuse the client's stable key instead of 500ing on the index.
+        from ulid import ULID
+
+        await db.execute(
+            update(MarketplacePurchase)
+            .where(
+                MarketplacePurchase.buyer_tenant_id == buyer_tenant.id,
+                MarketplacePurchase.idempotency_key == idempotency_key,
+                MarketplacePurchase.status.in_(("refunded", "failed")),
+            )
+            .values(idempotency_key=idempotency_key[:90] + ":r:" + str(ULID()))
+        )
 
     # Currency conversion into the buyer's currency (FX snapshot)
     amount = listing.price_minor or 0

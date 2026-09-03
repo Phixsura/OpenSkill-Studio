@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { ApiError } from "@/lib/api";
-import { portalApi, portalRole } from "@/lib/client-portal";
+import { portalApi, portalRole, portalToken } from "@/lib/client-portal";
 
 interface Brief {
   title: string;
@@ -44,8 +44,93 @@ interface ApprovalRecord {
   action: string;
   version: number;
   comment: string | null;
-  acted_by_label: string;
+  acted_by: string; // R101[M0]: backend serializes the label as acted_by
   created_at: string;
+}
+
+interface PortalComment {
+  id: string;
+  item_id: string;
+  text: string;
+  anchor_type: string;
+  author: string | null;
+  created_at: string;
+}
+
+/** R101[M2]: the comments channel (issue §30) had ZERO portal UI — clients
+ * could neither read the team's client-visible comments nor write their own
+ * outside the revision flow. Per-submission thread, global anchor. */
+function CommentsThread({
+  projectId,
+  submissionId,
+  itemId,
+  onAuthError,
+}: {
+  projectId: string;
+  submissionId: string;
+  itemId: string;
+  onAuthError: (e: unknown) => boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [text, setText] = useState("");
+  const commentsQuery = useQuery({
+    queryKey: ["portal-comments", projectId, submissionId],
+    queryFn: () =>
+      portalApi<{ data: PortalComment[] }>(
+        `/client-portal/projects/${projectId}/submissions/${submissionId}/comments`,
+      ),
+    retry: false,
+  });
+  const comments = (commentsQuery.data?.data ?? []).filter((c) => c.item_id === itemId);
+  const postMutation = useMutation({
+    mutationFn: () =>
+      portalApi(`/client-portal/projects/${projectId}/submissions/${submissionId}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ item_id: itemId, text, anchor_type: "global" }),
+      }),
+    onSuccess: () => {
+      setText("");
+      queryClient.invalidateQueries({ queryKey: ["portal-comments", projectId, submissionId] });
+    },
+    onError: (e) => {
+      if (!onAuthError(e)) toast.error(e instanceof ApiError ? e.message : "Comment failed");
+    },
+  });
+  return (
+    <details className="mt-2">
+      <summary className="cursor-pointer text-xs text-[hsl(var(--muted-foreground))]">
+        Comments ({comments.length})
+      </summary>
+      <div className="mt-2 space-y-2">
+        {comments.map((c) => (
+          <div key={c.id} className="rounded bg-[hsl(var(--secondary))] p-2 text-xs">
+            <span className="font-medium">{c.author ?? "Client"}</span>{" "}
+            <span className="text-[hsl(var(--muted-foreground))]">
+              {new Date(c.created_at).toLocaleString()}
+            </span>
+            <p className="mt-1 whitespace-pre-wrap">{c.text}</p>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <input
+            className="w-full rounded-md border bg-transparent px-2 py-1 text-xs"
+            placeholder="Add a comment…"
+            value={text}
+            maxLength={5000}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => postMutation.mutate()}
+            disabled={!text.trim() || postMutation.isPending}
+          >
+            Post
+          </Button>
+        </div>
+      </div>
+    </details>
+  );
 }
 
 export default function ClientProjectPage() {
@@ -56,9 +141,11 @@ export default function ClientProjectPage() {
   const [revisionComment, setRevisionComment] = useState("");
   const [revisionFor, setRevisionFor] = useState<string | null>(null);
 
-  // No session → bounce to access page
+  // No session → bounce to access page.
+  // R101[M1]: a logged-in ClientPortalMember carries a product access token —
+  // requiring the guest JWT made the member channel unreachable.
   useEffect(() => {
-    if (typeof window !== "undefined" && !sessionStorage.getItem("client_portal_jwt")) {
+    if (typeof window !== "undefined" && !portalToken()) {
       router.replace("/client/access");
     }
   }, [router]);
@@ -93,9 +180,13 @@ export default function ClientProjectPage() {
   });
 
   useEffect(() => {
-    if (submissionsQuery.error) onAuthError(submissionsQuery.error);
+    // R101[M4]: any of the three queries can be the first to see the expired
+    // token — only submissions was wired, leaving a half-dead page.
+    for (const err of [submissionsQuery.error, briefQuery.error, historyQuery.error]) {
+      if (err && onAuthError(err)) return;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submissionsQuery.error]);
+  }, [submissionsQuery.error, briefQuery.error, historyQuery.error]);
 
   const submissions = submissionsQuery.data?.data ?? [];
   const history = historyQuery.data?.data ?? [];
@@ -162,7 +253,15 @@ export default function ClientProjectPage() {
       const res = await portalApi<{ data: { download_url: string } }>(
         `/client-portal/projects/${projectId}/submissions/${submissionId}/items/${itemId}/download`,
       );
-      window.open(res.data.download_url, "_blank", "noopener");
+      // R101[M5]: window.open AFTER an await is popup-blocked in most
+      // browsers (no user-gesture context) and its null return was ignored —
+      // the button silently did nothing. A synthetic anchor click navigates
+      // without popup rules.
+      const a = document.createElement("a");
+      a.href = res.data.download_url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.click();
     } catch (e) {
       if (!onAuthError(e)) toast.error("Download failed");
     }
@@ -190,6 +289,43 @@ export default function ClientProjectPage() {
               Tone &amp; style: {brief.tone_and_style}
             </p>
           )}
+          {/* R101[L1]: the whitelisted client-facing fields were fetched but
+              never rendered — the client saw a thinner brief than intended */}
+          {brief.target_audience && (
+            <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
+              Audience: {brief.target_audience}
+            </p>
+          )}
+          {brief.deliverable_specs != null && (
+            <details className="mt-2 text-sm">
+              <summary className="cursor-pointer text-[hsl(var(--muted-foreground))]">
+                Deliverable specs
+              </summary>
+              <pre className="mt-1 overflow-auto rounded bg-[hsl(var(--secondary))] p-2 text-xs">
+                {JSON.stringify(brief.deliverable_specs, null, 2)}
+              </pre>
+            </details>
+          )}
+          {brief.timeline != null && (
+            <details className="mt-2 text-sm">
+              <summary className="cursor-pointer text-[hsl(var(--muted-foreground))]">
+                Timeline
+              </summary>
+              <pre className="mt-1 overflow-auto rounded bg-[hsl(var(--secondary))] p-2 text-xs">
+                {JSON.stringify(brief.timeline, null, 2)}
+              </pre>
+            </details>
+          )}
+          {brief.evaluation_criteria != null && (
+            <details className="mt-2 text-sm">
+              <summary className="cursor-pointer text-[hsl(var(--muted-foreground))]">
+                Evaluation criteria
+              </summary>
+              <pre className="mt-1 overflow-auto rounded bg-[hsl(var(--secondary))] p-2 text-xs">
+                {JSON.stringify(brief.evaluation_criteria, null, 2)}
+              </pre>
+            </details>
+          )}
         </section>
       )}
 
@@ -198,7 +334,12 @@ export default function ClientProjectPage() {
         {submissionsQuery.isLoading && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
         )}
-        {!submissionsQuery.isLoading && submissions.length === 0 && (
+        {submissionsQuery.isError && (
+          <p className="text-sm text-red-600">
+            Could not load deliverables — please retry or ask for a new link.
+          </p>
+        )}
+        {!submissionsQuery.isLoading && !submissionsQuery.isError && submissions.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
             Nothing has been shared for review yet.
           </p>
@@ -226,9 +367,14 @@ export default function ClientProjectPage() {
                       </span>
                     </p>
                     {item.content && (
-                      <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs text-[hsl(var(--muted-foreground))]">
-                        {item.content}
-                      </p>
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-xs text-[hsl(var(--muted-foreground))]">
+                          view content
+                        </summary>
+                        <p className="mt-1 whitespace-pre-wrap text-xs text-[hsl(var(--muted-foreground))]">
+                          {item.content}
+                        </p>
+                      </details>
                     )}
                     {item.type === "file" && (
                       <Button
@@ -240,13 +386,28 @@ export default function ClientProjectPage() {
                         Download
                       </Button>
                     )}
+                    <CommentsThread
+                      projectId={projectId}
+                      submissionId={s.id}
+                      itemId={item.id}
+                      onAuthError={onAuthError}
+                    />
                   </div>
                 ))}
               </div>
 
               {!finalAccepted && (
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => setRevisionFor(s.id)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // R101[L0]: one shared comment state across cards — a
+                      // typed comment silently retargeted to another version
+                      setRevisionFor(s.id);
+                      setRevisionComment("");
+                    }}
+                  >
                     Request revision
                   </Button>
                   {role === "approver" && (
@@ -306,7 +467,7 @@ export default function ClientProjectPage() {
             {history.map((h) => (
               <li key={h.id} className="rounded-md border p-3 text-sm">
                 <span className="font-medium">{h.action.replace(/_/g, " ")}</span> on version{" "}
-                {h.version} by {h.acted_by_label}
+                {h.version} by {h.acted_by}
                 <span className="ml-2 text-xs text-[hsl(var(--muted-foreground))]">
                   {new Date(h.created_at).toLocaleString()}
                 </span>

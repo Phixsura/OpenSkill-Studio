@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, apiWithAuth } from "@/lib/api";
 import { MarketplacePanel } from "@/components/marketplace-panel";
+import { InstallButton } from "@/components/install-button";
 
 interface PackDetail {
   id: string;
@@ -572,11 +573,12 @@ export default function RegistryPackDetailPage() {
         <div className="mt-4">
           <MarketplacePanel productType="skill_pack" productId={packId} isAuthed={isAuthed} />
         </div>
-        <Link href={isAuthed ? "/dashboard" : "/login"}>
-          <Button className="mt-4" aria-label={`Install ${pack.name}`}>
-            {isAuthed ? "Install in your organization →" : "Sign in to install →"}
-          </Button>
-        </Link>
+        <InstallButton
+          productType="skill_pack"
+          packId={packId}
+          packName={pack.name}
+          isAuthed={isAuthed}
+        />
       </div>
 
       <div className="grid gap-8 md:grid-cols-3">

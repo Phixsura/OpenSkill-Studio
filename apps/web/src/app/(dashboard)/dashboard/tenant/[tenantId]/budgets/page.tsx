@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth, ApiError } from "@/lib/api";
-import { formatMinor } from "@/lib/cp";
+import { formatMinor, majorToMinor } from "@/lib/cp";
 
 interface BudgetPolicy {
   id: string;
@@ -40,6 +40,15 @@ export default function TenantBudgetsPage() {
   });
   const budgets = budgetsQuery.data?.data ?? [];
 
+  // R101[H8]: budgets must be created in the TENANT's currency — hardcoded
+  // "USD" made the feature 422 on every attempt for non-USD tenants, and the
+  // hardcoded *100 was 100x off for zero-decimal currencies.
+  const tenantQuery = useQuery({
+    queryKey: ["tenant", tenantId],
+    queryFn: () => apiWithAuth<{ data: { currency: string } }>(`/tenants/${tenantId}`),
+  });
+  const currency = tenantQuery.data?.data?.currency ?? "USD";
+
   const createMutation = useMutation({
     mutationFn: () =>
       apiWithAuth(`/tenants/${tenantId}/budgets`, {
@@ -48,8 +57,8 @@ export default function TenantBudgetsPage() {
           scope_type: scopeType,
           scope_id: scopeType === "tenant" ? null : scopeId || null,
           period,
-          limit_minor: Math.round(parseFloat(limitMajor) * 100),
-          currency: "USD",
+          limit_minor: majorToMinor(limitMajor, currency),
+          currency,
           hard_stop: hardStop,
         }),
       }),
@@ -112,7 +121,7 @@ export default function TenantBudgetsPage() {
               type="number"
               min="0"
               step="0.01"
-              placeholder="Limit (USD)"
+              placeholder={`Limit (${currency})`}
               value={limitMajor}
               onChange={(e) => setLimitMajor(e.target.value)}
             />
@@ -127,7 +136,12 @@ export default function TenantBudgetsPage() {
           </label>
           <Button
             onClick={() => createMutation.mutate()}
-            disabled={!limitMajor || createMutation.isPending}
+            disabled={
+              majorToMinor(limitMajor, currency) == null ||
+              (majorToMinor(limitMajor, currency) ?? 0) <= 0 ||
+              (scopeType !== "tenant" && !scopeId.trim()) ||
+              createMutation.isPending
+            }
           >
             Create
           </Button>

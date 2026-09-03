@@ -92,6 +92,16 @@ export function formatMinor(amountMinor: number, currency: string): string {
   }
 }
 
+/** Parse a user-typed major-unit amount into integer minor units for the
+ * given currency (R101: hardcoded *100 broke zero-decimal currencies by 100x).
+ * Returns null when the input is not a finite positive-or-zero number. */
+export function majorToMinor(input: string, currency: string): number | null {
+  const value = parseFloat(input);
+  if (!Number.isFinite(value)) return null;
+  const factor = ZERO_DECIMAL.has(currency) ? 1 : 100;
+  return Math.round(value * factor);
+}
+
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", {

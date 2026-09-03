@@ -36,6 +36,51 @@ export default function TenantBillingPage() {
   const hasSub = sub != null && sub.status !== "none";
   const invoices = invoicesQuery.data?.data ?? [];
 
+  // R101[H10]: there was NO way to start a subscription from the UI — the
+  // whole self-serve funnel dead-ended at "No active subscription".
+  const plansQuery = useQuery({
+    queryKey: ["public-plans"],
+    queryFn: () => apiWithAuth<{ data: PlanCatalogEntry[] }>("/plans"),
+    enabled: !subQuery.isLoading && !hasSub,
+  });
+  const subscribablePlans = (plansQuery.data?.data ?? []).filter((p) =>
+    ["school", "growth", "enterprise", "oem"].includes(p.key),
+  );
+  const [subscribePlan, setSubscribePlan] = useState("");
+
+  const subscribeMutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth<{ data: { checkout_url?: string } }>(`/tenants/${tenantId}/subscription`, {
+        method: "POST",
+        body: JSON.stringify({
+          plan_key: subscribePlan,
+          interval: "month",
+          provider: "mock",
+        }),
+      }),
+    onSuccess: (res) => {
+      if (res?.data?.checkout_url) {
+        window.location.href = res.data.checkout_url;
+        return;
+      }
+      toast.success("Subscription started");
+      queryClient.invalidateQueries({ queryKey: ["tenant-subscription", tenantId] });
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Subscribe failed"),
+  });
+
+  // R101[M14]: un-cancel — the backend reactivate endpoint existed for
+  // exactly this but was unreachable from the UI.
+  const reactivateMutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/tenants/${tenantId}/subscription/reactivate`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Subscription reactivated");
+      queryClient.invalidateQueries({ queryKey: ["tenant-subscription", tenantId] });
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Reactivate failed"),
+  });
+
   const cancelMutation = useMutation({
     mutationFn: () =>
       apiWithAuth(`/tenants/${tenantId}/subscription/cancel`, {
@@ -64,8 +109,30 @@ export default function TenantBillingPage() {
           <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
         )}
         {!subQuery.isLoading && !hasSub && (
-          <div className="rounded-lg border border-dashed p-8 text-center text-sm text-[hsl(var(--muted-foreground))]">
-            No active subscription — you are on community defaults.
+          <div className="space-y-3 rounded-lg border border-dashed p-8 text-center">
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">
+              No active subscription — you are on community defaults.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <select
+                className="rounded-md border bg-transparent px-3 py-2 text-sm"
+                value={subscribePlan}
+                onChange={(e) => setSubscribePlan(e.target.value)}
+              >
+                <option value="">Choose a plan…</option>
+                {subscribablePlans.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                onClick={() => subscribeMutation.mutate()}
+                disabled={!subscribePlan || subscribeMutation.isPending}
+              >
+                {subscribeMutation.isPending ? "Starting…" : "Subscribe"}
+              </Button>
+            </div>
           </div>
         )}
         {hasSub && sub && "plan_key" in sub && (
@@ -74,7 +141,17 @@ export default function TenantBillingPage() {
               <span className="text-xl font-semibold capitalize">{sub.plan_key}</span>
               <StatusBadge status={sub.status} />
               {sub.cancel_at_period_end && (
-                <span className="text-xs text-amber-600">cancels at period end</span>
+                <>
+                  <span className="text-xs text-amber-600">cancels at period end</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => reactivateMutation.mutate()}
+                    disabled={reactivateMutation.isPending}
+                  >
+                    Keep subscription
+                  </Button>
+                </>
               )}
             </div>
             <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">

@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
 import { MarketplacePanel } from "@/components/marketplace-panel";
+import { InstallButton } from "@/components/install-button";
 
 interface PackDetail {
   id: string;
@@ -155,12 +156,13 @@ export default function PublicWorkflowPackPage() {
         <MarketplacePanel productType="workflow_pack" productId={packId} isAuthed={isAuthed} />
       </div>
 
-      <div className="mt-4 rounded-lg border border-dashed p-4 text-sm">
-        Install this workflow from your organization dashboard:{" "}
-        <Link href="/login?redirect=/dashboard" className="underline">
-          Sign in
-        </Link>{" "}
-        → Workflow Installations → install by pack.
+      <div className="mt-4">
+        <InstallButton
+          productType="workflow_pack"
+          packId={packId}
+          packName={pack.name}
+          isAuthed={isAuthed}
+        />
       </div>
 
       {pack.description && (

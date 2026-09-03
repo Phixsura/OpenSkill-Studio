@@ -15,6 +15,7 @@ interface PartnerDetail {
   status: string;
   currency: string;
   contact_email: string | null;
+  unsettled_accruals_minor: number;
 }
 
 interface Entry {
@@ -39,9 +40,9 @@ export default function PartnerOverviewPage() {
 
   const partner = partnerQuery.data?.data;
   const entries = entriesQuery.data?.data ?? [];
-  const accrued = entries
-    .filter((e) => e.status === "accrued" || e.status === "adjusted")
-    .reduce((sum, e) => sum + e.share_amount_minor, 0);
+  // R101[H6]: server-side aggregate — the client-side sum covered only the
+  // first page of entries and missed 'approved' status (wrong money).
+  const accrued = partner?.unsettled_accruals_minor ?? 0;
 
   if (partnerQuery.isLoading) {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;

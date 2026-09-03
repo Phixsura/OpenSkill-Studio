@@ -14,6 +14,7 @@ interface Blueprint {
   id: string;
   name: string;
   description: string | null;
+  is_active: boolean;
 }
 
 interface ProvisionRun {
@@ -36,7 +37,8 @@ export default function PartnerProvisionPage() {
     queryKey: ["partner-blueprints", partnerId],
     queryFn: () => apiWithAuth<{ data: Blueprint[] }>(`/partners/${partnerId}/blueprints`),
   });
-  const blueprints = blueprintsQuery.data?.data ?? [];
+  // R101[L6]: inactive blueprints always fail at submit — hide them
+  const blueprints = (blueprintsQuery.data?.data ?? []).filter((b) => b.is_active !== false);
 
   // Poll run status while it works through the step machine
   const runQuery = useQuery({
@@ -45,9 +47,13 @@ export default function PartnerProvisionPage() {
       apiWithAuth<{ data: ProvisionRun }>(`/partners/${partnerId}/provision-runs/${runId}`),
     enabled: runId != null,
     refetchInterval: (query) => {
+      // R101[M19]: stop on terminal status AND on query error — an erroring
+      // poll spun forever while freezing the panel on the last stale status.
+      if (query.state.status === "error") return false;
       const status = query.state.data?.data.status;
       return status === "completed" || status === "failed" ? false : 2000;
     },
+    retry: false,
   });
   const run = runQuery.data?.data;
 
@@ -59,7 +65,11 @@ export default function PartnerProvisionPage() {
           blueprint_id: blueprintId,
           name,
           slug,
-          idempotency_key: `${partnerId}:${slug}`,
+          // R101[H7]: key covers EVERY parameter — the old `${partnerId}:${slug}`
+          // key 409'd forever when the operator corrected the name/blueprint
+          // for the same slug (divergence guard compares all params). An
+          // identical resubmit still resumes (and re-enqueues a failed run).
+          idempotency_key: `${partnerId}:${slug}:${blueprintId}:${name}`.slice(0, 120),
         }),
       }),
     onSuccess: (res) => {

@@ -120,7 +120,10 @@ async def platform_dashboard(
     for currency, amount, interval, included, seat_price, seats in mrr_rows:
         monthly = amount // 12 if interval == "year" else amount
         overage_seats = max((seats or 0) - (included or 0), 0)
-        monthly += overage_seats * (seat_price or 0)
+        # R101[H14]: a yearly price row carries a YEARLY per-seat overage —
+        # normalize the seat component to monthly too, not just the plan fee.
+        seat_component = overage_seats * (seat_price or 0)
+        monthly += seat_component // 12 if interval == "year" else seat_component
         mrr_by_currency[currency] = mrr_by_currency.get(currency, 0) + monthly
     # Back-compat scalar: the platform-currency slice (other currencies are
     # reported separately, never silently mixed in).
@@ -140,6 +143,9 @@ async def platform_dashboard(
             select(
                 RatedUsage.usage_type,
                 RatedUsage.billable_currency,
+                # R101[H15]: cost lives in its own currency (the cost rate's) —
+                # group by it so a row never sums JPY cost into USD cost.
+                RatedUsage.internal_cost_currency,
                 func.sum(RatedUsage.quantity).label("quantity"),
                 func.sum(RatedUsage.billable_amount_minor).label("billable"),
                 func.sum(RatedUsage.internal_cost_minor).label("cost"),
@@ -151,7 +157,11 @@ async def platform_dashboard(
                 UsageEvent.occurred_at < end,
                 RatedUsage.status != "voided",
             )
-            .group_by(RatedUsage.usage_type, RatedUsage.billable_currency)
+            .group_by(
+                RatedUsage.usage_type,
+                RatedUsage.billable_currency,
+                RatedUsage.internal_cost_currency,
+            )
             .order_by(func.sum(RatedUsage.billable_amount_minor).desc())
         )
     ).all()
@@ -159,6 +169,7 @@ async def platform_dashboard(
         {
             "usage_type": r.usage_type,
             "currency": r.billable_currency,
+            "cost_currency": r.internal_cost_currency,
             "quantity": str(r.quantity or 0),
             "billable_minor": int(r.billable or 0),
             "cost_minor": int(r.cost or 0),
@@ -173,10 +184,17 @@ async def platform_dashboard(
         billable_by_currency[u["currency"]] = (
             billable_by_currency.get(u["currency"], 0) + u["billable_minor"]
         )
+    # R101[H15]: cost per its own currency — never a cross-currency sum.
+    cost_by_currency: dict[str, int] = {}
+    for u in usage_by_type:
+        cost_by_currency[u["cost_currency"]] = (
+            cost_by_currency.get(u["cost_currency"], 0) + u["cost_minor"]
+        )
     totals = {
         "billable_by_currency": billable_by_currency,
         "billable_minor": billable_by_currency.get(_settings.platform_currency, 0),
-        "internal_cost_minor": sum(u["cost_minor"] for u in usage_by_type),
+        "cost_by_currency": cost_by_currency,
+        "internal_cost_minor": cost_by_currency.get(_settings.platform_currency, 0),
         "margin_minor": sum(u["margin_minor"] or 0 for u in usage_by_type),
     }
 
@@ -228,16 +246,27 @@ async def platform_dashboard(
         {"currency": r.currency, "accrued_minor": int(r.accrued or 0)} for r in liability_rows
     ]
 
-    # Marketplace GMV (paid purchases in period)
-    gmv = (
+    # Marketplace GMV (paid purchases in period).
+    # R101[H9]: purchases are stored in the BUYER tenant's currency — a flat
+    # SUM added JPY minor (x1) to USD cents (x100) into one meaningless
+    # number. Group per currency; the scalar keeps the platform-currency
+    # slice for back-compat (same convention as MRR/billable).
+    gmv_rows = (
         await db.execute(
-            select(func.coalesce(func.sum(MarketplacePurchase.amount_minor), 0)).where(
+            select(
+                MarketplacePurchase.currency,
+                func.coalesce(func.sum(MarketplacePurchase.amount_minor), 0).label("amount"),
+            )
+            .where(
                 MarketplacePurchase.status == "paid",
                 MarketplacePurchase.created_at >= start,
                 MarketplacePurchase.created_at < end,
             )
+            .group_by(MarketplacePurchase.currency)
         )
-    ).scalar_one()
+    ).all()
+    gmv_by_currency = {r.currency: int(r.amount or 0) for r in gmv_rows}
+    gmv = gmv_by_currency.get(_settings.platform_currency, 0)
 
     # Attention lists
     past_due_tenants = (
@@ -278,6 +307,7 @@ async def platform_dashboard(
             "credits_outstanding": credits_outstanding,
             "settlement_liabilities": settlement_liabilities,
             "marketplace_gmv_minor": int(gmv),
+            "marketplace_gmv_by_currency": gmv_by_currency,
             "attention": {
                 "past_due": [
                     {"tenant_id": t.id, "name": t.name, "slug": t.slug} for t in past_due_tenants

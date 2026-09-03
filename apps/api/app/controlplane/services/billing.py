@@ -408,22 +408,23 @@ async def change_plan(
         # change must be pushed to the provider or it keeps invoicing the OLD
         # price/quantity forever. Platform-side proration stays authoritative
         # (the adapter disables provider proration).
+        # R101[M39]: pushed via the outbox — the old inline HTTP call ran
+        # while holding the m12 FOR UPDATE on the subscription row, blocking
+        # every concurrent close/cancel for the tenant for up to the provider
+        # timeout. The missing-ref 409 pre-check stays inline for immediate
+        # user feedback.
         if sub.provider in ("mock", "stripe") and sub.external_ref:
-            from app.controlplane.services.billing_providers import get_billing_provider
-
-            adapter = get_billing_provider(sub.provider)
-            if adapter is not None and new_price is not None:
-                if sub.provider == "stripe" and not new_price.external_price_ref:
-                    raise AppError(
-                        "PLAN_NOT_AVAILABLE",
-                        "Target plan price has no Stripe price configured",
-                        409,
-                    )
-                await adapter.change_subscription(
-                    sub.external_ref,
-                    new_price.external_price_ref or "",
-                    new_seats,
+            if (
+                sub.provider == "stripe"
+                and new_price is not None
+                and not new_price.external_price_ref
+            ):
+                raise AppError(
+                    "PLAN_NOT_AVAILABLE",
+                    "Target plan price has no Stripe price configured",
+                    409,
                 )
+            enqueue(db, "subscription.push_provider", {"subscription_id": sub.id})
     await db.flush()
     await record_audit(
         db,
@@ -471,14 +472,12 @@ async def reactivate_subscription(
         )
     )
     if sub.provider in ("mock", "stripe") and sub.external_ref:
-        from app.controlplane.services.billing_providers import get_billing_provider
-
-        adapter = get_billing_provider(sub.provider)
-        if adapter is not None:
-            try:
-                await adapter.change_subscription(sub.external_ref, "", sub.seat_quantity)
-            except Exception:  # noqa: BLE001 — best-effort; outbox push covers it
-                enqueue(db, "subscription.push_provider", {"subscription_id": sub.id})
+        # R101[H17]: always via the outbox push handler — it resolves the real
+        # price ref (the old inline call passed "" which Stripe rejects) and
+        # change_subscription now clears provider-side cancel_at_period_end,
+        # so the un-cancel actually sticks on the provider. Retries + visible
+        # dead-letter come free.
+        enqueue(db, "subscription.push_provider", {"subscription_id": sub.id})
     await record_audit(
         db,
         actor=actor,
@@ -765,7 +764,6 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     # covers the raised floor. Bill max(live, start); mark whether live won
     # so the proration walk skips the seat delta it would double-charge.
     billable_seats = max(live_seats, start_seats)
-    live_covers_increase = live_seats >= sub.seat_quantity
     included = price.included_seats if price else 0
     overage_seats = max(billable_seats - included, 0)
     seat_price = (price.overage_seat_amount_minor or 0) if price else 0
@@ -940,7 +938,11 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         # live-count charge subsumes it. Zero the seat component; the plan
         # component still prorates.
         seat_price = (new_p.overage_seat_amount_minor or 0) if new_p else 0
-        if live_covers_increase:
+        # R101[H22] (R82[M1] rework): decide per CHANGE, not via the current
+        # sub.seat_quantity — a later smaller change zeroed prorations of an
+        # earlier larger floor the live count never actually covered. The live
+        # count only covers a seat increase whose TARGET floor it reaches.
+        if live_seats >= (change.to_seats or 0):
             seat_price = 0
         preview = proration_preview(
             period_start=period.period_start,
@@ -1464,10 +1466,24 @@ async def issue_credit_note(
     was_open = invoice.status == "open"
     refund_amount = amount_minor
     if was_open:
-        debt_reduction = min(invoice.amount_due_minor, amount_minor)
+        # R101[C0]: amount_due_minor is set at finalize and never reduced by
+        # record_payment (which only compares paid_total against it) — the true
+        # outstanding debt is amount_due minus succeeded payments. Treating the
+        # full amount_due as debt let a note "reduce" debt that was already
+        # collected cash, silently keeping the collected portion.
+        paid_total = (
+            await db.execute(
+                select(func.coalesce(func.sum(PaymentRecord.amount_minor), 0)).where(
+                    PaymentRecord.invoice_id == invoice.id,
+                    PaymentRecord.status == "succeeded",
+                )
+            )
+        ).scalar_one()
+        outstanding = max(invoice.amount_due_minor - int(paid_total), 0)
+        debt_reduction = min(outstanding, amount_minor)
         refund_amount = amount_minor - debt_reduction
         invoice.amount_due_minor = invoice.amount_due_minor - debt_reduction
-        if invoice.amount_due_minor == 0:
+        if int(paid_total) >= invoice.amount_due_minor:
             await db.execute(
                 update(Invoice)
                 .where(Invoice.id == invoice.id, Invoice.status == "open")
@@ -1785,6 +1801,24 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
             .where(Subscription.id == sub.id, Subscription.status != "cancelled")
             .values(status="cancelled", cancelled_at=_now())
         )
+        # R101[H21]: same as the platform-initiated immediate cancel (R41[4]) —
+        # 'cancelled' subs fall out of scan_due_periods, so the open period
+        # holding the final partial plan fee + in-period usage would never be
+        # closed or billed. Truncate to now and enqueue the close.
+        open_period = (
+            await db.execute(
+                select(BillingPeriod).where(
+                    BillingPeriod.subscription_id == sub.id,
+                    BillingPeriod.status == "open",
+                )
+            )
+        ).scalar_one_or_none()
+        if open_period is not None:
+            now = _now()
+            if open_period.period_end > now:
+                open_period.period_end = now
+            await db.flush()
+            enqueue(db, "period.close_due", {"billing_period_id": open_period.id})
         await invalidate_cache(sub.tenant_id)
         return True
 
@@ -1820,6 +1854,18 @@ async def handle_subscription_push_provider(db: AsyncSession, payload: dict) -> 
             "cp_provider_change_push_no_price",
             subscription_id=sub.id,
             provider=sub.provider,
+        )
+        return
+    # R101[M38]: a deferred change can land on a plan whose Stripe price ref
+    # was never configured — pushing "" makes Stripe error on every retry
+    # until dead-letter while the provider keeps billing the old price. This
+    # is an ops-config gap, not a transient: log loudly and stop (the push is
+    # re-enqueued by the next change once the ref exists, or replayed).
+    if sub.provider == "stripe" and not new_p.external_price_ref:
+        log.error(
+            "cp_provider_change_push_no_external_ref",
+            subscription_id=sub.id,
+            plan_version_id=sub.plan_version_id,
         )
         return
     # R98[30]: let failures RAISE — the outbox retries with backoff and

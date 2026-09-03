@@ -148,6 +148,14 @@ async def ingest_adjustment(
         idempotency_key=idempotency_key,
         provider=original.provider,
         model_or_service=original.model_or_service,
+        # R101[H16]: carry ALL refs — rating's offering-fallback cost ladder
+        # resolves via workflow_run_id, so a reversal without it rated the
+        # delta at 0 instead of mirroring the original's cost basis.
+        user_id=original.user_id,
+        project_id=original.project_id,
+        workflow_run_id=original.workflow_run_id,
+        evaluation_task_id=original.evaluation_task_id,
+        provider_connection_id=original.provider_connection_id,
         adjustment_of_id=original.id,
         metadata={"reason": reason},
     )

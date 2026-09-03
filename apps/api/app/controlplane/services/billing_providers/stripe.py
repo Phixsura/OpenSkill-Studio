@@ -173,6 +173,11 @@ class StripeProvider(BillingProviderBase):
                 }
             ],
             proration_behavior="none",  # proration is computed platform-side
+            # R101[H17]: pushing current state must also clear a pending
+            # provider-side cancellation — reactivate flips the platform row
+            # to active, but without this the Stripe sub still cancelled at
+            # period end and the "reactivated" customer was silently dropped.
+            cancel_at_period_end=False,
         )
 
     async def cancel_subscription(self, external_ref: str, at_period_end: bool) -> None:

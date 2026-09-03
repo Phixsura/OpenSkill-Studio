@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -204,7 +205,15 @@ async def create_domain(
         created_by=actor.user_id,
     )
     db.add(domain)
-    await db.flush()
+    try:
+        # R101[L22]: two concurrent registrations of the same hostname both
+        # pass the existence pre-check (and the M2 stale-evict widened the
+        # window) — the loser died on the unique index as an unhandled 500.
+        # SAVEPOINT-isolate the insert and surface a clean 409.
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        raise AppError("DOMAIN_TAKEN", "This hostname is already registered", 409) from None
     await record_audit(
         db,
         actor=actor,

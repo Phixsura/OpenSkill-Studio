@@ -268,6 +268,19 @@ async def _expire_reservations(ctx: dict) -> None:
             log.info("cp_reservations_expired", count=n)
 
 
+async def _sweep_wedged_evals(ctx: dict) -> None:
+    # R101[H18]: tasks committed as PROCESSING before the LLM call are wedged
+    # forever if the process died mid-call — flip to FAILED + settle holds.
+    from app.core.database import AsyncSessionLocal
+    from app.services.evaluation import sweep_wedged_evaluations
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_wedged_evaluations(db)
+        await db.commit()
+        if n:
+            log.warning("cp_wedged_evals_swept", count=n)
+
+
 async def _expire_promos(ctx: dict) -> None:
     from app.controlplane.services.credits import expire_promotional
     from app.core.database import AsyncSessionLocal
@@ -330,6 +343,7 @@ def _cron_jobs() -> list:
         cron(_flush_api_counters, minute=5, name="cp_api_flush"),
         # P5 sweeps: reservation expiry every 30 min; promo expiry daily 02:37
         cron(_expire_reservations, minute={7, 37}, name="cp_reservation_expiry"),
+        cron(_sweep_wedged_evals, minute={13, 43}, name="cp_wedged_eval_sweep"),
         cron(_expire_promos, hour=2, minute=37, name="cp_promo_expiry"),
         # P6: billing period close scan hourly at :47
         cron(_scan_periods, minute=47, name="cp_period_scan"),

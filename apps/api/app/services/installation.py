@@ -538,6 +538,27 @@ class InstallationService:
                 raise AppError("ALREADY_FORKED", "Installation is already forked", 422)
             raise InstallationNotFoundError()
 
+        # R101[H20]: forking a PAID pack must NOT sever origin_pack_id — the
+        # R91[H1]/R101[H19] redistribution gates key on it, so fork→repackage
+        # was a two-click bypass of the resale block. Fork still frees the
+        # content from upgrade tracking (release/component refs cleared), but
+        # paid provenance is permanent.
+        from app.controlplane.models.marketplace import MarketplaceListing
+
+        paid_origin = (
+            await self.db.execute(
+                select(MarketplaceListing.id)
+                .where(
+                    MarketplaceListing.product_type == "skill_pack",
+                    MarketplaceListing.product_id == inst.pack_id,
+                    MarketplaceListing.status != "draft",
+                    MarketplaceListing.offer_type.in_(("paid", "partner_only")),
+                    MarketplaceListing.seller_org_id != org_id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
         # Remove origin tracking from all installed components
         for model in (Skill, Exercise, SkillCategory, ProjectTemplate):
             result = await self.db.execute(
@@ -547,7 +568,8 @@ class InstallationService:
                 )
             )
             for component in result.scalars():
-                component.origin_pack_id = None
+                if paid_origin is None:
+                    component.origin_pack_id = None
                 component.origin_release_id = None
                 component.origin_component_id = None
                 component.locally_modified = False

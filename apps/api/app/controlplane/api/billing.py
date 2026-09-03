@@ -639,9 +639,9 @@ async def close_due_periods(
     dependencies=[Depends(rate_limit(30, 60))],
 )
 async def list_webhook_events(
-    status: str | None = Query(
-        default=None, pattern=r"^(received|processed|failed|duplicate|ignored)$"
-    ),
+    # R101[L24]: "duplicate" is a replay RESPONSE flag, never a stored status
+    # — advertising it as a filter always returned an empty page.
+    status: str | None = Query(default=None, pattern=r"^(received|processed|failed|ignored)$"),
     page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=50, ge=1, le=200),
     user: User = Depends(require_platform_role(*_BILLING_ROLES)),

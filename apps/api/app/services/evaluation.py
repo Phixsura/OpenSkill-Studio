@@ -1301,3 +1301,55 @@ Please evaluate the submission against the rubric above."""
             )
         )
         await self.db.flush()
+
+
+async def sweep_wedged_evaluations(db: AsyncSession) -> int:
+    """R101[H18]: fail evaluations wedged in PROCESSING.
+
+    The R94[H5] commit-before-LLM pattern persists status=PROCESSING before
+    the provider call; a crash/restart mid-call leaves the task PROCESSING
+    forever with no retry path — and its credit reservation held. Any task
+    still PROCESSING well past the LLM timeout is dead (the inline executor
+    either finished or hit its own TimeoutError branch long ago). Flip to
+    FAILED (guarded, started_at-bounded) and settle the reservation with
+    actual (usually zero) spend.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import update as sa_update
+
+    cutoff = datetime.now(UTC) - timedelta(seconds=settings.eval_timeout_seconds * 3 + 60)
+    rows = (
+        (
+            await db.execute(
+                select(EvaluationTask).where(
+                    EvaluationTask.status == EvalStatus.PROCESSING,
+                    EvaluationTask.started_at < cutoff,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    n = 0
+    for task in rows:
+        result = await db.execute(
+            sa_update(EvaluationTask)
+            .where(
+                EvaluationTask.id == task.id,
+                EvaluationTask.status == EvalStatus.PROCESSING,
+                EvaluationTask.started_at < cutoff,
+            )
+            .values(
+                status=EvalStatus.FAILED,
+                error="Evaluation wedged in processing (worker crash?) — swept",
+                retries=EvaluationTask.retries + 1,
+            )
+        )
+        if not result.rowcount:
+            continue  # concurrent completion won
+        n += 1
+        log.warning("eval_wedged_swept", task_id=task.id, started_at=str(task.started_at))
+        svc = EvaluationService(db)
+        await svc._settle_eval_reservation(task)  # noqa: SLF001 — module-owned helper
+    return n

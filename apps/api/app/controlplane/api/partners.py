@@ -519,7 +519,21 @@ async def get_partner(
 ):
     await require_partner_member(db, partner_id, user)
     partner = await db.get(Partner, partner_id)
-    return DataResponse(data=_partner_response(partner))
+    # R101[H6]: the UI card summed a paginated page (max 50 entries) and
+    # missed 'approved' — a wrong money figure. Aggregate server-side over
+    # every not-yet-settled entry.
+    unsettled = (
+        await db.execute(
+            select(func.coalesce(func.sum(RevenueShareEntry.share_amount_minor), 0)).where(
+                RevenueShareEntry.beneficiary_type == "partner",
+                RevenueShareEntry.partner_id == partner_id,
+                RevenueShareEntry.status.in_(("accrued", "adjusted", "approved")),
+            )
+        )
+    ).scalar_one()
+    return DataResponse(
+        data={**_partner_response(partner), "unsettled_accruals_minor": int(unsettled)}
+    )
 
 
 @router.get("/partners/{partner_id}/tenants", dependencies=[Depends(rate_limit(30, 60))])
