@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -150,8 +150,15 @@ export default function ClientProjectPage() {
     }
   }, [router]);
 
+  // R123: onAuthError fires once per errored query (brief/submissions/history
+  // can all 401 together) — the FIRST call removes the guest JWT, so a second
+  // call misread the session as member-based and bounced a GUEST to /login.
+  // Latch the redirect so only the first classification wins.
+  const authRedirected = useRef(false);
   const onAuthError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 401) {
+      if (authRedirected.current) return true;
+      authRedirected.current = true;
       // R113[H3]: a MEMBER session (no guest JWT — the product access token
       // was used) must bounce to /login, not the access-code page: members
       // have no access code, so the old redirect stranded them in a loop.
