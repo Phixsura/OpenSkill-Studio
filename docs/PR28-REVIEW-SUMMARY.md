@@ -282,6 +282,43 @@ NaN/Infinity (R91-100-H13).
 
 ---
 
+### 2.10 R101–R112: the frontend/integration campaign
+
+After R1–R100 closed out the backend, a 12-dimension finder+verifier sweep
+targeted the **never-before-reviewed commercial frontend (~30 files), the
+FE/BE integration seams, and fix-of-fix in the newest backend code**: 166 raw
+claims, **165 confirmed by independent adversarial verification (1 refuted),
+89 distinct bugs after dedup — all fixed** across three commits.
+
+- **1 critical:** the R88[10] credit-note split ignored partial payments —
+  collected cash silently kept (fix-of-fix).
+- **Money display (frontend):** the platform dashboard hardcoded USD
+  everywhere — JPY rows rendered as `$` at 1/100 magnitude, MRR/Billable/GMV
+  cards showed only the platform-currency slice (the entire non-USD book
+  invisible), GMV was a cross-currency unconverted sum; budgets/credit-adjust
+  hardcoded `*100` (100× wrong for zero-decimal currencies) and budgets
+  hardcoded `currency: "USD"` (422 for every non-USD tenant).
+- **Whole features dead:** no UI path existed to start a subscription, to
+  install a pack from the registry (dead CTA link), to buy via checkout
+  (payment_method hardcoded "credit"), to use the portal member channel, or
+  to read/write portal comments (zero UI); partner_only listings were
+  invisible to the very tenants entitled to buy them.
+- **Stranded/false states:** a stable purchase idempotency key resumed a
+  REFUNDED purchase as fake success forever; failed provision-run retries
+  no-opped with a "started" toast; the impersonation 401 auto-refresh
+  silently swapped the read-only session for the operator's own privileged
+  token; logout kept the previous user's React Query cache.
+- **Backend fix-of-fix:** commit-before-LLM wedged crashed evals in
+  PROCESSING forever (new sweep cron); the H1 resale block missed
+  add_template and was bypassable via fork() severing origin_pack_id;
+  `subscription.deleted` webhooks never closed the final billing period;
+  MRR added yearly seat overage without /12.
+- **Systemic classes fixed with shared components:** ~10 list pages silently
+  truncated at the backend default page size (shared Pager); query errors
+  rendered as authoritative empty states (shared QueryError); filter inputs
+  fired per-keystroke against 30/60s rate limits (debounce); role-blind
+  rendering (useImpersonation/useTenantRole hooks gate mutation controls).
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
@@ -306,12 +343,15 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~230 confirmed defects fixed across 43 remediation commits** (R1–R100),
+- **~320 confirmed defects fixed across 46 remediation commits**: ~230 from
+  R1–R100 (backend) + 89 from R101–R112 (frontend/integration/fix-of-fix),
   on top of the 12-phase feature delivery.
-- 12 critical money-loss bugs found and fixed, including three that billed or
-  credited at 100×/wrong-currency scale and two that billed customers forever.
-- Every fix carries a regression test; silent-failure fixes are guard-proven;
-  each batch was committed with full per-finding traceability.
+- 13 critical money bugs found and fixed, including three that billed or
+  credited at 100×/wrong-currency scale, two that billed customers forever,
+  and one that silently kept collected cash on credit notes.
+- Every backend fix carries a regression test; silent-failure fixes are
+  guard-proven; frontend fixes verified by tsc/eslint/vitest plus both
+  browser E2E suites re-run green (60/60 + 42/42, zero 500s).
 - Full control-plane + product regression green; ruff clean.
 
 **Recommendation:** the PR is in a strong, well-verified state. Remaining
