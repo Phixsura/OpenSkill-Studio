@@ -388,7 +388,8 @@ try {
   const purchaseBtn = ppage.locator('button:has-text("Purchase license")');
   check("Purchase license button visible", (await purchaseBtn.count()) > 0);
   await purchaseBtn.first().click();
-  await ppage.waitForSelector("text=Pay with credit balance?", { timeout: 5000 });
+  // R101[L4/H13]: confirm step now shows the amount + a payment-method select
+  await ppage.waitForSelector('button:has-text("Confirm")', { timeout: 5000 });
   await ppage.click('button:has-text("Confirm")');
   await ppage.waitForSelector("text=Purchased — the pack is now licensed", { timeout: 15000 });
   check("purchase succeeds via UI (toast)", true);

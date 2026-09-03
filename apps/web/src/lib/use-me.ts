@@ -14,3 +14,12 @@ export function useMe() {
     staleTime: 60_000,
   });
 }
+
+/** R101[M27]: impersonation sessions are read-only server-side (#27 §6), but
+ * only the banner reflected that — every mutation button stayed enabled and
+ * failed with a confusing 403 on click. Pages gate their write controls on
+ * this hook instead. */
+export function useImpersonation(): boolean {
+  const { data } = useMe();
+  return Boolean(data?.data?.impersonation);
+}

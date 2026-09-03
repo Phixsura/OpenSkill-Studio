@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate, majorToMinor } from "@/lib/cp";
+import { useImpersonation } from "@/lib/use-me";
 
 interface PlatformTenantDetail {
   id: string;
@@ -37,6 +38,9 @@ interface TenantOrgSummary {
 export default function PlatformTenantDetailPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
   const queryClient = useQueryClient();
+  // R101[M27]: impersonation sessions are read-only server-side — disable the
+  // write controls instead of letting every click die with a 403 toast.
+  const impersonating = useImpersonation();
   const [suspendReason, setSuspendReason] = useState("");
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
@@ -55,6 +59,11 @@ export default function PlatformTenantDetailPage() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["platform-tenant", tenantId] });
     queryClient.invalidateQueries({ queryKey: ["platform-tenants"] });
+    // R101[L12]: the tenant-side views (overview banner, entitlements) render
+    // from differently-keyed queries — an admin flipping status then visiting
+    // the tenant pages saw the stale state until a hard reload.
+    queryClient.invalidateQueries({ queryKey: ["tenant", tenantId] });
+    queryClient.invalidateQueries({ queryKey: ["tenant-entitlements", tenantId] });
   };
 
   const suspendMutation = useMutation({
@@ -154,7 +163,8 @@ export default function PlatformTenantDetailPage() {
             <Button
               variant="destructive"
               onClick={() => suspendMutation.mutate()}
-              disabled={!suspendReason || suspendMutation.isPending}
+              disabled={!suspendReason || suspendMutation.isPending || impersonating}
+              title={impersonating ? "Read-only impersonation session" : undefined}
             >
               Suspend
             </Button>
@@ -162,7 +172,8 @@ export default function PlatformTenantDetailPage() {
         ) : (
           <Button
             onClick={() => reactivateMutation.mutate()}
-            disabled={reactivateMutation.isPending}
+            disabled={reactivateMutation.isPending || impersonating}
+            title={impersonating ? "Read-only impersonation session" : undefined}
           >
             Reactivate
           </Button>
@@ -188,7 +199,8 @@ export default function PlatformTenantDetailPage() {
           />
           <Button
             onClick={() => adjustMutation.mutate()}
-            disabled={!adjustAmount || !adjustReason || adjustMutation.isPending}
+            disabled={!adjustAmount || !adjustReason || adjustMutation.isPending || impersonating}
+            title={impersonating ? "Read-only impersonation session" : undefined}
           >
             Apply
           </Button>

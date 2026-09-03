@@ -131,6 +131,21 @@ export const STATUS_COLORS: Record<string, string> = {
   failed: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
   completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   running: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  // R101[L15]: statuses the backend actually emits but the map missed — they
+  // all fell through to neutral gray, hiding warning/error states in every
+  // badge (subscription, invoice, purchase, reservation, rated-usage).
+  cancel_at_period_end: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  uncollectible: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  pending: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  refunded: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  held: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  settled: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  released: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  expired: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  rated: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  invoiced: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  blocked: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  voided: "bg-gray-100 text-gray-500 line-through dark:bg-gray-800",
 };
 
 export function StatusBadgeClass(status: string): string {

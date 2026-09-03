@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Input } from "@/components/ui/input";
+import { Pager, QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth } from "@/lib/api";
 import { formatDate } from "@/lib/cp";
@@ -23,16 +24,32 @@ interface PlatformTenant {
 const STATUSES = ["", "trial", "active", "past_due", "suspended", "cancelled", "archived"];
 
 export default function PlatformTenantsPage() {
+  // R101[M20]: q fired a request per keystroke — debounce 400ms so typing a
+  // slug doesn't spray the backend (and burn the platform rate limit).
+  const [rawQ, setRawQ] = useState("");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
+  const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["platform-tenants", q, status],
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQ(rawQ);
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [rawQ]);
+
+  const { data, isLoading, isError, error } = useQuery({
+    // R101[M9]: page in key + sent to the API — the page silently truncated at
+    // the backend default page size with no way to see the rest of the fleet.
+    queryKey: ["platform-tenants", q, status, page],
     queryFn: () => {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(page), per_page: "50" });
       if (q) params.set("q", q);
       if (status) params.set("status", status);
-      return apiWithAuth<{ data: PlatformTenant[] }>(`/platform/tenants?${params.toString()}`);
+      return apiWithAuth<{ data: PlatformTenant[]; meta: { has_more: boolean } }>(
+        `/platform/tenants?${params.toString()}`,
+      );
     },
   });
   const tenants = data?.data ?? [];
@@ -43,13 +60,16 @@ export default function PlatformTenantsPage() {
         <Input
           className="max-w-xs"
           placeholder="Search name / slug / billing email"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+          value={rawQ}
+          onChange={(e) => setRawQ(e.target.value)}
         />
         <select
           className="rounded-md border bg-transparent px-3 py-2 text-sm"
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setPage(1);
+          }}
         >
           {STATUSES.map((s) => (
             <option key={s} value={s}>
@@ -60,7 +80,10 @@ export default function PlatformTenantsPage() {
       </div>
 
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
-      {!isLoading && (
+      {/* R101[M17]: query errors rendered as an empty table — an admin couldn't
+          tell "no tenants" from "the list endpoint is down". */}
+      {isError && <QueryError error={error} what="tenants" />}
+      {!isLoading && !isError && (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
             <thead className="border-b bg-[hsl(var(--secondary))] text-left">
@@ -96,6 +119,9 @@ export default function PlatformTenantsPage() {
             </tbody>
           </table>
         </div>
+      )}
+      {!isLoading && !isError && (
+        <Pager page={page} hasMore={data?.meta?.has_more ?? false} onPage={setPage} />
       )}
     </div>
   );

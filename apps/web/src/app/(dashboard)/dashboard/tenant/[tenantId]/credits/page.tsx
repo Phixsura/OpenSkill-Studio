@@ -1,8 +1,10 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { Pager, QueryError } from "@/components/cp-list";
 import { apiWithAuth } from "@/lib/api";
 import { formatDate, formatMinor } from "@/lib/cp";
 
@@ -26,14 +28,20 @@ interface LedgerEntry {
 
 export default function TenantCreditsPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
+  // R101[M31]: the ledger ignored pagination meta — anything past the backend
+  // default page size was silently unreachable.
+  const [page, setPage] = useState(1);
 
   const balancesQuery = useQuery({
     queryKey: ["tenant-credits", tenantId],
     queryFn: () => apiWithAuth<{ data: CreditBalance[] }>(`/tenants/${tenantId}/credits`),
   });
   const ledgerQuery = useQuery({
-    queryKey: ["tenant-credit-ledger", tenantId],
-    queryFn: () => apiWithAuth<{ data: LedgerEntry[] }>(`/tenants/${tenantId}/credits/ledger`),
+    queryKey: ["tenant-credit-ledger", tenantId, page],
+    queryFn: () =>
+      apiWithAuth<{ data: LedgerEntry[]; meta: { has_more: boolean } }>(
+        `/tenants/${tenantId}/credits/ledger?page=${page}&per_page=50`,
+      ),
   });
 
   const balances = balancesQuery.data?.data ?? [];
@@ -43,11 +51,15 @@ export default function TenantCreditsPage() {
     <div className="space-y-8">
       <section>
         <h2 className="mb-3 text-lg font-semibold">Balances</h2>
-        {balances.length === 0 ? (
+        {/* R101[M31]: a failed balances fetch rendered the "No credit balance"
+            empty state as if it were authoritative. */}
+        {balancesQuery.isError && <QueryError error={balancesQuery.error} what="credit balances" />}
+        {!balancesQuery.isLoading && !balancesQuery.isError && balances.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
             No credit balance yet. Credits are applied to invoices and can prepay usage.
           </p>
-        ) : (
+        )}
+        {balances.length > 0 && (
           <div className="grid gap-4 sm:grid-cols-3">
             {balances.map((b) => (
               <div key={b.currency} className="rounded-lg border p-4">
@@ -67,9 +79,12 @@ export default function TenantCreditsPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Ledger</h2>
-        {ledger.length === 0 ? (
+        {/* R101[M31]: same for the ledger — errors masqueraded as "No entries." */}
+        {ledgerQuery.isError && <QueryError error={ledgerQuery.error} what="credit ledger" />}
+        {!ledgerQuery.isLoading && !ledgerQuery.isError && ledger.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">No entries.</p>
-        ) : (
+        )}
+        {ledger.length > 0 && (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead className="border-b bg-[hsl(var(--secondary))] text-left">
@@ -110,6 +125,7 @@ export default function TenantCreditsPage() {
             </table>
           </div>
         )}
+        <Pager page={page} hasMore={ledgerQuery.data?.meta?.has_more ?? false} onPage={setPage} />
       </section>
     </div>
   );

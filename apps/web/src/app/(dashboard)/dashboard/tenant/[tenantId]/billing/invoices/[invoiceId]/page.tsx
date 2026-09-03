@@ -8,6 +8,9 @@ import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth } from "@/lib/api";
 import { formatDate, formatMinor, type InvoiceLine, type InvoiceSummary } from "@/lib/cp";
 
+// R101[L5]: interface must mirror _invoice_response — the backend never sends
+// "period" (rendered undefined dates) and DOES send tax_minor/paid_at, which
+// the page silently dropped from the totals.
 interface InvoiceDetail extends InvoiceSummary {
   lines: InvoiceLine[];
   payments: {
@@ -17,7 +20,8 @@ interface InvoiceDetail extends InvoiceSummary {
     status: string;
     received_at: string | null;
   }[];
-  period: { start: string; end: string } | null;
+  tax_minor: number;
+  paid_at: string | null;
 }
 
 export default function InvoiceDetailPage() {
@@ -54,9 +58,9 @@ export default function InvoiceDetailPage() {
               Issued {formatDate(invoice.issued_at)}
               {invoice.due_at ? ` · Due ${formatDate(invoice.due_at)}` : ""}
             </p>
-            {invoice.period && (
+            {invoice.paid_at && (
               <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                Period {formatDate(invoice.period.start)} – {formatDate(invoice.period.end)}
+                Paid {formatDate(invoice.paid_at)}
               </p>
             )}
           </div>
@@ -102,6 +106,12 @@ export default function InvoiceDetailPage() {
               <span className="font-mono">
                 −{formatMinor(Math.abs(invoice.credit_applied_minor), invoice.currency)}
               </span>
+            </div>
+          )}
+          {invoice.tax_minor !== 0 && (
+            <div className="flex justify-between">
+              <span className="text-[hsl(var(--muted-foreground))]">Tax</span>
+              <span className="font-mono">{formatMinor(invoice.tax_minor, invoice.currency)}</span>
             </div>
           )}
           <div className="flex justify-between border-t pt-1 font-semibold">

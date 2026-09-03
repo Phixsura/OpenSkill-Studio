@@ -3,8 +3,9 @@
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
+import { QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
-import { apiWithAuth } from "@/lib/api";
+import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate } from "@/lib/cp";
 
 interface AttributedTenant {
@@ -19,7 +20,7 @@ interface AttributedTenant {
 export default function PartnerTenantsPage() {
   const { partnerId } = useParams<{ partnerId: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["partner-tenants", partnerId],
     queryFn: () => apiWithAuth<{ data: AttributedTenant[] }>(`/partners/${partnerId}/tenants`),
   });
@@ -29,7 +30,18 @@ export default function PartnerTenantsPage() {
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Attributed tenants</h2>
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
-      {!isLoading && tenants.length === 0 && (
+      {/* R101[M29]: partner MEMBERs get 403 here — the old code rendered the
+          403 as "No attributed tenants. Provision one…", an authoritative-looking
+          empty state that sent non-admins on a wild goose chase. */}
+      {isError &&
+        (error instanceof ApiError && error.status === 403 ? (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            Attributed tenants are visible to partner admins only.
+          </p>
+        ) : (
+          <QueryError error={error} what="attributed tenants" />
+        ))}
+      {!isLoading && !isError && tenants.length === 0 && (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
           No attributed tenants. Provision one from the Provision tab.
         </p>

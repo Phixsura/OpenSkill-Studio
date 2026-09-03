@@ -1,8 +1,10 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { Pager, QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth } from "@/lib/api";
 import { formatDate, formatMinor } from "@/lib/cp";
@@ -32,14 +34,20 @@ interface Purchase {
 
 export default function TenantLicensesPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
+  // R101[L17]: purchase history ignored pagination meta — older purchases
+  // past the backend page size were unreachable.
+  const [purchasePage, setPurchasePage] = useState(1);
 
   const licensesQuery = useQuery({
     queryKey: ["tenant-licenses", tenantId],
     queryFn: () => apiWithAuth<{ data: LicenseGrant[] }>(`/tenants/${tenantId}/licenses`),
   });
   const purchasesQuery = useQuery({
-    queryKey: ["tenant-purchases", tenantId],
-    queryFn: () => apiWithAuth<{ data: Purchase[] }>(`/tenants/${tenantId}/purchases`),
+    queryKey: ["tenant-purchases", tenantId, purchasePage],
+    queryFn: () =>
+      apiWithAuth<{ data: Purchase[]; meta: { has_more: boolean } }>(
+        `/tenants/${tenantId}/purchases?page=${purchasePage}&per_page=50`,
+      ),
   });
 
   const licenses = licensesQuery.data?.data ?? [];
@@ -49,11 +57,15 @@ export default function TenantLicensesPage() {
     <div className="space-y-8">
       <section>
         <h2 className="mb-3 text-lg font-semibold">Licenses</h2>
-        {licenses.length === 0 ? (
+        {/* R101[L17]: a failed licenses fetch rendered the "No licenses" empty
+            state as if it were authoritative. */}
+        {licensesQuery.isError && <QueryError error={licensesQuery.error} what="licenses" />}
+        {!licensesQuery.isLoading && !licensesQuery.isError && licenses.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
             No licenses. Purchase paid packs from the registry to license them here.
           </p>
-        ) : (
+        )}
+        {licenses.length > 0 && (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead className="border-b bg-[hsl(var(--secondary))] text-left">
@@ -93,9 +105,12 @@ export default function TenantLicensesPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Purchase history</h2>
-        {purchases.length === 0 ? (
+        {/* R101[L17]: same for purchases — errors masqueraded as "No purchases." */}
+        {purchasesQuery.isError && <QueryError error={purchasesQuery.error} what="purchases" />}
+        {!purchasesQuery.isLoading && !purchasesQuery.isError && purchases.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">No purchases.</p>
-        ) : (
+        )}
+        {purchases.length > 0 && (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead className="border-b bg-[hsl(var(--secondary))] text-left">
@@ -125,6 +140,11 @@ export default function TenantLicensesPage() {
             </table>
           </div>
         )}
+        <Pager
+          page={purchasePage}
+          hasMore={purchasesQuery.data?.meta?.has_more ?? false}
+          onPage={setPurchasePage}
+        />
       </section>
     </div>
   );

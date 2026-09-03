@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Input } from "@/components/ui/input";
+import { QueryError } from "@/components/cp-list";
 import { apiWithAuth } from "@/lib/api";
 
 interface UsageEvent {
@@ -20,12 +21,29 @@ interface UsageEvent {
 }
 
 export default function PlatformUsagePage() {
+  // R101[M25]: all three free-text filters fired a request per keystroke —
+  // debounce 400ms so half-typed ULIDs/enum values don't spray 422s.
+  const [rawTenantId, setRawTenantId] = useState("");
+  const [rawUsageType, setRawUsageType] = useState("");
+  const [rawSource, setRawSource] = useState("");
   const [tenantId, setTenantId] = useState("");
   const [usageType, setUsageType] = useState("");
   const [source, setSource] = useState("");
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setTenantId(rawTenantId);
+      // R101[M13]: trailing whitespace from a pasted usage_type made the
+      // backend enum lookup 422 — trim before sending.
+      setUsageType(rawUsageType.trim());
+      setSource(rawSource.trim());
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [rawTenantId, rawUsageType, rawSource]);
+
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["platform-usage", tenantId, usageType, source, page],
     queryFn: () => {
       const params = new URLSearchParams({ page: String(page) });
@@ -45,34 +63,28 @@ export default function PlatformUsagePage() {
         <Input
           className="max-w-xs"
           placeholder="Tenant ID"
-          value={tenantId}
-          onChange={(e) => {
-            setTenantId(e.target.value);
-            setPage(1);
-          }}
+          value={rawTenantId}
+          onChange={(e) => setRawTenantId(e.target.value)}
         />
         <Input
           className="max-w-[14rem]"
           placeholder="Usage type"
-          value={usageType}
-          onChange={(e) => {
-            setUsageType(e.target.value);
-            setPage(1);
-          }}
+          value={rawUsageType}
+          onChange={(e) => setRawUsageType(e.target.value)}
         />
         <Input
           className="max-w-[12rem]"
           placeholder="Source"
-          value={source}
-          onChange={(e) => {
-            setSource(e.target.value);
-            setPage(1);
-          }}
+          value={rawSource}
+          onChange={(e) => setRawSource(e.target.value)}
         />
       </div>
 
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
-      {!isLoading && (
+      {/* R101[M35]: 422/429 from free-text filters were swallowed as an empty
+          table — surface the backend message so the admin can fix the filter. */}
+      {isError && <QueryError error={error} what="usage events" />}
+      {!isLoading && !isError && (
         <>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">

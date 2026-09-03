@@ -127,24 +127,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         Settings
       </NavLink>
-      {tenantMemberships[0] && (
+      {/* R101[L8]: only memberships[0] got a link — users on multiple tenants
+          or partners could never reach the others from the nav. One link per
+          membership (capped at 3), labelled by name so they're tellable apart. */}
+      {tenantMemberships.slice(0, 3).map((m) => (
         <NavLink
-          href={`/dashboard/tenant/${tenantMemberships[0].tenant_id}`}
-          active={pathname.startsWith("/dashboard/tenant")}
+          key={m.tenant_id}
+          href={`/dashboard/tenant/${m.tenant_id}`}
+          active={pathname.startsWith(`/dashboard/tenant/${m.tenant_id}`)}
           onClick={closeSidebar}
         >
-          Tenant
+          Tenant · {m.name}
         </NavLink>
-      )}
-      {partnerMemberships[0] && (
+      ))}
+      {partnerMemberships.slice(0, 3).map((m) => (
         <NavLink
-          href={`/partner/${partnerMemberships[0].partner_id}`}
-          active={pathname.startsWith("/partner")}
+          key={m.partner_id}
+          href={`/partner/${m.partner_id}`}
+          active={pathname.startsWith(`/partner/${m.partner_id}`)}
           onClick={closeSidebar}
         >
-          Partner
+          Partner · {m.name}
         </NavLink>
-      )}
+      ))}
       {hasPlatformRole && (
         <NavLink href="/platform" active={pathname.startsWith("/platform")} onClick={closeSidebar}>
           Platform

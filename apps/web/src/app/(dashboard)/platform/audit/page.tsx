@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Input } from "@/components/ui/input";
+import { QueryError } from "@/components/cp-list";
 import { apiWithAuth } from "@/lib/api";
 
 interface AuditEvent {
@@ -20,11 +21,24 @@ interface AuditEvent {
 }
 
 export default function PlatformAuditPage() {
+  // R101[M35]: both free-text filters fired a request per keystroke —
+  // debounce 400ms so half-typed IDs/actions don't spray requests.
+  const [rawTenantId, setRawTenantId] = useState("");
+  const [rawAction, setRawAction] = useState("");
   const [tenantId, setTenantId] = useState("");
   const [action, setAction] = useState("");
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setTenantId(rawTenantId);
+      setAction(rawAction);
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [rawTenantId, rawAction]);
+
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["platform-audit", tenantId, action, page],
     queryFn: () => {
       const params = new URLSearchParams({ page: String(page) });
@@ -43,25 +57,22 @@ export default function PlatformAuditPage() {
         <Input
           className="max-w-xs"
           placeholder="Tenant ID"
-          value={tenantId}
-          onChange={(e) => {
-            setTenantId(e.target.value);
-            setPage(1);
-          }}
+          value={rawTenantId}
+          onChange={(e) => setRawTenantId(e.target.value)}
         />
         <Input
           className="max-w-[16rem]"
           placeholder="Action (e.g. tenant.suspended)"
-          value={action}
-          onChange={(e) => {
-            setAction(e.target.value);
-            setPage(1);
-          }}
+          value={rawAction}
+          onChange={(e) => setRawAction(e.target.value)}
         />
       </div>
 
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
-      {!isLoading && (
+      {/* R101[M35]: query errors rendered as an empty table — an auditor
+          couldn't tell "no events" from "the audit endpoint is down". */}
+      {isError && <QueryError error={error} what="audit events" />}
+      {!isLoading && !isError && (
         <>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
@@ -79,12 +90,24 @@ export default function PlatformAuditPage() {
                   <tr key={e.id} className="border-b last:border-0">
                     <td className="px-4 py-2 text-xs">{new Date(e.created_at).toLocaleString()}</td>
                     <td className="px-4 py-2 font-mono text-xs">{e.action}</td>
+                    {/* R101[L16]: 10-char slices of a 26-char ULID collide and can't
+                        be pasted into other tools — show the full 26 chars and keep
+                        the complete id in a hover title. */}
                     <td className="px-4 py-2 text-xs">
                       {e.actor_type}
-                      {e.actor_user_id ? ` · ${e.actor_user_id.slice(0, 10)}…` : ""}
+                      {e.actor_user_id ? (
+                        <>
+                          {" · "}
+                          <span className="font-mono" title={e.actor_user_id}>
+                            {e.actor_user_id.slice(0, 26)}
+                          </span>
+                        </>
+                      ) : (
+                        ""
+                      )}
                     </td>
                     <td className="px-4 py-2 font-mono text-xs">
-                      {e.target_type}/{e.target_id.slice(0, 10)}…
+                      {e.target_type}/<span title={e.target_id}>{e.target_id.slice(0, 26)}</span>
                     </td>
                     <td className="px-4 py-2 text-xs text-[hsl(var(--muted-foreground))]">
                       {e.reason ?? (e.after ? JSON.stringify(e.after).slice(0, 80) : "—")}

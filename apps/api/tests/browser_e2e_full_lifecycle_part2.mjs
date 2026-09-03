@@ -194,11 +194,11 @@ try {
   await opage.waitForSelector("div.fixed select", { timeout: 5000 });
   check("change-plan dialog opens", true);
   await opage.selectOption("div.fixed select", { value: "growth" });
-  // preview fires on select — the <pre> block renders the proration JSON
-  await opage.waitForSelector("div.fixed pre", { timeout: 10000 });
-  const previewText = (await opage.textContent("div.fixed pre")) || "";
-  check("proration preview renders", previewText.length > 10, previewText.slice(0, 120));
-  check("preview carries proration numbers", /credit|charge|proration|minor/i.test(previewText), previewText.slice(0, 200));
+  // R101[L9]: preview now renders a human summary ("Net change: ...")
+  const previewEl = await opage.waitForSelector("text=Net change:", { timeout: 10000 });
+  const previewText = (await previewEl.evaluate((el) => el.parentElement?.textContent)) || "";
+  check("proration preview renders", previewText.includes("Net change:"), previewText.slice(0, 120));
+  check("preview carries proration numbers", /credit|charge|days/i.test(previewText), previewText.slice(0, 200));
   await opage.click('button:has-text("Confirm change")');
   await opage.waitForSelector("text=Plan change submitted", { timeout: 10000 });
   check("plan change submitted via UI", true);

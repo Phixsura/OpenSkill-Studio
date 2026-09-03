@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { QueryError } from "@/components/cp-list";
 import { apiWithAuth, ApiError } from "@/lib/api";
 
 interface Branding {
@@ -28,7 +29,7 @@ export default function TenantBrandingPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["tenant-branding", tenantId],
     queryFn: () => apiWithAuth<{ data: Branding }>(`/tenants/${tenantId}/branding`),
   });
@@ -60,6 +61,11 @@ export default function TenantBrandingPage() {
       ),
   });
 
+  // R101[M18]: a failed GET left "Loading..." on screen forever — form never
+  // populates, so the loading guard below never releases.
+  if (isError) {
+    return <QueryError error={error} what="branding" />;
+  }
   if (isLoading || !form) {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
   }

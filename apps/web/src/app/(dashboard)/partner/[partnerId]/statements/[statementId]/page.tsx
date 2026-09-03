@@ -14,7 +14,10 @@ interface Entry {
   id: string;
   source_type: string;
   source_id: string;
-  revenue_base_minor: number;
+  // R101[M10]: null for percentage_of_margin entries — the backend hides the
+  // base there (it's the platform's internal margin, never partner-visible).
+  revenue_base_minor: number | null;
+  rule_snapshot: { rule_type?: string } | null;
   share_amount_minor: number;
   currency: string;
   status: string;
@@ -52,11 +55,20 @@ export default function StatementDetailPage() {
 
   const downloadCsv = async () => {
     try {
+      // R101[M16]: read the token at click time, not render time — the raw
+      // fetch bypasses apiWithAuth's refresh logic, so a token captured
+      // earlier could already be rotated out by the time the user clicks.
       const token = useAuthStore.getState().accessToken;
       const res = await fetch(
         `${API_BASE}/api/v1/partners/${partnerId}/statements/${statementId}/export.csv`,
         { headers: token ? { Authorization: `Bearer ${token}` } : {} },
       );
+      // R101[M16]: 401 (null/expired token) previously surfaced as a generic
+      // "CSV export failed" with no hint that re-authenticating would fix it.
+      if (res.status === 401) {
+        toast.error("Session expired — reload and try again");
+        return;
+      }
       if (!res.ok) throw new ApiError(res.status, "EXPORT_FAILED", "Export failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -138,7 +150,14 @@ export default function StatementDetailPage() {
                     <StatusBadge status={e.status} />
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {formatMinor(e.revenue_base_minor, e.currency)}
+                    {/* R101[M10]: margin-rule entries have no partner-visible
+                        base (backend sends null / hides it) — "$0.00" read as
+                        "we earned share on zero revenue", which is wrong. */}
+                    {e.revenue_base_minor == null ||
+                    (e.revenue_base_minor === 0 &&
+                      e.rule_snapshot?.rule_type === "percentage_of_margin")
+                      ? "—"
+                      : formatMinor(e.revenue_base_minor, e.currency)}
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
                     {formatMinor(e.share_amount_minor, e.currency)}

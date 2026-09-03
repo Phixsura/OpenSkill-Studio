@@ -21,6 +21,10 @@ export function middleware(request: NextRequest) {
   // site-context (branding + theme) for it. The backend never trusts this
   // header — it is only a lookup key for the public site-context endpoint.
   const requestHeaders = new Headers(request.headers);
+  // R101[L14]: strip any client-supplied x-tenant-host first — on platform
+  // hosts the conditional set below never runs, so a spoofed inbound header
+  // would otherwise pass through and let a caller impersonate a custom domain.
+  requestHeaders.delete("x-tenant-host");
   if (host && !PLATFORM_HOSTS.has(host)) {
     requestHeaders.set("x-tenant-host", host);
   }

@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Pager, QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate, formatMinor, type InvoiceSummary, type Subscription } from "@/lib/cp";
+import { useImpersonation } from "@/lib/use-me";
 
 interface PlanCatalogEntry {
   key: string;
@@ -20,7 +22,13 @@ interface PlanCatalogEntry {
 export default function TenantBillingPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
   const queryClient = useQueryClient();
+  // R101[M27]: impersonation sessions are read-only server-side — disable the
+  // billing write controls instead of letting every click die with a 403 toast.
+  const impersonating = useImpersonation();
   const [changeOpen, setChangeOpen] = useState(false);
+  // R101[M11]: invoices ignored pagination meta — tenants with more than one
+  // backend page of invoices silently lost the older ones.
+  const [invoicePage, setInvoicePage] = useState(1);
 
   const subQuery = useQuery({
     queryKey: ["tenant-subscription", tenantId],
@@ -28,8 +36,11 @@ export default function TenantBillingPage() {
       apiWithAuth<{ data: Subscription | { status: "none" } }>(`/tenants/${tenantId}/subscription`),
   });
   const invoicesQuery = useQuery({
-    queryKey: ["tenant-invoices", tenantId],
-    queryFn: () => apiWithAuth<{ data: InvoiceSummary[] }>(`/tenants/${tenantId}/invoices`),
+    queryKey: ["tenant-invoices", tenantId, invoicePage],
+    queryFn: () =>
+      apiWithAuth<{ data: InvoiceSummary[]; meta: { has_more: boolean } }>(
+        `/tenants/${tenantId}/invoices?page=${invoicePage}&per_page=50`,
+      ),
   });
 
   const sub = subQuery.data?.data;
@@ -108,7 +119,10 @@ export default function TenantBillingPage() {
         {subQuery.isLoading && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
         )}
-        {!subQuery.isLoading && !hasSub && (
+        {/* R101[M24]: a failed subscription fetch rendered the "No active
+            subscription" funnel — offering a paying tenant a fresh subscribe. */}
+        {subQuery.isError && <QueryError error={subQuery.error} what="subscription" />}
+        {!subQuery.isLoading && !subQuery.isError && !hasSub && (
           <div className="space-y-3 rounded-lg border border-dashed p-8 text-center">
             <p className="text-sm text-[hsl(var(--muted-foreground))]">
               No active subscription — you are on community defaults.
@@ -128,7 +142,8 @@ export default function TenantBillingPage() {
               </select>
               <Button
                 onClick={() => subscribeMutation.mutate()}
-                disabled={!subscribePlan || subscribeMutation.isPending}
+                disabled={!subscribePlan || subscribeMutation.isPending || impersonating}
+                title={impersonating ? "Read-only impersonation session" : undefined}
               >
                 {subscribeMutation.isPending ? "Starting…" : "Subscribe"}
               </Button>
@@ -147,7 +162,8 @@ export default function TenantBillingPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => reactivateMutation.mutate()}
-                    disabled={reactivateMutation.isPending}
+                    disabled={reactivateMutation.isPending || impersonating}
+                    title={impersonating ? "Read-only impersonation session" : undefined}
                   >
                     Keep subscription
                   </Button>
@@ -173,7 +189,8 @@ export default function TenantBillingPage() {
                 variant="outline"
                 className="mt-4"
                 onClick={() => cancelMutation.mutate()}
-                disabled={cancelMutation.isPending}
+                disabled={cancelMutation.isPending || impersonating}
+                title={impersonating ? "Read-only impersonation session" : undefined}
               >
                 Cancel at period end
               </Button>
@@ -184,6 +201,7 @@ export default function TenantBillingPage() {
           <PlanChangeDialog
             tenantId={tenantId}
             currentPlan={hasSub && sub && "plan_key" in sub ? sub.plan_key : null}
+            currency={hasSub && sub && "currency" in sub ? sub.currency : null}
             onClose={() => setChangeOpen(false)}
           />
         )}
@@ -191,9 +209,13 @@ export default function TenantBillingPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Invoices</h2>
-        {invoices.length === 0 ? (
+        {/* R101[M11]: a failed invoices fetch rendered "No invoices yet." as an
+            authoritative empty state. */}
+        {invoicesQuery.isError && <QueryError error={invoicesQuery.error} what="invoices" />}
+        {!invoicesQuery.isLoading && !invoicesQuery.isError && invoices.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">No invoices yet.</p>
-        ) : (
+        )}
+        {invoices.length > 0 && (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead className="border-b bg-[hsl(var(--secondary))] text-left">
@@ -228,23 +250,51 @@ export default function TenantBillingPage() {
             </table>
           </div>
         )}
+        <Pager
+          page={invoicePage}
+          hasMore={invoicesQuery.data?.meta?.has_more ?? false}
+          onPage={setInvoicePage}
+        />
       </section>
     </div>
   );
 }
 
+// R101[L9]: human-readable breakdown line for the proration preview — only
+// the fields the backend is known to return, skipping any that are missing.
+function formatPreviewDetail(preview: Record<string, unknown>, currency: string): string {
+  const parts: string[] = [];
+  if (typeof preview.credit_unused_old_minor === "number") {
+    parts.push(`${formatMinor(preview.credit_unused_old_minor, currency)} credit for unused time`);
+  }
+  if (typeof preview.charge_new_remaining_minor === "number") {
+    parts.push(`${formatMinor(preview.charge_new_remaining_minor, currency)} for the new plan`);
+  }
+  if (typeof preview.days_left === "number") {
+    parts.push(`${preview.days_left} days left in period`);
+  }
+  return parts.join(" · ");
+}
+
 function PlanChangeDialog({
   tenantId,
   currentPlan,
+  currency,
   onClose,
 }: {
   tenantId: string;
   currentPlan: string | null;
+  currency: string | null;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  // R101[M27]: plan change is a write — read-only impersonation must not confirm it.
+  const impersonating = useImpersonation();
   const [planKey, setPlanKey] = useState<string>("");
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null);
+  // R101[M23]: rapid plan switching raced the previews — a slow response for
+  // plan A could land after plan B's and display A's numbers under B.
+  const previewPlanRef = useRef<string>("");
 
   const plansQuery = useQuery({
     queryKey: ["plan-catalog"],
@@ -258,8 +308,14 @@ function PlanChangeDialog({
         `/tenants/${tenantId}/subscription/change-preview`,
         { method: "POST", body: JSON.stringify({ plan_key: key }) },
       ),
-    onSuccess: (res) => setPreview(res.data),
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Preview failed"),
+    onSuccess: (res, key) => {
+      // R101[M23]: only accept the response for the plan still selected.
+      if (key === previewPlanRef.current) setPreview(res.data);
+    },
+    onError: (e, key) => {
+      if (key === previewPlanRef.current)
+        toast.error(e instanceof ApiError ? e.message : "Preview failed");
+    },
   });
 
   const changeMutation = useMutation({
@@ -287,6 +343,7 @@ function PlanChangeDialog({
           onChange={(e) => {
             setPlanKey(e.target.value);
             setPreview(null);
+            previewPlanRef.current = e.target.value;
             if (e.target.value) previewMutation.mutate(e.target.value);
           }}
         >
@@ -297,18 +354,33 @@ function PlanChangeDialog({
             </option>
           ))}
         </select>
-        {preview && (
-          <pre className="max-h-48 overflow-auto rounded-md bg-[hsl(var(--secondary))] p-3 text-xs">
-            {JSON.stringify(preview, null, 2)}
-          </pre>
-        )}
+        {/* R101[L9]: the proration preview dumped raw JSON minor units at the
+            user ("net_minor": 12345) — render a human summary when the known
+            fields are present, keep the <pre> as the fallback. */}
+        {preview &&
+          (typeof preview.net_minor === "number" && currency ? (
+            <div className="space-y-1 rounded-md bg-[hsl(var(--secondary))] p-3 text-sm">
+              <p className="font-medium">
+                Net change: {preview.net_minor >= 0 ? "+" : ""}
+                {formatMinor(preview.net_minor, currency)}
+              </p>
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                {formatPreviewDetail(preview, currency)}
+              </p>
+            </div>
+          ) : (
+            <pre className="max-h-48 overflow-auto rounded-md bg-[hsl(var(--secondary))] p-3 text-xs">
+              {JSON.stringify(preview, null, 2)}
+            </pre>
+          ))}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button
             onClick={() => changeMutation.mutate()}
-            disabled={!planKey || changeMutation.isPending}
+            disabled={!planKey || changeMutation.isPending || impersonating}
+            title={impersonating ? "Read-only impersonation session" : undefined}
           >
             Confirm change
           </Button>

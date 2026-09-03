@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate } from "@/lib/cp";
+import { useImpersonation } from "@/lib/use-me";
 
 interface TenantMember {
   id: string;
@@ -20,6 +21,9 @@ interface TenantMember {
 export default function TenantMembersPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
   const queryClient = useQueryClient();
+  // R101[M27]: impersonation sessions are read-only server-side — disable the
+  // membership write controls instead of letting every click die with a 403.
+  const impersonating = useImpersonation();
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState("billing_admin");
 
@@ -76,7 +80,11 @@ export default function TenantMembersPage() {
             <option value="billing_admin">billing_admin</option>
             <option value="owner">owner</option>
           </select>
-          <Button onClick={() => addMutation.mutate()} disabled={!userId || addMutation.isPending}>
+          <Button
+            onClick={() => addMutation.mutate()}
+            disabled={!userId || addMutation.isPending || impersonating}
+            title={impersonating ? "Read-only impersonation session" : undefined}
+          >
             Add
           </Button>
         </div>
@@ -105,7 +113,8 @@ export default function TenantMembersPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => removeMutation.mutate(m.id)}
-                      disabled={removeMutation.isPending}
+                      disabled={removeMutation.isPending || impersonating}
+                      title={impersonating ? "Read-only impersonation session" : undefined}
                     >
                       Remove
                     </Button>

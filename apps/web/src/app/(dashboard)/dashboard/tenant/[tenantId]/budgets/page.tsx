@@ -103,11 +103,19 @@ export default function TenantBudgetsPage() {
               <option value="user">User</option>
             </select>
             {scopeType !== "tenant" && (
-              <Input
-                placeholder={`${scopeType} ID`}
-                value={scopeId}
-                onChange={(e) => setScopeId(e.target.value)}
-              />
+              <div>
+                <Input
+                  placeholder={`${scopeType} ID`}
+                  value={scopeId}
+                  onChange={(e) => setScopeId(e.target.value)}
+                />
+                {/* R101[M36]: the backend can't cross-validate scope_id here, so a
+                    typo silently creates a policy that never matches any spend. */}
+                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                  Must be an existing {scopeType} ID — a wrong ID creates a policy that never
+                  matches.
+                </p>
+              </div>
             )}
             <select
               className="rounded-md border bg-transparent px-3 py-2 text-sm"

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/status-badge";
+import { Pager, QueryError } from "@/components/cp-list";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate } from "@/lib/cp";
 
@@ -36,10 +37,16 @@ export default function PlatformPartnersPage() {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [partnerType, setPartnerType] = useState("reseller");
+  // R101[M12]: page truncated at the backend default page size with no pager,
+  // and rendered errors as a silent empty table.
+  const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["platform-partners"],
-    queryFn: () => apiWithAuth<{ data: Partner[] }>("/platform/partners"),
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["platform-partners", page],
+    queryFn: () =>
+      apiWithAuth<{ data: Partner[]; meta: { has_more: boolean } }>(
+        `/platform/partners?page=${page}&per_page=50`,
+      ),
   });
   const partners = data?.data ?? [];
 
@@ -101,7 +108,8 @@ export default function PlatformPartnersPage() {
       )}
 
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
-      {!isLoading && (
+      {isError && <QueryError error={error} what="partners" />}
+      {!isLoading && !isError && (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
             <thead className="border-b bg-[hsl(var(--secondary))] text-left">
@@ -134,6 +142,7 @@ export default function PlatformPartnersPage() {
           </table>
         </div>
       )}
+      <Pager page={page} hasMore={data?.meta?.has_more ?? false} onPage={setPage} />
     </div>
   );
 }

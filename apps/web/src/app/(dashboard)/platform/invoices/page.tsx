@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Input } from "@/components/ui/input";
+import { Pager, QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth } from "@/lib/api";
 import { formatDate, formatMinor } from "@/lib/cp";
@@ -59,13 +60,18 @@ interface Trace {
 export default function PlatformInvoicesPage() {
   const [tenantId, setTenantId] = useState("");
   const [traceLineId, setTraceLineId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["platform-invoices", tenantId],
+  const { data, isLoading, isError, error } = useQuery({
+    // R101[M12]: page in key + sent to the API — the list truncated at the
+    // backend default page size, hiding older invoices with no pager.
+    queryKey: ["platform-invoices", tenantId, page],
     queryFn: () => {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(page), per_page: "50" });
       if (tenantId) params.set("tenant_id", tenantId);
-      return apiWithAuth<{ data: OpsInvoice[] }>(`/platform/invoices?${params.toString()}`);
+      return apiWithAuth<{ data: OpsInvoice[]; meta: { has_more: boolean } }>(
+        `/platform/invoices?${params.toString()}`,
+      );
     },
   });
   const invoices = data?.data ?? [];
@@ -76,9 +82,15 @@ export default function PlatformInvoicesPage() {
         className="max-w-xs"
         placeholder="Filter by tenant ID"
         value={tenantId}
-        onChange={(e) => setTenantId(e.target.value)}
+        onChange={(e) => {
+          setTenantId(e.target.value);
+          setPage(1);
+        }}
       />
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
+      {/* R101[M12]: query errors rendered as an empty list — an operator
+          couldn't tell "no invoices" from "the invoices endpoint is down". */}
+      {isError && <QueryError error={error} what="invoices" />}
       <div className="space-y-3">
         {invoices.map((inv) => (
           <details key={inv.id} className="rounded-lg border p-4">
@@ -125,6 +137,9 @@ export default function PlatformInvoicesPage() {
           </details>
         ))}
       </div>
+      {!isLoading && !isError && (
+        <Pager page={page} hasMore={data?.meta?.has_more ?? false} onPage={setPage} />
+      )}
 
       {traceLineId && <TraceDrawer lineId={traceLineId} onClose={() => setTraceLineId(null)} />}
     </div>
@@ -160,6 +175,13 @@ function TraceDrawer({ lineId, onClose }: { lineId: string; onClose: () => void 
                 Invoice {trace.invoice?.number ?? trace.invoice?.id} · {trace.counts.rated_rows}{" "}
                 rated rows
               </p>
+              {/* R101[L7]: the trace endpoint caps rated_usage — without this note a
+                  large line looked fully explained when most rows were missing. */}
+              {trace.counts.rated_rows > trace.rated_usage.length && (
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                  showing first {trace.rated_usage.length} of {trace.counts.rated_rows} rated rows
+                </p>
+              )}
             </div>
             {trace.rated_usage.map((r) => (
               <details key={r.id} className="rounded-md border p-3" open>
@@ -167,6 +189,9 @@ function TraceDrawer({ lineId, onClose }: { lineId: string; onClose: () => void 
                   <span className="font-mono text-xs">{r.usage_type}</span> · qty {r.quantity} ·
                   billable {formatMinor(r.billable_amount_minor, r.billable_currency)} · cost{" "}
                   {formatMinor(r.internal_cost_minor, r.internal_cost_currency)} · margin{" "}
+                  {/* R101[L7]: hardcoded USD is CORRECT here — margin_minor is
+                      normalized to the platform currency (USD) by the rating
+                      pipeline regardless of billable/cost currencies. */}
                   {r.margin_minor != null ? formatMinor(r.margin_minor, "USD") : "—"}
                 </summary>
                 <div className="mt-2 space-y-2">

@@ -52,10 +52,12 @@ export default function TenantDomainsPage() {
   });
 
   const verifyMutation = useMutation({
+    // R101[M34]: trim before sending — pasted tokens routinely carry stray
+    // whitespace, and each doomed attempt burns the 6-per-hour verify budget.
     mutationFn: (d: Domain) =>
       apiWithAuth(`/tenants/${tenantId}/domains/${d.id}/verify`, {
         method: "POST",
-        body: JSON.stringify({ token: verifyTokens[d.id] ?? "" }),
+        body: JSON.stringify({ token: (verifyTokens[d.id] ?? "").trim() }),
       }),
     onSuccess: () => {
       toast.success("Domain verified");
@@ -72,6 +74,19 @@ export default function TenantDomainsPage() {
       invalidate();
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Action failed"),
+  });
+
+  // R101[M21]: with the token shown only once, a lost token left the domain
+  // stuck in pending_verification forever — the DELETE route existed but was
+  // unreachable, so there was no escape hatch to re-add the domain.
+  const removeMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth(`/tenants/${tenantId}/domains/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Domain removed");
+      invalidate();
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Remove failed"),
   });
 
   return (
@@ -101,6 +116,12 @@ export default function TenantDomainsPage() {
             </p>
             <p className="break-all font-mono text-xs">
               {newDomain.verification_record} TXT &quot;{newDomain.verification_token}&quot;
+            </p>
+            {/* R101[M21]: the token lives only in this component's state — a
+                refresh loses it with no recovery path other than re-adding. */}
+            <p className="text-xs text-[hsl(var(--muted-foreground))]">
+              Copy it now — it is shown only once. If you lose it, disable this domain and add it
+              again.
             </p>
           </div>
         )}
@@ -139,7 +160,12 @@ export default function TenantDomainsPage() {
                         size="sm"
                         variant="outline"
                         onClick={() => verifyMutation.mutate(d)}
-                        disabled={verifyMutation.isPending}
+                        // R101[M34]: empty/garbage submits burned the
+                        // 6-per-hour verify rate limit — tokens are far longer
+                        // than 8 chars, so gate obviously-invalid input here.
+                        disabled={
+                          verifyMutation.isPending || (verifyTokens[d.id] ?? "").trim().length < 8
+                        }
                       >
                         Verify
                       </Button>
@@ -162,6 +188,19 @@ export default function TenantDomainsPage() {
                       disabled={actionMutation.isPending}
                     >
                       Disable
+                    </Button>
+                  )}
+                  {/* R101[M21]: escape hatch for a stuck pending domain — the
+                      one-time token cannot be re-shown, so remove + re-add is
+                      the only recovery. */}
+                  {d.status !== "active" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => removeMutation.mutate(d.id)}
+                      disabled={removeMutation.isPending}
+                    >
+                      Remove
                     </Button>
                   )}
                 </div>
