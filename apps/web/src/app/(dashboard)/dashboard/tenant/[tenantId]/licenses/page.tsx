@@ -112,19 +112,16 @@ export default function TenantLicensesPage() {
                     </td>
                     <td className="px-4 py-2">{formatDate(g.starts_at)}</td>
                     <td className="px-4 py-2 text-right">
-                      {g.product_type === "learning_path" &&
-                        g.status === "active" &&
-                        g.listing_id &&
-                        g.org_id && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => installPath.mutate(g)}
-                            disabled={installPath.isPending}
-                          >
-                            Install
-                          </Button>
-                        )}
+                      {g.product_type === "learning_path" && g.status === "active" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => installPath.mutate(g)}
+                          disabled={installPath.isPending}
+                        >
+                          Install
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))}

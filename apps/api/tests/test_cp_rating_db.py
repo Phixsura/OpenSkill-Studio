@@ -793,6 +793,18 @@ async def test_fx_unblock_targets_created_pair(db):
     (no pair filter/order/continuation) — the rows the new rate would fix
     could be starved forever behind unfixable ones. The handler now filters
     on the recorded fx_gap of the created pair and pages through all of it."""
+    # R123: the fx.rate_created handler now commits per page (M13) — a prior
+    # run's HUF→CZK rate survives in the dev DB and would make the "blocked"
+    # setup rate cleanly. Clear the pair first (test owns these currencies).
+    from sqlalchemy import text as _text
+
+    await db.execute(
+        _text(
+            "DELETE FROM cp_fx_rates WHERE (base_currency, quote_currency) "
+            "IN (('HUF','CZK'), ('CZK','HUF'), ('PLN','CZK'), ('CZK','PLN'))"
+        )
+    )
+    await db.flush()
     user = await _mk_user(db)
     # Tenant billed in CZK; two policies price in HUF and PLN → two gap kinds
     tenant = await _mk_tenant(db, user, currency="CZK")

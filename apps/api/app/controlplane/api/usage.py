@@ -127,13 +127,49 @@ async def ingest_usage(
     # already-CLOSED billing period (never invoiced) and, worse, zero-out
     # included_quota_then_overage pricing — the quota accumulator counts
     # prior usage by occurred_at, so backdating an event before the period's
-    # existing usage made every real event look under-quota. Bound manual
-    # ingestion to the tenant's currently-open billing window (30d floor for
-    # tenants with no subscription).
-    if body.occurred_at < datetime.now(UTC) - timedelta(days=30):
+    # existing usage made every real event look under-quota.
+    # R123[M15/L9] (H2 rework): the flat now()-30d floor neither closed the
+    # exploit (last month's unspent quota stays reachable for the first ~29
+    # days of a month) nor allowed legit backfill inside a long overdue open
+    # period. The correct window IS the open billing period when one exists:
+    # rating quotas and invoicing both key off it; anything older belongs to
+    # a closed (already invoiced) period. Fallback for period-less tenants:
+    # current tenant-tz calendar month (same window rating would use).
+    from app.controlplane.models.billing import BillingPeriod
+
+    # The true invariant: never backfill into an already-CLOSED (invoiced)
+    # window. close_period bills every rated row with occurred_at before its
+    # period_end, so pre-subscription usage lands on the first invoice fine —
+    # the boundary is the last closed period's end, not the open start.
+    closed_end = (
+        await db.execute(
+            select(BillingPeriod.period_end)
+            .where(
+                BillingPeriod.tenant_id == tenant.id,
+                BillingPeriod.status.in_(("closed", "invoiced")),
+            )
+            .order_by(BillingPeriod.period_end.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if closed_end is None:
+        # No invoiced history: quota parking is only exploitable across
+        # calendar months (the included-quota accumulator windows per tenant-tz
+        # month) — floor at the current month start.
+        from zoneinfo import ZoneInfo
+
+        try:
+            tz = ZoneInfo(tenant.timezone)
+        except Exception:  # noqa: BLE001
+            tz = UTC
+        local_now = datetime.now(UTC).astimezone(tz)
+        closed_end = local_now.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        ).astimezone(UTC)
+    if body.occurred_at < closed_end:
         raise AppError(
             "INVALID_QUANTITY",
-            "occurred_at is too far in the past (max 30 days)",
+            "occurred_at falls inside an already-invoiced billing window",
             422,
         )
     event = await metering.emit_usage(

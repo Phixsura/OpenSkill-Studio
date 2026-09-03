@@ -207,7 +207,35 @@ async def start_subscription(
         from app.config import settings
 
         if settings.stripe_secret_key:
-            body.provider = "stripe"
+            # R123[L10]: only route to Stripe when the target plan price
+            # actually has a Stripe price ref — otherwise the checkout dies
+            # on PLAN_NOT_AVAILABLE deep in session creation. In non-prod,
+            # fall back to mock (dev keeps working while refs are unset).
+            from app.controlplane.models.plan import PlanPrice, PlanVersion, ProductPlan
+
+            has_ref = (
+                await db.execute(
+                    select(PlanPrice.id)
+                    .join(PlanVersion, PlanVersion.id == PlanPrice.plan_version_id)
+                    .join(ProductPlan, ProductPlan.id == PlanVersion.plan_id)
+                    .where(
+                        ProductPlan.key == body.plan_key,
+                        PlanVersion.status == "active",
+                        PlanPrice.currency == tenant.currency,
+                        PlanPrice.interval == body.interval,
+                        PlanPrice.external_price_ref.isnot(None),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if has_ref is not None:
+                body.provider = "stripe"
+            elif settings.app_env == "production":
+                raise AppError(
+                    "BILLING_PROVIDER_UNCONFIGURED",
+                    "This plan is not yet available for online checkout; contact support",
+                    409,
+                )
         elif settings.app_env == "production":
             raise AppError(
                 "BILLING_PROVIDER_UNCONFIGURED",

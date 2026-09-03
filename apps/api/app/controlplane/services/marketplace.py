@@ -291,6 +291,13 @@ async def create_purchase(
     # still pending (double-click, checkout retry), each independently payable.
     # A pending purchase for the same (listing, buyer tenant) is returned
     # as-is: the buyer resumes it instead of opening a parallel charge.
+    # R123[H8]: resume only a SAME-payment-method pending purchase, and lock
+    # it — resuming a pending CHECKOUT purchase into the credit branch raced
+    # the Stripe webhook's pending→paid flip: the webhook collected the card
+    # while the endpoint debited credits against the same purchase (double
+    # charge, no reversal). FOR UPDATE serializes against the webhook; the
+    # method filter stops cross-method resumes entirely (a buyer switching
+    # methods gets a fresh purchase; the stale pending one expires unpaid).
     pending = (
         await db.execute(
             select(MarketplacePurchase)
@@ -298,9 +305,11 @@ async def create_purchase(
                 MarketplacePurchase.listing_id == listing.id,
                 MarketplacePurchase.buyer_tenant_id == buyer_tenant.id,
                 MarketplacePurchase.status == "pending",
+                MarketplacePurchase.payment_method == payment_method,
             )
             .order_by(MarketplacePurchase.created_at.desc())
             .limit(1)
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if pending is not None:
@@ -831,6 +840,14 @@ async def manual_grant(
     tenant = await db.get(TenantAccount, tenant_id)
     if tenant is None:
         raise AppError("TENANT_NOT_FOUND", "Tenant not found", 404)
+    # R123[L7]: an org_id outside the tenant produced a grant the install gate
+    # can never match (org.tenant_id != grant.tenant_id) — silently inert.
+    if org_id is not None:
+        from app.models.organization import Organization as _Org
+
+        org_row = await db.get(_Org, org_id)
+        if org_row is None or org_row.tenant_id != tenant_id:
+            raise AppError("LISTING_INVALID", "org_id does not belong to the target tenant", 422)
     grant = LicenseGrant(
         product_type=product_type,
         product_id=product_id,

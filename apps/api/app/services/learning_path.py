@@ -213,7 +213,7 @@ class LearningPathService:
     # ── Marketplace install (ADR-014 §8.5) ──
 
     async def install_from_listing(
-        self, org_id: str, listing_id: str, user_id: str
+        self, org_id: str, listing_id: str | None, user_id: str, product_id: str | None = None
     ) -> LearningPath:
         """Cross-org copy of a purchased learning path (R49[36]).
 
@@ -230,40 +230,77 @@ class LearningPathService:
         org = await self.db.get(Organization, org_id)
         if org is None:
             raise AppError("ORG_NOT_FOUND", "Organization not found", 404)
-        listing = await self.db.get(MarketplaceListing, listing_id)
-        if listing is None or listing.product_type != "learning_path":
-            raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
-        # R113[M0]: create_purchase requires an ACTIVE listing but nothing
-        # gated this install surface — draft/delisted/suspended listings
-        # stayed installable by id. Uniform 404 (anti-enumeration: same code
-        # as missing) rather than revealing an inactive listing exists.
-        if listing.status != "active":
-            raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+        # R123[H1]: manual license grants carry no listing_id — resolve the
+        # listing FROM the product when the caller only has product_id, so
+        # manually-granted paths are redeemable. A product with no listing at
+        # all still installs when the license gate passes (manual grant on an
+        # unlisted path).
+        listing = None
+        if listing_id is not None:
+            listing = await self.db.get(MarketplaceListing, listing_id)
+            if listing is None or listing.product_type != "learning_path":
+                raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+        else:
+            if product_id is None:
+                raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+            listing = (
+                await self.db.execute(
+                    select(MarketplaceListing)
+                    .where(
+                        MarketplaceListing.product_type == "learning_path",
+                        MarketplaceListing.product_id == product_id,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        source_product_id = listing.product_id if listing is not None else product_id
+        assert source_product_id is not None  # by the request model's one-of rule
 
         # R113[M1]: clients retry POST (double-click, network replay) and
         # every call minted a full duplicate copy of the path + items.
         # origin_listing_id records provenance (R113[H0]) — reuse it as the
         # idempotency key: one live installed copy per (org, listing). An
         # ARCHIVED copy (buyer deleted it) doesn't block a fresh install.
-        prior = (
-            await self.db.execute(
-                select(LearningPath)
-                .where(
-                    LearningPath.org_id == org_id,
-                    LearningPath.origin_listing_id == listing.id,
-                    LearningPath.status != ContentStatus.ARCHIVED,
+        if listing is not None:
+            prior = (
+                await self.db.execute(
+                    select(LearningPath)
+                    .where(
+                        LearningPath.org_id == org_id,
+                        LearningPath.origin_listing_id == listing.id,
+                        LearningPath.status != ContentStatus.ARCHIVED,
+                    )
+                    .limit(1)
                 )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if prior is not None:
-            return prior
+            ).scalar_one_or_none()
+            if prior is not None:
+                return prior
 
         # The license gate (covering grant / included plan / own product);
         # uniform 404 for private listings, LICENSE_REQUIRED 403 otherwise.
-        await cp_facade.check_install_license(self.db, "learning_path", listing.product_id, org)
+        # This runs BEFORE the active-listing check (R123[H5], reworking
+        # R113[M0]): a buyer holding a LIVE grant must stay able to redeem it
+        # after the seller delists/suspends — §8.4 revocation semantics say
+        # delisting blocks NEW purchases, never already-paid licenses. The
+        # gate raising (no grant) falls through to the uniform 404 below for
+        # inactive listings (anti-enumeration preserved for non-licensees).
+        # The gate itself covers every non-draft listing (R44[16]: delisting
+        # means "stop selling", never "give it away") — so a passing gate on
+        # an inactive listing can only mean a real covering grant / own
+        # product, and a failing gate maps to the uniform 404 to preserve
+        # anti-enumeration for non-licensees (R113[M0]).
+        try:
+            await cp_facade.check_install_license(self.db, "learning_path", source_product_id, org)
+        except AppError:
+            if listing is not None and listing.status != "active":
+                raise AppError("LISTING_NOT_FOUND", "Listing not found", 404) from None
+            raise
+        # Draft listings were never purchasable and carry no grants — the
+        # gate treats draft as no-listing (free pass), so keep the hard 404.
+        if listing is not None and listing.status == "draft":
+            raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
 
-        source = await self.db.get(LearningPath, listing.product_id)
+        source = await self.db.get(LearningPath, source_product_id)
         if source is None or source.status != ContentStatus.PUBLISHED:
             raise AppError("PATH_NOT_AVAILABLE", "Learning path is not available", 404)
 
@@ -303,11 +340,33 @@ class LearningPathService:
             estimated_minutes=source.estimated_minutes,
             # R113[H0]: provenance — create_listing refuses to sell a copy
             # installed from someone else's paid listing (H1 class for paths).
-            origin_listing_id=listing.id,
+            origin_listing_id=listing.id if listing is not None else None,
             created_by=user_id,
         )
-        self.db.add(copy)
-        await self.db.flush()
+        # R123[L6/L14]: the M1 idempotency pre-check is SELECT-only — two
+        # concurrent installs both pass it. The cp17 partial unique index
+        # (org_id, origin_listing_id) makes the loser fail here; return the
+        # winner's copy instead of a 500.
+        try:
+            async with self.db.begin_nested():
+                self.db.add(copy)
+                await self.db.flush()
+        except IntegrityError:
+            if listing is not None:
+                winner = (
+                    await self.db.execute(
+                        select(LearningPath)
+                        .where(
+                            LearningPath.org_id == org_id,
+                            LearningPath.origin_listing_id == listing.id,
+                            LearningPath.status != ContentStatus.ARCHIVED,
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if winner is not None:
+                    return winner
+            raise
         # R113[M2]: skill/project items carry no section_title (the CHECK
         # constraint only demands the FK), so degraded copies collapsed to
         # opaque "[skill]"/"[project]" headings — the buyer couldn't tell

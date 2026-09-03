@@ -740,6 +740,13 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
         from app.core.storage import get_s3_client
 
         file_key = f"exports/{tenant_id}/{export.id}.json"
+        # R123[L8]: persist the key BEFORE the upload — a crash between put
+        # and the status commit previously left an unreferenced PII bundle in
+        # the bucket (no row pointed at it, nothing could ever clean it).
+        # The row is still status='pending'; only file_key lands early so the
+        # stale-export sweeper can locate the object.
+        export.file_key = file_key
+        await db.commit()
         async for client in get_s3_client():
             # R65[23]: dedicated PRIVATE bucket — the shared s3_bucket also
             # serves portfolio covers via unsigned direct URLs, so a guessable

@@ -1,6 +1,8 @@
 """Tenant-facing endpoints: my tenants, detail, members, audit subset,
 org-under-tenant creation (ADR-014 §1.8)."""
 
+from datetime import UTC, datetime, timedelta
+
 import structlog
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
@@ -96,6 +98,34 @@ async def update_tenant(
     for field in ("name", "timezone", "currency"):
         if field in updates and updates[field] is None:
             raise AppError("VALIDATION_ERROR", f"{field} cannot be null", 422)
+    # R123[M8]: timezone anchors the included-quota month window (rating) and
+    # budget periods — a mid-month flip between extreme zones (UTC+14→UTC-12)
+    # moves month_start by up to 26h, resetting quota accumulation so already-
+    # counted usage re-rates as under-quota. Rate-limit changes: once per 30
+    # days (uses the audit trail as the change log; platform admins can always
+    # override server-side data directly).
+    if "timezone" in updates and updates["timezone"] != tenant.timezone:
+        from app.controlplane.models.audit import CommercialAuditEvent
+
+        recent_tz_change = (
+            await db.execute(
+                select(CommercialAuditEvent.id)
+                .where(
+                    CommercialAuditEvent.tenant_id == tenant_id,
+                    CommercialAuditEvent.action == "tenant.updated",
+                    CommercialAuditEvent.created_at > datetime.now(UTC) - timedelta(days=30),
+                    CommercialAuditEvent.after.has_key("timezone"),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if recent_tz_change is not None:
+            raise AppError(
+                "VALIDATION_ERROR",
+                "Timezone can be changed at most once every 30 days "
+                "(it anchors billing and quota periods)",
+                422,
+            )
     # R60[46]: capture pre-change values — country is a rev-share rule
     # dimension and timezone shifts budget/rating period boundaries; a silent
     # flip must be reconstructible from the audit trail.

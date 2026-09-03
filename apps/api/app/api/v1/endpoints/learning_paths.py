@@ -67,7 +67,9 @@ async def install_path_from_listing(
     tenant = await cp_facade.get_tenant_for_org(db, org_id)
     cp_facade.require_tenant_active(tenant)
     svc = LearningPathService(db)
-    path = await svc.install_from_listing(org_id, body.listing_id, user.id)
+    path = await svc.install_from_listing(
+        org_id, body.listing_id, user.id, product_id=body.product_id
+    )
     await db.commit()
     return DataResponse(data=LearningPathResponse.model_validate(path))
 

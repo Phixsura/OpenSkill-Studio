@@ -581,7 +581,16 @@ async def reverse_invoice_accruals(db: AsyncSession, invoice_id: str) -> int:
 
 
 async def accrue_credit_note(db: AsyncSession, credit_note_id: str, invoice_id: str) -> int:
-    """Credit note → proportional negative adjustment on invoice accruals."""
+    """Credit note → proportional negative adjustment on invoice accruals.
+
+    R123[M9] (documented v1 approximation): the reversal scales each entry's
+    share by note/total. For percentage_of_net_revenue that is exact when tax
+    is 0 (v1 always). For percentage_of_margin the margin does NOT scale with
+    the invoice total (a note forgiving the plan fee doesn't reduce usage
+    margin) — the proportional reversal over-reverses the margin-rule share.
+    Bounded: notes are capped at the invoice total, so cumulative reversals
+    never exceed the original accrual. Exact margin attribution needs
+    per-line notes (ADR-014 known limitation)."""
     from app.controlplane.models.billing import CreditNote
 
     note = await db.get(CreditNote, credit_note_id)
@@ -1024,4 +1033,27 @@ async def _handle_purchase_refunded(db: AsyncSession, payload: dict) -> None:
 
 @register_handler("credit_note.applied")
 async def _handle_credit_note(db: AsyncSession, payload: dict) -> None:
-    await accrue_credit_note(db, payload["credit_note_id"], payload["invoice_id"])
+    # R123[H7]: same outrun class as purchase.refunded (R113[M18]) — the note
+    # adjustment silently no-ops when it lands before invoice.finalized's
+    # accrual. Retry while the finalize accrual is still pending.
+    adjusted = await accrue_credit_note(db, payload["credit_note_id"], payload["invoice_id"])
+    if adjusted == 0:
+        from sqlalchemy import func as _f
+
+        from app.controlplane.models.outbox import OutboxMessage
+
+        pending = (
+            await db.execute(
+                select(_f.count())
+                .select_from(OutboxMessage)
+                .where(
+                    OutboxMessage.topic == "invoice.finalized",
+                    OutboxMessage.status.in_(("pending", "processing")),
+                    OutboxMessage.payload["invoice_id"].astext == payload["invoice_id"],
+                )
+            )
+        ).scalar_one()
+        if pending:
+            raise RuntimeError(
+                f"invoice.finalized accrual for {payload['invoice_id']} not yet processed — retry"
+            )

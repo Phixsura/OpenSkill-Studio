@@ -840,6 +840,13 @@ async def _handle_fx_created(db: AsyncSession, payload: dict) -> None:
     # Keyset pagination on id: rate_event flips FIXED rows out of 'blocked'
     # (shrinking the result set), so OFFSET would skip rows — the id cursor
     # advances past both fixed and still-unfixable rows exactly once.
+    # R123[M13]: commit per page — the whole backlog previously ran inside the
+    # single per-message transaction; an arq 300s timeout rolled back EVERY
+    # page and the retry restarted from row zero (all-or-nothing livelock on
+    # large backlogs). Per-page commits make progress durable; rate_event is
+    # idempotent, so the interrupted page simply re-runs. (This handler
+    # intentionally breaks the outer savepoint pattern — safe because it only
+    # flips blocked→rated rows and never partially writes a single row.)
     last_id = ""
     while True:
         batch = (
@@ -850,5 +857,6 @@ async def _handle_fx_created(db: AsyncSession, payload: dict) -> None:
         for event_id, row_id in batch:
             await rate_event(db, event_id)
             last_id = row_id
+        await db.commit()
         if len(batch) < 500:
             break

@@ -49,6 +49,16 @@ def upgrade() -> None:
     # d5e6f70b1120 pre-edit) still have the non-unique index and no unique
     # one; fresh DBs already match and both statements no-op.
     op.execute("DROP INDEX IF EXISTS ix_certificates_user_path")
+    # R123[L13]: a drifted DB that accumulated duplicate (user, path) rows —
+    # the exact hole the missing unique index allowed — would abort the whole
+    # migration at CREATE UNIQUE. Keep only the newest per pair first.
+    op.execute(
+        """
+        DELETE FROM certificates c USING certificates d
+        WHERE c.user_id = d.user_id AND c.path_id = d.path_id
+          AND c.issued_at < d.issued_at
+        """
+    )
     op.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_certificates_user_path "
         "ON certificates (user_id, path_id)"

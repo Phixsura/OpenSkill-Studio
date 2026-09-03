@@ -2188,3 +2188,83 @@ async def test_seat_increase_then_decrease_bills_per_segment(db):
     # The pre-fix walk billed the day-10 delta over ALL 20 remaining days
     # (~15×500×20/30 = 5000 alone) — assert we are well under that.
     assert proration_total < 5000, proration_total
+
+
+@pytest.mark.asyncio
+async def test_plan_change_reprices_seat_band_per_segment(db):
+    """R123[C0]: a mid-period plan change that RAISES included_seats must stop
+    charging the base-line overage for the post-change segment. The H7
+    floor-only extra billed the old plan's full-period overage regardless —
+    over-charging the exact upgrade that bought more included seats."""
+    from datetime import timedelta
+
+    from app.controlplane.models.billing import SubscriptionChange
+    from app.controlplane.models.plan import PlanPrice, PlanVersion, ProductPlan
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    # school: included 200, $5 overage. growth: included 1000 (covers overage).
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=215, provider="manual", actor=a
+    )
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    total_days = max((period.period_end - period.period_start).days, 1)
+    growth_version_id = (
+        await db.execute(
+            select(PlanVersion.id)
+            .join(ProductPlan, ProductPlan.id == PlanVersion.plan_id)
+            .where(ProductPlan.key == "growth", PlanVersion.status == "active")
+        )
+    ).scalar_one()
+    mid = period.period_start + timedelta(days=total_days // 2)
+    db.add(
+        SubscriptionChange(
+            subscription_id=sub.id,
+            change_type="plan_change",
+            from_plan_version_id=sub.plan_version_id,
+            to_plan_version_id=growth_version_id,
+            from_seats=215,
+            to_seats=215,
+            effective_at=mid,
+            proration_mode="immediate",
+            created_by=user.id,
+        )
+    )
+    sub.plan_version_id = growth_version_id
+    await db.flush()
+    inv = await billing_svc.close_period_and_invoice(db, period.id)
+    lines = await _lines(db, inv)
+    seats_total = _plan_lines_total(lines, "seats")
+    # Base line: 15 over school's 200 included × $5 = 7500 (full period)
+    assert seats_total == 15 * 500, seats_total
+    # The proration line must CREDIT the post-change half of that overage
+    # (growth includes 1000 seats → zero overage after the change), on top of
+    # the plan-fee delta.
+    growth_price = (
+        await db.execute(
+            select(PlanPrice).where(
+                PlanPrice.plan_version_id == growth_version_id,
+                PlanPrice.currency == "USD",
+                PlanPrice.interval == "month",
+            )
+        )
+    ).scalar_one()
+    school_price_minor = 19900
+    seg_days = total_days - (total_days // 2)
+    expected_fee_delta = round(
+        (growth_price.amount_minor - school_price_minor) * seg_days / total_days
+    )
+    expected_seat_credit = -round(15 * 500 * seg_days / total_days)
+    proration_total = _plan_lines_total(lines, "proration")
+    assert abs(proration_total - (expected_fee_delta + expected_seat_credit)) <= 2, (
+        proration_total,
+        expected_fee_delta,
+        expected_seat_credit,
+    )

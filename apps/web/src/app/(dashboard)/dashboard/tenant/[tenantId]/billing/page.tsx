@@ -80,13 +80,15 @@ export default function TenantBillingPage() {
   // the platform never appeared, and a key with no monthly price dead-ended
   // in PLAN_NOT_AVAILABLE. Filter by what makes a plan subscribable here: a
   // monthly price > 0 (in the tenant's currency once known).
+  // R123[M0]: never fall back to an any-currency first match — a EUR tenant
+  // whose tenant fetch failed was shown a USD price for a subscription that
+  // would charge EUR. No currency → no price → subscribe disabled below.
   const monthlyPrice = (p: PlanCatalogEntry) =>
-    (p.active_version?.prices ?? []).find(
-      (pr) =>
-        pr.interval === "month" &&
-        pr.amount_minor > 0 &&
-        (tenantCurrency == null || pr.currency === tenantCurrency),
-    ) ?? null;
+    tenantCurrency == null
+      ? null
+      : ((p.active_version?.prices ?? []).find(
+          (pr) => pr.interval === "month" && pr.amount_minor > 0 && pr.currency === tenantCurrency,
+        ) ?? null);
   const subscribablePlans = (plansQuery.data?.data ?? []).filter((p) => monthlyPrice(p) != null);
   const [subscribePlan, setSubscribePlan] = useState("");
   // R113[L7]: show the monthly price of the selected plan next to the button —

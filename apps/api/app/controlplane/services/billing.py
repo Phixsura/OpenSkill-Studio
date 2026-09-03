@@ -78,15 +78,25 @@ def proration_preview(
     old_seats: int = 0,
     new_seats: int = 0,
     seat_price_minor: int = 0,
+    natural_days: int | None = None,
 ) -> dict:
     """Per-day segment walk. Upgrade = immediate; the preview returns the
-    credit for the unused old plan + charge for the remaining new plan."""
+    credit for the unused old plan + charge for the remaining new plan.
+
+    R123[H2]: natural_days is the per-day DENOMINATOR (the natural interval
+    length the monthly fee covers). On a TRUNCATED period (immediate cancel /
+    provider deletion) period_end - period_start is shorter than the interval;
+    using it as the denominator inflated every remaining-day delta by
+    natural/actual. Callers with a truncated or anchor-extended period pass
+    the natural length; default keeps the period length (ratio 1 normally).
+    """
     total_days = max((period_end - period_start).days, 1)
     used_days = max(min((at - period_start).days, total_days), 0)
     days_left = total_days - used_days
+    denom_days = max(natural_days or total_days, 1)
 
     def per_day(amount: int) -> Decimal:
-        return Decimal(amount) / Decimal(total_days)
+        return Decimal(amount) / Decimal(denom_days)
 
     credit_unused_old = int(
         (per_day(old_amount_minor) * days_left).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
@@ -726,6 +736,15 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     # compute a ratio of exactly 1 (period_end == natural end), so the
     # normal path is numerically unchanged.
     natural_end = _add_interval(period.period_start, sub.interval)
+    # R123[L12]: the L5 anchor restore can create periods LONGER than
+    # _add_interval's natural end (Feb28→Mar31 when the anchor day is 31) —
+    # for those, the sub's intended period end IS the natural full length,
+    # else an immediate cancel inside it prorated by /28 instead of /31
+    # (~10% over) and a truncation was inferred where none happened. The sub
+    # row's current_period_end holds the intended end while this period is
+    # current (they are set together at rollover), surviving truncation.
+    if sub.current_period_start == period.period_start and sub.current_period_end > natural_end:
+        natural_end = sub.current_period_end
     natural_seconds = (natural_end - period.period_start).total_seconds()
     actual_seconds = (period.period_end - period.period_start).total_seconds()
     if natural_seconds > 0 and actual_seconds < natural_seconds:
@@ -782,6 +801,17 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     overage_seats = max(billable_seats - included, 0)
     seat_price = (price.overage_seat_amount_minor or 0) if price else 0
     if overage_seats and seat_price:
+        seats_amount = overage_seats * seat_price
+        # R123[H3]: same truncation proration as the plan line (R82[2]) — an
+        # immediate cancel on day 2 charged the FULL month of seat overage.
+        if natural_seconds > 0 and actual_seconds < natural_seconds:
+            seats_amount = int(
+                (
+                    Decimal(seats_amount)
+                    * max(Decimal(actual_seconds), Decimal(0))
+                    / Decimal(natural_seconds)
+                ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            )
         lines.append(
             InvoiceLine(
                 invoice_id=invoice.id,
@@ -789,7 +819,7 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                 description=f"{overage_seats} seats over included {included}",
                 quantity=overage_seats,
                 unit_amount_minor=seat_price,
-                amount_minor=overage_seats * seat_price,
+                amount_minor=seats_amount,
                 sort_order=sort,
             )
         )
@@ -927,17 +957,22 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         .scalars()
         .all()
     )
-    # R113[H7] (R101[H22] rework): the seat component is charged per SEGMENT
-    # [change.effective_at → next change | period end), not per change over
-    # ALL remaining days. The per-change walk both over-billed (an increase's
-    # delta kept charging past a later decrease, and re-charged the
-    # start→live band the base seats line already billed for the full period)
-    # and — before H22 — under-billed. Per segment the tenant owes
-    # max(floor, live, start) seats; the base line covers billable_seats
-    # (= max(live, start)) for every day, so the segment extra is
-    # max(floor − max(billable, included), 0). Plan-fee deltas still
-    # telescope correctly per change via proration_preview (seat_price=0).
-    total_period_days = max((period.period_end - period.period_start).days, 1)
+    # R113[H7] (R101[H22] rework) + R123[C0]: the seat component is charged
+    # per SEGMENT [change.effective_at → next change | period end). Per
+    # segment the tenant owes max(floor, billable) seats above THAT segment's
+    # plan's included_seats at THAT plan's seat price; the base seats line
+    # already billed (billable − start-plan-included) × start-plan-price for
+    # the whole period, so each segment's line is the DELTA between its
+    # correct charge and the base-line coverage. This reprices the band when
+    # a mid-period plan change alters included_seats or the seat price — the
+    # H7 floor-only extra over-billed an upgrade to a plan with MORE included
+    # seats and under-billed the reverse (R123[C0]). Plan-fee deltas still
+    # telescope per change via proration_preview (seat_price=0), with the
+    # natural interval as the per-day denominator so a truncated final
+    # period doesn't inflate the delta (R123[H2]).
+    natural_period_days = max((natural_end - period.period_start).days, 1)
+    base_overage = max(billable_seats - included, 0)  # seats billed by the base line
+    base_seat_price = seat_price
     ordered_changes = sorted(changes, key=lambda c: (c.effective_at, c.id))
     for idx, change in enumerate(ordered_changes):
         old_p = (
@@ -965,6 +1000,7 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             old_amount_minor=old_p.amount_minor if old_p else 0,
             new_amount_minor=new_p.amount_minor if new_p else 0,
             seat_price_minor=0,  # seat component handled per segment below
+            natural_days=natural_period_days,
         )
         seg_end = (
             ordered_changes[idx + 1].effective_at
@@ -972,14 +1008,16 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             else period.period_end
         )
         seg_days = max((min(seg_end, period.period_end) - change.effective_at).days, 0)
-        seat_price = (new_p.overage_seat_amount_minor or 0) if new_p else 0
+        seg_price = (new_p.overage_seat_amount_minor or 0) if new_p else 0
         seg_included = new_p.included_seats if new_p else 0
-        covered = max(billable_seats, seg_included)
-        extra_seats = max((change.to_seats or 0) - covered, 0)
+        # Correct charge for this segment vs what the base line already covers
+        seg_seats = max(max((change.to_seats or 0), billable_seats) - seg_included, 0)
+        correct_minor = seg_seats * seg_price
+        covered_minor = base_overage * base_seat_price
         seat_minor = int(
-            (Decimal(extra_seats * seat_price * seg_days) / Decimal(total_period_days)).quantize(
-                Decimal("1"), rounding=ROUND_HALF_UP
-            )
+            (
+                Decimal((correct_minor - covered_minor) * seg_days) / Decimal(natural_period_days)
+            ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         )
         net_minor = preview["net_minor"] + seat_minor
         if net_minor != 0:
@@ -1096,6 +1134,10 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                     RatedUsage.status == "rated",
                     RatedUsage.billable_currency == sub.currency,
                     UsageEvent.occurred_at < period.period_end,
+                    # R123[L11]: zero-billable rows (no_rate fallback, free
+                    # types) are never invoiced by design — counting them made
+                    # the warning fire on nearly every final close (noise).
+                    RatedUsage.billable_amount_minor > 0,
                 )
             )
         ).scalar_one()
@@ -1364,6 +1406,31 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
             actor=actor,
             idempotency_key=f"invvoid:{invoice.id}",
         )
+    # R123[H4]: voiding an OPEN invoice with recorded PARTIAL payments —
+    # the rewind re-bills the usage next cycle at full price while the
+    # collected cash sat attached to a void invoice, unrefunded and
+    # uncredited (same class as the R43[8] credit leg). Return collected
+    # payments to the tenant's credit balance so the re-bill nets out.
+    paid_total = (
+        await db.execute(
+            select(func.coalesce(func.sum(PaymentRecord.amount_minor), 0)).where(
+                PaymentRecord.invoice_id == invoice.id,
+                PaymentRecord.status == "succeeded",
+            )
+        )
+    ).scalar_one()
+    if int(paid_total) > 0:
+        await credit_svc.refund(
+            db,
+            invoice.tenant_id,
+            invoice.currency,
+            int(paid_total),
+            reference_type="invoice",
+            reference_id=invoice.id,
+            reason="Collected payments returned as credit on invoice void",
+            actor=actor,
+            idempotency_key=f"invvoidpay:{invoice.id}",
+        )
     # R43[11]: unbind invoice-billed license purchases so the re-close can pick
     # them up again (their license line died with this invoice).
     try:
@@ -1554,6 +1621,14 @@ async def issue_credit_note(
                 .where(Invoice.id == invoice.id, Invoice.status == "open")
                 .values(status="paid", paid_at=_now())
             )
+            # R123[L5]: mirror record_payment's full-settlement side effect —
+            # a note fully forgiving the invoice that put the tenant past_due
+            # left them past_due forever (only the payment path recovered).
+            tenant_row = await db.get(TenantAccount, invoice.tenant_id)
+            if tenant_row is not None and tenant_row.status == TenantStatus.PAST_DUE:
+                from app.controlplane.services.tenants import transition_status
+
+                await transition_status(db, tenant_row, TenantStatus.ACTIVE, actor=SYSTEM_ACTOR)
     await db.flush()
     if refund_amount > 0:  # collected money → refund as credit
         await credit_svc.refund(
@@ -1993,6 +2068,21 @@ async def handle_subscription_cancel_provider(db: AsyncSession, payload: dict) -
     external_ref = payload.get("external_ref")
     if provider not in ("mock", "stripe") or not external_ref:
         return
+    # R123[H6]: re-check the CURRENT platform state — a retried cancel(at_end)
+    # message landing AFTER a successful reactivate re-armed the provider-side
+    # cancellation (Stripe drops the customer at period end while the platform
+    # row stays active). A reactivated sub (active + flag cleared) means this
+    # cancel is obsolete: skip. Immediate cancels (at_period_end=False) still
+    # execute — the platform row is already 'cancelled' and irreversible.
+    if payload.get("at_period_end"):
+        sub_id = payload.get("subscription_id")
+        sub = await db.get(Subscription, sub_id) if sub_id else None
+        if sub is not None and sub.status == "active" and not sub.cancel_at_period_end:
+            log.info(
+                "cp_cancel_provider_skipped_reactivated",
+                subscription_id=sub_id,
+            )
+            return
     from app.controlplane.services.billing_providers import get_billing_provider
 
     adapter = get_billing_provider(provider)
@@ -2000,4 +2090,22 @@ async def handle_subscription_cancel_provider(db: AsyncSession, payload: dict) -
         return
     # Failures RAISE — the outbox retries with backoff and dead-letters
     # visibly (mirrors handle_subscription_push_provider).
-    await adapter.cancel_subscription(external_ref, bool(payload.get("at_period_end")))
+    # R123[M12/M16]: a provider-side already-cancelled/missing sub is SUCCESS
+    # for a cancel (the desired end state holds) — retrying it to dead-letter
+    # buried real cancels behind noise. Stripe raises InvalidRequestError for
+    # both; treat that class as done.
+    try:
+        await adapter.cancel_subscription(external_ref, bool(payload.get("at_period_end")))
+    except Exception as exc:
+        name = type(exc).__name__
+        msg = str(exc).lower()
+        if name == "InvalidRequestError" and (
+            "no such subscription" in msg or "canceled" in msg or "cancelled" in msg
+        ):
+            log.info(
+                "cp_cancel_provider_already_terminal",
+                external_ref=external_ref,
+                detail=str(exc)[:200],
+            )
+            return
+        raise

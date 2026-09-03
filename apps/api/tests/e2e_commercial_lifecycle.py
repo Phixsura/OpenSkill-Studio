@@ -18,6 +18,7 @@ Usage: make infra-up && make dev-api, then:
 
 import asyncio
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -523,7 +524,9 @@ async def main() -> bool:  # noqa: PLR0915
             json={
                 "usage_type": "image_generation",
                 "quantity": "10",
-                "occurred_at": "2026-08-31T00:00:00Z",
+                # R123[M1]: relative — a hardcoded date hard-crashes once the R113[H2]
+                # 30-day past bound overtakes it
+                "occurred_at": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
                 "idempotency_key": f"e2e-usage-{uid()}",
                 "provider": "mock",
                 "model_or_service": "mock-image-1",
@@ -618,7 +621,11 @@ async def main() -> bool:  # noqa: PLR0915
         project_id = r.json()["data"]["id"]
         r = await c.post(
             f"/orgs/{buyer_org}/projects/{project_id}/client-links",
-            json={"label": "Client CEO", "role": "approver", "expires_at": "2026-09-30T00:00:00Z"},
+            json={
+                "label": "Client CEO",
+                "role": "approver",
+                "expires_at": (datetime.now(UTC) + timedelta(days=30)).isoformat(),
+            },
             headers=hp,
         )
         check("Create guest link", r.status_code == 201, f"{r.status_code}: {r.text[:300]}")
