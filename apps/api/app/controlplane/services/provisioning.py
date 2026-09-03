@@ -9,7 +9,7 @@ product services {OrgService, InstallationService, WorkflowInstallationService}
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
@@ -436,6 +436,22 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
     # current tx, then upgrade the fresh one.
     from sqlalchemy import text as _text
 
+    # R113[L12]: a crash between the pre-upload commit and the S3 upload
+    # leaves the export row 'pending' FOREVER — nothing ever flips it, and
+    # the download endpoint keeps telling the tenant to wait. Self-heal on
+    # the retry surface: a new export supersedes any of THIS tenant's
+    # pending rows older than an hour (guarded UPDATE — a genuinely
+    # in-flight build is younger than that).
+    await db.execute(
+        update(TenantExport)
+        .where(
+            TenantExport.tenant_id == tenant_id,
+            TenantExport.status == "pending",
+            TenantExport.created_at < datetime.now(UTC) - timedelta(hours=1),
+        )
+        .values(status="failed", error="stale — superseded")
+    )
+
     await db.commit()
     await db.execute(_text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
     tenant = await db.get(TenantAccount, tenant_id)
@@ -447,7 +463,13 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
 
     from sqlalchemy import func as _f
 
-    from app.controlplane.models.billing import Invoice, InvoiceLine, Subscription
+    from app.controlplane.models.billing import (
+        CreditNote,
+        Invoice,
+        InvoiceLine,
+        PaymentRecord,
+        Subscription,
+    )
     from app.controlplane.models.branding import TenantBranding, TenantDomain
     from app.controlplane.models.credit import CreditLedgerEntry
     from app.controlplane.models.marketplace import LicenseGrant
@@ -545,8 +567,14 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
                 "status": invoice.status,
                 "currency": invoice.currency,
                 "total_minor": invoice.total_minor,
+                # R113[M31]: total alone can't reconcile a partially-credited
+                # invoice — the outstanding balance is billing-relevant data
+                # the tenant is entitled to in a §10.4 export.
+                "amount_due_minor": invoice.amount_due_minor,
                 "issued_at": invoice.issued_at.isoformat() if invoice.issued_at else None,
                 "lines": [],
+                "payments": [],
+                "credit_notes": [],
             }
             _by_inv[invoice.id] = entry
             bundle["invoices"].append(entry)
@@ -558,6 +586,63 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
                     "amount_minor": line.amount_minor,
                 }
             )
+    # R113[M31]: the export whitelisted invoices + lines but omitted the money
+    # movements against them — payments and credit notes are the tenant's own
+    # billing history and their absence made the bundle unreconcilable.
+    # Whitelist style: explicit fields only, no model_dump.
+    if _by_inv:
+        payments = (
+            (
+                await db.execute(
+                    select(PaymentRecord)
+                    .where(PaymentRecord.tenant_id == tenant_id)
+                    .order_by(PaymentRecord.created_at, PaymentRecord.id)
+                    .limit(EXPORT_MAX_ROWS)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(payments) >= EXPORT_MAX_ROWS:
+            truncated.append("payments")
+        for pay in payments:
+            inv_entry = _by_inv.get(pay.invoice_id)
+            if inv_entry is not None:
+                inv_entry["payments"].append(
+                    {
+                        "id": pay.id,
+                        "amount_minor": pay.amount_minor,
+                        "method": pay.method,
+                        "status": pay.status,
+                        "received_at": pay.received_at.isoformat() if pay.received_at else None,
+                    }
+                )
+        credit_notes = (
+            (
+                await db.execute(
+                    select(CreditNote)
+                    .where(CreditNote.tenant_id == tenant_id)
+                    .order_by(CreditNote.created_at, CreditNote.id)
+                    .limit(EXPORT_MAX_ROWS)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(credit_notes) >= EXPORT_MAX_ROWS:
+            truncated.append("credit_notes")
+        for note in credit_notes:
+            inv_entry = _by_inv.get(note.invoice_id)
+            if inv_entry is not None:
+                inv_entry["credit_notes"].append(
+                    {
+                        "id": note.id,
+                        "amount_minor": note.amount_minor,
+                        "reason": note.reason,
+                        "status": note.status,
+                        "created_at": note.created_at.isoformat(),
+                    }
+                )
     ledger = (
         (
             await db.execute(

@@ -101,25 +101,24 @@ export default function PlatformDashboardPage() {
             formatMinor(d.marketplace_gmv_minor, "USD"),
           )}
         />
+        {/* R113[H6]: render EVERY currency — [0] hid all but one aggregate */}
         <Card
           label="Credits outstanding"
           value={
-            d.credits_outstanding[0]
-              ? formatMinor(
-                  d.credits_outstanding[0].balance_minor,
-                  d.credits_outstanding[0].currency,
-                )
+            d.credits_outstanding.length
+              ? d.credits_outstanding
+                  .map((c) => formatMinor(c.balance_minor, c.currency))
+                  .join(" · ")
               : "—"
           }
         />
         <Card
           label="Settlement liability"
           value={
-            d.settlement_liabilities[0]
-              ? formatMinor(
-                  d.settlement_liabilities[0].accrued_minor,
-                  d.settlement_liabilities[0].currency,
-                )
+            d.settlement_liabilities.length
+              ? d.settlement_liabilities
+                  .map((s) => formatMinor(s.accrued_minor, s.currency))
+                  .join(" · ")
               : "—"
           }
         />

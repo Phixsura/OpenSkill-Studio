@@ -7,8 +7,10 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth, ApiError } from "@/lib/api";
+import { useImpersonation, usePlatformAdmin, useTenantRole } from "@/lib/use-me";
 
 interface Domain {
   id: string;
@@ -23,6 +25,20 @@ interface Domain {
 export default function TenantDomainsPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
   const queryClient = useQueryClient();
+  // R113[M10]: every domain mutation is owner-only server-side
+  // (require_tenant_member(..., "owner")) — billing_admins saw live buttons
+  // that all died with a 403 toast. R113[L6]: platform admins bypass tenant
+  // membership server-side, so they must keep the controls.
+  const isOwner = useTenantRole(tenantId) === "owner";
+  const isPlatformAdmin = usePlatformAdmin();
+  const canManage = isOwner || isPlatformAdmin;
+  // R101[M27]: impersonation sessions are read-only server-side.
+  const impersonating = useImpersonation();
+  const cannotManageTitle = impersonating
+    ? "Read-only impersonation session"
+    : !canManage
+      ? "Only the tenant owner can manage domains"
+      : undefined;
   const [hostname, setHostname] = useState("");
   // Raw verification token is shown ONCE at creation — held in memory only
   const [newDomain, setNewDomain] = useState<Domain | null>(null);
@@ -104,7 +120,8 @@ export default function TenantDomainsPage() {
           />
           <Button
             onClick={() => createMutation.mutate()}
-            disabled={!hostname || createMutation.isPending}
+            disabled={!hostname || createMutation.isPending || impersonating || !canManage}
+            title={cannotManageTitle}
           >
             Add
           </Button>
@@ -129,9 +146,13 @@ export default function TenantDomainsPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Domains</h2>
-        {domains.length === 0 ? (
+        {/* R113[M27]: a failed domains fetch was masked as "No custom domains."
+            — an authoritative empty state on a tenant serving live domains. */}
+        {domainsQuery.isError && <QueryError error={domainsQuery.error} what="custom domains" />}
+        {!domainsQuery.isLoading && !domainsQuery.isError && domains.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">No custom domains.</p>
-        ) : (
+        )}
+        {domains.length > 0 && (
           <div className="space-y-3">
             {domains.map((d) => (
               <div key={d.id} className="rounded-lg border p-4">
@@ -164,8 +185,12 @@ export default function TenantDomainsPage() {
                         // 6-per-hour verify rate limit — tokens are far longer
                         // than 8 chars, so gate obviously-invalid input here.
                         disabled={
-                          verifyMutation.isPending || (verifyTokens[d.id] ?? "").trim().length < 8
+                          verifyMutation.isPending ||
+                          (verifyTokens[d.id] ?? "").trim().length < 8 ||
+                          impersonating ||
+                          !canManage
                         }
+                        title={cannotManageTitle}
                       >
                         Verify
                       </Button>
@@ -175,7 +200,8 @@ export default function TenantDomainsPage() {
                     <Button
                       size="sm"
                       onClick={() => actionMutation.mutate({ id: d.id, action: "activate" })}
-                      disabled={actionMutation.isPending}
+                      disabled={actionMutation.isPending || impersonating || !canManage}
+                      title={cannotManageTitle}
                     >
                       Activate
                     </Button>
@@ -185,7 +211,8 @@ export default function TenantDomainsPage() {
                       size="sm"
                       variant="outline"
                       onClick={() => actionMutation.mutate({ id: d.id, action: "disable" })}
-                      disabled={actionMutation.isPending}
+                      disabled={actionMutation.isPending || impersonating || !canManage}
+                      title={cannotManageTitle}
                     >
                       Disable
                     </Button>
@@ -198,7 +225,8 @@ export default function TenantDomainsPage() {
                       size="sm"
                       variant="outline"
                       onClick={() => removeMutation.mutate(d.id)}
-                      disabled={removeMutation.isPending}
+                      disabled={removeMutation.isPending || impersonating || !canManage}
+                      title={cannotManageTitle}
                     >
                       Remove
                     </Button>

@@ -52,7 +52,9 @@ class MockProvider(BillingProviderBase):
             session_ref=session_ref,
         )
 
-    async def change_subscription(self, external_ref, new_price_ref, seat_quantity) -> None:
+    async def change_subscription(
+        self, external_ref, new_price_ref, seat_quantity, cancel_at_period_end: bool = False
+    ) -> None:
         return None
 
     async def cancel_subscription(self, external_ref, at_period_end) -> None:

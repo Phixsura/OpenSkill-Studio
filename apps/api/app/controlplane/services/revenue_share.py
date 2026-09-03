@@ -436,6 +436,16 @@ async def accrue_for_purchase(db: AsyncSession, purchase_id: str) -> int:
         # buyer-currency figures that generate_statement then summed into a
         # partner-currency statement unconverted.
         partner = await db.get(Partner, partner_id)
+        # R113[H4]: the invoice accrual path refuses terminated partners
+        # (ADR §7.6 — termination stops NEW accruals); the purchase path
+        # kept paying them. Same rule on both siblings.
+        if partner is not None and partner.status == "terminated":
+            log.info(
+                "cp_revshare_purchase_partner_terminated",
+                purchase_id=purchase.id,
+                partner_id=partner_id,
+            )
+            return created
         share = purchase.partner_share_minor
         base = purchase.amount_minor
         fx_snapshot = None
@@ -982,7 +992,34 @@ async def _handle_purchase_paid(db: AsyncSession, payload: dict) -> None:
 
 @register_handler("purchase.refunded")
 async def _handle_purchase_refunded(db: AsyncSession, payload: dict) -> None:
-    await accrue_refund(db, payload["purchase_id"])
+    # R113[M18]: a refund message can outrun the purchase.paid accrual
+    # (independent outbox messages) — zero originals meant zero reversals and
+    # the message was marked done, permanently keeping the positive accrual
+    # once it landed. Raise to retry until the originals exist (bounded by
+    # outbox backoff/dead-letter; a genuinely accrual-less purchase — free or
+    # partner-less — legitimately has no entries, so only retry when the
+    # PAID accrual is still pending in the outbox).
+    reversed_n = await accrue_refund(db, payload["purchase_id"])
+    if reversed_n == 0:
+        from sqlalchemy import func as _f
+
+        from app.controlplane.models.outbox import OutboxMessage
+
+        pending_paid = (
+            await db.execute(
+                select(_f.count())
+                .select_from(OutboxMessage)
+                .where(
+                    OutboxMessage.topic == "purchase.paid",
+                    OutboxMessage.status.in_(("pending", "processing")),
+                    OutboxMessage.payload["purchase_id"].astext == payload["purchase_id"],
+                )
+            )
+        ).scalar_one()
+        if pending_paid:
+            raise RuntimeError(
+                f"purchase.paid accrual for {payload['purchase_id']} not yet processed — retrying"
+            )
 
 
 @register_handler("credit_note.applied")

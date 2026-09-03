@@ -65,7 +65,11 @@ export function InstallButton({
       setSelecting(false);
       if (e instanceof ApiError) {
         if (e.code === "LICENSE_REQUIRED") {
-          toast.error("A license is required — purchase it above first.");
+          // R113[L8]: the install org can differ from the org whose license
+          // badge is shown above — name the mismatch instead of confusing.
+          toast.error(
+            "A license is required for the selected organization — check which org holds the license above, or purchase for this org first.",
+          );
           return;
         }
         if (e.code === "ALREADY_INSTALLED") {

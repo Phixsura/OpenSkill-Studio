@@ -1041,3 +1041,20 @@ class InstallationService:
                 )
 
             await self.db.flush()
+
+        # R113[M7]: pack.uninstalled was subscribable (VALID_EVENT_TYPES) but
+        # never fired anywhere — a dead event type integrators could register
+        # for and wait on forever. Mirror the pack.forked pattern above.
+        try:
+            from app.services.webhook import WebhookService
+
+            webhook_svc = WebhookService(self.db)
+            await webhook_svc.trigger_event(
+                inst_org_id,
+                "pack.uninstalled",
+                {"install_id": install_id, "pack_id": pack_id, "org_id": inst_org_id},
+            )
+        except Exception:
+            log.warning("webhook_trigger_failed", webhook_event="pack.uninstalled")
+
+        log.info("pack_uninstalled", install_id=install_id, org_id=inst_org_id, pack_id=pack_id)

@@ -11,13 +11,17 @@ import { Pager, QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate, formatMinor, type InvoiceSummary, type Subscription } from "@/lib/cp";
-import { useTenantRole } from "@/lib/use-me";
+import { usePlatformAdmin, useTenantRole } from "@/lib/use-me";
 import { useImpersonation } from "@/lib/use-me";
 
 interface PlanCatalogEntry {
   key: string;
   name: string;
-  prices: { currency: string; interval: string; amount_minor: number }[];
+  // R113[M12]: /plans nests prices under active_version — the old top-level
+  // `prices` field never existed in that response and was always undefined.
+  active_version?: {
+    prices: { currency: string; interval: string; amount_minor: number }[];
+  };
 }
 
 export default function TenantBillingPage() {
@@ -29,6 +33,12 @@ export default function TenantBillingPage() {
   // R101[M30]: subscription mutations are owner-only server-side — hide them
   // from billing_admins instead of 403-toasting every click.
   const isOwner = useTenantRole(tenantId) === "owner";
+  // R113[L6]: platform admins bypass tenant membership server-side
+  // (require_tenant_member grants them a virtual owner membership), but
+  // useTenantRole returns null for them — the owner controls were hidden from
+  // the very admins allowed to use them.
+  const isPlatformAdmin = usePlatformAdmin();
+  const canManage = isOwner || isPlatformAdmin;
   const [changeOpen, setChangeOpen] = useState(false);
   // R101[M11]: invoices ignored pagination meta — tenants with more than one
   // backend page of invoices silently lost the older ones.
@@ -58,10 +68,31 @@ export default function TenantBillingPage() {
     queryFn: () => apiWithAuth<{ data: PlanCatalogEntry[] }>("/plans"),
     enabled: !subQuery.isLoading && !hasSub,
   });
-  const subscribablePlans = (plansQuery.data?.data ?? []).filter((p) =>
-    ["school", "growth", "enterprise", "oem"].includes(p.key),
-  );
+  // R113[M12]: the backend resolves the price by tenant.currency + interval —
+  // knowing the tenant currency lets us filter and price plans the same way.
+  const tenantQuery = useQuery({
+    queryKey: ["tenant", tenantId],
+    queryFn: () => apiWithAuth<{ data: { currency: string } }>(`/tenants/${tenantId}`),
+    enabled: !subQuery.isLoading && !hasSub,
+  });
+  const tenantCurrency = tenantQuery.data?.data?.currency ?? null;
+  // R113[M12]: the dropdown hardcoded 4 plan keys — new paid plans added by
+  // the platform never appeared, and a key with no monthly price dead-ended
+  // in PLAN_NOT_AVAILABLE. Filter by what makes a plan subscribable here: a
+  // monthly price > 0 (in the tenant's currency once known).
+  const monthlyPrice = (p: PlanCatalogEntry) =>
+    (p.active_version?.prices ?? []).find(
+      (pr) =>
+        pr.interval === "month" &&
+        pr.amount_minor > 0 &&
+        (tenantCurrency == null || pr.currency === tenantCurrency),
+    ) ?? null;
+  const subscribablePlans = (plansQuery.data?.data ?? []).filter((p) => monthlyPrice(p) != null);
   const [subscribePlan, setSubscribePlan] = useState("");
+  // R113[L7]: show the monthly price of the selected plan next to the button —
+  // the funnel let users subscribe blind with no amount shown anywhere.
+  const selectedPlan = subscribablePlans.find((p) => p.key === subscribePlan);
+  const selectedPrice = selectedPlan ? monthlyPrice(selectedPlan) : null;
 
   const subscribeMutation = useMutation({
     mutationFn: () =>
@@ -114,7 +145,7 @@ export default function TenantBillingPage() {
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Subscription</h2>
-          {hasSub && isOwner && (
+          {hasSub && canManage && (
             <Button variant="outline" onClick={() => setChangeOpen(true)}>
               Change plan
             </Button>
@@ -131,27 +162,42 @@ export default function TenantBillingPage() {
             <p className="text-sm text-[hsl(var(--muted-foreground))]">
               No active subscription — you are on community defaults.
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <select
-                className="rounded-md border bg-transparent px-3 py-2 text-sm"
-                value={subscribePlan}
-                onChange={(e) => setSubscribePlan(e.target.value)}
-              >
-                <option value="">Choose a plan…</option>
-                {subscribablePlans.map((p) => (
-                  <option key={p.key} value={p.key}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <Button
-                onClick={() => subscribeMutation.mutate()}
-                disabled={!subscribePlan || subscribeMutation.isPending || impersonating}
-                title={impersonating ? "Read-only impersonation session" : undefined}
-              >
-                {subscribeMutation.isPending ? "Starting…" : "Subscribe"}
-              </Button>
-            </div>
+            {/* R113[M9]: starting a subscription is owner-only server-side —
+                billing_admins got a live funnel that 403'd at the last step. */}
+            {canManage ? (
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <select
+                  className="rounded-md border bg-transparent px-3 py-2 text-sm"
+                  value={subscribePlan}
+                  onChange={(e) => setSubscribePlan(e.target.value)}
+                >
+                  <option value="">Choose a plan…</option>
+                  {subscribablePlans.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                {/* R113[L7]: show what they're about to pay — the funnel let
+                    users subscribe with no amount shown anywhere. */}
+                {selectedPrice && (
+                  <span className="text-sm text-[hsl(var(--muted-foreground))]">
+                    {formatMinor(selectedPrice.amount_minor, selectedPrice.currency)}/month
+                  </span>
+                )}
+                <Button
+                  onClick={() => subscribeMutation.mutate()}
+                  disabled={!subscribePlan || subscribeMutation.isPending || impersonating}
+                  title={impersonating ? "Read-only impersonation session" : undefined}
+                >
+                  {subscribeMutation.isPending ? "Starting…" : "Subscribe"}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                Only the tenant owner can start a subscription.
+              </p>
+            )}
           </div>
         )}
         {hasSub && sub && "plan_key" in sub && (
@@ -162,12 +208,20 @@ export default function TenantBillingPage() {
               {sub.cancel_at_period_end && (
                 <>
                   <span className="text-xs text-amber-600">cancels at period end</span>
+                  {/* R113[M9]: reactivate is owner-only server-side — gate it
+                      like the other subscription mutations. */}
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => reactivateMutation.mutate()}
-                    disabled={reactivateMutation.isPending || impersonating}
-                    title={impersonating ? "Read-only impersonation session" : undefined}
+                    disabled={reactivateMutation.isPending || impersonating || !canManage}
+                    title={
+                      impersonating
+                        ? "Read-only impersonation session"
+                        : !canManage
+                          ? "Only the tenant owner can manage the subscription"
+                          : undefined
+                    }
                   >
                     Keep subscription
                   </Button>
@@ -189,12 +243,20 @@ export default function TenantBillingPage() {
               </p>
             </div>
             {!sub.cancel_at_period_end && (
+              // R113[M9]: cancel is owner-only server-side — billing_admins
+              // clicked a live button that always died with a 403 toast.
               <Button
                 variant="outline"
                 className="mt-4"
                 onClick={() => cancelMutation.mutate()}
-                disabled={cancelMutation.isPending || impersonating}
-                title={impersonating ? "Read-only impersonation session" : undefined}
+                disabled={cancelMutation.isPending || impersonating || !canManage}
+                title={
+                  impersonating
+                    ? "Read-only impersonation session"
+                    : !canManage
+                      ? "Only the tenant owner can manage the subscription"
+                      : undefined
+                }
               >
                 Cancel at period end
               </Button>

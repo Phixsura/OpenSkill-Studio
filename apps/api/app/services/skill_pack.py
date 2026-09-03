@@ -232,6 +232,26 @@ class SkillPackService:
         from app.core.cache import cache_delete_pattern
 
         await cache_delete_pattern("registry:*")
+
+        # R113[M7]: pack.updated was subscribable (VALID_EVENT_TYPES) but never
+        # fired — metadata edits on an installed pack were invisible to
+        # integrators. Notify each org with an ACTIVE installation (they track
+        # this pack's card); mirror the publish_release try/except pattern.
+        try:
+            from app.services.webhook import WebhookService
+
+            install_r = await self.db.execute(
+                select(SkillPackInstallation.org_id).where(
+                    SkillPackInstallation.pack_id == pack_id,
+                    SkillPackInstallation.status == InstallStatus.ACTIVE,
+                )
+            )
+            webhook_svc = WebhookService(self.db)
+            payload = {"pack_id": pack_id, "name": pack.name, "org_id": pack.owner_org_id}
+            for (install_org_id,) in install_r.all():
+                await webhook_svc.trigger_event(install_org_id, "pack.updated", payload)
+        except Exception:
+            log.warning("webhook_trigger_failed", pack_id=pack_id, webhook_event="pack.updated")
         return pack
 
     async def delete_pack(self, pack_id: str, org_id: str) -> None:
@@ -411,6 +431,25 @@ class SkillPackService:
         await self.db.refresh(pack)
 
         await self._record_approval_event(pack_id, "approved", actor_id)
+        # R113[L2]: 'pack.approved' was pref-mapped (_TYPE_TO_PREF_KEY →
+        # 'review') but no code ever created one — the pack creator learned
+        # their review verdict only by polling the pack page. Mirror the
+        # publish_release notify pattern (best-effort, never fails the
+        # decision). Skip self-approval: the actor already knows.
+        try:
+            if pack.created_by and pack.created_by != actor_id:
+                from app.services.notification import NotificationService
+
+                await NotificationService(self.db).create(
+                    user_id=pack.created_by,
+                    notification_type="pack.approved",
+                    title=f"Pack approved: {pack.name}",
+                    body="Your pack passed review and is now publicly visible.",
+                    org_id=org_id,
+                    data={"pack_id": pack_id},
+                )
+        except Exception:
+            log.warning("notify_pack_approved_failed", pack_id=pack_id)
         from app.core.cache import cache_delete_pattern
 
         await cache_delete_pattern("registry:*")
@@ -431,6 +470,23 @@ class SkillPackService:
 
         if actor_id:
             await self._record_approval_event(pack_id, "rejected", actor_id, reason)
+        # R113[L2]: same as approve_pack — 'pack.rejected' was pref-mapped but
+        # never created; the creator had no signal (or the reason) without
+        # polling. Best-effort; skip self-rejection.
+        try:
+            if pack.created_by and pack.created_by != actor_id:
+                from app.services.notification import NotificationService
+
+                await NotificationService(self.db).create(
+                    user_id=pack.created_by,
+                    notification_type="pack.rejected",
+                    title=f"Pack rejected: {pack.name}",
+                    body=reason[:500] if reason else "Your pack did not pass review.",
+                    org_id=org_id,
+                    data={"pack_id": pack_id, "reason": reason},
+                )
+        except Exception:
+            log.warning("notify_pack_rejected_failed", pack_id=pack_id)
         from app.core.cache import cache_delete_pattern
 
         await cache_delete_pattern("registry:*")

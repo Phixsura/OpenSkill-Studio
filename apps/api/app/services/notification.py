@@ -12,10 +12,13 @@ log = structlog.get_logger()
 # to preference keys (stored in UserNotificationPreference.preferences).
 # The endpoint stores keys like "pack_update" but notifications are created
 # with type "pack.updated" — this mapping bridges the gap.
+# R113[L1]: 'pack.installed' / 'pack.published' removed — those exist only as
+# WEBHOOK events; no code path ever creates an in-app notification with either
+# type, so the entries were dead. 'pack.approved'/'pack.rejected' are now
+# actually created (R113[L2] in approve_pack/reject_pack); 'pack.updated' is
+# created by publish_release.
 _TYPE_TO_PREF_KEY: dict[str, str] = {
     "pack.updated": "pack_update",
-    "pack.installed": "pack_update",
-    "pack.published": "pack_update",
     "pack.approved": "review",
     "pack.rejected": "review",
 }
@@ -114,14 +117,15 @@ class NotificationService:
 
     # ── Preferences ──
 
+    # R113[L1]: defaults were keyed by NOTIFICATION TYPE while the suppression
+    # lookup in create() uses the mapped PREF KEY ('pack_update'/'review') —
+    # the defaults never matched a lookup, and five of the seven entries were
+    # types no code path ever creates (dead toggles surfaced at GET
+    # /notifications/preferences). Key by the pref keys the PUT endpoint
+    # actually writes and create() actually consults.
     _DEFAULT_PREFERENCES: dict = {
-        "pack.installed": True,
-        "pack.updated": True,
-        "pack.approved": True,
-        "pack.rejected": True,
-        "submission.reviewed": True,
-        "cohort.status_changed": True,
-        "project.deadline_approaching": True,
+        "pack_update": True,
+        "review": True,
     }
 
     async def get_preferences(self, user_id: str) -> dict:

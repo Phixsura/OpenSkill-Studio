@@ -24,6 +24,16 @@ export function useImpersonation(): boolean {
   return Boolean(data?.data?.impersonation);
 }
 
+/** R113[L6]: platform admins bypass tenant membership server-side
+ * (require_tenant_member grants a virtual owner membership to UserRole.ADMIN
+ * and platform_admin), but useTenantRole returns null for them — so every
+ * owner-only control was hidden from the very admins allowed to use it. */
+export function usePlatformAdmin(): boolean {
+  const { data } = useMe();
+  const me = data?.data;
+  return me?.role === "admin" || (me?.platform_roles ?? []).includes("platform_admin");
+}
+
 /** R101[M30]: the tenant admin pages rendered owner-only mutations (cancel/
  * change subscription, member add/remove, domain ops, branding save) to
  * billing_admins, who got a 403 toast on every click. Resolve the caller's

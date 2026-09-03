@@ -12,7 +12,12 @@ import { useMe } from "@/lib/use-me";
 // platform role; otherwise the user needs one of the listed roles.
 // platform_support keeps Tenants (read-only server-side) per #27 §11.2.
 const TABS: { slug: string; label: string; roles: string[] | null }[] = [
-  { slug: "", label: "Dashboard", roles: null },
+  // R113[M22]: Dashboard and Usage had roles:null ("any platform role"), but
+  // the backend gates them on FINANCE_ROLES — GET /platform/dashboard requires
+  // platform_admin|billing_admin and GET /platform/usage-events likewise, so
+  // platform_support clicked straight into server-side 403s. Each tab now
+  // lists EXACTLY the roles its backend endpoint requires.
+  { slug: "", label: "Dashboard", roles: ["platform_admin", "billing_admin"] },
   {
     slug: "tenants",
     label: "Tenants",
@@ -20,11 +25,12 @@ const TABS: { slug: string; label: string; roles: string[] | null }[] = [
   },
   { slug: "plans", label: "Plans", roles: ["platform_admin", "billing_admin"] },
   { slug: "pricing", label: "Pricing", roles: ["platform_admin", "billing_admin"] },
-  { slug: "usage", label: "Usage", roles: null },
+  { slug: "usage", label: "Usage", roles: ["platform_admin", "billing_admin"] },
   { slug: "invoices", label: "Invoices", roles: ["platform_admin", "billing_admin"] },
   { slug: "settlements", label: "Settlements", roles: ["platform_admin", "billing_admin"] },
   { slug: "partners", label: "Partners", roles: ["platform_admin", "billing_admin"] },
-  { slug: "audit", label: "Audit", roles: null },
+  // R113[M22]: audit-events allows all three platform roles server-side.
+  { slug: "audit", label: "Audit", roles: ["platform_admin", "platform_support", "billing_admin"] },
 ];
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {

@@ -299,4 +299,13 @@ def downgrade() -> None:
     op.drop_index("uq_brief_org_slug", table_name="client_briefs")
     op.drop_index("ix_briefs_org_status", table_name="client_briefs")
     op.drop_table("client_briefs")
+    # R113[M15]: sa.Enum inside create_table implicitly CREATEs these types on
+    # upgrade but drop_table does NOT drop them — a downgrade left 5 orphaned
+    # enum types, so the next upgrade crashed with 'type already exists'
+    # (downgrades are dev-only, editing in place is safe).
+    op.execute("DROP TYPE IF EXISTS brief_status")
+    op.execute("DROP TYPE IF EXISTS application_status")
+    op.execute("DROP TYPE IF EXISTS cohort_status")
+    op.execute("DROP TYPE IF EXISTS cohort_role")
+    op.execute("DROP TYPE IF EXISTS participation_mode")
     # ### end Alembic commands ###

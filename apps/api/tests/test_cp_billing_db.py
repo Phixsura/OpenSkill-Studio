@@ -2096,3 +2096,95 @@ def test_stripe_sdk_calls_offloaded_to_thread(monkeypatch):
             assert t is not main_thread, f"SDK call '{name}' ran ON the event loop thread"
 
     _asyncio.run(run())
+
+
+@pytest.mark.asyncio
+async def test_mock_subscription_blocked_in_production(db, monkeypatch):
+    """R113[A0]: a mock-provider subscription in production gives the customer
+    a dead mock-checkout URL and a subscription that never collects money —
+    same class as marketplace checkout's R64[18] guard. The endpoint resolves
+    mock → stripe when configured, else 409s in production."""
+    from fastapi import Request as _Req
+
+    from app.config import settings as app_settings
+    from app.controlplane.api import billing as billing_api
+    from app.controlplane.api.billing import StartSubscriptionRequest
+    from app.exceptions import AppError
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.TRIAL)
+
+    monkeypatch.setattr(app_settings, "app_env", "production")
+    monkeypatch.setattr(app_settings, "stripe_secret_key", "")
+    scope = {"type": "http", "method": "POST", "path": "/", "headers": [], "query_string": b""}
+    with pytest.raises(AppError) as exc:
+        await billing_api.start_subscription(
+            tenant.id,
+            StartSubscriptionRequest(plan_key="school", interval="month", provider="mock"),
+            _Req(scope),
+            user=user,
+            db=db,
+        )
+    assert exc.value.code == "BILLING_PROVIDER_UNCONFIGURED"
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_seat_increase_then_decrease_bills_per_segment(db):
+    """R113[H7] (R101[H22] regression): an increase-then-decrease within one
+    period must bill the raised floor only for ITS OWN segment. The per-change
+    walk charged the increase's full delta over ALL remaining days (past the
+    later decrease) on top of the base line — a real-money over-charge."""
+    from datetime import timedelta
+
+    from app.controlplane.models.billing import SubscriptionChange
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    # school: included_seats=200, overage $5.00/seat (seed)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=205, provider="manual", actor=a
+    )
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    total_days = max((period.period_end - period.period_start).days, 1)
+    d10 = period.period_start + timedelta(days=10)
+    d20 = period.period_start + timedelta(days=20)
+    # Two immediate seat changes recorded directly (bypasses live-seat quota):
+    # 205 → 220 at day 10, 220 → 208 at day 20.
+    for eff, frm, to in ((d10, 205, 220), (d20, 220, 208)):
+        db.add(
+            SubscriptionChange(
+                subscription_id=sub.id,
+                change_type="seat_change",
+                from_plan_version_id=sub.plan_version_id,
+                to_plan_version_id=sub.plan_version_id,
+                from_seats=frm,
+                to_seats=to,
+                effective_at=eff,
+                proration_mode="immediate",
+                created_by=user.id,
+            )
+        )
+    sub.seat_quantity = 208
+    await db.flush()
+    inv = await billing_svc.close_period_and_invoice(db, period.id)
+    lines = await _lines(db, inv)
+    seats_total = _plan_lines_total(lines, "seats")
+    proration_total = _plan_lines_total(lines, "proration")
+    # Base seats line: max(live=0, start=205) − included 200 = 5 seats × $5.
+    assert seats_total == 5 * 500, seats_total
+    # Segment extras: [d10,d20) floor 220 → 15 over the billed 205 for 10 of
+    # total_days; [d20,end) floor 208 → 3 extra seats for the remaining days.
+    seg2_days = total_days - 20
+    expected = round(15 * 500 * 10 / total_days) + round(3 * 500 * seg2_days / total_days)
+    assert abs(proration_total - expected) <= 2, (proration_total, expected)
+    # The pre-fix walk billed the day-10 delta over ALL 20 remaining days
+    # (~15×500×20/30 = 5000 alone) — assert we are well under that.
+    assert proration_total < 5000, proration_total

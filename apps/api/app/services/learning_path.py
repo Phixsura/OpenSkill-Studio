@@ -233,6 +233,31 @@ class LearningPathService:
         listing = await self.db.get(MarketplaceListing, listing_id)
         if listing is None or listing.product_type != "learning_path":
             raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+        # R113[M0]: create_purchase requires an ACTIVE listing but nothing
+        # gated this install surface — draft/delisted/suspended listings
+        # stayed installable by id. Uniform 404 (anti-enumeration: same code
+        # as missing) rather than revealing an inactive listing exists.
+        if listing.status != "active":
+            raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+
+        # R113[M1]: clients retry POST (double-click, network replay) and
+        # every call minted a full duplicate copy of the path + items.
+        # origin_listing_id records provenance (R113[H0]) — reuse it as the
+        # idempotency key: one live installed copy per (org, listing). An
+        # ARCHIVED copy (buyer deleted it) doesn't block a fresh install.
+        prior = (
+            await self.db.execute(
+                select(LearningPath)
+                .where(
+                    LearningPath.org_id == org_id,
+                    LearningPath.origin_listing_id == listing.id,
+                    LearningPath.status != ContentStatus.ARCHIVED,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if prior is not None:
+            return prior
 
         # The license gate (covering grant / included plan / own product);
         # uniform 404 for private listings, LICENSE_REQUIRED 403 otherwise.
@@ -276,20 +301,55 @@ class LearningPathService:
             description=source.description,
             status=ContentStatus.PUBLISHED,
             estimated_minutes=source.estimated_minutes,
+            # R113[H0]: provenance — create_listing refuses to sell a copy
+            # installed from someone else's paid listing (H1 class for paths).
+            origin_listing_id=listing.id,
             created_by=user_id,
         )
         self.db.add(copy)
         await self.db.flush()
+        # R113[M2]: skill/project items carry no section_title (the CHECK
+        # constraint only demands the FK), so degraded copies collapsed to
+        # opaque "[skill]"/"[project]" headings — the buyer couldn't tell
+        # WHAT the seller's curriculum step was. Resolve the source entity
+        # names (seller-org rows we already read for the copy) and keep the
+        # bracket fallback only for unresolvable (deleted) refs.
+        src_skill_ids = [
+            i.skill_id for i in items if i.item_type == PathItemType.SKILL and i.skill_id
+        ]
+        src_project_ids = [
+            i.project_id for i in items if i.item_type == PathItemType.PROJECT and i.project_id
+        ]
+        skill_names: dict[str, str] = {}
+        project_names: dict[str, str] = {}
+        if src_skill_ids:
+            sk_r = await self.db.execute(
+                select(Skill.id, Skill.name).where(Skill.id.in_(src_skill_ids))
+            )
+            skill_names = {row[0]: row[1] for row in sk_r.all()}
+        if src_project_ids:
+            pj_r = await self.db.execute(
+                select(Project.id, Project.title).where(Project.id.in_(src_project_ids))
+            )
+            project_names = {row[0]: row[1] for row in pj_r.all()}
         for item in items:
             # skill/project refs are org-scoped rows that don't exist in the
             # buyer org — degrade them to informational section headings (ADR)
             # rather than carrying dangling foreign refs.
             if item.item_type in (PathItemType.SKILL, PathItemType.PROJECT):
+                resolved = (
+                    skill_names.get(item.skill_id)
+                    if item.item_type == PathItemType.SKILL
+                    else project_names.get(item.project_id)
+                )
+                title = item.section_title or (
+                    f"{resolved} (from source org)" if resolved else f"[{item.item_type.value}]"
+                )
                 self.db.add(
                     LearningPathItem(
                         path_id=copy.id,
                         item_type=PathItemType.SECTION,
-                        section_title=(item.section_title or f"[{item.item_type.value}]")[:200],
+                        section_title=title[:200],
                         sort_order=item.sort_order,
                         required=False,
                         unlock_rule=item.unlock_rule,

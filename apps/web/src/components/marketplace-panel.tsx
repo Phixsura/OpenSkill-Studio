@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -84,7 +84,20 @@ export function MarketplacePanel({
             `/registry/listings?product_type=${productType}&product_ids=${productId}`,
           ),
   });
-  const listing = listingQuery.data?.data?.[productId] ?? null;
+  const currentListing = listingQuery.data?.data?.[productId] ?? null;
+  // R113[L9]: switching the org selector to an org whose tenant is not
+  // partner-attributed excludes a partner_only listing from that org's
+  // listings-view — listing went null and the ENTIRE panel (org selector
+  // included) unmounted mid-interaction, stranding the user with no way to
+  // switch back. Keep the last non-null listing and render an explicit
+  // "not available" state with the selector instead of vanishing.
+  const [lastListing, setLastListing] = useState<Listing | null>(null);
+  useEffect(() => {
+    if (currentListing) setLastListing(currentListing);
+  }, [currentListing]);
+  const listing = currentListing ?? lastListing;
+  const listingUnavailable =
+    currentListing == null && lastListing != null && listingQuery.isSuccess;
 
   const licenseQuery = useQuery({
     queryKey: ["license-status", statusOrgId, productType, productId],
@@ -163,6 +176,33 @@ export function MarketplacePanel({
   }
   // private listings are seller-internal; no public purchase surface
   if (listing.offer_type === "private") return null;
+
+  // R113[L9]: the selected org's listings-view excludes this listing (e.g. a
+  // non-partner org on a partner_only listing) — say so instead of vanishing.
+  if (listingUnavailable) {
+    return (
+      <div className="rounded-lg border p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            Not available for this organization.
+          </p>
+          {adminOrgs.length > 1 && (
+            <select
+              className="rounded-md border bg-transparent px-2 py-1.5 text-sm"
+              value={statusOrgId ?? ""}
+              onChange={(e) => setSelectedOrg(e.target.value)}
+            >
+              {adminOrgs.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const startPurchase = () => {
     // fresh key per confirm-flow open (H0)

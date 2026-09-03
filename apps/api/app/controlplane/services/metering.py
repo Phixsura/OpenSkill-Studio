@@ -39,9 +39,9 @@ async def emit_usage(
 ) -> UsageEvent | None:
     """Append a usage event + outbox message in the caller's transaction.
 
-    Idempotent: ON CONFLICT (idempotency_key) DO NOTHING → returns None on
-    duplicate. Never commits — atomicity with the business write belongs to
-    the caller. Negative quantities are legal only for adjustments.
+    Idempotent: ON CONFLICT (tenant_id, idempotency_key) DO NOTHING → returns
+    None on duplicate. Never commits — atomicity with the business write
+    belongs to the caller. Negative quantities are legal only for adjustments.
     """
     unit = USAGE_TYPES.get(usage_type)
     if unit is None:
@@ -83,7 +83,10 @@ async def emit_usage(
             metadata_=metadata or {},
         )
         .on_conflict_do_nothing(
-            index_elements=["idempotency_key"],
+            # R113[M17]: composite target matches uq_cp_usage_idem_tenant —
+            # keys are per-tenant; the old (idempotency_key) target let one
+            # tenant's key swallow another tenant's billable event.
+            index_elements=["tenant_id", "idempotency_key"],
             # Partial unique index (WHERE idempotency_key IS NOT NULL) —
             # Postgres requires the matching predicate for inference.
             index_where=UsageEvent.idempotency_key.isnot(None),

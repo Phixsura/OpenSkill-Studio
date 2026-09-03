@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
+import { QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth } from "@/lib/api";
 import { formatMinor } from "@/lib/cp";
@@ -21,7 +22,7 @@ interface Statement {
 export default function PartnerStatementsPage() {
   const { partnerId } = useParams<{ partnerId: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["partner-statements", partnerId],
     queryFn: () => apiWithAuth<{ data: Statement[] }>(`/partners/${partnerId}/statements`),
   });
@@ -31,7 +32,10 @@ export default function PartnerStatementsPage() {
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Settlement statements</h2>
       {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
-      {!isLoading && statements.length === 0 && (
+      {/* R113[M24]: a failed statements fetch rendered "No statements yet." —
+          an authoritative-looking empty state that hid real settlement money. */}
+      {isError && <QueryError error={error} what="statements" />}
+      {!isLoading && !isError && statements.length === 0 && (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">No statements yet.</p>
       )}
       {statements.length > 0 && (

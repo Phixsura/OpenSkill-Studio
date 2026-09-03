@@ -41,7 +41,11 @@ class BillingProviderBase(ABC):
 
     @abstractmethod
     async def change_subscription(
-        self, external_ref: str, new_price_ref: str, seat_quantity: int
+        self,
+        external_ref: str,
+        new_price_ref: str,
+        seat_quantity: int,
+        cancel_at_period_end: bool = False,
     ) -> None: ...
 
     @abstractmethod

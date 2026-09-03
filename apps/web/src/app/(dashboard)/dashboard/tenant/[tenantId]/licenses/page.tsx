@@ -2,15 +2,18 @@
 
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
 import { Pager, QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
-import { apiWithAuth } from "@/lib/api";
+import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate, formatMinor } from "@/lib/cp";
 
 interface LicenseGrant {
   id: string;
+  listing_id: string | null;
   product_type: string;
   product_id: string;
   org_id: string | null;
@@ -53,6 +56,18 @@ export default function TenantLicensesPage() {
   const licenses = licensesQuery.data?.data ?? [];
   const purchases = purchasesQuery.data?.data ?? [];
 
+  // R113[L0]: learning_path licenses were dead rows — no UI could redeem
+  // them (the install endpoint existed but nothing called it).
+  const installPath = useMutation({
+    mutationFn: (g: LicenseGrant) =>
+      apiWithAuth(`/orgs/${g.org_id}/learning-paths/install`, {
+        method: "POST",
+        body: JSON.stringify({ listing_id: g.listing_id }),
+      }),
+    onSuccess: () => toast.success("Learning path installed into the organization"),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Install failed"),
+  });
+
   return (
     <div className="space-y-8">
       <section>
@@ -75,6 +90,7 @@ export default function TenantLicensesPage() {
                   <th className="px-4 py-2 font-medium">Source</th>
                   <th className="px-4 py-2 font-medium">Status</th>
                   <th className="px-4 py-2 font-medium">Since</th>
+                  <th className="px-4 py-2" />
                 </tr>
               </thead>
               <tbody>
@@ -95,6 +111,21 @@ export default function TenantLicensesPage() {
                       <StatusBadge status={g.status} />
                     </td>
                     <td className="px-4 py-2">{formatDate(g.starts_at)}</td>
+                    <td className="px-4 py-2 text-right">
+                      {g.product_type === "learning_path" &&
+                        g.status === "active" &&
+                        g.listing_id &&
+                        g.org_id && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => installPath.mutate(g)}
+                            disabled={installPath.isPending}
+                          >
+                            Install
+                          </Button>
+                        )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

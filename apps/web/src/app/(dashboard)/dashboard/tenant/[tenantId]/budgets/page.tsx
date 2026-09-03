@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { QueryError } from "@/components/cp-list";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatMinor, majorToMinor } from "@/lib/cp";
 
@@ -48,6 +49,10 @@ export default function TenantBudgetsPage() {
     queryFn: () => apiWithAuth<{ data: { currency: string } }>(`/tenants/${tenantId}`),
   });
   const currency = tenantQuery.data?.data?.currency ?? "USD";
+  // R113[M26]: if the tenant fetch failed, the form silently fell back to USD
+  // — on a non-USD tenant that budget 422s at best or, for zero-decimal
+  // currencies, is created 100x off. Block Create until the currency is known.
+  const currencyUnknown = tenantQuery.data?.data?.currency == null;
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -145,23 +150,31 @@ export default function TenantBudgetsPage() {
           <Button
             onClick={() => createMutation.mutate()}
             disabled={
+              // R113[M26]: don't create in a guessed currency (see above).
+              currencyUnknown ||
               majorToMinor(limitMajor, currency) == null ||
               (majorToMinor(limitMajor, currency) ?? 0) <= 0 ||
               (scopeType !== "tenant" && !scopeId.trim()) ||
               createMutation.isPending
             }
+            title={currencyUnknown ? "Tenant currency could not be loaded" : undefined}
           >
             Create
           </Button>
         </div>
       )}
 
-      {budgets.length === 0 ? (
+      {/* R113[M26]: a failed budgets fetch was masked as "No budget policies"
+          — an authoritative empty state on a tenant that may have hard-stop
+          budgets actively enforcing. */}
+      {budgetsQuery.isError && <QueryError error={budgetsQuery.error} what="budget policies" />}
+      {!budgetsQuery.isLoading && !budgetsQuery.isError && budgets.length === 0 && (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
           No budget policies. Your plan&apos;s AI budget entitlement still applies as a tenant-wide
           ceiling.
         </p>
-      ) : (
+      )}
+      {budgets.length > 0 && (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
             <thead className="border-b bg-[hsl(var(--secondary))] text-left">

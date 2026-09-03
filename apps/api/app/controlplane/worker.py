@@ -182,16 +182,51 @@ async def reap_stuck(db: AsyncSession, older_than_minutes: int = 10) -> int:
     """Return crashed-mid-processing messages to pending (lease reaper)."""
     from app.controlplane.models.outbox import OutboxMessage
 
+    # R113[M19]: arq's job-timeout cancellation raises CancelledError — a
+    # BaseException the per-message `except Exception` in process_outbox_once
+    # never sees, so the in-flight message (and any claimed-but-unstarted
+    # siblings) stayed 'processing' until this reaper. The reaper DID return
+    # them to pending within one cron cycle, but WITHOUT counting the attempt:
+    # a handler that hangs past the timeout on every try retried forever and
+    # could never dead-letter. Count the interrupted attempt here and
+    # dead-letter at the same threshold as failing handlers. Recovery lives in
+    # the reaper (not an in-loop except CancelledError) because a mid-query
+    # cancellation leaves the session's connection unusable for bookkeeping.
+    # Siblings of a cancelled batch get an attempt overcounted — acceptable:
+    # a batch cancelled outbox_max_attempts times over is wedged, not unlucky.
+    cutoff = _now() - timedelta(minutes=older_than_minutes)
+    dead = await db.execute(
+        update(OutboxMessage)
+        .where(
+            OutboxMessage.status == "processing",
+            OutboxMessage.locked_at < cutoff,
+            OutboxMessage.attempts >= settings.outbox_max_attempts - 1,
+        )
+        .values(
+            status="failed",
+            attempts=OutboxMessage.attempts + 1,
+            last_error="lease expired mid-processing (crash or job-timeout cancellation)",
+            locked_by=None,
+            locked_at=None,
+        )
+    )
     result = await db.execute(
         update(OutboxMessage)
         .where(
             OutboxMessage.status == "processing",
-            OutboxMessage.locked_at < _now() - timedelta(minutes=older_than_minutes),
+            OutboxMessage.locked_at < cutoff,
         )
-        .values(status="pending", locked_by=None, locked_at=None)
+        .values(
+            status="pending",
+            attempts=OutboxMessage.attempts + 1,
+            locked_by=None,
+            locked_at=None,
+        )
     )
     await db.commit()
-    return result.rowcount
+    if dead.rowcount:
+        log.error("outbox_reap_dead_letter", count=dead.rowcount)
+    return result.rowcount + dead.rowcount
 
 
 # ── arq wiring ───────────────────────────────────────────────

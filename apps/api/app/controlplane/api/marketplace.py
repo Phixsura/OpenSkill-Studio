@@ -120,6 +120,8 @@ def _purchase_response(p: MarketplacePurchase) -> dict:
 def _grant_response(g: LicenseGrant) -> dict:
     return {
         "id": g.id,
+        # R113[L0]: the UI needs listing_id to drive learning-path install
+        "listing_id": g.listing_id,
         "product_type": g.product_type,
         "product_id": g.product_id,
         "org_id": g.org_id,
@@ -364,7 +366,14 @@ async def org_listings_view(
     ids = [i.strip() for i in product_ids.split(",") if i.strip()][:50]
     offer_types = ["free", "paid", "included_with_plan"]
     if tenant.partner_id is not None:
-        offer_types.append("partner_only")
+        # R113[M13]: mirror create_purchase — a suspended/terminated partner's
+        # tenants must not see partner_only listings they can no longer buy
+        # (attribution row outlives the partnership).
+        from app.controlplane.models.partner import Partner
+
+        partner = await db.get(Partner, tenant.partner_id)
+        if partner is not None and partner.status == "active":
+            offer_types.append("partner_only")
     rows = (
         (
             await db.execute(

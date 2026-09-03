@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
+import { QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth } from "@/lib/api";
 import { formatDate, type TenantEntitlements } from "@/lib/cp";
@@ -74,6 +75,10 @@ export default function TenantOverviewPage() {
         {entQuery.isLoading && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>
         )}
+        {/* R113[M29]: a failed entitlements fetch collapsed to "Plan —" and an
+            empty section — a paying tenant appeared unsubscribed with no error
+            and no retry hint. */}
+        {entQuery.isError && <QueryError error={entQuery.error} what="entitlements" />}
         {ent && (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">

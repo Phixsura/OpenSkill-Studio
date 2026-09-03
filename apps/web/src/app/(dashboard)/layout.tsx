@@ -129,8 +129,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </NavLink>
       {/* R101[L8]: only memberships[0] got a link — users on multiple tenants
           or partners could never reach the others from the nav. One link per
-          membership (capped at 3), labelled by name so they're tellable apart. */}
-      {tenantMemberships.slice(0, 3).map((m) => (
+          membership, labelled by name so they're tellable apart.
+          R113[M30]: the cap of 3 had NO overflow affordance — membership #4+
+          was simply unreachable from the UI (no tenants index page exists).
+          Cap raised to 8; anything beyond that is listed in a tooltip so the
+          user at least knows what's hidden. */}
+      {tenantMemberships.slice(0, 8).map((m) => (
         <NavLink
           key={m.tenant_id}
           href={`/dashboard/tenant/${m.tenant_id}`}
@@ -140,7 +144,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           Tenant · {m.name}
         </NavLink>
       ))}
-      {partnerMemberships.slice(0, 3).map((m) => (
+      {tenantMemberships.length > 8 && (
+        <p
+          className="px-3 py-2 text-sm text-[hsl(var(--muted-foreground))]"
+          title={tenantMemberships
+            .slice(8)
+            .map((m) => m.name)
+            .join(", ")}
+        >
+          +{tenantMemberships.length - 8} more tenants
+        </p>
+      )}
+      {partnerMemberships.slice(0, 8).map((m) => (
         <NavLink
           key={m.partner_id}
           href={`/partner/${m.partner_id}`}
@@ -150,6 +165,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           Partner · {m.name}
         </NavLink>
       ))}
+      {partnerMemberships.length > 8 && (
+        <p
+          className="px-3 py-2 text-sm text-[hsl(var(--muted-foreground))]"
+          title={partnerMemberships
+            .slice(8)
+            .map((m) => m.name)
+            .join(", ")}
+        >
+          +{partnerMemberships.length - 8} more partners
+        </p>
+      )}
       {hasPlatformRole && (
         <NavLink href="/platform" active={pathname.startsWith("/platform")} onClick={closeSidebar}>
           Platform

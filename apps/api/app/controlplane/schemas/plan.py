@@ -1,6 +1,6 @@
 """Plan / entitlement schemas (ADR-014 §2)."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -48,6 +48,16 @@ class SetOverrideRequest(BaseModel):
     enforcement: str = Field(default="hard", pattern=r"^(hard|soft)$")
     expires_at: datetime | None = None
     reason: str = Field(min_length=3, max_length=500)
+
+    @field_validator("expires_at")
+    @classmethod
+    def _tz_aware(cls, v):
+        # R113[L3]: same R99[m19] class as pricing.py — entitlements.py
+        # compares `o.expires_at <= now` against aware now(); a naive value
+        # 500'd on TypeError every time effective entitlements resolved.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
 
     @field_validator("reason")
     @classmethod

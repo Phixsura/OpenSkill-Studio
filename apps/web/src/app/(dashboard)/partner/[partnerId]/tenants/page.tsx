@@ -1,9 +1,10 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { QueryError } from "@/components/cp-list";
+import { Pager, QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate } from "@/lib/cp";
@@ -19,10 +20,17 @@ interface AttributedTenant {
 
 export default function PartnerTenantsPage() {
   const { partnerId } = useParams<{ partnerId: string }>();
+  // R113[M11]: the backend paginates (page/per_page, default 50) but the page
+  // ignored the meta — a big-book partner silently saw only the first 50
+  // tenants with no pager.
+  const [page, setPage] = useState(1);
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["partner-tenants", partnerId],
-    queryFn: () => apiWithAuth<{ data: AttributedTenant[] }>(`/partners/${partnerId}/tenants`),
+    queryKey: ["partner-tenants", partnerId, page],
+    queryFn: () =>
+      apiWithAuth<{ data: AttributedTenant[]; meta: { has_more: boolean } }>(
+        `/partners/${partnerId}/tenants?page=${page}&per_page=50`,
+      ),
   });
   const tenants = data?.data ?? [];
 
@@ -74,6 +82,7 @@ export default function PartnerTenantsPage() {
           </table>
         </div>
       )}
+      <Pager page={page} hasMore={data?.meta?.has_more ?? false} onPage={setPage} />
     </div>
   );
 }

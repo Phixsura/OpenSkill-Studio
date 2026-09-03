@@ -28,7 +28,9 @@ class ManualProvider(BillingProviderBase):
     async def create_checkout_session(self, **kwargs) -> CheckoutSession:
         raise _manual_mode()
 
-    async def change_subscription(self, external_ref, new_price_ref, seat_quantity) -> None:
+    async def change_subscription(
+        self, external_ref, new_price_ref, seat_quantity, cancel_at_period_end: bool = False
+    ) -> None:
         return None  # local-only state; nothing remote to sync
 
     async def cancel_subscription(self, external_ref, at_period_end) -> None:

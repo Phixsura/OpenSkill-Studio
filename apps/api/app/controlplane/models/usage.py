@@ -47,8 +47,12 @@ USAGE_SOURCES = frozenset(
 class UsageEvent(Base):
     __tablename__ = "cp_usage_events"
     __table_args__ = (
+        # R113[M17]: tenant-scoped — a global key namespace collided across
+        # tenants (same class cp11/cp13 fixed for credits/purchases): tenant
+        # B's event silently no-op'd against tenant A's key via ON CONFLICT.
         Index(
-            "uq_cp_usage_idem",
+            "uq_cp_usage_idem_tenant",
+            "tenant_id",
             "idempotency_key",
             unique=True,
             postgresql_where="idempotency_key IS NOT NULL",

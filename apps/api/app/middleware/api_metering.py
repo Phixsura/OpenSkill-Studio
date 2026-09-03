@@ -60,7 +60,16 @@ def _local_day_buckets(tz_name: str, now: datetime) -> list[str]:
         tz = UTC
     local = now.astimezone(tz)
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
-    return [(day_start + timedelta(hours=h)).strftime("%Y%m%d%H") for h in range(24)]
+    # R113[L4]: a DST-transition day is 23 or 25 hours — a fixed 24-hour
+    # window either misses the day's last hour (under-count → quota leak) or
+    # double-counts into tomorrow. Compute the real day length.
+    next_day_start = (
+        (local + timedelta(days=1))
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .astimezone(UTC)
+    )
+    hours = max(int((next_day_start - day_start).total_seconds() // 3600), 1)
+    return [(day_start + timedelta(hours=h)).strftime("%Y%m%d%H") for h in range(hours)]
 
 
 def classify_path(path: str) -> str | None:

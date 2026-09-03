@@ -199,6 +199,21 @@ async def start_subscription(
                 "Manual subscriptions are created by platform billing admins",
                 409,
             )
+    # R113[A0]: same R64[18] guard as marketplace checkout — a mock-provider
+    # subscription in production gives the customer a dead mock-checkout URL
+    # and a subscription that can never collect money. Resolve the effective
+    # provider: prefer Stripe when configured; hard-fail mock in production.
+    if body.provider == "mock":
+        from app.config import settings
+
+        if settings.stripe_secret_key:
+            body.provider = "stripe"
+        elif settings.app_env == "production":
+            raise AppError(
+                "BILLING_PROVIDER_UNCONFIGURED",
+                "Checkout payments are not configured; contact support",
+                409,
+            )
     sub, checkout_url = await billing_svc.start_subscription(
         db,
         tenant,
@@ -702,7 +717,10 @@ async def replay_webhook_event(
 
     event = await db.get(BillingWebhookEvent, event_id)
     if event is None:
-        raise AppError("INVOICE_NOT_FOUND", "Webhook event not found", 404)
+        # R113[L13]: this 404 was copy-pasted with INVOICE_NOT_FOUND — ops
+        # tooling keying on the machine code misdiagnosed a bad event id as a
+        # missing invoice.
+        raise AppError("WEBHOOK_EVENT_NOT_FOUND", "Webhook event not found", 404)
     if event.status != "failed":
         raise AppError("VALIDATION_ERROR", "Only failed events can be replayed", 409)
     parsed = ParsedWebhookEvent(
@@ -710,7 +728,20 @@ async def replay_webhook_event(
         event_type=event.event_type,
         data=event.payload,
     )
-    handled = await _apply_webhook_event(db, event.provider, parsed)
+    # R113[M33]: a replay that failed AGAIN 500'd out of the endpoint — the
+    # session rolled back, the fresh error was discarded (event kept the
+    # stale one), and ops got no diagnosis. Mirror process_webhook: savepoint
+    # the handler, record the new failure on the event, and return it.
+    try:
+        async with db.begin_nested():
+            handled = await _apply_webhook_event(db, event.provider, parsed)
+    except Exception as exc:  # noqa: BLE001 — recorded for the next replay
+        event.status = "failed"
+        event.error = str(exc)[:2000]
+        event.processed_at = billing_svc._now()
+        await db.commit()
+        log.warning("cp_webhook_replay_failed", event_id=event.id, event_type=event.event_type)
+        return DataResponse(data={"replayed": False, "error": str(exc)[:200]})
     event.status = "processed" if handled else "ignored"
     event.error = None
     event.processed_at = billing_svc._now()

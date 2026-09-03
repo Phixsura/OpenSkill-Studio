@@ -553,11 +553,25 @@ async def cancel_subscription(
             await db.flush()
             enqueue(db, "period.close_due", {"billing_period_id": open_period.id})
     if sub.provider in ("mock", "stripe") and sub.external_ref:
-        from app.controlplane.services.billing_providers import get_billing_provider
-
-        adapter = get_billing_provider(sub.provider)
-        if adapter is not None:
-            await adapter.cancel_subscription(sub.external_ref, at_period_end)
+        # R113[M20/M34]: via the outbox — the old inline provider call ran
+        # under the guarded-UPDATE state transition (and the row lock), so a
+        # provider timeout/5xx rolled back the WHOLE cancel: the customer was
+        # told "cancelled" while nothing happened platform-side, or worse the
+        # provider cancel succeeded and the platform commit then failed,
+        # leaving the provider dark while we kept the sub live. Enqueue is
+        # atomic with the state change; the handler retries with backoff and
+        # dead-letters visibly. Refs are pinned at cancel time so a stale
+        # retry can never cancel a later re-subscription's new provider sub.
+        enqueue(
+            db,
+            "subscription.cancel_provider",
+            {
+                "subscription_id": sub.id,
+                "at_period_end": at_period_end,
+                "external_ref": sub.external_ref,
+                "provider": sub.provider,
+            },
+        )
     await record_audit(
         db,
         actor=actor,
@@ -913,7 +927,19 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         .scalars()
         .all()
     )
-    for change in changes:
+    # R113[H7] (R101[H22] rework): the seat component is charged per SEGMENT
+    # [change.effective_at → next change | period end), not per change over
+    # ALL remaining days. The per-change walk both over-billed (an increase's
+    # delta kept charging past a later decrease, and re-charged the
+    # start→live band the base seats line already billed for the full period)
+    # and — before H22 — under-billed. Per segment the tenant owes
+    # max(floor, live, start) seats; the base line covers billable_seats
+    # (= max(live, start)) for every day, so the segment extra is
+    # max(floor − max(billable, included), 0). Plan-fee deltas still
+    # telescope correctly per change via proration_preview (seat_price=0).
+    total_period_days = max((period.period_end - period.period_start).days, 1)
+    ordered_changes = sorted(changes, key=lambda c: (c.effective_at, c.id))
+    for idx, change in enumerate(ordered_changes):
         old_p = (
             await db.execute(
                 select(PlanPrice).where(
@@ -932,29 +958,31 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                 )
             )
         ).scalar_one_or_none()
-        # R82[M1]: when the seats line already billed the CURRENT live count
-        # for the full period (live >= raised floor), the seat delta's
-        # proration would double-charge those seats — the full-period
-        # live-count charge subsumes it. Zero the seat component; the plan
-        # component still prorates.
-        seat_price = (new_p.overage_seat_amount_minor or 0) if new_p else 0
-        # R101[H22] (R82[M1] rework): decide per CHANGE, not via the current
-        # sub.seat_quantity — a later smaller change zeroed prorations of an
-        # earlier larger floor the live count never actually covered. The live
-        # count only covers a seat increase whose TARGET floor it reaches.
-        if live_seats >= (change.to_seats or 0):
-            seat_price = 0
         preview = proration_preview(
             period_start=period.period_start,
             period_end=period.period_end,
             at=change.effective_at,
             old_amount_minor=old_p.amount_minor if old_p else 0,
             new_amount_minor=new_p.amount_minor if new_p else 0,
-            old_seats=change.from_seats or 0,
-            new_seats=change.to_seats or 0,
-            seat_price_minor=seat_price,
+            seat_price_minor=0,  # seat component handled per segment below
         )
-        if preview["net_minor"] != 0:
+        seg_end = (
+            ordered_changes[idx + 1].effective_at
+            if idx + 1 < len(ordered_changes)
+            else period.period_end
+        )
+        seg_days = max((min(seg_end, period.period_end) - change.effective_at).days, 0)
+        seat_price = (new_p.overage_seat_amount_minor or 0) if new_p else 0
+        seg_included = new_p.included_seats if new_p else 0
+        covered = max(billable_seats, seg_included)
+        extra_seats = max((change.to_seats or 0) - covered, 0)
+        seat_minor = int(
+            (Decimal(extra_seats * seat_price * seg_days) / Decimal(total_period_days)).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        net_minor = preview["net_minor"] + seat_minor
+        if net_minor != 0:
             db.add(
                 InvoiceLine(
                     invoice_id=invoice.id,
@@ -964,7 +992,7 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                         f"({preview['days_left']} days remaining)"
                     ),
                     quantity=1,
-                    amount_minor=preview["net_minor"],
+                    amount_minor=net_minor,
                     sort_order=sort,
                 )
             )
@@ -1051,6 +1079,34 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
 
     await finalize_invoice(db, invoice, actor=SYSTEM_ACTOR)
 
+    # R113[M8]: on the sub's FINAL close (cancelled / cancel-at-end) no next
+    # period is opened, so no future close will ever sweep this tenant again.
+    # Usage rated AFTER the billable_rows lock above (rating isn't serialized
+    # against the close) stays 'rated' forever — silently unbilled revenue.
+    # Do NOT silently bill it here: its amounts were never summed into a line
+    # and late-rated usage may need ops judgement on a dead account. Count and
+    # warn so ops can review (manual invoice or write-off).
+    if sub.status in ("cancel_at_period_end", "cancelled"):
+        residual = (
+            await db.execute(
+                select(func.count(RatedUsage.id))
+                .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
+                .where(
+                    RatedUsage.tenant_id == tenant.id,
+                    RatedUsage.status == "rated",
+                    RatedUsage.billable_currency == sub.currency,
+                    UsageEvent.occurred_at < period.period_end,
+                )
+            )
+        ).scalar_one()
+        if residual:
+            log.warning(
+                "cp_final_close_residual_usage",
+                subscription_id=sub.id,
+                tenant_id=tenant.id,
+                count=residual,
+            )
+
     # Roll the subscription into the next period (or cancel at period end)
     if sub.status == "cancel_at_period_end":
         await db.execute(
@@ -1110,6 +1166,15 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
 
         next_start = period.period_end
         next_end = _add_interval(next_start, sub.interval)
+        # R113[L5]: month-end anchor drift — a Jan-31 subscription rolls to
+        # Feb-28, and clamping from the 28th keeps every later period on the
+        # 28th forever. Restore the ORIGINAL anchor day when the target month
+        # can hold it (created_at fixes the anchor for the sub's lifetime).
+        if sub.interval == "month":
+            anchor = sub.created_at.day
+            max_day = _month_len(next_end.year, next_end.month)
+            if anchor > next_end.day and anchor <= max_day:
+                next_end = next_end.replace(day=min(anchor, max_day))
         sub.current_period_start = next_start
         sub.current_period_end = next_end
         db.add(
@@ -1641,6 +1706,16 @@ async def _notify_tenant_owners(
                 .scalars()
                 .all()
             )
+            # R113[M4]: a tenant with no owner/billing_admin members made every
+            # billing alert (payment failed, provider cancel) vanish silently —
+            # the loop simply didn't run and nothing recorded that nobody was
+            # told. Warn so ops can spot the unreachable tenant.
+            if not owner_ids:
+                log.warning(
+                    "cp_notify_no_tenant_owners",
+                    tenant_id=tenant_id,
+                    type=notification_type,
+                )
             svc = NotificationService(db)
             for uid in owner_ids:
                 await svc.create(
@@ -1819,6 +1894,21 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
                 open_period.period_end = now
             await db.flush()
             enqueue(db, "period.close_due", {"billing_period_id": open_period.id})
+        # R113[M5]: a PROVIDER-initiated cancel (dunning exhausted, card
+        # disputes, Stripe dashboard action) killed the subscription with zero
+        # tenant-facing signal — payment_failed notifies (R95[m10]) but the
+        # terminal event didn't, so the tenant discovered cancellation only
+        # when features died. Same owner-notification path as payment_failed.
+        await _notify_tenant_owners(
+            db,
+            sub.tenant_id,
+            notification_type="billing.subscription_cancelled",
+            title="Subscription cancelled",
+            body=(
+                "Your subscription was cancelled by the payment provider. "
+                "A final invoice will be issued."
+            ),
+        )
         await invalidate_cache(sub.tenant_id)
         return True
 
@@ -1862,6 +1952,15 @@ async def handle_subscription_push_provider(db: AsyncSession, payload: dict) -> 
     # is an ops-config gap, not a transient: log loudly and stop (the push is
     # re-enqueued by the next change once the ref exists, or replayed).
     if sub.provider == "stripe" and not new_p.external_price_ref:
+        # R113[L14]: the M38 early-return dropped the CANCEL FLAG sync along
+        # with the (impossible) price push. When the platform sub is pending
+        # cancellation, at least sync that flag via the provider's cancel API
+        # (needs no price ref) — otherwise Stripe kept auto-renewing a sub the
+        # customer cancelled. The reverse (reactivate wanting the flag
+        # CLEARED) cannot be synced without a price ref (Stripe clear is a
+        # subscription modify); the loud error below covers that gap for ops.
+        if sub.cancel_at_period_end:
+            await adapter.cancel_subscription(sub.external_ref, at_period_end=True)
         log.error(
             "cp_provider_change_push_no_external_ref",
             subscription_id=sub.id,
@@ -1870,8 +1969,35 @@ async def handle_subscription_push_provider(db: AsyncSession, payload: dict) -> 
         return
     # R98[30]: let failures RAISE — the outbox retries with backoff and
     # dead-letters visibly, instead of the old one-shot swallowed log line.
+    # R113[C0]: push the PLATFORM row's cancel flag — the adapter previously
+    # hardcoded cancel_at_period_end=False, so any push (plan/seat change,
+    # deferred rollover) silently un-cancelled a pending Stripe cancellation.
     await adapter.change_subscription(
         sub.external_ref,
         new_p.external_price_ref or "",
         sub.seat_quantity,
+        cancel_at_period_end=bool(sub.cancel_at_period_end),
     )
+
+
+@register_handler("subscription.cancel_provider")
+async def handle_subscription_cancel_provider(db: AsyncSession, payload: dict) -> None:
+    """R113[M20/M34]: provider-side cancel decoupled from cancel_subscription —
+    the inline call ran under the sub row lock and its failure rolled back the
+    whole cancel (or committed a provider cancel the platform then forgot).
+    Payload pins provider/external_ref as of cancel time, so a delayed retry
+    cancels exactly the sub the customer cancelled — never a successor sub
+    created by a later re-subscribe. Idempotent provider-side: cancelling an
+    already-cancelled provider sub is a no-op/terminal error the adapter maps."""
+    provider = payload.get("provider")
+    external_ref = payload.get("external_ref")
+    if provider not in ("mock", "stripe") or not external_ref:
+        return
+    from app.controlplane.services.billing_providers import get_billing_provider
+
+    adapter = get_billing_provider(provider)
+    if adapter is None:
+        return
+    # Failures RAISE — the outbox retries with backoff and dead-letters
+    # visibly (mirrors handle_subscription_push_provider).
+    await adapter.cancel_subscription(external_ref, bool(payload.get("at_period_end")))

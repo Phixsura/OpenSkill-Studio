@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatMinor } from "@/lib/cp";
@@ -27,7 +28,7 @@ interface Plan {
 export default function PlatformPlansPage() {
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["platform-plans"],
     queryFn: () => apiWithAuth<{ data: Plan[] }>("/platform/plans"),
   });
@@ -55,6 +56,11 @@ export default function PlatformPlansPage() {
 
   if (isLoading) {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  }
+  // R113[M23]: a failed plans fetch rendered a permanently blank pane — no
+  // error, no retry hint, indistinguishable from "no plans configured".
+  if (isError) {
+    return <QueryError error={error} what="plans" />;
   }
 
   return (

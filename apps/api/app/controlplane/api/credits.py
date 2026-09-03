@@ -1,11 +1,12 @@
 """Credit + budget endpoints (ADR-014 §5.5)."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -51,6 +52,17 @@ class GrantPromoRequest(BaseModel):
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     expires_at: datetime
     reason: str = Field(min_length=3, max_length=500)
+
+    @field_validator("expires_at")
+    @classmethod
+    def _tz_aware(cls, v):
+        # R113[L3]: same R99[m19] class as pricing.py — a naive expires_at
+        # lands on a timestamptz column as a session-timezone instant (promo
+        # expiry sweep then fires at the wrong time) and any Python-side
+        # comparison against aware now() TypeErrors → 500. Coerce to UTC.
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
 
     @field_validator("reason")
     @classmethod
@@ -378,6 +390,16 @@ async def create_budget(
         raise AppError("BUDGET_POLICY_CONFLICT", "A policy with these dimensions exists", 409)
     policy = BudgetPolicy(tenant_id=tenant_id, created_by=user.id, **body.model_dump())
     db.add(policy)
+    try:
+        # R113[L10]: two concurrent creates with the same dimensions both pass
+        # the dup pre-SELECT and race on uq_cp_budget_dims — the loser died as
+        # an unhandled 500. SAVEPOINT-isolate the insert; surface a clean 409.
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        raise AppError(
+            "BUDGET_POLICY_CONFLICT", "A policy with these dimensions exists", 409
+        ) from None
     await db.commit()
     return DataResponse(data=_budget_response(policy))
 

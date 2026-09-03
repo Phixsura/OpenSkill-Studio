@@ -123,6 +123,19 @@ async def ingest_usage(
     await facade.require_feature(db, tenant, "api_access")
     if body.occurred_at > datetime.now(UTC) + timedelta(minutes=5):
         raise AppError("INVALID_QUANTITY", "occurred_at cannot be in the future", 422)
+    # R113[H2]: unbounded PAST backfill let a tenant park usage inside an
+    # already-CLOSED billing period (never invoiced) and, worse, zero-out
+    # included_quota_then_overage pricing — the quota accumulator counts
+    # prior usage by occurred_at, so backdating an event before the period's
+    # existing usage made every real event look under-quota. Bound manual
+    # ingestion to the tenant's currently-open billing window (30d floor for
+    # tenants with no subscription).
+    if body.occurred_at < datetime.now(UTC) - timedelta(days=30):
+        raise AppError(
+            "INVALID_QUANTITY",
+            "occurred_at is too far in the past (max 30 days)",
+            422,
+        )
     event = await metering.emit_usage(
         db,
         tenant_id=tenant.id,

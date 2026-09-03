@@ -152,8 +152,16 @@ export default function ClientProjectPage() {
 
   const onAuthError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 401) {
+      // R113[H3]: a MEMBER session (no guest JWT — the product access token
+      // was used) must bounce to /login, not the access-code page: members
+      // have no access code, so the old redirect stranded them in a loop.
+      const hadGuestJwt = sessionStorage.getItem("client_portal_jwt") != null;
       sessionStorage.removeItem("client_portal_jwt");
-      router.replace("/client/access");
+      router.replace(
+        hadGuestJwt
+          ? "/client/access"
+          : `/login?redirect=${encodeURIComponent(`/client/${projectId}`)}`,
+      );
       return true;
     }
     return false;

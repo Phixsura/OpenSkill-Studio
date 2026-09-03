@@ -6,6 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 import structlog
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controlplane.models.marketplace import (
@@ -119,6 +120,23 @@ async def create_listing(
     if owner_org_id != seller_org_id:
         # Anti-enumeration: same code as missing
         raise AppError("PACK_NOT_FOUND", "Product not found", 404)
+    # R113[H0]: a learning path installed from someone else's paid listing is
+    # an org-owned COPY (org_id == buyer) — ownership alone let the buyer
+    # re-list purchased content for sale (H1 redistribution class for paths;
+    # skills/templates have the same gate via origin_pack_id).
+    if product_type == "learning_path" and getattr(_product, "origin_listing_id", None):
+        origin = await db.get(MarketplaceListing, _product.origin_listing_id)
+        if (
+            origin is not None
+            and origin.offer_type in ("paid", "partner_only")
+            and origin.seller_org_id != seller_org_id
+        ):
+            raise AppError(
+                "LICENSED_CONTENT_NOT_REDISTRIBUTABLE",
+                "This learning path was installed from a paid listing and "
+                "cannot be re-listed for sale",
+                403,
+            )
     if status_value != "published":
         raise AppError("LISTING_INVALID", "Only published products can be listed", 422)
     if offer_type in ("paid", "partner_only") and visibility_value == "private":
@@ -231,10 +249,21 @@ async def create_purchase(
     buyer_tenant = await get_tenant_for_org(db, buyer_org_id)
     if buyer_tenant.id == listing.seller_tenant_id:
         raise AppError("ALREADY_OWNED", "Cannot purchase your own product", 409)
-    if listing.offer_type == "partner_only" and buyer_tenant.partner_id is None:
-        raise AppError(
-            "LISTING_NOT_PURCHASABLE", "This listing is available to partner tenants only", 409
-        )
+    if listing.offer_type == "partner_only":
+        # R113[M13]: partner attribution alone isn't partnership — a
+        # suspended/terminated partner's tenants kept buying partner-only
+        # listings (the partner row stays for attribution history). The
+        # PARTNER must be currently active.
+        partner_active = False
+        if buyer_tenant.partner_id is not None:
+            from app.controlplane.models.partner import Partner
+
+            partner = await db.get(Partner, buyer_tenant.partner_id)
+            partner_active = partner is not None and partner.status == "active"
+        if not partner_active:
+            raise AppError(
+                "LISTING_NOT_PURCHASABLE", "This listing is available to partner tenants only", 409
+            )
     # R44[22]: invoice billing is opt-in PER LISTING — the seller flags
     # bill_via_invoice; buyers of other listings must pay up front.
     if payment_method == "invoice" and not listing.bill_via_invoice:
@@ -402,8 +431,32 @@ async def create_purchase(
             "purchased_major": await _latest_major(db, listing.product_type, listing.product_id),
         },
     )
-    db.add(purchase)
-    await db.flush()
+    try:
+        # R113[M14]: two concurrent purchases with the same idempotency key
+        # both pass the pre-SELECT (R72[2]) and race on uq_cp_purchase_idem —
+        # the loser died as an unhandled 500 and poisoned the session (M35).
+        # SAVEPOINT-isolate the insert (add INSIDE the savepoint so the
+        # rollback expunges the dead row — the recover path continues and the
+        # caller commits); on conflict resume the winner's LIVE row exactly
+        # like the pre-check would have.
+        async with db.begin_nested():
+            db.add(purchase)
+            await db.flush()
+    except IntegrityError:
+        existing = (
+            await db.execute(
+                select(MarketplacePurchase).where(
+                    MarketplacePurchase.buyer_tenant_id == buyer_tenant.id,
+                    MarketplacePurchase.idempotency_key == idempotency_key,
+                    MarketplacePurchase.status.in_(("pending", "paid")),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing
+        raise AppError(
+            "PURCHASE_STATUS_CONFLICT", "Concurrent purchase with this idempotency key", 409
+        ) from None
     return purchase
 
 

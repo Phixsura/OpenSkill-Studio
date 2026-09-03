@@ -158,7 +158,11 @@ class StripeProvider(BillingProviderBase):
         return CheckoutSession(url=session["url"], session_ref=session["id"])
 
     async def change_subscription(
-        self, external_ref: str, new_price_ref: str, seat_quantity: int
+        self,
+        external_ref: str,
+        new_price_ref: str,
+        seat_quantity: int,
+        cancel_at_period_end: bool = False,
     ) -> None:
         sdk = _stripe()
         sub = await asyncio.to_thread(sdk.Subscription.retrieve, external_ref)
@@ -173,11 +177,13 @@ class StripeProvider(BillingProviderBase):
                 }
             ],
             proration_behavior="none",  # proration is computed platform-side
-            # R101[H17]: pushing current state must also clear a pending
-            # provider-side cancellation — reactivate flips the platform row
-            # to active, but without this the Stripe sub still cancelled at
-            # period end and the "reactivated" customer was silently dropped.
-            cancel_at_period_end=False,
+            # R113[C0] (R101[H17] regression fix): mirror the PLATFORM row's
+            # cancel_at_period_end instead of hardcoding False — the hardcoded
+            # clear meant ANY push (plan change, deferred-change rollover)
+            # silently un-cancelled a customer's pending Stripe cancellation.
+            # Reactivate pushes False (its platform row just cleared the flag);
+            # a seat change on a cancelling sub keeps the cancellation.
+            cancel_at_period_end=cancel_at_period_end,
         )
 
     async def cancel_subscription(self, external_ref: str, at_period_end: bool) -> None:

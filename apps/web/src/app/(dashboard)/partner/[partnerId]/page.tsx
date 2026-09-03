@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
+import { QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth } from "@/lib/api";
 import { formatMinor } from "@/lib/cp";
@@ -73,9 +74,15 @@ export default function PartnerOverviewPage() {
       </div>
       <section>
         <h2 className="mb-3 text-lg font-semibold">Recent revenue share entries</h2>
-        {entries.length === 0 ? (
+        {/* R113[M25]: a failed entries fetch was masked as "No entries yet." —
+            a partner with real accruals saw an authoritative empty state. */}
+        {entriesQuery.isError && (
+          <QueryError error={entriesQuery.error} what="revenue share entries" />
+        )}
+        {!entriesQuery.isLoading && !entriesQuery.isError && entries.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">No entries yet.</p>
-        ) : (
+        )}
+        {entries.length > 0 && (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead className="border-b bg-[hsl(var(--secondary))] text-left">

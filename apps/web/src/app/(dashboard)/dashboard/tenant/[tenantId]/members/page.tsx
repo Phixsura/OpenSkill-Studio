@@ -7,8 +7,9 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { QueryError } from "@/components/cp-list";
 import { apiWithAuth, ApiError } from "@/lib/api";
-import { useTenantRole } from "@/lib/use-me";
+import { usePlatformAdmin, useTenantRole } from "@/lib/use-me";
 import { formatDate } from "@/lib/cp";
 import { useImpersonation } from "@/lib/use-me";
 
@@ -24,6 +25,12 @@ export default function TenantMembersPage() {
   const queryClient = useQueryClient();
   // R101[M30]: member management is owner-only server-side
   const isOwner = useTenantRole(tenantId) === "owner";
+  // R113[L6]: platform admins bypass tenant membership server-side
+  // (require_tenant_member grants them a virtual owner membership), but
+  // useTenantRole returns null for them — the owner controls were hidden from
+  // the very admins allowed to use them.
+  const isPlatformAdmin = usePlatformAdmin();
+  const canManage = isOwner || isPlatformAdmin;
   // R101[M27]: impersonation sessions are read-only server-side — disable the
   // membership write controls instead of letting every click die with a 403.
   const impersonating = useImpersonation();
@@ -85,11 +92,11 @@ export default function TenantMembersPage() {
           </select>
           <Button
             onClick={() => addMutation.mutate()}
-            disabled={!userId || addMutation.isPending || impersonating || !isOwner}
+            disabled={!userId || addMutation.isPending || impersonating || !canManage}
             title={
               impersonating
                 ? "Read-only impersonation session"
-                : !isOwner
+                : !canManage
                   ? "Only the tenant owner can manage members"
                   : undefined
             }
@@ -101,44 +108,50 @@ export default function TenantMembersPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Members</h2>
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-[hsl(var(--secondary))] text-left">
-              <tr>
-                <th className="px-4 py-2 font-medium">User</th>
-                <th className="px-4 py-2 font-medium">Role</th>
-                <th className="px-4 py-2 font-medium">Since</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((m) => (
-                <tr key={m.id} className="border-b last:border-0">
-                  <td className="px-4 py-2 font-mono text-xs">{m.user_id}</td>
-                  <td className="px-4 py-2">{m.role}</td>
-                  <td className="px-4 py-2">{formatDate(m.created_at)}</td>
-                  <td className="px-4 py-2 text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => removeMutation.mutate(m.id)}
-                      disabled={removeMutation.isPending || impersonating || !isOwner}
-                      title={
-                        impersonating
-                          ? "Read-only impersonation session"
-                          : !isOwner
-                            ? "Only the tenant owner can manage members"
-                            : undefined
-                      }
-                    >
-                      Remove
-                    </Button>
-                  </td>
+        {/* R113[M28]: a failed members fetch rendered an empty table — headers
+            with zero rows, indistinguishable from "no members" (impossible:
+            there is always at least the owner). */}
+        {membersQuery.isError && <QueryError error={membersQuery.error} what="tenant members" />}
+        {!membersQuery.isError && (
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-[hsl(var(--secondary))] text-left">
+                <tr>
+                  <th className="px-4 py-2 font-medium">User</th>
+                  <th className="px-4 py-2 font-medium">Role</th>
+                  <th className="px-4 py-2 font-medium">Since</th>
+                  <th className="px-4 py-2" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {members.map((m) => (
+                  <tr key={m.id} className="border-b last:border-0">
+                    <td className="px-4 py-2 font-mono text-xs">{m.user_id}</td>
+                    <td className="px-4 py-2">{m.role}</td>
+                    <td className="px-4 py-2">{formatDate(m.created_at)}</td>
+                    <td className="px-4 py-2 text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => removeMutation.mutate(m.id)}
+                        disabled={removeMutation.isPending || impersonating || !canManage}
+                        title={
+                          impersonating
+                            ? "Read-only impersonation session"
+                            : !canManage
+                              ? "Only the tenant owner can manage members"
+                              : undefined
+                        }
+                      >
+                        Remove
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );
