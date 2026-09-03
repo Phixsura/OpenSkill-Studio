@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import structlog
 from sqlalchemy import func, select
@@ -26,6 +26,21 @@ from app.models.project import (
 )
 
 log = structlog.get_logger()
+
+
+def _current_month_utc() -> date:
+    """R67[8]: month bucket key for EvalUsageMonthly.
+
+    date.today() is the API server's LOCAL calendar date while
+    task.completed_at is UTC — near month boundaries a non-UTC server wrote
+    spend into a different month than the one the budget gate read, letting
+    the cap be breached (or blocking a fresh month). UTC everywhere: the
+    display ledger is server-tz-independent and gate/write always agree.
+    (Tenant-tz alignment with CP budget windows is the CP policy's own
+    concern — it reads RatedUsage, not this table.)
+    """
+    return datetime.now(UTC).date().replace(day=1)
+
 
 DEFAULT_PASS_THRESHOLD = 0.6
 
@@ -229,6 +244,12 @@ class EvaluationService:
         if submission is None or submission.org_id != org_id:
             raise AppError("SUBMISSION_NOT_FOUND", "Submission not found", 404)
 
+        # Issue #27: suspended tenants cannot start costed executions
+        from app.controlplane import facade as cp_facade
+
+        tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+        cp_facade.require_tenant_active(tenant)
+
         # AI evaluation must be switched on for the org — the enabled flag
         # was stored but never checked, so a disabled org could still run
         # (and pay for) evaluations.
@@ -236,9 +257,37 @@ class EvaluationService:
         if not eval_settings.get("enabled"):
             raise EvalNotEnabledError()
 
-        # Check budget
-        if not await self.check_budget(org_id):
+        # Check budget — thread the submission's project/user so project- and
+        # user-scoped policies match (R63). R67[7]: pass a projected estimate
+        # so a hard_stop policy blocks the run that WOULD breach the limit,
+        # not the one after (projected_minor=0 only gated once spend already
+        # strictly exceeded the cap).
+        projected = await self._estimate_eval_cost_minor(org_id)
+        if not await self.check_budget(
+            org_id,
+            project_id=submission.project_id,
+            user_id=submission.user_id,
+            projected_minor=projected,
+        ):
             raise BudgetExceededError()
+
+        # R67[4]: credit enforcement (prepay, tenant metadata flag) applied to
+        # evaluation spend — workflow runs reserved credit but evals bypassed
+        # the ledger entirely (zero-balance prepay tenants ran unlimited paid
+        # LLM calls; the spend was rated and left uncollectable). Same
+        # pattern: positive estimate → reserve (settled with ACTUAL usage by
+        # the run.terminal-equivalent below); zero estimate → require some
+        # available balance.
+        from app.controlplane.services import credits as _credits
+
+        if bool((tenant.metadata_ or {}).get("credit_enforcement")):
+            if projected > 0:
+                _reservation_pending = True
+            else:
+                await _credits.require_available(self.db, tenant.id, tenant.currency)
+                _reservation_pending = False
+        else:
+            _reservation_pending = False
 
         task = EvaluationTask(
             org_id=org_id,
@@ -249,11 +298,26 @@ class EvaluationService:
         )
         self.db.add(task)
         await self.db.flush()
+        if _reservation_pending:
+            await _credits.reserve(
+                self.db,
+                tenant.id,
+                tenant.currency,
+                projected,
+                reference_type="evaluation_task",
+                reference_id=task.id,
+            )
 
         log.info("eval_task_created", task_id=task.id, type=eval_type, org_id=org_id)
 
         # Phase 1: execute inline (Phase 2: enqueue to ARQ)
         await self._execute_evaluation(task)
+        # R67[4]: settle the reservation with ACTUAL spend (synchronous single
+        # step — no outbox needed, per plan §5.3). Failed evals settle only
+        # what the provider actually charged (possibly 0 → release-equivalent
+        # via settle(0)).
+        if _reservation_pending:
+            await self._settle_eval_reservation(task)
 
         return task
 
@@ -294,6 +358,16 @@ class EvaluationService:
                 system = SYSTEM_PROMPT
 
             llm = create_llm_client(org_settings.get("default_model"))
+            # R94[H5]: commit BEFORE the (up to 120s) LLM call — the same R13
+            # pattern workflow_runtime uses before provider calls. Without it,
+            # a credit-enforced trigger held the tenant's TenantCreditBalance
+            # FOR UPDATE (reserve) plus an idle-in-transaction pool connection
+            # for the whole call, blocking every settle/top-up/debit for the
+            # tenant and starving the pool under concurrent evals.
+            # expire_on_commit=False keeps task/submission/project populated;
+            # a read-committed re-read hazard is acceptable here (the task row
+            # is only ever written by this request).
+            await self.db.commit()
             try:
                 response = await asyncio.wait_for(
                     llm.complete(
@@ -313,6 +387,18 @@ class EvaluationService:
                     timeout=settings.eval_timeout_seconds,
                 )
                 return
+
+            # R49[40]: the provider charged for this response regardless of
+            # what happens next (parse failure, any downstream exception).
+            # Stamp the spend on the task NOW so the failure branches can
+            # meter it — previously only the success path emitted usage
+            # events, so parse-failed evals were free (internal cost with
+            # zero billable, silent margin leak).
+            task.llm_provider = response.provider
+            task.llm_model = response.model
+            task.input_tokens = response.input_tokens
+            task.output_tokens = response.output_tokens
+            task.cost_usd = Decimal(str(calculate_cost(response)))
 
             # Parse result
             result = self._parse_evaluation_response(response.content, project.rubric)
@@ -368,6 +454,10 @@ class EvaluationService:
             # Update monthly usage
             await self._update_monthly_usage(task)
 
+            # Issue #27 §3.3c: control-plane usage events (idempotent per
+            # task+retry). EvalUsageMonthly above stays for display.
+            await self._emit_usage_events(task)
+
             await self.db.flush()
 
             log.info(
@@ -379,6 +469,13 @@ class EvaluationService:
             )
 
         except json.JSONDecodeError:
+            # R49[40]: the LLM call already returned — real tokens were spent.
+            # Meter them even though the evaluation failed (token events only;
+            # no multimodal_evaluation event since no evaluation was produced).
+            # Emit BEFORE the retries bump: the key carries this attempt's
+            # number; a later UI retry executes under the incremented value,
+            # so its own emission never collides with this one.
+            await self._emit_usage_events(task, tokens_only=True)
             task.retries += 1
             # Always set to FAILED — no background worker picks up PENDING tasks
             task.status = EvalStatus.FAILED
@@ -387,12 +484,40 @@ class EvaluationService:
             log.warning("eval_parse_failed", task_id=task.id, retries=task.retries)
 
         except Exception as e:
-            task.status = EvalStatus.FAILED
-            # Sanitize error: don't expose internal details (connection strings,
-            # file paths, API keys) to the client. Log the full error server-side.
-            task.error = "Evaluation failed due to an internal error"
-            task.completed_at = datetime.now(UTC)
-            await self.db.flush()
+            # R94[H6]: if the failure was a DB error (e.g. NUL in the LLM
+            # feedback aborting the flush), the session is in a failed
+            # transaction — every statement below would raise
+            # PendingRollbackError, 500 the request AND roll back the task
+            # row + metering (paid spend recorded nowhere). Roll back first;
+            # the pre-LLM commit (R94[H5]) preserved the task row, and
+            # expire_on_commit=False keeps the ORM objects usable. Re-attach
+            # the task since the rollback may have detached pending state.
+            if self.db.in_transaction() and not self.db.is_active:
+                await self.db.rollback()
+            try:
+                task.status = EvalStatus.FAILED
+                # Sanitize error: don't expose internal details (connection
+                # strings, file paths, API keys) to the client.
+                task.error = "Evaluation failed due to an internal error"
+                task.completed_at = datetime.now(UTC)
+                # R49[40]: input/output_tokens are set iff the LLM call
+                # completed; _emit_usage_events no-ops on zero tokens.
+                await self._emit_usage_events(task, tokens_only=True)
+                # R91[m0]: bump retries AFTER emitting (same contract as the
+                # parse-failure branch) — without it a UI retry's REAL second
+                # LLM spend re-used eval:{id}:0:* keys and its token events
+                # were silently dropped as duplicates (unrated, unbilled).
+                task.retries += 1
+                await self.db.flush()
+            except Exception:  # noqa: BLE001 — aborted session: recover once
+                await self.db.rollback()
+                task.status = EvalStatus.FAILED
+                task.error = "Evaluation failed due to an internal error"
+                task.completed_at = datetime.now(UTC)
+                self.db.add(task)
+                await self._emit_usage_events(task, tokens_only=True)
+                task.retries += 1
+                await self.db.flush()
             log.error("eval_failed", task_id=task.id, error=str(e))
 
     # ── Task CRUD ──
@@ -436,19 +561,51 @@ class EvaluationService:
         task = await self.get_task(task_id)
         if task.status != EvalStatus.FAILED:
             raise AppError("INVALID_STATE", "Only failed tasks can be retried", 422)
-        # Retry spends LLM budget just like a fresh trigger — enforce the
-        # same enabled + monthly-cap gates.
+        # Retry spends LLM budget just like a fresh trigger — enforce the SAME
+        # three gates trigger_evaluation applies: tenant not suspended (a
+        # costed action), AI enabled, and monthly cap. The suspension gate was
+        # missing, letting a suspended tenant re-run a paid LLM call (R32/C2).
+        from app.controlplane import facade as cp_facade
+
+        tenant = await cp_facade.get_tenant_for_org(self.db, task.org_id)
+        cp_facade.require_tenant_active(tenant)
         eval_settings = await self.get_eval_settings(task.org_id)
         if not eval_settings.get("enabled"):
             raise EvalNotEnabledError()
-        if not await self.check_budget(task.org_id):
+        retry_submission = await self.db.get(Submission, task.submission_id)
+        projected = await self._estimate_eval_cost_minor(task.org_id)
+        if not await self.check_budget(
+            task.org_id,
+            project_id=retry_submission.project_id if retry_submission else None,
+            user_id=retry_submission.user_id if retry_submission else None,
+            projected_minor=projected,
+        ):
             raise BudgetExceededError()
+        # R67[4]: retries spend real credit too — same prepay gate as trigger.
+        from app.controlplane.services import credits as _credits
+
+        _retry_reserved = False
+        if bool((tenant.metadata_ or {}).get("credit_enforcement")):
+            if projected > 0:
+                await _credits.reserve(
+                    self.db,
+                    tenant.id,
+                    tenant.currency,
+                    projected,
+                    reference_type="evaluation_task",
+                    reference_id=task.id,
+                )
+                _retry_reserved = True
+            else:
+                await _credits.require_available(self.db, tenant.id, tenant.currency)
         task.status = EvalStatus.PENDING
         task.error = None
         await self.db.flush()
 
         # Re-execute inline
         await self._execute_evaluation(task)
+        if _retry_reserved:
+            await self._settle_eval_reservation(task)
         return task
 
     async def cancel_task(self, task_id: str) -> EvaluationTask:
@@ -462,7 +619,7 @@ class EvaluationService:
     # ── Usage ──
 
     async def get_usage(self, org_id: str) -> dict:
-        current_month = date.today().replace(day=1)
+        current_month = _current_month_utc()
         result = await self.db.execute(
             select(EvalUsageMonthly).where(
                 EvalUsageMonthly.org_id == org_id,
@@ -502,8 +659,141 @@ class EvaluationService:
             "budget_remaining": (budget - spent) if budget is not None else None,
         }
 
-    async def check_budget(self, org_id: str) -> bool:
-        """Return True if under budget (or no budget set)."""
+    async def _estimate_eval_cost_minor(self, org_id: str) -> int:
+        """R67[7]: projected cost of the next eval, in tenant-currency minor.
+
+        Recent org average (last 20 completed evals) is the best predictor;
+        a fresh org falls back to a conservative flagship-tier estimate
+        (~$0.10). USD figure converted at the platform's minor scale — eval
+        costs are tracked in USD (cost_usd) and the CP budget check converts
+        policies itself; the reservation path converts via tenant currency.
+        """
+        from app.controlplane.models.pricing import minor_multiplier
+        from app.controlplane.services.tenants import get_tenant_for_org
+
+        avg_usd = (
+            await self.db.execute(
+                select(func.avg(EvaluationTask.cost_usd)).where(
+                    EvaluationTask.org_id == org_id,
+                    EvaluationTask.status == EvalStatus.COMPLETED,
+                    EvaluationTask.cost_usd.is_not(None),
+                )
+            )
+        ).scalar_one_or_none()
+        usd = Decimal(str(avg_usd)) if avg_usd else Decimal("0.10")
+        try:
+            tenant = await get_tenant_for_org(self.db, org_id)
+            currency = tenant.currency
+        except Exception:  # noqa: BLE001
+            currency = "USD"
+        if currency != "USD":
+            from app.controlplane.services.rating import resolve_fx
+
+            fx = await resolve_fx(self.db, "USD", currency, datetime.now(UTC))
+            if fx is None:
+                # No rate — reserve in tenant minor at 1:1 of the USD figure
+                # (conservative enough; rating blocks the real conversion).
+                pass
+            else:
+                usd = usd * fx[0]
+        return int(
+            (usd * minor_multiplier(currency)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+
+    async def _settle_eval_reservation(self, task: EvaluationTask) -> None:
+        """R67[4]: settle the eval's credit reservation with ACTUAL usage.
+
+        Mirrors handle_run_terminal: rate the task's events inline, sum the
+        exact billable in the reservation currency, settle (guarded). Failure
+        to settle must never fail the evaluation — the sweep cron releases
+        stale holds. R94[m5]: the whole body is SAVEPOINT-isolated — the
+        swallow below is only safe if a DB error inside (rate_pending /
+        settle / row flips) cannot leave the outer transaction aborted
+        (same class as R77[1]).
+        """
+        try:
+            from app.controlplane.models.credit import CreditReservation
+            from app.controlplane.models.pricing import RatedUsage
+            from app.controlplane.models.usage import UsageEvent as CpUsageEvent
+            from app.controlplane.services import credits as _credits
+            from app.controlplane.services.rating import rate_pending
+
+            async with self.db.begin_nested():
+                reservation = (
+                    await self.db.execute(
+                        select(CreditReservation).where(
+                            CreditReservation.reference_type == "evaluation_task",
+                            CreditReservation.reference_id == task.id,
+                            CreditReservation.status == "held",
+                        )
+                    )
+                ).scalar_one_or_none()
+                if reservation is None:
+                    return
+                await rate_pending(self.db, tenant_id=reservation.tenant_id)
+                # R98[H11]: FOR UPDATE — same double-charge race R80[1] closed
+                # for workflow runs: unlocked, this select raced close_period's
+                # locked usage-line sweep and the same rated rows were settled
+                # against the reservation AND billed on the invoice.
+                rows = (
+                    (
+                        await self.db.execute(
+                            select(RatedUsage)
+                            .join(CpUsageEvent, CpUsageEvent.id == RatedUsage.usage_event_id)
+                            .where(
+                                CpUsageEvent.evaluation_task_id == task.id,
+                                RatedUsage.billable_currency == reservation.currency,
+                                RatedUsage.status == "rated",
+                            )
+                            .with_for_update(of=RatedUsage)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                actual = int(
+                    sum((Decimal(r.billable_amount_exact) for r in rows), Decimal(0)).quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP
+                    )
+                )
+                settled = await _credits.settle(self.db, reservation.id, actual)
+                if settled.status == "settled" and rows:
+                    from sqlalchemy import update as _sa_update
+
+                    await self.db.execute(
+                        _sa_update(RatedUsage)
+                        .where(
+                            RatedUsage.id.in_([r.id for r in rows]),
+                            RatedUsage.status == "rated",
+                        )
+                        .values(status="settled")
+                    )
+            await self.db.flush()
+        except Exception:  # noqa: BLE001 — never fail the eval on settlement
+            log.warning("eval_reservation_settle_failed", task_id=task.id, exc_info=True)
+
+    async def check_budget(
+        self,
+        org_id: str,
+        *,
+        project_id: str | None = None,
+        user_id: str | None = None,
+        projected_minor: int = 0,
+    ) -> bool:
+        """Return True if under budget (or no budget set).
+
+        Issue #27 §17: the legacy settings check stays as the fast path (it
+        reads EvalUsageMonthly, the display ledger), and the control-plane
+        BudgetService is enforced on top — one budget SYSTEM with a
+        compatibility read. A legacy settings value with no policy row is
+        lazily converted by update_eval_settings' write-through; until then
+        both checks agree because upsert_from_eval_settings mirrors it.
+
+        project_id/user_id let project/user-scoped policies match (R63: the
+        single call site passed org_id only, so those scopes were dead), and
+        projected_minor is the estimated cost of the eval about to run so the
+        hard stop fires BEFORE the limit is breached, not one run after.
+        """
         from app.models.organization import Organization
 
         org = await self.db.get(Organization, org_id)
@@ -512,22 +802,57 @@ class EvaluationService:
 
         eval_settings = (org.settings or {}).get("ai_evaluation", {})
         budget = _coerce_budget(eval_settings.get("monthly_budget_usd"))
-        if budget is None:
-            return True
-
-        current_month = date.today().replace(day=1)
-        result = await self.db.execute(
-            select(EvalUsageMonthly).where(
-                EvalUsageMonthly.org_id == org_id,
-                EvalUsageMonthly.month == current_month,
+        if budget is not None:
+            current_month = _current_month_utc()
+            result = await self.db.execute(
+                select(EvalUsageMonthly).where(
+                    EvalUsageMonthly.org_id == org_id,
+                    EvalUsageMonthly.month == current_month,
+                )
             )
-        )
-        usage = result.scalar_one_or_none()
-        # No usage row means $0 spent — still subject to the budget. Returning
-        # True unconditionally here let a 0-budget org run its first eval of
-        # every month.
-        spent = float(usage.total_cost_usd) if usage is not None else 0.0
-        return spent < budget
+            usage = result.scalar_one_or_none()
+            # No usage row means $0 spent — still subject to the budget.
+            spent = float(usage.total_cost_usd) if usage is not None else 0.0
+            if spent >= budget:
+                return False
+
+        # Control-plane budgets: org/tenant policies + tenant AI ceiling.
+        try:
+            from app.controlplane.services import budgets as cp_budgets
+            from app.controlplane.services.tenants import get_tenant_for_org
+
+            tenant = await get_tenant_for_org(self.db, org_id)
+            decision = await cp_budgets.check(
+                self.db,
+                tenant,
+                org_id,
+                project_id=project_id,
+                user_id=user_id,
+                usage_type="multimodal_evaluation",
+                projected_minor=projected_minor,
+            )
+            # R63: surface soft (hard_stop=False / threshold) budget warnings —
+            # previously the return value was discarded, so a soft policy was
+            # behaviorally identical to no policy. Log them for now (a
+            # notification path can consume the same structlog event later).
+            for w in decision.warnings:
+                log.warning(
+                    "cp_budget_warning",
+                    org_id=org_id,
+                    policy_id=w.get("policy_id"),
+                    scope=w.get("scope"),
+                    over=w.get("over", False),
+                    threshold=w.get("threshold", False),
+                )
+        except AppError as exc:
+            if exc.code == "BUDGET_EXCEEDED":
+                return False
+            if exc.code == "TENANT_NOT_FOUND":
+                # Org row exists but tenant resolution failed (should not
+                # happen post-backfill) — legacy check already passed above.
+                return True
+            raise
+        return True
 
     # ── Settings ──
 
@@ -576,6 +901,19 @@ class EvaluationService:
         current["ai_evaluation"] = eval_cfg
         org.settings = current
         await self.db.flush()
+
+        # Issue #27 §17 (ONE budget system): write-through the monthly budget
+        # into a control-plane BudgetPolicy (org scope). The settings mirror
+        # stays for the existing UI; enforcement lives in BudgetService.
+        if "monthly_budget_usd" in updates:
+            from app.controlplane.services import budgets as cp_budgets
+
+            await cp_budgets.upsert_from_eval_settings(
+                self.db,
+                tenant_id=org.tenant_id,
+                org_id=org_id,
+                monthly_budget_usd=_coerce_budget(eval_cfg.get("monthly_budget_usd")),
+            )
 
         return await self.get_eval_settings(org_id)
 
@@ -836,11 +1174,90 @@ Please evaluate the submission against the rubric above."""
             "improvements": data.get("improvements", []),
         }
 
+    async def _emit_usage_events(self, task: EvaluationTask, *, tokens_only: bool = False) -> None:
+        """Issue #27 §3.3c: multimodal_evaluation + LLM token usage events.
+
+        Idempotency keys carry task.retries so a UI-triggered retry (a real
+        second LLM spend) meters again, while replays of the same attempt
+        never double-bill. Emission failures must not fail the evaluation —
+        the LLM spend already happened.
+
+        tokens_only=True (R49[40]): failure paths meter the token spend the
+        provider already charged for, without a multimodal_evaluation event
+        (no evaluation was actually produced).
+        """
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+
+        from app.controlplane import facade as cp_facade
+        from app.models.organization import Organization as _Org
+
+        tenant_id = (
+            await self.db.execute(select(_Org.tenant_id).where(_Org.id == task.org_id))
+        ).scalar_one_or_none()
+        if tenant_id is None:
+            return
+        now = _dt.now(_UTC)
+        # R67[5]: thread project/user refs onto the events — project-/user-
+        # scoped BudgetPolicies join RatedUsage via these columns; without
+        # them scoped policies never accumulated eval spend (gate saw 0).
+        submission = await self.db.get(Submission, task.submission_id)
+        common = {
+            "tenant_id": tenant_id,
+            "org_id": task.org_id,
+            "occurred_at": now,
+            "source": "evaluation",
+            "evaluation_task_id": task.id,
+            "provider": task.llm_provider,
+            "model_or_service": task.llm_model,
+            "project_id": submission.project_id if submission else None,
+            "user_id": submission.user_id if submission else None,
+        }
+        try:
+            # R77[1]: the swallow below is only safe when a DB error cannot
+            # poison the OUTER transaction. emit_usage flushes in the
+            # caller's session — a failed flush left the tx aborted, and the
+            # caller's next flush raised PendingRollbackError, converting a
+            # metering hiccup into a rolled-back COMPLETED evaluation (paid
+            # LLM call, no review, no task row). SAVEPOINT-isolate the
+            # emissions so only they roll back.
+            async with self.db.begin_nested():
+                if not tokens_only:
+                    await cp_facade.emit_usage(
+                        self.db,
+                        usage_type="multimodal_evaluation",
+                        quantity=1,
+                        idempotency_key=f"eval:{task.id}:{task.retries}:eval",
+                        metadata={
+                            "eval_type": task.type.value,
+                            "cost_usd": str(task.cost_usd) if task.cost_usd is not None else None,
+                        },
+                        **common,
+                    )
+                if task.input_tokens:
+                    await cp_facade.emit_usage(
+                        self.db,
+                        usage_type="llm_input_tokens",
+                        quantity=task.input_tokens,
+                        idempotency_key=f"eval:{task.id}:{task.retries}:in",
+                        **common,
+                    )
+                if task.output_tokens:
+                    await cp_facade.emit_usage(
+                        self.db,
+                        usage_type="llm_output_tokens",
+                        quantity=task.output_tokens,
+                        idempotency_key=f"eval:{task.id}:{task.retries}:out",
+                        **common,
+                    )
+        except Exception:  # noqa: BLE001 — never fail a completed eval on metering
+            log.warning("eval_usage_emit_failed", task_id=task.id, exc_info=True)
+
     async def _update_monthly_usage(self, task: EvaluationTask) -> None:
         """Upsert monthly usage stats with atomic SQL to prevent lost updates."""
         from sqlalchemy import update as sa_update
 
-        current_month = date.today().replace(day=1)
+        current_month = _current_month_utc()
         result = await self.db.execute(
             select(EvalUsageMonthly).where(
                 EvalUsageMonthly.org_id == task.org_id,
@@ -884,3 +1301,55 @@ Please evaluate the submission against the rubric above."""
             )
         )
         await self.db.flush()
+
+
+async def sweep_wedged_evaluations(db: AsyncSession) -> int:
+    """R101[H18]: fail evaluations wedged in PROCESSING.
+
+    The R94[H5] commit-before-LLM pattern persists status=PROCESSING before
+    the provider call; a crash/restart mid-call leaves the task PROCESSING
+    forever with no retry path — and its credit reservation held. Any task
+    still PROCESSING well past the LLM timeout is dead (the inline executor
+    either finished or hit its own TimeoutError branch long ago). Flip to
+    FAILED (guarded, started_at-bounded) and settle the reservation with
+    actual (usually zero) spend.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import update as sa_update
+
+    cutoff = datetime.now(UTC) - timedelta(seconds=settings.eval_timeout_seconds * 3 + 60)
+    rows = (
+        (
+            await db.execute(
+                select(EvaluationTask).where(
+                    EvaluationTask.status == EvalStatus.PROCESSING,
+                    EvaluationTask.started_at < cutoff,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    n = 0
+    for task in rows:
+        result = await db.execute(
+            sa_update(EvaluationTask)
+            .where(
+                EvaluationTask.id == task.id,
+                EvaluationTask.status == EvalStatus.PROCESSING,
+                EvaluationTask.started_at < cutoff,
+            )
+            .values(
+                status=EvalStatus.FAILED,
+                error="Evaluation wedged in processing (worker crash?) — swept",
+                retries=EvaluationTask.retries + 1,
+            )
+        )
+        if not result.rowcount:
+            continue  # concurrent completion won
+        n += 1
+        log.warning("eval_wedged_swept", task_id=task.id, started_at=str(task.started_at))
+        svc = EvaluationService(db)
+        await svc._settle_eval_reservation(task)  # noqa: SLF001 — module-owned helper
+    return n

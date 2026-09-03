@@ -91,7 +91,12 @@ class OrgService:
     # ── CRUD ──
 
     async def create(
-        self, name: str, slug: str | None, description: str | None, created_by: str
+        self,
+        name: str,
+        slug: str | None,
+        description: str | None,
+        created_by: str,
+        tenant_id: str | None = None,
     ) -> Organization:
         if slug is None:
             slug = self._generate_slug(name)
@@ -101,7 +106,25 @@ class OrgService:
         if existing.scalar_one_or_none() is not None:
             raise SlugAlreadyExistsError() from None
 
+        # Issue #27: every org belongs to a TenantAccount. Standalone creation
+        # (no tenant context) auto-creates a TRIAL tenant owned by the creator;
+        # the tenant-scoped path (POST /tenants/{id}/orgs) passes tenant_id and
+        # enforces the max_organizations entitlement at the endpoint.
+        if tenant_id is None:
+            from app.controlplane.services.audit import Actor
+            from app.controlplane.services.tenants import create_tenant
+
+            tenant = await create_tenant(
+                self.db,
+                name=name,
+                slug=slug,
+                actor=Actor(user_id=created_by, type="tenant"),
+                owner_user_id=created_by,
+            )
+            tenant_id = tenant.id
+
         org = Organization(
+            tenant_id=tenant_id,
             name=name,
             slug=slug,
             description=description,
@@ -111,7 +134,15 @@ class OrgService:
         try:
             await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
+            # R57[1]: when running inside an outbox-handler SAVEPOINT
+            # (worker isolation, provisioning steps), session.rollback()
+            # rolls back the ROOT batch transaction — poisoning every
+            # sibling message and un-claiming rows mid-flight. Inside a
+            # nested transaction we only raise: the enclosing
+            # begin_nested() unwinds to the savepoint and the root stays
+            # usable. On the plain request path behavior is unchanged.
+            if not self.db.in_nested_transaction():
+                await self.db.rollback()
             raise SlugAlreadyExistsError() from None
 
         # Creator becomes owner
@@ -175,9 +206,19 @@ class OrgService:
             raise InsufficientOrgPermissionError()
 
         org.status = OrgStatus.ARCHIVED
+        # R68[1]: archive the org's MEMBER rows too — they stayed ACTIVE and
+        # kept consuming the tenant-wide seat quota (blocking adds in sibling
+        # orgs) and were billed as live seats at period close. Rejoining a
+        # future org re-activates via the normal quota-gated path.
+        from sqlalchemy import update as sa_update
+
+        await self.db.execute(
+            sa_update(OrgMember)
+            .where(OrgMember.org_id == org_id, OrgMember.status == MemberStatus.ACTIVE)
+            .values(status=MemberStatus.ARCHIVED)
+        )
 
         # Archive all packs owned by this org so they're removed from registry
-        from sqlalchemy import update as sa_update
 
         from app.models.skill_pack import PackStatus, SkillPack
         from app.models.workflow_pack import WorkflowPack
@@ -214,6 +255,75 @@ class OrgService:
 
     # ── Members ──
 
+    async def _check_seat_quota(self, org_id: str, role: OrgRole, user_id: str) -> None:
+        """Issue #27 §2.5: enforce tenant seat entitlements. Single funnel —
+        add_member is the only row-creation path, so direct adds, invitation
+        accepts, and invite-link joins are all covered here."""
+        from app.controlplane import facade
+
+        key = (
+            "max_active_learners"
+            if role == OrgRole.STUDENT
+            else "max_instructors"  # INSTRUCTOR/ADMIN/OWNER all consume staff seats
+        )
+        tenant = await facade.get_tenant_for_org(self.db, org_id)
+        # R68[5]: joining consumes a billable seat — a costed action. Blocked
+        # tenants (suspension for non-payment, cancellation) must not keep
+        # growing seats via pre-existing invite links/invites; every member-
+        # creation path funnels through this check.
+        facade.require_tenant_active(tenant)
+        # R68[3] seat TOCTOU: two concurrent joins with one seat left both
+        # counted 9<10 and both inserted (over-cap, over-billed). A tenant-
+        # scoped transaction advisory lock serializes count→insert across all
+        # of the tenant's orgs; it releases at commit/rollback automatically.
+        from sqlalchemy import text as _text
+
+        await self.db.execute(
+            _text("SELECT pg_advisory_xact_lock(hashtext(:k))").bindparams(
+                k=f"cp_seats:{tenant.id}"
+            )
+        )
+        current_q = (
+            select(func.count(func.distinct(OrgMember.user_id)))
+            .select_from(OrgMember)
+            .join(Organization, Organization.id == OrgMember.org_id)
+            .where(
+                Organization.tenant_id == tenant.id,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
+        )
+        if role == OrgRole.STUDENT:
+            current_q = current_q.where(OrgMember.role == OrgRole.STUDENT)
+        else:
+            current_q = current_q.where(
+                OrgMember.role.in_([OrgRole.INSTRUCTOR, OrgRole.ADMIN, OrgRole.OWNER])
+            )
+        current = (await self.db.execute(current_q)).scalar_one()
+        # R74[1]: current counts DISTINCT users tenant-wide (matching billing's
+        # live-seats), but requested was always 1 — adding a user who ALREADY
+        # holds a seat in a sibling org (same role class) was falsely rejected
+        # at the cap even though the addition consumes no new seat.
+        already_counted_q = (
+            select(func.count(OrgMember.id))
+            .select_from(OrgMember)
+            .join(Organization, Organization.id == OrgMember.org_id)
+            .where(
+                Organization.tenant_id == tenant.id,
+                OrgMember.status == MemberStatus.ACTIVE,
+                OrgMember.user_id == user_id,
+            )
+        )
+        if role == OrgRole.STUDENT:
+            already_counted_q = already_counted_q.where(OrgMember.role == OrgRole.STUDENT)
+        else:
+            already_counted_q = already_counted_q.where(
+                OrgMember.role.in_([OrgRole.INSTRUCTOR, OrgRole.ADMIN, OrgRole.OWNER])
+            )
+        already_counted = (await self.db.execute(already_counted_q)).scalar_one() > 0
+        await facade.check_quota(
+            self.db, tenant, key, current=current, requested=0 if already_counted else 1
+        )
+
     async def add_member(
         self, org_id: str, user_id: str, role: OrgRole, invited_by: str | None = None
     ) -> OrgMember:
@@ -229,12 +339,15 @@ class OrgService:
 
         if existing is not None:
             if existing.status == MemberStatus.ARCHIVED:
+                # Re-activation consumes a seat again — same quota gate
+                await self._check_seat_quota(org_id, role, user_id)
                 existing.status = MemberStatus.ACTIVE
                 existing.role = role
                 await self.db.flush()
                 return existing
             raise AlreadyMemberError()
 
+        await self._check_seat_quota(org_id, role, user_id)
         member = OrgMember(
             org_id=org_id,
             user_id=user_id,
@@ -284,6 +397,18 @@ class OrgService:
 
         member = await self._get_active_member(org_id, user_id)
         old_role = member.role
+
+        # Issue #27 §2.5: a role change that moves a member INTO a seat class
+        # it did not previously occupy consumes a seat of that class — gate it,
+        # else the seat quota is bypassable by add-then-promote (add a student
+        # under the learner cap, promote to instructor past the staff cap).
+        staff_roles = (OrgRole.INSTRUCTOR, OrgRole.ADMIN, OrgRole.OWNER)
+        old_staff = old_role in staff_roles
+        new_staff = new_role in staff_roles
+        if new_staff and not old_staff:
+            await self._check_seat_quota(org_id, new_role, user_id)  # student → staff
+        elif new_role == OrgRole.STUDENT and old_role != OrgRole.STUDENT:
+            await self._check_seat_quota(org_id, OrgRole.STUDENT, user_id)  # staff → student
 
         # Prevent removing the last owner — lock owner rows to serialize
         # concurrent demotions and prevent TOCTOU race to zero owners

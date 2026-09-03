@@ -13,6 +13,7 @@ interface Certificate {
   org_name: string;
   issued_at: string;
   skills_completed: number;
+  certificate_footer: string | null;
 }
 
 export default function CertificateVerificationPage() {
@@ -20,8 +21,7 @@ export default function CertificateVerificationPage() {
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["certificate", certificateNumber],
-    queryFn: () =>
-      api<{ data: Certificate }>(`/certificates/${certificateNumber}`),
+    queryFn: () => api<{ data: Certificate }>(`/certificates/${certificateNumber}`),
   });
 
   const cert = data?.data;
@@ -41,8 +41,18 @@ export default function CertificateVerificationPage() {
       <div className="flex min-h-screen items-center justify-center bg-[hsl(var(--background))]">
         <div className="mx-auto max-w-md text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-950">
-            <svg className="h-8 w-8 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="h-8 w-8 text-red-600 dark:text-red-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </div>
           <h1 className="text-2xl font-bold">
@@ -72,8 +82,18 @@ export default function CertificateVerificationPage() {
           {/* Verified badge header */}
           <div className="bg-green-50 px-6 py-4 dark:bg-green-950">
             <div className="flex items-center justify-center gap-2">
-              <svg className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg
+                className="h-6 w-6 text-green-600 dark:text-green-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
               <span className="text-lg font-semibold text-green-700 dark:text-green-300">
                 Verified Certificate
@@ -131,6 +151,12 @@ export default function CertificateVerificationPage() {
 
           {/* Footer */}
           <div className="border-t px-6 py-3 text-center">
+            {/* R113[M6]: tenant white-label footer — was stored but never rendered */}
+            {cert.certificate_footer && (
+              <p className="mb-1 text-xs text-[hsl(var(--muted-foreground))]">
+                {cert.certificate_footer}
+              </p>
+            )}
             <p className="text-xs text-[hsl(var(--muted-foreground))]">
               Verified by OpenSkill Studio
             </p>

@@ -62,6 +62,22 @@ class WorkflowInstallationService:
         if release is None:
             raise AppError("RELEASE_NOT_FOUND", "No release found for this pack", 404)
 
+        # Issue #27 §8.4: marketplace license gate (after visibility, before copy)
+        from app.controlplane import facade as cp_facade
+        from app.models.organization import Organization as _CpOrg
+
+        _org = await self.db.get(_CpOrg, org_id)
+        if _org is not None:
+            # R91[m1]: installs are consuming actions — suspended tenants
+            # must not keep installing (parity with learning-path install).
+            tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+            cp_facade.require_tenant_active(tenant)
+            # target_version enforces major_locked on fresh installs too
+            # (R44[18] — uninstall→reinstall of a newer major).
+            await cp_facade.check_install_license(
+                self.db, "workflow_pack", pack_id, _org, target_version=release.version
+            )
+
         # ── Capability gate (ADR-011): hard failure, never auto-connect ──
         await self._capability_gate(org_id, release)
 
@@ -191,6 +207,16 @@ class WorkflowInstallationService:
             raise AppError("WORKFLOW_PACK_NOT_FOUND", "Original pack no longer exists", 404)
         # Re-check pack access — visibility/status may have changed since install
         await self._check_pack_access(inst.pack_id, org_id)
+
+        # Issue #27 §8.4: upgrades re-verify the license + major_locked policy
+        from app.controlplane.services.marketplace import check_upgrade_license
+        from app.models.organization import Organization as _CpOrg
+
+        _org = await self.db.get(_CpOrg, org_id)
+        if _org is not None:
+            await check_upgrade_license(
+                self.db, "workflow_pack", inst.pack_id, _org, target_version
+            )
 
         release = await self._resolve_release(inst.pack_id, target_version)
         if release is None:

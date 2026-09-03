@@ -21,5 +21,16 @@ class ConsoleEmailSender(EmailSender):
 
 def get_email_sender() -> EmailSender:
     """Return the email sender appropriate for the current environment."""
-    # Phase 2+: return ResendEmailSender() for production
+    # R113[H1]: silently returning the console sender in production meant
+    # every email (verification, password reset, billing notices) was
+    # log-only and undelivered with zero signal. Until a real provider
+    # lands (Phase 2+), production logs LOUDLY per send so ops can see the
+    # gap — and the boot log warns once.
+    from app.config import settings
+
+    if settings.app_env == "production":
+        log.error(
+            "email_sender_unconfigured",
+            detail="No production email provider configured — emails are NOT delivered",
+        )
     return ConsoleEmailSender()

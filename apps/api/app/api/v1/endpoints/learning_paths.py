@@ -14,6 +14,7 @@ from app.schemas.learning_path import (
     AssignPathRequest,
     CohortPathAssignmentResponse,
     CreateLearningPathRequest,
+    InstallPathRequest,
     LearningPathResponse,
     PathItemResponse,
     UpdateLearningPathRequest,
@@ -43,6 +44,32 @@ async def create_path(
     await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
     svc = LearningPathService(db)
     path = await svc.create_path(org_id, user.id, **body.model_dump(exclude_none=True))
+    await db.commit()
+    return DataResponse(data=LearningPathResponse.model_validate(path))
+
+
+@router.post(
+    "/orgs/{org_id}/learning-paths/install",
+    response_model=DataResponse[LearningPathResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def install_path_from_listing(
+    org_id: str,
+    body: InstallPathRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """ADR-014 §8.5: license-gated cross-org copy of a purchased learning path."""
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    from app.controlplane import facade as cp_facade
+
+    tenant = await cp_facade.get_tenant_for_org(db, org_id)
+    cp_facade.require_tenant_active(tenant)
+    svc = LearningPathService(db)
+    path = await svc.install_from_listing(
+        org_id, body.listing_id, user.id, product_id=body.product_id
+    )
     await db.commit()
     return DataResponse(data=LearningPathResponse.model_validate(path))
 

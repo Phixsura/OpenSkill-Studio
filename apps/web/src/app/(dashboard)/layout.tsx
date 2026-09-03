@@ -9,6 +9,9 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { api, sharedRefresh } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useMe } from "@/lib/use-me";
 import { NotificationBell } from "@/components/notification-bell";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +21,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { theme, setTheme } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // Role-conditional navigation: tenant admin / partner portal / platform
+  // console links appear only for users holding those memberships (#27 §11.2)
+  const { data: meData } = useMe();
+  const queryClient = useQueryClient();
+  const me = meData?.data;
+  const tenantMemberships = me?.tenant_memberships ?? [];
+  const partnerMemberships = me?.partner_memberships ?? [];
+  const hasPlatformRole = (me?.platform_roles?.length ?? 0) > 0 || me?.role === "admin";
+  const impersonation = me?.impersonation ?? null;
 
   useEffect(() => setMounted(true), []);
 
@@ -64,6 +77,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       // Logout should succeed even if the API call fails
     } finally {
       clearAuth();
+      // R101[H12]: drop EVERY cached query — the next user on this browser
+      // tab otherwise saw the previous user's data (amounts, memberships,
+      // role-gated nav) served from the warm React Query cache.
+      queryClient.clear();
       router.push("/login");
     }
   };
@@ -110,6 +127,60 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         Settings
       </NavLink>
+      {/* R101[L8]: only memberships[0] got a link — users on multiple tenants
+          or partners could never reach the others from the nav. One link per
+          membership, labelled by name so they're tellable apart.
+          R113[M30]: the cap of 3 had NO overflow affordance — membership #4+
+          was simply unreachable from the UI (no tenants index page exists).
+          Cap raised to 8; anything beyond that is listed in a tooltip so the
+          user at least knows what's hidden. */}
+      {tenantMemberships.slice(0, 8).map((m) => (
+        <NavLink
+          key={m.tenant_id}
+          href={`/dashboard/tenant/${m.tenant_id}`}
+          active={pathname.startsWith(`/dashboard/tenant/${m.tenant_id}`)}
+          onClick={closeSidebar}
+        >
+          Tenant · {m.name}
+        </NavLink>
+      ))}
+      {tenantMemberships.length > 8 && (
+        <p
+          className="px-3 py-2 text-sm text-[hsl(var(--muted-foreground))]"
+          title={tenantMemberships
+            .slice(8)
+            .map((m) => m.name)
+            .join(", ")}
+        >
+          +{tenantMemberships.length - 8} more tenants
+        </p>
+      )}
+      {partnerMemberships.slice(0, 8).map((m) => (
+        <NavLink
+          key={m.partner_id}
+          href={`/partner/${m.partner_id}`}
+          active={pathname.startsWith(`/partner/${m.partner_id}`)}
+          onClick={closeSidebar}
+        >
+          Partner · {m.name}
+        </NavLink>
+      ))}
+      {partnerMemberships.length > 8 && (
+        <p
+          className="px-3 py-2 text-sm text-[hsl(var(--muted-foreground))]"
+          title={partnerMemberships
+            .slice(8)
+            .map((m) => m.name)
+            .join(", ")}
+        >
+          +{partnerMemberships.length - 8} more partners
+        </p>
+      )}
+      {hasPlatformRole && (
+        <NavLink href="/platform" active={pathname.startsWith("/platform")} onClick={closeSidebar}>
+          Platform
+        </NavLink>
+      )}
     </>
   );
 
@@ -208,6 +279,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Main content */}
       <main id="main-content" className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        {/* Impersonation banner — session is read-only (#27 §6) */}
+        {impersonation && (
+          <div className="flex items-center justify-center gap-2 bg-amber-500 px-4 py-2 text-sm font-medium text-black">
+            <span>
+              ⚠ Support impersonation session (read-only) — viewing as {user?.display_name}
+            </span>
+          </div>
+        )}
         {/* Desktop header bar */}
         <div className="hidden items-center justify-end border-b px-8 py-3 md:flex">
           {mounted && isAuthenticated && <NotificationBell />}

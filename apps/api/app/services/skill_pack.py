@@ -232,6 +232,26 @@ class SkillPackService:
         from app.core.cache import cache_delete_pattern
 
         await cache_delete_pattern("registry:*")
+
+        # R113[M7]: pack.updated was subscribable (VALID_EVENT_TYPES) but never
+        # fired — metadata edits on an installed pack were invisible to
+        # integrators. Notify each org with an ACTIVE installation (they track
+        # this pack's card); mirror the publish_release try/except pattern.
+        try:
+            from app.services.webhook import WebhookService
+
+            install_r = await self.db.execute(
+                select(SkillPackInstallation.org_id).where(
+                    SkillPackInstallation.pack_id == pack_id,
+                    SkillPackInstallation.status == InstallStatus.ACTIVE,
+                )
+            )
+            webhook_svc = WebhookService(self.db)
+            payload = {"pack_id": pack_id, "name": pack.name, "org_id": pack.owner_org_id}
+            for (install_org_id,) in install_r.all():
+                await webhook_svc.trigger_event(install_org_id, "pack.updated", payload)
+        except Exception:
+            log.warning("webhook_trigger_failed", pack_id=pack_id, webhook_event="pack.updated")
         return pack
 
     async def delete_pack(self, pack_id: str, org_id: str) -> None:
@@ -272,6 +292,14 @@ class SkillPackService:
         if skill is None or skill.org_id != org_id:
             raise AppError("SKILL_NOT_FOUND", "Skill not found in this organization", 404)
 
+        # R91[H1]: a skill INSTALLED from someone else's paid pack carries
+        # origin_pack_id and passes the org-ownership check above (install
+        # copies it into the buyer org) — repackaging it into a new pack and
+        # publishing redistributed paid content license-free. Licensed-in
+        # content is usable, not redistributable: block re-packing when the
+        # origin pack is paid and not the org's own product.
+        await self._assert_origin_redistributable(skill.origin_pack_id, org_id, "skill")
+
         entry = SkillPackSkill(pack_id=pack_id, skill_id=skill_id, sort_order=sort_order)
         self.db.add(entry)
         try:
@@ -279,6 +307,40 @@ class SkillPackService:
         except IntegrityError:
             await self.db.rollback()
             raise AppError("SKILL_ALREADY_IN_PACK", "Skill already in this pack", 409) from None
+
+    async def _assert_origin_redistributable(
+        self, origin_pack_id: str | None, org_id: str, kind: str
+    ) -> None:
+        """R91[H1]+R101[H19]: licensed-in content is usable, not resellable.
+
+        Content installed from another org's paid/partner_only pack carries
+        origin_pack_id; blocking only skills left templates (and any other
+        origin-carrying content) freely repackagable — same hole, one door
+        over. Shared gate for every add-to-pack path.
+        """
+        if origin_pack_id is None:
+            return
+        from app.controlplane.models.marketplace import MarketplaceListing
+
+        origin_listing = (
+            await self.db.execute(
+                select(MarketplaceListing)
+                .where(
+                    MarketplaceListing.product_type == "skill_pack",
+                    MarketplaceListing.product_id == origin_pack_id,
+                    MarketplaceListing.status != "draft",
+                    MarketplaceListing.offer_type.in_(("paid", "partner_only")),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if origin_listing is not None and origin_listing.seller_org_id != org_id:
+            raise AppError(
+                "LICENSED_CONTENT_NOT_REDISTRIBUTABLE",
+                f"This {kind} was installed from a paid pack and cannot be "
+                "republished in another pack",
+                403,
+            )
 
     async def remove_skill(self, pack_id: str, skill_id: str, org_id: str) -> None:
         await self.get_pack(pack_id, org_id)
@@ -314,6 +376,10 @@ class SkillPackService:
         tmpl = await self.db.get(ProjectTemplate, template_id)
         if tmpl is None or tmpl.org_id != org_id:
             raise AppError("TEMPLATE_NOT_FOUND", "Template not found in this organization", 404)
+
+        # R101[H19]: templates installed from a paid pack were freely
+        # repackagable — the R91[H1] gate covered only skills.
+        await self._assert_origin_redistributable(tmpl.origin_pack_id, org_id, "template")
 
         entry = SkillPackTemplate(pack_id=pack_id, template_id=template_id, sort_order=sort_order)
         self.db.add(entry)
@@ -365,6 +431,25 @@ class SkillPackService:
         await self.db.refresh(pack)
 
         await self._record_approval_event(pack_id, "approved", actor_id)
+        # R113[L2]: 'pack.approved' was pref-mapped (_TYPE_TO_PREF_KEY →
+        # 'review') but no code ever created one — the pack creator learned
+        # their review verdict only by polling the pack page. Mirror the
+        # publish_release notify pattern (best-effort, never fails the
+        # decision). Skip self-approval: the actor already knows.
+        try:
+            if pack.created_by and pack.created_by != actor_id:
+                from app.services.notification import NotificationService
+
+                await NotificationService(self.db).create(
+                    user_id=pack.created_by,
+                    notification_type="pack.approved",
+                    title=f"Pack approved: {pack.name}",
+                    body="Your pack passed review and is now publicly visible.",
+                    org_id=org_id,
+                    data={"pack_id": pack_id},
+                )
+        except Exception:
+            log.warning("notify_pack_approved_failed", pack_id=pack_id)
         from app.core.cache import cache_delete_pattern
 
         await cache_delete_pattern("registry:*")
@@ -385,6 +470,23 @@ class SkillPackService:
 
         if actor_id:
             await self._record_approval_event(pack_id, "rejected", actor_id, reason)
+        # R113[L2]: same as approve_pack — 'pack.rejected' was pref-mapped but
+        # never created; the creator had no signal (or the reason) without
+        # polling. Best-effort; skip self-rejection.
+        try:
+            if pack.created_by and pack.created_by != actor_id:
+                from app.services.notification import NotificationService
+
+                await NotificationService(self.db).create(
+                    user_id=pack.created_by,
+                    notification_type="pack.rejected",
+                    title=f"Pack rejected: {pack.name}",
+                    body=reason[:500] if reason else "Your pack did not pass review.",
+                    org_id=org_id,
+                    data={"pack_id": pack_id, "reason": reason},
+                )
+        except Exception:
+            log.warning("notify_pack_rejected_failed", pack_id=pack_id)
         from app.core.cache import cache_delete_pattern
 
         await cache_delete_pattern("registry:*")
@@ -728,12 +830,20 @@ class SkillPackService:
             )
             org_ids = [row[0] for row in install_r.all()]
             if org_ids:
+                # R95[H7]: cap the fan-out — a popular pack's publish
+                # otherwise did an unbounded per-recipient create+flush loop
+                # inline in the request (thousands of installs = thousands of
+                # sequential statements before the publisher's request
+                # returns). 200 owner notifications is the v1 ceiling; the
+                # registry badge is the durable signal for the rest.
                 owner_r = await self.db.execute(
-                    select(OrgMember.user_id, OrgMember.org_id).where(
+                    select(OrgMember.user_id, OrgMember.org_id)
+                    .where(
                         OrgMember.org_id.in_(org_ids),
                         OrgMember.role == OrgRole.OWNER,
                         OrgMember.status == MemberStatus.ACTIVE,
                     )
+                    .limit(200)
                 )
                 notif_svc = NotificationService(self.db)
                 for user_id, org_id_val in owner_r.all():

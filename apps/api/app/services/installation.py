@@ -98,6 +98,21 @@ class InstallationService:
             if grant.scalar_one_or_none() is None:
                 raise AppError("PACK_NOT_FOUND", "Pack not found", 404)
 
+        # Issue #27 §8.4: marketplace license gate — after the visibility gate,
+        # before any content is copied. Paid/partner_only listings need a
+        # covering active grant; included_with_plan checks the buyer's plan.
+        from app.controlplane import facade as cp_facade
+        from app.models.organization import Organization as _CpOrg
+
+        _org = await self.db.get(_CpOrg, org_id)
+        if _org is not None:
+            # R91[m1]: installs copy content into the org (a consuming
+            # action, ADR-014 §10.4) — suspended/cancelled tenants must not
+            # keep installing. The learning-path sibling already gates.
+            tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+            cp_facade.require_tenant_active(tenant)
+            await cp_facade.check_install_license(self.db, "skill_pack", pack_id, _org)
+
         # Get release (latest if no version specified)
         if version:
             release_r = await self.db.execute(
@@ -118,6 +133,13 @@ class InstallationService:
 
         if release is None:
             raise AppError("RELEASE_NOT_FOUND", "No release found for this pack", 404)
+
+        # R44[18]: re-check with the RESOLVED version so major_locked licenses
+        # also gate fresh installs (uninstall→reinstall of a newer major).
+        if _org is not None:
+            await cp_facade.check_install_license(
+                self.db, "skill_pack", pack_id, _org, target_version=release.version
+            )
 
         # Check not already installed
         existing = await self.db.execute(
@@ -288,7 +310,15 @@ class InstallationService:
         try:
             await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
+            # R57[1]: when running inside an outbox-handler SAVEPOINT
+            # (worker isolation, provisioning steps), session.rollback()
+            # rolls back the ROOT batch transaction — poisoning every
+            # sibling message and un-claiming rows mid-flight. Inside a
+            # nested transaction we only raise: the enclosing
+            # begin_nested() unwinds to the savepoint and the root stays
+            # usable. On the plain request path behavior is unchanged.
+            if not self.db.in_nested_transaction():
+                await self.db.rollback()
             raise AppError(
                 "ALREADY_INSTALLED", "Pack already installed in this organization", 409
             ) from None
@@ -508,6 +538,27 @@ class InstallationService:
                 raise AppError("ALREADY_FORKED", "Installation is already forked", 422)
             raise InstallationNotFoundError()
 
+        # R101[H20]: forking a PAID pack must NOT sever origin_pack_id — the
+        # R91[H1]/R101[H19] redistribution gates key on it, so fork→repackage
+        # was a two-click bypass of the resale block. Fork still frees the
+        # content from upgrade tracking (release/component refs cleared), but
+        # paid provenance is permanent.
+        from app.controlplane.models.marketplace import MarketplaceListing
+
+        paid_origin = (
+            await self.db.execute(
+                select(MarketplaceListing.id)
+                .where(
+                    MarketplaceListing.product_type == "skill_pack",
+                    MarketplaceListing.product_id == inst.pack_id,
+                    MarketplaceListing.status != "draft",
+                    MarketplaceListing.offer_type.in_(("paid", "partner_only")),
+                    MarketplaceListing.seller_org_id != org_id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
         # Remove origin tracking from all installed components
         for model in (Skill, Exercise, SkillCategory, ProjectTemplate):
             result = await self.db.execute(
@@ -517,7 +568,8 @@ class InstallationService:
                 )
             )
             for component in result.scalars():
-                component.origin_pack_id = None
+                if paid_origin is None:
+                    component.origin_pack_id = None
                 component.origin_release_id = None
                 component.origin_component_id = None
                 component.locally_modified = False
@@ -559,6 +611,15 @@ class InstallationService:
             raise AppError("INSTALL_FORKED", "Cannot upgrade a forked installation", 422)
         if inst.pack_id is None:
             raise AppError("NO_SOURCE", "Installation source pack is unavailable", 422)
+
+        # Issue #27 §8.4: upgrades re-verify the license (revoked license
+        # blocks upgrades; major_locked grants block newer majors).
+        from app.controlplane.services.marketplace import check_upgrade_license
+        from app.models.organization import Organization as _CpOrg
+
+        _org = await self.db.get(_CpOrg, org_id)
+        if _org is not None:
+            await check_upgrade_license(self.db, "skill_pack", inst.pack_id, _org, target_version)
 
         # Get target release
         release_r = await self.db.execute(
@@ -980,3 +1041,20 @@ class InstallationService:
                 )
 
             await self.db.flush()
+
+        # R113[M7]: pack.uninstalled was subscribable (VALID_EVENT_TYPES) but
+        # never fired anywhere — a dead event type integrators could register
+        # for and wait on forever. Mirror the pack.forked pattern above.
+        try:
+            from app.services.webhook import WebhookService
+
+            webhook_svc = WebhookService(self.db)
+            await webhook_svc.trigger_event(
+                inst_org_id,
+                "pack.uninstalled",
+                {"install_id": install_id, "pack_id": pack_id, "org_id": inst_org_id},
+            )
+        except Exception:
+            log.warning("webhook_trigger_failed", webhook_event="pack.uninstalled")
+
+        log.info("pack_uninstalled", install_id=install_id, org_id=inst_org_id, pack_id=pack_id)

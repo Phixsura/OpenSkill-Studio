@@ -175,6 +175,23 @@ class WebhookService:
             # Use a nested savepoint so any DB error (e.g. missing column
             # before migration runs) doesn't invalidate the caller's session.
             async with self.db.begin_nested():
+                # R77[2]: the 'webhooks' entitlement was enforced only at
+                # subscription CREATE — suspended/cancelled tenants (whose
+                # SUSPENSION_MASKED_KEYS turn webhooks off) and plan
+                # downgrades kept DELIVERING through pre-existing
+                # subscriptions forever. Gate the delivery path itself.
+                from app.controlplane import facade as cp_facade
+                from app.controlplane.services.entitlements import get_effective
+
+                tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+                eff = await get_effective(self.db, tenant)
+                if not eff.values.get("webhooks"):
+                    log.info(
+                        "webhook_delivery_blocked_entitlement",
+                        org_id=org_id,
+                        webhook_event=event_type,
+                    )
+                    return
                 result = await self.db.execute(
                     select(WebhookSubscription).where(
                         WebhookSubscription.org_id == org_id,

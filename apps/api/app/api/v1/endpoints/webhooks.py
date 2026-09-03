@@ -98,6 +98,11 @@ async def create_webhook(
     db: AsyncSession = Depends(get_db),
 ):
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
+    # Issue #27: webhooks are a plan entitlement
+    from app.controlplane import facade as cp_facade
+
+    tenant = await cp_facade.get_tenant_for_org(db, org_id)
+    await cp_facade.require_feature(db, tenant, "webhooks")
     svc = WebhookService(db)
     sub = await svc.create(org_id, body.url, body.events)
     await db.commit()

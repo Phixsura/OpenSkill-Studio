@@ -53,6 +53,9 @@ class LearningPath(Base):
         default=ContentStatus.DRAFT,
     )
     estimated_minutes: Mapped[int | None] = mapped_column(Integer)
+    # R113[H0]: paid-content provenance — set when the path was installed from
+    # a marketplace listing; the create_listing gate blocks re-selling copies.
+    origin_listing_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

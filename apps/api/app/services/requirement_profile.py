@@ -161,6 +161,32 @@ class RequirementProfileService:
                 "Natural-language extraction is not enabled; use the structured form",
                 422,
             )
+        # R91[H0]: this was the ONLY platform-key LLM consumer with zero
+        # facade gates — suspended/$0-balance tenants' members burned paid
+        # Claude calls (retried ×2) that never became UsageEvents: invisible
+        # to budgets, rating, invoicing and the cost dashboard. Mirror the
+        # evaluation gates: tenant active + budget (projected at a nominal
+        # extraction cost) before the call, metering after.
+        from app.controlplane import facade as cp_facade
+
+        tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+        cp_facade.require_tenant_active(tenant)
+        # R101[L23]: a hardcoded 5 MINOR units means $0.05 for USD but ₩5
+        # (≈$0.004) for KRW — an order of magnitude less conservative for
+        # zero-decimal currencies. Without an FX lookup here, approximate the
+        # ~$0.05 ceiling: decimal currencies 5 minor, zero-decimal 50 minor
+        # (¥50/₩50 both land within the same order as five US cents).
+        from app.controlplane.models.pricing import minor_multiplier
+
+        projected = 5 if minor_multiplier(tenant.currency) == 100 else 50
+        await cp_facade.check_budget(
+            self.db,
+            tenant,
+            org_id,
+            user_id=user_id,
+            usage_type="llm_output_tokens",
+            projected_minor=projected,
+        )
         clean_raw = sanitize_untrusted_text(raw_request, 4000)
         capability_keys = await self._capability_keys()
 
@@ -170,9 +196,14 @@ class RequirementProfileService:
         extracted_ok = False
 
         prompt_error: str | None = None
+        spent_in = spent_out = 0
         for _attempt in range(2):
             try:
-                content, model_used = await self._call_llm(clean_raw, capability_keys, prompt_error)
+                content, model_used, tok_in, tok_out = await self._call_llm(
+                    clean_raw, capability_keys, prompt_error
+                )
+                spent_in += tok_in or 0
+                spent_out += tok_out or 0
                 parsed = self._parse_json(content)
                 extracted = ExtractedRequirements.model_validate(parsed)
                 structured, unmatched = self._normalize_extracted(extracted, capability_keys)
@@ -207,6 +238,39 @@ class RequirementProfileService:
         )
         self.db.add(profile)
         await self.db.flush()
+        # R91[H0]: meter the real token spend (both attempts) — savepoint-
+        # isolated so a metering hiccup never fails the extraction (the spend
+        # already happened; same policy as evaluation R77[1]).
+        if spent_in or spent_out:
+            try:
+                async with self.db.begin_nested():
+                    common = {
+                        "tenant_id": tenant.id,
+                        "org_id": org_id,
+                        "occurred_at": datetime.now(UTC),
+                        "source": "evaluation",
+                        "user_id": user_id,
+                        "provider": "anthropic",
+                        "model_or_service": model_used,
+                    }
+                    if spent_in:
+                        await cp_facade.emit_usage(
+                            self.db,
+                            usage_type="llm_input_tokens",
+                            quantity=spent_in,
+                            idempotency_key=f"rpx:{profile.id}:in",
+                            **common,
+                        )
+                    if spent_out:
+                        await cp_facade.emit_usage(
+                            self.db,
+                            usage_type="llm_output_tokens",
+                            quantity=spent_out,
+                            idempotency_key=f"rpx:{profile.id}:out",
+                            **common,
+                        )
+            except Exception:  # noqa: BLE001 — never fail extraction on metering
+                log.warning("requirement_extraction_metering_failed", profile_id=profile.id)
         return profile
 
     # ── Mutation ──────────────────────────────────────────
@@ -459,7 +523,7 @@ class RequirementProfileService:
 
     async def _call_llm(
         self, clean_raw: str, capability_keys: set[str], prior_error: str | None
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, int, int]:
         from app.core.llm import create_llm_client
 
         boundary = secrets.token_hex(8)
@@ -488,7 +552,7 @@ class RequirementProfileService:
             max_tokens=1024,
             temperature=0.0,
         )
-        return response.content, response.model
+        return response.content, response.model, response.input_tokens, response.output_tokens
 
     @staticmethod
     def _parse_json(content: str) -> dict:

@@ -489,7 +489,8 @@ async def test_file_too_large():
 
 
 @pytest.mark.asyncio
-async def test_eval_budget_exceeded():
+async def test_eval_budget_exceeded(monkeypatch):
+    from app.controlplane import facade as cp_facade
     from app.services.evaluation import BudgetExceededError, EvaluationService
 
     db = _mock_db()
@@ -499,6 +500,10 @@ async def test_eval_budget_exceeded():
     submission.org_id = "org1"
     db.get = AsyncMock(return_value=submission)
     svc = EvaluationService(db)
+    # Issue #27 suspension gate runs before the budget check — stub an active tenant
+    active_tenant = MagicMock()
+    monkeypatch.setattr(cp_facade, "get_tenant_for_org", AsyncMock(return_value=active_tenant))
+    monkeypatch.setattr(cp_facade, "require_tenant_active", MagicMock())
     # enabled gate now runs before the budget check
     svc.get_eval_settings = AsyncMock(return_value={"enabled": True})
     svc.check_budget = AsyncMock(return_value=False)
@@ -549,6 +554,37 @@ async def test_eval_retry_not_failed():
     svc = EvaluationService(db)
     with pytest.raises(AppError, match="Only failed"):
         await svc.retry_task("task1")
+
+
+@pytest.mark.asyncio
+async def test_eval_retry_blocked_on_suspended_tenant(monkeypatch):
+    """R32/C2: retry_task spends a paid LLM call and must apply the same
+    tenant-suspension gate as trigger_evaluation — a suspended tenant retry
+    must raise TENANT_SUSPENDED before re-executing."""
+    from app.controlplane import facade as cp_facade
+    from app.exceptions import AppError
+    from app.models.evaluation import EvalStatus
+    from app.services.evaluation import EvaluationService
+
+    db = _mock_db()
+    task = MagicMock()
+    task.status = EvalStatus.FAILED
+    task.org_id = "org1"
+    db.get = AsyncMock(return_value=task)
+
+    def _suspended(_tenant):
+        raise AppError("TENANT_SUSPENDED", "suspended", 403)
+
+    monkeypatch.setattr(cp_facade, "get_tenant_for_org", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(cp_facade, "require_tenant_active", _suspended)
+
+    svc = EvaluationService(db)
+    exec_spy = AsyncMock()
+    svc._execute_evaluation = exec_spy  # must NOT be reached
+    with pytest.raises(AppError) as exc:
+        await svc.retry_task("task1")
+    assert exc.value.code == "TENANT_SUSPENDED"
+    exec_spy.assert_not_awaited()
 
 
 # ── PortfolioService ─────────────────────────────────────

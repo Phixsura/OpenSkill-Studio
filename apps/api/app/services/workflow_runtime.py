@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.exceptions import AppError
+from app.models.organization import Organization
 from app.models.provider import (
     OrgCredential,
     ProviderAdapter,
@@ -218,6 +219,25 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _tenant_month_start(tz_name: str, at: datetime) -> datetime:
+    """UTC instant where the tenant-timezone calendar month containing `at` begins.
+
+    R49[39]: the run quota window must match the control plane's period
+    convention — the TENANT-timezone calendar month (rating and budgets both
+    use it). A naive UTC month start over-/under-counts runs near month
+    boundaries for non-UTC tenants (a UTC+13 tenant's new-month quota arrived
+    up to 13 hours late).
+    """
+    from zoneinfo import ZoneInfo
+
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001 — bad tz falls back to UTC
+        tz = UTC
+    local = at.astimezone(tz)
+    return local.replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+
 class WorkflowRuntimeService:
     """Request-session operations: create, read, decide, cancel."""
 
@@ -240,6 +260,48 @@ class WorkflowRuntimeService:
         if install is None or install.org_id != org_id or install.status == InstallStatus.REMOVED:
             raise AppError("INSTALLATION_NOT_FOUND", "Workflow installation not found", 404)
 
+        # R74[2]: an idempotent RETRY of an already-accepted run must not be
+        # re-gated — the run was admitted when it was created; hitting the
+        # monthly cap (which the accepted run itself may have consumed) or a
+        # subsequent suspension on the retry turns "safe to retry" into a
+        # 403/409 lottery. Probe cheaply here; the full validation (same
+        # member, same inputs) still runs at the main lookup below.
+        _is_idempotent_retry = False
+        if idempotency_key:
+            _probe = await self.db.execute(
+                select(WorkflowRun.id)
+                .where(
+                    WorkflowRun.org_id == org_id,
+                    WorkflowRun.idempotency_key == idempotency_key,
+                )
+                .limit(1)
+            )
+            _is_idempotent_retry = _probe.scalar_one_or_none() is not None
+
+        # Issue #27 §2.5: suspended tenants cannot start costed executions;
+        # active tenants are bounded by max_workflow_runs_month.
+        from app.controlplane import facade as cp_facade
+
+        tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+        if not _is_idempotent_retry:
+            cp_facade.require_tenant_active(tenant)
+            month_start = _tenant_month_start(tenant.timezone, _now())
+            from app.models.organization import Organization as _Org
+
+            run_count = (
+                await self.db.execute(
+                    select(func.count(WorkflowRun.id))
+                    .join(_Org, _Org.id == WorkflowRun.org_id)
+                    .where(
+                        _Org.tenant_id == tenant.id,
+                        WorkflowRun.created_at >= month_start,
+                    )
+                )
+            ).scalar_one()
+            await cp_facade.check_quota(
+                self.db, tenant, "max_workflow_runs_month", current=run_count
+            )
+
         # Resolve the effective definition: forked local copy or release manifest
         definition = install.local_definition
         if definition is None:
@@ -253,6 +315,26 @@ class WorkflowRuntimeService:
             if release is None:
                 raise AppError("NO_DEFINITION", "Release no longer exists", 422)
             definition = release.manifest.get("definition", {})
+
+        # R63: enforce budget policies + the tenant AI ceiling on workflow runs.
+        # Workflow runs are the primary costed path (they emit per-step provider
+        # usage that rating turns into RatedUsage), yet budgets.check was only
+        # ever reached from the evaluation service — workflow spend blew past
+        # every policy unbounded. Project the run's estimated cost (tenant
+        # currency, same units budgets compare against) so the check fails
+        # BEFORE the limit is breached, not one full run after. Raised
+        # BUDGET_EXCEEDED aborts before the run row is created (same tx).
+        from app.controlplane.services import credits as _credits
+
+        projected = await _credits.estimate_run_cost_minor(
+            self.db, definition, org_id, tenant.currency
+        )
+        # R74[2]: budget gate also skipped on idempotent retries (the accepted
+        # run's own projected spend must not re-block its retry).
+        if not _is_idempotent_retry:
+            await cp_facade.check_budget(
+                self.db, tenant, org_id, usage_type="workflow_run", projected_minor=projected
+            )
 
         # Validate run inputs against the definition's input schema
         input_defs = {i["key"]: i for i in definition.get("inputs", [])}
@@ -438,6 +520,32 @@ class WorkflowRuntimeService:
                         ) from None
                     return existing
             raise
+
+        # Issue #27 §5.3: credit reservation (opt-in via tenant metadata
+        # credit_enforcement). Same transaction as run creation — a failed
+        # reserve (INSUFFICIENT_CREDIT 402) aborts the run atomically; the
+        # run.terminal outbox handler settles ACTUAL usage or releases.
+        if bool((tenant.metadata_ or {}).get("credit_enforcement")):
+            # Reuse the estimate already computed for the budget check above.
+            estimate = projected
+            if estimate > 0:
+                await _credits.reserve(
+                    self.db,
+                    tenant.id,
+                    tenant.currency,
+                    estimate,
+                    reference_type="workflow_run",
+                    reference_id=run.id,
+                )
+            else:
+                # R31/C13: estimate rounds to 0 when offerings have NULL
+                # cost_per_call (auto-selection even prefers them), yet the run
+                # can still incur real billable usage that settle would floor
+                # at the balance. credit_enforcement means prepay — a run must
+                # not start with no credit on file. Require a positive
+                # available balance (the estimate is unknown, so this is the
+                # minimum viable gate; actual is reconciled at settle).
+                await _credits.require_available(self.db, tenant.id, tenant.currency)
 
         # Pre-create all step runs as PENDING
         for step in definition.get("steps", []):
@@ -750,6 +858,12 @@ class WorkflowRuntimeService:
         # run_cancelled event for a run that was never cancelled.
         if result.rowcount:
             self.db.add(WorkflowRunEvent(run_id=run_id, event_type="run_cancelled", payload={}))
+            # Emit run.terminal so the held credit reservation is settled/
+            # released. Without this a credit-enforced tenant's estimate stays
+            # reserved until the 36h expiry sweep — cancel is a terminal state
+            # exactly like completed/failed and must release the hold now.
+            await self.db.refresh(run)
+            await _emit_run_terminal(self.db, run, "cancelled")
         await self.db.flush()
         await self.db.refresh(run)
         return run
@@ -795,6 +909,25 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
     """One advance iteration. Returns True if any progress was made."""
     run = await db.get(WorkflowRun, run_id)
     if run is None:
+        return False
+
+    # R66[1]: require_tenant_active fired only at create_run — a run parked at
+    # a review gate (or WAITING_RETRY, or recovered by the sweeper) happily
+    # resumed provider spending AFTER the tenant was suspended/cancelled.
+    # This is THE choke point every resume path funnels through (review
+    # decision, lazy redispatch, sweeper, executor loop), so gate here: a
+    # blocked tenant's run simply makes no progress (and resumes intact on
+    # reactivation — suspension pauses, it doesn't cancel).
+    from app.controlplane import facade as cp_facade
+    from app.controlplane.models.tenant import TENANT_BLOCKED_STATUSES
+
+    _tenant = await cp_facade.get_tenant_for_org(db, run.org_id)
+    if _tenant.status in TENANT_BLOCKED_STATUSES:
+        log.warning(
+            "workflow_advance_blocked_tenant",
+            run_id=run_id,
+            tenant_status=_tenant.status.value,
+        )
         return False
 
     # PENDING → RUNNING (conditional)
@@ -889,6 +1022,7 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
             )
             if result.rowcount:
                 db.add(WorkflowRunEvent(run_id=run_id, event_type="run_failed", payload={}))
+                await _emit_run_terminal(db, run, "failed")
         else:
             # Collect workflow outputs ({} is a valid output — only skip None)
             outputs = {}
@@ -903,7 +1037,37 @@ async def _advance_once(db: AsyncSession, run_id: str) -> bool:
             )
             if result.rowcount:
                 db.add(WorkflowRunEvent(run_id=run_id, event_type="run_completed", payload={}))
+                await _emit_run_terminal(db, run, "completed")
     return False
+
+
+async def _emit_run_terminal(db: AsyncSession, run: WorkflowRun, status: str) -> None:
+    """Issue #27 §3.3b: one workflow_run usage event per run — BOTH outcomes,
+    metadata carries status (pricing may exclude failed via policy params).
+    Guarded by the terminal-transition rowcount + the idempotency key. Also
+    posts the run.terminal outbox message (reservation settlement, P5)."""
+    from app.controlplane import facade as cp_facade
+    from app.controlplane.models.outbox import enqueue
+
+    tenant_id = (
+        await db.execute(select(Organization.tenant_id).where(Organization.id == run.org_id))
+    ).scalar_one_or_none()
+    if tenant_id is None:
+        return
+    await cp_facade.emit_usage(
+        db,
+        tenant_id=tenant_id,
+        org_id=run.org_id,
+        usage_type="workflow_run",
+        quantity=1,
+        occurred_at=_now(),
+        source="workflow_runtime",
+        idempotency_key=f"wfrun:{run.id}",
+        workflow_run_id=run.id,
+        user_id=run.started_by,
+        metadata={"status": status},
+    )
+    enqueue(db, "run.terminal", {"run_id": run.id, "status": status})
 
 
 def _resolve_step_inputs(step: dict, run: WorkflowRun, edges: list, step_runs: dict) -> dict:
@@ -1386,6 +1550,41 @@ async def _execute_provider_action(
 
     if not isinstance(output, dict):
         output = {"result": str(output)[:8000]}
+
+    # Metering (Issue #27 §3.3a): strip the reserved __usage__ key BEFORE port
+    # mapping / _complete_step so it never reaches step output or the 48KB
+    # cap. Idempotency key carries the attempt — each real provider call
+    # meters once, retries never double-bill.
+    usage_items = output.pop("__usage__", None)
+    if isinstance(usage_items, list):
+        from app.controlplane import facade as cp_facade
+
+        tenant_id = (
+            await db.execute(select(Organization.tenant_id).where(Organization.id == run.org_id))
+        ).scalar_one_or_none()
+        if tenant_id is not None:
+            for i, item in enumerate(usage_items):
+                try:
+                    await cp_facade.emit_usage(
+                        db,
+                        tenant_id=tenant_id,
+                        org_id=run.org_id,
+                        usage_type=str(item.get("usage_type", "")),
+                        quantity=item.get("quantity", 0),
+                        occurred_at=_now(),
+                        source="workflow_runtime",
+                        idempotency_key=f"wfstep:{sr.id}:{claimed_attempt}:{i}",
+                        workflow_run_id=run.id,
+                        provider_connection_id=connection.id,
+                        provider=adapter_row.key if adapter_row else None,
+                        model_or_service=offering.model_name,
+                        user_id=run.started_by,
+                    )
+                except AppError:
+                    # A malformed usage element must never fail the step —
+                    # the provider work already succeeded. Log and continue.
+                    log.warning("wf_usage_emit_rejected", step_run_id=sr.id, item=str(item)[:200])
+
     # Map adapter output to declared output ports: adapter returns arbitrary
     # keys; declared ports pick matching keys, falling back to "result"
     ports = step.get("outputs", [])

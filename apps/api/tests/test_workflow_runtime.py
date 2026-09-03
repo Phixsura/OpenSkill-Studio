@@ -2419,3 +2419,133 @@ async def test_open_review_queue_instructor_only(c):
     # a student is forbidden from the queue entirely
     r_student = await c.get(f"/api/v1/orgs/{oid}/step-reviews", headers=h_student)
     assert r_student.status_code == 403, r_student.text
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_enforces_budget_policy(c):
+    """R63 CRITICAL: workflow runs must be checked against BudgetPolicy — the
+    check was previously reachable only from the evaluation path, so workflow
+    spend blew past every budget unbounded. An org monthly hard_stop budget of
+    $0.50 with a $9.99/call offering must reject the run at create with 429
+    BUDGET_EXCEEDED (projected estimate 9.99×1.5 = $14.98 > $0.50)."""
+    from sqlalchemy import update as sa_update
+
+    from app.controlplane.models.credit import BudgetPolicy
+    from app.controlplane.services.tenants import get_tenant_for_org
+    from app.core.database import AsyncSessionLocal
+    from app.models.provider import ProviderModelOffering
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    offering_id = await _mock_offering(c, h, oid)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == offering_id)
+            .values(cost_per_call_usd=9.99)
+        )
+        tenant = await get_tenant_for_org(db, oid)
+        db.add(
+            BudgetPolicy(
+                tenant_id=tenant.id,
+                scope_type="org",
+                scope_id=oid,
+                period="monthly",
+                limit_minor=50,  # $0.50
+                currency=tenant.currency,
+                hard_stop=True,
+            )
+        )
+        await db.commit()
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "over budget"}},
+        headers=h,
+    )
+    assert r.status_code == 429, r.text
+    assert r.json()["error"]["code"] == "BUDGET_EXCEEDED"
+
+    # A generous budget lets the same run through.
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(BudgetPolicy)
+            .where(BudgetPolicy.scope_id == oid)
+            .values(limit_minor=10_000_000)
+        )
+        await db.commit()
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "under budget"}},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text
+
+
+@pytest.mark.asyncio
+async def test_idempotent_retry_survives_quota_and_suspension(c):
+    """R74[2]: the monthly-run quota + require_tenant_active gated BEFORE the
+    idempotency lookup — a retry of an already-accepted run 403'd when the
+    accepted run itself consumed the last quota slot, or when the tenant was
+    suspended after acceptance. Retries of accepted runs must succeed."""
+    from sqlalchemy import select as sa_select
+
+    from app.controlplane.models.plan import TenantEntitlementOverride
+    from app.controlplane.models.tenant import TenantAccount, TenantStatus
+    from app.controlplane.services.entitlements import invalidate_cache
+    from app.core.database import AsyncSessionLocal
+    from app.models.organization import Organization
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    install_id = await _install(c, h, oid, _definition())
+    key = f"idem-{uuid.uuid4().hex[:8]}"
+    body = {"installation_id": install_id, "inputs": {"topic": "x"}, "idempotency_key": key}
+    r1 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs", json=body, headers=h)
+    assert r1.status_code == 201, r1.text
+    run_id = r1.json()["data"]["id"]
+
+    # Cap the month at 1 (the accepted run consumed it)
+    async with AsyncSessionLocal() as db:
+        tenant_id = (
+            await db.execute(sa_select(Organization.tenant_id).where(Organization.id == oid))
+        ).scalar_one()
+        db.add(
+            TenantEntitlementOverride(
+                tenant_id=tenant_id,
+                key="max_workflow_runs_month",
+                value={"v": 1},
+                reason="r74",
+            )
+        )
+        await db.commit()
+    await invalidate_cache(tenant_id)
+    # Retry of the SAME accepted run → 200/201 with the same id, not 403
+    r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs", json=body, headers=h)
+    assert r2.status_code in (200, 201), r2.text
+    assert r2.json()["data"]["id"] == run_id
+    # A NEW run is properly rejected at the cap
+    r3 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "y"}},
+        headers=h,
+    )
+    assert r3.status_code == 403, r3.text
+
+    # Suspension after acceptance: retry still returns the accepted run
+    async with AsyncSessionLocal() as db:
+        tenant = await db.get(TenantAccount, tenant_id)
+        tenant.status = TenantStatus.SUSPENDED
+        await db.commit()
+    await invalidate_cache(tenant_id)
+    r4 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs", json=body, headers=h)
+    assert r4.status_code in (200, 201), r4.text
+    assert r4.json()["data"]["id"] == run_id
+    # restore for other tests
+    async with AsyncSessionLocal() as db:
+        tenant = await db.get(TenantAccount, tenant_id)
+        tenant.status = TenantStatus.ACTIVE
+        await db.commit()
+    await invalidate_cache(tenant_id)
