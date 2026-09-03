@@ -11,6 +11,7 @@ import { Pager, QueryError } from "@/components/cp-list";
 import { StatusBadge } from "@/components/status-badge";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { formatDate, formatMinor, type InvoiceSummary, type Subscription } from "@/lib/cp";
+import { useTenantRole } from "@/lib/use-me";
 import { useImpersonation } from "@/lib/use-me";
 
 interface PlanCatalogEntry {
@@ -25,6 +26,9 @@ export default function TenantBillingPage() {
   // R101[M27]: impersonation sessions are read-only server-side — disable the
   // billing write controls instead of letting every click die with a 403 toast.
   const impersonating = useImpersonation();
+  // R101[M30]: subscription mutations are owner-only server-side — hide them
+  // from billing_admins instead of 403-toasting every click.
+  const isOwner = useTenantRole(tenantId) === "owner";
   const [changeOpen, setChangeOpen] = useState(false);
   // R101[M11]: invoices ignored pagination meta — tenants with more than one
   // backend page of invoices silently lost the older ones.
@@ -110,7 +114,7 @@ export default function TenantBillingPage() {
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Subscription</h2>
-          {hasSub && (
+          {hasSub && isOwner && (
             <Button variant="outline" onClick={() => setChangeOpen(true)}>
               Change plan
             </Button>

@@ -23,3 +23,16 @@ export function useImpersonation(): boolean {
   const { data } = useMe();
   return Boolean(data?.data?.impersonation);
 }
+
+/** R101[M30]: the tenant admin pages rendered owner-only mutations (cancel/
+ * change subscription, member add/remove, domain ops, branding save) to
+ * billing_admins, who got a 403 toast on every click. Resolve the caller's
+ * role in ONE tenant so pages can gate the controls. */
+export function useTenantRole(tenantId: string | null | undefined): string | null {
+  const { data } = useMe();
+  if (!tenantId) return null;
+  const membership = data?.data?.tenant_memberships?.find(
+    (m: { tenant_id: string; role: string }) => m.tenant_id === tenantId,
+  );
+  return membership?.role ?? null;
+}

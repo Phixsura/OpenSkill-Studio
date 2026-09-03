@@ -340,6 +340,65 @@ async def registry_listings(
 
 
 @router.get(
+    "/orgs/{org_id}/marketplace/listings-view",
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def org_listings_view(
+    org_id: str,
+    product_type: str = Query(pattern=r"^(skill_pack|workflow_pack|learning_path)$"),
+    product_ids: str = Query(max_length=2000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """R101[M7]: the PUBLIC badge endpoint deliberately hides partner_only
+    listings (anti-enumeration for anonymous callers, R25) — but that made
+    them invisible to the very partner tenants entitled to buy them, with no
+    authenticated surface at all. Org-scoped view: same shape as the public
+    badge, plus partner_only listings when the org's tenant is
+    partner-attributed."""
+    await require_org_member(org_id, user, db)
+    from app.controlplane import facade
+    from app.models.organization import Organization, OrgStatus
+
+    tenant = await facade.get_tenant_for_org(db, org_id)
+    ids = [i.strip() for i in product_ids.split(",") if i.strip()][:50]
+    offer_types = ["free", "paid", "included_with_plan"]
+    if tenant.partner_id is not None:
+        offer_types.append("partner_only")
+    rows = (
+        (
+            await db.execute(
+                select(MarketplaceListing).where(
+                    MarketplaceListing.product_type == product_type,
+                    MarketplaceListing.product_id.in_(ids),
+                    MarketplaceListing.status == "active",
+                    MarketplaceListing.offer_type.in_(offer_types),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    data = {}
+    for listing in rows:
+        # Same product-liveness re-check as the public badge (R86[7])
+        product = await market_svc._load_product(db, listing.product_type, listing.product_id)
+        if product is None:
+            continue
+        _p, _owner, p_status, p_visibility = product
+        if p_status != "published" or p_visibility not in ("public", "unlisted"):
+            continue
+        seller = await db.get(Organization, listing.seller_org_id)
+        if seller is None or seller.status == OrgStatus.ARCHIVED:
+            continue
+        data[listing.product_id] = {
+            **_listing_response(listing, public=True),
+            "seller_org_name": seller.name,
+        }
+    return DataResponse(data=data)
+
+
+@router.get(
     "/orgs/{org_id}/marketplace/license-status",
     dependencies=[Depends(rate_limit(60, 60))],
 )

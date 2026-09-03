@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth, ApiError } from "@/lib/api";
+import { useTenantRole } from "@/lib/use-me";
 import { formatDate } from "@/lib/cp";
 import { useImpersonation } from "@/lib/use-me";
 
@@ -21,6 +22,8 @@ interface TenantMember {
 export default function TenantMembersPage() {
   const { tenantId } = useParams<{ tenantId: string }>();
   const queryClient = useQueryClient();
+  // R101[M30]: member management is owner-only server-side
+  const isOwner = useTenantRole(tenantId) === "owner";
   // R101[M27]: impersonation sessions are read-only server-side — disable the
   // membership write controls instead of letting every click die with a 403.
   const impersonating = useImpersonation();
@@ -82,8 +85,14 @@ export default function TenantMembersPage() {
           </select>
           <Button
             onClick={() => addMutation.mutate()}
-            disabled={!userId || addMutation.isPending || impersonating}
-            title={impersonating ? "Read-only impersonation session" : undefined}
+            disabled={!userId || addMutation.isPending || impersonating || !isOwner}
+            title={
+              impersonating
+                ? "Read-only impersonation session"
+                : !isOwner
+                  ? "Only the tenant owner can manage members"
+                  : undefined
+            }
           >
             Add
           </Button>
@@ -113,8 +122,14 @@ export default function TenantMembersPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => removeMutation.mutate(m.id)}
-                      disabled={removeMutation.isPending || impersonating}
-                      title={impersonating ? "Read-only impersonation session" : undefined}
+                      disabled={removeMutation.isPending || impersonating || !isOwner}
+                      title={
+                        impersonating
+                          ? "Read-only impersonation session"
+                          : !isOwner
+                            ? "Only the tenant owner can manage members"
+                            : undefined
+                      }
                     >
                       Remove
                     </Button>

@@ -70,12 +70,19 @@ export function MarketplacePanel({
   const purchaseOrgId = selectedOrg || adminOrgs[0]?.id || null;
   const canPurchase = adminOrgs.length > 0;
 
+  // R101[M7]: the public badge endpoint deliberately hides partner_only
+  // listings — signed-in org members query the org-scoped view, which
+  // includes them when the tenant is partner-attributed.
   const listingQuery = useQuery({
-    queryKey: ["registry-listing", productType, productId],
+    queryKey: ["registry-listing", productType, productId, statusOrgId ?? "anon"],
     queryFn: () =>
-      api<{ data: Record<string, Listing> }>(
-        `/registry/listings?product_type=${productType}&product_ids=${productId}`,
-      ),
+      statusOrgId
+        ? apiWithAuth<{ data: Record<string, Listing> }>(
+            `/orgs/${statusOrgId}/marketplace/listings-view?product_type=${productType}&product_ids=${productId}`,
+          )
+        : api<{ data: Record<string, Listing> }>(
+            `/registry/listings?product_type=${productType}&product_ids=${productId}`,
+          ),
   });
   const listing = listingQuery.data?.data?.[productId] ?? null;
 
