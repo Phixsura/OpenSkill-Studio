@@ -778,12 +778,18 @@ async def void_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -> 
     # double-corrects too (the negative adjustment stays billable while the
     # original's charge is struck). Force ops to pick one correction path in
     # either order.
+    # R132 ([F8]): "live" adjustment — an adjustment whose OWN rating was
+    # voided is struck and must not block a legitimate void of the original.
     from app.controlplane.models.usage import UsageEvent as UsageEventModel
 
     adjusted = (
         await db.execute(
             select(UsageEventModel.id)
-            .where(UsageEventModel.adjustment_of_id == row.usage_event_id)
+            .outerjoin(RatedUsage, RatedUsage.usage_event_id == UsageEventModel.id)
+            .where(
+                UsageEventModel.adjustment_of_id == row.usage_event_id,
+                or_(RatedUsage.id.is_(None), RatedUsage.status != "voided"),
+            )
             .limit(1)
         )
     ).scalar_one_or_none()
@@ -840,10 +846,17 @@ async def unvoid_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -
     row = await db.get(RatedUsage, rated_id)
     if row is None:
         raise AppError("RATING_NOT_FOUND", "Rated usage not found", 404)
+    # R132 ([F5]): a row voided while BLOCKED (fx gap) has ZERO amounts — a
+    # blind restore-to-'rated' would sweep it into the next close as a
+    # permanent zero-bill. Restore to its pre-void status: blocked rows go
+    # back to 'blocked' (the fx.rate_created / manual rating paths re-rate
+    # them properly once the gap is fixed).
+    was_blocked = bool((row.sell_rate_snapshot or {}).get("fx_gaps"))
+    restore_to = "blocked" if was_blocked else "rated"
     result = await db.execute(
         _update(RatedUsage)
         .where(RatedUsage.id == rated_id, RatedUsage.status == "voided")
-        .values(status="rated", void_reason=None)
+        .values(status=restore_to, void_reason=None)
     )
     if not result.rowcount:
         await db.refresh(row)
@@ -851,6 +864,28 @@ async def unvoid_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -
             "RATED_USAGE_INVOICED",
             f"Only a voided rating can be restored (status '{row.status}')",
             409,
+        )
+    # R132 ([F10], R130[34] parity): a restored row for a tenant with no OPEN
+    # billing period will never be swept into an invoice — warn ops loudly.
+    from app.controlplane.models.billing import BillingPeriod
+
+    has_open = (
+        await db.execute(
+            select(BillingPeriod.id)
+            .where(
+                BillingPeriod.tenant_id == row.tenant_id,
+                BillingPeriod.status == "open",
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if has_open is None:
+        log.warning(
+            "cp_unvoid_no_open_period",
+            rated_usage_id=row.id,
+            tenant_id=row.tenant_id,
+            detail="no open billing period — this restored rating will never "
+            "be invoiced; use a manual invoice instead",
         )
     await record_audit(
         db,

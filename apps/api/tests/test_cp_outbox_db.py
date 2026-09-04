@@ -37,6 +37,24 @@ def test_topic():
     HANDLERS.pop(topic, None)
 
 
+@pytest.fixture(autouse=True)
+async def _purge_test_outbox_rows():
+    """R132: these tests COMMIT test.* outbox rows into the shared dev DB —
+    leaked pending rows filled the poll batch as handled=0 and the e2e
+    drain's early-break stranded real messages. Purge at the source, then
+    DISPOSE the engine — a pooled connection left bound to this test's loop
+    crashes the next test's loop (the 'attached to a different loop' class)."""
+    yield
+    from sqlalchemy import text
+
+    from app.core.database import engine
+
+    async with AsyncSessionLocal() as s:
+        await s.execute(text("DELETE FROM cp_outbox WHERE topic LIKE 'test.%'"))
+        await s.commit()
+    await engine.dispose()
+
+
 # ── Atomicity ────────────────────────────────────────────────
 
 

@@ -41,8 +41,16 @@ async def _dispose_after_sessionless_tests():
     """Tests that open their own AsyncSessionLocal sessions (outbox/concurrency)
     still need the engine disposed per-test — the loop is per-function."""
     yield
+    # R132: the outbox tests here COMMIT test.* rows into the shared dev DB —
+    # leaked pending rows filled poll batches as handled=0 and broke the e2e
+    # drain's early-break. Purge at the source.
+    from sqlalchemy import text as _text
+
     from app.core.database import engine
 
+    async with AsyncSessionLocal() as s:
+        await s.execute(_text("DELETE FROM cp_outbox WHERE topic LIKE 'test.%'"))
+        await s.commit()
     await engine.dispose()
 
 

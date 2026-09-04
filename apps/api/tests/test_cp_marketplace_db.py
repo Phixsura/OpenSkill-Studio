@@ -1631,3 +1631,262 @@ async def test_tenant_scope_purchase_not_suppressed_by_narrower_grant(db):
     assert minted is not None and minted.scope == "tenant", (
         "narrower org grant must not suppress the paid tenant-wide mint"
     )
+
+
+# ── R132 grant-width regressions ─────────────────────────────
+
+
+def test_grant_covers_listing_width_matrix():
+    """R132 ([F0]/[F1]/[F2]): pure width matrix — scope, duration, seats."""
+    from types import SimpleNamespace
+
+    from app.controlplane.services.marketplace import grant_covers_listing_width
+
+    def g(scope, expires_at=None, seat_limit=None):
+        return SimpleNamespace(scope=scope, expires_at=expires_at, seat_limit=seat_limit)
+
+    def li(scope, seat_limit=None):
+        return SimpleNamespace(license_scope=scope, seat_limit=seat_limit)
+
+    from datetime import UTC, datetime
+
+    future = datetime(2099, 1, 1, tzinfo=UTC)
+    # scope width
+    assert grant_covers_listing_width(g("tenant"), li("tenant"))
+    assert not grant_covers_listing_width(g("organization"), li("tenant"))
+    assert grant_covers_listing_width(g("tenant"), li("organization"))
+    assert grant_covers_listing_width(g("organization"), li("organization"))
+    # duration: ANY expiring grant never covers a perpetual purchase
+    assert not grant_covers_listing_width(g("tenant", expires_at=future), li("tenant"))
+    assert not grant_covers_listing_width(g("organization", expires_at=future), li("organization"))
+    # seat capacity
+    assert not grant_covers_listing_width(g("seat_limited", seat_limit=5), li("organization"))
+    assert not grant_covers_listing_width(
+        g("seat_limited", seat_limit=5), li("seat_limited", seat_limit=10)
+    )
+    assert grant_covers_listing_width(
+        g("seat_limited", seat_limit=10), li("seat_limited", seat_limit=5)
+    )
+
+
+@pytest.mark.asyncio
+async def test_org_grant_holder_can_buy_tenant_upgrade(db):
+    """R132 ([F0]): an org-scoped grant must not 409 the tenant-scope upgrade
+    purchase at the precheck."""
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user, license_scope="tenant")
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    await market_svc.manual_grant(
+        db,
+        product_type=listing.product_type,
+        product_id=listing.product_id,
+        tenant_id=buyer_tenant.id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    # Upgrade purchase goes through (no ALREADY_LICENSED).
+    p = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="checkout",
+        idempotency_key=f"upg-{ULID()}",
+    )
+    assert p.status == "pending"
+    # And completion mints the tenant-wide grant.
+    await market_svc.mark_purchase_paid(
+        db, purchase_id=p.id, payment_ref="upg", actor=_actor(buyer_user)
+    )
+    minted = (
+        await db.execute(select(LicenseGrant).where(LicenseGrant.purchase_id == p.id))
+    ).scalar_one()
+    assert minted.scope == "tenant"
+
+
+@pytest.mark.asyncio
+async def test_expiring_trial_grant_does_not_suppress_paid_mint(db):
+    """R132 ([F1]): a live-but-expiring trial grant must not suppress the
+    perpetual paid mint."""
+    from datetime import timedelta
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    # Trial grant: still live, expires in 7 days.
+    await market_svc.manual_grant(
+        db,
+        product_type=listing.product_type,
+        product_id=listing.product_id,
+        tenant_id=buyer_tenant.id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=datetime.now(UTC) + timedelta(days=7),
+        actor=_actor(seller_user),
+    )
+    p = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="checkout",
+        idempotency_key=f"trial-upg-{ULID()}",
+    )
+    await market_svc.mark_purchase_paid(
+        db, purchase_id=p.id, payment_ref="trialupg", actor=_actor(buyer_user)
+    )
+    minted = (
+        await db.execute(select(LicenseGrant).where(LicenseGrant.purchase_id == p.id))
+    ).scalar_one()
+    assert minted.expires_at is None, "paid purchase must mint the perpetual grant"
+
+
+@pytest.mark.asyncio
+async def test_manual_grant_copy_not_relistable(db):
+    """R132 ([F11]): a manual-grant copy (origin_source_path_id only, no
+    listing) of another org's path must not be re-listable for sale."""
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    lp_svc = LearningPathService(db)
+    src = await lp_svc.create_path(seller_org.id, seller_user.id, name="Grant Copy Src")
+    src.status = ContentStatus.PUBLISHED
+    await db.flush()
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=src.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    copy = await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=src.id)
+    copy.status = ContentStatus.PUBLISHED
+    await db.flush()
+    # Enable seller feature for the buyer org's tenant (create_listing gate
+    # is at the endpoint; the service-level resale gate is what we exercise).
+    with pytest.raises(AppError) as exc:
+        await market_svc.create_listing(
+            db,
+            seller_org_id=buyer_org.id,
+            product_type="learning_path",
+            product_id=copy.id,
+            offer_type="paid",
+            price_minor=5000,
+            currency="USD",
+            license_scope="organization",
+            seat_limit=None,
+            upgrade_policy="all_versions",
+            included_plan_keys=[],
+            bill_via_invoice=False,
+            actor=_actor(buyer_user),
+        )
+    assert exc.value.code == "LICENSED_CONTENT_NOT_REDISTRIBUTABLE"
+
+
+@pytest.mark.asyncio
+async def test_tenant_wide_seat_limit_caps_tenant_occupancy(db):
+    """R132 ([F12]): a tenant-wide (org_id NULL) seat_limited grant caps the
+    TENANT's occupancy — not each installing org independently."""
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    org_a = await _mk_org(db, buyer_user)
+    # Second org in the SAME tenant.
+    other_admin = await _mk_user(db)
+    svc = OrgService(db)
+    org_b = await svc.create(
+        name=f"SB {ULID()}",
+        slug=f"sb-{str(ULID()).lower()}",
+        description=None,
+        created_by=other_admin.id,
+    )
+    org_b.tenant_id = org_a.tenant_id
+    await db.flush()
+
+    lp_svc = LearningPathService(db)
+    path = await lp_svc.create_path(seller_org.id, seller_user.id, name="TW Seat Path")
+    path.status = ContentStatus.PUBLISHED
+    await db.flush()
+    # Tenant-wide grant capped at 2 seats.
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=org_a.tenant_id,
+        scope="seat_limited",
+        org_id=None,
+        seat_limit=2,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    # 2 students in org A + 1 in org B → tenant occupancy 3 > 2.
+    for org, count in ((org_a, 2), (org_b, 1)):
+        for _ in range(count):
+            student = await _mk_user(db)
+            db.add(
+                OrgMember(
+                    org_id=org.id,
+                    user_id=student.id,
+                    role=OrgRole.STUDENT,
+                    status=MemberStatus.ACTIVE,
+                )
+            )
+    await db.flush()
+    # Installing into org B (1 local student) must still fail: the CAP is
+    # tenant-wide and the tenant holds 3 active students.
+    with pytest.raises(AppError) as exc:
+        await lp_svc.install_from_listing(org_b.id, None, other_admin.id, product_id=path.id)
+    assert exc.value.code == "SEAT_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_seat_capacity_upgrade_honored_by_gate(db):
+    """R132 ([20]): after a paid seat-capacity upgrade both grants are active;
+    the covering-grant resolver must prefer the ROOMIER cap so the upgrade is
+    actually honored by the install gate."""
+    from app.controlplane.services.marketplace import _find_covering_grant
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    pack = await _mk_pack(db, seller_org, seller_user)
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    for cap in (5, 10):  # old tight grant, then the paid upgrade
+        await market_svc.manual_grant(
+            db,
+            product_type="skill_pack",
+            product_id=pack.id,
+            tenant_id=buyer_tenant.id,
+            scope="seat_limited",
+            org_id=buyer_org.id,
+            seat_limit=cap,
+            expires_at=None,
+            actor=_actor(seller_user),
+        )
+    covering = await _find_covering_grant(
+        db, "skill_pack", pack.id, buyer_tenant.id, buyer_org.id
+    )
+    assert covering is not None and covering.seat_limit == 10, (
+        "resolver must prefer the roomier (upgraded) seat cap"
+    )

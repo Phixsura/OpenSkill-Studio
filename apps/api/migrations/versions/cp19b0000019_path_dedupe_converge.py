@@ -63,10 +63,12 @@ def upgrade() -> None:
             """
         )
     )
-    # 2. Drop assignments stranded on ARCHIVED origin-carrying copies
-    # (delete_path semantics: archiving removes assignments; the raw cp17
-    # UPDATE skipped that cleanup and the rows kept feeding
-    # get_effective_skills).
+    # 2. Drop assignments stranded on ANY archived path — delete_path always
+    # removed them, but (a) the raw cp17 UPDATE skipped the cleanup for the
+    # copies it archived, and (b) update_path's PUT-archive branch skipped it
+    # for EVERY path until the R131 fix (R132[F13]). Either way the rows are
+    # unreachable through the API (list filters archived; unassign 404s on
+    # get_path) yet still feed get_effective_skills. One archive semantic.
     op.execute(
         sa.text(
             """
@@ -74,7 +76,6 @@ def upgrade() -> None:
             USING learning_paths dead
             WHERE dead.id = a.path_id
               AND dead.status = 'ARCHIVED'
-              AND dead.origin_listing_id IS NOT NULL
             """
         )
     )

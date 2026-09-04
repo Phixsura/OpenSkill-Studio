@@ -741,13 +741,6 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     period = await db.get(BillingPeriod, period_id)
     if period is None:
         return None
-    result = await db.execute(
-        update(BillingPeriod)
-        .where(BillingPeriod.id == period_id, BillingPeriod.status == "open")
-        .values(status="closed", closed_at=_now())
-    )
-    if not result.rowcount:
-        return None  # already closed/invoiced by a concurrent worker
     # R80[4]: LOCK the subscription for the whole close. The terminal branch
     # at the end reads sub.status — an unlocked read is stale against a
     # concurrent cancel(at_period_end) landing mid-close: the close rolled
@@ -756,6 +749,12 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     # immediate-change just swapped. FOR UPDATE + populate_existing makes
     # cancel/change (guarded UPDATEs on this row) wait until the close
     # commits, and the close itself sees the latest committed state.
+    # R132 ([3]/[21]): the Sub lock comes BEFORE the period guarded UPDATE —
+    # the canonical order is Sub → period → credit everywhere. void_invoice
+    # locks the Sub at its top; taking the period row first here formed an
+    # ABBA pair with the void's forward-period DELETE, and the void's
+    # later_locked guard (read after its Sub lock) relies on any concurrent
+    # close having fully committed once the Sub lock is acquired.
     sub = (
         await db.execute(
             select(Subscription)
@@ -764,6 +763,13 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
+    result = await db.execute(
+        update(BillingPeriod)
+        .where(BillingPeriod.id == period_id, BillingPeriod.status == "open")
+        .values(status="closed", closed_at=_now())
+    )
+    if not result.rowcount:
+        return None  # already closed/invoiced by a concurrent worker
     tenant = await db.get(TenantAccount, period.tenant_id)
 
     # R41[1]/[2]: bill this closed period in arrears on the plan/seats that were
@@ -797,6 +803,45 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .limit(1)
         )
     ).scalar_one_or_none()
+    # R132 ([19]): on a RE-close after a void-rewind, the no-upper-bound rule
+    # is wrong — an immediate change made in the (deleted) FORWARD window has
+    # from_* = post-rollover values, and using it bills this period at the
+    # wrong plan. A voided invoice on this period is the marker that an
+    # earlier close ran (only then can forward-window changes exist); in that
+    # case only IN-period changes anchor the arrears basis, and the fallback
+    # (sub.plan_version_id) holds the correct value courtesy of the rewind's
+    # F16 restore. Residual (accepted): an immediate change landing in the
+    # seconds-wide void→re-close gap mis-anchors the fallback by one period's
+    # plan delta.
+    if (
+        first_change is not None
+        and first_change.effective_at > period.period_end
+        and (
+            await db.execute(
+                select(Invoice.id)
+                .where(
+                    Invoice.billing_period_id == period.id,
+                    Invoice.status == "void",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        is not None
+    ):
+        first_change = (
+            await db.execute(
+                select(SubscriptionChange)
+                .where(
+                    SubscriptionChange.subscription_id == sub.id,
+                    SubscriptionChange.proration_mode == "immediate",
+                    SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
+                    SubscriptionChange.effective_at >= period.period_start,
+                    SubscriptionChange.effective_at <= period.period_end,
+                )
+                .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
     start_version_id = first_change.from_plan_version_id if first_change else sub.plan_version_id
     start_seats = (
         first_change.from_seats
@@ -1269,11 +1314,9 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                     RatedUsage.tenant_id == tenant.id,
                     RatedUsage.status == "rated",
                     RatedUsage.billable_currency == sub.currency,
-                    # R131 ([9]): NO occurred_at bound — this is the sub's
-                    # FINAL close, so ANY un-invoiced rated row is stranded,
-                    # including usage from a later window a void-rewind
-                    # deleted (occurred_at >= this period's end); the old
-                    # < period_end filter hid exactly that loss.
+                    # R131 ([9]): no occurred_at bound — this is the sub's
+                    # FINAL close, so a later-window row a void-rewind
+                    # deleted is stranded too.
                     # R123[L11]: zero-billable rows (no_rate fallback, free
                     # types) are never invoiced by design — counting them made
                     # the warning fire on nearly every final close (noise).
@@ -1285,12 +1328,28 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             )
         ).scalar_one()
         if residual:
-            log.warning(
-                "cp_final_close_residual_usage",
-                subscription_id=sub.id,
-                tenant_id=tenant.id,
-                count=residual,
-            )
+            # R132 ([F17]): the billable sweep is TENANT-wide, so a LIVE
+            # successor subscription's closes will pick these rows up — only
+            # warn when no future close exists (no live successor), else
+            # every sequential-sub tenant fires a false positive here.
+            successor = (
+                await db.execute(
+                    select(Subscription.id)
+                    .where(
+                        Subscription.tenant_id == tenant.id,
+                        Subscription.id != sub.id,
+                        Subscription.status != "cancelled",
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if successor is None:
+                log.warning(
+                    "cp_final_close_residual_usage",
+                    subscription_id=sub.id,
+                    tenant_id=tenant.id,
+                    count=residual,
+                )
 
     # Roll the subscription into the next period (or cancel at period end)
     if sub.status == "cancel_at_period_end":
@@ -1331,11 +1390,33 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .scalars()
             .all()
         )
+        # R132 ([19]): on a RE-rollover after a void-rewind, the re-armed
+        # deferred change may be chronologically OLDER than an immediate
+        # change the tenant made in the forward window — blindly folding it
+        # clobbers the paid immediate upgrade (entitlements silently revert
+        # while the upgrade's proration still bills). Fold only when no
+        # LATER immediate change supersedes the deferred one.
         for change in pending:
-            if change.to_plan_version_id is not None:
-                sub.plan_version_id = change.to_plan_version_id
-            if change.to_seats is not None:
-                sub.seat_quantity = change.to_seats
+            superseded = (
+                await db.execute(
+                    select(SubscriptionChange.id)
+                    .where(
+                        SubscriptionChange.subscription_id == sub.id,
+                        SubscriptionChange.proration_mode == "immediate",
+                        SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
+                        # ULID ids are time-ordered and strictly monotonic —
+                        # created_at (server_default now()) ties within one
+                        # transaction, so id is the reliable recency order.
+                        SubscriptionChange.id > change.id,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if superseded is None:
+                if change.to_plan_version_id is not None:
+                    sub.plan_version_id = change.to_plan_version_id
+                if change.to_seats is not None:
+                    sub.seat_quantity = change.to_seats
             change.invoiced = True
         if pending:
             await invalidate_cache(tenant.id)
@@ -1507,6 +1588,22 @@ async def record_payment(
 async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor: Actor) -> Invoice:
     if invoice.status == "paid":
         raise AppError("INVOICE_NOT_OPEN", "Paid invoices need a credit note, not a void", 409)
+    # R132 (lock-order): acquire the SUBSCRIPTION lock FIRST — close_period
+    # locks Sub → credit balance; the R131 rewind guard locked the sub AFTER
+    # the credit refunds below, creating an ABBA deadlock pair with a
+    # concurrent close of the same tenant. One canonical order: Sub first.
+    rewind_sub = None
+    if invoice.billing_period_id is not None:
+        _period_peek = await db.get(BillingPeriod, invoice.billing_period_id)
+        if _period_peek is not None:
+            rewind_sub = (
+                await db.execute(
+                    select(Subscription)
+                    .where(Subscription.id == _period_peek.subscription_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
     result = await db.execute(
         update(Invoice)
         .where(Invoice.id == invoice.id, Invoice.status.in_(["draft", "open"]))
@@ -1612,6 +1709,11 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
         # double-charging every subsequent period. Rewind only when no later
         # non-open period exists; otherwise void plainly (usage rows were
         # already unbound above) and corrections go through credit notes.
+        # R132 ([3]): this read is NOT stale — the sub row was locked FOR
+        # UPDATE at the top of this function, and close_period_and_invoice
+        # takes the same Sub lock as its FIRST action, so any concurrent
+        # close either fully committed before our lock (visible here under
+        # READ COMMITTED's per-statement snapshot) or is blocked behind us.
         later_locked = None
         if period is not None:
             later_locked = (
@@ -1638,25 +1740,11 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
         # terminal branch would cancel one period EARLY — silently discarding
         # the later window's plan fee, usage and remaining paid access. Void
         # plainly in that shape; corrections go through credit notes.
-        # R131 ([0]): FOR UPDATE — the guard read raced a concurrent
-        # cancel_subscription (its guarded UPDATE has no prior lock read), so
-        # a cancel landing mid-void slipped past cancel_in_later_window and
-        # the rewind deleted the consumed later period anyway. The lock
-        # serializes the two; combined with the immediate re-close enqueue
-        # the remaining interleaving window is the worker pickup (~seconds),
-        # and the widened final-close residual warning surfaces any loss.
-        rewind_sub = (
-            (
-                await db.execute(
-                    select(Subscription)
-                    .where(Subscription.id == period.subscription_id)
-                    .with_for_update()
-                    .execution_options(populate_existing=True)
-                )
-            ).scalar_one_or_none()
-            if period is not None
-            else None
-        )
+        # R131 ([0]) / R132 (lock-order): the sub row was locked FOR UPDATE at
+        # the TOP of this function (before the credit refunds) — same
+        # Sub-first order the close uses, so a concurrent cancel serializes
+        # against the void and no ABBA pair exists with close's
+        # Sub→credit-balance order. rewind_sub carries that locked row.
         cancel_in_later_window = (
             rewind_sub is not None
             and rewind_sub.current_period_start >= period.period_end
@@ -1713,6 +1801,39 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
                 sub.current_period_start = period.period_start
                 if rolled or period.period_end > sub.current_period_end:
                     sub.current_period_end = period.period_end
+                # R132 ([F16]): the rollover close FOLDED next_period changes
+                # into sub.plan_version_id/seat_quantity at this period's end.
+                # Un-invoicing them (above) without restoring the sub's fields
+                # made the re-close bill the period at the NEW plan (arrears
+                # billing falls back to sub.plan_version_id when no immediate
+                # change anchors the period start). Restore from the EARLIEST
+                # rollover-applied change's from_* — the re-close's rollover
+                # branch re-applies them afterwards exactly as the original
+                # close did.
+                first_rollover_change = (
+                    (
+                        await db.execute(
+                            select(SubscriptionChange)
+                            .where(
+                                SubscriptionChange.subscription_id == sub.id,
+                                SubscriptionChange.proration_mode == "next_period",
+                                SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
+                                SubscriptionChange.effective_at == period.period_end,
+                            )
+                            .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    # only a ROLLOVER close folds next_period changes —
+                    # terminal closes cancel without applying them.
+                    if rolled
+                    else None
+                )
+                if first_rollover_change is not None:
+                    if first_rollover_change.from_plan_version_id is not None:
+                        sub.plan_version_id = first_rollover_change.from_plan_version_id
+                    if first_rollover_change.from_seats is not None:
+                        sub.seat_quantity = first_rollover_change.from_seats
                 # R130 (rework of R129[C1]): do NOT resurrect a cancelled sub.
                 # The R129 restore-to-cancel_at_period_end fixed the original
                 # perpetual-rebill, but the transient state was (a) a second

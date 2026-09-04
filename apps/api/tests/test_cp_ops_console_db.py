@@ -143,6 +143,9 @@ async def test_dashboard_blocks(db):
         "suspended",
         "failed_webhooks",
         "dead_outbox",
+        # R132 ([F4]): paid purchases that delivered no grant — refund
+        # candidates from the duplicate-license skip branch.
+        "grantless_paid_purchases",
     }
 
 

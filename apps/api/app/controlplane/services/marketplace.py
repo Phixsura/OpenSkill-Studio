@@ -137,6 +137,21 @@ async def create_listing(
                 "cannot be re-listed for sale",
                 403,
             )
+    # R132 ([F11]): manual-grant copies carry ONLY origin_source_path_id (no
+    # listing) — the listing-keyed gate above missed them, so a grant-redeemed
+    # copy of ANOTHER org's path was re-listable for sale. Block listing any
+    # copy whose source path is owned by a different org.
+    if product_type == "learning_path" and getattr(_product, "origin_source_path_id", None):
+        from app.models.learning_path import LearningPath as LearningPathModel
+
+        src = await db.get(LearningPathModel, _product.origin_source_path_id)
+        if src is not None and src.org_id != seller_org_id:
+            raise AppError(
+                "LICENSED_CONTENT_NOT_REDISTRIBUTABLE",
+                "This learning path is an installed copy of another "
+                "organization's content and cannot be re-listed for sale",
+                403,
+            )
     if status_value != "published":
         raise AppError("LISTING_INVALID", "Only published products can be listed", 422)
     if offer_type in ("paid", "partner_only") and visibility_value == "private":
@@ -284,6 +299,12 @@ async def create_purchase(
     covering = await _find_covering_grant(
         db, listing.product_type, listing.product_id, buyer_tenant.id, buyer_org_id
     )
+    # R132 ([F0], completes R131's scope-width rule): a NARROWER grant must
+    # not block purchasing the WIDER entitlement — an org-scoped grant holder
+    # upgrading to a tenant-wide license 409'd here before checkout ever
+    # started, making the upgrade unpurchasable through any path.
+    if covering is not None and not grant_covers_listing_width(covering, listing):
+        covering = None
     if covering is not None:
         raise AppError("ALREADY_LICENSED", "You already hold a license for this product", 409)
     # R44[17]: the grant precheck only sees PAID purchases (grants are created
@@ -516,16 +537,12 @@ async def mark_purchase_paid(
         purchase.buyer_tenant_id,
         purchase.buyer_org_id,
     )
-    # R131 ([F9]): the existing grant must cover the PURCHASED scope, not just
-    # the buyer org — an org-scoped grant "covers" per _find_covering_grant,
-    # but the tenant PAID for a tenant-wide license; skipping the mint would
-    # take the money and deliver a strictly narrower entitlement. Only a
-    # tenant-wide grant covers a tenant-scope purchase.
-    if (
-        existing_grant is not None
-        and listing.license_scope == "tenant"
-        and existing_grant.scope != "tenant"
-    ):
+    # R131 ([F9]) / R132 ([F1]/[F2]): the existing grant must cover the FULL
+    # WIDTH of the purchase — scope (org grant vs tenant purchase), duration
+    # (expiring trial vs perpetual), and seat capacity — or the buyer paid
+    # for more than they hold. Shared helper keeps this in lockstep with the
+    # create_purchase precheck.
+    if existing_grant is not None and not grant_covers_listing_width(existing_grant, listing):
         existing_grant = None
     if existing_grant is None:
         grant = LicenseGrant(
@@ -692,20 +709,60 @@ async def _find_covering_grant(
         .all()
     )
     now = _now()
+    # R132 ([F3]): prefer the WIDEST covering grant — a tenant can legitimately
+    # hold several (org trial + purchased tenant-wide, R131/R132 width-mint
+    # states); returning the first row let a stale seat_limited cap bind where
+    # an uncapped grant covers. Order: tenant > organization/cohort >
+    # seat_limited; perpetual beats expiring within a tier.
+    best: LicenseGrant | None = None
+    best_rank: tuple | None = None
     for grant in grants:
         if grant.expires_at is not None and grant.expires_at <= now:
             continue
-        if grant.scope == "tenant":
-            return grant
         # 'cohort' scope enforces at the ORG boundary by design (ADR-014 §8.4:
         # cohort narrowing lives at the assignment layer — usage events don't
         # carry a cohort dim in v1). grant.cohort_id records the intended
         # cohort for that layer; it does not narrow the install gate.
-        if grant.scope in ("organization", "seat_limited", "cohort") and (
-            grant.org_id == org_id or grant.org_id is None
-        ):
-            return grant
-    return None
+        covers = grant.scope == "tenant" or (
+            grant.scope in ("organization", "seat_limited", "cohort")
+            and (grant.org_id == org_id or grant.org_id is None)
+        )
+        if not covers:
+            continue
+        scope_rank = 2 if grant.scope == "tenant" else (0 if grant.scope == "seat_limited" else 1)
+        # R132 ([20]): break seat_limited ties by CAP — after a paid capacity
+        # upgrade both grants are active; first-match kept the stale tighter
+        # cap binding forever (the paid upgrade never honored).
+        rank = (
+            scope_rank,
+            1 if grant.expires_at is None else 0,
+            grant.seat_limit or 0,
+        )
+        if best_rank is None or rank > best_rank:
+            best, best_rank = grant, rank
+    return best
+
+
+def grant_covers_listing_width(grant: LicenseGrant, listing: MarketplaceListing) -> bool:
+    """R132: does an existing grant cover the WIDTH of what a listing sells?
+
+    A purchase mints a perpetual grant at the listing's scope/seat cap — an
+    existing grant only makes that purchase redundant when it is at least as
+    wide on every axis: scope (tenant > org/cohort/seat_limited), duration
+    (perpetual vs expiring), and seat capacity. Shared by the create_purchase
+    ALREADY_LICENSED precheck and the mark_purchase_paid mint guard so the
+    two never diverge (the R129→R131 divergence class)."""
+    if listing.license_scope == "tenant" and grant.scope != "tenant":
+        return False
+    if grant.expires_at is not None:
+        return False
+    return not (
+        grant.scope == "seat_limited"
+        and (
+            listing.license_scope != "seat_limited"
+            or (grant.seat_limit or 0) < (listing.seat_limit or 0)
+        )
+    )
 
 
 async def enforce_seat_limit(db: AsyncSession, grant: LicenseGrant, org_id: str) -> None:
@@ -715,21 +772,38 @@ async def enforce_seat_limit(db: AsyncSession, grant: LicenseGrant, org_id: str)
     if grant.scope == "seat_limited" and grant.seat_limit:
         from sqlalchemy import func as _f
 
-        from app.models.organization import MemberStatus, OrgMember, OrgRole
+        from app.models.organization import (
+            MemberStatus,
+            Organization,
+            OrgMember,
+            OrgRole,
+            OrgStatus,
+        )
 
-        occupancy = (
-            await db.execute(
-                select(_f.count(_f.distinct(OrgMember.user_id))).where(
-                    OrgMember.org_id == org_id,
-                    OrgMember.status == MemberStatus.ACTIVE,
-                    OrgMember.role == OrgRole.STUDENT,
-                )
+        q = (
+            select(_f.count(_f.distinct(OrgMember.user_id)))
+            .select_from(OrgMember)
+            .where(
+                OrgMember.status == MemberStatus.ACTIVE,
+                OrgMember.role == OrgRole.STUDENT,
             )
-        ).scalar_one()
+        )
+        # R132 ([F12]): a grant narrowed to one org caps THAT org; a
+        # tenant-wide seat_limited grant (org_id NULL) caps the TENANT's
+        # total occupancy — per-installing-org counting let N orgs each
+        # consume the full cap (N× the seats the seller sold).
+        if grant.org_id is not None:
+            q = q.where(OrgMember.org_id == org_id)
+        else:
+            q = q.join(Organization, Organization.id == OrgMember.org_id).where(
+                Organization.tenant_id == grant.tenant_id,
+                Organization.status != OrgStatus.ARCHIVED,
+            )
+        occupancy = (await db.execute(q)).scalar_one()
         if occupancy > grant.seat_limit:
             raise AppError(
                 "SEAT_LIMIT_EXCEEDED",
-                f"License covers {grant.seat_limit} seats; organization has {occupancy}",
+                f"License covers {grant.seat_limit} seats; current occupancy is {occupancy}",
                 403,
             )
 

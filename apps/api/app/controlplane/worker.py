@@ -223,9 +223,23 @@ async def reap_stuck(db: AsyncSession, older_than_minutes: int = 10) -> int:
             locked_at=None,
         )
     )
+    # R132 ([F18]): purge old DONE rows — nothing ever deleted them, so
+    # cp_outbox grew unbounded (every usage event, close, accrual, and the
+    # cancelled-sub blocked-retry chain each leave a row). 30 days keeps a
+    # generous ops-debugging window; failed rows are kept (requeue surface).
+    from sqlalchemy import delete as _delete
+
+    purged = await db.execute(
+        _delete(OutboxMessage).where(
+            OutboxMessage.status == "done",
+            OutboxMessage.processed_at < _now() - timedelta(days=30),
+        )
+    )
     await db.commit()
     if dead.rowcount:
         log.error("outbox_reap_dead_letter", count=dead.rowcount)
+    if purged.rowcount:
+        log.info("outbox_done_purged", count=purged.rowcount)
     return result.rowcount + dead.rowcount
 
 

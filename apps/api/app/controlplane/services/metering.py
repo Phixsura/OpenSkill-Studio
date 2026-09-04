@@ -146,15 +146,18 @@ async def ingest_adjustment(
     # usage that was never billed. Force ops to pick one path.
     from app.controlplane.models.pricing import RatedUsage
 
-    voided = (
+    # R132 ([13]): FOR UPDATE — void_rated's gate reads usage_events while
+    # this gate reads rated_usage (disjoint write-sets = classic write skew:
+    # a concurrent void + adjust both passed their gates, double-crediting).
+    # Locking the rating row serializes the two: void_rated's guarded UPDATE
+    # on the same row blocks behind this lock, and its own gate then sees the
+    # committed adjustment.
+    rating_row = (
         await db.execute(
-            select(RatedUsage.id).where(
-                RatedUsage.usage_event_id == original.id,
-                RatedUsage.status == "voided",
-            )
+            select(RatedUsage).where(RatedUsage.usage_event_id == original.id).with_for_update()
         )
     ).scalar_one_or_none()
-    if voided is not None:
+    if rating_row is not None and rating_row.status == "voided":
         raise AppError(
             "VALIDATION_ERROR",
             "Original event's rating was voided — it was never billed; "
@@ -188,12 +191,30 @@ async def ingest_adjustment(
         # RETRY returns the original adjustment (idempotent success), instead
         # of a 409 that invites the client to retry with a FRESH key and
         # double-book the correction.
+        # R132 ([F6]): scope the lookup to the ORIGINAL's tenant — the unique
+        # index is per-tenant (cp16), so an unscoped key query could match
+        # another tenant's event and mis-handle a legitimate retry.
         existing = (
             await db.execute(
-                select(UsageEvent).where(UsageEvent.idempotency_key == idempotency_key)
+                select(UsageEvent).where(
+                    UsageEvent.idempotency_key == idempotency_key,
+                    UsageEvent.tenant_id == original.tenant_id,
+                )
             )
         ).scalar_one_or_none()
         if existing is not None and existing.adjustment_of_id == original.id:
+            # R132 ([15]): idempotent replay only for the SAME payload — a
+            # same-key retry with a different delta silently returned the old
+            # adjustment as a fresh 201, swallowing a distinct mutation
+            # (Stripe-style key semantics: same key + different payload = 409).
+            from decimal import Decimal
+
+            if Decimal(str(existing.quantity)) != Decimal(str(delta_quantity)):
+                raise AppError(
+                    "VALIDATION_ERROR",
+                    "Idempotency key reused with a different delta_quantity",
+                    409,
+                )
             return existing
         raise AppError("VALIDATION_ERROR", "Duplicate adjustment idempotency key", 409)
     # R130[34]: an adjustment for a tenant with NO open billing period (sub

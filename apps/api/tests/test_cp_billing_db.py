@@ -2548,3 +2548,116 @@ async def test_cancelled_sub_blocked_reclose_reenqueues(db):
     assert any(m.available_at > datetime.now(UTC) for m in mine), (
         "the retry must be DELAYED (backoff), not immediate"
     )
+
+
+@pytest.mark.asyncio
+async def test_void_restores_rollover_applied_plan(db):
+    """R132 ([F16]): voiding a rollover invoice whose close APPLIED a deferred
+    (next_period) downgrade must restore the sub's plan/seats to the OLD
+    values — otherwise the re-close bills the voided period at the NEW plan
+    (arrears falls back to sub.plan_version_id with no immediate change
+    anchoring the period start)."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+    )
+    # Deferred downgrade growth → school (next_period).
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="school", seats=None, proration_mode="next_period", actor=a
+    )
+    inv = await _force_close(db, sub)  # rollover: applies the downgrade
+    assert inv is not None
+    await db.refresh(sub)
+    growth_version = None  # capture post-void expectation via the change row
+    from app.controlplane.models.billing import SubscriptionChange
+
+    chg = (
+        await db.execute(
+            select(SubscriptionChange).where(
+                SubscriptionChange.subscription_id == sub.id,
+                SubscriptionChange.change_type == "plan_change",
+            )
+        )
+    ).scalar_one()
+    growth_version = chg.from_plan_version_id
+    assert sub.plan_version_id == chg.to_plan_version_id  # downgrade applied
+
+    await billing_svc.void_invoice(db, inv, reason="rollover dispute", actor=a)
+    await db.refresh(sub)
+    assert sub.plan_version_id == growth_version, (
+        "void must restore the pre-rollover plan for the arrears re-close"
+    )
+    # Re-close bills the voided period at the OLD (growth) fee.
+    inv2 = await billing_svc.close_period_and_invoice(db, inv.billing_period_id)
+    assert inv2 is not None
+    assert _plan_lines_total(await _lines(db, inv2), "plan") == 49900, (
+        "re-close must bill the voided period at the original plan"
+    )
+    # And the downgrade is re-applied at the re-rollover.
+    await db.refresh(sub)
+    assert sub.plan_version_id == chg.to_plan_version_id
+
+
+@pytest.mark.asyncio
+async def test_void_reclose_with_forward_immediate_upgrade(db):
+    """R132 ([19]): void-rewind of period 1 while the tenant made an IMMEDIATE
+    upgrade in period 2 — the re-close must (a) bill period 1 at its true
+    plan (not the forward change's from_*), and (b) NOT clobber the paid
+    immediate upgrade when re-folding the re-armed deferred downgrade."""
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+    )
+    # Backdate the period so the close runs at (past) natural end — the
+    # forward-window immediate change must land AFTER period_end, as in
+    # production (the hourly close fires once period_end <= now).
+    from datetime import timedelta
+
+    p1 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    shift = datetime.now(UTC) - timedelta(seconds=1) - p1.period_end
+    p1.period_start = p1.period_start + shift
+    p1.period_end = p1.period_end + shift
+    sub.current_period_start = p1.period_start
+    sub.current_period_end = p1.period_end
+    await db.flush()
+    # Deferred downgrade growth → school (effective at the past period end).
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="school", seats=None, proration_mode="next_period", actor=a
+    )
+    inv1 = await billing_svc.close_period_and_invoice(db, p1.id)
+    assert inv1 is not None
+    await db.refresh(sub)
+    # Tenant IMMEDIATELY upgrades back school → growth inside period 2
+    # (effective_at = now > P1.period_end).
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="growth", seats=None, proration_mode="immediate", actor=a
+    )
+    await db.refresh(sub)
+    upgrade_version = sub.plan_version_id  # growth again
+
+    # Ops void period 1's invoice → rewind (P2 open, sub active).
+    await billing_svc.void_invoice(db, inv1, reason="p1 dispute", actor=a)
+    inv2 = await billing_svc.close_period_and_invoice(db, inv1.billing_period_id)
+    assert inv2 is not None
+    # (a) period 1 re-billed at GROWTH (49900, minus seconds-level backdating
+    # proration), never at school's 19900.
+    plan_total = _plan_lines_total(await _lines(db, inv2), "plan")
+    assert plan_total > 45000, (
+        f"re-close must bill period 1 at its true (growth) plan, got {plan_total}"
+    )
+    # (b) the tenant's paid immediate upgrade survives the re-rollover.
+    await db.refresh(sub)
+    assert sub.plan_version_id == upgrade_version, (
+        "re-rollover must not clobber the later immediate upgrade"
+    )

@@ -295,6 +295,22 @@ async def platform_dashboard(
             select(func.count(OutboxMessage.id)).where(OutboxMessage.status == "failed")
         )
     ).scalar_one()
+    # R132 ([F4]): duplicate-license PAID purchases (mark_paid skip branch)
+    # are refund candidates — a structlog warn alone gave ops no pull-based
+    # surface. Count paid purchases whose product the buyer holds >1 active
+    # grant for OR that minted no grant (purchase_id absent from grants).
+    from app.controlplane.models.marketplace import LicenseGrant
+
+    dup_license_purchases = (
+        await db.execute(
+            select(func.count(MarketplacePurchase.id)).where(
+                MarketplacePurchase.status == "paid",
+                ~select(LicenseGrant.id)
+                .where(LicenseGrant.purchase_id == MarketplacePurchase.id)
+                .exists(),
+            )
+        )
+    ).scalar_one()
 
     return {
         "data": {
@@ -317,6 +333,9 @@ async def platform_dashboard(
                 ],
                 "failed_webhooks": int(failed_webhooks),
                 "dead_outbox": int(dead_outbox),
+                # paid purchases that delivered NO grant (duplicate-license
+                # skip branch) — refund candidates awaiting ops review.
+                "grantless_paid_purchases": int(dup_license_purchases),
             },
         }
     }
