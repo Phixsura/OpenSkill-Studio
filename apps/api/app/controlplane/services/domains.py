@@ -180,8 +180,14 @@ async def create_domain(
         await db.execute(select(TenantDomain).where(TenantDomain.hostname == host).limit(1))
     ).scalar_one_or_none()
     if existing is not None:
+        # R133 ([F12]): a NEVER-VERIFIED claim in 'failed' or 'disabled' is as
+        # stale as pending — a squatter could reach 'failed' trivially (3
+        # verify calls with no DNS record) or self-disable, holding the
+        # victim's hostname forever past the eviction the R83[M2] fix built.
+        # Verified-at-any-point rows are never evicted (verified_at set).
         stale_pending = (
-            existing.status == "pending_verification"
+            existing.status in ("pending_verification", "failed", "disabled")
+            and existing.verified_at is None
             and existing.created_at < datetime.now(UTC) - _td(days=7)
         )
         if stale_pending and existing.tenant_id != tenant_id:

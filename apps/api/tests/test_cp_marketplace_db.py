@@ -1890,3 +1890,98 @@ async def test_seat_capacity_upgrade_honored_by_gate(db):
     assert covering is not None and covering.seat_limit == 10, (
         "resolver must prefer the roomier (upgraded) seat cap"
     )
+
+
+@pytest.mark.asyncio
+async def test_expiring_wide_trial_does_not_shadow_perpetual_grant(db):
+    """R133 ([F10]): the ALREADY_LICENSED precheck must evaluate ALL covering
+    grants — an expiring tenant-wide trial (widest by scope, fails duration)
+    must not shadow the buyer's perpetual org grant and allow a redundant
+    re-purchase of the same org listing."""
+    from datetime import timedelta
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user)  # org-scope paid
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    # Perpetual org grant (the earlier purchase).
+    await market_svc.manual_grant(
+        db,
+        product_type=listing.product_type,
+        product_id=listing.product_id,
+        tenant_id=buyer_tenant.id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    # Expiring tenant-wide trial (ranks wider by scope).
+    await market_svc.manual_grant(
+        db,
+        product_type=listing.product_type,
+        product_id=listing.product_id,
+        tenant_id=buyer_tenant.id,
+        scope="tenant",
+        org_id=None,
+        expires_at=datetime.now(UTC) + timedelta(days=14),
+        actor=_actor(seller_user),
+    )
+    with pytest.raises(AppError) as exc:
+        await market_svc.create_purchase(
+            db,
+            listing_id=listing.id,
+            buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user),
+            payment_method="credit",
+            idempotency_key=f"shadow-{ULID()}",
+        )
+    assert exc.value.code == "ALREADY_LICENSED"
+
+
+@pytest.mark.asyncio
+async def test_trial_grant_does_not_unlock_major_bound(db):
+    """R133 ([F11]): a purchased_major=NULL trial grant shadowing the paid
+    grant must not lift the major_locked bound — the buyer's highest PAID
+    major governs."""
+    from datetime import timedelta
+
+    from app.controlplane.services.marketplace import check_upgrade_license
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user, upgrade_policy="major_locked")
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    # Paid org grant locked to major 1.
+    db.add(
+        LicenseGrant(
+            listing_id=listing.id,
+            product_type=listing.product_type,
+            product_id=listing.product_id,
+            tenant_id=buyer_tenant.id,
+            org_id=buyer_org.id,
+            scope="organization",
+            source="purchase",
+            purchased_major=1,
+        )
+    )
+    # Wider expiring trial with NO purchased_major.
+    await market_svc.manual_grant(
+        db,
+        product_type=listing.product_type,
+        product_id=listing.product_id,
+        tenant_id=buyer_tenant.id,
+        scope="tenant",
+        org_id=None,
+        expires_at=datetime.now(UTC) + timedelta(days=14),
+        actor=_actor(seller_user),
+    )
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await check_upgrade_license(
+            db, listing.product_type, listing.product_id, buyer_org, "2.0.0"
+        )
+    assert exc.value.code == "LICENSE_UPGRADE_REQUIRED"

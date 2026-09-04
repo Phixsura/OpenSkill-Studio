@@ -2661,3 +2661,44 @@ async def test_void_reclose_with_forward_immediate_upgrade(db):
     assert sub.plan_version_id == upgrade_version, (
         "re-rollover must not clobber the later immediate upgrade"
     )
+
+
+@pytest.mark.asyncio
+async def test_normal_close_folds_deferred_downgrade_despite_seat_bump(db):
+    """R133 ([F3] verified): the fold-supersede must not fire on the NORMAL
+    close path nor across axes — a scheduled plan downgrade followed by a
+    routine immediate seat bump must still take effect at rollover."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+    )
+    # Scheduled downgrade growth → school.
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="school", seats=None, proration_mode="next_period", actor=a
+    )
+    # Routine immediate seat bump AFTER the deferred change.
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key=None, seats=5, proration_mode="immediate", actor=a
+    )
+    from app.controlplane.models.billing import SubscriptionChange
+
+    downgrade = (
+        await db.execute(
+            select(SubscriptionChange).where(
+                SubscriptionChange.subscription_id == sub.id,
+                SubscriptionChange.proration_mode == "next_period",
+            )
+        )
+    ).scalar_one()
+    school_version = downgrade.to_plan_version_id
+
+    inv = await _force_close(db, sub)  # normal rollover — no void anywhere
+    assert inv is not None
+    await db.refresh(sub)
+    assert sub.plan_version_id == school_version, (
+        "the scheduled downgrade must fold at the normal rollover — a later "
+        "immediate seat bump must not suppress it"
+    )
+    assert sub.seat_quantity == 5, "the seat bump must survive"

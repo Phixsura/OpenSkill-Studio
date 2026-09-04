@@ -227,19 +227,35 @@ async def reap_stuck(db: AsyncSession, older_than_minutes: int = 10) -> int:
     # cp_outbox grew unbounded (every usage event, close, accrual, and the
     # cancelled-sub blocked-retry chain each leave a row). 30 days keeps a
     # generous ops-debugging window; failed rows are kept (requeue surface).
+    # R133 ([F0]): BATCHED — the first ship faces the whole historical
+    # backlog; an unbounded DELETE in the reaper's transaction risks the arq
+    # 300s job timeout (cancelling the lease recovery with it) and long row
+    # locks. 10k per cycle drains any realistic backlog within hours.
     from sqlalchemy import delete as _delete
 
-    purged = await db.execute(
-        _delete(OutboxMessage).where(
-            OutboxMessage.status == "done",
-            OutboxMessage.processed_at < _now() - timedelta(days=30),
+    purge_ids = (
+        (
+            await db.execute(
+                select(OutboxMessage.id)
+                .where(
+                    OutboxMessage.status == "done",
+                    OutboxMessage.processed_at < _now() - timedelta(days=30),
+                )
+                .limit(10_000)
+            )
         )
+        .scalars()
+        .all()
     )
+    purged_count = 0
+    if purge_ids:
+        purged = await db.execute(_delete(OutboxMessage).where(OutboxMessage.id.in_(purge_ids)))
+        purged_count = purged.rowcount
     await db.commit()
     if dead.rowcount:
         log.error("outbox_reap_dead_letter", count=dead.rowcount)
-    if purged.rowcount:
-        log.info("outbox_done_purged", count=purged.rowcount)
+    if purged_count:
+        log.info("outbox_done_purged", count=purged_count)
     return result.rowcount + dead.rowcount
 
 

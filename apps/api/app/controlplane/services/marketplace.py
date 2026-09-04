@@ -296,16 +296,17 @@ async def create_purchase(
         TenantStatus.TRIAL,
     ):
         raise AppError("LISTING_NOT_PURCHASABLE", "Seller is not currently active", 409)
-    covering = await _find_covering_grant(
-        db, listing.product_type, listing.product_id, buyer_tenant.id, buyer_org_id
-    )
     # R132 ([F0], completes R131's scope-width rule): a NARROWER grant must
     # not block purchasing the WIDER entitlement — an org-scoped grant holder
     # upgrading to a tenant-wide license 409'd here before checkout ever
-    # started, making the upgrade unpurchasable through any path.
-    if covering is not None and not grant_covers_listing_width(covering, listing):
-        covering = None
-    if covering is not None:
+    # started. R133 ([F10]): evaluate width over ALL covering grants — the
+    # single-widest answer let an expiring tenant trial (wide scope, fails
+    # duration) shadow a perpetual org grant that fully covers this listing,
+    # allowing a redundant charge.
+    all_covering = await _covering_grants(
+        db, listing.product_type, listing.product_id, buyer_tenant.id, buyer_org_id
+    )
+    if any(grant_covers_listing_width(g, listing) for g in all_covering):
         raise AppError("ALREADY_LICENSED", "You already hold a license for this product", 409)
     # R44[17]: the grant precheck only sees PAID purchases (grants are created
     # at mark_paid) — nothing stopped a second purchase while the first was
@@ -530,20 +531,22 @@ async def mark_purchase_paid(
     # covering tenant-wide grant for an org-scoped listing (the original H0
     # double-mint surviving for scope-superset shapes). _find_covering_grant
     # applies expiry + scope semantics; a covered buyer = true duplicate.
-    existing_grant = await _find_covering_grant(
+    # R131 ([F9]) / R132 ([F1]/[F2]): the existing grant must cover the FULL
+    # WIDTH of the purchase — scope, duration, seat capacity — or the buyer
+    # paid for more than they hold. R133 ([F10]): evaluate ALL covering
+    # grants (single-widest let an expiring wide trial shadow a perpetual
+    # covering grant). Shared helper keeps this in lockstep with the
+    # create_purchase precheck.
+    _all_covering = await _covering_grants(
         db,
         listing.product_type,
         listing.product_id,
         purchase.buyer_tenant_id,
         purchase.buyer_org_id,
     )
-    # R131 ([F9]) / R132 ([F1]/[F2]): the existing grant must cover the FULL
-    # WIDTH of the purchase — scope (org grant vs tenant purchase), duration
-    # (expiring trial vs perpetual), and seat capacity — or the buyer paid
-    # for more than they hold. Shared helper keeps this in lockstep with the
-    # create_purchase precheck.
-    if existing_grant is not None and not grant_covers_listing_width(existing_grant, listing):
-        existing_grant = None
+    existing_grant = next(
+        (g for g in _all_covering if grant_covers_listing_width(g, listing)), None
+    )
     if existing_grant is None:
         grant = LicenseGrant(
             listing_id=listing.id,
@@ -687,13 +690,24 @@ async def refund_purchase(
 # ── License gate (facade.check_install_license) ──────────────
 
 
-async def _find_covering_grant(
+def _grant_rank(grant: LicenseGrant) -> tuple:
+    """Width order: tenant > organization/cohort > seat_limited; perpetual >
+    expiring; roomier seat cap on ties (R132[F3]/[20])."""
+    scope_rank = 2 if grant.scope == "tenant" else (0 if grant.scope == "seat_limited" else 1)
+    return (scope_rank, 1 if grant.expires_at is None else 0, grant.seat_limit or 0)
+
+
+async def _covering_grants(
     db: AsyncSession,
     product_type: str,
     product_id: str,
     tenant_id: str,
     org_id: str,
-) -> LicenseGrant | None:
+) -> list[LicenseGrant]:
+    """ALL live covering grants, widest first (R133 [F10]/[F11]: consumers
+    that ask 'is the buyer already licensed for X width?' or 'what major did
+    the buyer PURCHASE?' must see every covering grant — the single-widest
+    answer let an expiring tenant trial shadow a perpetual org purchase)."""
     grants = (
         (
             await db.execute(
@@ -709,13 +723,7 @@ async def _find_covering_grant(
         .all()
     )
     now = _now()
-    # R132 ([F3]): prefer the WIDEST covering grant — a tenant can legitimately
-    # hold several (org trial + purchased tenant-wide, R131/R132 width-mint
-    # states); returning the first row let a stale seat_limited cap bind where
-    # an uncapped grant covers. Order: tenant > organization/cohort >
-    # seat_limited; perpetual beats expiring within a tier.
-    best: LicenseGrant | None = None
-    best_rank: tuple | None = None
+    covering = []
     for grant in grants:
         if grant.expires_at is not None and grant.expires_at <= now:
             continue
@@ -727,20 +735,24 @@ async def _find_covering_grant(
             grant.scope in ("organization", "seat_limited", "cohort")
             and (grant.org_id == org_id or grant.org_id is None)
         )
-        if not covers:
-            continue
-        scope_rank = 2 if grant.scope == "tenant" else (0 if grant.scope == "seat_limited" else 1)
-        # R132 ([20]): break seat_limited ties by CAP — after a paid capacity
-        # upgrade both grants are active; first-match kept the stale tighter
-        # cap binding forever (the paid upgrade never honored).
-        rank = (
-            scope_rank,
-            1 if grant.expires_at is None else 0,
-            grant.seat_limit or 0,
-        )
-        if best_rank is None or rank > best_rank:
-            best, best_rank = grant, rank
-    return best
+        if covers:
+            covering.append(grant)
+    covering.sort(key=_grant_rank, reverse=True)
+    return covering
+
+
+async def _find_covering_grant(
+    db: AsyncSession,
+    product_type: str,
+    product_id: str,
+    tenant_id: str,
+    org_id: str,
+) -> LicenseGrant | None:
+    """The single WIDEST covering grant (install-gate semantics — the widest
+    entitlement governs seat caps etc.). Width-comparison consumers should
+    use _covering_grants and evaluate ALL of them."""
+    covering = await _covering_grants(db, product_type, product_id, tenant_id, org_id)
+    return covering[0] if covering else None
 
 
 def grant_covers_listing_width(grant: LicenseGrant, listing: MarketplaceListing) -> bool:
@@ -887,19 +899,27 @@ async def check_install_license(
         )
     await enforce_seat_limit(db, grant, org.id)
     # R44[18]: major_locked applies to installs too, not just upgrades.
-    if (
-        target_version is not None
-        and listing.upgrade_policy == "major_locked"
-        and grant.purchased_major is not None
-    ):
+    # R133 ([F11]): the major bound comes from the PURCHASE grants, not the
+    # widest grant — a purchased_major=NULL manual/trial grant shadowing the
+    # paid grant silently unlocked all majors on a major-1 license. Bind on
+    # the MAX purchased_major among covering grants (the buyer's highest paid
+    # major); only when NO covering grant carries one (pure manual/trial
+    # licensing) is the product major-unrestricted by ops intent.
+    if target_version is not None and listing.upgrade_policy == "major_locked":
+        purchased_majors = [
+            g.purchased_major
+            for g in await _covering_grants(db, product_type, product_id, tenant.id, org.id)
+            if g.purchased_major is not None
+        ]
+        bound = max(purchased_majors) if purchased_majors else None
         try:
             target_major = int(str(target_version).split(".")[0])
         except ValueError:
             target_major = None
-        if target_major is not None and target_major > grant.purchased_major:
+        if bound is not None and target_major is not None and target_major > bound:
             raise AppError(
                 "LICENSE_UPGRADE_REQUIRED",
-                f"Your license covers major version {grant.purchased_major}; "
+                f"Your license covers major version {bound}; "
                 f"version {target_version} requires a new purchase",
                 403,
             )
@@ -927,17 +947,25 @@ async def check_upgrade_license(
     tenant = await get_tenant_for_org(db, org.id)
     if tenant.id == listing.seller_tenant_id:
         return
-    grant = await _find_covering_grant(db, product_type, product_id, tenant.id, org.id)
-    if grant is None or grant.purchased_major is None:
+    # R133 ([F11]): bind on the MAX purchased_major among ALL covering grants
+    # — the widest grant may be a purchased_major=NULL trial that shadows the
+    # paid grant (silently unlocking every major).
+    purchased_majors = [
+        g.purchased_major
+        for g in await _covering_grants(db, product_type, product_id, tenant.id, org.id)
+        if g.purchased_major is not None
+    ]
+    if not purchased_majors:
         return
+    bound = max(purchased_majors)
     try:
         target_major = int(str(target_version).split(".")[0])
     except ValueError:
         return
-    if target_major > grant.purchased_major:
+    if target_major > bound:
         raise AppError(
             "LICENSE_UPGRADE_REQUIRED",
-            f"Your license covers major version {grant.purchased_major}; "
+            f"Your license covers major version {bound}; "
             f"version {target_version} requires a new purchase",
             403,
         )

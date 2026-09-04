@@ -770,7 +770,14 @@ async def void_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -> 
 
     from app.controlplane.services.audit import record_audit
 
-    row = await db.get(RatedUsage, rated_id)
+    # R133 ([F6]): FOR UPDATE — completes the [13] write-skew closure. The
+    # adjust path locks this row before its gate; locking here too makes the
+    # two gates fully serialized in both orders (adjust-first blocks the
+    # void's lock until the adjustment commits and the gate below sees it;
+    # void-first blocks the adjust's lock until 'voided' commits).
+    row = (
+        await db.execute(select(RatedUsage).where(RatedUsage.id == rated_id).with_for_update())
+    ).scalar_one_or_none()
     if row is None:
         raise AppError("RATING_NOT_FOUND", "Rated usage not found", 404)
     # R131 ([F4]): the reverse of the R130[37] adjust-gate — voiding an
@@ -843,9 +850,56 @@ async def unvoid_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -
 
     from app.controlplane.services.audit import record_audit
 
-    row = await db.get(RatedUsage, rated_id)
+    row = (
+        await db.execute(select(RatedUsage).where(RatedUsage.id == rated_id).with_for_update())
+    ).scalar_one_or_none()
     if row is None:
         raise AppError("RATING_NOT_FOUND", "Rated usage not found", 404)
+    # R133 ([F7]): mirror gate — the voided row may belong to an ADJUSTMENT
+    # event whose ORIGINAL's rating is live; restoring it recreates the
+    # double-correct the [F4]/R130[37] gates forbid (both the original charge
+    # and its reversal billable). Also the inverse: the row's own event may
+    # have a live adjustment referencing it.
+    from app.controlplane.models.usage import UsageEvent as UsageEventModel
+
+    ev = await db.get(UsageEventModel, row.usage_event_id)
+    if ev is not None and ev.adjustment_of_id is not None:
+        original_live = (
+            await db.execute(
+                select(RatedUsage.id)
+                .join(UsageEventModel, UsageEventModel.id == RatedUsage.usage_event_id)
+                .where(
+                    UsageEventModel.id == ev.adjustment_of_id,
+                    RatedUsage.status != "voided",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if original_live is not None:
+            raise AppError(
+                "RATED_USAGE_INVOICED",
+                "This is an adjustment whose original is live — restoring it "
+                "would double-correct; void the original first",
+                409,
+            )
+    live_adjustment = (
+        await db.execute(
+            select(RatedUsage.id)
+            .join(UsageEventModel, UsageEventModel.id == RatedUsage.usage_event_id)
+            .where(
+                UsageEventModel.adjustment_of_id == row.usage_event_id,
+                RatedUsage.status != "voided",
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if live_adjustment is not None:
+        raise AppError(
+            "RATED_USAGE_INVOICED",
+            "Event has a live adjustment — restoring the original too would "
+            "double-correct; void the adjustment first",
+            409,
+        )
     # R132 ([F5]): a row voided while BLOCKED (fx gap) has ZERO amounts — a
     # blind restore-to-'rated' would sweep it into the next close as a
     # permanent zero-bill. Restore to its pre-void status: blocked rows go
@@ -858,6 +912,15 @@ async def unvoid_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -
         .where(RatedUsage.id == rated_id, RatedUsage.status == "voided")
         .values(status=restore_to, void_reason=None)
     )
+    if was_blocked and result.rowcount:
+        # R133 ([F9]): the missing FX rate may have been created WHILE the row
+        # was voided — the fx.rate_created sweep skips voided rows, so nothing
+        # would ever re-rate this one (and a blocked row wedges every close
+        # for the tenant). Re-drive the rating attempt directly; still-missing
+        # rates leave it blocked as before.
+        from app.controlplane.models.outbox import enqueue as _enqueue
+
+        _enqueue(db, "usage.recorded", {"usage_event_id": row.usage_event_id})
     if not result.rowcount:
         await db.refresh(row)
         raise AppError(

@@ -289,6 +289,10 @@ async def request_revision(
     await _assert_no_final(db, principal.project_id)
     # R69[4]: same-version repeat is a no-op (comment traffic belongs in
     # comments; the DECISION for this version is already recorded).
+    # R133 ([13]): serialize on the submission row — the SELECT-then-INSERT
+    # dedup raced concurrent duplicates (double record + double notification
+    # fan-out); no unique index exists for per-version decisions.
+    await db.execute(select(Submission.id).where(Submission.id == submission.id).with_for_update())
     prior = (
         await db.execute(
             select(ClientApprovalRecord)
@@ -344,6 +348,9 @@ async def approve(
     # R69[4]: repeated identical decisions are idempotent no-ops — each call
     # previously inserted another append-only record and re-fanned up to 50
     # org notifications (unbounded spam from one client clicking approve).
+    # R133 ([13]): serialize on the submission row — the SELECT-then-INSERT
+    # dedup raced concurrent duplicates (double record + double fan-out).
+    await db.execute(select(Submission.id).where(Submission.id == submission.id).with_for_update())
     prior = (
         await db.execute(
             select(ClientApprovalRecord)

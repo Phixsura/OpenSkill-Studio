@@ -301,6 +301,9 @@ async def platform_dashboard(
     # grant for OR that minted no grant (purchase_id absent from grants).
     from app.controlplane.models.marketplace import LicenseGrant
 
+    # R133 ([F1]): ANY grant row (active or revoked) means the purchase
+    # DELIVERED — a later manual revoke is a separate ops action, not a
+    # refund-queue signal. Only purchases that never minted count.
     dup_license_purchases = (
         await db.execute(
             select(func.count(MarketplacePurchase.id)).where(

@@ -209,7 +209,13 @@ async def ingest_adjustment(
             # (Stripe-style key semantics: same key + different payload = 409).
             from decimal import Decimal
 
-            if Decimal(str(existing.quantity)) != Decimal(str(delta_quantity)):
+            # R133 ([F8]): quantize BOTH sides to the column's 6dp scale — the
+            # stored value is Numeric(18,6)-truncated, so a legitimately
+            # identical retry with >6dp input compared unequal (false 409).
+            _scale = Decimal("0.000001")
+            if Decimal(str(existing.quantity)).quantize(_scale) != Decimal(
+                str(delta_quantity)
+            ).quantize(_scale):
                 raise AppError(
                     "VALIDATION_ERROR",
                     "Idempotency key reused with a different delta_quantity",
