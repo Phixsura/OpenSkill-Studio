@@ -180,7 +180,12 @@ async def grant_promotional(
     )
     if entry is None:
         # Duplicate key → return the original grant (idempotent), no re-audit.
-        return (
+        # The dedup namespace is tenant-wide across entry types (deliberate,
+        # see _append_entry) — so verify the existing row IS this grant. A key
+        # previously consumed by adjust/top-up must 409, not masquerade as a
+        # 201 promo grant with the other row's type/amount (R134 [F13] keyed-
+        # retry pattern: same args → original row, mismatch → conflict).
+        original = (
             await db.execute(
                 select(CreditLedgerEntry).where(
                     CreditLedgerEntry.tenant_id == tenant_id,
@@ -188,6 +193,17 @@ async def grant_promotional(
                 )
             )
         ).scalar_one()
+        if (
+            original.entry_type != "promotional"
+            or original.currency != currency
+            or original.amount_minor != amount_minor
+        ):
+            raise AppError(
+                "IDEMPOTENCY_CONFLICT",
+                "Idempotency key already used with different parameters",
+                409,
+            )
+        return original
     await record_audit(
         db,
         actor=actor,

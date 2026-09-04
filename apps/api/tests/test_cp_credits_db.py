@@ -1791,3 +1791,31 @@ async def test_grant_promotional_idempotency_key(db):
     )
     await db.refresh(balance)
     assert balance.balance_minor == 6000
+    # Same key, DIFFERENT params → 409, never the other row masquerading.
+    with pytest.raises(AppError) as exc:
+        await credit_svc.grant_promotional(
+            db,
+            tenant.id,
+            "USD",
+            9999,
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            reason="different amount",
+            actor=a,
+            idempotency_key=key,
+        )
+    assert exc.value.code == "IDEMPOTENCY_CONFLICT"
+    # A key already consumed by adjust must not return as a promo grant.
+    akey = f"adj-{ULID()}"
+    await credit_svc.adjust(db, tenant.id, "USD", 700, reason="ops", actor=a, idempotency_key=akey)
+    with pytest.raises(AppError) as exc2:
+        await credit_svc.grant_promotional(
+            db,
+            tenant.id,
+            "USD",
+            700,
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            reason="stolen key",
+            actor=a,
+            idempotency_key=akey,
+        )
+    assert exc2.value.code == "IDEMPOTENCY_CONFLICT"

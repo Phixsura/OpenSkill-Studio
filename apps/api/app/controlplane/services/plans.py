@@ -112,11 +112,33 @@ async def update_draft(
     entitlements: dict | None = None,
     prices: list[dict] | None = None,
 ) -> PlanVersion:
+    # R135: TOCTOU — the caller's copy may be stale; a concurrent activation
+    # could flip draft→active between the router's load and the writes below,
+    # letting a PATCH mutate an ACTIVE (immutable) version's entitlements or
+    # prices. Lock the row and re-read the status inside the critical section
+    # (activate_version's guarded UPDATE serializes on this row lock).
+    version = (
+        await db.execute(
+            select(PlanVersion)
+            .where(PlanVersion.id == version.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     _require_draft(version)
     if entitlements is not None:
         validated = {k: validate_entitlement_value(k, v) for k, v in entitlements.items()}
         version.entitlements = validated
     if prices is not None:
+        # R135: duplicate (currency, interval) in ONE body hit uq_cp_plan_price
+        # as an unhandled 23505 → 500. Reject up front with a clean 422.
+        pairs = [(p["currency"], p["interval"]) for p in prices]
+        if len(pairs) != len(set(pairs)):
+            raise AppError(
+                "VALIDATION_ERROR",
+                "Duplicate (currency, interval) price in request",
+                422,
+            )
         # Replace-all semantics for draft prices (simplest correct editor model)
         existing = (
             (await db.execute(select(PlanPrice).where(PlanPrice.plan_version_id == version.id)))

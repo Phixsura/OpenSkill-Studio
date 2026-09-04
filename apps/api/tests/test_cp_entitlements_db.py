@@ -1062,3 +1062,87 @@ async def test_concurrent_create_plan_same_key_clean_409():
             await s.execute(_delete(ProductPlan).where(ProductPlan.key == key))
             await s.commit()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_update_draft_toctou_activation_race():
+    """R135: update_draft must re-check status under the version-row lock —
+    a PATCH whose session loaded the version BEFORE a concurrent activation
+    committed must 409 (PLAN_VERSION_IMMUTABLE), never mutate the now-ACTIVE
+    version. Two sessions: A loads (draft), B activates+commits, A patches."""
+    from app.core.database import engine
+
+    plan_id = None
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup, role=UserRole.ADMIN)
+            plan = await plan_svc.create_plan(
+                setup,
+                key=f"toctou-{str(ULID()).lower()[:8]}",
+                name="Toctou",
+                description=None,
+                actor=_actor(user),
+            )
+            draft = await plan_svc.create_draft_version(setup, plan, created_by=user.id)
+            await setup.commit()
+            plan_id, draft_id, user_id = plan.id, draft.id, user.id
+
+        async with AsyncSessionLocal() as sa, AsyncSessionLocal() as sb:
+            # A loads the version — sees draft.
+            stale = await sa.get(PlanVersion, draft_id)
+            assert stale.status == "draft"
+            # B activates and COMMITS.
+            vb = await sb.get(PlanVersion, draft_id)
+            ub = await sb.get(User, user_id)
+            await plan_svc.activate_version(sb, vb, actor=_actor(ub))
+            await sb.commit()
+            # A patches with its stale (draft-status) object.
+            with pytest.raises(AppError) as exc:
+                await plan_svc.update_draft(sa, stale, entitlements={"webhooks": False})
+            assert exc.value.code == "PLAN_VERSION_IMMUTABLE"
+            await sa.rollback()
+
+        async with AsyncSessionLocal() as s:
+            v = await s.get(PlanVersion, draft_id)
+            assert v.status == "active"
+            assert v.entitlements.get("webhooks") is not False, "ACTIVE version mutated"
+    finally:
+        if plan_id is not None:
+            async with AsyncSessionLocal() as s:
+                from sqlalchemy import delete as _delete
+
+                await s.execute(_delete(PlanVersion).where(PlanVersion.plan_id == plan_id))
+                await s.execute(_delete(ProductPlan).where(ProductPlan.id == plan_id))
+                await s.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_update_draft_duplicate_price_pair_422(db):
+    """R135: duplicate (currency, interval) inside ONE prices body must be a
+    clean 422, not an unhandled 23505 → 500."""
+    user = await _mk_user(db, role=UserRole.ADMIN)
+    plan = await plan_svc.create_plan(
+        db,
+        key=f"dupp-{str(ULID()).lower()[:8]}",
+        name="DupPair",
+        description=None,
+        actor=_actor(user),
+    )
+    draft = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    with pytest.raises(AppError) as exc:
+        await plan_svc.update_draft(
+            db,
+            draft,
+            prices=[
+                {"currency": "USD", "interval": "month", "amount_minor": 1000},
+                {"currency": "USD", "interval": "month", "amount_minor": 2000},
+            ],
+        )
+    assert exc.value.code == "VALIDATION_ERROR"
+    assert exc.value.status_code == 422
+    from sqlalchemy import delete as _delete
+
+    await db.execute(_delete(PlanVersion).where(PlanVersion.plan_id == plan.id))
+    await db.execute(_delete(ProductPlan).where(ProductPlan.id == plan.id))
+    await db.flush()

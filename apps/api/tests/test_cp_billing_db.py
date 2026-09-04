@@ -2876,3 +2876,128 @@ async def test_void_restore_with_stacked_deferred_changes(db):
     # And the re-rollover re-applies the stacked fold (last-wins again).
     await db.refresh(sub)
     assert sub.plan_version_id == last.to_plan_version_id
+
+
+@pytest.mark.asyncio
+async def test_void_restore_skips_axis_after_roundtrip_forward_changes(db):
+    """R135 (high): forward-window immediate changes that ROUND-TRIP back to
+    the post_fold value (10→20→10) must still mark the axis as forward-owned:
+    the restore skips (ID-order discriminator, same as the re-close's
+    supersede), so the sub keeps the tenant's final choice instead of being
+    stranded on pre_fold."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="community", interval="month", seats=30, provider="manual", actor=a
+    )
+    p1 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    shift = datetime.now(UTC) - timedelta(seconds=1) - p1.period_end
+    p1.period_start = p1.period_start + shift
+    p1.period_end = p1.period_end + shift
+    sub.current_period_start = p1.period_start
+    sub.current_period_end = p1.period_end
+    await db.flush()
+    # Deferred seat change 30 → 40 (floors above the 25 included so the
+    # invoice is non-zero — a zero-amount invoice auto-pays and cannot void).
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key=None, seats=40, proration_mode="next_period", actor=a
+    )
+    inv1 = await billing_svc.close_period_and_invoice(db, p1.id)
+    assert inv1 is not None
+    await db.refresh(sub)
+    assert sub.seat_quantity == 40  # folded
+    # Forward window: 40 → 60 → 40 (round-trip back to post_fold value).
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key=None, seats=60, proration_mode="immediate", actor=a
+    )
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key=None, seats=40, proration_mode="immediate", actor=a
+    )
+    await db.refresh(sub)
+    assert sub.seat_quantity == 40
+    # Void P1: the forward window OWNS the seats axis (two real changes with
+    # id > watermark) — the restore must NOT rewind to 30.
+    await billing_svc.void_invoice(db, inv1, reason="dispute", actor=a)
+    await db.refresh(sub)
+    assert sub.seat_quantity == 40, (
+        "restore must skip a forward-owned axis even when its value equals post_fold"
+    )
+    inv2 = await billing_svc.close_period_and_invoice(db, inv1.billing_period_id)
+    assert inv2 is not None
+    await db.refresh(sub)
+    assert sub.seat_quantity == 40, "re-close must leave the tenant's final choice in force"
+
+
+@pytest.mark.asyncio
+async def test_reclose_replays_original_live_seat_count(db):
+    """R135 (medium): the seats line's live-seat count is stamped into
+    close_snapshot at the original close; a re-close after membership churn
+    must bill the SAME seats charge (period membership is a historical
+    fact)."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="community", interval="month", seats=40, provider="manual", actor=a
+    )
+    inv1 = await _force_close(db, sub)
+    assert inv1 is not None
+    seats1 = _plan_lines_total(await _lines(db, inv1), "seats")
+    assert seats1 > 0
+    assert inv1.close_snapshot.get("live_seats") is not None, "live count must be stamped"
+    # Simulate interim churn by corrupting what a re-derivation WOULD see:
+    # (no members were ever created for this tenant, so live=0 both times —
+    # instead prove the replay path by editing the snapshot's stamped count
+    # and asserting the re-close bills from the SNAPSHOT, not a fresh query.)
+    snap = dict(inv1.close_snapshot)
+    snap["live_seats"] = 999  # pretend 999 students were active during P
+    inv1.close_snapshot = snap
+    await db.flush()
+    await billing_svc.void_invoice(db, inv1, reason="dispute", actor=a)
+    inv2 = await billing_svc.close_period_and_invoice(db, inv1.billing_period_id)
+    assert inv2 is not None
+    seats2 = _plan_lines_total(await _lines(db, inv2), "seats")
+    # replayed basis: max(999, 40) - 25 included, vs fresh query max(0,40)-25
+    assert seats2 > seats1, (
+        f"re-close must replay the stamped live count (got {seats2}, original-shape {seats1})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_reclose_does_not_stamp_fresh_watermark(db):
+    """R135 (medium): a re-close of a LEGACY void (no snapshot on the void
+    invoice) must NOT stamp its re-close-time watermark as if it were the
+    original close's — that watermark includes forward-window changes and
+    would poison the NEXT void/re-close cycle's supersede. The re-issued
+    invoice carries basis + fold outcome but NO change_watermark key."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+    )
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="school", seats=None, proration_mode="next_period", actor=a
+    )
+    inv1 = await _force_close(db, sub)
+    assert inv1 is not None
+    # Make inv1 a LEGACY invoice (pre-snapshot era).
+    inv1.close_snapshot = None
+    await db.flush()
+    await billing_svc.void_invoice(db, inv1, reason="legacy dispute", actor=a)
+    inv2 = await billing_svc.close_period_and_invoice(db, inv1.billing_period_id)
+    assert inv2 is not None
+    snap = inv2.close_snapshot or {}
+    assert "change_watermark" not in snap, (
+        "legacy re-close must not stamp a fresh watermark as the original's"
+    )
+    # basis + fold outcome still stamped (usable by later restores)
+    assert "start_version_id" in snap
+    assert "post_fold_version_id" in snap

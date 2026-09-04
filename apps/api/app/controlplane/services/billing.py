@@ -847,6 +847,25 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .limit(1)
         )
     ).scalar_one_or_none()
+    # R135 (medium): re-close of a LEGACY void (void invoice with no snapshot).
+    # The fresh watermark computed above includes forward-window changes made
+    # after the ORIGINAL close — stamping it as if it were the original's
+    # poisons the NEXT void/re-close cycle (the supersede would stop seeing
+    # the tenant's forward paid change as forward-window and re-fold the
+    # deferred change over it). Track legacy-ness; the stamp below omits the
+    # watermark in that case so later cycles keep using legacy heuristics.
+    legacy_reclose = False
+    if reclose_snapshot is None:
+        legacy_reclose = (
+            await db.execute(
+                select(Invoice.id)
+                .where(
+                    Invoice.billing_period_id == period.id,
+                    Invoice.status == "void",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none() is not None
     if reclose_snapshot is not None:
         start_version_id = reclose_snapshot["start_version_id"]
         start_seats = reclose_snapshot["start_seats"]
@@ -954,16 +973,34 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         # below) is per-invoice.
         close_snapshot=(
             {
-                "change_watermark": reclose_snapshot.get("change_watermark"),
+                # dict-unpack preserves KEY ABSENCE (= watermark unknown,
+                # legacy) vs None (= no changes existed at the original
+                # close) — .get() would collapse the two.
+                **{k: reclose_snapshot[k] for k in ("change_watermark",) if k in reclose_snapshot},
                 "start_version_id": start_version_id,
                 "start_seats": start_seats,
             }
             if reclose_snapshot is not None
-            else {
-                "change_watermark": change_watermark,
-                "start_version_id": start_version_id,
-                "start_seats": start_seats,
-            }
+            else (
+                {
+                    # R135 (medium): on a LEGACY re-close the fresh watermark
+                    # is NOT the original close's — it already includes
+                    # forward-window changes, and stamping it would poison the
+                    # next void/re-close cycle's supersede (it would re-fold
+                    # the deferred change over the tenant's forward paid
+                    # change). OMIT the key entirely: None is taken ("no
+                    # changes existed at close"), so key-absence is the
+                    # "watermark unknown — use legacy heuristics" marker.
+                    "start_version_id": start_version_id,
+                    "start_seats": start_seats,
+                }
+                if legacy_reclose
+                else {
+                    "change_watermark": change_watermark,
+                    "start_version_id": start_version_id,
+                    "start_seats": start_seats,
+                }
+            )
         ),
     )
     db.add(invoice)
@@ -1015,23 +1052,35 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
     # b. seats line: max(actual peak, reserved floor) minus included
     from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole, OrgStatus
 
-    live_seats = (
-        await db.execute(
-            select(func.count(func.distinct(OrgMember.user_id)))
-            .select_from(OrgMember)
-            .join(Organization, Organization.id == OrgMember.org_id)
-            .where(
-                Organization.tenant_id == tenant.id,
-                # R68[2]: members of archived (deleted) orgs are not live
-                # seats — without this filter a deleted org's students were
-                # billed every period forever (delete_org now archives member
-                # rows too, but the org filter also covers historic data).
-                Organization.status != OrgStatus.ARCHIVED,
-                OrgMember.status == MemberStatus.ACTIVE,
-                OrgMember.role == OrgRole.STUDENT,
+    # R135 (medium): on a re-close, REPLAY the original close's live-seat
+    # count from the snapshot — membership during the billed period is a
+    # historical fact voiding cannot change. Re-querying current membership
+    # made a void+re-close of the same past period bill a different seats
+    # charge whenever headcount moved in the interim (offboarding after the
+    # period under-billed; growth over-billed for students not present then).
+    if reclose_snapshot is not None and "live_seats" in reclose_snapshot:
+        live_seats = reclose_snapshot["live_seats"]
+    else:
+        live_seats = (
+            await db.execute(
+                select(func.count(func.distinct(OrgMember.user_id)))
+                .select_from(OrgMember)
+                .join(Organization, Organization.id == OrgMember.org_id)
+                .where(
+                    Organization.tenant_id == tenant.id,
+                    # R68[2]: members of archived (deleted) orgs are not live
+                    # seats — without this filter a deleted org's students were
+                    # billed every period forever (delete_org now archives member
+                    # rows too, but the org filter also covers historic data).
+                    Organization.status != OrgStatus.ARCHIVED,
+                    OrgMember.status == MemberStatus.ACTIVE,
+                    OrgMember.role == OrgRole.STUDENT,
+                )
             )
-        )
-    ).scalar_one()
+        ).scalar_one()
+    # Stamp for future re-closes (both fresh closes and re-closes carry it
+    # forward — reassignment keeps the JSONB change tracked).
+    invoice.close_snapshot = {**(invoice.close_snapshot or {}), "live_seats": live_seats}
     # Use the PERIOD-START reserved floor, not the post-change sub.seat_quantity:
     # a mid-period immediate seat increase is billed by the proration line below,
     # so counting the raised floor here too double-charged the delta (R41[2]).
@@ -1471,10 +1520,16 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         # both to_* columns on every row) and only fires on a re-rollover.
         fold_divider: str | None = None
         is_reclose = reclose_snapshot is not None
-        if is_reclose:
+        if is_reclose and "change_watermark" in reclose_snapshot:
             # Empty-string sentinel: no changes existed at the original close,
             # so EVERY immediate change is forward-window ('' < any ULID).
             fold_divider = reclose_snapshot.get("change_watermark") or ""
+        elif is_reclose:
+            # R135 (medium): snapshot exists but the watermark key is ABSENT —
+            # this chain started from a legacy (pre-snapshot) void, so the
+            # original close's watermark is unknowable. fold_divider stays
+            # None → per-change global-id-order legacy supersede below.
+            pass
         else:
             # Legacy re-close (void predates close_snapshot): keep the R133
             # global-id-order supersede — per-change, below.
@@ -1959,7 +2014,62 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
                 # change owns (sub value != post_fold) is NOT reverted —
                 # that would revert the tenant's paid change.
                 snap = invoice.close_snapshot if rolled else None
-                if snap is not None and "post_fold_version_id" in snap:
+                if (
+                    snap is not None
+                    and "post_fold_version_id" in snap
+                    and "change_watermark" in snap
+                ):
+                    # R135 (high): the axis-ownership discriminator must be
+                    # the SAME one the re-close's supersede uses — a
+                    # forward-window immediate real change exists (id >
+                    # watermark) — NOT value equality against post_fold.
+                    # Forward changes that round-trip back to the post_fold
+                    # value (10→20→10) made the value guard fire while the
+                    # re-close's supersede (ID order) suppressed the re-fold,
+                    # stranding the sub on pre_fold — a value neither the
+                    # deferred change nor the tenant's forward changes ever
+                    # selected. Skip the restore iff the forward window owns
+                    # the axis; the re-close then also skips the re-fold, so
+                    # both sides agree by construction. (Watermark key ABSENT
+                    # = legacy chain, unknown divider → value-equality branch
+                    # below instead; None = no changes existed → "" sentinel.)
+                    wm = snap.get("change_watermark") or ""
+                    fwd_plan = (
+                        await db.execute(
+                            select(SubscriptionChange.id)
+                            .where(
+                                SubscriptionChange.subscription_id == sub.id,
+                                SubscriptionChange.proration_mode == "immediate",
+                                SubscriptionChange.to_plan_version_id.isnot(None),
+                                SubscriptionChange.to_plan_version_id
+                                != SubscriptionChange.from_plan_version_id,
+                                SubscriptionChange.id > wm,
+                            )
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if snap["pre_fold_version_id"] is not None and fwd_plan is None:
+                        sub.plan_version_id = snap["pre_fold_version_id"]
+                    fwd_seats = (
+                        await db.execute(
+                            select(SubscriptionChange.id)
+                            .where(
+                                SubscriptionChange.subscription_id == sub.id,
+                                SubscriptionChange.proration_mode == "immediate",
+                                SubscriptionChange.to_seats.isnot(None),
+                                SubscriptionChange.to_seats != SubscriptionChange.from_seats,
+                                SubscriptionChange.id > wm,
+                            )
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if snap["pre_fold_seats"] is not None and fwd_seats is None:
+                        sub.seat_quantity = snap["pre_fold_seats"]
+                elif snap is not None and "post_fold_version_id" in snap:
+                    # Legacy-chain snapshot (watermark unknowable): the R134
+                    # value-equality guard is the best available heuristic —
+                    # restore an axis only while the sub still carries the
+                    # fold's post_fold value.
                     if (
                         snap["pre_fold_version_id"] is not None
                         and sub.plan_version_id == snap["post_fold_version_id"]

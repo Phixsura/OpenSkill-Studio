@@ -453,6 +453,25 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   path without one — a retried POST double-granted); create_plan /
   create_draft_version read-then-insert races SAVEPOINT/lock-guarded to
   409s. All six guard-proven with regression tests.
+- **R135 (in progress)**: 10-dimension hunt over the R134-follow-up snapshot
+  machinery itself. Early confirmations, all fixed + guard-proven: (high) the
+  void restore's VALUE-equality axis guard disagreed with the re-close's
+  ID-order supersede whenever forward changes round-tripped back to the
+  post_fold value (10→20→10) — restore fired, re-fold suppressed, sub
+  stranded on pre_fold forever; both sides now use the same forward-window
+  ID-order discriminator. (med) a legacy re-close stamped its OWN fresh
+  watermark as if it were the original close's, poisoning the next
+  void/re-close cycle — legacy chains now omit the key (absence = "unknown,
+  use legacy heuristics"; None stays "no changes existed"). (med) the seats
+  line re-derived live_seats at re-close time — interim membership churn
+  changed a historical period's seats charge; the count is now stamped in
+  close_snapshot and replayed. (med) update_draft TOCTOU let a PATCH racing
+  an activation mutate an ACTIVE version — status re-checked under the
+  version-row lock. (low) duplicate (currency,interval) pairs in one PATCH
+  body 500'd on uq_cp_plan_price → clean 422. Plus a hardening followup on
+  the R134 [F14] fix: a promo-grant retry whose key was already consumed by
+  adjust/top-up (or different params) now 409s IDEMPOTENCY_CONFLICT instead
+  of returning the other row as if it were the grant.
 
 ## 4. Convergence
 
