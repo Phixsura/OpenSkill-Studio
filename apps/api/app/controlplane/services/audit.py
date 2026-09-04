@@ -58,6 +58,7 @@ AUDIT_ACTIONS = frozenset(
         # usage
         "usage.adjusted",
         "rated_usage.voided",
+        "rated_usage.unvoided",
         # credits
         "credit.topped_up",
         "credit.promotional_granted",

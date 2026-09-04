@@ -487,10 +487,24 @@ async def change_plan(
     # values — or a second change in the same period previews a different
     # seat delta than the invoice's segment walk charges.
     start_seats, start_included, start_seat_price = await _period_start_seat_basis(db, sub)
+    # R131: ONE clock read — the preview's `at` and the change row's
+    # effective_at were separate _now() calls; crossing a UTC day boundary
+    # between them made the approved net differ from the close's (which walks
+    # segments by effective_at) by a full day's proration.
+    change_at = _now()
+    # R131 ([5]): in the post-period-end gap (period elapsed, hourly close not
+    # yet run) an immediate change is billed by R81/R82[1] semantics in the
+    # NEXT window at near-full value — but the preview computed against the
+    # ELAPSED window (days_left clamps to 0 → net 0 shown, full delta billed).
+    # Preview against the window the change will actually be prorated in.
+    pv_start, pv_end = sub.current_period_start, sub.current_period_end
+    if change_at >= pv_end:
+        pv_start = pv_end
+        pv_end = _add_interval(pv_start, sub.interval)
     preview = proration_preview(
-        period_start=sub.current_period_start,
-        period_end=sub.current_period_end,
-        at=_now(),
+        period_start=pv_start,
+        period_end=pv_end,
+        at=change_at,
         old_amount_minor=old_price.amount_minor if old_price else 0,
         new_amount_minor=new_price.amount_minor if new_price else 0,
         old_seats=start_seats,
@@ -511,7 +525,7 @@ async def change_plan(
             to_plan_version_id=new_version.id,
             from_seats=sub.seat_quantity,
             to_seats=new_seats,
-            effective_at=_now() if mode == "immediate" else sub.current_period_end,
+            effective_at=change_at if mode == "immediate" else sub.current_period_end,
             proration_mode=mode,
             created_by=actor.user_id,
         )
@@ -816,6 +830,23 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .where(BillingPeriod.id == period_id)
             .values(status="open", closed_at=None)
         )
+        # R131 ([10] follow-on to R130's void re-close): a CANCELLED sub is
+        # invisible to scan_due_periods, so the hourly cron never re-enqueues
+        # this period — the single void-enqueued close was the only shot, and
+        # bouncing here stranded the final invoice forever (revenue silently
+        # lost). Re-enqueue with a delay so the retry loop survives until ops
+        # add the missing FX rate (backoff via available_at; the message
+        # chain is bounded by ops fixing the gap, mirroring the cron loop
+        # live subs get).
+        if sub.status == "cancelled":
+            from datetime import timedelta as _td
+
+            enqueue(
+                db,
+                "period.close_due",
+                {"billing_period_id": period_id},
+                available_at=_now() + _td(minutes=30),
+            )
         log.warning("cp_invoice_blocked_ratings", tenant_id=tenant.id, blocked=blocked)
         return None
 
@@ -1238,7 +1269,11 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                     RatedUsage.tenant_id == tenant.id,
                     RatedUsage.status == "rated",
                     RatedUsage.billable_currency == sub.currency,
-                    UsageEvent.occurred_at < period.period_end,
+                    # R131 ([9]): NO occurred_at bound — this is the sub's
+                    # FINAL close, so ANY un-invoiced rated row is stranded,
+                    # including usage from a later window a void-rewind
+                    # deleted (occurred_at >= this period's end); the old
+                    # < period_end filter hid exactly that loss.
                     # R123[L11]: zero-billable rows (no_rate fallback, free
                     # types) are never invoiced by design — counting them made
                     # the warning fire on nearly every final close (noise).
@@ -1603,8 +1638,24 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
         # terminal branch would cancel one period EARLY — silently discarding
         # the later window's plan fee, usage and remaining paid access. Void
         # plainly in that shape; corrections go through credit notes.
+        # R131 ([0]): FOR UPDATE — the guard read raced a concurrent
+        # cancel_subscription (its guarded UPDATE has no prior lock read), so
+        # a cancel landing mid-void slipped past cancel_in_later_window and
+        # the rewind deleted the consumed later period anyway. The lock
+        # serializes the two; combined with the immediate re-close enqueue
+        # the remaining interleaving window is the worker pickup (~seconds),
+        # and the widened final-close residual warning surfaces any loss.
         rewind_sub = (
-            await db.get(Subscription, period.subscription_id) if period is not None else None
+            (
+                await db.execute(
+                    select(Subscription)
+                    .where(Subscription.id == period.subscription_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if period is not None
+            else None
         )
         cancel_in_later_window = (
             rewind_sub is not None
@@ -1675,8 +1726,13 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
                 # forward (the immediate-cancel path has always used it). The
                 # only reason R129 resurrected was that scan_due_periods skips
                 # cancelled subs — enqueue the re-close directly instead.
-                if sub.status == "cancelled":
-                    enqueue(db, "period.close_due", {"billing_period_id": period.id})
+                # R131 ([9]): enqueue for EVERY rewind, not just cancelled —
+                # the hourly-cron wait left a ≤1h window where a tenant
+                # cancel-at-period-end landing after the void turned the
+                # re-close terminal one period early (silently discarding the
+                # rewound-forward window's billables). An immediate re-close
+                # shrinks that interleaving window to seconds.
+                enqueue(db, "period.close_due", {"billing_period_id": period.id})
                 await invalidate_cache(sub.tenant_id)
     await record_audit(
         db,
@@ -2213,8 +2269,15 @@ async def handle_subscription_push_provider(db: AsyncSession, payload: dict) -> 
     except Exception as exc:
         name = type(exc).__name__
         msg = str(exc).lower()
-        if name == "InvalidRequestError" and (
-            "no such subscription" in msg or "canceled" in msg or "cancelled" in msg
+        # R131 ([0] rework of R130[36]): only swallow the terminal error when
+        # the PLATFORM row is also terminal — for a LIVE platform sub, a dead
+        # provider sub is real divergence (platform keeps invoicing with no
+        # collection path) and must dead-letter loudly, not be marked done.
+        await db.refresh(sub)
+        if (
+            name == "InvalidRequestError"
+            and ("no such subscription" in msg or "canceled" in msg or "cancelled" in msg)
+            and sub.status in ("cancelled", "cancel_at_period_end")
         ):
             log.info(
                 "cp_push_provider_already_terminal",

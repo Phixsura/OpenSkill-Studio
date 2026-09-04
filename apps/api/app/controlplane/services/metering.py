@@ -184,6 +184,17 @@ async def ingest_adjustment(
         metadata={"reason": reason},
     )
     if event is None:
+        # R131 ([10]): mirror manual ingest's duplicate semantics — a keyed
+        # RETRY returns the original adjustment (idempotent success), instead
+        # of a 409 that invites the client to retry with a FRESH key and
+        # double-book the correction.
+        existing = (
+            await db.execute(
+                select(UsageEvent).where(UsageEvent.idempotency_key == idempotency_key)
+            )
+        ).scalar_one_or_none()
+        if existing is not None and existing.adjustment_of_id == original.id:
+            return existing
         raise AppError("VALIDATION_ERROR", "Duplicate adjustment idempotency key", 409)
     # R130[34]: an adjustment for a tenant with NO open billing period (sub
     # terminally closed / never subscribed) will rate but NEVER be swept into

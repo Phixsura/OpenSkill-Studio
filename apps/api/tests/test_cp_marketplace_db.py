@@ -1483,3 +1483,151 @@ async def test_grant_install_then_listing_purchase_no_duplicate_copy(db):
         )
     ).scalar_one()
     assert live == 1
+
+
+# ── R131 regressions ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_own_tenant_bypass_rejects_purchased_copies(db):
+    """R131 CRITICAL: the own-tenant bypass must qualify only AUTHORED paths —
+    an installed COPY of another tenant's paid content (origin markers set)
+    must not be re-fanned to sibling orgs via the bypass (license laundering,
+    survives refund revocation)."""
+    from app.models.learning_path import LearningPath
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    lp_svc = LearningPathService(db)
+    src = await lp_svc.create_path(seller_org.id, seller_user.id, name="Paid Gold")
+    src.status = ContentStatus.PUBLISHED
+    await db.flush()
+    # Buyer legitimately licensed + installed a copy (org-scoped grant).
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=src.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    copy = await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=src.id)
+    copy.status = ContentStatus.PUBLISHED  # buyer publishes the copy locally
+    await db.flush()
+
+    # Buyer's SIBLING org (same tenant, no grant) tries to install the COPY
+    # by its product_id — the bypass must NOT treat the copy as "own".
+    sibling_user = await _mk_user(db)
+    svc = OrgService(db)
+    sibling = await svc.create(
+        name=f"LSib {ULID()}",
+        slug=f"lsib-{str(ULID()).lower()}",
+        description=None,
+        created_by=sibling_user.id,
+    )
+    sibling.tenant_id = buyer_org.tenant_id
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await lp_svc.install_from_listing(sibling.id, None, sibling_user.id, product_id=copy.id)
+    assert exc.value.code == "LISTING_NOT_FOUND"
+    # And no second copy exists anywhere in the tenant.
+    copies = (
+        await db.execute(
+            select(func.count(LearningPath.id)).where(
+                LearningPath.org_id == sibling.id,
+            )
+        )
+    ).scalar_one()
+    assert copies == 0
+
+
+@pytest.mark.asyncio
+async def test_listingless_seat_limit_enforced(db):
+    """R131 ([4]): seat_limited occupancy binds on the listing-less path."""
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    lp_svc = LearningPathService(db)
+    path = await lp_svc.create_path(seller_org.id, seller_user.id, name="Seat Path")
+    path.status = ContentStatus.PUBLISHED
+    await db.flush()
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="seat_limited",
+        org_id=buyer_org.id,
+        seat_limit=1,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    # Two active students → occupancy 2 > limit 1.
+    for _ in range(2):
+        student = await _mk_user(db)
+        db.add(
+            OrgMember(
+                org_id=buyer_org.id,
+                user_id=student.id,
+                role=OrgRole.STUDENT,
+                status=MemberStatus.ACTIVE,
+            )
+        )
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=path.id)
+    assert exc.value.code == "SEAT_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_tenant_scope_purchase_not_suppressed_by_narrower_grant(db):
+    """R131 ([3]): a tenant-scope purchase must mint even when an ORG-scoped
+    grant covers the buyer org — the tenant paid for the WIDER scope."""
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user, license_scope="tenant")
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+
+    # Pending checkout purchase created BEFORE the narrow grant lands.
+    p = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="checkout",
+        idempotency_key=f"narrow-{ULID()}",
+    )
+    await market_svc.manual_grant(
+        db,
+        product_type=listing.product_type,
+        product_id=listing.product_id,
+        tenant_id=buyer_tenant.id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    await market_svc.mark_purchase_paid(
+        db, purchase_id=p.id, payment_ref="narrow", actor=_actor(buyer_user)
+    )
+    minted = (
+        await db.execute(select(LicenseGrant).where(LicenseGrant.purchase_id == p.id))
+    ).scalar_one_or_none()
+    assert minted is not None and minted.scope == "tenant", (
+        "narrower org grant must not suppress the paid tenant-wide mint"
+    )

@@ -144,6 +144,11 @@ async def ingest_usage(
     # window. close_period bills every rated row with occurred_at before its
     # period_end, so pre-subscription usage lands on the first invoice fine —
     # the boundary is the last closed period's end, not the open start.
+    # Accepted residual (R131[9]): an orphaned never-invoiced OPEN window that
+    # predates a NEWER closed period (blocked-reopen under a cancelled sub,
+    # then a re-subscribe whose periods invoice) still sits below closed_end —
+    # backfill into the orphan 422s. Fail-safe (refuses bookable usage, never
+    # double-bills); the orphan itself is the anomaly ops must resolve.
     closed_end = (
         await db.execute(
             select(BillingPeriod.period_end)

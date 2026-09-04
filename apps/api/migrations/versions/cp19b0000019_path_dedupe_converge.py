@@ -3,19 +3,29 @@
 cp17's duplicate-copy backfill was rewritten in place by the R129 commit
 (NULL-provenance/keep-newest → ARCHIVE/keep-oldest). Alembic records cp17 as
 applied, so DBs migrated in the window between the two commits ran the OLD
-backfill and never see the fix. This revision re-runs the repair idempotently
-and heals the collateral the raw ARCHIVE left behind:
+backfill and never see the fix. This revision re-runs the dedupe idempotently
+and drops assignments stranded on archived copies.
 
-1. Re-archive live duplicate copies per (org, origin listing) — preferring
-   the copy that carries cohort assignments (R130[21]: keep-OLDEST archived
-   the copy admins had actually assigned), then the oldest.
-2. Re-point cohort assignments stranded on archived duplicates to the live
-   copy of the same (org, origin) — the service's delete_path always removes
-   assignments when archiving, so any assignment on an ARCHIVED path is an
-   orphan no API can reach (list filters it; unassign 404s on get_path).
-3. Provenance NULLed by the old backfill is unrecoverable (the listing link
-   is gone); such rows are indistinguishable from local authoring. Known
-   residual for window-migrated DBs only — the resale gate misses them.
+R131 audit revisions:
+- Step 1 is provably a no-op on any post-cp17 DB (the partial unique index
+  admits at most one live copy per (org, origin listing)); it stays as a
+  belt-and-suspenders for drifted DBs. The n_assign preference keeps the
+  cohort-ASSIGNED copy when duplicates DO exist (R130[21]: keep-oldest
+  archived the copy admins had actually assigned).
+- The earlier draft also RE-POINTED stranded assignments to the live copy.
+  Dropped: the heuristic could not distinguish cp17-backfill collateral from
+  a deliberate PUT-archive retirement, silently resurrecting retired content
+  onto a re-installed copy (and could target a DRAFT copy, bypassing the
+  published-only assignment gate). Window-DB admins re-assign manually; the
+  deletion below logs nothing but is reviewable via the audit of this
+  migration run in ops notes.
+- Assignments on archived paths are NOT fully unreachable (the earlier
+  docstring claim was wrong): get_effective_skills reads them without a
+  status filter. Deleting them here converges to delete_path semantics —
+  update_path's archive branch now applies the same cleanup going forward.
+- Known residual: provenance NULLed by the old backfill is unrecoverable
+  (indistinguishable from local authoring); the resale gate misses those
+  rows on window-migrated DBs only.
 
 Revision ID: cp19b0000019
 Revises: cp18a0000018
@@ -53,27 +63,10 @@ def upgrade() -> None:
             """
         )
     )
-    # 2a. Re-point stranded assignments to the surviving live copy.
-    op.execute(
-        sa.text(
-            """
-            INSERT INTO cohort_learning_path_assignments
-                (cohort_id, path_id, assigned_at, assigned_by)
-            SELECT a.cohort_id, live.id, a.assigned_at, a.assigned_by
-            FROM cohort_learning_path_assignments a
-            JOIN learning_paths dead
-              ON dead.id = a.path_id
-             AND dead.status = 'ARCHIVED'
-             AND dead.origin_listing_id IS NOT NULL
-            JOIN learning_paths live
-              ON live.org_id = dead.org_id
-             AND live.origin_listing_id = dead.origin_listing_id
-             AND live.status != 'ARCHIVED'
-            ON CONFLICT DO NOTHING
-            """
-        )
-    )
-    # 2b. Drop the orphans (service semantics: archiving removes assignments).
+    # 2. Drop assignments stranded on ARCHIVED origin-carrying copies
+    # (delete_path semantics: archiving removes assignments; the raw cp17
+    # UPDATE skipped that cleanup and the rows kept feeding
+    # get_effective_skills).
     op.execute(
         sa.text(
             """

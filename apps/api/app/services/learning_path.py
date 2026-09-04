@@ -74,6 +74,23 @@ class LearningPathService:
         for k, v in fields.items():
             if v is not None and hasattr(path, k):
                 setattr(path, k, v)
+        # R131 (cp19 audit): archiving via PUT status='archived' must apply the
+        # SAME cleanup as delete_path — leaving cohort assignments behind
+        # created permanently-orphaned rows (list filters them, unassign 404s
+        # on get_path) that still fed get_effective_skills, and that the cp19
+        # repair could then mis-classify as backfill collateral and re-point
+        # to a re-installed copy nobody assigned. One archive semantic.
+        if path.status == ContentStatus.ARCHIVED:
+            from sqlalchemy import delete as sa_delete
+
+            await self.db.execute(
+                sa_delete(LearningPathItem).where(LearningPathItem.path_id == path_id)
+            )
+            await self.db.execute(
+                sa_delete(CohortLearningPathAssignment).where(
+                    CohortLearningPathAssignment.path_id == path_id
+                )
+            )
         await self.db.flush()
         await self.db.refresh(path)
         return path
@@ -280,7 +297,18 @@ class LearningPathService:
                 # here because no listing exists).
                 source = await self.db.get(LearningPath, product_id)
                 own = False
-                if source is not None:
+                if (
+                    source is not None
+                    # R131 CRITICAL: "own" means AUTHORED by this tenant — an
+                    # installed COPY of another tenant's paid content also
+                    # lives in an org of this tenant, and treating it as own
+                    # let the buyer fan the copy out to unlicensed sibling
+                    # orgs (and past refund revocation), defeating the
+                    # R113[H0] redistribution gate. Copies carry provenance
+                    # markers; only marker-free paths qualify.
+                    and source.origin_listing_id is None
+                    and source.origin_source_path_id is None
+                ):
                     src_org = await self.db.get(Organization, source.org_id)
                     own = src_org is not None and getattr(src_org, "tenant_id", None) == tenant_id
                 if not own:
@@ -291,6 +319,12 @@ class LearningPathService:
                         # uniform 404 — never reveal the path exists to a
                         # non-licensee
                         raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+                    # R130[5]: seat_limited caps bind on this path too —
+                    # check_install_license (which enforces them) is
+                    # unreachable for listing-less products.
+                    from app.controlplane.services.marketplace import enforce_seat_limit
+
+                    await enforce_seat_limit(self.db, grant, org_id)
         source_product_id = listing.product_id if listing is not None else product_id
         assert source_product_id is not None  # by the request model's one-of rule
 

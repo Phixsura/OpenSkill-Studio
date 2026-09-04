@@ -640,6 +640,24 @@ async def void_rated_usage(
     return DataResponse(data=_platform_rated_response(row))
 
 
+@router.post("/platform/rated-usage/{rated_id}/unvoid", dependencies=[Depends(rate_limit(20, 60))])
+async def unvoid_rated_usage(
+    rated_id: str,
+    body: VoidRatedRequest,
+    request: Request,
+    user: User = Depends(require_platform_role(*_BILLING_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """R131 ([8]): guarded voided→rated restore — a mistaken void was
+    permanently uncorrectable (the adjust gate blocks voided originals and no
+    re-rate path exists)."""
+    row = await rating_svc.unvoid_rated(
+        db, rated_id, reason=body.reason, actor=make_actor(request, user)
+    )
+    await db.commit()
+    return DataResponse(data=_platform_rated_response(row))
+
+
 @router.post("/platform/rating/run", dependencies=[Depends(rate_limit(10, 60))])
 async def trigger_rating(
     tenant_id: str | None = Query(default=None),

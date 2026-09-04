@@ -1306,3 +1306,49 @@ async def test_certificate_not_issued_at_rounded_100_pct(c):
     data2 = r2.json()["data"]
     assert data2["completed"] == 200
     assert data2.get("certificate_number"), "certificate missing at true 100%"
+
+
+@pytest.mark.asyncio
+async def test_put_archive_cleans_assignments_like_delete(c):
+    """R131 (cp19 audit): PUT status='archived' must apply delete_path's
+    cleanup — leaving cohort assignments behind orphaned rows no API could
+    remove (unassign 404s on the archived path) while get_effective_skills
+    kept reading them."""
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.learning_path import CohortLearningPathAssignment
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = (await c.post(f"/api/v1/orgs/{oid}/paths", json={"name": "ArchClean"}, headers=h)).json()[
+        "data"
+    ]["id"]
+    # Publish, create a cohort, assign the path.
+    r = await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"status": "published"}, headers=h)
+    assert r.status_code == 200
+    cid = (
+        await c.post(
+            f"/api/v1/orgs/{oid}/cohorts",
+            json={"name": f"CC-{uuid.uuid4().hex[:6]}"},
+            headers=h,
+        )
+    ).json()["data"]["id"]
+    r = await c.post(f"/api/v1/orgs/{oid}/cohorts/{cid}/paths", json={"path_id": pid}, headers=h)
+    assert r.status_code in (200, 201), r.text
+    # Archive via PUT (not DELETE).
+    r = await c.put(f"/api/v1/orgs/{oid}/paths/{pid}", json={"status": "archived"}, headers=h)
+    assert r.status_code == 200
+    async with AsyncSessionLocal() as db:
+        left = (
+            (
+                await db.execute(
+                    select(CohortLearningPathAssignment).where(
+                        CohortLearningPathAssignment.path_id == pid
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert left == [], "PUT-archive must remove cohort assignments (delete_path semantics)"

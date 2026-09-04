@@ -34,8 +34,14 @@ class OutboxMessage(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-def enqueue(db, topic: str, payload: dict) -> OutboxMessage:
-    """Insert an outbox row in the caller's transaction (no commit here)."""
+def enqueue(db, topic: str, payload: dict, available_at=None) -> OutboxMessage:
+    """Insert an outbox row in the caller's transaction (no commit here).
+
+    R131: optional available_at defers the first poll pickup — used by the
+    cancelled-sub blocked-ratings retry loop, which has no cron to re-drive it.
+    """
     msg = OutboxMessage(topic=topic, payload=payload)
+    if available_at is not None:
+        msg.available_at = available_at
     db.add(msg)
     return msg

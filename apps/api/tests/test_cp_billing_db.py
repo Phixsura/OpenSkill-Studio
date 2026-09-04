@@ -2455,3 +2455,96 @@ def test_preview_seat_days_match_close_segment_days():
     )
     # close: seg_days = floor(14.5) = 14 → 8×500×14/30 = 1867
     assert p["seat_proration_minor"] == 1867
+
+
+@pytest.mark.asyncio
+async def test_void_rewind_enqueues_immediate_reclose(db):
+    """R131 ([0]): every rewind enqueues the re-close directly — waiting for
+    the hourly cron left a ≤1h window where a tenant cancel-at-period-end
+    turned the re-close terminal one period early."""
+    from app.controlplane.models.outbox import OutboxMessage
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    inv = await _force_close(db, sub)  # rollover close (sub stays active)
+    assert inv is not None
+    period_id = inv.billing_period_id
+    await billing_svc.void_invoice(db, inv, reason="dispute", actor=a)
+    msgs = (
+        (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == "period.close_due")))
+        .scalars()
+        .all()
+    )
+    assert any(m.payload.get("billing_period_id") == period_id for m in msgs), (
+        "void rewind of an ACTIVE sub must enqueue the re-close immediately"
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_sub_blocked_reclose_reenqueues(db):
+    """R131 ([1]): a cancelled sub's re-close bouncing on blocked ratings must
+    re-enqueue itself (delayed) — the single void-enqueued message was the
+    only shot and 'done' stranded the final invoice forever."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False, actor=a)
+    await db.refresh(sub)
+    assert sub.status == "cancelled"
+    period = (
+        await db.execute(select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
+    ).scalar_one()
+    # Plant a BLOCKED rated row for the tenant → the close must abort+reopen.
+    ev = UsageEvent(
+        tenant_id=tenant.id,
+        org_id="01JBLORGY00000000000000000",
+        usage_type="image_generation",
+        quantity=1,
+        unit="images",
+        occurred_at=datetime.now(UTC),
+        source="manual",
+    )
+    db.add(ev)
+    await db.flush()
+    db.add(
+        RatedUsage(
+            usage_event_id=ev.id,
+            tenant_id=tenant.id,
+            org_id=ev.org_id,
+            usage_type=ev.usage_type,
+            quantity=ev.quantity,
+            cost_rate_snapshot={},
+            internal_cost_minor=0,
+            internal_cost_currency="USD",
+            sell_rate_snapshot={"fx_gaps": ["ZZZ->USD"]},
+            billable_amount_minor=0,
+            billable_currency="USD",
+            status="blocked",
+        )
+    )
+    await db.flush()
+    inv = await billing_svc.close_period_and_invoice(db, period.id)
+    assert inv is None, "blocked ratings must abort the close"
+    await db.refresh(period)
+    assert period.status == "open"
+    retry = (
+        (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == "period.close_due")))
+        .scalars()
+        .all()
+    )
+    mine = [m for m in retry if m.payload.get("billing_period_id") == period.id]
+    assert mine, "cancelled-sub blocked abort must re-enqueue its own retry"
+    assert any(m.available_at > datetime.now(UTC) for m in mine), (
+        "the retry must be DELAYED (backoff), not immediate"
+    )

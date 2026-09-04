@@ -516,6 +516,17 @@ async def mark_purchase_paid(
         purchase.buyer_tenant_id,
         purchase.buyer_org_id,
     )
+    # R131 ([F9]): the existing grant must cover the PURCHASED scope, not just
+    # the buyer org — an org-scoped grant "covers" per _find_covering_grant,
+    # but the tenant PAID for a tenant-wide license; skipping the mint would
+    # take the money and deliver a strictly narrower entitlement. Only a
+    # tenant-wide grant covers a tenant-scope purchase.
+    if (
+        existing_grant is not None
+        and listing.license_scope == "tenant"
+        and existing_grant.scope != "tenant"
+    ):
+        existing_grant = None
     if existing_grant is None:
         grant = LicenseGrant(
             listing_id=listing.id,
@@ -697,6 +708,32 @@ async def _find_covering_grant(
     return None
 
 
+async def enforce_seat_limit(db: AsyncSession, grant: LicenseGrant, org_id: str) -> None:
+    """R130[5]/R131: seat_limited occupancy gate — shared by the install gate
+    AND the listing-less learning-path path (which bypasses
+    check_install_license entirely, so the cap was silently unenforced there)."""
+    if grant.scope == "seat_limited" and grant.seat_limit:
+        from sqlalchemy import func as _f
+
+        from app.models.organization import MemberStatus, OrgMember, OrgRole
+
+        occupancy = (
+            await db.execute(
+                select(_f.count(_f.distinct(OrgMember.user_id))).where(
+                    OrgMember.org_id == org_id,
+                    OrgMember.status == MemberStatus.ACTIVE,
+                    OrgMember.role == OrgRole.STUDENT,
+                )
+            )
+        ).scalar_one()
+        if occupancy > grant.seat_limit:
+            raise AppError(
+                "SEAT_LIMIT_EXCEEDED",
+                f"License covers {grant.seat_limit} seats; organization has {occupancy}",
+                403,
+            )
+
+
 async def check_install_license(
     db: AsyncSession,
     product_type: str,
@@ -774,26 +811,7 @@ async def check_install_license(
             "A license is required to install this content",
             403,
         )
-    if grant.scope == "seat_limited" and grant.seat_limit:
-        from sqlalchemy import func as _f
-
-        from app.models.organization import MemberStatus, OrgMember, OrgRole
-
-        occupancy = (
-            await db.execute(
-                select(_f.count(_f.distinct(OrgMember.user_id))).where(
-                    OrgMember.org_id == org.id,
-                    OrgMember.status == MemberStatus.ACTIVE,
-                    OrgMember.role == OrgRole.STUDENT,
-                )
-            )
-        ).scalar_one()
-        if occupancy > grant.seat_limit:
-            raise AppError(
-                "SEAT_LIMIT_EXCEEDED",
-                f"License covers {grant.seat_limit} seats; organization has {occupancy}",
-                403,
-            )
+    await enforce_seat_limit(db, grant, org.id)
     # R44[18]: major_locked applies to installs too, not just upgrades.
     if (
         target_version is not None

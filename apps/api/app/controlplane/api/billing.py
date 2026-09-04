@@ -326,10 +326,19 @@ async def change_preview(
     start_seats, start_included, start_seat_price = await billing_svc._period_start_seat_basis(
         db, sub
     )
+    # R131 ([5]): in the post-period-end gap, preview against the NEXT window
+    # (where R81/R82[1] semantics actually prorate the change), not the
+    # elapsed one whose days_left clamps to 0 (net 0 shown, ~full delta
+    # billed).
+    _at = billing_svc._now()
+    pv_start, pv_end = sub.current_period_start, sub.current_period_end
+    if _at >= pv_end:
+        pv_start = pv_end
+        pv_end = billing_svc._add_interval(pv_start, sub.interval)
     preview = billing_svc.proration_preview(
-        period_start=sub.current_period_start,
-        period_end=sub.current_period_end,
-        at=billing_svc._now(),
+        period_start=pv_start,
+        period_end=pv_end,
+        at=_at,
         old_amount_minor=old_price.amount_minor if old_price else 0,
         new_amount_minor=new_price.amount_minor if new_price else 0,
         old_seats=start_seats,

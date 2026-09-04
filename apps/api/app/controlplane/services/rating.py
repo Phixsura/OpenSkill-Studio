@@ -773,6 +773,27 @@ async def void_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -> 
     row = await db.get(RatedUsage, rated_id)
     if row is None:
         raise AppError("RATING_NOT_FOUND", "Rated usage not found", 404)
+    # R131 ([F4]): the reverse of the R130[37] adjust-gate — voiding an
+    # original that already has a live ADJUSTMENT event referencing it
+    # double-corrects too (the negative adjustment stays billable while the
+    # original's charge is struck). Force ops to pick one correction path in
+    # either order.
+    from app.controlplane.models.usage import UsageEvent as UsageEventModel
+
+    adjusted = (
+        await db.execute(
+            select(UsageEventModel.id)
+            .where(UsageEventModel.adjustment_of_id == row.usage_event_id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if adjusted is not None:
+        raise AppError(
+            "RATED_USAGE_INVOICED",
+            "Event already has an adjustment — voiding the original too would "
+            "double-correct; void or adjust, not both",
+            409,
+        )
     # R73[6]: a guarded transition, not a read-then-blind-setattr. The old code
     # raced close_period_and_invoice: T1 read status='rated', T2 invoiced the
     # row (guarded rated→invoiced) and committed, T1's unguarded UPDATE then
@@ -795,6 +816,46 @@ async def void_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -> 
         db,
         actor=actor,
         action="rated_usage.voided",
+        target_type="rated_usage",
+        target_id=row.id,
+        tenant_id=row.tenant_id,
+        reason=reason,
+    )
+    await db.flush()
+    await db.refresh(row)
+    return row
+
+
+async def unvoid_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -> RatedUsage:
+    """R131 ([8]): voided was TERMINAL — a mistaken void was permanently
+    uncorrectable through the metering pipeline (the R130[37] adjust gate
+    blocks adjustments on voided originals, rate_pending skips non-blocked
+    rows, and the unique index forbids a second rating). Guarded voided→rated
+    restore: the row re-enters the next close's billable sweep with its
+    original snapshots intact."""
+    from sqlalchemy import update as _update
+
+    from app.controlplane.services.audit import record_audit
+
+    row = await db.get(RatedUsage, rated_id)
+    if row is None:
+        raise AppError("RATING_NOT_FOUND", "Rated usage not found", 404)
+    result = await db.execute(
+        _update(RatedUsage)
+        .where(RatedUsage.id == rated_id, RatedUsage.status == "voided")
+        .values(status="rated", void_reason=None)
+    )
+    if not result.rowcount:
+        await db.refresh(row)
+        raise AppError(
+            "RATED_USAGE_INVOICED",
+            f"Only a voided rating can be restored (status '{row.status}')",
+            409,
+        )
+    await record_audit(
+        db,
+        actor=actor,
+        action="rated_usage.unvoided",
         target_type="rated_usage",
         target_id=row.id,
         tenant_id=row.tenant_id,
