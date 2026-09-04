@@ -109,8 +109,14 @@ const drainOutbox = () =>
   pyHelper(`
 import asyncio
 async def go():
+    from sqlalchemy import text
     from app.controlplane.worker import process_outbox_once
     from app.core.database import AsyncSessionLocal, engine
+    # R130: purge stale test.* rows (committed by test_cp_outbox_db) — they
+    # fill the poll batch as handled=0 and the early-break strands real work.
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("DELETE FROM cp_outbox WHERE topic LIKE 'test.%'"))
+        await db.commit()
     total = 0
     for _ in range(10):
         async with AsyncSessionLocal() as db:

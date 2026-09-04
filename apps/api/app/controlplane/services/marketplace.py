@@ -501,17 +501,21 @@ async def mark_purchase_paid(
     # is recorded (paid) so ops can refund the redundant charge; the license
     # already exists.
     scope_org = purchase.buyer_org_id if listing.license_scope != "tenant" else None
-    existing_grant = (
-        await db.execute(
-            select(LicenseGrant.id).where(
-                LicenseGrant.product_type == listing.product_type,
-                LicenseGrant.product_id == listing.product_id,
-                LicenseGrant.tenant_id == purchase.buyer_tenant_id,
-                LicenseGrant.org_id == scope_org,
-                LicenseGrant.status == "active",
-            )
-        )
-    ).scalar_one_or_none()
+    # R130 (rework of R129[H0]): use the canonical covering-grant helper —
+    # the ad-hoc exact-shape query (a) crashed with MultipleResultsFound on
+    # duplicate active grants (real: pre-H0 mints, double manual grants),
+    # (b) ignored expires_at, so a date-expired grant suppressed the mint for
+    # a genuinely PAID renewal (money taken, no license), and (c) missed a
+    # covering tenant-wide grant for an org-scoped listing (the original H0
+    # double-mint surviving for scope-superset shapes). _find_covering_grant
+    # applies expiry + scope semantics; a covered buyer = true duplicate.
+    existing_grant = await _find_covering_grant(
+        db,
+        listing.product_type,
+        listing.product_id,
+        purchase.buyer_tenant_id,
+        purchase.buyer_org_id,
+    )
     if existing_grant is None:
         grant = LicenseGrant(
             listing_id=listing.id,
@@ -531,22 +535,27 @@ async def mark_purchase_paid(
         log.warning(
             "cp_purchase_paid_duplicate_license",
             purchase_id=purchase.id,
-            existing_grant_id=existing_grant,
+            existing_grant_id=existing_grant.id,
             detail="paid purchase for an already-licensed product — refund candidate",
         )
-    from app.controlplane.services.metering import emit_usage
+    # R130: only meter content_license when a grant was actually DELIVERED —
+    # the H0 skip branch still emitted the event, so a tenant whose price
+    # policy rates content_license was billed a usage line for a license that
+    # never existed (and refund_purchase never reverses usage events).
+    if existing_grant is None:
+        from app.controlplane.services.metering import emit_usage
 
-    await emit_usage(
-        db,
-        tenant_id=purchase.buyer_tenant_id,
-        org_id=purchase.buyer_org_id,
-        usage_type="content_license",
-        quantity=1,
-        occurred_at=_now(),
-        source="manual",
-        idempotency_key=f"license:{purchase.id}",
-        metadata={"listing_id": listing.id, "purchase_id": purchase.id},
-    )
+        await emit_usage(
+            db,
+            tenant_id=purchase.buyer_tenant_id,
+            org_id=purchase.buyer_org_id,
+            usage_type="content_license",
+            quantity=1,
+            occurred_at=_now(),
+            source="manual",
+            idempotency_key=f"license:{purchase.id}",
+            metadata={"listing_id": listing.id, "purchase_id": purchase.id},
+        )
     enqueue(db, "purchase.paid", {"purchase_id": purchase.id})
     # R60[42]: mark-paid delivers a license and triggers rev-share accrual —
     # the actor (buyer via credit/invoice, SYSTEM via webhook, billing_admin

@@ -40,10 +40,20 @@ async def post_with_backoff(c: httpx.AsyncClient, path: str, **kw) -> httpx.Resp
 
 
 async def drain_outbox(max_rounds: int = 10) -> int:
-    """Process outbox messages inline (worker-less E2E)."""
+    """Process outbox messages inline (worker-less E2E).
+
+    R130: purge stale test.* topic rows first — test_cp_outbox_db commits
+    unknown-topic rows into the shared dev DB; they fill the poll batch,
+    count as handled=0 (no handler), and the handled==0 early-break then
+    strands real messages (provision.run sat pending forever)."""
+    from sqlalchemy import text
+
     from app.controlplane.worker import process_outbox_once
     from app.core.database import AsyncSessionLocal
 
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("DELETE FROM cp_outbox WHERE topic LIKE 'test.%'"))
+        await db.commit()
     total = 0
     for _ in range(max_rounds):
         async with AsyncSessionLocal() as db:

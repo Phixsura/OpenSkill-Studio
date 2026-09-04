@@ -2332,10 +2332,15 @@ def test_preview_band_repricing_matches_close_walk():
 
 @pytest.mark.asyncio
 async def test_void_after_cancel_close_recancels_not_rebills(db):
-    """R129[C1]: voiding the FINAL invoice of a cancelled sub must resurrect
-    it to cancel_at_period_end (re-close re-cancels, no new period) — the
-    earlier restore-to-'active' turned the re-close into a rollover that
-    opened a fresh period and re-billed a departed customer forever."""
+    """R129[C1] → R130 rework: voiding the FINAL invoice of a cancelled sub
+    must leave it CANCELLED (the terminal-close branch bills a cancelled
+    sub's period without rolling forward) and enqueue the re-close directly
+    — the R129 resurrect-to-cancel_at_period_end was escapable via
+    reactivate_subscription and violated uq_cp_sub_live once the tenant had
+    re-subscribed. The original bug (restore-to-'active' → rollover →
+    perpetual re-bill) must stay fixed."""
+    from app.controlplane.models.outbox import OutboxMessage
+
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     a = _actor(user)
@@ -2351,12 +2356,22 @@ async def test_void_after_cancel_close_recancels_not_rebills(db):
 
     await billing_svc.void_invoice(db, inv, reason="final invoice dispute", actor=a)
     await db.refresh(sub)
-    assert sub.status == "cancel_at_period_end", "void must resurrect to a re-cancellable state"
-    assert sub.cancel_at_period_end is True
+    # Stays cancelled — no resurrect (reactivate must NOT become possible,
+    # and a successor subscription must not violate uq_cp_sub_live).
+    assert sub.status == "cancelled"
+    # The re-close is enqueued directly (scan_due_periods skips cancelled).
+    msgs = (
+        (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == "period.close_due")))
+        .scalars()
+        .all()
+    )
+    assert any(m.payload.get("billing_period_id") == period_id for m in msgs), (
+        "void of a terminal-close invoice must enqueue the re-close itself"
+    )
 
     inv2 = await billing_svc.close_period_and_invoice(db, period_id)
     assert inv2 is not None and inv2.id != inv.id
-    # Re-close must terminate again — cancelled, and NO new open period.
+    # Re-close terminates — still cancelled, NO new open period.
     await db.refresh(sub)
     assert sub.status == "cancelled"
     open_periods = (
@@ -2369,3 +2384,74 @@ async def test_void_after_cancel_close_recancels_not_rebills(db):
     assert open_periods == 0
     # And the regenerated invoice bills the same period's plan fee once.
     assert _plan_lines_total(await _lines(db, inv2), "plan") == 19900
+    # A successor subscription is startable after the void (no unique-index
+    # violation from any resurrect) — the R130 [0] shape.
+    sub2, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    assert sub2.id != sub.id
+
+
+@pytest.mark.asyncio
+async def test_void_older_invoice_no_rewind_when_cancel_scheduled_later(db):
+    """R130[4]/[23]: voiding period N's invoice while a cancellation is
+    scheduled in the OPEN period N+1 must NOT rewind — the rewind deleted
+    N+1 and the re-close's terminal branch cancelled one period early,
+    silently discarding N+1's plan fee and remaining paid access."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    inv_n = await _force_close(db, sub)  # closes N, rolls to N+1 (open)
+    assert inv_n is not None
+    # Tenant schedules cancel-at-period-end during N+1.
+    await db.refresh(sub)
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=True, actor=a)
+    await db.refresh(sub)
+    assert sub.status == "cancel_at_period_end"
+    n1 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+
+    # Void N's invoice — must void PLAINLY (no rewind, no N+1 delete).
+    await billing_svc.void_invoice(db, inv_n, reason="june dispute", actor=a)
+    await db.refresh(sub)
+    assert sub.status == "cancel_at_period_end", "void must not touch the scheduled cancel"
+    still_open = await db.get(BillingPeriod, n1.id)
+    assert still_open is not None and still_open.status == "open", (
+        "the later open period must survive the void"
+    )
+    voided_period = await db.get(BillingPeriod, inv_n.billing_period_id)
+    assert voided_period.status == "invoiced", "no rewind: the voided period stays invoiced"
+
+
+def test_preview_seat_days_match_close_segment_days():
+    """R130[3]: the preview's seat component must count days the way the
+    close's segment walk does — floor(period_end − at), not
+    total − floor(at − start), which is one day larger for any
+    non-midnight change."""
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    end = datetime(2026, 10, 1, tzinfo=UTC)
+    at = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)  # midday: 14.5 days remain
+    p = billing_svc.proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=0,
+        new_amount_minor=0,
+        old_seats=0,
+        new_seats=8,
+        seat_price_minor=500,
+        billable_seats=0,
+        old_included_seats=0,
+        new_included_seats=0,
+        old_seat_price_minor=500,
+    )
+    # close: seg_days = floor(14.5) = 14 → 8×500×14/30 = 1867
+    assert p["seat_proration_minor"] == 1867

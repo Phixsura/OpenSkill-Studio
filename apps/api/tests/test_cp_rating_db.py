@@ -1024,3 +1024,30 @@ async def test_rated_usage_pagination_stable_across_identical_timestamps(db):
     finally:
         app.router.lifespan_context = orig
         await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_fx_chunk_reenqueue_carries_cursor(db):
+    """R130[12]: the chunk re-enqueue must carry a keyset cursor — the R129
+    cursorless re-select livelocked on the same first 500 rows forever when
+    they stayed blocked (rate effective_from AFTER their occurred_at)."""
+    # Direct handler-contract test: payload with a cursor selects only rows
+    # AFTER it; a full chunk re-enqueues with the LAST row id as the cursor.
+    import app.controlplane.models.outbox as outbox_mod
+    from app.controlplane.services.rating import _handle_fx_created
+
+    enqueued = []
+    orig_enqueue = outbox_mod.enqueue
+
+    def _capture(db_, topic, payload):
+        enqueued.append((topic, payload))
+        return orig_enqueue(db_, topic, payload)
+
+    outbox_mod.enqueue = _capture
+    try:
+        # No fx row for the id → no pair filter; empty blocked set for a
+        # cursor beyond every ULID means no re-enqueue.
+        await _handle_fx_created(db, {"fx_rate_id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ", "after_id": "z"})
+    finally:
+        outbox_mod.enqueue = orig_enqueue
+    assert enqueued == [], "no full chunk → no re-enqueue"

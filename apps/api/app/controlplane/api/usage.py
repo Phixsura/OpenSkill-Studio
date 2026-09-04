@@ -61,7 +61,10 @@ class IngestUsageRequest(BaseModel):
 class AdjustUsageRequest(BaseModel):
     delta_quantity: str | int | float
     reason: str = Field(min_length=3, max_length=500)
-    idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
+    # R130[35]: REQUIRED — the adjust endpoint moves the same money as manual
+    # ingestion (which requires a key); an unkeyed client/network retry
+    # double-booked the correction (each call minted a fresh adjustment).
+    idempotency_key: str = Field(min_length=8, max_length=120)
 
 
 class UsageEventResponse(BaseModel):
@@ -167,7 +170,12 @@ async def ingest_usage(
                     BillingPeriod.tenant_id == tenant.id,
                     BillingPeriod.status == "open",
                 )
-                .order_by(BillingPeriod.period_start.desc())
+                # R130[13]: OLDEST open window, not newest — a tenant can hold
+                # two open periods (a blocked-ratings reopen orphaned under a
+                # cancelled sub + a new sub's period); the invariant is "never
+                # inside an INVOICED window", and the oldest never-invoiced
+                # start is the correct, most permissive floor.
+                .order_by(BillingPeriod.period_start.asc())
                 .limit(1)
             )
         ).scalar_one_or_none()

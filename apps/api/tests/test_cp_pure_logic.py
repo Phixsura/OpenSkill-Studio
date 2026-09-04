@@ -278,7 +278,23 @@ def test_manual_invoice_line_quantity_bound_validated():
     from app.controlplane.api.billing import ManualInvoiceLineInput
 
     ok = ManualInvoiceLineInput(description="consulting", amount_minor=50000, quantity="2.5")
-    assert ok.quantity == "2.5"
-    for bad in ("two", "1,5", "NaN", "Infinity", "-Infinity", "0", "-3", "1e13"):
+    # R130[29]: normalized to the column's scale — the stored value is what
+    # gets validated (and returned), not the raw string.
+    assert ok.quantity == "2.500000"
+    for bad in (
+        "two",
+        "1,5",
+        "NaN",
+        "Infinity",
+        "-Infinity",
+        "0",
+        "-3",
+        "1e13",
+        # R130[29]: quantizes to 0.000000 at the column's scale — a stored
+        # zero the raw >0 check missed.
+        "0.0000001",
+        # R130[29]: passes raw bounds but asyncpg cannot encode it.
+        "1E-20000",
+    ):
         with pytest.raises(ValidationError):
             ManualInvoiceLineInput(description="x", amount_minor=1, quantity=bad)

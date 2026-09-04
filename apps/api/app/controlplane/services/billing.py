@@ -125,8 +125,13 @@ def proration_preview(
         band = max(billable_seats, old_seats)
         covered = max(band - old_included_seats, 0) * old_price_eff
         correct = max(max(new_seats, band) - new_included_seats, 0) * seat_price_minor
+        # R130[3]: the close's segment walk counts seat days as
+        # floor(period_end − effective_at) — NOT total − floor(used), which
+        # is one day larger for any non-midnight change. Use the close's
+        # formula so the approved seat component matches the invoiced one.
+        seat_days = max(min((period_end - at).days, total_days), 0)
         seat_proration = int(
-            (per_day(correct - covered) * days_left).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            (per_day(correct - covered) * seat_days).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         )
     else:
         seat_delta = (new_seats - old_seats) * seat_price_minor
@@ -146,6 +151,49 @@ def proration_preview(
 
 
 # ── Subscription lifecycle ───────────────────────────────────
+
+
+async def _period_start_seat_basis(db: AsyncSession, sub: "Subscription") -> tuple[int, int, int]:
+    """(start_seats, start_included, start_seat_price) — the PERIOD-START
+    basis the close's seats line bills against (R130[2]). The close derives
+    the base line from the FIRST immediate change since period_start
+    (from_seats / from_plan_version_id); previews after a prior mid-period
+    change were banding on the CURRENT floor/plan instead, so the approved
+    seat delta diverged from the invoice's segment walk on any second change
+    within the same period."""
+    first_change = (
+        await db.execute(
+            select(SubscriptionChange)
+            .where(
+                SubscriptionChange.subscription_id == sub.id,
+                SubscriptionChange.proration_mode == "immediate",
+                SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
+                SubscriptionChange.effective_at >= sub.current_period_start,
+            )
+            .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    start_version_id = first_change.from_plan_version_id if first_change else sub.plan_version_id
+    start_seats = (
+        first_change.from_seats
+        if first_change and first_change.from_seats is not None
+        else sub.seat_quantity
+    )
+    start_price = (
+        await db.execute(
+            select(PlanPrice).where(
+                PlanPrice.plan_version_id == start_version_id,
+                PlanPrice.currency == sub.currency,
+                PlanPrice.interval == sub.interval,
+            )
+        )
+    ).scalar_one_or_none()
+    return (
+        start_seats,
+        start_price.included_seats if start_price else 0,
+        (start_price.overage_seat_amount_minor or 0) if start_price else 0,
+    )
 
 
 async def _live_student_seats(db: AsyncSession, tenant_id: str) -> int:
@@ -434,21 +482,26 @@ async def change_plan(
         old_price.amount_minor if old_price else 0
     )
     mode = proration_mode or ("immediate" if upgrade else "next_period")
+    # R130[2]: the seat basis must be the PERIOD-START floor/plan the close's
+    # base seats line bills against — not the current (post-prior-change)
+    # values — or a second change in the same period previews a different
+    # seat delta than the invoice's segment walk charges.
+    start_seats, start_included, start_seat_price = await _period_start_seat_basis(db, sub)
     preview = proration_preview(
         period_start=sub.current_period_start,
         period_end=sub.current_period_end,
         at=_now(),
         old_amount_minor=old_price.amount_minor if old_price else 0,
         new_amount_minor=new_price.amount_minor if new_price else 0,
-        old_seats=sub.seat_quantity,
+        old_seats=start_seats,
         new_seats=new_seats,
         seat_price_minor=(new_price.overage_seat_amount_minor or 0) if new_price else 0,
         # R129[M5]: band-aware seat math (see proration_preview) so the shown
         # net matches the invoice's R123[C0] segment repricing.
         billable_seats=await _live_student_seats(db, tenant.id),
-        old_included_seats=old_price.included_seats if old_price else 0,
+        old_included_seats=start_included,
         new_included_seats=new_price.included_seats if new_price else 0,
-        old_seat_price_minor=(old_price.overage_seat_amount_minor or 0) if old_price else 0,
+        old_seat_price_minor=start_seat_price,
     )
     db.add(
         SubscriptionChange(
@@ -1543,8 +1596,30 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
                 invoice_id=invoice.id,
                 period_id=period.id,
             )
-        if period is not None and later_locked is None:
-            sub = await db.get(Subscription, period.subscription_id)
+        # R130 ([4]/[23]): a later OPEN period doesn't trip later_locked, but
+        # when the sub has ROLLED past the voided period AND a cancellation is
+        # scheduled/executed in that LATER window, rewinding would delete the
+        # later period (with its truncated final billables) and the re-close's
+        # terminal branch would cancel one period EARLY — silently discarding
+        # the later window's plan fee, usage and remaining paid access. Void
+        # plainly in that shape; corrections go through credit notes.
+        rewind_sub = (
+            await db.get(Subscription, period.subscription_id) if period is not None else None
+        )
+        cancel_in_later_window = (
+            rewind_sub is not None
+            and rewind_sub.current_period_start >= period.period_end
+            and rewind_sub.status in ("cancel_at_period_end", "cancelled")
+        )
+        if period is not None and later_locked is None and cancel_in_later_window:
+            log.warning(
+                "cp_void_no_rewind_cancel_in_later_window",
+                invoice_id=invoice.id,
+                period_id=period.id,
+                subscription_status=rewind_sub.status,
+            )
+        if period is not None and later_locked is None and not cancel_in_later_window:
+            sub = rewind_sub
             await db.execute(
                 update(BillingPeriod)
                 .where(BillingPeriod.id == period.id)
@@ -1587,22 +1662,21 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
                 sub.current_period_start = period.period_start
                 if rolled or period.period_end > sub.current_period_end:
                     sub.current_period_end = period.period_end
-                # R129[C1] CRITICAL: a sub cancelled by this period's close must
-                # be resurrected to a state the re-close will RE-CANCEL — not to
-                # plain 'active', which the rollover branch (status not in
-                # cancel_at_period_end/cancelled) turns into a brand-new period,
-                # perpetually re-billing a departed customer. Restore to
-                # 'cancel_at_period_end' so the re-close's terminal branch
-                # re-cancels without rolling forward. The uq_cp_sub_live partial
-                # index (status != 'cancelled') tolerates this transient state.
+                # R130 (rework of R129[C1]): do NOT resurrect a cancelled sub.
+                # The R129 restore-to-cancel_at_period_end fixed the original
+                # perpetual-rebill, but the transient state was (a) a second
+                # non-cancelled row violating uq_cp_sub_live the moment the
+                # tenant had re-subscribed (void 500-blocked forever), and
+                # (b) accepted by reactivate_subscription — a tenant owner
+                # clicking Reactivate in the window turned the re-close back
+                # into a rollover, resurrecting a departed customer. The sub
+                # stays 'cancelled': close_period_and_invoice's terminal
+                # branch bills a cancelled sub's final period WITHOUT rolling
+                # forward (the immediate-cancel path has always used it). The
+                # only reason R129 resurrected was that scan_due_periods skips
+                # cancelled subs — enqueue the re-close directly instead.
                 if sub.status == "cancelled":
-                    # Distinguish immediate cancel (no future period ever existed;
-                    # the final invoice IS terminal) from at-period-end. Either
-                    # way the re-close must end cancelled: cancel_at_period_end
-                    # rolls to cancelled without opening a new period.
-                    sub.status = "cancel_at_period_end"
-                    sub.cancel_at_period_end = True
-                    sub.cancelled_at = None
+                    enqueue(db, "period.close_due", {"billing_period_id": period.id})
                 await invalidate_cache(sub.tenant_id)
     await record_audit(
         db,
@@ -2124,12 +2198,32 @@ async def handle_subscription_push_provider(db: AsyncSession, payload: dict) -> 
     # R113[C0]: push the PLATFORM row's cancel flag — the adapter previously
     # hardcoded cancel_at_period_end=False, so any push (plan/seat change,
     # deferred rollover) silently un-cancelled a pending Stripe cancellation.
-    await adapter.change_subscription(
-        sub.external_ref,
-        new_p.external_price_ref or "",
-        sub.seat_quantity,
-        cancel_at_period_end=bool(sub.cancel_at_period_end),
-    )
+    # R130[36]: a push racing a provider-side terminal cancel (change enqueued
+    # before an immediate cancel, or a delayed retry) modifies a dead Stripe
+    # sub — InvalidRequestError on every retry → noisy dead-letter. Mirror the
+    # cancel handler's R123[M12/M16] tolerance: the platform row is (or will
+    # be) cancelled too, so there is nothing left to sync.
+    try:
+        await adapter.change_subscription(
+            sub.external_ref,
+            new_p.external_price_ref or "",
+            sub.seat_quantity,
+            cancel_at_period_end=bool(sub.cancel_at_period_end),
+        )
+    except Exception as exc:
+        name = type(exc).__name__
+        msg = str(exc).lower()
+        if name == "InvalidRequestError" and (
+            "no such subscription" in msg or "canceled" in msg or "cancelled" in msg
+        ):
+            log.info(
+                "cp_push_provider_already_terminal",
+                subscription_id=sub.id,
+                external_ref=sub.external_ref,
+                detail=str(exc)[:200],
+            )
+            return
+        raise
 
 
 @register_handler("subscription.cancel_provider")

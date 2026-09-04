@@ -39,6 +39,33 @@ class LearningPath(Base):
     __table_args__ = (
         Index("uq_path_org_slug", "org_id", "slug", unique=True),
         Index("ix_paths_org_status", "org_id", "status"),
+        # R130[20]: mirror the migration-created indexes (cp15/cp17/cp18) so
+        # autogenerate doesn't emit DROP INDEX for them — the partial uniques
+        # are the race-closers install_from_listing's IntegrityError-resume
+        # path depends on.
+        Index(
+            "ix_paths_origin_listing",
+            "origin_listing_id",
+            postgresql_where="origin_listing_id IS NOT NULL",
+        ),
+        Index(
+            "uq_paths_org_origin_live",
+            "org_id",
+            "origin_listing_id",
+            unique=True,
+            postgresql_where="origin_listing_id IS NOT NULL AND status != 'ARCHIVED'",
+        ),
+        Index(
+            "uq_paths_org_source_live",
+            "org_id",
+            "origin_source_path_id",
+            unique=True,
+            postgresql_where=(
+                "origin_source_path_id IS NOT NULL "
+                "AND origin_listing_id IS NULL "
+                "AND status != 'ARCHIVED'"
+            ),
+        ),
     )
 
     id: Mapped[str] = ulid_pk()

@@ -139,6 +139,7 @@ async def list_my_orgs(
             role=o["role"],
             member_count=o["member_count"],
             created_at=o["org"].created_at,
+            tenant_id=o["org"].tenant_id,
         )
         for o in orgs
     ]

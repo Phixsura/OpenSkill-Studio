@@ -1229,3 +1229,257 @@ async def test_mark_paid_skips_grant_when_already_licensed(db):
         )
     ).scalar_one()
     assert grants == 1, "duplicate checkout completion must not mint a second grant"
+
+
+# ── R130 grant-semantics regressions ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_listingless_gate_full_grant_semantics(db):
+    """R130[7]/[8]/[11]: the listing-less gate must apply the SAME semantics
+    as _find_covering_grant — expired grants don't redeem, org-scoped grants
+    don't cover sibling orgs — and a tenant's OWN unlisted path installs
+    into a sibling org without any grant."""
+    from datetime import timedelta
+
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    lp_svc = LearningPathService(db)
+    path = await lp_svc.create_path(seller_org.id, seller_user.id, name="Sem Path")
+    path.status = ContentStatus.PUBLISHED
+    await db.flush()
+
+    # (a) EXPIRED grant → still 404 (expiry is read-time; status stays active)
+    expired = await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        actor=_actor(seller_user),
+    )
+    assert expired.status == "active"  # never swept
+    with pytest.raises(AppError) as exc:
+        await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=path.id)
+    assert exc.value.code == "LISTING_NOT_FOUND"
+
+    # (b) grant org-scoped to ANOTHER org of the same tenant → 404 here
+    other_user = await _mk_user(db)
+    svc = OrgService(db)
+    sibling = await svc.create(
+        name=f"Sib {ULID()}",
+        slug=f"sib-{str(ULID()).lower()}",
+        description=None,
+        created_by=other_user.id,
+    )
+    sibling.tenant_id = buyer_org.tenant_id  # same tenant, different org
+    await db.flush()
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=sibling.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    with pytest.raises(AppError) as exc2:
+        await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=path.id)
+    assert exc2.value.code == "LISTING_NOT_FOUND"
+
+    # (c) own-tenant bypass: an org of the SELLER's tenant installs the
+    # tenant's own unlisted path with no grant at all.
+    seller_sibling = await svc.create(
+        name=f"SSib {ULID()}",
+        slug=f"ssib-{str(ULID()).lower()}",
+        description=None,
+        created_by=seller_user.id,
+    )
+    seller_sibling.tenant_id = seller_org.tenant_id
+    await db.flush()
+    copy = await lp_svc.install_from_listing(
+        seller_sibling.id, None, seller_user.id, product_id=path.id
+    )
+    assert copy.org_id == seller_sibling.id
+
+
+@pytest.mark.asyncio
+async def test_mark_paid_covering_semantics_and_expiry(db):
+    """R130[6]/[9]/[31]: the duplicate-grant guard uses covering semantics —
+    an EXPIRED grant must NOT suppress a paid renewal's mint, and a
+    tenant-wide grant MUST suppress an org-scoped duplicate."""
+    from datetime import timedelta
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+
+    # (a) expired grant → renewal purchase MUST mint a fresh grant
+    await market_svc.manual_grant(
+        db,
+        product_type=listing.product_type,
+        product_id=listing.product_id,
+        tenant_id=buyer_tenant.id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        actor=_actor(seller_user),
+    )
+    p1 = await market_svc.create_purchase(
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="checkout",
+        idempotency_key=f"renew-{ULID()}",
+    )
+    await market_svc.mark_purchase_paid(
+        db, purchase_id=p1.id, payment_ref="renew1", actor=_actor(buyer_user)
+    )
+    fresh = (
+        await db.execute(
+            select(func.count(LicenseGrant.id)).where(
+                LicenseGrant.purchase_id == p1.id, LicenseGrant.status == "active"
+            )
+        )
+    ).scalar_one()
+    assert fresh == 1, "expired grant must not suppress a paid renewal's grant"
+
+    # (b) tenant-WIDE covering grant suppresses an org-scoped duplicate mint
+    seller2 = await _mk_user(db)
+    buyer2 = await _mk_user(db)
+    s_org2 = await _mk_org(db, seller2)
+    b_org2 = await _mk_org(db, buyer2)
+    listing2 = await _mk_listing(db, s_org2, seller2)
+    t2 = await db.get(TenantAccount, b_org2.tenant_id)
+    # H0 shape: the checkout purchase is created FIRST (no coverage yet),
+    # the covering tenant-wide grant lands while it is pending (e.g. a
+    # manual grant / another channel), THEN the stale checkout completes.
+    p2 = await market_svc.create_purchase(
+        db,
+        listing_id=listing2.id,
+        buyer_org_id=b_org2.id,
+        purchaser=_actor(buyer2),
+        payment_method="checkout",
+        idempotency_key=f"dup2-{ULID()}",
+    )
+    # (c)'s purchase must also predate any covering grant (precheck blocks
+    # otherwise); different payment method so H8 pending-resume doesn't merge.
+    p3 = await market_svc.create_purchase(
+        db,
+        listing_id=listing2.id,
+        buyer_org_id=b_org2.id,
+        purchaser=_actor(buyer2),
+        payment_method="credit",
+        idempotency_key=f"dup3-{ULID()}",
+    )
+    await market_svc.manual_grant(
+        db,
+        product_type=listing2.product_type,
+        product_id=listing2.product_id,
+        tenant_id=t2.id,
+        scope="tenant",
+        org_id=None,
+        expires_at=None,
+        actor=_actor(seller2),
+    )
+    await market_svc.mark_purchase_paid(
+        db, purchase_id=p2.id, payment_ref="dup2", actor=_actor(buyer2)
+    )
+    minted = (
+        await db.execute(
+            select(func.count(LicenseGrant.id)).where(LicenseGrant.purchase_id == p2.id)
+        )
+    ).scalar_one()
+    assert minted == 0, "tenant-wide covering grant must suppress the duplicate mint"
+
+    # (c) duplicate active grants must not crash the guard (R130[5])
+    for _ in range(2):
+        await market_svc.manual_grant(
+            db,
+            product_type=listing2.product_type,
+            product_id=listing2.product_id,
+            tenant_id=t2.id,
+            scope="organization",
+            org_id=b_org2.id,
+            expires_at=None,
+            actor=_actor(seller2),
+        )
+    # No MultipleResultsFound — completes cleanly.
+    got = await market_svc.mark_purchase_paid(
+        db, purchase_id=p3.id, payment_ref=None, actor=_actor(buyer2)
+    )
+    assert got.status == "paid"
+
+
+@pytest.mark.asyncio
+async def test_grant_install_then_listing_purchase_no_duplicate_copy(db):
+    """R130[10]: a manual-grant install followed by a listing-backed install
+    of the SAME source must return the existing copy, not mint a second."""
+    from app.models.learning_path import LearningPath
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    lp_svc = LearningPathService(db)
+    path = await lp_svc.create_path(seller_org.id, seller_user.id, name="Dup Path")
+    path.status = ContentStatus.PUBLISHED
+    await db.flush()
+    await market_svc.manual_grant(
+        db,
+        product_type="learning_path",
+        product_id=path.id,
+        tenant_id=buyer_org.tenant_id,
+        scope="organization",
+        org_id=buyer_org.id,
+        expires_at=None,
+        actor=_actor(seller_user),
+    )
+    copy1 = await lp_svc.install_from_listing(buyer_org.id, None, buyer_user.id, product_id=path.id)
+
+    # Seller then lists the path; the buyer installs via the listing.
+    listing = await market_svc.create_listing(
+        db,
+        seller_org_id=seller_org.id,
+        product_type="learning_path",
+        product_id=path.id,
+        offer_type="paid",
+        price_minor=9900,
+        currency="USD",
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(seller_user),
+    )
+    listing.status = "active"
+    await db.flush()
+    copy2 = await lp_svc.install_from_listing(buyer_org.id, listing.id, buyer_user.id)
+    assert copy2.id == copy1.id, "listing install must find the manual-grant copy"
+    live = (
+        await db.execute(
+            select(func.count(LearningPath.id)).where(
+                LearningPath.org_id == buyer_org.id,
+                LearningPath.origin_source_path_id == path.id,
+                LearningPath.status != ContentStatus.ARCHIVED,
+            )
+        )
+    ).scalar_one()
+    assert live == 1

@@ -140,6 +140,27 @@ async def ingest_adjustment(
     original = await db.get(UsageEvent, original_event_id)
     if original is None:
         raise AppError("USAGE_EVENT_NOT_FOUND", "Usage event not found", 404)
+    # R130[37]: a VOIDED rating means the original was struck from billing
+    # entirely (void_rated is the other correction path). Layering a negative
+    # adjustment on top double-corrects — the tenant gets a free credit for
+    # usage that was never billed. Force ops to pick one path.
+    from app.controlplane.models.pricing import RatedUsage
+
+    voided = (
+        await db.execute(
+            select(RatedUsage.id).where(
+                RatedUsage.usage_event_id == original.id,
+                RatedUsage.status == "voided",
+            )
+        )
+    ).scalar_one_or_none()
+    if voided is not None:
+        raise AppError(
+            "VALIDATION_ERROR",
+            "Original event's rating was voided — it was never billed; "
+            "an adjustment would double-correct",
+            409,
+        )
     event = await emit_usage(
         db,
         tenant_id=original.tenant_id,
@@ -164,6 +185,32 @@ async def ingest_adjustment(
     )
     if event is None:
         raise AppError("VALIDATION_ERROR", "Duplicate adjustment idempotency key", 409)
+    # R130[34]: an adjustment for a tenant with NO open billing period (sub
+    # terminally closed / never subscribed) will rate but NEVER be swept into
+    # an invoice — no future close exists. The money silently evaporates.
+    # Warn loudly so ops route the correction via manual invoice or a credit
+    # adjustment instead (the audit row alone gave no signal).
+    from app.controlplane.models.billing import BillingPeriod
+
+    has_open = (
+        await db.execute(
+            select(BillingPeriod.id)
+            .where(
+                BillingPeriod.tenant_id == original.tenant_id,
+                BillingPeriod.status == "open",
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if has_open is None:
+        log.warning(
+            "cp_adjustment_no_open_period",
+            usage_event_id=event.id,
+            original_event_id=original.id,
+            tenant_id=original.tenant_id,
+            detail="no open billing period — this adjustment will never be "
+            "invoiced; use a manual invoice or credit adjustment",
+        )
     await record_audit(
         db,
         actor=actor,

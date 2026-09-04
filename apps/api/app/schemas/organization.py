@@ -86,6 +86,10 @@ class OrgResponse(BaseModel):
     role: str | None = None  # Caller's role in this org
     member_count: int = 0
     created_at: datetime
+    # R130[32]: the tenant this org belongs to — multi-tenant users need it
+    # to target tenant-scoped actions (e.g. license installs) at an org of
+    # the RIGHT tenant; without it the FE picked an arbitrary admin org.
+    tenant_id: str | None = None
 
     model_config = {"from_attributes": True}
 

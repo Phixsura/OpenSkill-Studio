@@ -850,15 +850,23 @@ async def _handle_fx_created(db: AsyncSession, payload: dict) -> None:
     # per-message), then if more remain enqueue another fx.rate_created for the
     # same pair so the outbox drains the backlog across messages. rate_event is
     # idempotent, so a retry of this message re-rates at most CHUNK rows.
+    # R130[12]: carry the keyset cursor THROUGH the re-enqueued payload — the
+    # R129 "no cursor needed" premise held only for rows the new rate fixes.
+    # rate_event leaves a row 'blocked' when the rate doesn't cover its
+    # occurred_at (effective_from > occurred_at) or an inverse quantizes to
+    # <= 0; with >= chunk such rows the cursorless re-select livelocked on
+    # the same first 500 forever, starving the rest and looping the outbox.
     chunk = 500
+    cursor = (payload or {}).get("after_id", "")
     rows = (
-        await db.execute(q.where(RatedUsage.id > "").order_by(RatedUsage.id).limit(chunk))
+        await db.execute(q.where(RatedUsage.id > cursor).order_by(RatedUsage.id).limit(chunk))
     ).all()
     for event_id, _row_id in rows:
         await rate_event(db, event_id)
     if len(rows) == chunk and payload:
-        # More may remain — the same filter re-selects still-blocked rows next
-        # round (rated ones drop out of status=='blocked'), so no cursor needed.
         from app.controlplane.models.outbox import enqueue
 
-        enqueue(db, "fx.rate_created", payload)
+        # The cursor advances past fixed AND still-unfixable rows exactly
+        # once, so the sweep terminates; still-blocked rows wait for the
+        # next rate creation or a manual rating run (as before R129).
+        enqueue(db, "fx.rate_created", {**payload, "after_id": rows[-1][1]})

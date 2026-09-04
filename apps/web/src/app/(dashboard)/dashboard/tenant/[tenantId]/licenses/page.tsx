@@ -64,16 +64,25 @@ export default function TenantLicensesPage() {
   const orgsQuery = useQuery({
     queryKey: ["my-orgs"],
     queryFn: () =>
-      apiWithAuth<{ data: { id: string; name: string; role: string | null }[] }>("/orgs"),
+      apiWithAuth<{
+        data: { id: string; name: string; role: string | null; tenant_id: string | null }[];
+      }>("/orgs"),
   });
+  // R130[32]: restrict the fallback to admin orgs of THIS tenant — /orgs
+  // spans every tenant the user belongs to, and targeting a foreign-tenant
+  // org 404s the licensed tenant's grant (or installs into the wrong tenant).
   const adminOrgs = (orgsQuery.data?.data ?? []).filter(
-    (o) => o.role === "owner" || o.role === "admin",
+    (o) => (o.role === "owner" || o.role === "admin") && o.tenant_id === tenantId,
   );
   const installPath = useMutation({
     mutationFn: (g: LicenseGrant) => {
       const targetOrg = g.org_id ?? adminOrgs[0]?.id;
       if (!targetOrg) {
-        throw new ApiError(0, "NO_ORG", "You must be an org owner/admin to install");
+        throw new ApiError(
+          0,
+          "NO_ORG",
+          "You must be an owner/admin of an organization in this tenant to install",
+        );
       }
       const body = g.listing_id ? { listing_id: g.listing_id } : { product_id: g.product_id };
       return apiWithAuth(`/orgs/${targetOrg}/learning-paths/install`, {
@@ -92,6 +101,9 @@ export default function TenantLicensesPage() {
         {/* R101[L17]: a failed licenses fetch rendered the "No licenses" empty
             state as if it were authoritative. */}
         {licensesQuery.isError && <QueryError error={licensesQuery.error} what="licenses" />}
+        {/* R130[16]: a failed /orgs fetch silently disabled Install with no
+            retry affordance — surface it like the sibling queries. */}
+        {orgsQuery.isError && <QueryError error={orgsQuery.error} what="your organizations" />}
         {!licensesQuery.isLoading && !licensesQuery.isError && licenses.length === 0 && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
             No licenses. Purchase paid packs from the registry to license them here.
@@ -129,16 +141,27 @@ export default function TenantLicensesPage() {
                     </td>
                     <td className="px-4 py-2">{formatDate(g.starts_at)}</td>
                     <td className="px-4 py-2 text-right">
-                      {g.product_type === "learning_path" && g.status === "active" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => installPath.mutate(g)}
-                          disabled={installPath.isPending}
-                        >
-                          Install
-                        </Button>
-                      )}
+                      {g.product_type === "learning_path" &&
+                        g.status === "active" &&
+                        // R130[17]: no button for date-expired grants (status
+                        // stays 'active'; expiry is read-time) — clicking
+                        // could only fail downstream.
+                        (g.expires_at == null || new Date(g.expires_at) > new Date()) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => installPath.mutate(g)}
+                            // R130[16]: also gate on the orgs fetch — while
+                            // /orgs is loading or failed, adminOrgs=[] would
+                            // throw a false "must be an org owner/admin".
+                            disabled={
+                              installPath.isPending ||
+                              (g.org_id == null && (orgsQuery.isLoading || orgsQuery.isError))
+                            }
+                          >
+                            Install
+                          </Button>
+                        )}
                     </td>
                   </tr>
                 ))}

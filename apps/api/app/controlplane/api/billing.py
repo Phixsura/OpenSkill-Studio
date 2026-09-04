@@ -110,9 +110,18 @@ class ManualInvoiceLineInput(BaseModel):
             raise ValueError("quantity must be a decimal number") from None
         if not d.is_finite():
             raise ValueError("quantity must be finite")
+        # R130[29]: quantize to the column's scale FIRST — '0.0000001' passes
+        # a raw > 0 check but Postgres stores it as 0.000000 (the value the
+        # validator rejects as '0'), and '1E-20000' passes the bounds but
+        # asyncpg cannot encode it (DataError at flush). Validate the value
+        # that will actually be stored.
+        try:
+            d = d.quantize(Decimal("0.000001"))
+        except InvalidOperation:
+            raise ValueError("quantity out of range") from None
         if d <= 0 or d >= Decimal("1000000000000"):
             raise ValueError("quantity out of range")
-        return v
+        return str(d)
 
 
 class ManualInvoiceRequest(BaseModel):
@@ -312,21 +321,26 @@ async def change_preview(
         )
     else:
         new_price = old_price
+    # R130[2]: seat basis = the PERIOD-START floor/plan (what the close's
+    # base seats line covers), not the current post-prior-change values.
+    start_seats, start_included, start_seat_price = await billing_svc._period_start_seat_basis(
+        db, sub
+    )
     preview = billing_svc.proration_preview(
         period_start=sub.current_period_start,
         period_end=sub.current_period_end,
         at=billing_svc._now(),
         old_amount_minor=old_price.amount_minor if old_price else 0,
         new_amount_minor=new_price.amount_minor if new_price else 0,
-        old_seats=sub.seat_quantity,
+        old_seats=start_seats,
         new_seats=body.seats if body.seats is not None else sub.seat_quantity,
         seat_price_minor=(new_price.overage_seat_amount_minor or 0) if new_price else 0,
         # R129[M5]: band-aware seat math — the preview must show the same
         # seat component the close's R123[C0] segment walk will invoice.
         billable_seats=await billing_svc._live_student_seats(db, tenant_id),
-        old_included_seats=old_price.included_seats if old_price else 0,
+        old_included_seats=start_included,
         new_included_seats=new_price.included_seats if new_price else 0,
-        old_seat_price_minor=(old_price.overage_seat_amount_minor or 0) if old_price else 0,
+        old_seat_price_minor=start_seat_price,
     )
     return DataResponse(data=preview)
 

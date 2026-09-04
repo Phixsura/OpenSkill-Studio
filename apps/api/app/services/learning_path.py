@@ -4,7 +4,7 @@ import re
 import secrets
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -267,24 +267,30 @@ class LearningPathService:
             # MANUAL grant — require an active LicenseGrant covering this org
             # before proceeding when no listing exists.
             if listing is None:
-                from app.controlplane.models.marketplace import LicenseGrant
+                # R130: delegate to _find_covering_grant — the ad-hoc R129
+                # query ignored expires_at (expired grants redeemed forever),
+                # grant org scope and seat limits (org B could redeem org A's
+                # grant). The canonical helper enforces all of them.
+                from app.controlplane.services.marketplace import _find_covering_grant
 
                 tenant_id = getattr(org, "tenant_id", None)
-                grant = (
-                    await self.db.execute(
-                        select(LicenseGrant.id)
-                        .where(
-                            LicenseGrant.product_type == "learning_path",
-                            LicenseGrant.product_id == product_id,
-                            LicenseGrant.status == "active",
-                            LicenseGrant.tenant_id == tenant_id,
-                        )
-                        .limit(1)
+                # R130: own-tenant bypass — a tenant installing its OWN
+                # unlisted path into a sibling org needs no grant (mirrors
+                # check_install_license's seller bypass, which is unreachable
+                # here because no listing exists).
+                source = await self.db.get(LearningPath, product_id)
+                own = False
+                if source is not None:
+                    src_org = await self.db.get(Organization, source.org_id)
+                    own = src_org is not None and getattr(src_org, "tenant_id", None) == tenant_id
+                if not own:
+                    grant = await _find_covering_grant(
+                        self.db, "learning_path", product_id, tenant_id, org_id
                     )
-                ).scalar_one_or_none()
-                if grant is None:
-                    # uniform 404 — never reveal the path exists to a non-licensee
-                    raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+                    if grant is None:
+                        # uniform 404 — never reveal the path exists to a
+                        # non-licensee
+                        raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
         source_product_id = listing.product_id if listing is not None else product_id
         assert source_product_id is not None  # by the request model's one-of rule
 
@@ -299,7 +305,17 @@ class LearningPathService:
                     select(LearningPath)
                     .where(
                         LearningPath.org_id == org_id,
-                        LearningPath.origin_listing_id == listing.id,
+                        # R130: also match a prior MANUAL-GRANT copy of the
+                        # same source (origin_listing_id NULL, source stamped)
+                        # — the disjoint keys let a grant-install followed by
+                        # a listing purchase mint a duplicate live copy.
+                        or_(
+                            LearningPath.origin_listing_id == listing.id,
+                            and_(
+                                LearningPath.origin_listing_id.is_(None),
+                                LearningPath.origin_source_path_id == listing.product_id,
+                            ),
+                        ),
                         LearningPath.status != ContentStatus.ARCHIVED,
                     )
                     .limit(1)
