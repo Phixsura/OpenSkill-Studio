@@ -862,38 +862,43 @@ async def unvoid_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -
     # have a live adjustment referencing it.
     from app.controlplane.models.usage import UsageEvent as UsageEventModel
 
+    # R134 (dual-unvoid skew): the gates LOCK the paired rating row — each
+    # unvoid previously locked only its OWN row and read the pair unlocked,
+    # so two concurrent unvoids of an original+adjustment pair both passed
+    # (each saw the other still voided) and restored the double-correct. With
+    # the pair locked, the second unvoid blocks and re-reads the committed
+    # restore (a rare simultaneous pair may deadlock-abort one side — loud,
+    # not corrupting).
     ev = await db.get(UsageEventModel, row.usage_event_id)
     if ev is not None and ev.adjustment_of_id is not None:
-        original_live = (
+        # Lock UNCONDITIONALLY (no status filter — a filtered SELECT matching
+        # zero rows takes no lock and the skew survives), then check status.
+        original_row = (
             await db.execute(
-                select(RatedUsage.id)
+                select(RatedUsage)
                 .join(UsageEventModel, UsageEventModel.id == RatedUsage.usage_event_id)
-                .where(
-                    UsageEventModel.id == ev.adjustment_of_id,
-                    RatedUsage.status != "voided",
-                )
+                .where(UsageEventModel.id == ev.adjustment_of_id)
                 .limit(1)
+                .with_for_update(of=RatedUsage)
             )
         ).scalar_one_or_none()
-        if original_live is not None:
+        if original_row is not None and original_row.status != "voided":
             raise AppError(
                 "RATED_USAGE_INVOICED",
                 "This is an adjustment whose original is live — restoring it "
                 "would double-correct; void the original first",
                 409,
             )
-    live_adjustment = (
+    adjustment_row = (
         await db.execute(
-            select(RatedUsage.id)
+            select(RatedUsage)
             .join(UsageEventModel, UsageEventModel.id == RatedUsage.usage_event_id)
-            .where(
-                UsageEventModel.adjustment_of_id == row.usage_event_id,
-                RatedUsage.status != "voided",
-            )
+            .where(UsageEventModel.adjustment_of_id == row.usage_event_id)
             .limit(1)
+            .with_for_update(of=RatedUsage)
         )
     ).scalar_one_or_none()
-    if live_adjustment is not None:
+    if adjustment_row is not None and adjustment_row.status != "voided":
         raise AppError(
             "RATED_USAGE_INVOICED",
             "Event has a live adjustment — restoring the original too would "
