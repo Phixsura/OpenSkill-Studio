@@ -890,14 +890,28 @@ async def check_install_license(
             403,
         )
     # paid | partner_only
-    grant = await _find_covering_grant(db, product_type, product_id, tenant.id, org.id)
-    if grant is None:
+    covering = await _covering_grants(db, product_type, product_id, tenant.id, org.id)
+    if not covering:
         raise AppError(
             "LICENSE_REQUIRED",
             "A license is required to install this content",
             403,
         )
-    await enforce_seat_limit(db, grant, org.id)
+    # R134 ([F8]): the install passes if ANY covering grant permits it under
+    # its seat cap — the single-widest grant let a roomier-cap tenant-wide
+    # grant (whose tenant-wide occupancy check can 403) shadow the buyer's
+    # own org-scoped purchase grant that would allow the install. Try each;
+    # only 403 when EVERY covering grant is over its cap.
+    seat_error: AppError | None = None
+    for _g in covering:
+        try:
+            await enforce_seat_limit(db, _g, org.id)
+            seat_error = None
+            break
+        except AppError as _e:
+            seat_error = _e
+    if seat_error is not None:
+        raise seat_error
     # R44[18]: major_locked applies to installs too, not just upgrades.
     # R133 ([F11]): the major bound comes from the PURCHASE grants, not the
     # widest grant — a purchased_major=NULL manual/trial grant shadowing the
@@ -935,7 +949,11 @@ async def check_upgrade_license(
             select(MarketplaceListing).where(
                 MarketplaceListing.product_type == product_type,
                 MarketplaceListing.product_id == product_id,
-                MarketplaceListing.status == "active",
+                # R134 ([F7]): a delisted/suspended listing still binds its
+                # major lock — "delisting means stop SELLING, not give away
+                # newer majors" (R44[16], applied on the install side but
+                # left active-only here). Exclude only 'draft'.
+                MarketplaceListing.status != "draft",
                 MarketplaceListing.upgrade_policy == "major_locked",
             )
         )

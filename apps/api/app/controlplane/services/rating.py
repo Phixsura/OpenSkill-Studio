@@ -855,24 +855,22 @@ async def unvoid_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -
     ).scalar_one_or_none()
     if row is None:
         raise AppError("RATING_NOT_FOUND", "Rated usage not found", 404)
-    # R133 ([F7]): mirror gate — the voided row may belong to an ADJUSTMENT
-    # event whose ORIGINAL's rating is live; restoring it recreates the
-    # double-correct the [F4]/R130[37] gates forbid (both the original charge
-    # and its reversal billable). Also the inverse: the row's own event may
-    # have a live adjustment referencing it.
+    # R134 ([F11] — fixes the R133 polarity inversion): the forbidden state is
+    # {original STRUCK + reversal LIVE} = a negative billable with no
+    # offsetting charge = free credit. Restoring a voided row can only reach
+    # it in ONE case: the row is an ADJUSTMENT and its original is struck
+    # (voided/unrated). {both live} is the NORMAL compensating state (net
+    # billing), and restoring an ORIGINAL can never produce a struck original
+    # — so it is always safe (no gate). The old code inverted Gate A (blocked
+    # the safe {original live} remedy, allowed the {original struck} harm) and
+    # added a spurious original-side gate that 409'd the legitimate restore.
     from app.controlplane.models.usage import UsageEvent as UsageEventModel
 
-    # R134 (dual-unvoid skew): the gates LOCK the paired rating row — each
-    # unvoid previously locked only its OWN row and read the pair unlocked,
-    # so two concurrent unvoids of an original+adjustment pair both passed
-    # (each saw the other still voided) and restored the double-correct. With
-    # the pair locked, the second unvoid blocks and re-reads the committed
-    # restore (a rare simultaneous pair may deadlock-abort one side — loud,
-    # not corrupting).
     ev = await db.get(UsageEventModel, row.usage_event_id)
     if ev is not None and ev.adjustment_of_id is not None:
-        # Lock UNCONDITIONALLY (no status filter — a filtered SELECT matching
-        # zero rows takes no lock and the skew survives), then check status.
+        # Lock the original's rating UNCONDITIONALLY (a status-filtered SELECT
+        # matching zero rows takes no lock — dual-unvoid write skew survives),
+        # then decide on the loaded status.
         original_row = (
             await db.execute(
                 select(RatedUsage)
@@ -882,29 +880,14 @@ async def unvoid_rated(db: AsyncSession, rated_id: str, *, reason: str, actor) -
                 .with_for_update(of=RatedUsage)
             )
         ).scalar_one_or_none()
-        if original_row is not None and original_row.status != "voided":
+        if original_row is None or original_row.status == "voided":
             raise AppError(
                 "RATED_USAGE_INVOICED",
-                "This is an adjustment whose original is live — restoring it "
-                "would double-correct; void the original first",
+                "This adjustment reverses a charge that is not currently "
+                "billed — restoring it would credit the tenant with no "
+                "offsetting charge; restore the original rating first",
                 409,
             )
-    adjustment_row = (
-        await db.execute(
-            select(RatedUsage)
-            .join(UsageEventModel, UsageEventModel.id == RatedUsage.usage_event_id)
-            .where(UsageEventModel.adjustment_of_id == row.usage_event_id)
-            .limit(1)
-            .with_for_update(of=RatedUsage)
-        )
-    ).scalar_one_or_none()
-    if adjustment_row is not None and adjustment_row.status != "voided":
-        raise AppError(
-            "RATED_USAGE_INVOICED",
-            "Event has a live adjustment — restoring the original too would "
-            "double-correct; void the adjustment first",
-            409,
-        )
     # R132 ([F5]): a row voided while BLOCKED (fx gap) has ZERO amounts — a
     # blind restore-to-'rated' would sweep it into the next close as a
     # permanent zero-bill. Restore to its pre-void status: blocked rows go

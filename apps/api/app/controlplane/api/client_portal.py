@@ -810,21 +810,24 @@ async def void_final_acceptance(
             ClientApprovalRecord.action == "final_accepted",
         )
         .values(action="final_accept_voided")
-        .returning(ClientApprovalRecord.id)
+        .returning(ClientApprovalRecord.id, ClientApprovalRecord.completed_brief)
     )
-    voided_id = result.scalar_one_or_none()
-    if voided_id is None:
+    voided_row = result.first()
+    if voided_row is None:
         raise AppError("PROJECT_NOT_FOUND", "No final acceptance to void", 404)
+    voided_id = voided_row.id
     # R133 ([F13]): the acceptance flipped the linked brief to COMPLETED (a
     # terminal status — only ARCHIVED is reachable from it), so voiding the
     # record without rewinding the brief left it stuck COMPLETED forever
-    # while revisions resumed. Guarded COMPLETED→REVIEW restore (the state
-    # the acceptance consumed); a brief the org already ARCHIVED stays put.
+    # while revisions resumed. Guarded COMPLETED→REVIEW restore.
+    # R134 ([F1]): rewind ONLY when THIS acceptance performed the transition
+    # (completed_brief provenance) — a brief the org completed deliberately
+    # before the acceptance stays COMPLETED.
     from app.models.client_brief import BriefStatus, ClientBrief
     from app.models.project import Project as _Project
 
     _project = await db.get(_Project, project_id)
-    if _project is not None and _project.client_brief_id:
+    if voided_row.completed_brief and _project is not None and _project.client_brief_id:
         await db.execute(
             _sa_update(ClientBrief)
             .where(

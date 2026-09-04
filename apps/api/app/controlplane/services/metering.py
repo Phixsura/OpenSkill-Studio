@@ -207,15 +207,19 @@ async def ingest_adjustment(
             # same-key retry with a different delta silently returned the old
             # adjustment as a fresh 201, swallowing a distinct mutation
             # (Stripe-style key semantics: same key + different payload = 409).
-            from decimal import Decimal
+            from decimal import ROUND_HALF_UP, Decimal
 
             # R133 ([F8]): quantize BOTH sides to the column's 6dp scale — the
             # stored value is Numeric(18,6)-truncated, so a legitimately
             # identical retry with >6dp input compared unequal (false 409).
+            # R134 ([F13]): ROUND_HALF_UP — Decimal's default ROUND_HALF_EVEN
+            # disagrees with Postgres numeric (round half AWAY from zero) on
+            # exact 7th-decimal ties (0.0000005 stored 0.000001, quantized
+            # 0.000000 under bankers' rounding → false 409 on identical retry).
             _scale = Decimal("0.000001")
-            if Decimal(str(existing.quantity)).quantize(_scale) != Decimal(
+            if Decimal(str(existing.quantity)).quantize(_scale, rounding=ROUND_HALF_UP) != Decimal(
                 str(delta_quantity)
-            ).quantize(_scale):
+            ).quantize(_scale, rounding=ROUND_HALF_UP):
                 raise AppError(
                     "VALIDATION_ERROR",
                     "Idempotency key reused with a different delta_quantity",

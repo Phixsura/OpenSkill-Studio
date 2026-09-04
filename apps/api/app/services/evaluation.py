@@ -494,6 +494,17 @@ class EvaluationService:
             # the task since the rollback may have detached pending state.
             if self.db.in_transaction() and not self.db.is_active:
                 await self.db.rollback()
+            # R134 ([F4]): rollback EXPIRES every persistent attribute
+            # (expire_on_commit=False covers commit, not rollback). The next
+            # bare attribute read (task.org_id inside _emit_usage_events)
+            # would lazy-refresh synchronously → MissingGreenlet, escaping
+            # this handler and leaving the task stuck PROCESSING — the exact
+            # bug R133 tried to fix one layer too deep. Refresh here so every
+            # subsequent task.* read is already loaded (awaitable context).
+            import contextlib as _ctxlib
+
+            with _ctxlib.suppress(Exception):
+                await self.db.refresh(task)
             try:
                 task.status = EvalStatus.FAILED
                 # Sanitize error: don't expose internal details (connection
@@ -511,6 +522,11 @@ class EvaluationService:
                 await self.db.flush()
             except Exception:  # noqa: BLE001 — aborted session: recover once
                 await self.db.rollback()
+                # R134 ([F4]): same rollback-expiry hazard as above.
+                try:
+                    await self.db.refresh(task)
+                except Exception:  # noqa: BLE001
+                    self.db.add(task)
                 task.status = EvalStatus.FAILED
                 task.error = "Evaluation failed due to an internal error"
                 task.completed_at = datetime.now(UTC)
@@ -686,6 +702,11 @@ class EvaluationService:
         try:
             usd = Decimal(str(avg_usd)) if avg_usd else Decimal("0.10")
         except (InvalidOperation, ValueError):
+            # R134 ([F6]): log — a SYSTEMATIC non-numeric scalar (driver
+            # regression) would silently degrade every estimate to $0.10,
+            # firing hard-stop budgets late and under-holding prepay
+            # reservations. One warn per call surfaces the regression.
+            log.warning("eval_cost_estimate_non_numeric", org_id=org_id, raw=str(avg_usd))
             usd = Decimal("0.10")
         try:
             tenant = await get_tenant_for_org(self.db, org_id)
@@ -1214,6 +1235,10 @@ Please evaluate the submission against the rubric above."""
         try:
             submission = await self.db.get(Submission, task.submission_id)
         except Exception:  # noqa: BLE001 — refs are optional enrichment
+            # R134 ([F5]): log the swallow — silently dropping project/user
+            # refs makes scoped BudgetPolicies see 0 spend for this event
+            # (the R67[5] regression) with no signal otherwise.
+            log.warning("eval_usage_refs_lookup_failed", task_id=task.id)
             submission = None
         common = {
             "tenant_id": tenant_id,

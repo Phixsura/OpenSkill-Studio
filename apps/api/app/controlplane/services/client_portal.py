@@ -381,6 +381,10 @@ async def final_accept(
     racer gets IntegrityError mapped to 409). Completes the client brief."""
     submission = await assert_shared(db, principal.project_id, submission_id)
     _assert_decidable(submission, "final-accept")
+    # R134 ([F2]): same submission-row serialization the R133 fix gave
+    # approve/request_revision — a concurrent approve/revision and a
+    # final-accept otherwise interleave their status transitions unlocked.
+    await db.execute(select(Submission.id).where(Submission.id == submission.id).with_for_update())
     record = _record(principal, submission, "final_accepted", comment)
     from sqlalchemy.exc import IntegrityError
 
@@ -399,7 +403,7 @@ async def final_accept(
     if project is not None and project.client_brief_id:
         from app.models.client_brief import BriefStatus, ClientBrief
 
-        await db.execute(
+        brief_result = await db.execute(
             update(ClientBrief)
             .where(
                 ClientBrief.id == project.client_brief_id,
@@ -409,6 +413,11 @@ async def final_accept(
             )
             .values(status=BriefStatus.COMPLETED)
         )
+        # R134 ([F1]): record whether THIS acceptance flipped the brief —
+        # void-final only rewinds when it did (a brief the org completed
+        # deliberately beforehand must stay COMPLETED after the void).
+        if brief_result.rowcount:
+            record.completed_brief = True
     await _notify_org(db, principal, submission, "client_final_accepted")
     return record
 

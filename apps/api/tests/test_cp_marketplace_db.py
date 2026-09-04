@@ -1884,9 +1884,7 @@ async def test_seat_capacity_upgrade_honored_by_gate(db):
             expires_at=None,
             actor=_actor(seller_user),
         )
-    covering = await _find_covering_grant(
-        db, "skill_pack", pack.id, buyer_tenant.id, buyer_org.id
-    )
+    covering = await _find_covering_grant(db, "skill_pack", pack.id, buyer_tenant.id, buyer_org.id)
     assert covering is not None and covering.seat_limit == 10, (
         "resolver must prefer the roomier (upgraded) seat cap"
     )

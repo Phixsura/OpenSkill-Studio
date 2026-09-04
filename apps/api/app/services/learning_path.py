@@ -288,8 +288,6 @@ class LearningPathService:
                 # query ignored expires_at (expired grants redeemed forever),
                 # grant org scope and seat limits (org B could redeem org A's
                 # grant). The canonical helper enforces all of them.
-                from app.controlplane.services.marketplace import _find_covering_grant
-
                 tenant_id = getattr(org, "tenant_id", None)
                 # R130: own-tenant bypass — a tenant installing its OWN
                 # unlisted path into a sibling org needs no grant (mirrors
@@ -312,19 +310,34 @@ class LearningPathService:
                     src_org = await self.db.get(Organization, source.org_id)
                     own = src_org is not None and getattr(src_org, "tenant_id", None) == tenant_id
                 if not own:
-                    grant = await _find_covering_grant(
+                    from app.controlplane.services.marketplace import (
+                        _covering_grants,
+                        enforce_seat_limit,
+                    )
+
+                    covering = await _covering_grants(
                         self.db, "learning_path", product_id, tenant_id, org_id
                     )
-                    if grant is None:
+                    if not covering:
                         # uniform 404 — never reveal the path exists to a
                         # non-licensee
                         raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
                     # R130[5]: seat_limited caps bind on this path too —
                     # check_install_license (which enforces them) is
-                    # unreachable for listing-less products.
-                    from app.controlplane.services.marketplace import enforce_seat_limit
-
-                    await enforce_seat_limit(self.db, grant, org_id)
+                    # unreachable for listing-less products. R134 ([F8]): pass
+                    # if ANY covering grant permits it (single-widest let a
+                    # roomier tenant-wide cap 403 an install the org grant
+                    # allows).
+                    seat_error: AppError | None = None
+                    for _g in covering:
+                        try:
+                            await enforce_seat_limit(self.db, _g, org_id)
+                            seat_error = None
+                            break
+                        except AppError as _e:
+                            seat_error = _e
+                    if seat_error is not None:
+                        raise seat_error
         source_product_id = listing.product_id if listing is not None else product_id
         assert source_product_id is not None  # by the request model's one-of rule
 

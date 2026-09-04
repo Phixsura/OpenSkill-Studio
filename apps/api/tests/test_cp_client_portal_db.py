@@ -610,3 +610,81 @@ async def test_tenant_audit_endpoint_flattens_jsonb(db):
     assert out["nested"] == "[…]"
     assert out["arr"] == "[…]"
     assert _scalar_summary(None) is None
+
+
+@pytest.mark.asyncio
+async def test_void_final_rewinds_brief_only_when_acceptance_completed_it(db):
+    """R133[F13]/R134[F1]: void-final rewinds the brief COMPLETED→REVIEW only
+    when THIS acceptance performed the transition — a brief the org completed
+    deliberately beforehand stays COMPLETED."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+    from app.models.client_brief import BriefStatus, ClientBrief
+
+    # Case A: acceptance completes the brief → void rewinds it.
+    user = await _mk_user(db)
+    org, tenant, brief, project, submission = await _mk_project_env(db, user)
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
+    await db.flush()
+    auth = await _guest_auth(db, project, user, role="approver")
+    principal = await portal_svc.get_client_principal(db, project.id, auth)
+    final = await portal_svc.final_accept(db, principal, submission.id, "done")
+    assert final.completed_brief is True
+    brief_row = await db.get(ClientBrief, brief.id)
+    assert brief_row.status == BriefStatus.COMPLETED
+    org_id, project_id, brief_id = org.id, project.id, brief.id
+    token = create_access_token(user.id, user.email, user.role.value)
+    await db.commit()
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/orgs/{org_id}/projects/{project_id}/client-approvals/void-final",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 200, r.text
+    finally:
+        app.router.lifespan_context = orig
+    db.expire_all()
+    rewound = await db.get(ClientBrief, brief_id)
+    assert rewound.status == BriefStatus.REVIEW, "acceptance-completed brief must rewind"
+
+    # Case B: org completed the brief BEFORE the acceptance → void leaves it.
+    user2 = await _mk_user(db)
+    org2, tenant2, brief2, project2, submission2 = await _mk_project_env(db, user2)
+    db.add(ClientShare(project_id=project2.id, submission_id=submission2.id, shared_by=user2.id))
+    # Org deliberately completes the brief first.
+    b2 = await db.get(ClientBrief, brief2.id)
+    b2.status = BriefStatus.COMPLETED
+    await db.flush()
+    auth2 = await _guest_auth(db, project2, user2, role="approver")
+    principal2 = await portal_svc.get_client_principal(db, project2.id, auth2)
+    final2 = await portal_svc.final_accept(db, principal2, submission2.id, "ok")
+    assert final2.completed_brief is False, "acceptance did not transition the brief"
+    org2_id, project2_id, brief2_id = org2.id, project2.id, brief2.id
+    token2 = create_access_token(user2.id, user2.email, user2.role.value)
+    await db.commit()
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/orgs/{org2_id}/projects/{project2_id}/client-approvals/void-final",
+                headers={"Authorization": f"Bearer {token2}"},
+            )
+            assert r.status_code == 200, r.text
+    finally:
+        app.router.lifespan_context = orig
+    db.expire_all()
+    untouched = await db.get(ClientBrief, brief2_id)
+    assert untouched.status == BriefStatus.COMPLETED, (
+        "a brief the org completed deliberately must survive the void"
+    )

@@ -1051,3 +1051,76 @@ async def test_fx_chunk_reenqueue_carries_cursor(db):
     finally:
         outbox_mod.enqueue = orig_enqueue
     assert enqueued == [], "no full chunk → no re-enqueue"
+
+
+@pytest.mark.asyncio
+async def test_unvoid_polarity_and_double_correct_gates(db):
+    """R134 ([F11]): unvoid gate polarity. Restoring a voided ADJUSTMENT is
+    ALLOWED only when its original is live (normal compensating pair);
+    BLOCKED when the original is struck (would credit with no charge).
+    Restoring an ORIGINAL is always safe."""
+
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services.rating import unvoid_rated
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    org_id = "01JBLORGRAT000000000000000"
+
+    async def _event(adjustment_of=None):
+        ev = UsageEvent(
+            tenant_id=tenant.id,
+            org_id=org_id,
+            usage_type="api_request",
+            quantity=1,
+            unit="requests",
+            occurred_at=datetime.now(UTC),
+            source="adjustment" if adjustment_of else "manual",
+            adjustment_of_id=adjustment_of,
+        )
+        db.add(ev)
+        await db.flush()
+        return ev
+
+    async def _rated(ev, status, amount):
+        r = RatedUsage(
+            usage_event_id=ev.id,
+            tenant_id=tenant.id,
+            org_id=org_id,
+            usage_type=ev.usage_type,
+            quantity=ev.quantity,
+            cost_rate_snapshot={},
+            internal_cost_minor=0,
+            internal_cost_currency="USD",
+            sell_rate_snapshot={},
+            billable_amount_minor=amount,
+            billable_currency="USD",
+            status=status,
+        )
+        db.add(r)
+        await db.flush()
+        return r
+
+    # Original live (rated $100); adjustment VOIDED (-$100).
+    orig_ev = await _event()
+    await _rated(orig_ev, "rated", 100)
+    adj_ev = await _event(adjustment_of=orig_ev.id)
+    adj_rated = await _rated(adj_ev, "voided", -100)
+    # Restoring the adjustment onto a LIVE original is the normal state → OK.
+    restored = await unvoid_rated(
+        db, adj_rated.id, reason="adjustment was correct", actor=_actor(user)
+    )
+    assert restored.status == "rated"
+
+    # Now the forbidden shape: original VOIDED, adjustment VOIDED; restoring
+    # the adjustment would credit with no offsetting charge → 409.
+    orig2 = await _event()
+    o2r = await _rated(orig2, "voided", 100)
+    adj2 = await _event(adjustment_of=orig2.id)
+    a2r = await _rated(adj2, "voided", -100)
+    with pytest.raises(AppError) as exc:
+        await unvoid_rated(db, a2r.id, reason="try", actor=_actor(user))
+    assert exc.value.code == "RATED_USAGE_INVOICED"
+    # Restoring the ORIGINAL is always safe.
+    restored_o = await unvoid_rated(db, o2r.id, reason="fix original", actor=_actor(user))
+    assert restored_o.status == "rated"
