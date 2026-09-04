@@ -390,6 +390,19 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   endpoint); PUT-archive now applies delete_path's cleanup. The cp19
   re-point step was dropped after its audit showed it could resurrect
   deliberately retired content onto a re-installed copy.
+- **R132**: 22 confirmed (25 raw) — fourth fix-of-fix pass plus a fresh
+  convergence probe. The grant-width rule was completed structurally
+  (grant_covers_listing_width: scope + duration + seat capacity, one shared
+  helper for precheck and mint — an expiring trial grant no longer swallows
+  a perpetual paid purchase, and the widest covering grant wins); the
+  resale gate closed its last door (manual-grant copies were re-listable);
+  tenant-wide seat caps now bind tenant-wide (per-org counting allowed N×
+  the licensed seats). Billing converged on ONE lock order (Sub → period →
+  credit), dissolving two ABBA deadlock pairs, and the void re-close was
+  proven correct against forward-window immediate changes (it had re-billed
+  a rewound period at the wrong plan and silently reverted a paid upgrade).
+  The outbox reaper finally purges done rows; outbox test debris is cleaned
+  at the source.
 
 ## 4. Convergence
 
@@ -415,10 +428,11 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~505 confirmed defects fixed across 53 remediation commits**: ~230 from
+- **~527 confirmed defects fixed across 54 remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
-  R113–R122, 44 from R123–R128, 25 from R129, 38 from R130 and 16 from
-  R131 (fix-of-fix + fresh surfaces), on top of the 12-phase delivery.
+  R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131
+  and 22 from R132 (fix-of-fix + fresh surfaces), on top of the 12-phase
+  delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed
   customers forever, one that silently kept collected cash on credit
