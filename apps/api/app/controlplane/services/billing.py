@@ -772,6 +772,23 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         return None  # already closed/invoiced by a concurrent worker
     tenant = await db.get(TenantAccount, period.tenant_id)
 
+    # R134 ([2]): change watermark, taken UNDER the Subscription FOR UPDATE.
+    # change_plan also inserts SubscriptionChange rows only while holding that
+    # lock, so every change row is either committed before this point (visible
+    # here, id <= watermark) or serialized after this close commits (id >
+    # watermark). Transaction timestamps do NOT give this property — a change
+    # whose tx opened before the close's tx but queued behind the sub lock
+    # carries created_at < the close's now() while its from_* are post-
+    # rollover values. The watermark is the divider a re-close uses to decide
+    # which changes the original close could have seen.
+    change_watermark = (
+        await db.execute(
+            select(func.max(SubscriptionChange.id)).where(
+                SubscriptionChange.subscription_id == sub.id
+            )
+        )
+    ).scalar_one_or_none()
+
     # R41[1]/[2]: bill this closed period in arrears on the plan/seats that were
     # in effect at its START, then let the proration lines below charge the delta
     # for any mid-period immediate change. Using the CURRENT sub.plan_version_id
@@ -803,51 +820,78 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .limit(1)
         )
     ).scalar_one_or_none()
-    # R132 ([19]) / R133 ([F2] rework): on a RE-close after a void-rewind, the
-    # no-upper-bound rule is wrong — an immediate change made in the (deleted)
-    # FORWARD window has from_* = post-rollover values. But a close-lag GAP
-    # change (landed after period_end yet BEFORE the original close) is a
-    # legit anchor whose from_* holds the true period values — the R132
-    # in-period-only re-bound wrongly dropped it too. The original close time
-    # (the voided invoice's finalized_at) is the correct divider: anchor on
-    # the earliest immediate change CREATED before the original close.
-    if first_change is not None and first_change.effective_at > period.period_end:
-        void_marker = (
-            await db.execute(
-                select(Invoice.created_at)
-                .where(
-                    Invoice.billing_period_id == period.id,
-                    Invoice.status == "void",
-                )
-                .order_by(Invoice.created_at)
-                .limit(1)
+    # R134 ([1]/[2], R133 [F2] rework): on a RE-close, do not re-DERIVE the
+    # basis at all — the original close stamped its computed basis into the
+    # (now void) invoice's close_snapshot under this same Sub lock. The
+    # period-start plan/seats are a historical fact voiding cannot change, so
+    # the snapshot is always right, while every derivation heuristic has a
+    # losing case: a forward-window immediate change that owns an axis left
+    # first_change None and the fallback billed the FORWARD values ([1]); a
+    # close-concurrent change's transaction timestamp orders before the
+    # close's despite carrying post-rollover from_* — now() is fixed at tx
+    # BEGIN, not at sub-lock acquisition, so timestamp order does not track
+    # lock serialization ([2]).
+    reclose_snapshot: dict | None = (
+        await db.execute(
+            select(Invoice.close_snapshot)
+            .where(
+                Invoice.billing_period_id == period.id,
+                Invoice.status == "void",
+                Invoice.close_snapshot.isnot(None),
             )
-        ).first()
-        if void_marker is not None:
-            # DB-clock timestamp (server_default now()) — comparable to
-            # SubscriptionChange.created_at (same clock); finalized_at is
-            # app-clock and skews against it.
-            original_close_at = void_marker.created_at
-            first_change = (
+            # FIRST void's snapshot: across stacked void/re-close cycles its
+            # watermark keeps partitioning changes into "seen by the original
+            # rollover" vs "forward-window", so every re-close reproduces the
+            # same fold decisions.
+            .order_by(Invoice.created_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if reclose_snapshot is not None:
+        start_version_id = reclose_snapshot["start_version_id"]
+        start_seats = reclose_snapshot["start_seats"]
+    else:
+        # Legacy re-bound (R132 [19] / R133 [F2]) for periods whose void
+        # invoice predates close_snapshot: the original close time (the void
+        # invoice's DB-clock created_at) divides gap anchors from
+        # forward-window changes. Subject to the [2] tx-timestamp residual —
+        # accepted for the legacy transition only.
+        if first_change is not None and first_change.effective_at > period.period_end:
+            void_marker = (
                 await db.execute(
-                    select(SubscriptionChange)
+                    select(Invoice.created_at)
                     .where(
-                        SubscriptionChange.subscription_id == sub.id,
-                        SubscriptionChange.proration_mode == "immediate",
-                        SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
-                        SubscriptionChange.effective_at >= period.period_start,
-                        SubscriptionChange.created_at < original_close_at,
+                        Invoice.billing_period_id == period.id,
+                        Invoice.status == "void",
                     )
-                    .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
+                    .order_by(Invoice.created_at)
                     .limit(1)
                 )
-            ).scalar_one_or_none()
-    start_version_id = first_change.from_plan_version_id if first_change else sub.plan_version_id
-    start_seats = (
-        first_change.from_seats
-        if first_change and first_change.from_seats is not None
-        else sub.seat_quantity
-    )
+            ).first()
+            if void_marker is not None:
+                original_close_at = void_marker.created_at
+                first_change = (
+                    await db.execute(
+                        select(SubscriptionChange)
+                        .where(
+                            SubscriptionChange.subscription_id == sub.id,
+                            SubscriptionChange.proration_mode == "immediate",
+                            SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
+                            SubscriptionChange.effective_at >= period.period_start,
+                            SubscriptionChange.created_at < original_close_at,
+                        )
+                        .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+        start_version_id = (
+            first_change.from_plan_version_id if first_change else sub.plan_version_id
+        )
+        start_seats = (
+            first_change.from_seats
+            if first_change and first_change.from_seats is not None
+            else sub.seat_quantity
+        )
     version = await db.get(PlanVersion, start_version_id)
     plan = await db.get(ProductPlan, version.plan_id)
     price = (
@@ -902,6 +946,25 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
         provider=sub.provider,
         issued_at=_now(),
         due_at=_now() + timedelta(days=14),
+        # R134 ([0]/[1]/[2]/[15]): freeze this close's decisions so a future
+        # void/re-close reproduces them instead of re-deriving from mutable
+        # state. On a re-close, carry the ORIGINAL close's watermark + basis
+        # forward (they are the stable historical facts across stacked
+        # void/re-close cycles); the fold outcome (stamped after the fold
+        # below) is per-invoice.
+        close_snapshot=(
+            {
+                "change_watermark": reclose_snapshot.get("change_watermark"),
+                "start_version_id": start_version_id,
+                "start_seats": start_seats,
+            }
+            if reclose_snapshot is not None
+            else {
+                "change_watermark": change_watermark,
+                "start_version_id": start_version_id,
+                "start_seats": start_seats,
+            }
+        ),
     )
     db.add(invoice)
     await db.flush()
@@ -1390,28 +1453,47 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             .scalars()
             .all()
         )
-        # R132 ([19]) / R133 ([F3]/[F5] rework): on a RE-rollover after a
-        # void-rewind, the re-armed deferred change may be chronologically
-        # OLDER than an immediate change the tenant made in the forward
-        # window — blindly folding it clobbers the paid immediate upgrade.
-        # The R132 supersede check was too blunt: (a) it fired in the NORMAL
-        # close path too, dropping a legit scheduled downgrade whenever ANY
-        # later immediate change existed; (b) it was axis-blind (a seat bump
-        # suppressed a plan downgrade); (c) a skipped change was still marked
-        # invoiced — consumed with no effect and no bill. Now: supersede only
-        # applies on a RE-rollover (a void invoice marks the period), only
-        # PER AXIS, and a fully-superseded axis is simply dropped (its effect
-        # was replaced by the later paid change; nothing to re-apply).
-        is_reclose = (
-            await db.execute(
-                select(Invoice.id)
-                .where(
-                    Invoice.billing_period_id == period.id,
-                    Invoice.status == "void",
+        # R132 ([19]) / R133 ([F3]/[F5]) / R134 ([0]) rework: on a RE-rollover
+        # after a void-rewind, a deferred change may be superseded by an
+        # immediate change the tenant made in the FORWARD window (after the
+        # original close) — blindly folding it clobbers the paid change. But
+        # ONLY forward-window changes supersede: an in-period immediate change
+        # (created before the original close) was already applied and then
+        # folded-over by the original close's unconditional fold, so the
+        # re-close must reproduce that fold, not drop the deferred change.
+        # R134 [0]: the R133 check used global id order (any later immediate
+        # change), which let an in-period immediate change falsely consume the
+        # deferred downgrade on re-close. The correct divider is the original
+        # close's change WATERMARK (stamped in the void invoice's
+        # close_snapshot under the same Sub lock): supersede iff an immediate
+        # real change on the axis has id > watermark. Supersede stays per-axis
+        # (from != to is the real-change discriminator — change_plan copies
+        # both to_* columns on every row) and only fires on a re-rollover.
+        fold_divider: str | None = None
+        is_reclose = reclose_snapshot is not None
+        if is_reclose:
+            # Empty-string sentinel: no changes existed at the original close,
+            # so EVERY immediate change is forward-window ('' < any ULID).
+            fold_divider = reclose_snapshot.get("change_watermark") or ""
+        else:
+            # Legacy re-close (void predates close_snapshot): keep the R133
+            # global-id-order supersede — per-change, below.
+            is_reclose = (
+                await db.execute(
+                    select(Invoice.id)
+                    .where(
+                        Invoice.billing_period_id == period.id,
+                        Invoice.status == "void",
+                    )
+                    .limit(1)
                 )
-                .limit(1)
-            )
-        ).scalar_one_or_none() is not None
+            ).scalar_one_or_none() is not None
+        # R134 ([15]): pre-fold values, stamped into close_snapshot below so a
+        # void rewind restores the sub to exactly this state — the R133 [F4]
+        # earliest-change restore broke on 2+ stacked deferred changes
+        # (last-wins fold ≠ earliest change's to_*).
+        pre_fold_version_id = sub.plan_version_id
+        pre_fold_seats = sub.seat_quantity
         for change in pending:
             # An axis where to == from is a copied placeholder, not a change.
             fold_plan = (
@@ -1420,14 +1502,18 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             )
             fold_seats = change.to_seats is not None and change.to_seats != change.from_seats
             if is_reclose:
-                # R133 (verifier follow-up): the axis discriminator is
-                # from != to — change_plan populates BOTH to_* columns on
-                # every row (unchanged axes carry copied values), so
-                # isnot(None) matched everything and an unrelated seat bump
-                # still falsely superseded a deferred plan downgrade.
+                # ULID ids are time-ordered — created_at (server_default
+                # now()) ties within one tx, so id is the recency order.
+                # max(watermark, change.id): an in-period deferred change
+                # (id <= watermark) is superseded only by FORWARD-window
+                # immediate changes; a post-void deferred change (id >
+                # watermark) only by immediate changes made after ITSELF —
+                # a forward immediate change the tenant scheduled the
+                # deferred change ON TOP OF must not consume it.
+                plan_divider = (
+                    max(fold_divider, change.id) if fold_divider is not None else change.id
+                )
                 if fold_plan:
-                    # ULID ids are time-ordered — created_at (server_default
-                    # now()) ties within one tx, so id is the recency order.
                     later_plan = (
                         await db.execute(
                             select(SubscriptionChange.id)
@@ -1437,7 +1523,7 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                                 SubscriptionChange.to_plan_version_id.isnot(None),
                                 SubscriptionChange.to_plan_version_id
                                 != SubscriptionChange.from_plan_version_id,
-                                SubscriptionChange.id > change.id,
+                                SubscriptionChange.id > plan_divider,
                             )
                             .limit(1)
                         )
@@ -1452,7 +1538,7 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
                                 SubscriptionChange.proration_mode == "immediate",
                                 SubscriptionChange.to_seats.isnot(None),
                                 SubscriptionChange.to_seats != SubscriptionChange.from_seats,
-                                SubscriptionChange.id > change.id,
+                                SubscriptionChange.id > plan_divider,
                             )
                             .limit(1)
                         )
@@ -1463,6 +1549,17 @@ async def close_period_and_invoice(db: AsyncSession, period_id: str) -> Invoice 
             if fold_seats:
                 sub.seat_quantity = change.to_seats
             change.invoiced = True
+        # R134 ([15]): freeze this rollover's fold outcome — void_invoice
+        # restores per-axis from pre_fold when the sub still carries the
+        # post_fold value (a later immediate change owning the axis makes
+        # them differ, correctly skipping the restore).
+        invoice.close_snapshot = {
+            **(invoice.close_snapshot or {}),
+            "pre_fold_version_id": pre_fold_version_id,
+            "pre_fold_seats": pre_fold_seats,
+            "post_fold_version_id": sub.plan_version_id,
+            "post_fold_seats": sub.seat_quantity,
+        }
         if pending:
             await invalidate_cache(tenant.id)
             # R64[16]/R94[H4]: push the now-applied deferred change to the
@@ -1846,51 +1943,70 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
                 sub.current_period_start = period.period_start
                 if rolled or period.period_end > sub.current_period_end:
                     sub.current_period_end = period.period_end
-                # R132 ([F16]): the rollover close FOLDED next_period changes
-                # into sub.plan_version_id/seat_quantity at this period's end.
-                # Un-invoicing them (above) without restoring the sub's fields
-                # made the re-close bill the period at the NEW plan (arrears
-                # billing falls back to sub.plan_version_id when no immediate
-                # change anchors the period start). Restore from the EARLIEST
-                # rollover-applied change's from_* — the re-close's rollover
-                # branch re-applies them afterwards exactly as the original
-                # close did.
-                first_rollover_change = (
-                    (
-                        await db.execute(
-                            select(SubscriptionChange)
-                            .where(
-                                SubscriptionChange.subscription_id == sub.id,
-                                SubscriptionChange.proration_mode == "next_period",
-                                SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
-                                SubscriptionChange.effective_at == period.period_end,
+                # R132 ([F16]) / R133 ([F4]) / R134 ([15]): the rollover close
+                # FOLDED next_period changes into sub.plan_version_id /
+                # seat_quantity at this period's end. Un-invoicing them
+                # (above) without restoring the sub's fields made the re-close
+                # bill the period at the NEW plan. Restore from the voided
+                # invoice's close_snapshot: per axis, when the sub still
+                # carries the fold's post_fold value, rewind to pre_fold. The
+                # R133 earliest-change restore broke on 2+ stacked deferred
+                # changes ([15]): the fold is last-wins, so the sub held the
+                # LAST change's to_* while the guard compared against the
+                # EARLIEST change's — the restore silently skipped and the
+                # re-close billed the period at the folded (cheaper) plan.
+                # The [F4] rule is unchanged: an axis a later immediate
+                # change owns (sub value != post_fold) is NOT reverted —
+                # that would revert the tenant's paid change.
+                snap = invoice.close_snapshot if rolled else None
+                if snap is not None and "post_fold_version_id" in snap:
+                    if (
+                        snap["pre_fold_version_id"] is not None
+                        and sub.plan_version_id == snap["post_fold_version_id"]
+                    ):
+                        sub.plan_version_id = snap["pre_fold_version_id"]
+                    if (
+                        snap["pre_fold_seats"] is not None
+                        and sub.seat_quantity == snap["post_fold_seats"]
+                    ):
+                        sub.seat_quantity = snap["pre_fold_seats"]
+                else:
+                    # Legacy restore for invoices that predate close_snapshot
+                    # (earliest rollover-applied change's from_*, per-axis
+                    # guarded) — carries the known [15] stacked-change gap for
+                    # the transition window only.
+                    first_rollover_change = (
+                        (
+                            await db.execute(
+                                select(SubscriptionChange)
+                                .where(
+                                    SubscriptionChange.subscription_id == sub.id,
+                                    SubscriptionChange.proration_mode == "next_period",
+                                    SubscriptionChange.change_type.in_(
+                                        ["plan_change", "seat_change"]
+                                    ),
+                                    SubscriptionChange.effective_at == period.period_end,
+                                )
+                                .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
+                                .limit(1)
                             )
-                            .order_by(SubscriptionChange.effective_at, SubscriptionChange.id)
-                            .limit(1)
-                        )
-                    ).scalar_one_or_none()
-                    # only a ROLLOVER close folds next_period changes —
-                    # terminal closes cancel without applying them.
-                    if rolled
-                    else None
-                )
-                # R133 ([F4]): only revert a value the fold LEFT IN FORCE — a
-                # later immediate change may have moved the sub since the
-                # rollover (its to_* is what the sub holds now); reverting to
-                # the deferred change's from_* would revert the tenant's paid
-                # change. Per axis: restore only when the sub still carries
-                # the deferred change's to_* value.
-                if first_rollover_change is not None:
-                    if (
-                        first_rollover_change.from_plan_version_id is not None
-                        and sub.plan_version_id == first_rollover_change.to_plan_version_id
-                    ):
-                        sub.plan_version_id = first_rollover_change.from_plan_version_id
-                    if (
-                        first_rollover_change.from_seats is not None
-                        and sub.seat_quantity == first_rollover_change.to_seats
-                    ):
-                        sub.seat_quantity = first_rollover_change.from_seats
+                        ).scalar_one_or_none()
+                        # only a ROLLOVER close folds next_period changes —
+                        # terminal closes cancel without applying them.
+                        if rolled
+                        else None
+                    )
+                    if first_rollover_change is not None:
+                        if (
+                            first_rollover_change.from_plan_version_id is not None
+                            and sub.plan_version_id == first_rollover_change.to_plan_version_id
+                        ):
+                            sub.plan_version_id = first_rollover_change.from_plan_version_id
+                        if (
+                            first_rollover_change.from_seats is not None
+                            and sub.seat_quantity == first_rollover_change.to_seats
+                        ):
+                            sub.seat_quantity = first_rollover_change.from_seats
                 # R130 (rework of R129[C1]): do NOT resurrect a cancelled sub.
                 # The R129 restore-to-cancel_at_period_end fixed the original
                 # perpetual-rebill, but the transient state was (a) a second

@@ -141,6 +141,13 @@ class Invoice(Base):
     external_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     void_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # R134 ([0]/[1]/[2]/[15]): stamped by close_period_and_invoice under the
+    # Subscription FOR UPDATE — {change_watermark, start_version_id,
+    # start_seats, pre_fold_version_id, pre_fold_seats, post_fold_*}. A
+    # void/re-close reads the ORIGINAL close's basis and fold outcome from
+    # here instead of re-deriving them from timestamps (whose order does not
+    # track sub-lock serialization) or global change-id order.
+    close_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(26), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

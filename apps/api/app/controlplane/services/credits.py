@@ -162,6 +162,7 @@ async def grant_promotional(
     expires_at: datetime,
     reason: str,
     actor: Actor,
+    idempotency_key: str | None = None,
 ) -> CreditLedgerEntry:
     if amount_minor <= 0:
         raise AppError("VALIDATION_ERROR", "Grant amount must be positive", 422)
@@ -174,7 +175,19 @@ async def grant_promotional(
         reason=reason,
         expires_at=expires_at,
         created_by=actor.user_id,
+        # R134 ([F14]): dedup on the key — a retried grant is idempotent.
+        idempotency_key=idempotency_key,
     )
+    if entry is None:
+        # Duplicate key → return the original grant (idempotent), no re-audit.
+        return (
+            await db.execute(
+                select(CreditLedgerEntry).where(
+                    CreditLedgerEntry.tenant_id == tenant_id,
+                    CreditLedgerEntry.idempotency_key == idempotency_key,
+                )
+            )
+        ).scalar_one()
     await record_audit(
         db,
         actor=actor,

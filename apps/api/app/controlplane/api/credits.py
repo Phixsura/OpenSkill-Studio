@@ -52,6 +52,10 @@ class GrantPromoRequest(BaseModel):
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     expires_at: datetime
     reason: str = Field(min_length=3, max_length=500)
+    # R134 ([F14]): the only credit-MINTING endpoint that lacked idempotency —
+    # a retried POST double-granted promo credit (adjust/top-up both thread a
+    # key; grant_promotional skipped the dedup SELECT entirely for key=None).
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
 
     @field_validator("expires_at")
     @classmethod
@@ -292,6 +296,7 @@ async def grant_promotional(
         expires_at=body.expires_at,
         reason=body.reason,
         actor=make_actor(request, user),
+        idempotency_key=body.idempotency_key,
     )
     await db.commit()
     return DataResponse(data=_ledger_response(entry))

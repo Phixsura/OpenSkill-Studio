@@ -417,8 +417,10 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   unvoid re-drive). Stale surfaces: domain-squat via 'failed' status
   evicted; void-final rewinds the stuck-COMPLETED brief; portal decisions
   serialize on the submission row.
-- **R134**: 13 confirmed (~15 raw) — sixth fix-of-fix pass plus a route
-  sweep. Two correctness INVERSIONS in the R133 fixes: the unvoid mirror
+- **R134**: 19 confirmed (17 + 2 follow-through) — sixth fix-of-fix pass plus
+  a route sweep, landed in two batches (the first commit was cut from a
+  partial journal read; the workflow's final output carried 4 more). Two
+  correctness INVERSIONS in the R133 fixes: the unvoid mirror
   gate was backwards (blocked the safe restore, allowed the free-credit
   one), and the stuck-PROCESSING guard sat below a rollback that expired
   the ORM attributes it read (MissingGreenlet escaped, task stuck exactly
@@ -428,6 +430,29 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   skew; void-final now rewinds a brief only when the acceptance completed it
   (new provenance column, cp20). The metering void/unvoid/adjust machinery
   reached a fixpoint after four rounds of refinement.
+- **R134 follow-up (void/re-close snapshot rework)**: the void→re-close
+  machinery's remaining defects were all one disease — the re-close tried to
+  REDERIVE the original close's decisions from mutable state, and every
+  heuristic had a losing case: the fold-supersede keyed on global change-id
+  order (an in-period immediate change falsely consumed a scheduled
+  downgrade on re-close — the [F3] pathology reintroduced through the void
+  path); the arrears fallback billed FORWARD-window plan/seat values when a
+  forward change owned an axis and the restore correctly skipped; the
+  tx-timestamp divider itself mis-ordered close-concurrent changes (now()
+  is fixed at tx BEGIN, not sub-lock acquisition); and the rollover restore
+  rewound only the EARLIEST of stacked deferred changes (last-wins fold ≠
+  earliest's to_*, so the guard skipped and the re-close billed the folded
+  cheaper plan). Cure: cp_invoices.close_snapshot (migration cp21) — each
+  close stamps its change WATERMARK (max change id under the same Sub FOR
+  UPDATE change_plan inserts under), arrears basis, and pre/post-fold values;
+  the re-close replays the snapshot instead of deriving, the fold-supersede
+  divides forward-window changes at max(watermark, change.id), and the void
+  restore rewinds per-axis from pre_fold when the sub still holds post_fold.
+  Legacy (pre-snapshot) invoices keep the old heuristics for the transition.
+  Plus: grant_promotional gained an idempotency key (the only credit-MINTING
+  path without one — a retried POST double-granted); create_plan /
+  create_draft_version read-then-insert races SAVEPOINT/lock-guarded to
+  409s. All six guard-proven with regression tests.
 
 ## 4. Convergence
 

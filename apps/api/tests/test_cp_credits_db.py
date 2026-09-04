@@ -29,6 +29,11 @@ from app.models.user import User, UserRole, UserStatus
 async def db():
     from app.core.database import engine
 
+    # R134 follow-up: a preceding file can leave pool connections bound to its
+    # (now closed) event loop — the first checkout here then dies with
+    # "Event loop is closed". Abandon any stale pool without touching the
+    # dead-loop connections (close=False), then open fresh ones on this loop.
+    await engine.dispose(close=False)
     async with AsyncSessionLocal() as session:
         yield session
         await session.rollback()
@@ -1720,3 +1725,69 @@ async def test_partial_promo_expiry_completes_later(db):
     # pass 3: no-op
     n3 = await credit_svc.expire_promotional(db)
     assert n3 == 0
+
+
+@pytest.mark.asyncio
+async def test_grant_promotional_idempotency_key(db):
+    """R134 ([F14]): grant_promotional was the only credit-minting path with
+    no idempotency — a retried POST double-granted promo credit. With a key,
+    the second call returns the ORIGINAL entry and mints nothing."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    key = f"promo-{ULID()}"
+    e1 = await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        5000,
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+        reason="launch promo",
+        actor=a,
+        idempotency_key=key,
+    )
+    e2 = await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        5000,
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+        reason="launch promo",
+        actor=a,
+        idempotency_key=key,
+    )
+    assert e2.id == e1.id, "retried grant must return the original entry"
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(
+                TenantCreditBalance.tenant_id == tenant.id,
+                TenantCreditBalance.currency == "USD",
+            )
+        )
+    ).scalar_one()
+    assert balance.balance_minor == 5000, "the retry must not double-grant"
+    entries = (
+        (
+            await db.execute(
+                select(CreditLedgerEntry).where(
+                    CreditLedgerEntry.tenant_id == tenant.id,
+                    CreditLedgerEntry.entry_type == "promotional",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(entries) == 1
+    # No key → each call mints (documented behavior for key-less callers).
+    await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        1000,
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+        reason="keyless",
+        actor=a,
+    )
+    await db.refresh(balance)
+    assert balance.balance_minor == 6000

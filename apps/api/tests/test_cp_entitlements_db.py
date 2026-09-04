@@ -30,6 +30,11 @@ from app.models.user import User, UserRole, UserStatus
 async def db():
     from app.core.database import engine
 
+    # R134 follow-up: a preceding file can leave pool connections bound to its
+    # (now closed) event loop — the first checkout here then dies with
+    # "Event loop is closed". Abandon any stale pool without touching the
+    # dead-loop connections (close=False), then open fresh ones on this loop.
+    await engine.dispose(close=False)
     async with AsyncSessionLocal() as session:
         yield session
         await session.rollback()
@@ -342,6 +347,14 @@ async def test_concurrent_activate_single_winner():
             )
             assert active_count <= 1
     finally:
+        # Committed rows must be swept — the shared dev DB otherwise
+        # accumulates one junk plan per run (R134 follow-up hygiene).
+        async with AsyncSessionLocal() as s:
+            from sqlalchemy import delete as _delete
+
+            await s.execute(_delete(PlanVersion).where(PlanVersion.plan_id == plan.id))
+            await s.execute(_delete(ProductPlan).where(ProductPlan.id == plan.id))
+            await s.commit()
         await engine.dispose()
 
 
@@ -596,6 +609,7 @@ async def test_external_price_ref_write_path(db):
         await db.execute(select(PlanPrice).where(PlanPrice.plan_version_id == draft.id))
     ).scalar_one()
     price_id = price.id
+    xr_plan_id, xr_draft_id = plan.id, draft.id
     token = create_access_token(user.id, user.email, user.role.value)
     await db.commit()
 
@@ -619,6 +633,13 @@ async def test_external_price_ref_write_path(db):
     db.expire_all()
     fresh = await db.get(PlanPrice, price_id)
     assert fresh.external_price_ref == "price_1QstripeXYZ"
+    # Sweep the committed plan — shared dev DB hygiene (R134 follow-up).
+    from sqlalchemy import delete as _delete
+
+    await db.execute(_delete(PlanPrice).where(PlanPrice.plan_version_id == xr_draft_id))
+    await db.execute(_delete(PlanVersion).where(PlanVersion.plan_id == xr_plan_id))
+    await db.execute(_delete(ProductPlan).where(ProductPlan.id == xr_plan_id))
+    await db.commit()
 
 
 @pytest.mark.asyncio
@@ -644,6 +665,7 @@ async def test_two_draft_activation_race_deterministic():
             d2 = await plan_svc.create_draft_version(setup, plan, created_by=user.id)
             await setup.commit()
             d1_id, d2_id, user_id = d1.id, d2.id, user.id
+            plan_id = plan.id
 
         async def b_activate():
             async with AsyncSessionLocal() as s:
@@ -678,6 +700,13 @@ async def test_two_draft_activation_race_deterministic():
                 statuses.append(v.status)
             assert statuses.count("active") == 1, statuses
     finally:
+        # Sweep the committed plan — shared dev DB hygiene (R134 follow-up).
+        async with AsyncSessionLocal() as s:
+            from sqlalchemy import delete as _delete
+
+            await s.execute(_delete(PlanVersion).where(PlanVersion.plan_id == plan_id))
+            await s.execute(_delete(ProductPlan).where(ProductPlan.id == plan_id))
+            await s.commit()
         await engine.dispose()
 
 
@@ -925,3 +954,111 @@ async def test_already_seated_user_joins_second_org_at_cap(db):
     with pytest.raises(AppError) as exc:
         await svc.add_member(org_a.id, other.id, OrgRole.STUDENT)
     assert exc.value.code == "QUOTA_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_draft_version_create_no_500():
+    """R134 ([16]): two concurrent create_draft_version calls both computed
+    max(version)+1 and the loser 500'd on uq_cp_plan_version. The plan-row
+    FOR UPDATE serializes them: both succeed with distinct versions."""
+    from app.core.database import engine
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup, role=UserRole.ADMIN)
+            plan = await plan_svc.create_plan(
+                setup,
+                key=f"drace-{str(ULID()).lower()[:8]}",
+                name="DraftRace",
+                description=None,
+                actor=_actor(user),
+            )
+            await setup.commit()
+            plan_id, user_id = plan.id, user.id
+
+        outcomes: list[str] = []
+
+        async def make_draft():
+            async with AsyncSessionLocal() as s:
+                p = await s.get(ProductPlan, plan_id)
+                try:
+                    await plan_svc.create_draft_version(s, p, created_by=user_id)
+                    await s.commit()
+                    outcomes.append("ok")
+                except AppError:
+                    await s.rollback()
+                    outcomes.append("409")
+                except Exception as exc:  # noqa: BLE001
+                    await s.rollback()
+                    outcomes.append(type(exc).__name__)
+
+        await asyncio.gather(make_draft(), make_draft())
+        assert all(o in ("ok", "409") for o in outcomes), outcomes
+        async with AsyncSessionLocal() as s:
+            versions = (
+                (await s.execute(select(PlanVersion.version).where(PlanVersion.plan_id == plan_id)))
+                .scalars()
+                .all()
+            )
+            assert len(versions) == len(set(versions)), f"duplicate versions: {versions}"
+            assert len(versions) == outcomes.count("ok")
+    finally:
+        async with AsyncSessionLocal() as s:
+            from sqlalchemy import delete as _delete
+
+            await s.execute(_delete(PlanVersion).where(PlanVersion.plan_id == plan_id))
+            await s.execute(_delete(ProductPlan).where(ProductPlan.id == plan_id))
+            await s.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_create_plan_same_key_clean_409():
+    """R134 ([16]): two concurrent create_plan calls with the same key — the
+    loser must get the documented PLAN_EXISTS 409, not an IntegrityError 500
+    (SAVEPOINT-isolated flush)."""
+    from app.core.database import engine
+
+    key = f"krace-{str(ULID()).lower()[:8]}"
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup, role=UserRole.ADMIN)
+            await setup.commit()
+            user_id = user.id
+
+        outcomes: list[str] = []
+
+        async def make_plan():
+            async with AsyncSessionLocal() as s:
+                u = await s.get(User, user_id)
+                try:
+                    await plan_svc.create_plan(
+                        s, key=key, name="KRace", description=None, actor=_actor(u)
+                    )
+                    await s.commit()
+                    outcomes.append("ok")
+                except AppError as e:
+                    await s.rollback()
+                    outcomes.append(e.code)
+                except Exception as exc:  # noqa: BLE001
+                    await s.rollback()
+                    outcomes.append(type(exc).__name__)
+
+        await asyncio.gather(make_plan(), make_plan())
+        assert sorted(outcomes) == ["PLAN_EXISTS", "ok"] or outcomes == ["ok", "ok"], outcomes
+        # ["ok","ok"] would mean both landed — impossible with the unique key;
+        # accept only one row either way:
+        async with AsyncSessionLocal() as s:
+            from sqlalchemy import func as _fn
+
+            count = (
+                await s.execute(select(_fn.count(ProductPlan.id)).where(ProductPlan.key == key))
+            ).scalar_one()
+            assert count == 1
+    finally:
+        async with AsyncSessionLocal() as s:
+            from sqlalchemy import delete as _delete
+
+            await s.execute(_delete(ProductPlan).where(ProductPlan.key == key))
+            await s.commit()
+        await engine.dispose()

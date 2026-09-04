@@ -29,6 +29,11 @@ from app.models.user import User, UserRole, UserStatus
 async def db():
     from app.core.database import engine
 
+    # R134 follow-up: a preceding file can leave pool connections bound to its
+    # (now closed) event loop — the first checkout here then dies with
+    # "Event loop is closed". Abandon any stale pool without touching the
+    # dead-loop connections (close=False), then open fresh ones on this loop.
+    await engine.dispose(close=False)
     async with AsyncSessionLocal() as session:
         yield session
         await session.rollback()
@@ -2702,3 +2707,172 @@ async def test_normal_close_folds_deferred_downgrade_despite_seat_bump(db):
         "immediate seat bump must not suppress it"
     )
     assert sub.seat_quantity == 5, "the seat bump must survive"
+
+
+@pytest.mark.asyncio
+async def test_reclose_reproduces_fold_despite_in_period_immediate_change(db):
+    """R134 ([0]): an IMMEDIATE change made in the same period BEFORE the
+    original close must not supersede the deferred change on re-close — the
+    original rollover folded the deferred change over it, and the re-close
+    must reproduce that outcome (close_snapshot watermark divider), not drop
+    the scheduled downgrade via global id order."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    # (1) deferred downgrade school → community (next_period)…
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="community", seats=None, proration_mode="next_period", actor=a
+    )
+    # (2) …then, later the SAME period, an immediate upgrade school → growth.
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="growth", seats=None, proration_mode="immediate", actor=a
+    )
+    from app.controlplane.models.billing import SubscriptionChange
+
+    deferred = (
+        await db.execute(
+            select(SubscriptionChange).where(
+                SubscriptionChange.subscription_id == sub.id,
+                SubscriptionChange.proration_mode == "next_period",
+            )
+        )
+    ).scalar_one()
+    # (3) original close: arrears anchored on the immediate change's from_*
+    # (school), rollover folds the deferred downgrade → community.
+    inv1 = await _force_close(db, sub)
+    assert inv1 is not None
+    await db.refresh(sub)
+    assert sub.plan_version_id == deferred.to_plan_version_id, (
+        "normal rollover folds the deferred downgrade (R133 [F3])"
+    )
+    # (4) void + (5) re-close: the in-period immediate change (id <= the
+    # original close's watermark) must NOT supersede the deferred change.
+    await billing_svc.void_invoice(db, inv1, reason="dispute", actor=a)
+    inv2 = await billing_svc.close_period_and_invoice(db, inv1.billing_period_id)
+    assert inv2 is not None
+    await db.refresh(sub)
+    assert sub.plan_version_id == deferred.to_plan_version_id, (
+        "re-close must reproduce the original fold — the in-period immediate "
+        "change was already folded-over by the original close"
+    )
+    # And the arrears basis matches the original: period billed at school.
+    assert _plan_lines_total(await _lines(db, inv1), "plan") == _plan_lines_total(
+        await _lines(db, inv2), "plan"
+    ), "re-close must bill the same plan fee as the voided original"
+
+
+@pytest.mark.asyncio
+async def test_reclose_bills_snapshot_seats_when_forward_change_owns_axis(db):
+    """R134 ([1]): forward-window immediate seat bump + voided period whose
+    rollover folded a deferred seat drop — the re-close must bill the voided
+    period at its ORIGINAL seat floor (close_snapshot), not the forward
+    value that sub.seat_quantity now holds. Community plan: included 25,
+    $5 overage — floors must exceed included or the line is vacuously 0."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="community", interval="month", seats=40, provider="manual", actor=a
+    )
+    p1 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    # Backdate so the forward change lands after period_end (production shape).
+    shift = datetime.now(UTC) - timedelta(seconds=1) - p1.period_end
+    p1.period_start = p1.period_start + shift
+    p1.period_end = p1.period_end + shift
+    sub.current_period_start = p1.period_start
+    sub.current_period_end = p1.period_end
+    await db.flush()
+    # Deferred seat drop 40 → 30 (next_period).
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key=None, seats=30, proration_mode="next_period", actor=a
+    )
+    inv1 = await billing_svc.close_period_and_invoice(db, p1.id)
+    assert inv1 is not None
+    await db.refresh(sub)
+    assert sub.seat_quantity == 30, "rollover folds the deferred seat drop"
+    seats1 = _plan_lines_total(await _lines(db, inv1), "seats")
+    # (40-25)*500 scaled by the backdated period's truncation ratio (~30/31).
+    assert seats1 > 0, "floor 40 over included 25 must produce a seats line"
+    # Forward-window immediate seat bump 30 → 300 in period 2.
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key=None, seats=300, proration_mode="immediate", actor=a
+    )
+    await db.refresh(sub)
+    assert sub.seat_quantity == 300
+    # Void P1 → the seat restore is correctly skipped (forward change owns
+    # the axis) — but the re-close must still bill P1 at floor 40.
+    await billing_svc.void_invoice(db, inv1, reason="p1 dispute", actor=a)
+    await db.refresh(sub)
+    assert sub.seat_quantity == 300, "void must not clobber the paid forward seat bump"
+    inv2 = await billing_svc.close_period_and_invoice(db, inv1.billing_period_id)
+    assert inv2 is not None
+    seats2 = _plan_lines_total(await _lines(db, inv2), "seats")
+    assert seats2 == seats1, (
+        f"re-close must bill the voided period at its original seat floor "
+        f"(got {seats2}, original {seats1})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_void_restore_with_stacked_deferred_changes(db):
+    """R134 ([15]): TWO stacked next_period changes fold last-wins at the
+    rollover; voiding that invoice must rewind the sub to the PRE-FOLD plan
+    (close_snapshot), not skip the restore because the sub holds the LAST
+    change's to_* while the legacy guard compared the EARLIEST's."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+    )
+    pre_fold_version = sub.plan_version_id
+    # Two stacked deferred downgrades: growth→school, then growth→community.
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="school", seats=None, proration_mode="next_period", actor=a
+    )
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key="community", seats=None, proration_mode="next_period", actor=a
+    )
+    from app.controlplane.models.billing import SubscriptionChange
+
+    last = (
+        await db.execute(
+            select(SubscriptionChange)
+            .where(
+                SubscriptionChange.subscription_id == sub.id,
+                SubscriptionChange.proration_mode == "next_period",
+            )
+            .order_by(SubscriptionChange.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    inv1 = await _force_close(db, sub)  # rollover: folds BOTH, last-wins
+    assert inv1 is not None
+    await db.refresh(sub)
+    assert sub.plan_version_id == last.to_plan_version_id, "fold is last-wins"
+    growth_fee = _plan_lines_total(await _lines(db, inv1), "plan")
+    assert growth_fee == 49900, "original close bills the pre-fold plan"
+
+    await billing_svc.void_invoice(db, inv1, reason="stacked dispute", actor=a)
+    await db.refresh(sub)
+    assert sub.plan_version_id == pre_fold_version, (
+        "void must rewind to the PRE-FOLD plan even with stacked deferred changes"
+    )
+    inv2 = await billing_svc.close_period_and_invoice(db, inv1.billing_period_id)
+    assert inv2 is not None
+    assert _plan_lines_total(await _lines(db, inv2), "plan") == 49900, (
+        "re-close must bill the voided period at the original (growth) fee, "
+        "not the folded downgrade's"
+    )
+    # And the re-rollover re-applies the stacked fold (last-wins again).
+    await db.refresh(sub)
+    assert sub.plan_version_id == last.to_plan_version_id

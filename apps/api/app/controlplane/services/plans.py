@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controlplane.models.plan import (
@@ -31,7 +32,15 @@ async def create_plan(
         raise AppError("PLAN_EXISTS", f"Plan '{key}' already exists", 409)
     plan = ProductPlan(key=key, name=name, description=description)
     db.add(plan)
-    await db.flush()
+    # R134 ([16]): the read-then-insert races the unique index on key — two
+    # concurrent creates both pass the precheck and the loser 500s on
+    # IntegrityError. SAVEPOINT-isolate the flush so the loser gets the same
+    # 409 the precheck gives (asyncpg poisons the whole tx otherwise).
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        raise AppError("PLAN_EXISTS", f"Plan '{key}' already exists", 409) from None
     return plan
 
 
@@ -39,6 +48,10 @@ async def create_draft_version(
     db: AsyncSession, plan: ProductPlan, *, created_by: str | None
 ) -> PlanVersion:
     """New draft cloning the current active version's entitlements + prices."""
+    # R134 ([16]): serialize concurrent drafts on the plan row — two racing
+    # creates both computed max(version)+1 and the loser 500'd on
+    # uq_cp_plan_version. Same pattern as activate_version's plan lock (R62).
+    await db.execute(select(ProductPlan.id).where(ProductPlan.id == plan.id).with_for_update())
     latest = (
         await db.execute(
             select(func.max(PlanVersion.version)).where(PlanVersion.plan_id == plan.id)

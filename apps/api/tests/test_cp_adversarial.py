@@ -33,6 +33,11 @@ from app.models.user import User, UserRole, UserStatus
 async def db():
     from app.core.database import engine
 
+    # R134 follow-up: a preceding file can leave pool connections bound to its
+    # (now closed) event loop — the first checkout here then dies with
+    # "Event loop is closed". Abandon any stale pool without touching the
+    # dead-loop connections (close=False), then open fresh ones on this loop.
+    await engine.dispose(close=False)
     async with AsyncSessionLocal() as session:
         yield session
         await session.rollback()
