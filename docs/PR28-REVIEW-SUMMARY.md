@@ -363,6 +363,19 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   approves a credit, invoice charges), the tz-gate has_key matched no-op
   round-trips, and both outrun retries went silent over dead-lettered
   originals. Three fixes carry double-sided guard-proofs.
+- **R130**: 38 confirmed (41 raw) — a second fix-of-fix pass, this time over
+  R129. The dominant cluster: R129's grant checks re-implemented license
+  semantics ad-hoc, dropping expiry and scope everywhere (expired grants
+  redeemed forever; a paid renewal collected money and delivered no
+  license; org B could redeem org A's grant) — both gates now delegate to
+  the canonical _find_covering_grant. The R129[C1] void resurrect was
+  itself escapable (tenant Reactivate in the window resurrected a departed
+  customer; a successor sub 500-blocked the void on uq_cp_sub_live) —
+  reworked to keep the sub cancelled and enqueue the re-close directly.
+  Plus: the fx chunk re-enqueue livelocked without its cursor, the cp17
+  in-place rewrite left window-migrated DBs unrepaired (cp19 converge
+  migration), and the model was missing the cp15/17/18 partial indexes
+  (next autogenerate would have DROPPED the race-closing uniques).
 
 ## 4. Convergence
 
@@ -388,10 +401,10 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~450 confirmed defects fixed across 51 remediation commits**: ~230 from
+- **~490 confirmed defects fixed across 52 remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
-  R113–R122, 44 from R123–R128 and 25 from R129 (fix-of-fix + fresh
-  surfaces), on top of the 12-phase feature delivery.
+  R113–R122, 44 from R123–R128, 25 from R129 and 38 from R130 (fix-of-fix
+  - fresh surfaces), on top of the 12-phase feature delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed
   customers forever, one that silently kept collected cash on credit
