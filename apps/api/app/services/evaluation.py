@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 import structlog
 from sqlalchemy import func, select
@@ -680,7 +680,13 @@ class EvaluationService:
                 )
             )
         ).scalar_one_or_none()
-        usd = Decimal(str(avg_usd)) if avg_usd else Decimal("0.10")
+        # R133: total conversion — a non-numeric scalar (driver quirk, or the
+        # mock-DB unit tests) must degrade to the conservative default, not
+        # crash the trigger path with InvalidOperation.
+        try:
+            usd = Decimal(str(avg_usd)) if avg_usd else Decimal("0.10")
+        except (InvalidOperation, ValueError):
+            usd = Decimal("0.10")
         try:
             tenant = await get_tenant_for_org(self.db, org_id)
             currency = tenant.currency
@@ -1201,7 +1207,14 @@ Please evaluate the submission against the rubric above."""
         # R67[5]: thread project/user refs onto the events — project-/user-
         # scoped BudgetPolicies join RatedUsage via these columns; without
         # them scoped policies never accumulated eval spend (gate saw 0).
-        submission = await self.db.get(Submission, task.submission_id)
+        # R133: tolerate the lookup failing — this helper runs inside the
+        # FAILURE handler too, where the triggering fault may be the DB
+        # itself; a re-raise here escaped _execute_evaluation and the task
+        # never persisted FAILED (stuck PROCESSING until the reaper).
+        try:
+            submission = await self.db.get(Submission, task.submission_id)
+        except Exception:  # noqa: BLE001 — refs are optional enrichment
+            submission = None
         common = {
             "tenant_id": tenant_id,
             "org_id": task.org_id,
