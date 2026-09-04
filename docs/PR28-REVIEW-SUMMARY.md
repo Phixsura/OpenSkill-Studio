@@ -376,6 +376,20 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   in-place rewrite left window-migrated DBs unrepaired (cp19 converge
   migration), and the model was missing the cp15/17/18 partial indexes
   (next autogenerate would have DROPPED the race-closing uniques).
+- **R131**: 16 confirmed (19 raw + a dedicated cp19 audit) — third
+  consecutive fix-of-fix pass, this time over R130. One CRITICAL from R130
+  itself: the own-tenant bypass computed "own" as source-org tenant ==
+  installer tenant, so a purchased COPY of another tenant's paid content
+  qualified — the buyer could fan it out to unlicensed sibling orgs and past
+  refund revocation (own now means AUTHORED: provenance-marker-free only).
+  Also: a narrower existing grant suppressed a wider paid mint; the R130
+  stays-cancelled re-close was one-shot (blocked-ratings abort stranded the
+  voided final invoice forever — now re-enqueues with delay); the
+  post-period-end gap previewed net 0 for a ~full-value change; void_rated
+  became bidirectional-safe with adjustments AND reversible (unvoid
+  endpoint); PUT-archive now applies delete_path's cleanup. The cp19
+  re-point step was dropped after its audit showed it could resurrect
+  deliberately retired content onto a re-installed copy.
 
 ## 4. Convergence
 
@@ -401,10 +415,10 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~490 confirmed defects fixed across 52 remediation commits**: ~230 from
+- **~505 confirmed defects fixed across 53 remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
-  R113–R122, 44 from R123–R128, 25 from R129 and 38 from R130 (fix-of-fix
-  - fresh surfaces), on top of the 12-phase feature delivery.
+  R113–R122, 44 from R123–R128, 25 from R129, 38 from R130 and 16 from
+  R131 (fix-of-fix + fresh surfaces), on top of the 12-phase delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed
   customers forever, one that silently kept collected cash on credit
