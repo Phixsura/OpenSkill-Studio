@@ -403,6 +403,20 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   a rewound period at the wrong plan and silently reverted a paid upgrade).
   The outbox reaper finally purges done rows; outbox test debris is cleaned
   at the source.
+- **R133**: 14 confirmed (16 raw + 3 failures from the first-ever complete
+  2121-test run) — fifth fix-of-fix pass plus a stale-surface probe. The
+  R132 fold-supersede was structurally wrong (4 highs): it fired on the
+  NORMAL close path and was axis-blind — a routine seat bump silently
+  dropped and permanently consumed a scheduled plan downgrade (~$300/mo
+  silent overcharge, no recovery). Reworked: re-close-gated, per-axis with
+  from≠to as the real-change discriminator, replaced axes dropped cleanly.
+  The width prechecks now scan ALL covering grants (an expiring trial
+  shadowed a perpetual grant, enabling redundant charges); major_locked
+  binds on the max PAID major. Metering void/unvoid gained full mutual
+  exclusion (both-side locks, mirror gates, quantized retry comparison,
+  unvoid re-drive). Stale surfaces: domain-squat via 'failed' status
+  evicted; void-final rewinds the stuck-COMPLETED brief; portal decisions
+  serialize on the submission row.
 
 ## 4. Convergence
 
@@ -428,11 +442,11 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~527 confirmed defects fixed across 54 remediation commits**: ~230 from
+- **~544 confirmed defects fixed across 56 remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
-  R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131
-  and 22 from R132 (fix-of-fix + fresh surfaces), on top of the 12-phase
-  delivery.
+  R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
+  22 from R132 and 17 from R133 (incl. the full-suite sweep), on top of
+  the 12-phase delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed
   customers forever, one that silently kept collected cash on credit
