@@ -417,6 +417,17 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   unvoid re-drive). Stale surfaces: domain-squat via 'failed' status
   evicted; void-final rewinds the stuck-COMPLETED brief; portal decisions
   serialize on the submission row.
+- **R134**: 13 confirmed (~15 raw) — sixth fix-of-fix pass plus a route
+  sweep. Two correctness INVERSIONS in the R133 fixes: the unvoid mirror
+  gate was backwards (blocked the safe restore, allowed the free-credit
+  one), and the stuck-PROCESSING guard sat below a rollback that expired
+  the ORM attributes it read (MissingGreenlet escaped, task stuck exactly
+  as before). Both reworked + guard-proven. Also: the install seat gate and
+  upgrade major-lock still evaluated a single grant (roomier trial shadowed
+  the paid grant; delisting unlocked all majors); the dual-unvoid write
+  skew; void-final now rewinds a brief only when the acceptance completed it
+  (new provenance column, cp20). The metering void/unvoid/adjust machinery
+  reached a fixpoint after four rounds of refinement.
 
 ## 4. Convergence
 
@@ -442,11 +453,11 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~544 confirmed defects fixed across 56 remediation commits**: ~230 from
+- **~558 confirmed defects fixed across 58 remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
   R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
-  22 from R132 and 17 from R133 (incl. the full-suite sweep), on top of
-  the 12-phase delivery.
+  22 from R132, 17 from R133 and 14 from R134 (fix-of-fix + fresh
+  surfaces), on top of the 12-phase delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed
   customers forever, one that silently kept collected cash on credit
