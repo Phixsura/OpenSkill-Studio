@@ -3001,3 +3001,198 @@ async def test_legacy_reclose_does_not_stamp_fresh_watermark(db):
     # basis + fold outcome still stamped (usable by later restores)
     assert "start_version_id" in snap
     assert "post_fold_version_id" in snap
+
+
+@pytest.mark.asyncio
+async def test_credit_note_idempotency_key(db):
+    """R135: a retried credit-note POST created a SECOND note and
+    double-refunded (each retry minted a fresh cn:{new_id} ledger key, so the
+    ledger dedup could never fire). A keyed retry with the same amount must
+    return the ORIGINAL note; the same key with a different amount is a 409."""
+    from datetime import timedelta as _td
+
+    from app.controlplane.models.billing import CreditNote
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
+    from app.controlplane.services.billing import _add_interval
+
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    period.period_start = datetime.now(UTC) - _td(days=40)
+    period.period_end = _add_interval(period.period_start, "month")
+    sub.current_period_start = period.period_start
+    sub.current_period_end = period.period_end
+    await db.flush()
+    invoice = await billing_svc.close_period_and_invoice(db, period.id)
+    assert invoice is not None
+    await db.refresh(invoice)
+    assert invoice.total_minor == 19900
+    key = f"cnkey-{ULID()}"
+    n1 = await billing_svc.issue_credit_note(
+        db,
+        invoice,
+        amount_minor=3000,
+        reason="partial refund",
+        actor=_actor(user),
+        idempotency_key=key,
+    )
+    await db.refresh(invoice)
+    assert invoice.amount_due_minor == 16900
+    # Retry (same key, same amount) → the ORIGINAL note, nothing re-applied.
+    n2 = await billing_svc.issue_credit_note(
+        db,
+        invoice,
+        amount_minor=3000,
+        reason="partial refund (retry)",
+        actor=_actor(user),
+        idempotency_key=key,
+    )
+    assert n2.id == n1.id
+    await db.refresh(invoice)
+    assert invoice.amount_due_minor == 16900, "the retry must not double-apply"
+    notes = (
+        (
+            await db.execute(
+                select(CreditNote).where(
+                    CreditNote.invoice_id == invoice.id, CreditNote.idempotency_key == key
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(notes) == 1, f"{len(notes)} notes landed for one key"
+    # Same key, different amount → parameter divergence, not a silent replay.
+    with pytest.raises(AppError) as exc:
+        await billing_svc.issue_credit_note(
+            db,
+            invoice,
+            amount_minor=4000,
+            reason="different amount",
+            actor=_actor(user),
+            idempotency_key=key,
+        )
+    assert exc.value.code == "IDEMPOTENCY_CONFLICT"
+    # Unkeyed calls keep the legacy behavior (each mints a new note).
+    n3 = await billing_svc.issue_credit_note(
+        db, invoice, amount_minor=1000, reason="unkeyed", actor=_actor(user)
+    )
+    assert n3.id != n1.id
+
+
+@pytest.mark.asyncio
+async def test_gap_change_seat_basis_is_current_not_elapsed_period_start(db):
+    """R135 (extends R131[5]): a gap change (period elapsed, hourly close not
+    yet run) is billed by the NEXT period's close, whose seats basis is this
+    change's own from_* — the sub's CURRENT seats. With a prior mid-period
+    change, the ELAPSED period-start basis made the approved seat proration
+    diverge from the invoiced one (the R129[M5]/R130[2] parity class)."""
+    from datetime import timedelta as _td
+    from decimal import ROUND_HALF_UP, Decimal
+
+    from app.controlplane.models.billing import SubscriptionChange
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=300,
+        provider="manual",
+        actor=_actor(user),
+    )
+    # Prior mid-period immediate seat change 300 → 250.
+    await billing_svc.change_plan(
+        db,
+        tenant,
+        sub,
+        plan_key=None,
+        seats=250,
+        proration_mode="immediate",
+        actor=_actor(user),
+    )
+    from app.controlplane.services.billing import _add_interval
+
+    # Shift the period fully into the past (gap), keeping the prior change
+    # INSIDE the elapsed period so _period_start_seat_basis resolves to its
+    # from_seats=300 — the wrong basis for the gap window.
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
+    ).scalar_one()
+    period.period_start = datetime.now(UTC) - _td(days=40)
+    period.period_end = _add_interval(period.period_start, "month")
+    sub.current_period_start = period.period_start
+    sub.current_period_end = period.period_end
+    prior = (
+        await db.execute(
+            select(SubscriptionChange)
+            .where(SubscriptionChange.subscription_id == sub.id)
+            .order_by(SubscriptionChange.id)
+        )
+    ).scalars().all()[-1]
+    prior.effective_at = datetime.now(UTC) - _td(days=20)
+    await db.flush()
+    gap_start = sub.current_period_end
+    gap_end = _add_interval(gap_start, "month")
+    # Gap change: seats 250 → 400, previewed against the NEXT window.
+    res = await billing_svc.change_plan(
+        db,
+        tenant,
+        sub,
+        plan_key=None,
+        seats=400,
+        proration_mode="immediate",
+        actor=_actor(user),
+    )
+    preview = res["proration"]
+    gap_change = (
+        await db.execute(
+            select(SubscriptionChange)
+            .where(SubscriptionChange.subscription_id == sub.id)
+            .order_by(SubscriptionChange.id)
+        )
+    ).scalars().all()[-1]
+    at = gap_change.effective_at
+    total_days = max((gap_end - gap_start).days, 1)
+    seat_days = max(min((gap_end - at).days, total_days), 0)
+    assert seat_days > 0, "sanity: the gap window must have remaining days"
+
+    # school seed: included 200, overage 500/seat; no live students (band =
+    # old-seats floor). correct = (max(400, basis) − 200) × 500 = 100000.
+    def _expected(basis: int) -> int:
+        covered = max(basis - 200, 0) * 500
+        correct = max(max(400, basis) - 200, 0) * 500
+        return int(
+            (Decimal(correct - covered) / Decimal(total_days) * seat_days).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+
+    expected_current = _expected(250)  # sub's CURRENT seats — the fix
+    expected_elapsed = _expected(300)  # elapsed period-start basis — the bug
+    assert expected_current != expected_elapsed, "sanity: the bases must diverge"
+    assert preview["seat_proration_minor"] == expected_current, (
+        f"gap preview used the elapsed-period basis: {preview['seat_proration_minor']} "
+        f"(elapsed would be {expected_elapsed})"
+    )

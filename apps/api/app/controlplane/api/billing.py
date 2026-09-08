@@ -79,6 +79,8 @@ class VoidInvoiceRequest(BaseModel):
 class CreditNoteRequest(BaseModel):
     amount_minor: int = Field(gt=0, le=MAX_MINOR)
     reason: str = Field(min_length=3, max_length=500)
+    # R135: retried POSTs double-refunded — keyed retry returns the original.
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=120)
 
     @field_validator("reason")
     @classmethod
@@ -713,6 +715,7 @@ async def issue_credit_note(
         amount_minor=body.amount_minor,
         reason=body.reason,
         actor=make_actor(request, user),
+        idempotency_key=body.idempotency_key,
     )
     await db.commit()
     return DataResponse(

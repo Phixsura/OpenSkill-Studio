@@ -1014,3 +1014,35 @@ async def test_share_then_install_end_to_end(c):
         headers=hd_,
     )
     assert r.status_code == 404, r.text
+
+
+@pytest.mark.asyncio
+async def test_duplicate_skill_preserves_origin_provenance(c):
+    """R135 (high): duplication must NOT sever provenance — a copy of
+    licensed-in content is still licensed-in content. Dropping origin_pack_id
+    made duplicate a two-click laundering primitive: the resale gate keys on
+    it, so a provenance-free copy of a paid pack's skill was freely
+    repackagable and resellable (fork already preserves it)."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill import Skill as SkillModel
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    sid = await _skill(c, h, oid, "Licensed Skill")
+    pack_id = "01ORIGINPACK00000000000000"
+    release_id = "01ORIGINRELEASE00000000000"
+    async with AsyncSessionLocal() as s:
+        skill = await s.get(SkillModel, sid)
+        skill.origin_pack_id = pack_id
+        skill.origin_release_id = release_id
+        skill.origin_component_id = "skill-1"
+        await s.commit()
+
+    r = await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/duplicate", headers=h)
+    assert r.status_code == 201, r.text
+    new_id = r.json()["data"]["id"]
+    async with AsyncSessionLocal() as s:
+        dup = await s.get(SkillModel, new_id)
+        assert dup.origin_pack_id == pack_id, "duplicate severed origin_pack_id"
+        assert dup.origin_release_id == release_id
+        assert dup.origin_component_id == "skill-1"

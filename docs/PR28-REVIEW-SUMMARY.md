@@ -472,6 +472,46 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   the R134 [F14] fix: a promo-grant retry whose key was already consumed by
   adjust/top-up (or different params) now 409s IDEMPOTENCY_CONFLICT instead
   of returning the other row as if it were the grant.
+  Second wave (9 confirmed, all fixed + regression-tested; the two behavioral
+  reworks guard-proven by revert-fail-restore): (high) expire_promotional's
+  R98[H10] fix left a partially-expired lot open until cumulative expiry
+  reached FACE VALUE — but face value spent before expiry is simply gone, so
+  every later pass ate NEW deposits (top-ups, void-payment refunds, credit
+  notes) up to the face, clawing back real collected money; the only reason
+  to stay open is now a RESERVED remainder. (high) duplicate_skill dropped
+  origin_pack_id/release/component — a two-click laundering primitive (the
+  R91[H1] resale gate keys on provenance; fork already preserved it).
+  (high) the anonymous workflow-pack registry preview served every step's
+  full config/prompt graph — a workflow pack's definition IS the product, so
+  every PAID pack's IP was free (steal → own-org pack → listingless install
+  free-pass); paid/partner_only-listed packs now get a structural preview
+  (names/types/capabilities/IO only, `redacted: true`), mirroring the
+  skill-pack registry's learning_content withholding. (high) a retried
+  credit-note POST minted a SECOND note and double-refunded (each retry got a
+  fresh cn:{new_id} ledger key so the dedup never fired) — client-keyed
+  idempotency, Stripe-style: same key+amount → original note, mismatch →
+  409, partial unique index backstop (migration cp22). (med) uq_cp_credit_idem
+  is (tenant, key) across ALL currencies but the dedup SELECT only serializes
+  on the (tenant, currency) balance lock — a concurrent same-key write on a
+  different currency 500'd on 23505; SAVEPOINT-isolated flush turns the loser
+  into the documented duplicate no-op with its balance mutation reverted.
+  (med) grant_covers_listing_width had no MAJOR-VERSION axis: under
+  major_locked, the upgrade gate demanded a new purchase
+  (LICENSE_UPGRADE_REQUIRED) that the width check then 409'd
+  (ALREADY_LICENSED) — self-serve upgrades impossible by construction; a paid
+  grant pinned below the current latest major no longer covers (unpinned
+  manual/plan grants still do). (med, extends R131[5]) a gap change's preview
+  used the ELAPSED period's seat basis while the next close bills from the
+  change's own from_* — with a prior mid-period change the approved seat
+  proration diverged from the invoiced one; the gap branch now shifts the
+  basis to the sub's current plan/seats with the same change_at clock read.
+  (med) create_listing accepted a seat_limit on non-seat_limited scopes where
+  it is dead data (enforce_seat_limit never fires) — a "10-seat team license"
+  priced on scope=organization silently sold unlimited seats; now 422 (the
+  R44[20] mirror). (low) a promo-grant retry with a different expires_at
+  silently kept the original date while reporting success — expires_at is
+  behavioral (the expiry cron claws back at that instant), so it joins the
+  IDEMPOTENCY_CONFLICT parameter set.
 
 ## 4. Convergence
 

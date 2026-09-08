@@ -11,6 +11,7 @@ from decimal import Decimal
 import structlog
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -107,9 +108,30 @@ async def _append_entry(
         idempotency_key=idempotency_key,
         created_by=created_by,
     )
-    db.add(entry)
-    balance.balance_minor = new_balance
-    await db.flush()
+    # R135: the dedup SELECT above only serializes against writes holding the
+    # SAME (tenant, currency) balance lock — uq_cp_credit_idem is unique on
+    # (tenant, key) across ALL currencies, so a concurrent same-key write on
+    # a DIFFERENT currency passes the SELECT and the loser's flush raised an
+    # unhandled 23505 → 500 (the R134[16]/R113[L10] read-then-insert class).
+    # SAVEPOINT-isolate the add+flush; the loser is expunged and gets the
+    # documented duplicate no-op (None) with the balance mutation reverted.
+    if idempotency_key is not None:
+        try:
+            async with db.begin_nested():
+                db.add(entry)
+                balance.balance_minor = new_balance
+                await db.flush()
+        except IntegrityError:
+            # the savepoint rollback expunges the pending entry itself; only
+            # detach defensively if it survived (SQLAlchemy version drift).
+            if entry in db:
+                db.expunge(entry)
+            balance.balance_minor = new_balance - amount_minor
+            return None
+    else:
+        db.add(entry)
+        balance.balance_minor = new_balance
+        await db.flush()
     return entry
 
 
@@ -197,6 +219,11 @@ async def grant_promotional(
             original.entry_type != "promotional"
             or original.currency != currency
             or original.amount_minor != amount_minor
+            # R135: expires_at is behavioral (expire_promotional claws the
+            # credit back at that instant) — a retry "extending" the expiry
+            # silently kept the original date while reporting 201 success.
+            # Every requested parameter must match (R72[3] divergence rule).
+            or original.expires_at != expires_at
         ):
             raise AppError(
                 "IDEMPOTENCY_CONFLICT",
@@ -588,6 +615,15 @@ async def expire_promotional(db: AsyncSession) -> int:
                 )
                 remaining_face = max(lot.amount_minor - already_expired, 0)
                 expire_amount = min(remaining_face, max(0, available))
+                # R135 (high, R98[H10] rework): the ONLY reason to leave a lot
+                # open after this pass is a RESERVED remainder (a live hold we
+                # must not break — it settles/releases and a later pass sweeps
+                # it). Face value the tenant SPENT before expiry is simply
+                # gone; keeping the lot open for it made every later pass eat
+                # NEW deposits (top-ups, void-payment refunds, credit notes)
+                # up to the face value — clawing back real collected money.
+                # After expiring the available portion, anything of the
+                # remainder not covered by reserved_minor is forfeit: close.
                 if remaining_face <= 0:
                     lot.consumed_expiration_id = lot.id  # fully expired earlier
                 elif expire_amount > 0:
@@ -600,13 +636,18 @@ async def expire_promotional(db: AsyncSession) -> int:
                         reference_id=lot.id,
                         idempotency_key=f"expire:{lot.id}:{already_expired}",
                     )
-                    # Fully consumed only when the cumulative expiry reaches
-                    # the face value; partial leaves it open for a later pass.
-                    if entry is not None and already_expired + expire_amount >= lot.amount_minor:
+                    if entry is not None and (
+                        already_expired + expire_amount >= lot.amount_minor
+                        or balance.reserved_minor <= 0
+                    ):
+                        # cumulative face reached, or no live hold to wait
+                        # for — the unexpired remainder was pre-expiry spend.
                         lot.consumed_expiration_id = entry.id
                     expired += 1
-                elif balance.balance_minor <= 0:
-                    lot.consumed_expiration_id = lot.id  # nothing left; mark done
+                elif balance.reserved_minor <= 0:
+                    # nothing expirable AND nothing reserved: the remainder
+                    # was spent before expiry — close, don't stalk new money.
+                    lot.consumed_expiration_id = lot.id
         except Exception:  # noqa: BLE001 — one bad lot must not wedge the cron
             log.warning("cp_promo_expiry_lot_failed", lot_id=lot.id, exc_info=True)
             continue

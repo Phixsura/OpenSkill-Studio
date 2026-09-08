@@ -179,6 +179,17 @@ class InvoiceLine(Base):
 
 class CreditNote(Base):
     __tablename__ = "cp_credit_notes"
+    __table_args__ = (
+        # R135: retried POSTs double-refunded (new note + new cn:{id} ledger
+        # key each time). Client-supplied key dedupes per invoice.
+        Index(
+            "uq_cp_credit_note_idem",
+            "invoice_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where="idempotency_key IS NOT NULL",
+        ),
+    )
 
     id: Mapped[str] = ulid_pk()
     invoice_id: Mapped[str] = mapped_column(
@@ -191,6 +202,7 @@ class CreditNote(Base):
     status: Mapped[str] = mapped_column(
         String(10), default="issued", server_default="issued"
     )  # issued | applied
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(26), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

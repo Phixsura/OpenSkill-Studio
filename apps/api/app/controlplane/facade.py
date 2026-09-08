@@ -169,3 +169,26 @@ async def check_install_license(
     from app.controlplane.services.marketplace import check_install_license as _impl
 
     await _impl(db, product_type, product_id, org, target_version=target_version)
+
+
+async def has_paid_listing(db: AsyncSession, product_type: str, product_id: str) -> bool:
+    """R135: True when the product carries any non-draft paid/partner_only
+    listing — the anonymous registry preview must redact the full definition
+    for such products (a workflow pack's definition IS the product)."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.marketplace import MarketplaceListing
+
+    row = (
+        await db.execute(
+            _select(MarketplaceListing.id)
+            .where(
+                MarketplaceListing.product_type == product_type,
+                MarketplaceListing.product_id == product_id,
+                MarketplaceListing.status != "draft",
+                MarketplaceListing.offer_type.in_(["paid", "partner_only"]),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return row is not None

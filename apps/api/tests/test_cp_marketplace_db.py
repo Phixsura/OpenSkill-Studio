@@ -1647,11 +1647,18 @@ def test_grant_covers_listing_width_matrix():
 
     from app.controlplane.services.marketplace import grant_covers_listing_width
 
-    def g(scope, expires_at=None, seat_limit=None):
-        return SimpleNamespace(scope=scope, expires_at=expires_at, seat_limit=seat_limit)
+    def g(scope, expires_at=None, seat_limit=None, purchased_major=None):
+        return SimpleNamespace(
+            scope=scope,
+            expires_at=expires_at,
+            seat_limit=seat_limit,
+            purchased_major=purchased_major,
+        )
 
-    def li(scope, seat_limit=None):
-        return SimpleNamespace(license_scope=scope, seat_limit=seat_limit)
+    def li(scope, seat_limit=None, upgrade_policy="all_versions"):
+        return SimpleNamespace(
+            license_scope=scope, seat_limit=seat_limit, upgrade_policy=upgrade_policy
+        )
 
     from datetime import UTC, datetime
 
@@ -1671,6 +1678,27 @@ def test_grant_covers_listing_width_matrix():
     )
     assert grant_covers_listing_width(
         g("seat_limited", seat_limit=10), li("seat_limited", seat_limit=5)
+    )
+    # R135: major axis under major_locked — a paid grant pinned below the
+    # current latest major does NOT cover (the upgrade purchase must not 409),
+    # while unpinned (manual/plan) grants and all_versions listings do.
+    assert not grant_covers_listing_width(
+        g("organization", purchased_major=1),
+        li("organization", upgrade_policy="major_locked"),
+        latest_major=2,
+    )
+    assert grant_covers_listing_width(
+        g("organization", purchased_major=2),
+        li("organization", upgrade_policy="major_locked"),
+        latest_major=2,
+    )
+    assert grant_covers_listing_width(
+        g("organization", purchased_major=None),
+        li("organization", upgrade_policy="major_locked"),
+        latest_major=2,
+    )
+    assert grant_covers_listing_width(
+        g("organization", purchased_major=1), li("organization"), latest_major=None
     )
 
 
@@ -1988,3 +2016,23 @@ async def test_trial_grant_does_not_unlock_major_bound(db):
             db, listing.product_type, listing.product_id, buyer_org, "2.0.0"
         )
     assert exc.value.code == "LICENSE_UPGRADE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_listing_rejects_seat_limit_on_non_seat_scope(db):
+    """R135: a seat_limit on any scope other than seat_limited is dead data —
+    enforce_seat_limit only fires on scope == 'seat_limited', so a seller
+    pricing a "10-seat team license" on scope=organization silently sold
+    unlimited seats. The contradiction must be a 422 at create time (the
+    mirror of R44[20], which fixed seat_limited-without-limit)."""
+    user = await _mk_user(db)
+    org = await _mk_org(db, user)
+    with pytest.raises(AppError) as exc:
+        await _mk_listing(db, org, user, license_scope="organization", seat_limit=10)
+    assert exc.value.code == "LISTING_INVALID"
+    with pytest.raises(AppError) as exc2:
+        await _mk_listing(db, org, user, license_scope="tenant", seat_limit=5)
+    assert exc2.value.code == "LISTING_INVALID"
+    # The valid pairing still works.
+    listing = await _mk_listing(db, org, user, license_scope="seat_limited", seat_limit=10)
+    assert listing.seat_limit == 10

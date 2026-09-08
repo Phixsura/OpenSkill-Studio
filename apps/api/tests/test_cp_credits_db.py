@@ -1736,12 +1736,13 @@ async def test_grant_promotional_idempotency_key(db):
     tenant = await _mk_tenant(db, user)
     a = _actor(user)
     key = f"promo-{ULID()}"
+    promo_expiry = datetime.now(UTC) + timedelta(days=30)
     e1 = await credit_svc.grant_promotional(
         db,
         tenant.id,
         "USD",
         5000,
-        expires_at=datetime.now(UTC) + timedelta(days=30),
+        expires_at=promo_expiry,
         reason="launch promo",
         actor=a,
         idempotency_key=key,
@@ -1751,7 +1752,7 @@ async def test_grant_promotional_idempotency_key(db):
         tenant.id,
         "USD",
         5000,
-        expires_at=datetime.now(UTC) + timedelta(days=30),
+        expires_at=promo_expiry,
         reason="launch promo",
         actor=a,
         idempotency_key=key,
@@ -1798,12 +1799,26 @@ async def test_grant_promotional_idempotency_key(db):
             tenant.id,
             "USD",
             9999,
-            expires_at=datetime.now(UTC) + timedelta(days=30),
+            expires_at=promo_expiry,
             reason="different amount",
             actor=a,
             idempotency_key=key,
         )
     assert exc.value.code == "IDEMPOTENCY_CONFLICT"
+    # R135: a different expires_at is behavioral divergence too — the silent
+    # 201 kept the ORIGINAL expiry while ops believed they extended it.
+    with pytest.raises(AppError) as exc_exp:
+        await credit_svc.grant_promotional(
+            db,
+            tenant.id,
+            "USD",
+            5000,
+            expires_at=promo_expiry + timedelta(days=240),
+            reason="launch promo",
+            actor=a,
+            idempotency_key=key,
+        )
+    assert exc_exp.value.code == "IDEMPOTENCY_CONFLICT"
     # A key already consumed by adjust must not return as a promo grant.
     akey = f"adj-{ULID()}"
     await credit_svc.adjust(db, tenant.id, "USD", 700, reason="ops", actor=a, idempotency_key=akey)
@@ -1819,3 +1834,184 @@ async def test_grant_promotional_idempotency_key(db):
             idempotency_key=akey,
         )
     assert exc2.value.code == "IDEMPOTENCY_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_same_key_cross_currency_concurrent_no_500():
+    """R135: uq_cp_credit_idem is (tenant, key) across ALL currencies, but the
+    dedup SELECT only serializes on the (tenant, currency) balance lock — two
+    concurrent same-key writes on DIFFERENT currencies both passed the SELECT
+    and the loser 500'd on 23505. The SAVEPOINT-isolated flush turns the loser
+    into the documented duplicate no-op."""
+    from app.core.database import engine
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup)
+            tenant = await _mk_tenant(setup, user)
+            await setup.commit()
+            tenant_id, user_id = tenant.id, user.id
+
+        key = f"xcur-{ULID()}"
+        outcomes: list[str] = []
+
+        # Deterministic interleave: A writes USD and HOLDS its tx open; B
+        # writes EUR with the same key — B's dedup SELECT cannot see A's
+        # uncommitted row and B's flush blocks on uq_cp_credit_idem until A
+        # commits, then raises 23505 (the pre-fix 500). The SAVEPOINT must
+        # convert that into the documented duplicate no-op.
+        sa = AsyncSessionLocal()
+        sb = AsyncSessionLocal()
+        try:
+            ua = await sa.get(User, user_id)
+            entry_a = await credit_svc.adjust(
+                sa,
+                tenant_id,
+                "USD",
+                1500,
+                reason="cross-currency race",
+                actor=Actor(user_id=ua.id, type="platform"),
+                idempotency_key=key,
+            )
+            assert entry_a is not None
+
+            async def b_write():
+                ub = await sb.get(User, user_id)
+                try:
+                    entry = await credit_svc.adjust(
+                        sb,
+                        tenant_id,
+                        "EUR",
+                        1500,
+                        reason="cross-currency race",
+                        actor=Actor(user_id=ub.id, type="platform"),
+                        idempotency_key=key,
+                    )
+                    await sb.commit()
+                    outcomes.append("ok" if entry is not None else "dup")
+                except AppError as e:
+                    await sb.rollback()
+                    outcomes.append(e.code)
+                except Exception as exc:  # noqa: BLE001
+                    await sb.rollback()
+                    outcomes.append(type(exc).__name__)
+
+            b_task = asyncio.create_task(b_write())
+            await asyncio.sleep(0.3)  # B is now blocked on the unique index
+            await sa.commit()  # release → B's flush resolves (23505 pre-fix)
+            await b_task
+        finally:
+            await sa.close()
+            await sb.close()
+        assert outcomes == ["dup"], outcomes
+        # exactly ONE ledger row landed for the key
+        async with AsyncSessionLocal() as s:
+            rows = (
+                (
+                    await s.execute(
+                        select(CreditLedgerEntry).where(
+                            CreditLedgerEntry.tenant_id == tenant_id,
+                            CreditLedgerEntry.idempotency_key == key,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(rows) == 1, f"{len(rows)} rows landed"
+            # and the loser's balance was NOT mutated
+            balances = (
+                (
+                    await s.execute(
+                        select(TenantCreditBalance).where(
+                            TenantCreditBalance.tenant_id == tenant_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            total = sum(b.balance_minor for b in balances)
+            assert total == 1500, f"total balance {total} — loser's mutation leaked"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_expired_lot_spent_remainder_closes_and_spares_new_money(db):
+    """R135 (high, R98[H10] rework): face value the tenant SPENT before expiry
+    is simply gone — the lot must CLOSE once nothing is reserved, not stay
+    open until cumulative expiry reaches face value. An open lot made every
+    later cron pass eat NEW deposits (top-ups, void-payment refunds, credit
+    notes) up to the face — clawing back real collected money."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    lot = await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        1000,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        reason="welcome",
+        actor=a,
+    )
+    # Spend 600 of the promo before the expiry cron runs.
+    hold = await credit_svc.reserve(
+        db, tenant.id, "USD", 600, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    await credit_svc.settle(db, hold.id, 600)
+    await credit_svc.expire_promotional(db)
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert balance.balance_minor == 0, "the 400 still available must expire"
+    await db.refresh(lot)
+    assert lot.consumed_expiration_id is not None, (
+        "spent remainder + nothing reserved must CLOSE the lot"
+    )
+    # New money deposited AFTER expiry must be untouched by later passes.
+    await credit_svc.top_up(db, tenant.id, "USD", 500, actor=a, idempotency_key=f"nt-{ULID()}")
+    await credit_svc.expire_promotional(db)
+    await db.refresh(balance)
+    assert balance.balance_minor == 500, "a later pass clawed back a fresh top-up"
+
+
+@pytest.mark.asyncio
+async def test_expired_lot_reserved_remainder_still_waits(db):
+    """R135 guard: the lot-closing rework must NOT break the R98[H10]
+    behavior — a remainder covered by a LIVE hold keeps the lot open, and a
+    later pass expires it after release."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    lot = await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        1000,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        reason="welcome",
+        actor=a,
+    )
+    hold = await credit_svc.reserve(
+        db, tenant.id, "USD", 300, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    await credit_svc.expire_promotional(db)
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert balance.balance_minor == 300, "only the unreserved 700 expires this pass"
+    await db.refresh(lot)
+    assert lot.consumed_expiration_id is None, "reserved remainder must keep the lot open"
+    # Release the hold → the next pass sweeps the remainder and closes.
+    await credit_svc.release(db, hold.id)
+    await credit_svc.expire_promotional(db)
+    await db.refresh(balance)
+    await db.refresh(lot)
+    assert balance.balance_minor == 0
+    assert lot.consumed_expiration_id is not None

@@ -501,6 +501,26 @@ async def change_plan(
     if change_at >= pv_end:
         pv_start = pv_end
         pv_end = _add_interval(pv_start, sub.interval)
+        # R135 (medium, extends R131[5]): the seat basis must shift with the
+        # window. A gap change is billed by the NEXT period's close, whose
+        # seats basis is this change's own from_* — the sub's CURRENT
+        # plan/seats — not the ELAPSED period's start values. With a prior
+        # mid-period change, the elapsed basis made the approved seat
+        # proration diverge from the invoiced one (the R129[M5]/R130[2]
+        # preview↔invoice parity class, gap-window shape). Same change_at
+        # clock read as the window shift (R131 one-clock rule).
+        gap_price = (
+            await db.execute(
+                select(PlanPrice).where(
+                    PlanPrice.plan_version_id == sub.plan_version_id,
+                    PlanPrice.currency == sub.currency,
+                    PlanPrice.interval == sub.interval,
+                )
+            )
+        ).scalar_one_or_none()
+        start_seats = sub.seat_quantity
+        start_included = gap_price.included_seats if gap_price else 0
+        start_seat_price = (gap_price.overage_seat_amount_minor or 0) if gap_price else 0
     preview = proration_preview(
         period_start=pv_start,
         period_end=pv_end,
@@ -2152,7 +2172,13 @@ async def void_invoice(db: AsyncSession, invoice: Invoice, *, reason: str, actor
 
 
 async def issue_credit_note(
-    db: AsyncSession, invoice: Invoice, *, amount_minor: int, reason: str, actor: Actor
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    amount_minor: int,
+    reason: str,
+    actor: Actor,
+    idempotency_key: str | None = None,
 ) -> CreditNote:
     """The ONLY correction path for finalized invoices: an explicit credit
     note that lands as a credit-ledger refund for the next cycle."""
@@ -2168,6 +2194,29 @@ async def issue_credit_note(
     ).scalar_one()
     if invoice.status not in ("open", "paid"):
         raise AppError("INVOICE_NOT_OPEN", "Credit notes apply to finalized invoices", 409)
+    # R135: a retried POST created a SECOND note and double-refunded (each
+    # retry minted a fresh cn:{new_id} ledger key — the tenant got 2× the
+    # intended correction of collected money). Keyed retry: same key + same
+    # amount → the original note; mismatch → 409 (Stripe-style). The invoice
+    # FOR UPDATE above serializes concurrent same-key requests, and the
+    # partial unique index backstops.
+    if idempotency_key is not None:
+        existing = (
+            await db.execute(
+                select(CreditNote).where(
+                    CreditNote.invoice_id == invoice.id,
+                    CreditNote.idempotency_key == idempotency_key,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.amount_minor != amount_minor:
+                raise AppError(
+                    "IDEMPOTENCY_CONFLICT",
+                    "Idempotency key already used with different parameters",
+                    409,
+                )
+            return existing
     if amount_minor <= 0 or amount_minor > invoice.total_minor:
         raise AppError("PAYMENT_INVALID", "Credit note exceeds invoice total", 422)
     # R43[10]: cap CUMULATIVELY — each note was only checked against the
@@ -2194,6 +2243,7 @@ async def issue_credit_note(
         currency=invoice.currency,
         reason=reason,
         status="applied",
+        idempotency_key=idempotency_key,
         created_by=actor.user_id,
     )
     db.add(note)

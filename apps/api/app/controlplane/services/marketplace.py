@@ -112,6 +112,17 @@ async def create_listing(
         raise AppError("LISTING_INVALID", "Paid listings need price and currency", 422)
     if license_scope == "seat_limited" and not seat_limit:
         raise AppError("LISTING_INVALID", "seat_limited listings need seat_limit", 422)
+    # R135: the mirror direction — a seat_limit on any OTHER scope is dead
+    # data (enforce_seat_limit only fires on scope == 'seat_limited'), so a
+    # seller pricing a "10-seat team license" on scope=organization silently
+    # sold unlimited seats. Reject the contradiction up front (R44[20] fixed
+    # the same mirror for manual grants).
+    if license_scope != "seat_limited" and seat_limit is not None:
+        raise AppError(
+            "LISTING_INVALID",
+            "seat_limit is only valid with license_scope='seat_limited'",
+            422,
+        )
 
     loaded = await _load_product(db, product_type, product_id)
     if loaded is None:
@@ -306,7 +317,14 @@ async def create_purchase(
     all_covering = await _covering_grants(
         db, listing.product_type, listing.product_id, buyer_tenant.id, buyer_org_id
     )
-    if any(grant_covers_listing_width(g, listing) for g in all_covering):
+    # R135: major axis — resolve the current latest major once so a
+    # major_locked grant pinned below it does NOT block the upgrade purchase.
+    _lm = (
+        await _latest_major(db, listing.product_type, listing.product_id)
+        if listing.upgrade_policy == "major_locked"
+        else None
+    )
+    if any(grant_covers_listing_width(g, listing, latest_major=_lm) for g in all_covering):
         raise AppError("ALREADY_LICENSED", "You already hold a license for this product", 409)
     # R44[17]: the grant precheck only sees PAID purchases (grants are created
     # at mark_paid) — nothing stopped a second purchase while the first was
@@ -544,8 +562,18 @@ async def mark_purchase_paid(
         purchase.buyer_tenant_id,
         purchase.buyer_org_id,
     )
+    _lm_paid = (
+        await _latest_major(db, listing.product_type, listing.product_id)
+        if listing.upgrade_policy == "major_locked"
+        else None
+    )
     existing_grant = next(
-        (g for g in _all_covering if grant_covers_listing_width(g, listing)), None
+        (
+            g
+            for g in _all_covering
+            if grant_covers_listing_width(g, listing, latest_major=_lm_paid)
+        ),
+        None,
     )
     if existing_grant is None:
         grant = LicenseGrant(
@@ -755,18 +783,35 @@ async def _find_covering_grant(
     return covering[0] if covering else None
 
 
-def grant_covers_listing_width(grant: LicenseGrant, listing: MarketplaceListing) -> bool:
+def grant_covers_listing_width(
+    grant: LicenseGrant, listing: MarketplaceListing, *, latest_major: int | None = None
+) -> bool:
     """R132: does an existing grant cover the WIDTH of what a listing sells?
 
     A purchase mints a perpetual grant at the listing's scope/seat cap — an
     existing grant only makes that purchase redundant when it is at least as
     wide on every axis: scope (tenant > org/cohort/seat_limited), duration
-    (perpetual vs expiring), and seat capacity. Shared by the create_purchase
-    ALREADY_LICENSED precheck and the mark_purchase_paid mint guard so the
-    two never diverge (the R129→R131 divergence class)."""
+    (perpetual vs expiring), seat capacity, and — under major_locked — the
+    MAJOR VERSION axis (R135). Shared by the create_purchase ALREADY_LICENSED
+    precheck and the mark_purchase_paid mint guard so the two never diverge
+    (the R129→R131 divergence class)."""
     if listing.license_scope == "tenant" and grant.scope != "tenant":
         return False
     if grant.expires_at is not None:
+        return False
+    # R135: under major_locked, a purchase today sells access UP TO the
+    # CURRENT latest major. A paid grant pinned below it does not cover that
+    # width — without this axis the upgrade gate demanded a new purchase
+    # (LICENSE_UPGRADE_REQUIRED) that this very check then 409'd
+    # (ALREADY_LICENSED): self-serve upgrades were impossible by construction.
+    # purchased_major=None grants (manual/plan-included) are major-unlimited —
+    # the upgrade gate binds only on paid majors — so they DO cover.
+    if (
+        listing.upgrade_policy == "major_locked"
+        and latest_major is not None
+        and grant.purchased_major is not None
+        and grant.purchased_major < latest_major
+    ):
         return False
     return not (
         grant.scope == "seat_limited"
