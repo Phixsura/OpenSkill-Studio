@@ -308,3 +308,41 @@ async def test_fetch_video_and_sample_too_large():
         with pytest.raises(AppError) as exc_info:
             await fetch_video_and_sample("test/video.mp4")
         assert exc_info.value.code == "VIDEO_TOO_LARGE"
+
+
+@pytest.mark.asyncio
+async def test_ffmpeg_hang_is_bounded_and_killed(monkeypatch):
+    """R188: ffprobe/ffmpeg run on attacker-controlled bytes with no deadline —
+    a crafted stream that hangs the decoder parked the evaluation coroutine
+    forever and leaked the subprocess. Bounded now: timeout → kill → 422."""
+    import asyncio
+
+    from app.core import video_eval
+    from app.exceptions import AppError
+
+    killed: list[bool] = []
+
+    class HangingProc:
+        def kill(self):
+            killed.append(True)
+
+        async def communicate(self):
+            if killed:
+                return b"", b""  # post-kill reap returns immediately
+            await asyncio.sleep(3600)  # simulated decoder hang
+
+    async def fake_exec(*cmd, **kw):
+        return HangingProc()
+
+    monkeypatch.setattr(video_eval.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(video_eval, "FFMPEG_TIMEOUT_SECONDS", 0.2)
+
+    import time
+
+    t0 = time.monotonic()
+    with pytest.raises(AppError) as exc:
+        await video_eval._get_video_duration("/tmp/hostile.mp4")
+    elapsed = time.monotonic() - t0
+    assert exc.value.code == "VIDEO_PROCESSING_TIMEOUT"
+    assert elapsed < 2, f"hang not bounded ({elapsed:.1f}s)"
+    assert killed, "hung subprocess must be killed, not abandoned"
