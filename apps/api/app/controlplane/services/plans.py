@@ -255,7 +255,29 @@ async def set_override(
             reason=reason,
             created_by=actor.user_id,
         )
-        db.add(override)
+        # R187: check-then-insert on uq_cp_ent_override — an admin
+        # double-clicking Save raced itself and the loser 500'd on the
+        # unique index (same shape as create_plan, fixed in R134[16]).
+        # Savepoint + fall back to updating the winner's row.
+        try:
+            async with db.begin_nested():
+                db.add(override)
+                await db.flush()
+        except IntegrityError:
+            winner = (
+                await db.execute(
+                    select(TenantEntitlementOverride).where(
+                        TenantEntitlementOverride.tenant_id == tenant_id,
+                        TenantEntitlementOverride.key == key,
+                    )
+                )
+            ).scalar_one()
+            before = {"value": winner.value.get("v"), "enforcement": winner.enforcement}
+            winner.value = {"v": normalized}
+            winner.enforcement = enforcement
+            winner.expires_at = expires_at
+            winner.reason = reason
+            override = winner
     await db.flush()
     await record_audit(
         db,

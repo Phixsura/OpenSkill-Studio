@@ -508,3 +508,81 @@ async def test_concurrent_first_profile_touch_no_500():
         assert username_b3 == pa.username, "loser must return the winner's profile"
     finally:
         await engine.dispose()
+
+
+async def test_concurrent_set_override_no_500():
+    """R187: set_override is check-then-insert on uq_cp_ent_override — two
+    concurrent sets of the same (tenant, key) both passed the existence
+    pre-check and the loser died on the unique index as an unhandled 500
+    (an admin double-clicking Save races itself). The loser must now update
+    the winner's row instead."""
+    from app.controlplane.models.plan import TenantEntitlementOverride
+    from app.controlplane.services.audit import Actor
+    from app.controlplane.services.plans import set_override
+    from app.controlplane.services.tenants import create_tenant
+    from app.core.database import engine
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup)
+            tenant = await create_tenant(
+                setup,
+                name=f"I18 Ovr {ULID()}",
+                slug=f"i18ovr-{str(ULID()).lower()}",
+                actor=Actor(user_id=user.id, type="tenant"),
+                owner_user_id=user.id,
+            )
+            await setup.commit()
+            tenant_id = tenant.id
+            actor = Actor(user_id=user.id, type="platform")
+
+        sa = AsyncSessionLocal()
+        sb = AsyncSessionLocal()
+        try:
+            ta = await sa.get(
+                __import__("app.controlplane.models.tenant", fromlist=["TenantAccount"]).TenantAccount,
+                tenant_id,
+            )
+            tb = await sb.get(
+                __import__("app.controlplane.models.tenant", fromlist=["TenantAccount"]).TenantAccount,
+                tenant_id,
+            )
+            # A inserts and HOLDS (uncommitted) — B's insert will block on the
+            # unique index until A commits, then hit IntegrityError.
+            await set_override(
+                sa, ta.id, "max_organizations", value=5, enforcement="hard",
+                expires_at=None, reason="A", actor=actor,
+            )
+
+            async def b_set():
+                await set_override(
+                    sb, tb.id, "max_organizations", value=9, enforcement="hard",
+                    expires_at=None, reason="B", actor=actor,
+                )
+                await sb.commit()
+
+            b = asyncio.create_task(b_set())
+            await asyncio.sleep(0.3)
+            await sa.commit()
+            await b  # must not raise
+        finally:
+            await sa.close()
+            await sb.close()
+
+        async with AsyncSessionLocal() as s:
+            rows = (
+                (
+                    await s.execute(
+                        select(TenantEntitlementOverride).where(
+                            TenantEntitlementOverride.tenant_id == tenant_id,
+                            TenantEntitlementOverride.key == "max_organizations",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(rows) == 1, "must converge to one override row"
+            assert rows[0].value == {"v": 9}, "loser's update must win (last-writer)"
+    finally:
+        await engine.dispose()
