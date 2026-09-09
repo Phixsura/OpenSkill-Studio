@@ -844,6 +844,19 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   wraps user text in an UNPREDICTABLE secrets.token_hex(8) boundary the
   attacker cannot guess, the pattern evaluation.py should have used. Unit
   regression + guard-proven by revert; eval suites 66 green.
+- **R162 (mutation testing — test-suite strength on the money-math core)**:
+  3 coverage blind spots found and closed; no product bug, but three latent
+  silent-regression traps removed. A source-mutation probe injected operator/
+  constant mutations (>→>=, +→-, max→min, ×→÷, HALF_UP→DOWN, sign flips) into
+  rating.py's pure economic functions and ran the fast pure tests — surviving
+  mutations mark untested logic. Blind spots: (1) the minimum-fee floor was
+  never tested on a ZERO-cost event (a >→>= mutation would silently bill the
+  min fee on zero usage — phantom overcharge — undetected); (2) tier
+  first-wins-on-duplicate-min_qty was unpinned; (3) the _exact billable/cost
+  twins had only DB-level coverage — their operators and the exact min-fee
+  floor were mutation-uncovered at the pure level. Added fast pure regression
+  tests; the probe now kills 100% of injected mutations (9/9 and 8/8 across
+  the _minor and _exact variants). Rating + marketplace: 66 green.
   test drives 5 same-collapsing names + a post-collision probe (guard-proven
   by revert to the bare-flush retry → PendingRollbackError).
 - **R159 (industry scanner battery — supply chain, static analysis,
