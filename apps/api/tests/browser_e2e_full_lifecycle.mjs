@@ -618,6 +618,9 @@ try {
   await gpage.click('button:has-text("Approve version")');
   await gpage.waitForSelector("text=Version approved", { timeout: 10000 });
   check("version approved via UI", true);
+  // R185: final acceptance now confirms via window.confirm (irreversible
+  // action) — Playwright dismisses dialogs by default, so accept it.
+  gpage.once("dialog", (d) => d.accept());
   await gpage.click('button:has-text("Final accept")');
   await gpage.waitForSelector("text=Project finally accepted", { timeout: 10000 });
   check("final accept via UI", true);
