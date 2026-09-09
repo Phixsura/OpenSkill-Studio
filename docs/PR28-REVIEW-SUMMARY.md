@@ -875,6 +875,29 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   (a missing ContentLength no longer bypasses it). The video pipeline was
   verified bounded (fixed 8 frames — num_frames not caller-controlled, 500MB
   size + 600s duration caps, hardcoded image/jpeg frames, graceful per-item
+- **R165 (deep-dive: workflow step concurrent advancement)**: CLEAN SWEEP,
+  0 findings — the most concurrency-dense subsystem verified correct
+  hazard-by-hazard. advance_run runs multiple loops with their own sessions
+  and no run-level lock, but EVERY mutation is a guarded conditional UPDATE
+  (PENDING→RUNNING, skip-propagation, run completion FAILED/COMPLETED) so
+  concurrent loops never lose an update or double-settle. Step execution
+  claims PENDING/WAITING_RETRY→RUNNING with a fencing token
+  (attempt == sr.attempt); the loser gets rowcount 0. provider_action is
+  write-ahead (provider_request_id + offering committed before the call),
+  re-checks status+attempt AFTER the commit (column SELECT bypassing the
+  identity map) to bail on a cancel that raced the write-ahead, closes the
+  read tx before the network call, pins retries to the recorded offering
+  (BINDING_STALE — no mid-step account switch), and meters with an
+  attempt-scoped idempotency key. Settlement (_complete_step/_fail_or_retry)
+  is fenced on status+attempt; the lease (timeout+30s) outlives the bounded
+  provider call, and the reaper (max_attempts-guarded) plus the status gate
+  make a resurrected executor's settlement a clean no-op. decide_review,
+  cancel_run, and sweep_stale's review-expiry all take the SAME steps→reviews
+  →run lock order (no ABBA deadlock), guard on undecided/WAITING_REVIEW, and
+  emit terminal events only on the winning flip; every resume path
+  dispatch_advances after commit and sweep_stale's stalled-run recovery is
+  idempotent + double-count-safe (R78). R11/R13/R55/R66/R73/R78/R85/R90e/
+  R94/R101 defenses all present and correct.
   degradation).
   test drives 5 same-collapsing names + a post-collision probe (guard-proven
   by revert to the bare-flush retry → PendingRollbackError).
