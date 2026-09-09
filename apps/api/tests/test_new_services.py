@@ -3,6 +3,7 @@
 APP_ENV=test PYTHONPATH=. uv run pytest tests/test_new_services.py -v
 """
 
+import asyncio
 import uuid
 
 import pytest
@@ -1046,3 +1047,139 @@ async def test_duplicate_skill_preserves_origin_provenance(c):
         assert dup.origin_pack_id == pack_id, "duplicate severed origin_pack_id"
         assert dup.origin_release_id == release_id
         assert dup.origin_component_id == "skill-1"
+
+
+# ═══════════════ R171: webhook SSRF gaps + event-loop stall + streamed delivery ═══════════════
+
+
+def test_webhook_blocklist_cgnat_and_nat64():
+    """R171: 100.64.0.0/10 (CGNAT / Tailscale overlay) has is_private=False and
+    was in no CIDR entry — webhooks to cloud-internal LBs / tailnet services
+    passed the SSRF check. NAT64 64:ff9b::<v4> bypassed every IPv4 rule."""
+    from app.services.webhook import _is_blocked_url
+
+    assert _is_blocked_url("http://100.64.0.5/hook") is True
+    assert _is_blocked_url("http://100.127.255.254/hook") is True
+    # NAT64 well-known prefix embedding the AWS metadata IP
+    assert _is_blocked_url("http://[64:ff9b::a9fe:a9fe]/latest/meta-data/") is True
+    # Sanity: a public IP literal still passes
+    assert _is_blocked_url("https://93.184.216.34/hook") is False
+
+
+@pytest.mark.asyncio
+async def test_webhook_blocked_cgnat_endpoint(c):
+    """R171: the create endpoint rejects CGNAT-space URLs with 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/webhooks",
+        json={"url": "http://100.64.0.5/hook", "events": []},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert "WEBHOOK_URL_BLOCKED" in r.text
+
+
+@pytest.mark.asyncio
+async def test_webhook_dns_check_does_not_stall_event_loop(monkeypatch):
+    """R171: _is_blocked_url runs a SYNCHRONOUS getaddrinfo. Called directly
+    from async code, a slow resolver (attacker-controlled NS) froze the whole
+    event loop. The async wrapper must keep the loop ticking during lookup."""
+    import socket
+    import time as _time
+
+    from app.services import webhook as wh
+
+    def slow_getaddrinfo(*a, **kw):
+        _time.sleep(0.5)  # simulated slow authoritative NS
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        for _ in range(20):
+            ticks += 1
+            await asyncio.sleep(0.02)
+
+    t = asyncio.create_task(ticker())
+    blocked = await wh._is_blocked_url_async("https://slow-ns.example.com/hook")
+    t.cancel()
+    assert blocked is False
+    # With the sync call inline, the loop is frozen for 0.5s → ticks stays 0.
+    assert ticks >= 5, f"event loop stalled during DNS lookup (ticks={ticks})"
+
+
+@pytest.mark.asyncio
+async def test_webhook_delivery_streams_and_signs(monkeypatch):
+    """R171: functional delivery through the new stream path — a local server
+    receives the POST, the HMAC signature verifies, and the (large) response
+    body is never buffered by the sender."""
+    import hashlib
+    import hmac as hmac_mod
+
+    from app.services import webhook as wh
+    from app.services.webhook import WebhookService
+
+    received: dict = {}
+
+    async def handle(reader, writer):
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += await reader.read(1024)
+        head, _, rest = data.partition(b"\r\n\r\n")
+        headers = {}
+        for line in head.split(b"\r\n")[1:]:
+            k, _, v = line.partition(b": ")
+            headers[k.decode().lower()] = v.decode()
+        clen = int(headers.get("content-length", "0"))
+        body = rest
+        while len(body) < clen:
+            body += await reader.read(4096)
+        received["headers"] = headers
+        received["body"] = body
+        # Answer with a deliberately large body — sender must not buffer it.
+        # Written in small chunks so the SERVER side never holds it either
+        # (tracemalloc below measures the whole process).
+        total = 8 * 1024 * 1024
+        chunk = b"x" * 8192
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: " + str(total).encode() + b"\r\n\r\n")
+        try:
+            for _ in range(total // len(chunk)):
+                writer.write(chunk)
+                await writer.drain()
+        except (ConnectionResetError, BrokenPipeError):
+            pass  # sender closed without reading — exactly what we want
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    # 127.0.0.1 is (correctly) blocklisted — bypass only for this delivery test
+    monkeypatch.setattr(wh, "_is_blocked_url", lambda url: False)
+    # Keep a developer machine's HTTP(S)_PROXY out of the loopback connection
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    secret = "s3cr3t" * 8
+    import tracemalloc
+
+    tracemalloc.start()
+    await WebhookService._deliver_background(
+        f"http://127.0.0.1:{port}/hook", secret, "wh_test", "pack.published", {"pack_id": "p1"}
+    )
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    # Streamed-and-discarded: the 8MB response body must never be buffered.
+    assert peak < 2 * 1024 * 1024, f"response body was buffered (peak={peak})"
+    server.close()
+    await server.wait_closed()
+
+    assert received, "server never received the delivery"
+    body = received["body"]
+    sig = received["headers"]["x-webhook-signature"]
+    expect = hmac_mod.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    assert hmac_mod.compare_digest(sig, expect), "HMAC signature mismatch"
+    assert received["headers"]["x-webhook-event"] == "pack.published"
