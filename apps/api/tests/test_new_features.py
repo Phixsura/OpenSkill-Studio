@@ -1401,3 +1401,58 @@ async def test_review_forbidden_for_owner_org_members(c):
     h_out, _ = await _auth(c)
     r2 = await c.post(f"/api/v1/registry/packs/{pid}/reviews", json={"rating": 4}, headers=h_out)
     assert r2.status_code == 201, r2.text[:200]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_review_409_preserves_transaction(c):
+    """R179: create_review's duplicate handler called session.rollback() — a
+    FULL transaction rollback (R57[1]/R177 class) that wiped any earlier
+    uncommitted work in the caller's transaction. Savepoint now: the 409
+    surfaces while sibling work in the same session survives the commit."""
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.pack_review import PackReview
+    from app.services.pack_review import PackReviewService
+
+    h_owner, _ = await _auth(c)
+    oid = await _org(c, h_owner)
+    pid_a = await _published_public_pack(c, h_owner, oid, pack_name=f"RevA {uuid.uuid4().hex[:6]}")
+    pid_b = await _published_public_pack(
+        c, h_owner, oid, pack_name=f"RevB {uuid.uuid4().hex[:6]}", skill_name="Skill B"
+    )
+    # Reviewer is a different user OUTSIDE the owning org
+    h_rev, reviewer = await _auth(c)
+    r = await c.post(
+        f"/api/v1/registry/packs/{pid_a}/reviews",
+        json={"rating": 5, "title": "great", "body": "x" * 25},
+        headers=h_rev,
+    )
+    assert r.status_code == 201, r.text
+
+    async with AsyncSessionLocal() as s:
+        svc = PackReviewService(s)
+        # Earlier uncommitted work in the same transaction: review on pack B
+        await svc.create_review(pid_b, reviewer["id"], 4, body="y" * 25)
+        # Duplicate on pack A → 409, must NOT wipe the pack-B review
+        try:
+            await svc.create_review(pid_a, reviewer["id"], 3, body="z" * 25)
+            raise AssertionError("expected DUPLICATE_REVIEW")
+        except AppError as e:
+            assert e.code == "DUPLICATE_REVIEW"
+        await s.commit()
+
+    async with AsyncSessionLocal() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(PackReview).where(
+                        PackReview.pack_id == pid_b, PackReview.user_id == reviewer["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1, "duplicate-review rollback wiped the sibling review"

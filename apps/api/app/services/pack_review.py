@@ -98,11 +98,15 @@ class PackReviewService:
             title=title,
             body=body,
         )
-        self.db.add(review)
+        # R179: savepoint, not session.rollback() — the full rollback wiped
+        # any earlier uncommitted work in the caller's transaction (R57[1]/
+        # R177 class) and poisons sibling messages when reached inside an
+        # outbox-handler SAVEPOINT.
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(review)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             raise AppError(
                 "DUPLICATE_REVIEW",
                 "You have already reviewed this pack",
@@ -283,13 +287,19 @@ class PackReviewService:
         else:
             # Add vote — handle concurrent double-click with IntegrityError
             vote = ReviewHelpfulVote(user_id=user_id, review_id=review_id)
-            self.db.add(vote)
             try:
-                await self.db.flush()
+                # R179: savepoint — the previous session.rollback() here wiped
+                # the whole transaction and then KEPT WRITING (delete + flush
+                # below), committing a request whose earlier work had been
+                # silently discarded (R177 lost-write shape).
+                async with self.db.begin_nested():
+                    self.db.add(vote)
+                    await self.db.flush()
             except IntegrityError:
                 # Vote was already inserted by a concurrent request — treat as remove
-                await self.db.rollback()
-                existing2 = await self.db.get(ReviewHelpfulVote, (user_id, review_id))
+                existing2 = await self.db.get(
+                    ReviewHelpfulVote, (user_id, review_id), populate_existing=True
+                )
                 if existing2:
                     await self.db.delete(existing2)
                     review = await self.db.get(PackReview, review_id)
