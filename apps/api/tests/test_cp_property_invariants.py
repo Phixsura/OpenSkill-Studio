@@ -504,3 +504,228 @@ async def test_reclose_lines_stable_even_with_forward_changes(db, seed):
         f"seed {seed}: forward changes altered the RE-CLOSED period's lines\n"
         f"  first : {lines_key(lines1)}\n  second: {lines_key(lines2)}"
     )
+
+
+@pytest.mark.parametrize("seed", (501, 517, 541))
+async def test_long_horizon_saga_conservation(db, seed):
+    """R154: 10 consecutive billing periods on one subscription with random
+    per-period events — seat/plan changes (immediate + deferred), rated usage,
+    void+re-close cycles — PLUS injected faults modelling outbox at-least-once
+    delivery (replayed close on the just-closed period, double-fired
+    rate_event). Conservation invariants at the end:
+
+      C1  every non-open period carries exactly ONE live (non-void) invoice
+      C2  every rated usage row is billed exactly once: status 'invoiced' with
+          a line on a LIVE invoice, or 'voided' — never twice, never stranded
+      C3  per live invoice: Σ(usage-line amounts) == Σ(billable of its rows)
+      C4  the credit ledger invariants (I1/I3) still hold
+      C5  no un-invoiced change remains behind the open period (all folded)
+    """
+    from datetime import timedelta as _td
+    from decimal import Decimal
+
+    from app.controlplane.models.billing import BillingPeriod, Invoice, InvoiceLine
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services import billing as billing_svc
+    from app.controlplane.services import metering, rating
+    from app.controlplane.services import pricing as pricing_svc
+    from app.controlplane.services.billing import SubscriptionChange, _add_interval
+
+    rng = random.Random(seed)
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = Actor(user_id=user.id, type="platform")
+    await pricing_svc.create_price_policy(
+        db,
+        actor=a,
+        name=f"saga-{seed}-{ULID()}",
+        policy_type="fixed_unit_price",
+        usage_type="image_generation",
+        currency="USD",
+        params={"unit_price_minor": 25},
+        effective_from=datetime.now(UTC) - _td(days=800),
+        tenant_id=tenant.id,
+    )
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=rng.choice([0, 250]),
+        provider="manual", actor=a,
+    )
+    for cycle in range(10):
+        # random credit so some invoices consume balance (exercises the
+        # credit-applied leg of close + the void refund leg)
+        if rng.random() < 0.3:
+            await credit_svc.top_up(
+                db, tenant.id, "USD", rng.randint(500, 4000), actor=a,
+                idempotency_key=f"saga{seed}-{cycle}-{ULID()}",
+            )
+        # random changes while the period is current
+        for _ in range(rng.randint(0, 2)):
+            await billing_svc.change_plan(
+                db, tenant, sub, plan_key=None, seats=rng.choice([0, 120, 300, 450]),
+                proration_mode="immediate", actor=a,
+            )
+        if rng.random() < 0.3:
+            await billing_svc.change_plan(
+                db, tenant, sub, plan_key=None, seats=rng.choice([60, 200]),
+                proration_mode="next_period", actor=a,
+            )
+        # backdate the open period so it is closable NOW; stagger the changes
+        period = (
+            await db.execute(
+                select(BillingPeriod).where(
+                    BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+                )
+            )
+        ).scalar_one()
+        period.period_start = datetime.now(UTC) - _td(days=40)
+        period.period_end = _add_interval(period.period_start, "month")
+        sub.current_period_start = period.period_start
+        sub.current_period_end = period.period_end
+        day = 2
+        for ch in (
+            (
+                await db.execute(
+                    select(SubscriptionChange).where(
+                        SubscriptionChange.subscription_id == sub.id,
+                        SubscriptionChange.invoiced.is_(False),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            if ch.proration_mode == "immediate":
+                ch.effective_at = period.period_start + _td(days=day)
+                day += rng.randint(2, 6)
+            else:
+                ch.effective_at = period.period_end
+        await db.flush()
+        # usage inside the window; FAULT: double-fire rate_event (outbox
+        # at-least-once) — must stay a single rated row (uq_cp_rated_event)
+        for u in range(rng.randint(0, 3)):
+            ev = await metering.emit_usage(
+                db,
+                tenant_id=tenant.id,
+                org_id="01SAGAORGSAGAORGSAGAORG000",
+                usage_type="image_generation",
+                quantity=Decimal(rng.randint(1, 8)),
+                occurred_at=period.period_start + _td(days=rng.randint(1, 27)),
+                source="manual",
+                idempotency_key=f"su{seed}-{cycle}-{u}",
+            )
+            await rating.rate_event(db, ev.id)
+            if rng.random() < 0.5:
+                await rating.rate_event(db, ev.id)  # injected duplicate delivery
+        invoice = await billing_svc.close_period_and_invoice(db, period.id)
+        assert invoice is not None, f"seed {seed} cycle {cycle}: close failed"
+        # FAULT: replayed close on the same period (duplicate outbox message)
+        if rng.random() < 0.5:
+            dup = await billing_svc.close_period_and_invoice(db, period.id)
+            assert dup is None, f"seed {seed} cycle {cycle}: replayed close double-invoiced"
+        # occasional void + immediate re-close
+        if rng.random() < 0.35:
+            await billing_svc.void_invoice(db, invoice, reason="saga redo", actor=a)
+            invoice = await billing_svc.close_period_and_invoice(db, period.id)
+            assert invoice is not None, f"seed {seed} cycle {cycle}: re-close failed"
+        await db.refresh(sub)
+
+    # ── conservation checks ─────────────────────────────────
+    periods = (
+        (
+            await db.execute(
+                select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    open_periods = [p for p in periods if p.status == "open"]
+    assert len(open_periods) == 1, f"seed {seed}: {len(open_periods)} open periods"
+    for p in periods:
+        if p.status == "open":
+            continue
+        live = (
+            (
+                await db.execute(
+                    select(Invoice).where(
+                        Invoice.billing_period_id == p.id, Invoice.status != "void"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(live) == 1, (
+            f"seed {seed}: period {p.id} has {len(live)} live invoices (C1)"
+        )
+    rated_rows = (
+        (
+            await db.execute(
+                select(RatedUsage)
+                .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
+                .where(RatedUsage.tenant_id == tenant.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    per_invoice_billable: dict[str, int] = {}
+    for row in rated_rows:
+        assert row.status in ("invoiced", "voided"), (
+            f"seed {seed}: rated row {row.id} stranded in '{row.status}' (C2)"
+        )
+        if row.status == "invoiced":
+            assert row.invoice_line_id is not None, f"seed {seed}: invoiced row w/o line (C2)"
+            line = (
+                await db.execute(
+                    select(InvoiceLine).where(InvoiceLine.id == row.invoice_line_id)
+                )
+            ).scalar_one()
+            inv = (
+                await db.execute(select(Invoice).where(Invoice.id == line.invoice_id))
+            ).scalar_one()
+            assert inv.status != "void", (
+                f"seed {seed}: rated row {row.id} bound to a VOID invoice (C2)"
+            )
+            per_invoice_billable[inv.id] = (
+                per_invoice_billable.get(inv.id, 0) + row.billable_amount_minor
+            )
+    for inv_id, billable_sum in per_invoice_billable.items():
+        usage_lines_sum = sum(
+            li.amount_minor
+            for li in (
+                (
+                    await db.execute(
+                        select(InvoiceLine).where(
+                            InvoiceLine.invoice_id == inv_id,
+                            InvoiceLine.line_type == "usage",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        )
+        assert usage_lines_sum == billable_sum, (
+            f"seed {seed}: invoice {inv_id} usage lines {usage_lines_sum} != "
+            f"Σ billable {billable_sum} (C3)"
+        )
+    await _assert_ledger_invariants(db, tenant.id)  # C4
+    stale_unfolded = (
+        (
+            await db.execute(
+                select(SubscriptionChange).where(
+                    SubscriptionChange.subscription_id == sub.id,
+                    SubscriptionChange.invoiced.is_(False),
+                    SubscriptionChange.change_type.in_(["plan_change", "seat_change"]),
+                    SubscriptionChange.effective_at < sub.current_period_start,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert not stale_unfolded, (
+        f"seed {seed}: {len(stale_unfolded)} changes left un-invoiced behind the open period (C5)"
+    )
