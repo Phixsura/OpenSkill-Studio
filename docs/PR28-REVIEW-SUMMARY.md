@@ -688,6 +688,23 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   the period end stable); the un-invoice window, first-void snapshot
   selection, and per-invoice fold stamps are mutually consistent. The
   R133→R135 rework has reached a genuine fixpoint.
+- **issue-18 debt payoff (folded into this PR by owner decision)**: the
+  R70-class stale-read-write debt flagged during PR #22 is fully paid — 13
+  service methods across evaluation/client-brief/cohort/organization/
+  peer-review/project/skill fixed with guarded conditional UPDATEs and
+  FOR UPDATE re-reads (flagships: double-retry double-charged the paid LLM
+  call; cancel stamped over an executed task; double-convert made two
+  projects off one brief; parallel gradings lost progress updates), with 5
+  deterministic two-session interleave tests, guard-proven by revert. The
+  addenda went with it: proxy-aware rate-limit identity (user-id keying +
+  trusted_proxy_hops XFF unwrap, spoof-safe default), ULID pagination
+  tiebreaks across 19 order_bys in 12 services, registry per_page cap
+  parity; the chunked data-URI evasion was verified already closed by the
+  later stripped-scan matchers. R72 (anon review/discussion user_id
+  exposure) reviewed and CLOSED as by-design public attribution: the id is
+  an opaque ULID, no public user_id-addressable endpoint exists, and the
+  display name is already shown. All four live suites re-run green against
+  the final code (148+52+49+17, zero 500s); full suite 2163 passed.
 
 ### Convergence of the R135-R148 continuation
 
