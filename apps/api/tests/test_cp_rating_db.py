@@ -1129,3 +1129,80 @@ async def test_unvoid_polarity_and_double_correct_gates(db):
     # Restoring the ORIGINAL is always safe.
     restored_o = await unvoid_rated(db, o2r.id, reason="fix original", actor=_actor(user))
     assert restored_o.status == "rated"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cost_rate_creates_cannot_overlap():
+    """R147: the overlap pre-check is read-then-insert with NO DB constraint
+    backstop — two concurrent creates for the same dimensions both passed and
+    committed OVERLAPPING windows (under cost_plus_* policies the ambiguous
+    cost basis changes customer billing). The dimension-tuple advisory lock
+    serializes check→insert; the loser sees the winner's committed row → 409."""
+    from app.controlplane.models.pricing import ProviderCostRate
+    from app.core.database import engine
+
+    dims = f"race-{str(ULID()).lower()[:8]}"
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup)
+            await setup.commit()
+            user_id = user.id
+
+        t0 = datetime.now(UTC) - timedelta(days=1)
+        outcomes: list[str] = []
+
+        def _args(u):
+            return dict(
+                actor=_actor(u),
+                provider=dims,
+                model_or_service="m1",
+                usage_type="image_generation",
+                currency="USD",
+                unit_cost=Decimal("0.02"),
+                effective_from=t0,
+            )
+
+        # Deterministic interleave: A creates and HOLDS its tx open (its
+        # pre-check row is invisible to B); B's create must BLOCK on the
+        # dimension advisory lock until A commits, then see the winner row →
+        # 409. Pre-fix, B's pre-check passed and both rows committed.
+        sa = AsyncSessionLocal()
+        sb = AsyncSessionLocal()
+        try:
+            ua = await sa.get(User, user_id)
+            await pricing_svc.create_cost_rate(sa, **_args(ua))
+
+            async def b_create():
+                ub = await sb.get(User, user_id)
+                try:
+                    await pricing_svc.create_cost_rate(sb, **_args(ub))
+                    await sb.commit()
+                    outcomes.append("created")
+                except AppError as e:
+                    await sb.rollback()
+                    outcomes.append(e.code)
+                except Exception as exc:  # noqa: BLE001
+                    await sb.rollback()
+                    outcomes.append(type(exc).__name__)
+
+            b_task = asyncio.create_task(b_create())
+            await asyncio.sleep(0.3)  # B is now blocked on the advisory lock
+            await sa.commit()
+            await b_task
+        finally:
+            await sa.close()
+            await sb.close()
+        assert outcomes == ["COST_RATE_OVERLAP"], outcomes
+        async with AsyncSessionLocal() as s:
+            rows = (
+                (
+                    await s.execute(
+                        select(ProviderCostRate).where(ProviderCostRate.provider == dims)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(rows) == 1, f"{len(rows)} overlapping rates committed"
+    finally:
+        await engine.dispose()

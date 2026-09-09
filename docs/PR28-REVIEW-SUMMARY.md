@@ -626,8 +626,25 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   Cleared: require_tenant_member/require_partner_member uniform-404 +
   role-403 semantics, platform-role bypass, member add/remove audit symmetry,
   partner attribution authz.
+- **R146 (rating void/unvoid/fx-retry machinery)**: CLEAN SWEEP, 0 findings —
+  the five-round-refined mutual-exclusion gates (adjust-vs-void, dual-unvoid
+  unconditional lock, blocked-restore re-drive, keyset fx cursor) all verified
+  correct in both lock orders.
+- **R147 (pricing/plans/metering)**: 1 confirmed (med, money under
+  cost_plus__), fixed + guard-proven with a deterministic two-session test.
+  create_cost_rate's overlap pre-check is read-then-insert with NO DB
+  constraint backstop (no exclusion constraint on dimensions+window) — two
+  concurrent creates for the same (provider, model, usage_type, capability)
+  both passed and committed OVERLAPPING windows; resolution stays
+  deterministic (.limit(1)) but under cost_plus__ policies the ambiguous cost
+  basis changes customer billing. A transaction-scoped advisory lock on the
+  dimension tuple now serializes check→insert (the loser sees the winner's
+  committed row → clean 409) — the organization.py/creator_matching pattern.
+  Cleared: supersede double-fire self-corrects through the successor overlap
+  409; storage/seat sweeps idempotent per (org, period); plans TOCTOU/
+  SAVEPOINT guards from R134/R135 hold.
 
-### Convergence of the R135-R145 continuation
+### Convergence of the R135-R147 continuation
 
 The R135 second wave through R143 ran as targeted fix-of-fix audits and
 fresh-surface sweeps over every control-plane service not yet re-probed
@@ -635,7 +652,7 @@ fresh-surface sweeps over every control-plane service not yet re-probed
 provisioning/export, revenue-share/settlement, platform dashboard, budgets,
 entitlements) plus frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
-R145=1** — a clean
+R145=1, R146=0, R147=1** — a clean
 convergence curve, the last findings low/medium severity (one partner
 under-payment on a void-after-credit-note edge, one false-429 budget window,
 input-type 500s, TOCTOU re-checks) with no new critical or money-at-scale
@@ -669,7 +686,7 @@ that closed PR #22.
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
   R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
   22 from R132, 17 from R133, 14 from R134, 13 from R135 (two waves) and
-  9 from R136–R145 (fix-of-fix continuation converging to repeated clean
+  10 from R136–R147 (fix-of-fix continuation converging to repeated clean
   rounds), on top of the 12-phase delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed

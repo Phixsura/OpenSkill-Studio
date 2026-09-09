@@ -133,6 +133,24 @@ async def create_cost_rate(db: AsyncSession, *, actor: Actor, **fields) -> Provi
     if fields.get("unit") not in (None, unit):
         raise AppError("VALIDATION_ERROR", f"unit must be '{unit}' for {usage_type}", 422)
     fields["unit"] = unit
+    # R147: the overlap pre-check is read-then-insert with NO DB constraint
+    # backstop (no exclusion constraint on the dimension+window) — two
+    # concurrent creates for the same dimensions both passed and committed
+    # OVERLAPPING windows. Resolution stays deterministic (.limit(1)) but
+    # under cost_plus_* policies the ambiguous cost basis changes CUSTOMER
+    # billing. A transaction-scoped advisory lock on the dimension tuple
+    # serializes check→insert (the loser's pre-check then sees the winner's
+    # committed row → clean 409), same pattern as organization.py seats and
+    # creator_matching evidence.
+    from sqlalchemy import text as _text
+
+    _dims = (
+        f"cost_rate:{fields['provider']}:{fields.get('model_or_service')}"
+        f":{usage_type}:{fields.get('capability_key')}"
+    )
+    await db.execute(
+        _text("SELECT pg_advisory_xact_lock(hashtext(:k))").bindparams(k=_dims)
+    )
     await _check_cost_rate_overlap(
         db,
         provider=fields["provider"],
