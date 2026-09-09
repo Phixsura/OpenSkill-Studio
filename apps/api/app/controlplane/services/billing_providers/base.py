@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass(frozen=True)
@@ -9,6 +10,10 @@ class ParsedWebhookEvent:
     external_event_id: str
     event_type: str
     data: dict
+    # R167: provider event created-time (Stripe `event.created`), used to
+    # ignore stale out-of-order status transitions. None = ordering unknown
+    # (mock provider) → apply unconditionally, preserving prior behavior.
+    occurred_at: "datetime | None" = None
 
 
 @dataclass(frozen=True)

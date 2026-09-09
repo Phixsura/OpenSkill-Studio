@@ -59,6 +59,12 @@ class Subscription(Base):
     provider: Mapped[str] = mapped_column(String(20), default="manual", server_default="manual")
     external_customer_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
     external_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # R167: created-time of the newest provider billing event applied to this
+    # sub — status transitions ignore any event older than this (Stripe events
+    # arrive out of order and at-least-once).
+    last_billing_event_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_by: Mapped[str | None] = mapped_column(String(26), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

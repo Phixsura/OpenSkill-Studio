@@ -2401,6 +2401,26 @@ async def process_webhook(
     return {"duplicate": False, "status": event.status}
 
 
+def _is_stale_billing_event(sub, parsed) -> bool:
+    """R167: True when this provider event is OLDER than the newest billing
+    event already applied to the subscription — apply nothing. Unknown event
+    time (mock/manual, occurred_at=None) is never stale (preserves behavior)."""
+    occurred = getattr(parsed, "occurred_at", None)
+    if occurred is None or sub.last_billing_event_at is None:
+        return False
+    return occurred < sub.last_billing_event_at
+
+
+def _advance_billing_event_hwm(sub, parsed) -> None:
+    """Record this event's created-time as the subscription's high-water mark
+    when it is newer (or the first seen)."""
+    occurred = getattr(parsed, "occurred_at", None)
+    if occurred is not None and (
+        sub.last_billing_event_at is None or occurred > sub.last_billing_event_at
+    ):
+        sub.last_billing_event_at = occurred
+
+
 def _subscription_ref(data: dict) -> str | None:
     """The subscription id from a Stripe payload, tolerant of API versions.
 
@@ -2553,6 +2573,19 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
         ).scalar_one_or_none()
         if sub is None:
             return False
+        # R167: ignore a STALE out-of-order event. Stripe delivers events with
+        # no ordering guarantee — a late invoice.paid (older cycle) arriving
+        # after a newer payment_failed must not resurrect the sub to active.
+        if _is_stale_billing_event(sub, parsed):
+            log.info(
+                "cp_webhook_stale_ignored",
+                event_type=event_type,
+                subscription_id=sub.id,
+                occurred_at=str(parsed.occurred_at),
+                last=str(sub.last_billing_event_at),
+            )
+            return True
+        _advance_billing_event_hwm(sub, parsed)
         # The subscription itself must leave past_due too — reactivating only
         # the tenant left the sub permanently stuck (R42[6]).
         await db.execute(
@@ -2578,6 +2611,16 @@ async def _apply_webhook_event(db: AsyncSession, provider: str, parsed) -> bool:
         ).scalar_one_or_none()
         if sub is None:
             return False
+        if _is_stale_billing_event(sub, parsed):
+            log.info(
+                "cp_webhook_stale_ignored",
+                event_type=event_type,
+                subscription_id=sub.id,
+                occurred_at=str(parsed.occurred_at),
+                last=str(sub.last_billing_event_at),
+            )
+            return True
+        _advance_billing_event_hwm(sub, parsed)
         tenant = await db.get(TenantAccount, sub.tenant_id)
         if tenant is not None and tenant.status == TenantStatus.ACTIVE:
             from app.controlplane.services.tenants import transition_status

@@ -3219,3 +3219,59 @@ async def test_gap_change_seat_basis_is_current_not_elapsed_period_start(db):
         f"gap preview used the elapsed-period basis: {preview['seat_proration_minor']} "
         f"(elapsed would be {expected_elapsed})"
     )
+
+
+@pytest.mark.asyncio
+async def test_stripe_webhook_out_of_order_status_events_ignored(db):
+    """R167: Stripe delivers events with no ordering guarantee. A STALE
+    invoice.paid arriving after a newer invoice.payment_failed must NOT
+    resurrect the subscription to active — the status handlers gate on the
+    event's created-time high-water mark. Applied directly through
+    _apply_webhook_event with explicit occurred_at (the mock signer path
+    carries no timestamp)."""
+    from datetime import timedelta as _td
+
+    from app.controlplane.services.billing import _apply_webhook_event
+    from app.controlplane.services.billing_providers.base import ParsedWebhookEvent
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=_actor(user),
+    )
+    sub.provider = "stripe"
+    sub.external_ref = f"sub_{ULID()}"
+    sub.status = "active"
+    await db.flush()
+
+    t1 = datetime.now(UTC) - _td(hours=2)  # OLD (cycle N)
+    t2 = datetime.now(UTC) - _td(hours=1)  # NEWER (cycle N)
+    t3 = datetime.now(UTC)                 # NEWEST (cycle N+1)
+
+    def _evt(etype, occurred):
+        return ParsedWebhookEvent(
+            external_event_id=f"evt_{ULID()}",
+            event_type=etype,
+            data={"subscription": sub.external_ref},
+            occurred_at=occurred,
+        )
+
+    # 1. payment_failed @ t2 → past_due, hwm=t2
+    await _apply_webhook_event(db, "stripe", _evt("invoice.payment_failed", t2))
+    await db.refresh(sub)
+    assert sub.status == "past_due", "failed event must move sub to past_due"
+    assert sub.last_billing_event_at == t2
+
+    # 2. STALE paid @ t1 (< t2) → IGNORED, sub stays past_due
+    handled = await _apply_webhook_event(db, "stripe", _evt("invoice.paid", t1))
+    await db.refresh(sub)
+    assert handled is True  # recorded, not errored
+    assert sub.status == "past_due", "stale paid event must NOT resurrect the sub"
+    assert sub.last_billing_event_at == t2, "hwm must not regress on a stale event"
+
+    # 3. NEWER paid @ t3 → active, hwm=t3
+    await _apply_webhook_event(db, "stripe", _evt("invoice.paid", t3))
+    await db.refresh(sub)
+    assert sub.status == "active", "a newer paid event must reactivate"
+    assert sub.last_billing_event_at == t3

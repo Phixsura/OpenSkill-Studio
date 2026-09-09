@@ -220,8 +220,20 @@ class StripeProvider(BillingProviderBase):
         cur = data.get("currency")
         if amt is not None and cur:
             data["amount_total"] = _platform_minor_from_stripe(int(amt), cur)
+        # R167: Stripe stamps every event with a Unix `created` time — thread
+        # it through so status handlers can ignore stale out-of-order events.
+        from datetime import UTC, datetime
+
+        try:
+            created = event["created"]
+        except (KeyError, TypeError):
+            created = None
+        occurred_at = (
+            datetime.fromtimestamp(int(created), tz=UTC) if created is not None else None
+        )
         return ParsedWebhookEvent(
             external_event_id=event["id"],
             event_type=event["type"],
             data=data,
+            occurred_at=occurred_at,
         )

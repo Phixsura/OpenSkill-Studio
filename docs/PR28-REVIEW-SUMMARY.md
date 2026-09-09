@@ -917,6 +917,25 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   STATE MACHINE — already deep-read clean in R140 (regen unbind/double-count
   guard, statement-row FOR UPDATE serialization, manual-adjustment keying)
   with the void-reversal source_type bug fixed in R139.
+- **R167 (deep-dive: Stripe subscription webhook state sync)**: 1 confirmed
+  (medium, billing-state correctness), fixed + guard-proven. Stripe delivers
+  webhook events with NO ordering guarantee (and at-least-once), but the
+  invoice.paid→active and invoice.payment_failed→past_due transitions were
+  applied purely by event TYPE with no recency check — a late-delivered STALE
+  event flipped the subscription (and tenant) to the wrong billing state: a
+  paying customer wrongly past_due (consumption blocked), or past_due not
+  enforced during real dunning (revenue side). The dedup guard (per
+  external_event_id) covers replays but not REORDERING. Fixed by capturing
+  Stripe's event.created time into ParsedWebhookEvent, recording a per-
+  subscription high-water mark (new column cp_subscriptions
+  .last_billing_event_at, migration cp23), and gating the paid/failed
+  transitions to ignore any event older than the newest already applied
+  (mock/manual events carry no timestamp → apply unconditionally, preserving
+  behavior). customer.subscription.deleted stays terminal (Stripe never
+  un-deletes) and the checkout binding / _subscription_ref extraction were
+  verified correct per event type. Two-session-style out-of-order regression
+  test (failed@t2 → stale paid@t1 ignored → newer paid@t3 applies);
+  guard-proven; billing suite 61 green.
   degradation).
   test drives 5 same-collapsing names + a post-collision probe (guard-proven
   by revert to the bare-flush retry → PendingRollbackError).
