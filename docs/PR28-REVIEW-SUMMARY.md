@@ -1169,6 +1169,34 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
     hard-delete FK sweep (every child of every hard-deleted parent is
     CASCADE/SET NULL), XSS-sink sweep (both dangerouslySetInnerHTML sites
     escaped/token-validated), cp22/cp23 migrations round-tripped on dev DB.
+- **R188–R189 (line-by-line: core modules — commits e2c1a9c/b5c3a85)**:
+  2 confirmed findings (one MEDIUM-HIGH), fixed + guard-proven; the backend
+  service layer is now 100% line-by-line covered.
+  - `video_eval.py` (R188, MEDIUM): both ffmpeg/ffprobe subprocess calls
+    awaited communicate() with NO deadline while decoding
+    attacker-controlled bytes — a crafted stream that hangs the decoder
+    parked the evaluation coroutine forever and LEAKED the process (the
+    wedged-eval sweeper flips the task to FAILED but cannot reap the
+    subprocess). Bounded (60s) + kill + reap + clean 422. Hang-simulation
+    test guard-proven (revert → 20s timeout).
+  - `config.py` (R189, MEDIUM-HIGH): CORSMiddleware runs with
+    allow_credentials=True, where starlette ECHOES the request Origin for a
+    wildcard entry — CORS_ORIGINS='["*"]' silently granted every website
+    credentialed API access (any page could hit /auth/refresh with the
+    visitor's httpOnly refresh cookie → account takeover for any logged-in
+    visitor). config.py boot-guards five other production footguns; CORS was
+    the missing family member. Production boot now refuses wildcards.
+    Read clean in the same pass: deps.py (R59/R91 verified), all five
+    middleware (impersonation whitelist unspoofable — path tricks over-block,
+    never under-block; api-metering R53/R92/R113 verified; ASGI body cap),
+    worker.py (two-phase claim / per-message commit / reaper ordering all
+    re-derived sound), facade.py, billing_providers (mock R64[20] header-bytes,
+    manual 409s), exceptions.py (global input-sqlstate backstop), email.py
+    (production gap logs loudly — documented ADR limitation), database/cache/
+    redis, media.py magic-bytes, video sampling determinism, stores/auth.ts
+    (memory-only token), main.py (fail-hard prod boot, drain ordering),
+    workflow_runtime.py full pass (closed-vocabulary template rendering,
+    R11/R13/R85 claim discipline re-verified).
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
