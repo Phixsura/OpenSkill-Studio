@@ -298,3 +298,18 @@ def test_manual_invoice_line_quantity_bound_validated():
     ):
         with pytest.raises(ValidationError):
             ManualInvoiceLineInput(description="x", amount_minor=1, quantity=bad)
+
+
+def test_tenant_own_actions_are_tenant_visible():
+    """R186: subscription.reactivated is emitted by the tenant's OWN
+    reactivate action (billing page) but was filtered from the tenant-scoped
+    audit endpoint — the tenant's timeline showed a cancel with no follow-up
+    while the subscription was live again. Same for member add/remove
+    (tenant-console actions)."""
+    for action in (
+        "subscription.reactivated",
+        "tenant.member_added",
+        "tenant.member_removed",
+    ):
+        assert action in AUDIT_ACTIONS
+        assert action in TENANT_VISIBLE_ACTIONS, f"{action} is a tenant-own action"

@@ -165,6 +165,15 @@ TENANT_VISIBLE_ACTIONS = frozenset(
         "subscription.plan_changed",
         "subscription.started",
         "subscription.cancelled",
+        # R186: reactivation is the TENANT's own action (billing page
+        # "Reactivate" button) — filtering it left the tenant's audit
+        # timeline showing a cancel with no visible follow-up while the
+        # subscription was in fact live again: an actively misleading trail.
+        "subscription.reactivated",
+        # R186: member add/remove are tenant-admin actions on the tenant's
+        # own console — platform-internal they are not.
+        "tenant.member_added",
+        "tenant.member_removed",
         "entitlement.override_set",
         "entitlement.override_removed",
         "credit.topped_up",
