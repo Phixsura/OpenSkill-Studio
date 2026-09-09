@@ -75,9 +75,27 @@ class PortfolioService:
                 break
             username = f"{base[:30]}-{secrets.token_hex(3)}"
 
+        # R174: the uniqueness loop above is check-then-insert — a bare flush
+        # 500'd on both race shapes: (a) the SAME user's first two requests
+        # arriving in parallel (SPA fires profile GET + PUT together) collide
+        # on the PK; (b) two users with the same display name generate the
+        # same username and collide on the unique index. Savepoint + recover.
         profile = UserProfile(user_id=user_id, username=username)
-        self.db.add(profile)
-        await self.db.flush()
+        try:
+            async with self.db.begin_nested():
+                self.db.add(profile)
+                await self.db.flush()
+        except IntegrityError:
+            # PK race: the concurrent request for this user won — return its row.
+            existing = await self.db.get(UserProfile, user_id, populate_existing=True)
+            if existing is not None:
+                return existing
+            # Username race: retry once with a random suffix.
+            profile = UserProfile(
+                user_id=user_id, username=f"{base[:30]}-{secrets.token_hex(3)}"
+            )
+            self.db.add(profile)
+            await self.db.flush()
         return profile
 
     # Nullable profile columns where an explicit null means "clear the field".

@@ -436,3 +436,75 @@ async def _peer_round(db, org, instructor, learners):
         org.id, project.id, instructor.id, name="R173", num_reviews=2
     )
     return project.id, rnd.id
+
+
+async def test_concurrent_first_profile_touch_no_500():
+    """R174: get_or_create_profile is check-then-insert on BOTH the PK (same
+    user's parallel first requests) and the username unique index (two users
+    with the same display name). Each bare-flush race was a 500. The loser
+    must recover: same-user → return the winner's row; same-username →
+    retry with a random suffix."""
+    from app.core.database import engine
+    from app.services.portfolio import PortfolioService
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            # Two distinct users with an IDENTICAL display name → identical
+            # generated username base.
+            u1 = await _mk_user(setup)
+            u2 = await _mk_user(setup)
+            clash = f"Race Clash {str(ULID()).lower()}"
+            u1.display_name = clash
+            u2.display_name = clash
+            await setup.commit()
+            u1_id, u2_id = u1.id, u2.id
+
+        # ── shape (b): username unique-index race across two users ──
+        sa = AsyncSessionLocal()
+        sb = AsyncSessionLocal()
+        try:
+            pa = await PortfolioService(sa).get_or_create_profile(u1_id)  # holds insert
+            username_a = pa.username
+
+            async def b_create():
+                profile = await PortfolioService(sb).get_or_create_profile(u2_id)
+                name = profile.username
+                await sb.commit()
+                return name
+
+            b = asyncio.create_task(b_create())
+            await asyncio.sleep(0.3)
+            await sa.commit()
+            username_b = await b
+        finally:
+            await sa.close()
+            await sb.close()
+        assert username_b != username_a, "loser must have retried with a suffix"
+        assert username_b.startswith(username_a[:30])
+
+        # ── shape (a): same-user PK race ──
+        async with AsyncSessionLocal() as setup:
+            u3 = await _mk_user(setup)
+            await setup.commit()
+            u3_id = u3.id
+        sa = AsyncSessionLocal()
+        sb = AsyncSessionLocal()
+        try:
+            pa = await PortfolioService(sa).get_or_create_profile(u3_id)
+
+            async def b_same_user():
+                profile = await PortfolioService(sb).get_or_create_profile(u3_id)
+                name = profile.username
+                await sb.commit()
+                return name
+
+            b = asyncio.create_task(b_same_user())
+            await asyncio.sleep(0.3)
+            await sa.commit()
+            username_b3 = await b
+        finally:
+            await sa.close()
+            await sb.close()
+        assert username_b3 == pa.username, "loser must return the winner's profile"
+    finally:
+        await engine.dispose()
