@@ -875,6 +875,9 @@ async def main():
             "http://10.0.0.5/internal",
             "http://[::1]:8000/api/v1/health",
             "http://2130706433/hook",
+            # R171: CGNAT shared space (is_private=False!) + NAT64 prefix
+            "http://100.64.0.5/hook",
+            "http://[64:ff9b::a9fe:a9fe]/latest/meta-data/",
         ]:
             r = await c.post(
                 f"/orgs/{a_org}/webhooks",
@@ -888,6 +891,15 @@ async def main():
         )
         check("public https webhook accepted (positive control)",
               r.status_code in (200, 201), f"got {r.status_code}: {r.text[:100]}")
+
+        # R172: target-side share removal — only the TARGET org may remove an
+        # incoming share; strangers get uniform 404 (no share-existence oracle)
+        r = await c.delete(f"/orgs/{a_org}/shared-with-me/{'0' * 26}", headers=ah)
+        denied(r, "remove-incoming-share on nonexistent pack", allow=(404,))
+        r = await c.delete(f"/orgs/{v_org}/shared-with-me/{'0' * 26}", headers=ah)
+        denied(r, "remove-incoming-share cross-org (attacker on victim org)", allow=(403, 404))
+        r = await c.delete(f"/orgs/{a_org}/shared-with-me/{'0' * 26}")
+        denied(r, "remove-incoming-share anonymous", allow=(401,))
 
         # ═══ W. HTTP protocol edges ═══
         section("W. protocol edges")
