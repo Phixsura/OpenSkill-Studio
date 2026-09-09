@@ -772,6 +772,212 @@ async def main():
                         headers=ah)
         denied(r, "attacker writes victim org settings")
 
+    # ═══ U. LIVE HTTP race attacks ═══
+    async with httpx.AsyncClient(base_url=API, timeout=60, trust_env=False) as c:
+        section("U. live races: idempotency, max_uses, final-accept, unique slug")
+        # U1: 8 parallel purchases with ONE idempotency key → ≤1 purchase
+        ikey = f"race-{uuid.uuid4().hex[:16]}"
+
+        async def _buy():
+            return await c.post(
+                f"/orgs/{a_org}/marketplace/purchases",
+                json={"listing_id": listing_id, "payment_method": "credit",
+                      "idempotency_key": ikey},
+                headers=ah,
+            )
+
+        rs = await asyncio.gather(*[_buy() for _ in range(8)])
+        codes = sorted(r.status_code for r in rs)
+        ids = {r.json()["data"]["id"] for r in rs if r.status_code in (200, 201)}
+        no_500 = all(r.status_code < 500 for r in rs)
+        check("8-way purchase idempotency race: no 500s", no_500, f"codes={codes}")
+        check("8-way purchase idempotency race: ≤1 purchase id", len(ids) <= 1,
+              f"ids={ids} codes={codes}")
+
+        # U2: invite link max_uses=1, 6 racers → exactly ONE join
+        r = await c.post(
+            f"/orgs/{v_org}/invite-links",
+            json={"role": "student", "max_uses": 1, "expires_in_days": 7}, headers=vh,
+        )
+        rcode = r.json()["data"]["url"].rsplit("/", 1)[-1]
+        racers = []
+        for i in range(6):
+            hh, _, _ = await register(c, f"racer{i}")
+            racers.append(hh)
+
+        async def _join(hh):
+            return await c.post("/invites/join", json={"code": rcode}, headers=hh)
+
+        rs = await asyncio.gather(*[_join(hh) for hh in racers])
+        joins = [r for r in rs if r.status_code in (200, 201)]
+        no_500 = all(r.status_code < 500 for r in rs)
+        check("6-way max_uses=1 race: no 500s", no_500,
+              f"codes={sorted(r.status_code for r in rs)}")
+        check("6-way max_uses=1 race: exactly 1 join", len(joins) == 1,
+              f"{len(joins)} joins")
+
+        # U3: portal final-accept ×6 parallel → exactly one 201
+        r = await c.post(
+            f"/orgs/{v_org}/projects/{v_proj}/submissions/{v_sub}/submit", headers=vh
+        )
+        check("victim submits draft (U3 setup)", r.status_code == 200, r.text[:120])
+        await c.post(
+            f"/orgs/{v_org}/projects/{v_proj}/client-shares",
+            json={"submission_id": v_sub}, headers=vh,
+        )
+        la = await c.post(
+            f"/orgs/{v_org}/projects/{v_proj}/client-links",
+            json={"role": "approver", "expires_at": _exp()}, headers=vh,
+        )
+        graw = la.json()["data"]["token"]
+        g = await c.post("/client-portal/guest-session", json={"token": graw})
+        atok = {"Authorization": f"Bearer {g.json()['data']['access_token']}"}
+
+        async def _final():
+            return await c.post(
+                f"/client-portal/projects/{v_proj}/final-accept",
+                json={"submission_id": v_sub, "comment": "race"}, headers=atok,
+            )
+
+        rs = await asyncio.gather(*[_final() for _ in range(6)])
+        oks = [r for r in rs if r.status_code == 201]
+        no_500 = all(r.status_code < 500 for r in rs)
+        check("6-way final-accept race: no 500s", no_500,
+              f"codes={sorted(r.status_code for r in rs)}")
+        check("6-way final-accept race: exactly 1 acceptance", len(oks) == 1,
+              f"{len(oks)} accepted")
+
+        # U4: 6 parallel org creates with ONE slug → 1 winner, clean losers
+        slug = f"race-slug-{uuid.uuid4().hex[:10]}"
+
+        async def _mkorg(hh):
+            return await c.post(
+                "/orgs", json={"name": "Race Org X", "slug": slug, "description": "d"},
+                headers=hh,
+            )
+
+        rs = await asyncio.gather(*[_mkorg(racers[i % len(racers)]) for i in range(6)])
+        wins = [r for r in rs if r.status_code in (200, 201)]
+        no_500 = all(r.status_code < 500 for r in rs)
+        check("6-way same-slug org race: no 500s", no_500,
+              f"codes={sorted(r.status_code for r in rs)}")
+        check("6-way same-slug org race: exactly 1 winner", len(wins) == 1,
+              f"{len(wins)} wins")
+
+        # ═══ V. SSRF probes (webhook URLs) ═══
+        section("V. SSRF: webhook URL blocklist")
+        for target in [
+            "http://localhost:6379/hook",
+            "http://127.0.0.2/hook",
+            "http://0.0.0.0/hook",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://metadata.google.internal/computeMetadata/v1/",
+            "http://10.0.0.5/internal",
+            "http://[::1]:8000/api/v1/health",
+            "http://2130706433/hook",
+        ]:
+            r = await c.post(
+                f"/orgs/{a_org}/webhooks",
+                json={"url": target, "events": ["pack.published"]}, headers=ah,
+            )
+            denied(r, f"webhook SSRF {target[:44]}", allow=(400, 403, 422))
+        r = await c.post(
+            f"/orgs/{a_org}/webhooks",
+            json={"url": "https://example.com/hook", "events": ["pack.published"]},
+            headers=ah,
+        )
+        check("public https webhook accepted (positive control)",
+              r.status_code in (200, 201), f"got {r.status_code}: {r.text[:100]}")
+
+        # ═══ W. HTTP protocol edges ═══
+        section("W. protocol edges")
+        r = await c.post(
+            f"/orgs/{a_org}/categories",
+            content=b'{"name": "first", "name": "second"}',
+            headers={**ah, "Content-Type": "application/json"},
+        )
+        check("duplicate JSON keys: no 500, deterministic parse",
+              r.status_code < 500, f"got {r.status_code}")
+        r = await c.post(
+            f"/orgs/{a_org}/categories", content=b'["not", "an", "object"]',
+            headers={**ah, "Content-Type": "application/json"},
+        )
+        denied(r, "array where object expected", allow=(400, 422))
+        r = await c.post(
+            f"/orgs/{a_org}/categories", content=b'{"name": "tp"}',
+            headers={**ah, "Content-Type": "text/plain"},
+        )
+        denied(r, "text/plain content-type on JSON route", allow=(400, 415, 422))
+        r = await c.get(
+            f"/orgs/{a_org}/skills",
+            headers={**ah, "X-HTTP-Method-Override": "DELETE"},
+        )
+        check("method-override header ignored", r.status_code == 200, f"got {r.status_code}")
+        r = await c.get(f"/orgs/{a_org}/%2e%2e/%2e%2e/platform/tenants", headers=ah)
+        denied(r, "URL-encoded ../ path traversal", allow=(400, 401, 403, 404))
+        r = await c.get(f"/orgs/{a_org}/skills?q=" + "A" * 20000, headers=ah)
+        check("20KB query param: no 500", r.status_code < 500, f"got {r.status_code}")
+        r = await c.request("HEAD", "/platform/tenants")
+        check("anon HEAD on protected route: no body leak",
+              r.status_code in (401, 403, 404, 405) and not r.content,
+              f"got {r.status_code}, {len(r.content)}B body")
+
+        # ═══ Y. Enumeration uniformity ═══
+        section("Y. account enumeration")
+        r1 = await c.post("/auth/login",
+                          json={"email": f"ghost-{uuid.uuid4().hex[:8]}@nowhere-example.com",
+                                "password": "Wrong1!xx"})
+        r2 = await c.post("/auth/login", json={"email": dup_email, "password": "Wrong1!xx"})
+        check(
+            "login: unknown email vs wrong password INDISTINGUISHABLE",
+            r1.status_code == r2.status_code
+            and r1.json()["error"]["code"] == r2.json()["error"]["code"],
+            f"{r1.status_code}/{r1.json()['error']['code']} vs "
+            f"{r2.status_code}/{r2.json()['error']['code']}",
+        )
+        f1 = await c.post("/auth/forgot-password",
+                          json={"email": f"ghost-{uuid.uuid4().hex[:8]}@nowhere-example.com"})
+        f2 = await c.post("/auth/forgot-password", json={"email": dup_email})
+        check("forgot-password: existence not disclosed",
+              f1.status_code == f2.status_code, f"{f1.status_code} vs {f2.status_code}")
+
+        # ═══ Z. Import bombs ═══
+        section("Z. pack-import bombs")
+        r = await c.post(
+            f"/orgs/{a_org}/packs/import",
+            files={"file": ("bomb.zip", b"PK\x03\x04" + b"A" * (6 * 1024 * 1024),
+                            "application/zip")},
+            headers=ah,
+        )
+        denied(r, "6MB corrupt zip import", allow=(400, 413, 422))
+        import json as _json
+        import zipfile
+        from io import BytesIO
+
+        deep = leaf = {}
+        for _ in range(300):
+            leaf["n"] = {}
+            leaf = leaf["n"]
+        zbuf = BytesIO()
+        with zipfile.ZipFile(zbuf, "w") as z:
+            z.writestr("manifest.json", _json.dumps({"pack": deep}))
+        r = await c.post(
+            f"/orgs/{a_org}/packs/import",
+            files={"file": ("deep.zip", zbuf.getvalue(), "application/zip")},
+            headers=ah,
+        )
+        denied(r, "300-deep manifest import", allow=(400, 413, 422))
+        # zip bomb: tiny zip, huge decompressed member
+        zbuf2 = BytesIO()
+        with zipfile.ZipFile(zbuf2, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("manifest.json", '{"pad": "' + "A" * (60 * 1024 * 1024) + '"}')
+        r = await c.post(
+            f"/orgs/{a_org}/packs/import",
+            files={"file": ("zbomb.zip", zbuf2.getvalue(), "application/zip")},
+            headers=ah,
+        )
+        denied(r, "60MB-decompressed zip bomb", allow=(400, 413, 422))
+
     # ═══ H. Session/refresh attacks ═══
     async with httpx.AsyncClient(base_url=API, timeout=30, trust_env=False) as c2:
         section("H. refresh rotation + revocation")

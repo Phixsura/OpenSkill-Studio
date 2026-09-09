@@ -789,6 +789,27 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   code-verified free of formula-injection vectors (machine values only, no
   free-text fields). Grand total: 143/143 hostile probes cleanly denied
   across the whole campaign battery, zero 500s in the monitored API log.
+- **R158 (battery: live races, SSRF, protocol edges, enumeration, import
+  bombs — 173 probes total)**: 0 new product findings; the last uncovered
+  adversarial dimensions are now permanent live coverage. LIVE HTTP RACES
+  (the battery had been serial until now): 8-way purchase-idempotency race →
+  ≤1 purchase, no 500s; 6-way max_uses=1 invite-link race → exactly 1 join;
+  6-way portal final-accept race → exactly 1 acceptance; 6-way same-slug org
+  race → exactly 1 winner — the service-level race fixes verified over real
+  concurrent HTTP. SSRF: the webhook URL blocklist held against
+  localhost/127.0.0.2/0.0.0.0/169.254.169.254/metadata.google.internal/
+  10.0.0.5/[::1]/decimal-encoded 2130706433 (DNS-resolving check, NXDOMAIN
+  treated as blocked), public positive control accepted; provider
+  connections were code-verified to store NO fetchable URLs (adapters are
+  code-registered). Protocol edges: duplicate JSON keys, array-for-object,
+  text/plain content-type, X-HTTP-Method-Override ignored, %2e%2e path
+  traversal, 20KB query, anon HEAD body-leak — all clean. Enumeration:
+  unknown-email vs wrong-password logins are INDISTINGUISHABLE and
+  forgot-password discloses nothing (an initial false positive traced to the
+  probe's reserved .test TLD failing EmailStr). Import bombs: 6MB corrupt
+  zip, 300-deep manifest, 60MB-decompressed zip bomb — all rejected. The
+  partner CSV remains formula-injection-free by construction. Final battery:
+  **173 hostile probes, 26 sections, zero bypass, zero 500s**.
 
 ### Convergence of the R135-R148 continuation
 
@@ -801,7 +822,7 @@ outbox worker, API-metering middleware, audit registry, impersonation) plus
 frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
 R145=1, R146=0, R147=1, R148=0, R149=0 (validation), R150=0,
-R151=1, R152=0, R153=0, R154=0, R155=0, R156=1, R157=0 (property fuzz + saga + live
+R151=1, R152=0, R153=0, R154=0, R155=0, R156=1, R157=0, R158=0 (property fuzz + saga + live
 adversarial battery, new attack
 classes)** — a clean
 convergence curve, the last findings low/medium severity (one partner
