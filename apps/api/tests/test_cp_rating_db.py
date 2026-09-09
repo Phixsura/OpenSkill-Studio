@@ -1206,3 +1206,55 @@ async def test_concurrent_cost_rate_creates_cannot_overlap():
             assert len(rows) == 1, f"{len(rows)} overlapping rates committed"
     finally:
         await engine.dispose()
+
+
+def test_min_fee_not_applied_to_zero_cost():
+    """R162 (mutation probe): a ZERO-cost/zero-quantity event must NOT be
+    floored up to the minimum fee — the floor applies only to a real positive
+    charge (cost > 0). A `>=` here would silently bill the minimum fee on a
+    zero-usage event (phantom overcharge). Pins both the _minor and _exact
+    paths so a `> → >=` mutation is killed."""
+    # zero quantity, min fee set → stays 0, never floored to 50
+    assert rating.compute_internal_cost_minor(Decimal("0.018"), Decimal(0), "USD", 50) == 0
+    assert rating.compute_internal_cost_exact(
+        Decimal("0.018"), Decimal(0), "USD", 50
+    ) == Decimal(0)
+    # zero unit cost, positive quantity, min fee → also 0 (no real charge)
+    assert rating.compute_internal_cost_minor(Decimal("0"), Decimal(10), "USD", 50) == 0
+    # a genuine positive charge below the floor IS raised to it (control)
+    assert rating.compute_internal_cost_minor(Decimal("0.10"), Decimal(1), "USD", 50) == 50
+    # negative reversal never flips into a positive minimum-fee charge
+    assert rating.compute_internal_cost_minor(Decimal("0.018"), Decimal(-10), "USD", 50) == -50
+    # exact path: a real positive charge below the floor is RAISED to it
+    # (max, not min) — the exact twin's floor must be pinned too.
+    assert rating.compute_internal_cost_exact(Decimal("0.10"), Decimal(1), "USD", 50) == Decimal(50)
+
+
+def test_apply_tiers_first_wins_on_duplicate_min_qty():
+    """R162 (mutation probe): with two tiers at the SAME min_qty the FIRST
+    listed wins (strict `>` on best_min). Pins first-wins so a `> → >=`
+    mutation (which would flip to last-wins) is killed."""
+    tiers = [
+        {"min_qty": "100", "unit_cost": "0.010"},  # first at 100 — wins
+        {"min_qty": "100", "unit_cost": "0.099"},  # duplicate — must NOT override
+    ]
+    assert rating.apply_tiers(Decimal("0.02"), tiers, Decimal("500")) == Decimal("0.010")
+
+
+def test_compute_billable_exact_mirrors_minor():
+    """R162: the _exact billable twin had only DB-level coverage. Pin the pure
+    matrix directly so its operators (pct, block ceiling, unit price, quota)
+    are mutation-covered without a DB."""
+    fe = rating.compute_billable_exact
+    assert fe("cost_plus_percentage", {"percentage": "50"},
+              internal_cost_exact=Decimal(100), quantity=Decimal(1)) == Decimal(150)
+    # unit price accumulates the sub-minor remainder (0.4), not rounded to 0
+    assert fe("fixed_unit_price", {"unit_price_minor": 1, "per_quantity": "1000000"},
+              internal_cost_exact=Decimal(0), quantity=Decimal(400000)) == Decimal("0.4")
+    # block markup: 1400/1000 → 2 blocks
+    assert fe("cost_plus_fixed", {"fixed_markup_minor": 500, "per_quantity": "1000"},
+              internal_cost_exact=Decimal(100), quantity=Decimal(1400)) == Decimal(100 + 1000)
+    # quota overage: prior 0, included 100, qty 150 → 50 over × 2 = 100
+    assert fe("included_quota_then_overage",
+              {"included_quota": "100", "overage_unit_price_minor": 2},
+              internal_cost_exact=Decimal(0), quantity=Decimal(150)) == Decimal(100)
