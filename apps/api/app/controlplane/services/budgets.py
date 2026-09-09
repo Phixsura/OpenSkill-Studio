@@ -77,6 +77,13 @@ async def _spent_minor(db: AsyncSession, tenant: TenantAccount, policy: BudgetPo
         .join(UsageEvent, UsageEvent.id == RatedUsage.usage_event_id)
         .where(
             RatedUsage.tenant_id == tenant.id,
+            # R151 (R142 follow-up): duplicate the tenant filter on the EVENT
+            # side so the planner can drive ix_cp_usage_tenant_time
+            # (tenant_id, occurred_at) — without it the occurred_at window
+            # can't use a composite index and the hot-path budget check scans
+            # the tenant's full rated history. Semantically identical
+            # (a rated row's tenant always equals its event's tenant).
+            UsageEvent.tenant_id == tenant.id,
             # 'settled' = paid via credit reservation; still real spend for
             # budget purposes (only voided/blocked are excluded).
             RatedUsage.status.in_(["rated", "invoiced", "settled"]),
