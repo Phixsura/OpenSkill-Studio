@@ -705,6 +705,19 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   an opaque ULID, no public user_id-addressable endpoint exists, and the
   display name is already shown. All four live suites re-run green against
   the final code (148+52+49+17, zero 500s); full suite 2163 passed.
+- **R153 (property/invariant fuzz — a NEW attack class after 17 reading
+  rounds)**: 0 findings across the widened search space; the invariants are
+  now pinned as executable tests (tests/test_cp_property_invariants.py).
+  I1-I3: ledger replayability (balance == Σ amounts, balance_after running
+  sum, reserved == Σ held) across ~150-op random sequences through the full
+  public credit API incl. the expiry cron. I4: the same invariants under 3
+  CONCURRENT committed writers × 40 ops on one (tenant, currency). I5:
+  void + re-close reproduces the invoice LINE FOR LINE with identical
+  post-fold sub state over randomized backdated mid-period change sets (40
+  seeds); I5b: forward gap-window changes may alter the fold outcome but
+  never the re-closed period's lines (30 seeds). The R133→R135 snapshot
+  fixpoint and the credit critical-section design are now empirically
+  pinned, not just read-verified.
 
 ### Convergence of the R135-R148 continuation
 
@@ -717,7 +730,7 @@ outbox worker, API-metering middleware, audit registry, impersonation) plus
 frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
 R145=1, R146=0, R147=1, R148=0, R149=0 (validation), R150=0,
-R151=1, R152=0** — a clean
+R151=1, R152=0, R153=0 (property fuzz)** — a clean
 convergence curve, the last findings low/medium severity (one partner
 under-payment on a void-after-credit-note edge, one false-429 budget window,
 input-type 500s, TOCTOU re-checks) with no new critical or money-at-scale
