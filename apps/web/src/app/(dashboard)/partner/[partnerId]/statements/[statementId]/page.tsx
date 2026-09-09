@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
-import { apiWithAuth, ApiError } from "@/lib/api";
+import { apiWithAuth, ApiError, sharedRefresh } from "@/lib/api";
 import { formatDate, formatMinor } from "@/lib/cp";
 import { useAuthStore } from "@/stores/auth";
 
@@ -58,16 +58,21 @@ export default function StatementDetailPage() {
       // R101[M16]: read the token at click time, not render time — the raw
       // fetch bypasses apiWithAuth's refresh logic, so a token captured
       // earlier could already be rotated out by the time the user clicks.
-      const token = useAuthStore.getState().accessToken;
-      const res = await fetch(
-        `${API_BASE}/api/v1/partners/${partnerId}/statements/${statementId}/export.csv`,
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
-      );
-      // R101[M16]: 401 (null/expired token) previously surfaced as a generic
-      // "CSV export failed" with no hint that re-authenticating would fix it.
+      // R184: and on 401, actually refresh + retry once (same as the
+      // submission upload) instead of telling the user to reload — a partner
+      // reading a statement for >15 min hit the expiry on every export.
+      const doFetch = (tok: string | null) =>
+        fetch(`${API_BASE}/api/v1/partners/${partnerId}/statements/${statementId}/export.csv`, {
+          headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+        });
+      let res = await doFetch(useAuthStore.getState().accessToken);
       if (res.status === 401) {
-        toast.error("Session expired — reload and try again");
-        return;
+        try {
+          res = await doFetch(await sharedRefresh());
+        } catch {
+          toast.error("Session expired — please log in again");
+          return;
+        }
       }
       if (!res.ok) throw new ApiError(res.status, "EXPORT_FAILED", "Export failed");
       const blob = await res.blob();
