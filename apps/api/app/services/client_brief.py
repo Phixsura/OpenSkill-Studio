@@ -45,11 +45,16 @@ class ClientBriefService:
             created_by=created_by,
             **fields,
         )
-        self.db.add(brief)
+        # R177: slug-collision recovery previously called session.rollback() —
+        # a FULL transaction rollback, not a savepoint. Any uncommitted work
+        # the caller had already done in the same transaction was silently
+        # wiped before the retry (and only the brief itself was re-added).
+        # Savepoint the insert instead, same pattern as portfolio.create_item.
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(brief)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             brief.slug = f"{slug[:290]}-{secrets.token_hex(3)}"
             self.db.add(brief)
             await self.db.flush()

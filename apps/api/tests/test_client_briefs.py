@@ -483,3 +483,43 @@ async def test_convert_rubric_bad_max_score_is_422_not_500(c):
     r = await _convert([{"criterion": "Quality", "max_score": 100}])
     assert r.status_code == 201, r.text
     assert r.json()["data"]["max_score"] == 100
+
+
+@pytest.mark.asyncio
+async def test_brief_slug_retry_does_not_wipe_transaction(c):
+    """R177: the slug-collision retry called session.rollback() — a FULL
+    transaction rollback that silently wiped any uncommitted work already in
+    the caller's transaction (only the colliding brief was re-added). Two
+    same-title briefs created in ONE session must BOTH survive the commit."""
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.client_brief import ClientBrief
+    from app.services.client_brief import ClientBriefService
+
+    h, u = await _auth(c)
+    oid = await _org(c, h)
+
+    async with AsyncSessionLocal() as s:
+        svc = ClientBriefService(s)
+        kw = {
+            "client_name": "Acme",
+            "project_type": "ai_visual",
+            "objective": "obj",
+        }
+        a = await svc.create_brief(oid, u["id"], title="Collide Title R177", **kw)
+        a_id = a.id
+        # Same title → same slug → IntegrityError → retry path
+        b = await svc.create_brief(oid, u["id"], title="Collide Title R177", **kw)
+        assert b.slug != a.slug
+        await s.commit()
+
+    async with AsyncSessionLocal() as s:
+        rows = (
+            (await s.execute(select(ClientBrief).where(ClientBrief.org_id == oid)))
+            .scalars()
+            .all()
+        )
+        ids = {r.id for r in rows}
+        assert a_id in ids, "retry wiped the earlier uncommitted brief from the transaction"
+        assert len(rows) == 2
