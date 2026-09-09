@@ -1,7 +1,7 @@
 // P11: control-plane money display helpers (#27 §11.3)
 import { describe, expect, it } from "vitest";
 
-import { formatMinor, StatusBadgeClass } from "@/lib/cp";
+import { formatMinor, majorToMinor, StatusBadgeClass } from "@/lib/cp";
 
 describe("formatMinor", () => {
   it("formats standard 2-decimal currencies from minor units", () => {
@@ -22,6 +22,29 @@ describe("formatMinor", () => {
 
   it("never throws on unknown currency codes", () => {
     expect(() => formatMinor(123, "ZZZ")).not.toThrow();
+  });
+
+  it("R163: case-insensitive zero-decimal detection (matches backend .upper())", () => {
+    // A lowercase code must not miss ZERO_DECIMAL and divide by 100 (100x bug).
+    expect(formatMinor(1500, "jpy")).toBe("¥1,500");
+    expect(formatMinor(1500, "krw")).toBe("₩1,500");
+  });
+});
+
+describe("majorToMinor", () => {
+  it("converts major units to integer minor per currency", () => {
+    expect(majorToMinor("199.00", "USD")).toBe(19900);
+    expect(majorToMinor("1500", "JPY")).toBe(1500);
+  });
+
+  it("R163: zero-decimal detection is case-insensitive", () => {
+    // "1500" jpy must stay 1500 minor, not 150000.
+    expect(majorToMinor("1500", "jpy")).toBe(1500);
+  });
+
+  it("rejects non-finite input", () => {
+    expect(majorToMinor("abc", "USD")).toBeNull();
+    expect(majorToMinor("", "USD")).toBeNull();
   });
 });
 

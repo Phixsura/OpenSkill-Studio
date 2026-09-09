@@ -79,6 +79,10 @@ const ZERO_DECIMAL = new Set(["JPY", "KRW"]);
 
 /** Format integer minor units as a display amount ("$199.00", "¥1,500"). */
 export function formatMinor(amountMinor: number, currency: string): string {
+  // R163: normalize case like the backend's minor_multiplier (R81[0]) — a
+  // lowercase code ("jpy") missed ZERO_DECIMAL and divided by 100, a 100x
+  // display error for zero-decimal currencies.
+  currency = currency.toUpperCase();
   const divisor = ZERO_DECIMAL.has(currency) ? 1 : 100;
   const value = amountMinor / divisor;
   try {
@@ -98,7 +102,7 @@ export function formatMinor(amountMinor: number, currency: string): string {
 export function majorToMinor(input: string, currency: string): number | null {
   const value = parseFloat(input);
   if (!Number.isFinite(value)) return null;
-  const factor = ZERO_DECIMAL.has(currency) ? 1 : 100;
+  const factor = ZERO_DECIMAL.has(currency.toUpperCase()) ? 1 : 100;
   return Math.round(value * factor);
 }
 
