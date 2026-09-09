@@ -718,6 +718,17 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   never the re-closed period's lines (30 seeds). The R133→R135 snapshot
   fixpoint and the credit critical-section design are now empirically
   pinned, not just read-verified.
+- **R154 (long-horizon saga + fault injection)**: 0 findings — 10
+  consecutive billing periods per seed on one subscription with random
+  per-period events (immediate/deferred seat and plan changes, rated usage,
+  credit top-ups, void+re-close cycles) PLUS injected faults modelling outbox
+  at-least-once delivery (replayed close on the just-closed period must
+  return None, double-fired rate_event must stay one rated row). Conservation
+  held across 300 randomized period cycles (30-seed scout): every non-open
+  period carries exactly ONE live invoice; every rated row is billed exactly
+  once (never bound to a void invoice, never stranded); per-invoice usage
+  lines reconcile to Σ billable; the credit ledger invariants survive the
+  whole saga; and no change is left un-folded behind the open period.
 
 ### Convergence of the R135-R148 continuation
 
@@ -730,7 +741,8 @@ outbox worker, API-metering middleware, audit registry, impersonation) plus
 frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
 R145=1, R146=0, R147=1, R148=0, R149=0 (validation), R150=0,
-R151=1, R152=0, R153=0 (property fuzz)** — a clean
+R151=1, R152=0, R153=0, R154=0 (property fuzz + saga, new attack
+classes)** — a clean
 convergence curve, the last findings low/medium severity (one partner
 under-payment on a void-after-credit-note edge, one false-429 budget window,
 input-type 500s, TOCTOU re-checks) with no new critical or money-at-scale
