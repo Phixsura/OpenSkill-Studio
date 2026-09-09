@@ -990,6 +990,20 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   swallows every failure inside its own SAVEPOINT — an initial defensive wrap
   was reverted when a test showed it was both unnecessary and (via
   double-nested savepoints) destabilizing.
+- **R171 (systematic sweep: outbox-handler redelivery idempotency)**: CLEAN
+  SWEEP, 0 findings. The worker delivers at-least-once (a crash between a
+  handler's commit and its status write, or a retry, redelivers the message),
+  so every one of the 11 @register_handler functions must be idempotent.
+  Verified each: run.terminal (guarded settle/release on status==held),
+  usage.recorded (uq_cp_rated_event), fx.rate_created (keyset re-rate),
+  period.close_due (guarded period status==open), subscription.push_provider
+  (stateless push of current state — a duplicate is a provider no-op),
+  subscription.cancel_provider (payload-pinned ref + already-cancelled-is-
+  success), invoice.finalized / purchase.paid / purchase.refunded /
+  credit_note.applied (all via _insert_entry natural-key dedup), and
+  provision.run (resumable guarded step machine). No handler double-applies a
+  money or state effect on redelivery — the R89 per-message SAVEPOINT plus
+  DB-level idempotency holds across all of them.
   sweep idempotency intact.
   green.
   degradation).
