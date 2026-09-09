@@ -604,6 +604,25 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   spend (or a false warning). Now windows on UsageEvent.occurred_at, matching
   both the dashboard and close_period_and_invoice's period attribution. The
   only remaining rated_at period-boundary in the control plane.
+- **R143 (entitlements/quota enforcement gate)**: CLEAN SWEEP, 0 findings —
+  the highest-blast-radius resolver verified correct: suspension mask wins
+  over plan/override values, expired overrides filter live (no cron), the
+  dirty-tombstone protocol prevents a racing reader from re-caching a stale
+  value across the mutation commit, quota soft/hard fallback and NaN-safe
+  typed value validation all hold.
+
+### Convergence of the R135-R143 continuation
+
+The R135 second wave through R143 ran as targeted fix-of-fix audits and
+fresh-surface sweeps over every control-plane service not yet re-probed
+(credits, billing, marketplace, client-portal, white-label/domains/branding,
+provisioning/export, revenue-share/settlement, platform dashboard, budgets,
+entitlements) plus frontend parity. Confirmed-finding counts by round:
+**R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0** — a clean
+convergence curve, the last findings low/medium severity (one partner
+under-payment on a void-after-credit-note edge, one false-429 budget window,
+input-type 500s, TOCTOU re-checks) with no new critical or money-at-scale
+class. Three clean sweeps (R140, R141, R143) bracket the tail.
 
 ## 4. Convergence
 
@@ -629,11 +648,12 @@ that closed PR #22.
 
 ## 5. Bottom line
 
-- **~558 confirmed defects fixed across 58 remediation commits**: ~230 from
+- **~575 confirmed defects fixed across 65 remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
   R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
-  22 from R132, 17 from R133 and 14 from R134 (fix-of-fix + fresh
-  surfaces), on top of the 12-phase delivery.
+  22 from R132, 17 from R133, 14 from R134, 13 from R135 (two waves) and
+  8 from R136–R143 (fix-of-fix continuation converging to repeated clean
+  rounds), on top of the 12-phase delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed
   customers forever, one that silently kept collected cash on credit
