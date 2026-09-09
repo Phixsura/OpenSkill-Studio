@@ -954,6 +954,22 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   still-RUNNING run defers to invoice billing (no revenue loss). Poison-
   isolation regression test (one failing + one healthy stale hold → healthy
   still expires, reserved_minor doesn't drift); guard-proven; credits 42
+- **R169 (deep-dive: seat + storage metering sweeps)**: 1 confirmed
+  (medium, revenue availability), fixed + guard-proven. sweep_seats and
+  sweep_storage looped every org emitting usage in the caller's single
+  transaction with NO per-org isolation — one org whose size query or
+  emit_usage raised aborted the whole batch. The seat sweep fires MONTHLY
+  (cron day 1), so an unguarded abort loses a FULL MONTH of active-learner-
+  seat billing platform-wide (storage: a full day); the same R168/
+  expire_promotional gap with worse cadence. Each org now runs in its own
+  begin_nested + log-and-continue. Verified along the way: the seat/storage
+  idempotency keys (seats:{org}:{month}, storage:{org}:{date}) make re-runs
+  no-ops; the count is a point-in-time day-1 snapshot (defined v1 policy);
+  cancelled-tenant post-cancel seat events never reach an invoice (the
+  cancelled sub is skipped by scan_due_periods) and suspended-tenant seat
+  billing is deliberate recurring-fee policy (ADR §10.7) — neither is a
+  billing bug. Poison-org isolation regression test; guard-proven; seat
+  sweep idempotency intact.
   green.
   degradation).
   test drives 5 same-collapsing names + a post-collision probe (guard-proven

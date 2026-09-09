@@ -284,36 +284,46 @@ async def sweep_storage(db: AsyncSession, for_date: datetime | None = None) -> i
     ).all()
     emitted = 0
     for org_id, tenant_id in orgs:
-        item_bytes = (
-            await db.execute(
-                select(func.coalesce(func.sum(SubmissionItem.file_size), 0))
-                .join(Submission, Submission.id == SubmissionItem.submission_id)
-                .where(Submission.org_id == org_id)
-            )
-        ).scalar_one()
-        asset_bytes = (
-            await db.execute(
-                select(func.coalesce(func.sum(ProjectAsset.file_size), 0)).where(
-                    ProjectAsset.org_id == org_id
+        # R169: isolate each org in a SAVEPOINT so one org whose size query or
+        # emit raises can't abort the whole DAILY storage sweep (the
+        # expire_promotional/R168 per-item pattern). Without it a single
+        # poison org rolled back every org's event and the sweep re-failed
+        # each day — no storage billed platform-wide until the org was fixed.
+        try:
+            async with db.begin_nested():
+                item_bytes = (
+                    await db.execute(
+                        select(func.coalesce(func.sum(SubmissionItem.file_size), 0))
+                        .join(Submission, Submission.id == SubmissionItem.submission_id)
+                        .where(Submission.org_id == org_id)
+                    )
+                ).scalar_one()
+                asset_bytes = (
+                    await db.execute(
+                        select(func.coalesce(func.sum(ProjectAsset.file_size), 0)).where(
+                            ProjectAsset.org_id == org_id
+                        )
+                    )
+                ).scalar_one()
+                total = item_bytes + asset_bytes
+                if total == 0:
+                    continue
+                gb = (Decimal(total) / Decimal(1073741824)).quantize(Decimal("0.000001"))
+                event = await emit_usage(
+                    db,
+                    tenant_id=tenant_id,
+                    org_id=org_id,
+                    usage_type="storage_gb_day",
+                    quantity=gb,
+                    occurred_at=datetime.now(UTC),
+                    source="storage_sweep",
+                    idempotency_key=f"storage:{org_id}:{day}",
                 )
-            )
-        ).scalar_one()
-        total = item_bytes + asset_bytes
-        if total == 0:
+            if event is not None:
+                emitted += 1
+        except Exception:  # noqa: BLE001 — one bad org must not wedge the cron
+            log.warning("cp_storage_sweep_org_failed", org_id=org_id, exc_info=True)
             continue
-        gb = (Decimal(total) / Decimal(1073741824)).quantize(Decimal("0.000001"))
-        event = await emit_usage(
-            db,
-            tenant_id=tenant_id,
-            org_id=org_id,
-            usage_type="storage_gb_day",
-            quantity=gb,
-            occurred_at=datetime.now(UTC),
-            source="storage_sweep",
-            idempotency_key=f"storage:{org_id}:{day}",
-        )
-        if event is not None:
-            emitted += 1
     return emitted
 
 
@@ -350,18 +360,27 @@ async def sweep_seats(db: AsyncSession, for_month: str | None = None) -> int:
     for org_id, tenant_id, seats in rows:
         if seats == 0:
             continue
-        event = await emit_usage(
-            db,
-            tenant_id=tenant_id,
-            org_id=org_id,
-            usage_type="active_learner_seat",
-            quantity=seats,
-            occurred_at=datetime.now(UTC),
-            source="seat_sweep",
-            idempotency_key=f"seats:{org_id}:{month}",
-        )
-        if event is not None:
-            emitted += 1
+        # R169: isolate each org — one org's emit failure must not abort the
+        # MONTHLY seat sweep (it fires only on the 1st, so an unguarded abort
+        # loses a WHOLE month of seat billing platform-wide). Mirrors the
+        # storage sweep above and expire_promotional/R168.
+        try:
+            async with db.begin_nested():
+                event = await emit_usage(
+                    db,
+                    tenant_id=tenant_id,
+                    org_id=org_id,
+                    usage_type="active_learner_seat",
+                    quantity=seats,
+                    occurred_at=datetime.now(UTC),
+                    source="seat_sweep",
+                    idempotency_key=f"seats:{org_id}:{month}",
+                )
+            if event is not None:
+                emitted += 1
+        except Exception:  # noqa: BLE001 — one bad org must not wedge the cron
+            log.warning("cp_seat_sweep_org_failed", org_id=org_id, exc_info=True)
+            continue
     return emitted
 
 

@@ -716,3 +716,62 @@ async def test_backfill_bound_open_period_accepted_closed_rejected(db):
         )
         assert r.status_code == 422, r.text
         assert "already-invoiced" in r.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_seat_sweep_isolates_one_bad_org(db, monkeypatch):
+    """R169: one org whose emit_usage raises must NOT abort the whole MONTHLY
+    seat sweep (it fires only on the 1st — an unguarded abort loses a full
+    month of seat billing platform-wide). The healthy org still gets its
+    seat event; the poison org's savepoint rolls back cleanly."""
+    from app.models.organization import OrgRole
+    from app.services.organization import OrgService
+
+    owner = await _mk_user(db)
+    svc = OrgService(db)
+    orgs = []
+    for _ in range(2):
+        o = await svc.create(
+            name=f"IsoSweep {ULID()}",
+            slug=f"iso-{str(ULID()).lower()}",
+            description=None,
+            created_by=owner.id,
+        )
+        s = await _mk_user(db)
+        await svc.add_member(o.id, s.id, OrgRole.STUDENT)
+        orgs.append(o.id)
+    await db.flush()
+    month = datetime.now(UTC).strftime("%Y-%m")
+    poison_org = orgs[0]
+
+    real_emit = metering.emit_usage
+
+    async def flaky_emit(db_, **kw):
+        if kw.get("org_id") == poison_org and kw.get("usage_type") == "active_learner_seat":
+            raise RuntimeError("simulated emit failure")
+        return await real_emit(db_, **kw)
+
+    monkeypatch.setattr(metering, "emit_usage", flaky_emit)
+    # Must NOT raise despite the poison org.
+    emitted = await metering.sweep_seats(db, for_month=month)
+    await db.flush()
+    monkeypatch.undo()
+
+    # The healthy org still got its seat event; the poison org did not.
+    for oid in orgs:
+        rows = (
+            (
+                await db.execute(
+                    select(UsageEvent).where(
+                        UsageEvent.idempotency_key == f"seats:{oid}:{month}"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if oid == poison_org:
+            assert len(rows) == 0, "poison org's savepoint must have rolled back"
+        else:
+            assert len(rows) == 1, "healthy org must still be seat-billed"
+    assert emitted >= 1
