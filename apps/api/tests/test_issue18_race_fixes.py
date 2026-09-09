@@ -291,3 +291,46 @@ async def test_concurrent_add_member_409_not_500():
         assert outcomes == ["ALREADY_MEMBER"], outcomes
     finally:
         await engine.dispose()
+
+
+async def test_cohort_slug_collision_retry_no_session_poison():
+    """R160 (schemathesis): non-ASCII cohort names collapse to the same slug;
+    the FIRST retry flush was un-SAVEPOINT'd, so a second collision (concurrent
+    create or suffix race) poisoned the session → PendingRollbackError 500 on
+    the next statement. The savepoint-retry loop must yield unique slugs and
+    never poison the session — 5 same-collapsing-name creates all succeed."""
+    from app.core.database import engine
+    from app.models.cohort import Cohort
+    from app.services.cohort import CohortService
+
+    try:
+        async with AsyncSessionLocal() as s:
+            user = await _mk_user(s)
+            org = await _mk_org(s, user)
+            await s.commit()
+            org_id = org.id
+
+        # All these names collapse to the same base slug via _generate_slug.
+        names = ["team alpha", "team!alpha", "team@@@alpha", "TEAM  ALPHA", "team.alpha"]  # all → base slug "team-alpha"
+        async with AsyncSessionLocal() as s:
+            svc = CohortService(s)
+            made = []
+            for nm in names:
+                cohort = await svc.create_cohort(org_id, name=nm, description=None,
+                                                 created_by=user.id)
+                made.append(cohort.id)
+            await s.commit()
+            # a normal op AFTER the retries must work (session not poisoned)
+            await svc.create_cohort(org_id, name="normal cohort", description=None,
+                                            created_by=user.id)
+            await s.commit()
+        async with AsyncSessionLocal() as s:
+            rows = (
+                (await s.execute(select(Cohort).where(Cohort.org_id == org_id)))
+                .scalars().all()
+            )
+            slugs = [r.slug for r in rows]
+            assert len(rows) == len(names) + 1, f"{len(rows)} cohorts (expected {len(names)+1})"
+            assert len(set(slugs)) == len(slugs), f"duplicate slugs: {slugs}"
+    finally:
+        await engine.dispose()

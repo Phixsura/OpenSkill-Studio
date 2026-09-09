@@ -63,7 +63,30 @@ class CohortService:
         max_learners: int | None = None,
         created_by: str = "",
     ) -> Cohort:
-        slug = self._generate_slug(name)
+        base = self._generate_slug(name)
+        # R160 (schemathesis): weird names collapse to the same base slug
+        # (non-ASCII → e.g. "u-b"). Pick a FREE slug up front with a single
+        # SELECT, then insert once. The earlier retry-after-IntegrityError
+        # loop could not work: in this async stack a flush IntegrityError —
+        # even inside begin_nested — deactivates the session for any further
+        # statement (PendingRollbackError 500), so recovery-in-place is not
+        # possible. A genuine TOCTOU collision on the chosen slug is a clean
+        # 409 (the request's session is torn down on the AppError), matching
+        # the proven add_member pattern.
+        existing = set(
+            (
+                await self.db.execute(
+                    select(Cohort.slug).where(
+                        Cohort.org_id == org_id, Cohort.slug.like(f"{base[:190]}%")
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        slug = base
+        while slug in existing:
+            slug = f"{base[:190]}-{secrets.token_hex(4)}"
         cohort = Cohort(
             org_id=org_id,
             name=name,
@@ -76,13 +99,16 @@ class CohortService:
         )
         self.db.add(cohort)
         try:
-            async with self.db.begin_nested():
-                await self.db.flush()
-        except IntegrityError:
-            cohort.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
-            self.db.add(cohort)
             await self.db.flush()
-
+        except IntegrityError:
+            # TOCTOU: a concurrent create took this slug between the SELECT
+            # and our flush. Clean 409 — the client retries (a fresh token
+            # suffix will be free). Do NOT attempt in-place recovery.
+            raise AppError(
+                "COHORT_SLUG_CONFLICT",
+                "Cohort name collided concurrently; please retry",
+                409,
+            ) from None
         log.info("cohort_created", cohort_id=cohort.id, org_id=org_id)
         return cohort
 

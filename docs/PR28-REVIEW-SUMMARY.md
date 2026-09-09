@@ -810,6 +810,22 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   zip, 300-deep manifest, 60MB-decompressed zip bomb — all rejected. The
   partner CSV remains formula-injection-free by construction. Final battery:
   **173 hostile probes, 26 sections, zero bypass, zero 500s**.
+- **R160 (Schemathesis — schema-driven property fuzz over ALL 481
+  endpoints)**: 1 confirmed 500, fixed + guard-proven; ~19k hypothesis-
+  generated cases per phase. THE FINDING: POST cohorts with a name that
+  sanitizes to a short/degenerate slug (non-ASCII → e.g. "u-b") hit a
+  UniqueViolation, and the collision RETRY ran a bare (un-savepoint'd) flush
+  — in this async SQLAlchemy stack a flush IntegrityError deactivates the
+  whole session, so the next statement 500'd with PendingRollbackError (a
+  reproducible crash from ordinary cohort names). Rewritten to pick a free
+  slug with a single SELECT then insert once, raising a clean 409 on a
+  genuine TOCTOU collision (recovery-in-place is impossible here — the
+  proven add_member pattern). Two other flagged 'negative-data acceptances'
+  were verified benign framework behavior (FastAPI ignores unknown query
+  params; Pydantic v2 coerces JSON 0→False on a bool field, semantically
+  correct). Post-fix re-fuzz: 19,161 cases, ZERO server errors. Regression
+  test drives 5 same-collapsing names + a post-collision probe (guard-proven
+  by revert to the bare-flush retry → PendingRollbackError).
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
