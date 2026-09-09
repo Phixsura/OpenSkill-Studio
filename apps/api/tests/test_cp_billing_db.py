@@ -3093,6 +3093,29 @@ async def test_credit_note_idempotency_key(db):
         db, invoice, amount_minor=1000, reason="unkeyed", actor=_actor(user)
     )
     assert n3.id != n1.id
+    # R136: a keyed retry AFTER the invoice was voided replays the original
+    # note (the operation DID succeed) instead of 409'ing; a NEW note on the
+    # void invoice is still rejected.
+    await billing_svc.void_invoice(db, invoice, reason="redo cycle", actor=_actor(user))
+    n4 = await billing_svc.issue_credit_note(
+        db,
+        invoice,
+        amount_minor=3000,
+        reason="late retry",
+        actor=_actor(user),
+        idempotency_key=key,
+    )
+    assert n4.id == n1.id
+    with pytest.raises(AppError) as exc_void:
+        await billing_svc.issue_credit_note(
+            db,
+            invoice,
+            amount_minor=500,
+            reason="fresh note on void",
+            actor=_actor(user),
+            idempotency_key=f"cnk2-{ULID()}",
+        )
+    assert exc_void.value.code == "INVOICE_NOT_OPEN"
 
 
 @pytest.mark.asyncio

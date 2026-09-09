@@ -2015,3 +2015,131 @@ async def test_expired_lot_reserved_remainder_still_waits(db):
     await db.refresh(lot)
     assert balance.balance_minor == 0
     assert lot.consumed_expiration_id is not None
+
+
+@pytest.mark.asyncio
+async def test_expired_lot_settled_remainder_does_not_eat_deposit(db):
+    """R136 (med, R135 residue): a lot left open for a RESERVED remainder
+    still stalked new money through the SETTLE path — the hold spends the
+    remainder, a fresh deposit lands, and the next pass swept the deposit up
+    to the remainder. The ledger-replay cap attributes debits since the first
+    expiration pass to the waiting remainder first."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    lot = await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        1000,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        reason="welcome",
+        actor=a,
+    )
+    hold = await credit_svc.reserve(
+        db, tenant.id, "USD", 300, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    await credit_svc.expire_promotional(db)  # pass 1: expires 700, lot open
+    # The hold SETTLES — the 300 remainder is spent, not returned.
+    await credit_svc.settle(db, hold.id, 300)
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert balance.balance_minor == 0
+    # Fresh deposit AFTER the settle.
+    await credit_svc.top_up(db, tenant.id, "USD", 500, actor=a, idempotency_key=f"dep-{ULID()}")
+    await credit_svc.expire_promotional(db)  # pass 2 must not touch the deposit
+    await db.refresh(balance)
+    await db.refresh(lot)
+    assert balance.balance_minor == 500, "pass 2 clawed back the fresh deposit"
+    assert lot.consumed_expiration_id is not None, "spent remainder must close the lot"
+
+
+@pytest.mark.asyncio
+async def test_expired_lot_partial_settle_then_release_sweeps_only_survivor(db):
+    """R136 anchor check: a hold of 300 settles 150 (150 released back).
+    The later pass must sweep exactly the surviving 150, and a THIRD pass
+    must not re-sweep the settled 150 out of new deposits (fixed first-pass
+    anchor — a per-pass anchor forgets the settle by pass 3)."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    lot = await credit_svc.grant_promotional(
+        db,
+        tenant.id,
+        "USD",
+        1000,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        reason="welcome",
+        actor=a,
+    )
+    hold = await credit_svc.reserve(
+        db, tenant.id, "USD", 300, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    await credit_svc.expire_promotional(db)  # pass 1: expires 700
+    await credit_svc.settle(db, hold.id, 150)  # 150 spent, 150 back to available
+    await credit_svc.expire_promotional(db)  # pass 2: sweeps the surviving 150
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert balance.balance_minor == 0, "pass 2 must sweep exactly the released 150"
+    await db.refresh(lot)
+    assert lot.consumed_expiration_id is not None, (
+        "after sweeping the survivor the settled remainder is forfeit — close"
+    )
+    # Deposit after close: untouched by any later pass.
+    await credit_svc.top_up(db, tenant.id, "USD", 400, actor=a, idempotency_key=f"d2-{ULID()}")
+    await credit_svc.expire_promotional(db)
+    await db.refresh(balance)
+    assert balance.balance_minor == 400
+
+
+@pytest.mark.asyncio
+async def test_append_entry_reraises_non_idempotency_integrity_error(db, monkeypatch):
+    """R136: the SAVEPOINT catch must only no-op a REAL idempotency collision
+    (winner row exists) — any other IntegrityError inside the flush (FK,
+    check constraint) must propagate, not masquerade as a duplicate."""
+    from sqlalchemy.exc import IntegrityError as SAIntegrityError
+
+    from app.controlplane.services.credits import _append_entry, _locked_balance
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    await credit_svc.top_up(db, tenant.id, "USD", 100, actor=a, idempotency_key=f"s-{ULID()}")
+    balance = await _locked_balance(db, tenant.id, "USD")
+
+    real_flush = db.flush
+    calls = {"n": 0}
+
+    async def poisoned_flush(*args, **kwargs):
+        calls["n"] += 1
+        raise SAIntegrityError("simulated fk violation", None, Exception("fk"))
+
+    monkeypatch.setattr(db, "flush", poisoned_flush)
+    try:
+        with pytest.raises(SAIntegrityError):
+            await _append_entry(
+                db,
+                balance,
+                entry_type="adjustment",
+                amount_minor=50,
+                idempotency_key=f"never-inserted-{ULID()}",
+            )
+    finally:
+        monkeypatch.setattr(db, "flush", real_flush)
+    assert calls["n"] == 1
+    # The true-duplicate path still no-ops: pre-existing winner with the key.
+    key = f"win-{ULID()}"
+    e1 = await credit_svc.adjust(
+        db, tenant.id, "USD", 70, reason="w", actor=a, idempotency_key=key
+    )
+    assert e1 is not None
+    dup = await credit_svc.adjust(
+        db, tenant.id, "USD", 70, reason="w", actor=a, idempotency_key=key
+    )
+    assert dup is None

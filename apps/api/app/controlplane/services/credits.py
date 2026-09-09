@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,7 +126,28 @@ async def _append_entry(
             # detach defensively if it survived (SQLAlchemy version drift).
             if entry in db:
                 db.expunge(entry)
-            balance.balance_minor = new_balance - amount_minor
+            # The rollback reverted the DB-side mutation and expired the
+            # balance row — refresh instead of re-assigning (an attribute
+            # write on an expired instance loads synchronously and dies with
+            # MissingGreenlet under asyncio).
+            await db.refresh(balance)
+            # R136: only a REAL idempotency collision is a duplicate no-op —
+            # a blanket catch misreported any other IntegrityError (FK, check
+            # constraint) inside the savepoint as "duplicate", silently
+            # dropping a legitimate write. Verify the winner row exists (the
+            # 23505 loser only unblocks after the winner COMMITS, so it is
+            # visible here); anything else re-raises.
+            with db.no_autoflush:
+                winner = (
+                    await db.execute(
+                        select(CreditLedgerEntry.id).where(
+                            CreditLedgerEntry.tenant_id == balance.tenant_id,
+                            CreditLedgerEntry.idempotency_key == idempotency_key,
+                        )
+                    )
+                ).scalar_one_or_none()
+            if winner is None:
+                raise
             return None
     else:
         db.add(entry)
@@ -614,7 +635,56 @@ async def expire_promotional(db: AsyncSession) -> int:
                     ).scalar_one()
                 )
                 remaining_face = max(lot.amount_minor - already_expired, 0)
-                expire_amount = min(remaining_face, max(0, available))
+                # R136 (med, R135 residue): a lot left open for a RESERVED
+                # remainder still stalked new money through the SETTLE path —
+                # the hold spends the remainder (balance drops, reserved
+                # clears), a fresh deposit lands, and the next pass swept the
+                # deposit up to the remainder. The ledger is replayable:
+                # attribute every debit SINCE this lot's last expiration pass
+                # to the waiting remainder first (conservative — protects
+                # deposits; at worst forfeits platform promo). Release adds
+                # no ledger entry, so a released hold's promo stays sweepable.
+                sweepable = remaining_face
+                if already_expired > 0 and remaining_face > 0:
+                    # Anchor at the FIRST pass (ULID ids are time-ordered):
+                    # sweepable = remaining_face − all debits since then.
+                    # remaining_face already nets out later expirations, so a
+                    # fixed anchor never double- or under-counts a settle the
+                    # way a per-pass anchor would (a pre-pass-2 settle would
+                    # be forgotten by pass 3 and the sweep would overshoot
+                    # into fresh deposits again).
+                    first_exp_id = (
+                        await db.execute(
+                            select(func.min(CreditLedgerEntry.id)).where(
+                                CreditLedgerEntry.entry_type == "expiration",
+                                CreditLedgerEntry.reference_type == "promotional_lot",
+                                CreditLedgerEntry.reference_id == lot.id,
+                            )
+                        )
+                    ).scalar_one()
+                    spent_since = int(
+                        (
+                            await db.execute(
+                                select(
+                                    func.coalesce(func.sum(-CreditLedgerEntry.amount_minor), 0)
+                                ).where(
+                                    CreditLedgerEntry.tenant_id == lot.tenant_id,
+                                    CreditLedgerEntry.currency == lot.currency,
+                                    CreditLedgerEntry.amount_minor < 0,
+                                    CreditLedgerEntry.id > first_exp_id,
+                                    # this lot's own expirations are not
+                                    # spends (NULL-safe: a NULL reference_id
+                                    # debit IS a spend — plain != drops it)
+                                    or_(
+                                        CreditLedgerEntry.reference_id.is_(None),
+                                        CreditLedgerEntry.reference_id != lot.id,
+                                    ),
+                                )
+                            )
+                        ).scalar_one()
+                    )
+                    sweepable = max(remaining_face - spent_since, 0)
+                expire_amount = min(sweepable, max(0, available))
                 # R135 (high, R98[H10] rework): the ONLY reason to leave a lot
                 # open after this pass is a RESERVED remainder (a live hold we
                 # must not break — it settles/releases and a later pass sweeps
@@ -644,9 +714,11 @@ async def expire_promotional(db: AsyncSession) -> int:
                         # for — the unexpired remainder was pre-expiry spend.
                         lot.consumed_expiration_id = entry.id
                     expired += 1
-                elif balance.reserved_minor <= 0:
-                    # nothing expirable AND nothing reserved: the remainder
-                    # was spent before expiry — close, don't stalk new money.
+                elif sweepable <= 0 or balance.reserved_minor <= 0:
+                    # nothing expirable AND (nothing reserved, or the waiting
+                    # remainder was spent since the last pass): the remainder
+                    # is forfeit — close, don't stalk new money. sweepable
+                    # only ever shrinks, so 0 now means 0 forever.
                     lot.consumed_expiration_id = lot.id
         except Exception:  # noqa: BLE001 — one bad lot must not wedge the cron
             log.warning("cp_promo_expiry_lot_failed", lot_id=lot.id, exc_info=True)

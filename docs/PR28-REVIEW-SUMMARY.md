@@ -512,6 +512,30 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   silently kept the original date while reporting success — expires_at is
   behavioral (the expiry cron claws back at that instant), so it joins the
   IDEMPOTENCY_CONFLICT parameter set.
+- **R136 (fix-of-fix audit of the R135 second wave)**: 3 confirmed, fixed +
+  guard-proven; 5 suspects cleared by code verification (duplicate_project
+  needs no provenance — Projects carry none and packs contain only
+  skills/templates; purchased_major snapshots at create and upgrade_policy is
+  immutable post-create; manual_grant already nulls seat_limit off-scope; no
+  other anon surface serves workflow definitions; the gap seat-basis close
+  parity holds through the rollover). (med) the R135 reserved-remainder lot
+  still stalked new money through the SETTLE path — the hold spends the
+  remainder, a deposit lands, and the next pass swept the deposit up to the
+  remainder; the ledger being replayable, the sweep is now capped by
+  remaining_face minus all debits since the lot's FIRST expiration pass
+  (fixed anchor — a per-pass anchor forgets a settle by pass 3 and
+  overshoots again; NULL-safe reference_id exclusion), attributing
+  post-expiry spends to the waiting remainder first (conservative: protects
+  customer deposits, at worst forfeits platform promo). (med) the R135
+  cross-currency SAVEPOINT catch treated ANY IntegrityError as a duplicate
+  no-op — an FK/check-constraint failure inside the flush silently dropped a
+  legitimate write; the loser now verifies the winner row actually exists
+  (visible post-commit by 23505 ordering) and re-raises otherwise, with the
+  balance restored via refresh (an attribute write on the expired instance
+  died with MissingGreenlet). (low) a keyed credit-note retry AFTER the
+  invoice was voided 409'd as if the operation never happened — the keyed
+  replay now sits before the status gate (replay has no side effects); a
+  fresh note on a void invoice still 409s.
 
 ## 4. Convergence
 

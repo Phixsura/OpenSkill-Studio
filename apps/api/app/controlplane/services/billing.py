@@ -2192,8 +2192,6 @@ async def issue_credit_note(
             .execution_options(populate_existing=True)
         )
     ).scalar_one()
-    if invoice.status not in ("open", "paid"):
-        raise AppError("INVOICE_NOT_OPEN", "Credit notes apply to finalized invoices", 409)
     # R135: a retried POST created a SECOND note and double-refunded (each
     # retry minted a fresh cn:{new_id} ledger key — the tenant got 2× the
     # intended correction of collected money). Keyed retry: same key + same
@@ -2217,6 +2215,11 @@ async def issue_credit_note(
                     409,
                 )
             return existing
+    # R136: the status gate sits AFTER the keyed replay — a retry of a note
+    # that succeeded before the invoice was voided must return the original
+    # note (replay has no side effects), not 409 as if it never happened.
+    if invoice.status not in ("open", "paid"):
+        raise AppError("INVOICE_NOT_OPEN", "Credit notes apply to finalized invoices", 409)
     if amount_minor <= 0 or amount_minor > invoice.total_minor:
         raise AppError("PAYMENT_INVALID", "Credit note exceeds invoice total", 422)
     # R43[10]: cap CUMULATIVELY — each note was only checked against the
