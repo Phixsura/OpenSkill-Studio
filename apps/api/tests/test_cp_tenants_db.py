@@ -846,3 +846,37 @@ async def test_concurrent_owner_removals_cannot_reach_zero_owners():
             assert len(remaining) == 1, f"{len(remaining)} owners left — race reached zero"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_expire_trials_isolates_one_bad_tenant(db, monkeypatch):
+    """R170: one tenant whose transition_status raises a non-AppError must NOT
+    wedge the whole HOURLY trial-expiry cron (the R168/R169 per-item isolation
+    class). The healthy expired trial still downgrades; the poison one is left
+    for a later pass."""
+    poison_owner = await _mk_user(db)
+    healthy_owner = await _mk_user(db)
+    poison = await _mk_tenant(db, poison_owner)
+    healthy = await _mk_tenant(db, healthy_owner)
+    poison.trial_ends_at = datetime.now(UTC) - timedelta(days=1)
+    healthy.trial_ends_at = datetime.now(UTC) - timedelta(days=1)
+    await db.flush()
+    poison_id = poison.id
+
+    real_transition = tenant_svc.transition_status
+
+    async def flaky_transition(db_, tenant, to_status, **kw):
+        if tenant.id == poison_id:
+            raise RuntimeError("simulated transition failure")
+        return await real_transition(db_, tenant, to_status, **kw)
+
+    monkeypatch.setattr(tenant_svc, "transition_status", flaky_transition)
+    n = await tenant_svc.expire_trials(db)  # must not raise
+    await db.flush()
+    monkeypatch.undo()
+
+    await db.refresh(poison)
+    await db.refresh(healthy)
+    assert healthy.status == TenantStatus.ACTIVE, "healthy trial must still expire"
+    assert poison.status == TenantStatus.TRIAL, "poison tenant rolled back, left for later"
+    assert n >= 1

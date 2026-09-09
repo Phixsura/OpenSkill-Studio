@@ -225,16 +225,25 @@ async def expire_trials(db: AsyncSession) -> int:
     for tenant in rows:
         # Paid subscription already activated the tenant elsewhere; the guard
         # protects against that race (0 rows → someone else transitioned).
+        # R170: isolate each tenant in a SAVEPOINT and catch broadly (not only
+        # AppError). transition_status also runs record_audit + cache
+        # invalidation — a non-AppError DB error there aborted the whole
+        # HOURLY batch AND left the session in a failed state, so even the
+        # AppError-only guard for later tenants then hit PendingRollbackError:
+        # trials stopped expiring platform-wide until the poison row cleared.
+        # (expire_promotional / R168 / R169 per-item isolation class.)
         try:
-            await transition_status(
-                db,
-                tenant,
-                target,
-                actor=Actor(user_id=None, type="system"),
-                reason="trial expired",
-            )
+            async with db.begin_nested():
+                await transition_status(
+                    db,
+                    tenant,
+                    target,
+                    actor=Actor(user_id=None, type="system"),
+                    reason="trial expired",
+                )
             count += 1
-        except AppError:
+        except Exception:  # noqa: BLE001 — one bad tenant must not wedge the cron
+            log.warning("cp_trial_expiry_failed", tenant_id=tenant.id, exc_info=True)
             continue
     return count
 

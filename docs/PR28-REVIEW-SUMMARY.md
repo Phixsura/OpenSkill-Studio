@@ -969,6 +969,27 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   cancelled sub is skipped by scan_due_periods) and suspended-tenant seat
   billing is deliberate recurring-fee policy (ADR §10.7) — neither is a
   billing bug. Poison-org isolation regression test; guard-proven; seat
+- **R170 (systematic cron-handler isolation sweep)**: 1 confirmed
+  (medium, entitlement/revenue), fixed + guard-proven — completing the
+  cron per-item-isolation class (R168/R169). Audited ALL 11 cron handlers:
+  outbox poll (per-message SAVEPOINT, R89), reaper (bulk), promo expiry (the
+  reference per-lot pattern), reservation expiry (R168), seat/storage (R169),
+  and workflow sweep (R144/R165) were already isolated; scan_due_periods only
+  enqueues (real work isolated downstream by the outbox worker) and
+  flush_api_request_counters commits per-key + self-heals next hour — neither
+  needs it. THE FINDING: expire_trials (HOURLY) looped tenants catching ONLY
+  AppError with no SAVEPOINT — a non-AppError from transition_status's
+  record_audit / cache invalidation aborted the batch AND left the session
+  aborted, so even the AppError guard for later tenants then hit
+  PendingRollbackError: trials stopped expiring platform-wide (tenants kept
+  TRIAL entitlements past expiry). Now each tenant runs in its own
+  begin_nested with a broad log-and-continue. Poison-tenant regression test +
+  guard-proven. sweep_wedged_evaluations was ALSO examined and left unchanged:
+  its only raise-capable per-task op is a guarded UPDATE (a DB error there is
+  systemic, not a per-item poison), and _settle_eval_reservation already
+  swallows every failure inside its own SAVEPOINT — an initial defensive wrap
+  was reverted when a test showed it was both unnecessary and (via
+  double-nested savepoints) destabilizing.
   sweep idempotency intact.
   green.
   degradation).

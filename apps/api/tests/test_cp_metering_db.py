@@ -775,3 +775,4 @@ async def test_seat_sweep_isolates_one_bad_org(db, monkeypatch):
         else:
             assert len(rows) == 1, "healthy org must still be seat-billed"
     assert emitted >= 1
+
