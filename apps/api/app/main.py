@@ -75,11 +75,13 @@ async def lifespan(app: FastAPI):
 
     # 1. Drain in-flight webhook deliveries and workflow executions before
     #    tearing down connections
+    from app.services.auth import drain_email_tasks
     from app.services.webhook import drain_webhook_tasks
     from app.services.workflow_runtime import drain_workflow_tasks
 
     await drain_webhook_tasks()
     await drain_workflow_tasks()
+    await drain_email_tasks()
 
     # 2. Close DB pool
     await engine.dispose()

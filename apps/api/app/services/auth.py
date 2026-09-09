@@ -43,6 +43,18 @@ def _send_email_background(coro) -> None:
     task.add_done_callback(_email_tasks.discard)
 
 
+async def drain_email_tasks(timeout: float = 10.0) -> None:
+    """Await in-flight reset emails on shutdown (same as drain_webhook_tasks)."""
+    if not _email_tasks:
+        return
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*_email_tasks, return_exceptions=True), timeout=timeout
+        )
+    except TimeoutError:
+        log.warning("email_drain_timeout", pending=len(_email_tasks))
+
+
 # ── Errors ────────────────────────────────────────────────────
 
 
