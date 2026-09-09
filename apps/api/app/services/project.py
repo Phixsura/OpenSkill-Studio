@@ -53,7 +53,15 @@ MAX_FILENAME_LEN = 200
 def _clamp_filename(name: str) -> str:
     """Clamp a client-supplied filename, preserving the extension, so a very
     long name doesn't raise a DataError 500 on insert or an invalid-object-name
-    error from object storage."""
+    error from object storage.
+
+    R156 (adversarial battery): also strip PATH COMPONENTS — a filename like
+    '../../../etc/passwd.png' was stored verbatim and echoed by every API
+    response. The S3 key was already sanitized and Content-Disposition carries
+    no filename, so nothing traverses TODAY — but stored hostile path data is
+    a footgun for any future consumer (exports, zips, desktop clients) that
+    trusts file_name as a save path. Basename at ingestion, defense in depth."""
+    name = name.replace("\\", "/").rsplit("/", 1)[-1].lstrip(".") or "file"
     if len(name) <= MAX_FILENAME_LEN:
         return name
     dot = name.rfind(".")

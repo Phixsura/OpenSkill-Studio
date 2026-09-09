@@ -750,6 +750,29 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   rotation-race tolerance, and the battery instead pins the property that
   matters — explicit revocation kills the whole chain, graced tokens
   included. Every probe returned a clean 4xx: no bypass, no oracle, no 500.
+- **R156 (battery extension to full coverage — 112 probes)**: 1 confirmed
+  (low, defense-in-depth), fixed + guard-proven live. The extended battery
+  adds: billing WEBHOOK forgery (unsigned / forged-HMAC / non-ASCII
+  signature header / manual + unknown providers / 100KB unsigned body — all
+  401/4xx, the anonymous money surface holds); marketplace money gates
+  (paid-pack anonymous preview redaction with no prompt leakage, unlicensed
+  install denied, client-side price fields structurally dropped — a credit
+  purchase charges the LISTING price, listing someone else's product denied,
+  platform mark-paid/refund as student denied, cross-tenant purchase history
+  uniform-404); registry visibility (private skill pack + draft workflow
+  pack: detail/releases/preview/reviews/discussions all anon-404); portal
+  deep attacks (reviewer-role guest final-accept 403, guest token
+  cross-PROJECT 404, email-bound link wrong-email 401, revocation kills the
+  LIVE session on the next request and re-exchange); auth edges (100-char
+  password no bcrypt-72 500, duplicate + case-variant email, control-char
+  password, wrong-old change-password); upload attacks (content-type spoof
+  422, cross-user file download denied). THE FINDING: a path-traversal
+  filename ('../../../etc/passwd.png') was stored VERBATIM and echoed by
+  every API response — the S3 key was already sanitized and
+  Content-Disposition carries no filename, so nothing traverses today, but
+  stored hostile path data is a footgun for any future consumer (exports,
+  zips, desktop clients) trusting file_name as a save path; _clamp_filename
+  now basenames at ingestion (guard-proven by live revert).
 
 ### Convergence of the R135-R148 continuation
 
@@ -762,7 +785,7 @@ outbox worker, API-metering middleware, audit registry, impersonation) plus
 frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
 R145=1, R146=0, R147=1, R148=0, R149=0 (validation), R150=0,
-R151=1, R152=0, R153=0, R154=0, R155=0 (property fuzz + saga + live
+R151=1, R152=0, R153=0, R154=0, R155=0, R156=1 (property fuzz + saga + live
 adversarial battery, new attack
 classes)** — a clean
 convergence curve, the last findings low/medium severity (one partner

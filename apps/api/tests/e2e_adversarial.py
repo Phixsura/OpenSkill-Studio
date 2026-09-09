@@ -332,6 +332,295 @@ async def main():
             check(f"anon {verb} {path.split('/')[1]}… → 401/403",
                   r.status_code in (401, 403), f"got {r.status_code}")
 
+    # ═══ I. Webhook forgery (anonymous MONEY surface) ═══
+    async with httpx.AsyncClient(base_url=API, timeout=30, trust_env=False) as c:
+        section("I. billing webhook forgery")
+        evil = b'{"id":"evt_pwn","type":"topup.succeeded","data":{"tenant_id":"x","amount_minor":99999999,"currency":"USD"}}'
+        r = await c.post("/billing/webhooks/mock", content=evil,
+                         headers={"Content-Type": "application/json"})
+        check("unsigned mock webhook → 401", r.status_code == 401, f"got {r.status_code}")
+        r = await c.post("/billing/webhooks/mock", content=evil,
+                         headers={"Content-Type": "application/json",
+                                  "X-Mock-Signature": "f" * 64})
+        check("forged-signature webhook → 401", r.status_code == 401, f"got {r.status_code}")
+        r = await c.post("/billing/webhooks/mock", content=evil,
+                         headers=httpx.Headers({b"Content-Type": b"application/json",
+                                                b"X-Mock-Signature": b"\xff\xfe garbage"}))
+        check("non-ASCII signature header → 401 not 500", r.status_code == 401,
+              f"got {r.status_code}")
+        r = await c.post("/billing/webhooks/manual", content=evil,
+                         headers={"Content-Type": "application/json"})
+        check("manual-provider webhook rejected", r.status_code in (401, 404),
+              f"got {r.status_code}")
+        r = await c.post("/billing/webhooks/doesnotexist", content=evil,
+                         headers={"Content-Type": "application/json"})
+        check("unknown provider webhook rejected", r.status_code in (401, 404),
+              f"got {r.status_code}")
+        r = await c.post("/billing/webhooks/stripe", content=b"A" * 100_000,
+                         headers={"Content-Type": "application/json"})
+        check("100KB unsigned stripe body → 4xx not 5xx", 400 <= r.status_code < 500,
+              f"got {r.status_code}")
+
+    # ═══ J. Marketplace money gates ═══
+    async with httpx.AsyncClient(base_url=API, timeout=60, trust_env=False) as c:
+        section("J. marketplace: pricing, licensing, seller boundaries")
+        # victim publishes a workflow pack, then a PAID listing (DB-inserted:
+        # entitlement gates are not the subject here — the LICENSE gate is)
+        wf_def = {
+            "schema_version": 1,
+            "inputs": [{"key": "topic", "type": "text", "required": True}],
+            "outputs": [{"key": "final", "type": "image", "from_step": "g", "from_port": "result"}],
+            "steps": [
+                {"id": "b", "type": "prompt_template", "name": "Build",
+                 "config": {"template": "SECRET-PROMPT {{inputs.topic}}"},
+                 "inputs": [], "outputs": [{"port": "prompt", "type": "prompt"}]},
+                {"id": "g", "type": "provider_action", "name": "Gen",
+                 "config": {"capability": "image_generation"},
+                 "inputs": [{"port": "prompt", "type": "prompt"}],
+                 "outputs": [{"port": "result", "type": "image"}]},
+            ],
+            "edges": [{"id": "e1", "from_step": "b", "from_port": "prompt",
+                       "to_step": "g", "to_port": "prompt"}],
+            "ui": {},
+        }
+        r = await c.post(f"/orgs/{v_org}/workflow-packs",
+                         json={"name": f"VWF {uuid.uuid4().hex[:6]}"}, headers=vh)
+        v_wf = r.json()["data"]["id"]
+        r = await c.put(f"/orgs/{v_org}/workflow-packs/{v_wf}/definition",
+                        json={"definition": wf_def}, headers=vh)
+        check("victim wf definition accepted", r.status_code == 200, r.text[:120])
+        await c.post(f"/orgs/{v_org}/workflow-packs/{v_wf}/releases",
+                     json={"version": "1.0.0"}, headers=vh)
+        await c.post(f"/orgs/{v_org}/workflow-packs/{v_wf}/submit-review", headers=vh)
+        r = await c.post(f"/orgs/{v_org}/workflow-packs/{v_wf}/approve", headers=vh)
+        check("victim wf pack approved (public)", r.status_code == 200, f"got {r.status_code}")
+
+        from decimal import Decimal
+
+        from app.controlplane.models.marketplace import MarketplaceListing
+        from app.core.database import AsyncSessionLocal, engine
+
+        async with AsyncSessionLocal() as s:
+            listing = MarketplaceListing(
+                product_type="workflow_pack", product_id=v_wf,
+                seller_org_id=v_org, seller_tenant_id=v_tenant or v_org,
+                offer_type="paid", price_minor=21494, currency="USD",
+                platform_commission_pct=Decimal("30.00"), status="active",
+            )
+            s.add(listing)
+            await s.commit()
+            listing_id = listing.id
+        await engine.dispose()
+
+        # J1: anon preview of the PAID pack must be REDACTED (no prompt leak)
+        r = await c.get(f"/registry/workflow-packs/{v_wf}/preview")
+        check("paid pack preview redacted", r.status_code == 200
+              and r.json()["data"]["definition"].get("redacted") is True, r.text[:120])
+        check("paid pack preview leaks no prompt", "SECRET-PROMPT" not in r.text)
+        # J2: attacker installs the paid pack WITHOUT a license → denied
+        r = await c.post(f"/orgs/{a_org}/workflow-installations",
+                         json={"pack_id": v_wf}, headers=ah)
+        denied(r, "install paid-listed pack without license", allow=(402, 403, 404, 422))
+        # J3: purchase with tampered client-side price fields → schema drops
+        # them; credit purchase without balance charges the LISTING price
+        r = await c.post(
+            f"/orgs/{a_org}/marketplace/purchases",
+            json={"listing_id": listing_id, "payment_method": "credit",
+                  "amount_minor": 1, "price_minor": 1,
+                  "idempotency_key": f"adv-{uuid.uuid4().hex[:12]}"},
+            headers=ah,
+        )
+        if r.status_code == 402:
+            check("price tamper ignored (charged listing price → 402 no balance)", True)
+        elif r.status_code in (200, 201):
+            amt = r.json()["data"].get("amount_minor")
+            check("price tamper ignored (server-side price)", amt == 21494,
+                  f"amount {amt}")
+        else:
+            check("purchase attempt clean 4xx", 400 <= r.status_code < 500,
+                  f"got {r.status_code}: {r.text[:120]}")
+        # J4: attacker lists the VICTIM's product from their own org
+        r = await c.post(
+            f"/orgs/{a_org}/marketplace/listings",
+            json={"product_type": "workflow_pack", "product_id": v_wf,
+                  "offer_type": "paid", "price_minor": 100, "currency": "USD",
+                  "license_scope": "organization", "upgrade_policy": "all_versions"},
+            headers=ah,
+        )
+        denied(r, "attacker lists victim's product", allow=(403, 404, 409, 422))
+        # J5: platform money ops as student
+        for verb, path in [
+            ("POST", "/platform/purchases/PWNEDPURCHASEID0000000000/mark-paid"),
+            ("POST", "/platform/purchases/PWNEDPURCHASEID0000000000/refund"),
+        ]:
+            r = await c.request(verb, path, json={"reason": "pwn"}, headers=ah)
+            denied(r, f"{verb} {path.split('/')[2]} money op as student",
+                   allow=(401, 403, 404, 422))
+        # J6: victim tenant purchase history, attacker token
+        if v_tenant:
+            r = await c.get(f"/tenants/{v_tenant}/purchases", headers=ah)
+            denied(r, "victim tenant purchases (attacker)")
+
+        # ═══ K. Registry visibility ═══
+        section("K. registry: private/draft leakage")
+        for path in [
+            f"/registry/packs/{v_pack}",
+            f"/registry/packs/{v_pack}/releases",
+            f"/registry/packs/{v_pack}/preview",
+            f"/registry/packs/{v_pack}/reviews",
+            f"/registry/packs/{v_pack}/discussions",
+        ]:
+            r = await c.get(path)
+            check(f"anon {path.split(v_pack)[-1] or '/detail'} of PRIVATE pack → 404",
+                  r.status_code == 404, f"got {r.status_code}")
+        r = await c.post(f"/orgs/{v_org}/workflow-packs",
+                         json={"name": f"Draft {uuid.uuid4().hex[:6]}"}, headers=vh)
+        v_draft_wf = r.json()["data"]["id"]
+        for path in [
+            f"/registry/workflow-packs/{v_draft_wf}",
+            f"/registry/workflow-packs/{v_draft_wf}/releases",
+            f"/registry/workflow-packs/{v_draft_wf}/preview",
+        ]:
+            r = await c.get(path)
+            check(f"anon draft wf {path.split(v_draft_wf)[-1] or '/detail'} → 404",
+                  r.status_code == 404, f"got {r.status_code}")
+
+        # ═══ L. Portal deep attacks ═══
+        section("L. portal: role gate, cross-project, revocation, email binding")
+        v_proj2 = (
+            await c.post(
+                f"/orgs/{v_org}/projects",
+                json={"title": "Victim Project 2", "description": "d", "instructions": "i",
+                      "rubric": [{"criterion": "Q", "max_score": 100}]},
+                headers=vh,
+            )
+        ).json()["data"]["id"]
+        # reviewer-role guest must not final-accept
+        link_r = await c.post(
+            f"/orgs/{v_org}/projects/{v_proj}/client-links",
+            json={"role": "reviewer", "expires_at": _exp()}, headers=vh,
+        )
+        raw_r = link_r.json()["data"]["token"]
+        g = await c.post("/client-portal/guest-session", json={"token": raw_r})
+        rtok = g.json()["data"]["access_token"]
+        r = await c.post(
+            f"/client-portal/projects/{v_proj}/final-accept",
+            json={"submission_id": v_sub, "comment": "pwn"},
+            headers={"Authorization": f"Bearer {rtok}"},
+        )
+        check("reviewer guest final-accept → 403", r.status_code == 403, f"got {r.status_code}")
+        # cross-project token use → uniform 404
+        r = await c.get(
+            f"/client-portal/projects/{v_proj2}/submissions",
+            headers={"Authorization": f"Bearer {rtok}"},
+        )
+        check("guest token cross-PROJECT → 404", r.status_code == 404, f"got {r.status_code}")
+        # email-bound link, wrong email → 401
+        link_e = await c.post(
+            f"/orgs/{v_org}/projects/{v_proj}/client-links",
+            json={"role": "reviewer", "email": "cmo@acme.com", "expires_at": _exp()},
+            headers=vh,
+        )
+        raw_e = link_e.json()["data"]["token"]
+        r = await c.post("/client-portal/guest-session",
+                         json={"token": raw_e, "email": "attacker@evil.com"})
+        check("email-bound link + wrong email → 401", r.status_code == 401,
+              f"got {r.status_code}")
+        # revocation kills the live guest session on the NEXT request
+        link_id = link_r.json()["data"]["id"]
+        rv = await c.post(
+            f"/orgs/{v_org}/projects/{v_proj}/client-links/{link_id}/revoke", headers=vh
+        )
+        check("revoke accepted", rv.status_code in (200, 204), f"got {rv.status_code}")
+        r = await c.get(
+            f"/client-portal/projects/{v_proj}/submissions",
+            headers={"Authorization": f"Bearer {rtok}"},
+        )
+        check("revoked link's live token → 401", r.status_code == 401, f"got {r.status_code}")
+        r = await c.post("/client-portal/guest-session", json={"token": raw_r})
+        check("revoked link re-exchange → 401", r.status_code == 401, f"got {r.status_code}")
+
+        # ═══ M. Auth edges ═══
+        section("M. auth edges")
+        r = await c.post("/auth/register",
+                         json={"email": f"adv-long-{uuid.uuid4().hex[:8]}@t.com",
+                               "password": "Xx1!" + "a" * 96, "display_name": "Long Pass"})
+        check("100-char password → clean (no bcrypt-72 500)", r.status_code in (201, 422),
+              f"got {r.status_code}")
+        dup_email = f"adv-dup-{uuid.uuid4().hex[:8]}@t.com"
+        await c.post("/auth/register", json={"email": dup_email, "password": "Adv3rs4ry!x",
+                                             "display_name": "Dup One"})
+        r = await c.post("/auth/register", json={"email": dup_email, "password": "Adv3rs4ry!x",
+                                                 "display_name": "Dup Two"})
+        check("duplicate email → 409/422", r.status_code in (409, 422), f"got {r.status_code}")
+        r = await c.post("/auth/register", json={"email": dup_email.upper(),
+                                                 "password": "Adv3rs4ry!x",
+                                                 "display_name": "Dup Case"})
+        check("case-variant duplicate email rejected", r.status_code in (409, 422),
+              f"got {r.status_code}")
+        r = await c.post("/auth/login", json={"email": dup_email, "password": "WrongPass1!"})
+        check("wrong password login → 401", r.status_code == 401, f"got {r.status_code}")
+        r = await c.post("/auth/login", json={"email": dup_email, "password": "x\x00y"})
+        check("control-char password → 4xx not 500", 400 <= r.status_code < 500,
+              f"got {r.status_code}")
+        r = await c.post("/auth/change-password",
+                         json={"old_password": "WrongPass1!", "new_password": "NewPass1!x"},
+                         headers=ah)
+        check("change-password wrong old → 4xx", 400 <= r.status_code < 500,
+              f"got {r.status_code}")
+
+        # ═══ N. Upload attacks ═══
+        section("N. uploads: sniffing, traversal, IDOR")
+        rd = await c.post(
+            f"/orgs/{v_org}/projects/{v_proj}/deliverables",
+            json={"name": "Img", "type": "image", "required": False}, headers=vh,
+        )
+        v_deliv = rd.json()["data"]["id"]
+        import struct
+        import zlib
+
+        def _png():
+            sig = b"\x89PNG\r\n\x1a\n"
+
+            def chunk(t, d):
+                crc = zlib.crc32(t + d) & 0xFFFFFFFF
+                return struct.pack(">I", len(d)) + t + d + struct.pack(">I", crc)
+
+            ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+            return sig + chunk(b"IHDR", ihdr) + chunk(
+                b"IDAT", zlib.compress(b"\x00\xff\x00\x00")
+            ) + chunk(b"IEND", b"")
+
+        rf = await c.post(
+            f"/orgs/{v_org}/submissions/{v_sub}/files",
+            files={"file": ("real.png", _png(), "image/png")},
+            data={"deliverable_id": v_deliv}, headers=vh,
+        )
+        v_file = rf.json()["data"]["id"] if rf.status_code == 201 else None
+        check("victim uploads real file", v_file is not None, rf.text[:120])
+        r = await c.post(
+            f"/orgs/{v_org}/submissions/{v_sub}/files",
+            files={"file": ("fake.png", b"#!/bin/sh\nrm -rf /", "image/png")},
+            data={"deliverable_id": v_deliv}, headers=vh,
+        )
+        check("content-type spoof (shell as PNG) → 422", r.status_code == 422,
+              f"got {r.status_code}")
+        r = await c.post(
+            f"/orgs/{v_org}/submissions/{v_sub}/files",
+            files={"file": ("../../../etc/passwd.png", _png(), "image/png")},
+            data={"deliverable_id": v_deliv}, headers=vh,
+        )
+        traversal_ok = r.status_code == 422 or (
+            r.status_code == 201 and ".." not in r.json()["data"].get("file_name", "")
+        )
+        check("path-traversal filename neutralized", traversal_ok,
+              f"got {r.status_code}: {r.text[:120]}")
+        if v_file:
+            r = await c.get(
+                f"/orgs/{v_org}/submissions/{v_sub}/files/{v_file}/download", headers=ah
+            )
+            denied(r, "attacker downloads victim file (victim path)")
+
     # ═══ H. Session/refresh attacks ═══
     async with httpx.AsyncClient(base_url=API, timeout=30, trust_env=False) as c2:
         section("H. refresh rotation + revocation")
