@@ -773,6 +773,22 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   stored hostile path data is a footgun for any future consumer (exports,
   zips, desktop clients) trusting file_name as a save path; _clamp_filename
   now basenames at ingestion (guard-proven by live revert).
+- **R157 (battery completion — 143 probes, 20 attack sections)**: 0 new
+  findings; every remaining surface now covered live. Added: invite-link
+  lifecycle abuse (max_uses exhaustion, deactivation, garbage codes/tokens,
+  the role CEILING — a student cannot mint an owner-role link, non-members
+  cannot enumerate links); impersonation walls with a REAL platform admin
+  (grant→mint→read works; the imp session is walled from the client portal,
+  cannot refresh, cannot target a privileged user; revoking the grant kills
+  the LIVE token on the next request — deps re-check the grant per request;
+  a student cannot mint from an admin's grant); tenant PII export +
+  private-pack export denials; confidential requirement-profile/match-run
+  surfaces uniform-404; review/discussion writes on private packs denied
+  (anon and authed); the org-settings reserved namespace (ai_evaluation via
+  the generic settings PUT) rejected. The partner statement CSV was
+  code-verified free of formula-injection vectors (machine values only, no
+  free-text fields). Grand total: 143/143 hostile probes cleanly denied
+  across the whole campaign battery, zero 500s in the monitored API log.
 
 ### Convergence of the R135-R148 continuation
 
@@ -785,7 +801,7 @@ outbox worker, API-metering middleware, audit registry, impersonation) plus
 frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
 R145=1, R146=0, R147=1, R148=0, R149=0 (validation), R150=0,
-R151=1, R152=0, R153=0, R154=0, R155=0, R156=1 (property fuzz + saga + live
+R151=1, R152=0, R153=0, R154=0, R155=0, R156=1, R157=0 (property fuzz + saga + live
 adversarial battery, new attack
 classes)** — a clean
 convergence curve, the last findings low/medium severity (one partner

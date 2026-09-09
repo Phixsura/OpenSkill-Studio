@@ -621,6 +621,157 @@ async def main():
             )
             denied(r, "attacker downloads victim file (victim path)")
 
+    # ═══ O. Invite-link lifecycle abuse ═══
+    async with httpx.AsyncClient(base_url=API, timeout=30, trust_env=False) as c:
+        section("O. invite links: reuse caps, deactivation, role ceiling")
+        r = await c.post(
+            f"/orgs/{v_org}/invite-links",
+            json={"role": "student", "max_uses": 1, "expires_in_days": 7}, headers=vh,
+        )
+        check("owner mints student link", r.status_code in (200, 201), r.text[:120])
+        code = r.json()["data"]["url"].rsplit("/", 1)[-1]
+        link_id = r.json()["data"]["id"]
+        j1h, _, _ = await register(c, "joiner1")
+        r = await c.post("/invites/join", json={"code": code}, headers=j1h)
+        check("first join via link succeeds", r.status_code in (200, 201), r.text[:120])
+        j2h, _, _ = await register(c, "joiner2")
+        r = await c.post("/invites/join", json={"code": code}, headers=j2h)
+        denied(r, "max_uses=1 exhausted link second join", allow=(400, 403, 404, 409, 410, 422))
+        r = await c.post(
+            f"/orgs/{v_org}/invite-links",
+            json={"role": "student", "max_uses": 10, "expires_in_days": 7}, headers=vh,
+        )
+        code2 = r.json()["data"]["url"].rsplit("/", 1)[-1]
+        link2_id = r.json()["data"]["id"]
+        r = await c.delete(f"/orgs/{v_org}/invite-links/{link2_id}", headers=vh)
+        if r.status_code == 405:
+            r = await c.put(
+                f"/orgs/{v_org}/invite-links/{link2_id}",
+                json={"is_active": False}, headers=vh,
+            )
+        check("link deactivated", r.status_code in (200, 204), f"got {r.status_code}")
+        r = await c.post("/invites/join", json={"code": code2}, headers=j2h)
+        denied(r, "deactivated link join", allow=(400, 403, 404, 409, 410, 422))
+        r = await c.post("/invites/join", json={"code": "PWNEDCODE123"}, headers=j2h)
+        denied(r, "garbage link code", allow=(400, 404, 422))
+        r = await c.post("/invites/accept", json={"token": "PWNEDTOKEN" * 4}, headers=j2h)
+        denied(r, "garbage email-invite token", allow=(400, 401, 404, 422))
+        # role ceiling: joiner1 (student) mints an OWNER link → 403
+        r = await c.post(
+            f"/orgs/{v_org}/invite-links",
+            json={"role": "owner", "max_uses": 1, "expires_in_days": 7}, headers=j1h,
+        )
+        denied(r, "student mints owner-role link", allow=(403, 404))
+        # attacker (non-member) reads the org's invite links → denied
+        r = await c.get(f"/orgs/{v_org}/invite-links", headers=ah)
+        denied(r, "non-member lists invite links")
+
+    # ═══ P. Impersonation abuse (real platform admin via DB) ═══
+    async with httpx.AsyncClient(base_url=API, timeout=30, trust_env=False) as c:
+        section("P. impersonation: privilege walls + revocation")
+        from sqlalchemy import update as _sa_update
+
+        from app.core.database import AsyncSessionLocal as _SessionLocal
+        from app.core.database import engine as _eng
+        from app.models.user import User as _User
+        from app.models.user import UserRole as _UserRole
+
+        admin_h, admin_uid, _ = await register(c, "padmin")
+        async with _SessionLocal() as s:
+            await s.execute(
+                _sa_update(_User).where(_User.id == admin_uid).values(role=_UserRole.ADMIN)
+            )
+            await s.commit()
+        await _eng.dispose()
+        r = await c.post(
+            "/platform/impersonation-grants",
+            json={"target_user_id": v_uid, "reason": "support case", "expires_in_minutes": 30},
+            headers=admin_h,
+        )
+        check("admin creates grant for plain user", r.status_code in (200, 201), r.text[:150])
+        grant_id = r.json()["data"]["id"]
+        r = await c.post(f"/platform/impersonation-grants/{grant_id}/token", headers=admin_h)
+        check("admin mints imp token", r.status_code == 200, r.text[:150])
+        imp_tok = r.json()["data"]["access_token"]
+        imp_h = {"Authorization": f"Bearer {imp_tok}"}
+        r = await c.get(f"/orgs/{v_org}/skills", headers=imp_h)
+        check("imp token reads target's org", r.status_code == 200, f"got {r.status_code}")
+        # imp session must be WALLED from the client portal
+        r = await c.get(f"/client-portal/projects/{v_proj}/submissions", headers=imp_h)
+        check("imp token blocked on client portal", r.status_code == 403,
+              f"got {r.status_code}")
+        # imp session cannot refresh (no refresh minted)
+        r = await c.post("/auth/refresh", headers=imp_h)
+        denied(r, "imp session refresh attempt", allow=(401, 403, 422))
+        # grant against a PRIVILEGED target must be rejected
+        r = await c.post(
+            "/platform/impersonation-grants",
+            json={"target_user_id": admin_uid, "reason": "pwn", "expires_in_minutes": 30},
+            headers=admin_h,
+        )
+        denied(r, "grant targeting an admin", allow=(403, 422))
+        # revoke the grant → existing token dies on the next request
+        r = await c.post(f"/platform/impersonation-grants/{grant_id}/revoke", headers=admin_h)
+        if r.status_code == 404:
+            r = await c.delete(f"/platform/impersonation-grants/{grant_id}", headers=admin_h)
+        check("grant revoked", r.status_code in (200, 204), f"got {r.status_code}")
+        r = await c.get(f"/orgs/{v_org}/skills", headers=imp_h)
+        check("revoked grant kills the LIVE imp token", r.status_code == 401,
+              f"got {r.status_code}")
+        r = await c.post(f"/platform/impersonation-grants/{grant_id}/token", headers=admin_h)
+        denied(r, "mint on revoked grant", allow=(401, 404, 409, 422))
+        # a plain attacker cannot mint from someone else's grant id
+        r = await c.post(f"/platform/impersonation-grants/{grant_id}/token", headers=ah)
+        denied(r, "student mints from admin's grant")
+
+        # ═══ Q. Export / PII surfaces ═══
+        section("Q. exports + PII")
+        r = await c.post(f"/platform/tenants/{v_tenant or 'x'}/exports", headers=ah)
+        denied(r, "student requests tenant PII export")
+        r = await c.get(f"/platform/tenants/{v_tenant or 'x'}/exports/01FAKEEXPORT00000000000000",
+                        headers=ah)
+        denied(r, "student polls export download")
+        # pack export: victim's PRIVATE pack by id, attacker org path
+        r = await c.get(f"/orgs/{a_org}/packs/{v_pack}/export", headers=ah)
+        denied(r, "export victim's private pack via own org")
+
+        # ═══ R. Confidential match/profile surfaces ═══
+        section("R. confidential surfaces (R88 class)")
+        for verb, path in [
+            ("GET", f"/orgs/{v_org}/requirement-profiles", ),
+            ("POST", f"/orgs/{v_org}/requirement-profiles/from-brief/{v_brief}"),
+            ("GET", f"/orgs/{a_org}/requirement-profiles/01FAKEPROFILE0000000000000"),
+            ("GET", f"/orgs/{v_org}/match-runs"),
+        ]:
+            r = await c.request(verb, path, json={} if verb == "POST" else None, headers=ah)
+            denied(r, f"{verb} {path.split('/', 3)[-1][:40]}",
+                   allow=(401, 403, 404, 405, 422))
+
+        # ═══ S. Review/discussion abuse ═══
+        section("S. reviews + discussions")
+        r = await c.post(f"/registry/packs/{v_pack}/reviews",
+                         json={"rating": 1, "title": "pwn", "body": "trash"}, headers=ah)
+        denied(r, "review a PRIVATE (unlisted) pack", allow=(401, 403, 404, 409, 422))
+        r = await c.post(f"/registry/packs/{v_pack}/discussions",
+                         json={"body": "spam"}, headers=ah)
+        denied(r, "discuss a PRIVATE pack", allow=(401, 403, 404, 422))
+        # anonymous writes
+        r = await c.post(f"/registry/packs/{v_pack}/reviews",
+                         json={"rating": 5, "title": "x", "body": "y"})
+        check("anon review write → 401/403/404", r.status_code in (401, 403, 404),
+              f"got {r.status_code}")
+
+        # ═══ T. Org settings reserved namespace ═══
+        section("T. org settings namespace")
+        r = await c.put(f"/orgs/{a_org}/settings",
+                        json={"settings": {"ai_evaluation": {"enabled": True,
+                                                             "monthly_budget_usd": 999999}}},
+                        headers=ah)
+        denied(r, "reserved ai_evaluation key via generic settings", allow=(400, 403, 422))
+        r = await c.put(f"/orgs/{v_org}/settings", json={"settings": {"theme": "dark"}},
+                        headers=ah)
+        denied(r, "attacker writes victim org settings")
+
     # ═══ H. Session/refresh attacks ═══
     async with httpx.AsyncClient(base_url=API, timeout=30, trust_env=False) as c2:
         section("H. refresh rotation + revocation")
