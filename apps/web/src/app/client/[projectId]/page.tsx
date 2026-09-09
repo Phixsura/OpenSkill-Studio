@@ -437,7 +437,20 @@ export default function ClientProjectPage() {
                       </Button>
                       <Button
                         size="sm"
-                        onClick={() => finalAcceptMutation.mutate(s.id)}
+                        onClick={() => {
+                          // R185: final acceptance is single-shot and
+                          // irreversible server-side (one final-accept per
+                          // project) — the app confirms archive/fork/remove,
+                          // but its most consequential client action fired on
+                          // a bare misclick.
+                          if (
+                            window.confirm(
+                              "Finally accept this project? This closes the engagement and cannot be undone.",
+                            )
+                          ) {
+                            finalAcceptMutation.mutate(s.id);
+                          }
+                        }}
                         disabled={finalAcceptMutation.isPending}
                       >
                         Final accept
