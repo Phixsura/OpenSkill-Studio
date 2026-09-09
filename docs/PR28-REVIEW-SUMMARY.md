@@ -1219,6 +1219,49 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   data (org→tenant status mapping exact; 3,411 ARCHIVED orgs all mapped
   ARCHIVED); cp19's repair SQL re-derived correct; cp21–cp23 read clean
   (cp22/cp23 round-tripped on the dev DB).
+- **R191–R197 (NEW-TECHNIQUE EXPANSION — six industry techniques not
+  previously in the matrix, applied on owner request; 6 confirmed findings
+  from 6 distinct techniques)**:
+  - R191 (PII/secrets-in-logs audit over the 62k-line verification log,
+    MEDIUM-HIGH): production email log carried body_preview — reset/verify
+    links embed SINGLE-USE tokens (CWE-532 account-takeover primitive for
+    anyone with log access) and plaintext recipients violated the codebase's
+    own email_hash convention. Redacted outside dev; structlog-capture test
+    guard-proven.
+  - R192 (fresh-DB full-chain migration test, MEDIUM): downgrade-to-base
+    orphaned all 20 product enum types (op.drop_table never drops enums) —
+    re-upgrade or reuse of the database crashed DuplicateObject. Initial
+    schema's downgrade now drops them; zero→head→base(0 enums)→head verified.
+  - R193 (Lighthouse audit, LOW): public registry was the only section
+    without a <main> landmark; a11y 90→93. Remaining heading-order/aria
+    items recorded as content-level follow-ups.
+  - R194 (Hypothesis generative fuzz, 2000 examples ×5 parsers, LOW):
+    _parse_semver raised on ''/'0' — all four API gates verified schema-safe,
+    but registry sorting reads STORED versions (R87 total-branch doctrine).
+    Made total; tests/test_parser_fuzz.py joins the permanent suite. genmeta
+    and sanitize survived clean.
+  - R195 (billing clock-edge properties, cf. Stripe test clocks): 300-example
+    Hypothesis sweep over _add_interval (leap-day/month-end anniversaries,
+    24-interval chaining) and proration_preview (totality, bounds,
+    conservation, monotonicity) — all hold; permanent asset.
+  - R196 (infrastructure chaos: docker-paused Redis, MEDIUM): fail-open held
+    (zero 500s) but 5s+5s socket timeouts made every cache-touching request
+    block ~10s — a Redis outage soft-killed the platform. Sub-second timeouts
+    now; live probe: 10.08s → 2.1s, recovery 14ms.
+  - R197 (soak, 8.5 min): 11,907 mixed requests incl. 1,700 fire-and-forget
+    email paths — 0 server errors, p50 40ms / p95 83ms, RSS flat (no task-set
+    or session leak).
+    Also run clean: Next bundle secret scan (only 3 by-design NEXT_PUBLIC
+    vars); OpenAPI↔frontend type-drift (product surfaces zero-drift; CP layer
+    has no response_model so contract checking is impossible there — recorded
+    v1 limitation).
+- **ROUND-2 COMPLETE FULL PASS (owner-requested repeat, at R195 HEAD, under
+  severe host memory pressure — phase 1 executed as 12 sequential chunks)**:
+  backend **2218 passed / 1 skipped / 0 failed**; battery 178/178; live e2e
+  52+49+148+17 all green; browser 19+31+60+42 all green (lifecycle-1 back to
+  full 60 after the R185 dialog test update); tsc/eslint clean, vitest 192;
+  gitleaks/pnpm-audit/pip-audit clean; Schemathesis 25,523/25,523 (Coverage+
+  Fuzzing+Stateful). API log across both rounds: zero 500s, zero tracebacks.
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
