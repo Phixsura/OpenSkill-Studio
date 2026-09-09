@@ -101,6 +101,26 @@ class Settings(BaseSettings):
             return json.loads(v)
         return v
 
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, v: list[str], info: Any) -> list[str]:
+        # R189: the app runs CORSMiddleware with allow_credentials=True. With
+        # a wildcard origin, starlette ECHOES the request Origin instead of
+        # sending "*" (which is invalid with credentials) — so an ops
+        # CORS_ORIGINS='["*"]' silently granted EVERY website credentialed
+        # access to the API: any page could call /auth/refresh with the
+        # visitor's httpOnly refresh cookie and mint access tokens (full
+        # account takeover for any logged-in visitor). Same boot-guard
+        # pattern as jwt_secret/domain_verifier: refuse to start production
+        # with a wildcard.
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if app_env not in ("development", "test") and any("*" in o for o in v):
+            raise ValueError(
+                "CORS_ORIGINS must not contain wildcards in production "
+                "(credentials mode echoes any origin)"
+            )
+        return v
+
     @field_validator("domain_verifier")
     @classmethod
     def validate_domain_verifier(cls, v: str, info: Any) -> str:

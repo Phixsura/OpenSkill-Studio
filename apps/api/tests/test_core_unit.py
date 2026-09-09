@@ -169,6 +169,31 @@ def test_cors_origins_string_parse():
     assert s.cors_origins == ["http://localhost:3000"]
 
 
+def test_cors_wildcard_refused_in_production():
+    """R189: the app runs CORS with allow_credentials=True — starlette then
+    ECHOES the request Origin for a wildcard entry, so CORS_ORIGINS='["*"]'
+    silently granted every website credentialed API access (any page could
+    hit /auth/refresh with the visitor's httpOnly cookie). Production boot
+    must refuse the wildcard, same guard family as jwt_secret."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    with _pytest.raises(ValidationError, match="wildcard"):
+        Settings(
+            app_env="production",
+            cors_origins='["*"]',
+            jwt_secret="x" * 64,
+            s3_secret_key="real-secret",
+            database_url="postgresql+asyncpg://app:secret@db/prod",
+            credential_encryption_key="",
+            domain_verifier="dns",
+        )
+    # Dev keeps the convenience
+    assert Settings(app_env="development", cors_origins='["*"]').cors_origins == ["*"]
+
+
 # ── Exceptions ───────────────────────────────────────────
 
 
