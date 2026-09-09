@@ -1197,6 +1197,13 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
     (memory-only token), main.py (fail-hard prod boot, drain ordering),
     workflow_runtime.py full pass (closed-vocabulary template rendering,
     R11/R13/R85 claim discipline re-verified).
+- **R190 final numbers**: insurance run at EXACT HEAD (R189 included):
+  **2206 passed / 1 skipped / 0 failed** (32:46) — the flake did not recur
+  in either post-continuation full run. Browser e2e re-run against fresh
+  servers (stale 5-day API replaced; R172 route presence verified 404→401):
+  `browser_e2e_commercial.mjs` **19/19**, `browser_e2e.mjs` **31/31**, zero
+  console errors, API log zero 500s/tracebacks throughout. Battery gained 5
+  probes (CGNAT/NAT64 SSRF, shared-with-me authz ×3) for its next live run.
 - **R190 (full-suite verification of the R171–R189 continuation)**: backend
   full suite at R187-state HEAD: **2204 passed / 1 skipped / 0 failed**
   (42:54). One earlier full run showed a single failure
