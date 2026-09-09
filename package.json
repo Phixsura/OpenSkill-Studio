@@ -40,5 +40,12 @@
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=22"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss@<8.5.23": ">=8.5.23",
+      "sharp@<0.35.4": ">=0.35.4",
+      "js-yaml@>=4.0.0 <4.3.2": ">=4.3.2"
+    }
   }
 }

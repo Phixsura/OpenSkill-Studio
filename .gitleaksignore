@@ -1,0 +1,3 @@
+# ADR-002 response EXAMPLE — truncated JWT header prefix placeholder, not a secret
+84dfc7697a846c7819949821c21f38fb5ea5e2bd:docs/design/002-auth-and-users.md:generic-api-key:969
+be9bed8608fc1123df4f998af474318f3b828e0d:docs/design/002-auth-and-users.md:generic-api-key:969

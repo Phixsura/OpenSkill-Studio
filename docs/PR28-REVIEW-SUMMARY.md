@@ -810,6 +810,20 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   zip, 300-deep manifest, 60MB-decompressed zip bomb — all rejected. The
   partner CSV remains formula-injection-free by construction. Final battery:
   **173 hostile probes, 26 sections, zero bypass, zero 500s**.
+- **R159 (industry scanner battery — supply chain, static analysis,
+  secrets)**: 2 real dependency findings, fixed; code and history clean.
+  pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
+  multipart part-header CRLF injection, Content-Length+Transfer-Encoding
+  request-smuggling primitive, and a decompression-bomb memory amplification
+  — bumped to 2.12.0 (audit now clean; exposure was low: only trusted
+  upstream endpoints are fetched). pnpm audit: 9 advisories (2 critical /
+  5 high) across next 15.5.23's chain (next, sharp, postcss) + js-yaml —
+  next bumped to ^15.5.24 with overrides for the transitives; audit now
+  clean, web tsc + 188 vitest green. bandit over 51k LOC: 15 low-severity,
+  all verified benign (token_type literals, documented fail-open cache
+  paths, two type-narrowing asserts). gitleaks over all 622 commits: 2
+  hits, both the SAME truncated example-JWT placeholder in ADR-002's
+  response sample — fingerprinted in .gitleaksignore.
 
 ### Convergence of the R135-R148 continuation
 
