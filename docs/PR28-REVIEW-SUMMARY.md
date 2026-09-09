@@ -898,6 +898,25 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   dispatch_advances after commit and sweep_stale's stalled-run recovery is
   idempotent + double-count-safe (R78). R11/R13/R55/R66/R73/R78/R85/R90e/
   R94/R101 defenses all present and correct.
+- **R166 (completion deep-dives: Stripe adapter, export PII, settlement)**:
+  CLEAN SWEEP across all three. STRIPE ADAPTER — amount conversion
+  round-trips correctly for zero-/two-/three-decimal currencies
+  (_stripe_unit_amount ↔ _platform_minor_from_stripe), verify_webhook
+  normalizes exactly the field downstream consumes (amount_total — the whole
+  webhook processor reads no other amount), SDK calls offloaded to threads
+  (R89[13]), cancel_at_period_end mirrors the platform row (R113[C0]),
+  checkout pins the version the customer saw (R80[2]), signatures fail
+  closed; the one-off amount_minor guard is intentionally absent per the
+  documented thin-wrapper contract and no caller can pass an invalid amount
+  (marketplace purchase uses a validated positive listing price; no
+  credit_topup checkout caller exists). TENANT EXPORT — PII-whitelisted:
+  build_export imports no cost-rate / credential / internal-cost /
+  reconciliation model, emits explicit fields only (no model_dump), scopes
+  every query to the tenant, excludes DELETED users (R85[M6]); the one real
+  issue (boundary-invoice truncation) was already fixed in R138. SETTLEMENT
+  STATE MACHINE — already deep-read clean in R140 (regen unbind/double-count
+  guard, statement-row FOR UPDATE serialization, manual-adjustment keying)
+  with the void-reversal source_type bug fixed in R139.
   degradation).
   test drives 5 same-collapsing names + a post-collision probe (guard-proven
   by revert to the bare-flush retry → PendingRollbackError).
