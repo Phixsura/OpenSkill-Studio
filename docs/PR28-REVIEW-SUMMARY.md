@@ -648,6 +648,20 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   windows, the ent-dirty tombstone honored by the secondary quota cache (key
   formats verified matching), the closed audit-action registry, and the
   impersonation privileged-target re-check at every mint all hold.
+- **R149 (full live-validation wave)**: every E2E surface re-run against the
+  R135-R148 code — e2e_commercial 52/52, e2e_workflow_lifecycle 49/49,
+  e2e_smoke 148/148, e2e_concurrency_probe 17/17 (real races fired against
+  the live server), browser suites 19/19 + 60/60 + 42/42 + 31/31, frontend
+  tsc/eslint clean + vitest 188/188 — with the API log monitored throughout:
+  ZERO 500s, zero tracebacks, zero error-level lines. Four test-infra
+  stalenesses fixed (no product code): e2e_smoke graded the author's own
+  attempt (now grades via a distinct instructor and asserts
+  SELF_GRADING_FORBIDDEN for the author — the R88-91 gate working as
+  designed) and used bare urllib (system-proxy 502s — no-proxy opener
+  installed); e2e_concurrency_probe's httpx client gained trust_env=False;
+  browser_e2e.mjs updated for the register→auto-tenant dashboard landing,
+  logs out (refresh cookie) before the login flow, and uses per-run unique
+  org name/slug against the shared dev DB.
 
 ### Convergence of the R135-R148 continuation
 
