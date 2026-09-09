@@ -110,8 +110,15 @@ class CohortService:
         )
         return list(result.scalars().all()), total
 
-    async def get_cohort(self, cohort_id: str, *, include_archived: bool = False) -> Cohort:
-        cohort = await self.db.get(Cohort, cohort_id)
+    async def get_cohort(
+        self, cohort_id: str, *, include_archived: bool = False, for_update: bool = False
+    ) -> Cohort:
+        # for_update (issue-18 debt, R70 pattern): transition callers lock the
+        # row so the status gate below cannot race a concurrent transition;
+        # populate_existing overwrites a stale identity-map copy.
+        cohort = await self.db.get(
+            Cohort, cohort_id, with_for_update=for_update or None, populate_existing=for_update
+        )
         if cohort is None:
             raise CohortNotFoundError()
         if cohort.status == CohortStatus.ARCHIVED and not include_archived:
@@ -126,7 +133,7 @@ class CohortService:
     }
 
     async def update_cohort(self, cohort_id: str, **fields) -> Cohort:
-        cohort = await self.get_cohort(cohort_id)
+        cohort = await self.get_cohort(cohort_id, for_update=True)
         if fields.get("status"):
             new_status = CohortStatus(fields.pop("status"))
             allowed = self._VALID_TRANSITIONS.get(cohort.status, set())
@@ -180,7 +187,7 @@ class CohortService:
         return cohort
 
     async def delete_cohort(self, cohort_id: str) -> None:
-        cohort = await self.get_cohort(cohort_id)
+        cohort = await self.get_cohort(cohort_id, for_update=True)
         if cohort.status != CohortStatus.DRAFT:
             raise AppError("INVALID_STATE", "Only draft cohorts can be deleted", 422)
         cohort.status = CohortStatus.ARCHIVED

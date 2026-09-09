@@ -355,8 +355,15 @@ class OrgService:
             status=MemberStatus.ACTIVE,
             invited_by=invited_by,
         )
-        self.db.add(member)
-        await self.db.flush()
+        # issue-18 debt (R70 class): two concurrent adds of the same user both
+        # passed the existence pre-check and the loser died on uq_org_member as
+        # an unhandled 500. SAVEPOINT-isolate the insert → clean 409.
+        try:
+            async with self.db.begin_nested():
+                self.db.add(member)
+                await self.db.flush()
+        except IntegrityError:
+            raise AlreadyMemberError() from None
         return member
 
     async def remove_member(self, org_id: str, user_id: str, removed_by: str) -> None:

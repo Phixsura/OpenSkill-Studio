@@ -325,8 +325,24 @@ class EvaluationService:
 
     async def _execute_evaluation(self, task: EvaluationTask) -> None:
         """Execute the evaluation: call LLM, parse result, write review."""
+        # issue-18 debt (R70 class): claim PENDING→PROCESSING with a guarded
+        # UPDATE — a cancel that won the race (CANCELLED committed) must stop
+        # the execution here, not be overwritten by the unguarded PROCESSING
+        # write and then charged for an LLM call on a cancelled task.
+        from sqlalchemy import update as _sa_update
+
+        started = datetime.now(UTC)
+        claim = await self.db.execute(
+            _sa_update(EvaluationTask)
+            .where(EvaluationTask.id == task.id, EvaluationTask.status == EvalStatus.PENDING)
+            .values(status=EvalStatus.PROCESSING, started_at=started)
+        )
+        if not claim.rowcount:
+            await self.db.refresh(task)
+            log.info("eval_execute_skipped", task_id=task.id, status=str(task.status))
+            return
         task.status = EvalStatus.PROCESSING
-        task.started_at = datetime.now(UTC)
+        task.started_at = started
         await self.db.flush()
 
         start_time = time.perf_counter()
@@ -575,8 +591,22 @@ class EvaluationService:
 
     async def retry_task(self, task_id: str) -> EvaluationTask:
         task = await self.get_task(task_id)
-        if task.status != EvalStatus.FAILED:
+        # issue-18 debt (R70 class): the Python gate on a stale read raced a
+        # concurrent retry — both saw FAILED, both reserved credit and both
+        # ran the paid LLM call (double spend, double transition). Claim the
+        # transition with a guarded UPDATE first: the loser blocks on the row
+        # lock, re-evaluates the predicate after the winner commits, and gets
+        # a clean 422. A gate failure below rolls the claim back with the tx.
+        from sqlalchemy import update as _sa_update
+
+        claim = await self.db.execute(
+            _sa_update(EvaluationTask)
+            .where(EvaluationTask.id == task_id, EvaluationTask.status == EvalStatus.FAILED)
+            .values(status=EvalStatus.PENDING, error=None)
+        )
+        if not claim.rowcount:
             raise AppError("INVALID_STATE", "Only failed tasks can be retried", 422)
+        await self.db.refresh(task)
         # Retry spends LLM budget just like a fresh trigger — enforce the SAME
         # three gates trigger_evaluation applies: tenant not suspended (a
         # costed action), AI enabled, and monthly cap. The suspension gate was
@@ -614,8 +644,7 @@ class EvaluationService:
                 _retry_reserved = True
             else:
                 await _credits.require_available(self.db, tenant.id, tenant.currency)
-        task.status = EvalStatus.PENDING
-        task.error = None
+        # (status/error already claimed above — the ORM copy was refreshed)
         await self.db.flush()
 
         # Re-execute inline
@@ -626,10 +655,22 @@ class EvaluationService:
 
     async def cancel_task(self, task_id: str) -> EvaluationTask:
         task = await self.get_task(task_id)
-        if task.status != EvalStatus.PENDING:
+        # issue-18 debt (R70 class): the stale-read gate raced the executor —
+        # cancel read PENDING while _execute_evaluation flipped the task to
+        # PROCESSING/COMPLETED, and the unguarded write then stamped CANCELLED
+        # over a task that actually ran (spend recorded, result discarded).
+        # Guarded transition: only a task still PENDING can be cancelled.
+        from sqlalchemy import update as _sa_update
+
+        result = await self.db.execute(
+            _sa_update(EvaluationTask)
+            .where(EvaluationTask.id == task_id, EvaluationTask.status == EvalStatus.PENDING)
+            .values(status=EvalStatus.CANCELLED)
+        )
+        if not result.rowcount:
+            await self.db.refresh(task)
             raise AppError("INVALID_STATE", "Only pending tasks can be cancelled", 422)
-        task.status = EvalStatus.CANCELLED
-        await self.db.flush()
+        await self.db.refresh(task)
         return task
 
     # ── Usage ──

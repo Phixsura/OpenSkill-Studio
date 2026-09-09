@@ -265,7 +265,12 @@ class PeerReviewService:
         score_breakdown: list[dict] | None,
         feedback: str | None,
     ) -> PeerAssessment:
-        assessment = await self.db.get(PeerAssessment, assessment_id)
+        # issue-18 debt (R70 pattern): lock the assessment row — the
+        # ALREADY_SUBMITTED gate below otherwise raced a concurrent submit of
+        # the same assessment (double submit, last-wins score overwrite).
+        assessment = await self.db.get(
+            PeerAssessment, assessment_id, with_for_update=True, populate_existing=True
+        )
         if assessment is None:
             raise AssessmentNotFoundError()
         rnd = await self.get_round(assessment.round_id, org_id)

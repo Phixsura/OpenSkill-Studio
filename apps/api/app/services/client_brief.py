@@ -123,9 +123,19 @@ class ClientBriefService:
 
     async def delete_brief(self, brief_id: str) -> None:
         brief = await self.get_brief(brief_id)
-        if brief.status != BriefStatus.DRAFT:
+        # issue-18 debt (R70 class): guarded transition — the stale-read gate
+        # raced a concurrent convert/open (delete landed ARCHIVED over a brief
+        # that had just gone ACTIVE, killing its linked project's brief).
+        from sqlalchemy import update as _sa_update
+
+        result = await self.db.execute(
+            _sa_update(ClientBrief)
+            .where(ClientBrief.id == brief_id, ClientBrief.status == BriefStatus.DRAFT)
+            .values(status=BriefStatus.ARCHIVED)
+        )
+        if not result.rowcount:
             raise AppError("INVALID_STATE", "Only draft briefs can be deleted", 422)
-        brief.status = BriefStatus.ARCHIVED
+        await self.db.refresh(brief)
         await self.db.flush()
 
     async def convert_to_project(
@@ -154,6 +164,19 @@ class ClientBriefService:
         # Only draft briefs can be converted — a second convert on an already-
         # active brief would create duplicate projects and crash on lazy-load.
         if brief.status != BriefStatus.DRAFT:
+            raise AppError("INVALID_STATE", "Only draft briefs can be converted", 422)
+        # issue-18 debt (R70 class): claim DRAFT→ACTIVE up front — two
+        # concurrent converts both passed the stale-read gate and created TWO
+        # projects off one brief. The loser blocks on the row lock and 422s;
+        # a failure later in project creation rolls the claim back with the tx.
+        from sqlalchemy import update as _sa_update
+
+        claim = await self.db.execute(
+            _sa_update(ClientBrief)
+            .where(ClientBrief.id == brief_id, ClientBrief.status == BriefStatus.DRAFT)
+            .values(status=BriefStatus.ACTIVE)
+        )
+        if not claim.rowcount:
             raise AppError("INVALID_STATE", "Only draft briefs can be converted", 422)
 
         # Validate cohort belongs to the same org
@@ -204,8 +227,8 @@ class ClientBriefService:
                 i,
             )
 
-        # Mark brief as assigned
-        brief.status = BriefStatus.ACTIVE
+        # Brief already claimed DRAFT→ACTIVE above; keep the ORM copy in sync.
+        await self.db.refresh(brief)
         await self.db.flush()
 
         log.info(

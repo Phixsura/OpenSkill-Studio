@@ -666,8 +666,14 @@ class ProjectService:
         await self.db.flush()
         return submission
 
-    async def get_submission(self, submission_id: str) -> Submission:
-        sub = await self.db.get(Submission, submission_id)
+    async def get_submission(self, submission_id: str, *, for_update: bool = False) -> Submission:
+        # for_update (issue-18 debt, R70 pattern): transition callers
+        # (submit_draft, create_review) lock the row so their status gates
+        # cannot race each other; populate_existing overwrites a stale
+        # identity-map copy read earlier in the same session.
+        sub = await self.db.get(
+            Submission, submission_id, with_for_update=for_update or None, populate_existing=for_update
+        )
         if sub is None:
             raise SubmissionNotFoundError()
         return sub
@@ -705,7 +711,11 @@ class ProjectService:
     async def submit_draft(
         self, submission_id: str, user_id: str, require_published: bool = False
     ) -> Submission:
-        sub = await self.get_submission(submission_id)
+        # issue-18 debt: locked read — a double submit raced the status gate
+        # (double version bump on revision-resubmit, double gamification
+        # points), and a submit racing create_review's status write interleaved
+        # unserialised. Both paths now contend on the submission row.
+        sub = await self.get_submission(submission_id, for_update=True)
 
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
@@ -1040,7 +1050,10 @@ class ProjectService:
         score_breakdown: dict | None,
         feedback: str | None,
     ) -> SubmissionReview:
-        sub = await self.get_submission(submission_id)
+        # issue-18 debt: locked read — see submit_draft (a review racing a
+        # resubmission otherwise stamped APPROVED/final_score onto the NEW
+        # version's row off a stale SUBMITTED read of the old one).
+        sub = await self.get_submission(submission_id, for_update=True)
         project = await self.get_project(sub.project_id)
 
         # No self-review (R86). An instructor can submit to their own project;

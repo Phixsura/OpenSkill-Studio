@@ -534,6 +534,10 @@ async def test_eval_cancel_not_pending():
     task = MagicMock()
     task.status = EvalStatus.COMPLETED
     db.get = AsyncMock(return_value=task)
+    # issue-18 fix: cancel is now a GUARDED conditional UPDATE — a non-pending
+    # task yields rowcount 0 (the mock mirrors the DB predicate miss).
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+    db.refresh = AsyncMock()
 
     svc = EvaluationService(db)
     with pytest.raises(AppError, match="Only pending"):
@@ -550,6 +554,10 @@ async def test_eval_retry_not_failed():
     task = MagicMock()
     task.status = EvalStatus.PENDING
     db.get = AsyncMock(return_value=task)
+    # issue-18 fix: retry claims FAILED→PENDING with a guarded UPDATE —
+    # a non-failed task yields rowcount 0.
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+    db.refresh = AsyncMock()
 
     svc = EvaluationService(db)
     with pytest.raises(AppError, match="Only failed"):
