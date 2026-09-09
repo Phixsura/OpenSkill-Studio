@@ -8,6 +8,14 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Application
     app_env: str = "development"
+    # R78b (issue-18 addendum): number of TRUSTED reverse-proxy hops in front
+    # of the app. 0 (default) = X-Forwarded-For is untrusted and ignored —
+    # rate limiting keys on the direct peer IP. Behind a load balancer set 1
+    # (CDN + LB = 2): the client is then read from the N-th-from-the-right
+    # X-Forwarded-For entry (the address the innermost trusted proxy saw).
+    # Without this, every deployment behind a proxy collapsed ALL users into
+    # the proxy IP's single bucket per route.
+    trusted_proxy_hops: int = 0
     debug: bool = False  # Override via DEBUG=true env var
     log_level: str = "INFO"
     log_format: str = "console"  # console | json

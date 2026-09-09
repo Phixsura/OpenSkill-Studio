@@ -275,6 +275,7 @@ async def test_rate_limit_keys_on_route_template_not_concrete_path():
         patch("app.core.rate_limit.check_rate_limit", new=AsyncMock(side_effect=_fake_check)),
     ):
         mock_settings.app_env = "production"
+        mock_settings.trusted_proxy_hops = 0  # R78b: identity resolution reads it
         await checker(_req("/orgs/O1/projects/P1/creator-shortlist", template))
         await checker(_req("/orgs/O1/projects/P2/creator-shortlist", template))
 

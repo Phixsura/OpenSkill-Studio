@@ -665,6 +665,7 @@ async def test_rate_limit_dependency_denied():
     # os.environ changes after import don't affect it)
     with patch("app.core.rate_limit.settings") as mock_settings:
         mock_settings.app_env = "production"
+        mock_settings.trusted_proxy_hops = 0  # R78b: identity resolution reads it
 
         # First call should pass
         with patch(

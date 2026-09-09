@@ -106,7 +106,7 @@ class CohortService:
         total = total_r.scalar_one()
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(Cohort.created_at.desc()).offset(offset).limit(per_page)
+            base.order_by(Cohort.created_at.desc(), Cohort.id.desc()).offset(offset).limit(per_page)
         )
         return list(result.scalars().all()), total
 
@@ -309,7 +309,7 @@ class CohortService:
 
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(CohortMember.joined_at).offset(offset).limit(per_page)
+            base.order_by(CohortMember.joined_at, CohortMember.id).offset(offset).limit(per_page)
         )
         return [(row[0], row[1], row[2]) for row in result.all()], total
 

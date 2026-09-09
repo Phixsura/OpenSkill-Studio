@@ -464,7 +464,7 @@ class OrgService:
         total = total_result.scalar_one()
 
         result = await self.db.execute(
-            base.order_by(OrgMember.joined_at.desc()).offset(offset).limit(per_page)
+            base.order_by(OrgMember.joined_at.desc(), OrgMember.id.desc()).offset(offset).limit(per_page)
         )
         members = result.scalars().all()
         return list(members), total

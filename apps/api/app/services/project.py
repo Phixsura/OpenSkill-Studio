@@ -415,7 +415,7 @@ class ProjectService:
 
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(Project.deadline.asc().nulls_last(), Project.created_at.desc())
+            base.order_by(Project.deadline.asc().nulls_last(), Project.created_at.desc(), Project.id.desc())
             .offset(offset)
             .limit(per_page)
         )
@@ -704,7 +704,7 @@ class ProjectService:
         if user_id:
             joined = joined.where(Submission.user_id == user_id)
         result = await self.db.execute(
-            joined.order_by(Submission.created_at.desc()).offset(offset).limit(per_page)
+            joined.order_by(Submission.created_at.desc(), Submission.id.desc()).offset(offset).limit(per_page)
         )
         return [(sub, name) for sub, name in result.all()], total
 

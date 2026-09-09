@@ -92,7 +92,7 @@ class DiscussionService:
                 PackDiscussion.pack_id == pack_id,
                 PackDiscussion.parent_id.is_(None),
             )
-            .order_by(PackDiscussion.created_at.asc())
+            .order_by(PackDiscussion.created_at.asc(), PackDiscussion.id.asc())
             .offset(offset)
             .limit(per_page)
         )
@@ -110,7 +110,7 @@ class DiscussionService:
                 PackDiscussion.pack_id == pack_id,
                 PackDiscussion.parent_id.in_(top_ids),
             )
-            .order_by(PackDiscussion.created_at.asc())
+            .order_by(PackDiscussion.created_at.asc(), PackDiscussion.id.asc())
         )
         replies_result = await self.db.execute(replies_q)
         replies = list(replies_result.scalars().all())
