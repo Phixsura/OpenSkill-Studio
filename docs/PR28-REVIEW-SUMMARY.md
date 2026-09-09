@@ -674,6 +674,20 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   R139 (reversal double-fire orderings + idempotent second pass), R145 (lock
   ordering), and R147 (advisory-lock deadlock analysis across
   supersede/create interleavings) all verified clean.
+- **R152 (close_snapshot replay machine — formal walkthrough)**: CLEAN SWEEP,
+  0 findings. The full transition space of the change_plan/close/void/
+  re-close machine was walked scenario by scenario: stacked void/re-close
+  cycles reproduce identical folds off the FIRST void's watermark; the
+  void-restore and re-close-supersede share one forward-window discriminator
+  (id > watermark, per axis) and agree by construction in every ordering
+  tried, including forward round-trips (10→20→10), immediate changes in the
+  reopened gap window, deferred changes scheduled on top of forward changes,
+  and legacy (watermark-absent) chains; live_seats replays as a historical
+  fact; deferred changes whose effective_at targets the DELETED forward
+  period correctly re-fold at the rebuilt rollover (anchor restoration keeps
+  the period end stable); the un-invoice window, first-void snapshot
+  selection, and per-invoice fold stamps are mutually consistent. The
+  R133→R135 rework has reached a genuine fixpoint.
 
 ### Convergence of the R135-R148 continuation
 
@@ -686,7 +700,7 @@ outbox worker, API-metering middleware, audit registry, impersonation) plus
 frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
 R145=1, R146=0, R147=1, R148=0, R149=0 (validation), R150=0,
-R151=1** — a clean
+R151=1, R152=0** — a clean
 convergence curve, the last findings low/medium severity (one partner
 under-payment on a void-after-credit-note edge, one false-429 budget window,
 input-type 500s, TOCTOU re-checks) with no new critical or money-at-scale
