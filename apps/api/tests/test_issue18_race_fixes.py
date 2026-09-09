@@ -334,3 +334,105 @@ async def test_cohort_slug_collision_retry_no_session_poison():
             assert len(set(slugs)) == len(slugs), f"duplicate slugs: {slugs}"
     finally:
         await engine.dispose()
+
+
+async def test_double_start_assessment_allocates_once():
+    """R173: two concurrent start_assessment calls on one SETUP round both
+    passed the phase gate and both allocated — the allocation is RANDOM, so
+    the (round, submission, reviewer) unique index only stops identical
+    pairs: the net effect was doubled reviewer workload or a 500 at commit.
+    The round-row lock serializes them; the loser re-reads ASSESSMENT → 422."""
+    from app.core.database import engine
+    from app.models.project import PeerAssessment
+    from app.services.peer_review import PeerReviewService
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            instructor = await _mk_user(setup)
+            org = await _mk_org(setup, instructor)
+            learners = [await _mk_user(setup) for _ in range(4)]
+            project_id, round_id = await _peer_round(setup, org, instructor, learners)
+            await setup.commit()
+
+        sa = AsyncSessionLocal()
+        sb = AsyncSessionLocal()
+        outcomes: list[str] = []
+        try:
+            # A: allocate and HOLD the transaction open (lock on the round row)
+            rnd_a, count_a = await PeerReviewService(sa).start_assessment(round_id, org.id)
+            assert count_a > 0
+
+            async def b_start():
+                try:
+                    await PeerReviewService(sb).start_assessment(round_id, org.id)
+                    await sb.commit()
+                    outcomes.append("allocated")
+                except AppError as e:
+                    await sb.rollback()
+                    outcomes.append(e.code)
+
+            b = asyncio.create_task(b_start())
+            await asyncio.sleep(0.3)
+            assert not outcomes, "B must be blocked on the round lock, not finished"
+            await sa.commit()
+            await b
+        finally:
+            await sa.close()
+            await sb.close()
+
+        assert outcomes == ["INVALID_PHASE"], outcomes
+        async with AsyncSessionLocal() as s:
+            n = (
+                await s.execute(
+                    select(PeerAssessment).where(PeerAssessment.round_id == round_id)
+                )
+            ).scalars().all()
+            assert len(n) == count_a, f"expected single allocation ({count_a}), got {len(n)}"
+    finally:
+        await engine.dispose()
+
+
+async def _peer_round(db, org, instructor, learners):
+    """Project + one SUBMITTED submission per learner + a SETUP round."""
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+    from app.models.project import ItemType, SubmissionItem
+    from app.services.peer_review import PeerReviewService
+    from app.services.project import ProjectService
+
+    psvc = ProjectService(db)
+    project = await psvc.create_project(
+        org_id=org.id,
+        title=f"I18 Peer {ULID()}",
+        slug=None,
+        description="d",
+        instructions="i",
+        difficulty="beginner",
+        max_score=100,
+        rubric=[{"criterion": "Q", "max_score": 100}],
+        deadline=None,
+        late_deadline=None,
+        late_penalty_pct=0,
+        max_submissions=0,
+        skill_ids=None,
+        created_by=instructor.id,
+    )
+    d = await psvc.create_deliverable(project.id, "Work", None, "text", True, {}, 0)
+    for learner in learners:
+        db.add(
+            OrgMember(
+                org_id=org.id, user_id=learner.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+            )
+        )
+        await db.flush()
+        sub = await psvc.create_submission(org.id, project.id, learner.id)
+        db.add(
+            SubmissionItem(
+                submission_id=sub.id, deliverable_id=d.id, type=ItemType.TEXT, content="w"
+            )
+        )
+        await db.flush()
+        await psvc.submit_draft(sub.id, learner.id)
+    rnd = await PeerReviewService(db).create_round(
+        org.id, project.id, instructor.id, name="R173", num_reviews=2
+    )
+    return project.id, rnd.id
