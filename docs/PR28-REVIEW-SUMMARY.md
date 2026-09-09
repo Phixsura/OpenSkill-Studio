@@ -1004,6 +1004,22 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   provision.run (resumable guarded step machine). No handler double-applies a
   money or state effect on redelivery — the R89 per-message SAVEPOINT plus
   DB-level idempotency holds across all of them.
+- **R172 (systematic sweep: FX / currency-conversion boundary consistency)**:
+  CLEAN SWEEP, 0 findings — an audit of the codebase's historically WORST bug
+  class (money-currency: R35/R56/R61/R75/R81/R88/R167). Every convert_minor /
+  convert_exact / resolve_fx call site (7 across rating, revenue_share,
+  marketplace) verified on three axes: (1) DIRECTION — each is
+  resolve_fx(A,B) → convert_minor(x, rate, A, B), from/to matching the
+  resolved pair; (2) MISSING-RATE — billable conversions block, never
+  silent-zero (rating: blocked_gaps → status='blocked', re-rated by
+  fx.rate_created; revenue_share: RAISE 409 so the outbox retries/dead-letters
+  instead of a None-return silently marking the accrual done), while
+  margin-side FX may leave margin NULL without blocking billing; (3) TIMESTAMP
+  — decision-time throughout (rating: event.occurred_at; invoice/rule: the
+  close's `at`; purchase: settlement-time _now(), defensible since shares are
+  already frozen in buyer currency). minor-unit convention centralized in
+  convert_minor/convert_exact. The piecemeal historical fixes have converged
+  into one uniform, correct FX discipline.
   sweep idempotency intact.
   green.
   degradation).
