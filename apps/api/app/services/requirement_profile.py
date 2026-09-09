@@ -590,6 +590,15 @@ class RequirementProfileService:
         if data.get("difficulty") and data["difficulty"] not in _DIFFICULTIES:
             unmatched.append(sanitize_untrusted_text(str(data["difficulty"]), 64))
             data.pop("difficulty")
+        # R178: mirror _validate_structured's range bound — the form path
+        # rejects time_budget outside 1..100000, but the extraction path only
+        # type-checked it (int | None). A hallucinated negative or absurd
+        # budget (e.g. -5, 10**18) flowed into structured_requirements and
+        # skewed S3 soft scoring. Out-of-range → unmatched, never stored.
+        tb = data.get("time_budget")
+        if tb is not None and (isinstance(tb, bool) or not (1 <= tb <= 100_000)):
+            unmatched.append(sanitize_untrusted_text(str(tb), 64))
+            data.pop("time_budget")
 
         for key, value in data.items():
             if key in ALLOWED_FIELDS:
