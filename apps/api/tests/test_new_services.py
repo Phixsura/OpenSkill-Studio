@@ -1183,3 +1183,61 @@ async def test_webhook_delivery_streams_and_signs(monkeypatch):
     expect = hmac_mod.new(secret.encode(), body, hashlib.sha256).hexdigest()
     assert hmac_mod.compare_digest(sig, expect), "HMAC signature mismatch"
     assert received["headers"]["x-webhook-event"] == "pack.published"
+
+
+@pytest.mark.asyncio
+async def test_target_org_can_remove_unsolicited_share(c):
+    """R172: sharing is push-model with no consent step, and revoke was gated
+    to the OWNER org only — the receiving org had no way to clear a hostile
+    pack out of /shared-with-me or cut its installability. Target-side
+    removal: instructor of the TARGET org deletes the incoming share."""
+    ha, _ = await _auth(c)
+    oid_a = await _org(c, ha)
+    hb, _ = await _auth(c)
+    oid_b = await _org(c, hb)
+
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid_a}/packs", json={"name": "Unsolicited"}, headers=ha)
+    ).json()["data"]["id"]
+    sid = await _skill(c, ha, oid_a, "Unsolicited Skill")
+    await c.post(f"/api/v1/orgs/{oid_a}/packs/{pid}/skills", json={"skill_id": sid}, headers=ha)
+    await c.post(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=ha
+    )
+    await c.put(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}",
+        json={"sharing_enabled": True},
+        headers=ha,
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}/share", json={"target_org_id": oid_b}, headers=ha
+    )
+    assert r.status_code == 201, r.text
+    shared = (await c.get(f"/api/v1/orgs/{oid_b}/shared-with-me", headers=hb)).json()["data"]
+    assert any(p["id"] == pid for p in shared)
+
+    # A third org that is NOT the target cannot remove B's incoming share
+    hc, _ = await _auth(c)
+    oid_c = await _org(c, hc)
+    r = await c.delete(f"/api/v1/orgs/{oid_c}/shared-with-me/{pid}", headers=hc)
+    assert r.status_code == 404, r.text
+
+    # B (target) removes it
+    r = await c.delete(f"/api/v1/orgs/{oid_b}/shared-with-me/{pid}", headers=hb)
+    assert r.status_code == 204, r.text
+    shared = (await c.get(f"/api/v1/orgs/{oid_b}/shared-with-me", headers=hb)).json()["data"]
+    assert not any(p["id"] == pid for p in shared)
+
+    # ... and the installability the share granted is gone too
+    r = await c.post(
+        f"/api/v1/orgs/{oid_b}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=hb
+    )
+    assert r.status_code == 404, r.text
+
+    # removing again → 404; owner org can re-share afterwards (no tombstone)
+    r = await c.delete(f"/api/v1/orgs/{oid_b}/shared-with-me/{pid}", headers=hb)
+    assert r.status_code == 404
+    r = await c.post(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}/share", json={"target_org_id": oid_b}, headers=ha
+    )
+    assert r.status_code == 201, r.text
