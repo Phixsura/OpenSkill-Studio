@@ -81,7 +81,14 @@ async def _spent_minor(db: AsyncSession, tenant: TenantAccount, policy: BudgetPo
             # budget purposes (only voided/blocked are excluded).
             RatedUsage.status.in_(["rated", "invoiced", "settled"]),
             RatedUsage.billable_currency == policy.currency,
-            RatedUsage.rated_at >= start,
+            # R142: window on when the usage OCCURRED, not rated_at. The
+            # FX-unblock retry resets rated_at to now() (the same shift the
+            # dashboard fixed in R48[33]) — a prior-period event re-rated this
+            # period would otherwise count against THIS budget window, firing
+            # a false BUDGET_EXCEEDED (429) that blocks legitimate current
+            # spend. occurred_at also matches how close_period_and_invoice
+            # attributes usage to a period, so budget and invoice agree.
+            UsageEvent.occurred_at >= start,
         )
     )
     if policy.scope_type == "org":

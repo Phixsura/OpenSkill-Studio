@@ -1002,6 +1002,107 @@ async def test_tenant_ai_ceiling_denominated_in_tenant_currency(db):
 
 
 @pytest.mark.asyncio
+async def test_budget_windows_on_occurred_at_not_rated_at(db):
+    """R142: budget spend must window on when the usage OCCURRED, not rated_at.
+    A prior-period event whose FX was unblocked THIS period (rating resets
+    rated_at to now() — R48[33]'s shift) must NOT count against the current
+    budget window, or a false BUDGET_EXCEEDED blocks legitimate current spend."""
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)  # USD
+    org = "01J142ORG142ORG142ORG1420"
+    db.add(
+        BudgetPolicy(
+            tenant_id=tenant.id,
+            scope_type="org",
+            scope_id=org,
+            period="monthly",
+            limit_minor=100,
+            currency="USD",
+            hard_stop=True,
+        )
+    )
+    await db.flush()
+    # An event that OCCURRED 40 days ago (prior month) but was RE-RATED just
+    # now (FX unblock) — rated_at is current, occurred_at is old.
+    eid = str(ULID())
+    db.add(
+        UsageEvent(
+            id=eid,
+            tenant_id=tenant.id,
+            org_id=org,
+            usage_type="image_generation",
+            quantity=1,
+            unit="images",
+            occurred_at=datetime.now(UTC) - timedelta(days=40),
+            source="manual",
+        )
+    )
+    await db.flush()
+    db.add(
+        RatedUsage(
+            usage_event_id=eid,
+            tenant_id=tenant.id,
+            org_id=org,
+            usage_type="image_generation",
+            quantity=1,
+            cost_rate_snapshot={},
+            internal_cost_minor=0,
+            internal_cost_currency="USD",
+            sell_rate_snapshot={},
+            billable_amount_minor=200,  # would blow the 100 limit if counted
+            billable_amount_exact=Decimal(200),
+            billable_currency="USD",
+            status="rated",
+            rated_at=datetime.now(UTC),  # re-rated NOW
+        )
+    )
+    await db.flush()
+    # occurred_at is last month → not in this month's window → no breach.
+    decision = await budget_svc.check(db, tenant, org)
+    assert decision.allowed, "prior-period (re-rated) spend leaked into the current budget window"
+    # A same-amount event that actually OCCURRED this period DOES breach.
+    eid2 = str(ULID())
+    db.add(
+        UsageEvent(
+            id=eid2,
+            tenant_id=tenant.id,
+            org_id=org,
+            usage_type="image_generation",
+            quantity=1,
+            unit="images",
+            occurred_at=datetime.now(UTC),
+            source="manual",
+        )
+    )
+    await db.flush()
+    db.add(
+        RatedUsage(
+            usage_event_id=eid2,
+            tenant_id=tenant.id,
+            org_id=org,
+            usage_type="image_generation",
+            quantity=1,
+            cost_rate_snapshot={},
+            internal_cost_minor=0,
+            internal_cost_currency="USD",
+            sell_rate_snapshot={},
+            billable_amount_minor=200,
+            billable_amount_exact=Decimal(200),
+            billable_currency="USD",
+            status="rated",
+            rated_at=datetime.now(UTC),
+        )
+    )
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await budget_svc.check(db, tenant, org)
+    assert exc.value.code == "BUDGET_EXCEEDED"
+
+
+@pytest.mark.asyncio
 async def test_eval_settings_write_through(db):
     """Issue §17: PUT settings/evaluation creates/updates/removes the policy."""
     user = await _mk_user(db)

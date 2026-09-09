@@ -584,6 +584,26 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   accrue_credit_note per-note proportional reversal + natural-key replay
   safety, accrue_refund, rule specificity/versioning, statement lifecycle,
   FX-blocking-not-vanishing.
+- **R140 (settlement machine + statement generation + platform dashboard)**:
+  CLEAN SWEEP, 0 findings — regen unbind/double-count guard (manual
+  adjustments stay bound, counted once via manual_adjustments_minor),
+  statement-row FOR UPDATE serializing generate against
+  finalize/approve/adjust, manual-adjustment self-referential keying, and
+  per-currency MRR/billable/cost/margin grouping all verified correct.
+- **R141 (frontend parity for R135-R139)**: CLEAN SWEEP, 0 findings — the
+  redacted workflow preview matches what the UI already renders (step
+  name/type only, never config/prompt); credit-note idempotency_key and the
+  seat_limit-scope 422 are ops/seller API-only paths with no web form; the
+  error envelope surfaces error.code uniformly.
+- **R142 (budget + metering enforcement fix-of-fix)**: 1 confirmed (med,
+  enforcement correctness), fixed + guard-proven. budgets._spent_minor
+  windowed the period on RatedUsage.rated_at, but the FX-unblock retry resets
+  rated_at to now() (the exact shift the dashboard fixed in R48[33]) — a
+  prior-period event re-rated this period counted against the CURRENT budget
+  window, firing a false BUDGET_EXCEEDED (429) that blocks legitimate current
+  spend (or a false warning). Now windows on UsageEvent.occurred_at, matching
+  both the dashboard and close_period_and_invoice's period attribution. The
+  only remaining rated_at period-boundary in the control plane.
 
 ## 4. Convergence
 
