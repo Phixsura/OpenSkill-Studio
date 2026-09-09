@@ -1065,6 +1065,38 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
     authz, R88d idempotency; concurrent-award duplicate remains a documented
     known race), notification.py (prefs whitelisted at endpoint),
     provider.py (offering CASCADE at DB, update schemas closed, cost bounds).
+- **R177–R180 (line-by-line continuation + session.rollback() class sweep —
+  commits 42e96fb/0fcb71d/d2db8a9)**: 4 confirmed findings, all fixed +
+  guard-proven; 6 more files read clean.
+  - `client_brief.py` (R177, 42e96fb): create_brief's slug-collision handler
+    called session.rollback() — a FULL transaction rollback that silently
+    wiped any earlier uncommitted work in the caller's transaction before
+    retrying (only the brief was re-added). Savepoint now (the
+    portfolio.create_item pattern). Test: two same-title briefs in ONE
+    session both survive the commit.
+  - `requirement_profile.py` (R178, 0fcb71d): extracted time_budget bypassed
+    the form path's 1..100000 range bound (ExtractedRequirements only
+    type-checked it) — a hallucinated negative/absurd budget skewed S3 soft
+    scoring. _normalize_extracted now applies the same bound → unmatched.
+  - `pack_review.py` (R179, d2db8a9, 2 sites): create_review's duplicate
+    handler and toggle_helpful's vote-collision handler both called
+    session.rollback(); toggle_helpful then KEPT WRITING after the full
+    rollback (the exact R177 lost-write shape). Both savepointed. Test:
+    duplicate-review 409 with a sibling same-session review surviving.
+  - R180 class sweep: all 26 remaining `.rollback()` sites audited.
+    Endpoint-level rollbacks own their tx (legitimate); evaluation.py ×2,
+    production/learning_composer, creator_matching are DELIBERATE guarded
+    recovery/discard semantics; auth.py + skill_pack.py ×4 are
+    terminal-raise-only (the request tx dies with the 409 anyway, no
+    caller catches-and-continues — verified). Class closed: the only two
+    sites where the hazard was real were fixed in R179.
+    Read clean in the same pass: organization.py (all three role-mint paths
+    carry the R91 `<=` gate; seat-quota advisory lock; savepointed add_member),
+    learning_path.py (my-progress endpoint pre-gates get_path; drip_schedule
+    has no writer — unreachable), workflow_adapters.py (org-key mandatory,
+    model allowlist, boundary-wrapped untrusted inputs), duplicate.py
+    (R89/R135 trails verified), pack_sharing endpoints, peer-review schema
+    bounds (score 0..10000; org gate via get_round on both list surfaces).
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
