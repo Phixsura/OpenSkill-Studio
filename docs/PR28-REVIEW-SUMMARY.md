@@ -1025,6 +1025,46 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   degradation).
   test drives 5 same-collapsing names + a post-collision probe (guard-proven
   by revert to the bare-flush retry → PendingRollbackError).
+- **R173–R176 (line-by-line source reads of never-opened files — commit
+  labels R171–R174, which collide with the two clean-sweep round numbers
+  above; commits 573fd9f/71af2b0/e43c240/2632fc6 are authoritative)**:
+  6 confirmed findings across 4 files, all fixed + guard-proven. The reads
+  deliberately ignored existing R-comments (they prove past bugs were fixed,
+  not that none remain) and re-derived behavior from the code alone.
+  - `webhook.py` (573fd9f, 3 findings): (1) SSRF blocklist gap — 100.64.0.0/10
+    (RFC 6598 CGNAT: cloud-internal LBs, Tailscale overlays) has
+    `is_private=False` AND `is_global=False`, so neither the CIDR list nor the
+    defense-in-depth flag check caught it; NAT64 64:ff9b::/96 embedded any
+    IPv4 (incl. 169.254.169.254) past every IPv4 rule. (2) `_is_blocked_url`
+    runs synchronous `socket.getaddrinfo` ON the event loop (create path +
+    every delivery) — a hostname with a slow authoritative NS froze every
+    in-flight request for the resolver timeout; now `asyncio.to_thread`.
+    (3) delivery used `client.post()`, buffering the org-controlled
+    receiver's ENTIRE response — multi-GB bodies × 25 subscriptions was
+    unbounded memory amplification; now `client.stream()`, body never read.
+    Tests: CGNAT/NAT64 unit + endpoint 422; ticker-based event-loop-liveness
+    proof under a 0.5s-slow resolver; real loopback delivery (HMAC verified,
+    tracemalloc peak <2MB against a chunked 8MB response).
+  - `pack_sharing.py` (71af2b0, 1): sharing is push-model with no consent
+    step, and revoke was OWNER-org-gated — the receiving org had no way to
+    clear hostile packs out of /shared-with-me or cut the installability the
+    PackShare row grants (R92i). New DELETE /orgs/{id}/shared-with-me/{pack}
+    (instructor+ of the TARGET org); non-target orgs uniform 404.
+  - `peer_review.py` (e43c240, 1): start_assessment lacked the R70 lock that
+    submit_assessment already had — two concurrent starts both passed the
+    SETUP gate and both allocated; allocation is RANDOM so the unique index
+    only stops identical pairs: doubled reviewer workload or IntegrityError 500. Round row now FOR UPDATE in start_assessment + close_round;
+    two-session interleave test asserts blocked-mid-race + single allocation.
+  - `portfolio.py` (2632fc6, 1): get_or_create_profile bare-flush 500 on two
+    first-touch races — same user's parallel first requests (user_id PK) and
+    two users with the same display name (username unique index). Savepoint +
+    recover: PK race returns the winner's row, username race retries with a
+    random suffix. Two-session test covers both shapes.
+    Files read clean the same way (no finding, verified hardened at the schema
+    or model layer): gamification.py (score/level math consistent, endpoint
+    authz, R88d idempotency; concurrent-award duplicate remains a documented
+    known race), notification.py (prefs whitelisted at endpoint),
+    provider.py (offering CASCADE at DB, update schemas closed, cost bounds).
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
