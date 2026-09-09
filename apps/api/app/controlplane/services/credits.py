@@ -546,33 +546,51 @@ async def expire_stale_reservations(db: AsyncSession) -> int:
     )
     handled = 0
     for reservation in stale:
-        run = None
-        if reservation.reference_type == "workflow_run":
-            from app.models.workflow_run import RunStatus, WorkflowRun
+        # R168: isolate each reservation in a SAVEPOINT + try/except, exactly
+        # like expire_promotional's per-lot isolation. Without it, ONE
+        # reservation whose release/extension raised (a _locked_balance
+        # deadlock, a transient DB error) aborted the caller's whole
+        # transaction — the cron committed nothing and retried the identical
+        # poison batch forever, so NO reservation ever expired and dead holds
+        # piled up until a tenant hit INSUFFICIENT_CREDIT on reserved-but-dead
+        # estimates. One bad reservation must not wedge the platform-wide cron.
+        try:
+            async with db.begin_nested():
+                run = None
+                if reservation.reference_type == "workflow_run":
+                    from app.models.workflow_run import RunStatus, WorkflowRun
 
-            run = await db.get(WorkflowRun, reservation.reference_id)
+                    run = await db.get(WorkflowRun, reservation.reference_id)
 
-        # R31/C9: a run parked at a review gate legitimately waits up to
-        # settings.review_due_days (1–30d) — the bounded 2×6h extension used
-        # to release its hold at ~36h, so on approval the run resumed with no
-        # reservation and its usage went uncharged. Keep extending a
-        # WAITING_REVIEW run indefinitely (the gate is the natural bound; a
-        # review-expiry/ cancel emits run.terminal which settles). Keep the
-        # small bounded extension only for PENDING/RUNNING, which should never
-        # linger — a genuinely stuck executor is then released as before.
-        if run is not None and run.status == RunStatus.WAITING_REVIEW:
-            reservation.extension_count += 1
-            reservation.expires_at = now + timedelta(hours=24)
-        elif (
-            run is not None
-            and run.status in (RunStatus.PENDING, RunStatus.RUNNING)
-            and reservation.extension_count < 2
-        ):
-            reservation.extension_count += 1
-            reservation.expires_at = now + timedelta(hours=6)
-        else:
-            await release(db, reservation.id)
-        handled += 1
+                # R31/C9: a run parked at a review gate legitimately waits up to
+                # settings.review_due_days (1–30d) — the bounded 2×6h extension
+                # used to release its hold at ~36h, so on approval the run
+                # resumed with no reservation and its usage went uncharged. Keep
+                # extending a WAITING_REVIEW run indefinitely (the gate is the
+                # natural bound; a review-expiry/cancel emits run.terminal which
+                # settles). Keep the small bounded extension only for
+                # PENDING/RUNNING, which should never linger — a genuinely stuck
+                # executor is then released as before.
+                if run is not None and run.status == RunStatus.WAITING_REVIEW:
+                    reservation.extension_count += 1
+                    reservation.expires_at = now + timedelta(hours=24)
+                elif (
+                    run is not None
+                    and run.status in (RunStatus.PENDING, RunStatus.RUNNING)
+                    and reservation.extension_count < 2
+                ):
+                    reservation.extension_count += 1
+                    reservation.expires_at = now + timedelta(hours=6)
+                else:
+                    await release(db, reservation.id)
+            handled += 1
+        except Exception:  # noqa: BLE001 — one bad reservation must not wedge the cron
+            log.warning(
+                "cp_reservation_expiry_failed",
+                reservation_id=reservation.id,
+                exc_info=True,
+            )
+            continue
     return handled
 
 

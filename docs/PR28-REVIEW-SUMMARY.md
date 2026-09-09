@@ -936,6 +936,25 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   verified correct per event type. Two-session-style out-of-order regression
   test (failed@t2 → stale paid@t1 ignored → newer paid@t3 applies);
   guard-proven; billing suite 61 green.
+- **R168 (deep-dive: credit reservation expiry sweep)**: 1 confirmed
+  (medium, availability), fixed + guard-proven. expire_stale_reservations
+  processed every stale hold in the caller's single transaction with NO
+  per-reservation isolation — one reservation whose release/extension raised
+  (a _locked_balance deadlock, a transient DB error) aborted the whole batch,
+  the cron committed nothing, and it retried the identical poison batch
+  forever: NO reservation ever expired and dead holds piled up until tenants
+  hit INSUFFICIENT_CREDIT on reserved-but-dead estimates. The sibling
+  expire_promotional already isolates each lot in a SAVEPOINT ("one bad lot
+  must not wedge the cron"); this sweep lacked the mirror. Each reservation
+  now runs in its own begin_nested + try/except (log + continue). Verified
+  clean along the way: release()/settle() are idempotent (guarded UPDATE,
+  early-return-without-decrement on rowcount 0 — no reserved_minor drift under
+  concurrent sweeps), the WAITING_REVIEW indefinite-extension (R31/C9) and the
+  PENDING/RUNNING bounded 2×6h extension are correct, and a released hold on a
+  still-RUNNING run defers to invoice billing (no revenue loss). Poison-
+  isolation regression test (one failing + one healthy stale hold → healthy
+  still expires, reserved_minor doesn't drift); guard-proven; credits 42
+  green.
   degradation).
   test drives 5 same-collapsing names + a post-collision probe (guard-proven
   by revert to the bare-flush retry → PendingRollbackError).

@@ -2244,3 +2244,52 @@ async def test_append_entry_reraises_non_idempotency_integrity_error(db, monkeyp
         db, tenant.id, "USD", 70, reason="w", actor=a, idempotency_key=key
     )
     assert dup is None
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_reservations_isolates_one_bad_reservation(db, monkeypatch):
+    """R168: a single reservation whose processing raises must NOT wedge the
+    whole reservation-expiry cron (the expire_promotional per-lot isolation
+    class). The healthy stale hold still expires; the poison one is left held
+    (its savepoint rolled back) for a later pass / manual handling."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    await credit_svc.top_up(db, tenant.id, "USD", 2000, actor=a)
+    poison = await credit_svc.reserve(
+        db, tenant.id, "USD", 300, reference_type="manual", reference_id="poison-ref"
+    )
+    healthy = await credit_svc.reserve(
+        db, tenant.id, "USD", 200, reference_type="manual", reference_id="healthy-ref"
+    )
+    poison.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    healthy.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    await db.flush()
+    poison_id = poison.id
+
+    real_release = credit_svc.release
+
+    async def flaky_release(db_, reservation_id):
+        if reservation_id == poison_id:
+            raise RuntimeError("simulated release failure")
+        return await real_release(db_, reservation_id)
+
+    monkeypatch.setattr(credit_svc, "release", flaky_release)
+
+    # Must NOT raise despite the poison reservation.
+    handled = await credit_svc.expire_stale_reservations(db)
+    await db.flush()
+    monkeypatch.undo()
+
+    await db.refresh(poison)
+    await db.refresh(healthy)
+    balance = (
+        await db.execute(
+            select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert healthy.status == "released", "healthy hold must still expire"
+    assert poison.status == "held", "poison hold rolled back, left for a later pass"
+    # only the healthy 200 freed; the poison 300 savepoint reverted cleanly
+    assert balance.reserved_minor == 300, f"reserved drifted: {balance.reserved_minor}"
+    assert handled >= 1
