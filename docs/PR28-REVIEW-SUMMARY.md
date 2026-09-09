@@ -554,6 +554,22 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   invoices flips to paid before void becomes reachable), domains lifecycle
   authz (owner-gated + tenant-scoped + entitlement re-checked at activate),
   guest-link/principal handling, ClientShare delete-on-unshare semantics.
+- **R138 (provisioning + tenant-export deep-dive)**: 1 confirmed, fixed +
+  guard-proven. (low) build_export LEFT-JOINs invoices×lines and caps by
+  EXPORT_MAX_ROWS on the JOINED rows — at the 50k boundary the last invoice
+  was cut mid-lines, so the §10.4 compliance bundle shipped an invoice header
+  with a PARTIAL line set whose sum diverged from total_minor (silently
+  unreconcilable); the boundary invoice's rows are now dropped whole so every
+  emitted invoice is complete, with truncated_collections already flagging
+  the drop. Cleared by verification: the provision-run idempotency divergence
+  guard compares every requested parameter (name/blueprint/slug/partner);
+  concurrent double-execution of one run is serialized by the guarded
+  status-UPDATE row lock (a second worker blocks then no-ops on the
+  committed terminal status); blueprint config is depth-capped + extra=forbid
+  (no user/credential/billing keys); export authz is platform_admin-gated,
+  tenant-scoped, PII-whitelisted (deleted users excluded, presign mints
+  audited), and REPEATABLE-READ snapshot-consistent with the tx released
+  before the S3 upload.
 
 ## 4. Convergence
 

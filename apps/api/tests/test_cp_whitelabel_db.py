@@ -758,3 +758,69 @@ async def test_stale_pending_domain_claim_evicted(db):
     )
     with pytest.raises(AppError):
         await domain_svc.create_domain(db, tenant_id=victim.id, hostname=host3, actor=_actor(user))
+
+
+@pytest.mark.asyncio
+async def test_export_truncation_never_ships_partial_invoice(db, monkeypatch):
+    """R138: build_export LEFT-JOINs invoices×lines and caps by EXPORT_MAX_ROWS
+    on the JOINED rows — the boundary invoice was cut mid-lines, shipping a
+    header with a partial line set whose sum diverged from total_minor. Every
+    EMITTED invoice must be complete; the truncated flag signals the drop."""
+    import json
+
+    from app.controlplane.models.billing import Invoice, InvoiceLine
+    from app.controlplane.services import provisioning as prov
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    # Two invoices, two lines each. Cap at 3 joined rows: the window holds
+    # inv1(line,line) + inv2(line) — inv2 is cut mid-lines.
+    for n in range(2):
+        inv = Invoice(
+            tenant_id=tenant.id,
+            number=f"INV-{ULID()}",
+            status="open",
+            currency="USD",
+            total_minor=300,
+            amount_due_minor=300,
+        )
+        db.add(inv)
+        await db.flush()
+        for so in range(2):
+            db.add(
+                InvoiceLine(
+                    invoice_id=inv.id,
+                    line_type="usage",
+                    description=f"l{so}",
+                    amount_minor=150,
+                    sort_order=so,
+                )
+            )
+    await db.flush()
+    monkeypatch.setattr(prov, "EXPORT_MAX_ROWS", 3)
+
+    captured: dict = {}
+
+    async def fake_s3():
+        class FakeClient:
+            async def head_bucket(self, **kw):
+                return {}
+
+            async def create_bucket(self, **kw):
+                return {}
+
+            async def put_object(self, **kw):
+                captured["body"] = kw["Body"].decode()
+
+        yield FakeClient()
+
+    monkeypatch.setattr("app.core.storage.get_s3_client", fake_s3)
+    export = await prov.build_export(db, tenant.id, actor=_actor(user))
+    assert export.status == "completed"
+    bundle = json.loads(captured["body"])
+    assert "invoices" in bundle["truncated_collections"]
+    # Every emitted invoice's lines must reconcile to its total — no partial.
+    for inv in bundle["invoices"]:
+        assert sum(line["amount_minor"] for line in inv["lines"]) == inv["total_minor"], (
+            "a partial (boundary-cut) invoice was shipped"
+        )

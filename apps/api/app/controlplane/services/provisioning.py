@@ -555,8 +555,18 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
             .limit(EXPORT_MAX_ROWS)
         )
     ).all()
-    if len(inv_rows) >= EXPORT_MAX_ROWS:
+    inv_truncated = len(inv_rows) >= EXPORT_MAX_ROWS
+    if inv_truncated:
         truncated.append("invoices")
+        # R138: the LIMIT caps JOINED (invoice × line) rows — the boundary
+        # invoice is likely cut mid-lines, so its header would ship with a
+        # PARTIAL line set whose sum diverges from total_minor (a silently
+        # unreconcilable §10.4 compliance bundle). Drop every row of the last
+        # invoice id in the window so every EMITTED invoice is complete; the
+        # truncated_collections flag already tells the reader invoices were
+        # dropped.
+        _last_inv_id = inv_rows[-1][0].id
+        inv_rows = [r for r in inv_rows if r[0].id != _last_inv_id]
     bundle["invoices"] = []
     _by_inv: dict = {}
     for invoice, line in inv_rows:
