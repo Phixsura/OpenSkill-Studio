@@ -693,3 +693,48 @@ async def test_void_final_rewinds_brief_only_when_acceptance_completed_it(db):
     assert untouched.status == BriefStatus.COMPLETED, (
         "a brief the org completed deliberately must survive the void"
     )
+
+
+@pytest.mark.asyncio
+async def test_final_accept_recheck_under_lock_toctou():
+    """R137: every portal decision path checked _assert_decidable on a
+    PRE-lock read — a final-accept whose session loaded the submission as
+    SUBMITTED before a concurrent revision flip committed then completed the
+    brief off stale state. Two sessions: A resolves the principal and loads,
+    B flips the submission to REVISION_REQUESTED and commits, A final-accepts
+    with its stale object → must 409 SUBMISSION_NOT_REVIEWABLE."""
+    from app.core.database import engine
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            user = await _mk_user(setup)
+            _, _, brief, project, submission = await _mk_project_env(setup, user)
+            setup.add(ClientShare(project_id=project.id, submission_id=submission.id))
+            auth = await _guest_auth(setup, project, user, role="approver")
+            await setup.commit()
+            project_id, submission_id, brief_id = project.id, submission.id, brief.id
+
+        async with AsyncSessionLocal() as sa, AsyncSessionLocal() as sb:
+            # A resolves the principal and (inside final_accept) will load the
+            # submission — force the stale read NOW.
+            principal = await portal_svc.get_client_principal(sa, project_id, auth)
+            stale = await sa.get(Submission, submission_id)
+            assert stale.status == SubmissionStatus.SUBMITTED
+            # B: creator pulls the work back into revision and COMMITS.
+            sub_b = await sb.get(Submission, submission_id)
+            sub_b.status = SubmissionStatus.REVISION_REQUESTED
+            await sb.commit()
+            # A final-accepts off its stale SUBMITTED read → locked re-check
+            # must reject.
+            with pytest.raises(AppError) as exc:
+                await portal_svc.final_accept(sa, principal, submission_id, "ship it")
+            assert exc.value.code == "SUBMISSION_NOT_REVIEWABLE"
+            await sa.rollback()
+
+        async with AsyncSessionLocal() as s:
+            b = await s.get(ClientBrief, brief_id)
+            assert b.status != BriefStatus.COMPLETED, (
+                "brief completed off a submission that was back in revision"
+            )
+    finally:
+        await engine.dispose()

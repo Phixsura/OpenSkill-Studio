@@ -292,7 +292,11 @@ async def request_revision(
     # R133 ([13]): serialize on the submission row — the SELECT-then-INSERT
     # dedup raced concurrent duplicates (double record + double notification
     # fan-out); no unique index exists for per-version decisions.
-    await db.execute(select(Submission.id).where(Submission.id == submission.id).with_for_update())
+    # R137: re-read + re-assert UNDER the lock — the pre-lock decidable check
+    # raced a concurrent status flip / resubmission (version bump), so the
+    # record could land on a stale version (the R135 update_draft TOCTOU
+    # shape).
+    submission = await _locked_decidable(db, submission.id, "request revision on")
     prior = (
         await db.execute(
             select(ClientApprovalRecord)
@@ -320,6 +324,26 @@ async def request_revision(
     await _notify_org(db, principal, submission, "client_revision_requested")
     await db.flush()
     return record
+
+
+async def _locked_decidable(db: AsyncSession, submission_id: str, action: str) -> Submission:
+    """R137: FOR UPDATE + fresh re-read + decidability re-check in one step.
+
+    Every decision path checked _assert_decidable on a PRE-lock read and only
+    then locked the row — a concurrent status flip or resubmission (version
+    bump) between the two landed the decision record on a stale version, and
+    final-accept could complete the brief off a submission that had just gone
+    back into revision (the R135 update_draft TOCTOU shape)."""
+    submission = (
+        await db.execute(
+            select(Submission)
+            .where(Submission.id == submission_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    _assert_decidable(submission, action)
+    return submission
 
 
 def _assert_decidable(submission: Submission, action: str) -> None:
@@ -350,7 +374,8 @@ async def approve(
     # org notifications (unbounded spam from one client clicking approve).
     # R133 ([13]): serialize on the submission row — the SELECT-then-INSERT
     # dedup raced concurrent duplicates (double record + double fan-out).
-    await db.execute(select(Submission.id).where(Submission.id == submission.id).with_for_update())
+    # R137: re-read + re-assert under the lock (stale-version TOCTOU).
+    submission = await _locked_decidable(db, submission.id, "approve")
     prior = (
         await db.execute(
             select(ClientApprovalRecord)
@@ -384,7 +409,10 @@ async def final_accept(
     # R134 ([F2]): same submission-row serialization the R133 fix gave
     # approve/request_revision — a concurrent approve/revision and a
     # final-accept otherwise interleave their status transitions unlocked.
-    await db.execute(select(Submission.id).where(Submission.id == submission.id).with_for_update())
+    # R137: re-read + re-assert under the lock — a final-accept racing a
+    # revision request (or a resubmission bumping the version) otherwise
+    # completes the brief off a stale SUBMITTED read.
+    submission = await _locked_decidable(db, submission.id, "final-accept")
     record = _record(principal, submission, "final_accepted", comment)
     from sqlalchemy.exc import IntegrityError
 

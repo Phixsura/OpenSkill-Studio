@@ -536,6 +536,24 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   invoice was voided 409'd as if the operation never happened — the keyed
   replay now sits before the status gate (replay has no side effects); a
   fresh note on a void invoice still 409s.
+- **R137 (client-portal + white-label sweep, R136 self-audit clean)**: 2
+  confirmed, fixed + guard-proven/regression-tested. (med) every portal
+  decision path (approve / request-revision / final-accept) checked
+  _assert_decidable on a PRE-lock read and locked the submission row only
+  afterwards — a final-accept racing a revision flip (or a resubmission
+  bumping the version) completed the brief off a stale SUBMITTED read (the
+  R135 update_draft TOCTOU shape); all three now re-read + re-assert under
+  the FOR UPDATE via one _locked_decidable helper (two-session regression
+  test, guard-proven by revert). (low) legal_links arrives as list[dict]
+  with untyped values — a non-str url (123, {}, or null) hit .startswith in
+  validate_https_url and 500'd with AttributeError (the R87
+  untrusted-inner-type class); type-checked → 422, and a null url is now
+  rejected explicitly (a legal link without a URL is a dead anchor). Cleared
+  by verification: credit-note vs invoice-billed purchase rev-share
+  interplay (refund_purchase reverses accrual; note-forgiveness on open
+  invoices flips to paid before void becomes reachable), domains lifecycle
+  authz (owner-gated + tenant-scoped + entitlement re-checked at activate),
+  guest-link/principal handling, ClientShare delete-on-unshare semantics.
 
 ## 4. Convergence
 

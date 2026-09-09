@@ -46,7 +46,10 @@ def validate_theme_tokens(tokens: dict) -> dict:
 def validate_https_url(url: str | None, field: str) -> str | None:
     if url is None:
         return None
-    if not url.startswith("https://") or len(url) > 500:
+    # R137: legal_links arrives as list[dict] with UNTYPED values — a non-str
+    # url (123, {}, null-less JSON types) hit .startswith and 500'd with
+    # AttributeError (the R87 untrusted-inner-type class). Type-check first.
+    if not isinstance(url, str) or not url.startswith("https://") or len(url) > 500:
         raise AppError("BRANDING_INVALID", f"{field} must be an https:// URL", 422)
     return url
 
@@ -59,6 +62,10 @@ def validate_legal_links(links: list) -> list:
             raise AppError("BRANDING_INVALID", "legal_links entries need label+url only", 422)
         if not isinstance(link["label"], str) or len(link["label"]) > 50:
             raise AppError("BRANDING_INVALID", "legal link label too long", 422)
+        # R137: a None url is "not provided" to validate_https_url — but a
+        # legal link WITHOUT a url is a dead anchor; require it here.
+        if link["url"] is None:
+            raise AppError("BRANDING_INVALID", "legal link url is required", 422)
         validate_https_url(link["url"], "legal link url")
     return links
 

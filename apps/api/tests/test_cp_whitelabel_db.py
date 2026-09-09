@@ -109,6 +109,10 @@ def test_legal_links_and_urls():
         [{"label": "T", "url": "javascript:alert(1)"}],
         [{"label": "T" * 60, "url": "https://x.com"}],
         [{"label": "T", "url": "https://x.com", "extra": 1}],
+        # R137: non-str url inside the untyped list[dict] 500'd on .startswith
+        [{"label": "T", "url": 123}],
+        [{"label": "T", "url": {"nested": "x"}}],
+        [{"label": "T", "url": None}],
     ):
         with pytest.raises(AppError):
             branding_svc.validate_legal_links(bad)
