@@ -1127,6 +1127,48 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
     import-time array validation AND a caller-side try/except),
     workflow_adapters.py, duplicate.py, notification-bell.tsx,
     install-button.tsx.
+- **R184–R187 (line-by-line continuation: pages, audit registry, plans —
+  commits f51c1e1/0875210/27d6d3a/70fb336/88cb7b5)**: 6 confirmed findings,
+  all fixed (+ guard-proofs where a regression test can bite); many more
+  surfaces read clean.
+  - Submit page (R184, MEDIUM): the file-upload fetch is the one call that
+    cannot go through apiWithAuth (FormData boundary) — and therefore missed
+    its 401 → sharedRefresh → retry. Access tokens live 15 minutes; a learner
+    filling the submission form longer got a hard "Upload failed (401)".
+    Upload now refresh-retries once. Also gated prompt-save (double-click).
+  - Partner CSV export (R184b, LOW, class completion): the R101[M16] site
+    KNEW it bypassed refresh but only toasted "reload and try again" — now
+    refresh-retries like R184. Bare-fetch sweep: the two /u/* fetches are
+    anonymous SSR — class closed.
+  - Client portal (R185, LOW-MEDIUM): "Final accept" is single-shot and
+    irreversible server-side, yet the button had no confirmation while
+    archive/fork/remove all confirm — a misclick closed the engagement.
+  - audit.py (R186, LOW): subscription.reactivated is emitted by the
+    TENANT'S OWN billing-page action but TENANT_VISIBLE_ACTIONS filtered it —
+    the tenant's audit timeline showed a cancel with no follow-up while the
+    subscription was live again (started/cancelled were visible); ditto
+    tenant.member_added/removed (tenant-console actions). All three now
+    visible; platform-internal actions stay filtered (test-asserted both ways).
+  - plans.py (R187, LOW): set_override check-then-insert on
+    uq_cp_ent_override — an admin double-clicking Save 500'd on the unique
+    index (create_plan's identical shape was fixed in R134[16]; this site was
+    missed). Savepoint + loser-updates-winner; two-session test guard-proven.
+  - R181 follow-up: fire-and-forget reset emails drain at lifespan shutdown
+    (mirror drain_webhook_tasks) so a deploy doesn't eat a just-requested
+    reset email.
+    Read clean in this pass: registry pack page + dashboard pack page +
+    workflow editor (edit-counter dirty tracking, NaN-guarded convert) +
+    billing page (R101[M23] preview race verified) + client portal page +
+    briefs/providers/cohorts/paths/compose/shortlist/requirements pages (all
+    isPending-gated, JSON.parse try/caught), genmeta.py (exemplary: zip-bomb
+    caps, non-finite clamps; extracted text lands in a Text column via
+    json.dumps escaping so no raw NUL reaches Postgres), domains.py
+    (IDNA2008, stale-claim eviction, savepointed insert), entitlements.py
+    (dirty-tombstone cache discipline verified), client_portal.py service
+    (R137 _locked_decidable applied on all three decision paths), audit
+    hard-delete FK sweep (every child of every hard-deleted parent is
+    CASCADE/SET NULL), XSS-sink sweep (both dangerouslySetInnerHTML sites
+    escaped/token-validated), cp22/cp23 migrations round-tripped on dev DB.
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
