@@ -857,6 +857,25 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   floor were mutation-uncovered at the pure level. Added fast pure regression
   tests; the probe now kills 100% of injected mutations (9/9 and 8/8 across
   the _minor and _exact variants). Rating + marketplace: 66 green.
+- **R163–R164 (targeted deep-dive: money formatting + multimodal image
+  base64)**: 2 confirmed (1 web display, 1 backend defense-in-depth), fixed +
+  guard-proven. (web, R163) formatMinor/majorToMinor tested the zero-decimal
+  currency set WITHOUT case-normalization while the backend's minor_multiplier
+  explicitly .upper()s (R81[0]) — a lowercase code was a 100x display /
+  input-conversion error. (backend, R164) fetch_image_as_base64 returned the
+  S3 object's ContentType verbatim as the LLM media_type, unvalidated and
+  independent of the DB mime the caller gated on: a stored object whose
+  ContentType is not one of {jpeg,png,gif,webp} (svg/bmp/octet-stream, or S3's
+  "image/png" default over corrupt bytes, or drift between the two duplicated
+  IMAGE_MIMES constant sets) would embed an invalid media_type and make the
+  PAID multimodal LLM call reject the ENTIRE evaluation — the image fetch's
+  try/except only wraps the fetch, not the later LLM call. Now validated
+  against the vision set (raises → caller degrades to "[Image unavailable]"
+  for the one item) and the size cap is enforced on the actual bytes too
+  (a missing ContentLength no longer bypasses it). The video pipeline was
+  verified bounded (fixed 8 frames — num_frames not caller-controlled, 500MB
+  size + 600s duration caps, hardcoded image/jpeg frames, graceful per-item
+  degradation).
   test drives 5 same-collapsing names + a post-collision probe (guard-proven
   by revert to the bare-flush retry → PendingRollbackError).
 - **R159 (industry scanner battery — supply chain, static analysis,

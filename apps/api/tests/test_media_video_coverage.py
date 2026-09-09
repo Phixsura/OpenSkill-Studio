@@ -117,6 +117,57 @@ async def test_fetch_image_as_base64_too_large():
         assert exc_info.value.code == "IMAGE_TOO_LARGE"
 
 
+@pytest.mark.asyncio
+async def test_fetch_image_rejects_unsupported_media_type():
+    """R164: a stored object whose ContentType is not an LLM-evaluatable image
+    must raise (so the caller degrades to '[Image unavailable]') instead of
+    poisoning the paid multimodal LLM call with an invalid media_type."""
+    from app.core.media_eval import fetch_image_as_base64
+    from app.exceptions import AppError
+
+    fake_body = b"<svg>...</svg>"
+    for hostile_ct in ("image/svg+xml", "image/bmp", "application/octet-stream", "text/html"):
+        mock_body = AsyncMock()
+        mock_body.read = AsyncMock(return_value=fake_body)
+        mock_client = AsyncMock()
+        mock_client.get_object = AsyncMock(
+            return_value={"ContentType": hostile_ct, "ContentLength": len(fake_body),
+                          "Body": mock_body}
+        )
+
+        async def fake_get_s3(_c=mock_client):
+            yield _c
+
+        with patch("app.core.media_eval.get_s3_client", fake_get_s3):
+            with pytest.raises(AppError) as exc:
+                await fetch_image_as_base64("test/x")
+            assert exc.value.code == "IMAGE_MEDIA_TYPE_UNSUPPORTED", hostile_ct
+
+
+@pytest.mark.asyncio
+async def test_fetch_image_size_cap_on_actual_bytes_when_length_absent():
+    """R164: a missing ContentLength must not bypass the size cap — the actual
+    read bytes are bounded too."""
+    from app.core.media_eval import MAX_IMAGE_SIZE, fetch_image_as_base64
+    from app.exceptions import AppError
+
+    oversized = b"\x00" * (MAX_IMAGE_SIZE + 1)
+    mock_body = AsyncMock()
+    mock_body.read = AsyncMock(return_value=oversized)
+    mock_client = AsyncMock()
+    mock_client.get_object = AsyncMock(
+        return_value={"ContentType": "image/png", "Body": mock_body}  # NO ContentLength
+    )
+
+    async def fake_get_s3():
+        yield mock_client
+
+    with patch("app.core.media_eval.get_s3_client", fake_get_s3):
+        with pytest.raises(AppError) as exc:
+            await fetch_image_as_base64("test/nolen")
+        assert exc.value.code == "IMAGE_TOO_LARGE"
+
+
 # ═══════════════ video_eval.py ═══════════════
 
 
