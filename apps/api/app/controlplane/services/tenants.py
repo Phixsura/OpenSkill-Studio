@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 import structlog
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -328,12 +328,17 @@ async def remove_tenant_member(
     if member is None or member.tenant_id != tenant.id:
         raise AppError("TENANT_NOT_FOUND", "Tenant member not found", 404)
     if member.role == "owner":
+        # R145: LOCK the owner rows — the unlocked count raced concurrent
+        # removals (two sessions removing the two owners both counted 2 → a
+        # tenant with ZERO owners, locked out of every owner-gated operation
+        # forever). Mirrors the org-side R-fix in organization.py
+        # change_member_role (same TOCTOU-to-zero-owners shape).
         owners = await db.execute(
-            select(func.count(TenantMember.id)).where(
-                TenantMember.tenant_id == tenant.id, TenantMember.role == "owner"
-            )
+            select(TenantMember.id)
+            .where(TenantMember.tenant_id == tenant.id, TenantMember.role == "owner")
+            .with_for_update()
         )
-        if owners.scalar_one() <= 1:
+        if len(owners.all()) <= 1:
             raise AppError("LAST_OWNER_REMOVAL", "Cannot remove the last tenant owner", 409)
     removed = {"user_id": member.user_id, "role": member.role}
     await db.delete(member)

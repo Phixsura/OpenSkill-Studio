@@ -610,15 +610,32 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   dirty-tombstone protocol prevents a racing reader from re-caching a stale
   value across the mutation commit, quota soft/hard fallback and NaN-safe
   typed value validation all hold.
+- **R144 (outbox worker machinery)**: CLEAN SWEEP, 0 findings — two-phase
+  claim (batch claim commit → per-message commit), SKIP LOCKED consumption,
+  unknown-topic dead-lettering, reaper attempt-counting for job-timeout
+  cancellations, batched done-row purge, and shutdown task draining all
+  verified correct.
+- **R145 (tenant lifecycle/membership + partners API)**: 1 confirmed (med,
+  availability), fixed + guard-proven with a two-session race test.
+  remove_tenant_member's last-owner guard counted owner rows UNLOCKED — two
+  concurrent removals of a tenant's two owners both counted 2 (>1) and both
+  deleted, leaving a tenant with ZERO owners, permanently locked out of every
+  owner-gated operation (domains, billing, member management). The owner rows
+  are now locked FOR UPDATE before the count, mirroring the org-side fix in
+  organization.change_member_role (the same TOCTOU-to-zero-owners shape).
+  Cleared: require_tenant_member/require_partner_member uniform-404 +
+  role-403 semantics, platform-role bypass, member add/remove audit symmetry,
+  partner attribution authz.
 
-### Convergence of the R135-R143 continuation
+### Convergence of the R135-R145 continuation
 
 The R135 second wave through R143 ran as targeted fix-of-fix audits and
 fresh-surface sweeps over every control-plane service not yet re-probed
 (credits, billing, marketplace, client-portal, white-label/domains/branding,
 provisioning/export, revenue-share/settlement, platform dashboard, budgets,
 entitlements) plus frontend parity. Confirmed-finding counts by round:
-**R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0** — a clean
+**R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
+R145=1** — a clean
 convergence curve, the last findings low/medium severity (one partner
 under-payment on a void-after-credit-note edge, one false-429 budget window,
 input-type 500s, TOCTOU re-checks) with no new critical or money-at-scale
@@ -652,7 +669,7 @@ that closed PR #22.
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
   R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
   22 from R132, 17 from R133, 14 from R134, 13 from R135 (two waves) and
-  8 from R136–R143 (fix-of-fix continuation converging to repeated clean
+  9 from R136–R145 (fix-of-fix continuation converging to repeated clean
   rounds), on top of the 12-phase delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed

@@ -762,3 +762,87 @@ async def test_noop_timezone_patch_does_not_poison_tz_gate(db):
         )
         assert r.status_code == 422, r.text
         assert "30 days" in r.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_owner_removals_cannot_reach_zero_owners():
+    """R145: the last-owner guard counted owners UNLOCKED — two sessions each
+    removing one of the two owners both counted 2 (>1) and both deleted,
+    leaving a tenant with ZERO owners (locked out of every owner-gated
+    operation forever). The owner rows are now locked (org-side pattern), so
+    the loser serializes behind the winner and re-counts 1 → 409."""
+    from app.core.database import engine
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            owner1 = await _mk_user(setup)
+            owner2 = await _mk_user(setup)
+            tenant = await _mk_tenant(setup, owner1)
+            await tenant_svc.add_tenant_member(
+                setup, tenant, user_id=owner2.id, role="owner", actor=_actor(owner1)
+            )
+            members = (
+                (
+                    await setup.execute(
+                        select(tenant_svc.TenantMember).where(
+                            tenant_svc.TenantMember.tenant_id == tenant.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(members) == 2
+            m1_id, m2_id = members[0].id, members[1].id
+            await setup.commit()
+            tenant_id, actor_id = tenant.id, owner1.id
+
+        outcomes: list[str] = []
+        sa = AsyncSessionLocal()
+        sb = AsyncSessionLocal()
+        try:
+            ta = await sa.get(tenant_svc.TenantAccount, tenant_id)
+            ua = await sa.get(User, actor_id)
+            # A removes owner 1 and HOLDS its tx open (owner rows locked).
+            await tenant_svc.remove_tenant_member(sa, ta, m1_id, actor=_actor(ua))
+
+            async def b_remove():
+                tb = await sb.get(tenant_svc.TenantAccount, tenant_id)
+                ub = await sb.get(User, actor_id)
+                try:
+                    # B blocks on the locked owner rows until A commits, then
+                    # must re-count and see a single remaining owner → 409.
+                    await tenant_svc.remove_tenant_member(sb, tb, m2_id, actor=_actor(ub))
+                    await sb.commit()
+                    outcomes.append("removed")
+                except AppError as e:
+                    await sb.rollback()
+                    outcomes.append(e.code)
+                except Exception as exc:  # noqa: BLE001
+                    await sb.rollback()
+                    outcomes.append(type(exc).__name__)
+
+            b_task = asyncio.create_task(b_remove())
+            await asyncio.sleep(0.3)  # B is now blocked on the owner-row lock
+            await sa.commit()
+            await b_task
+        finally:
+            await sa.close()
+            await sb.close()
+        assert outcomes == ["LAST_OWNER_REMOVAL"], outcomes
+        async with AsyncSessionLocal() as s:
+            remaining = (
+                (
+                    await s.execute(
+                        select(tenant_svc.TenantMember).where(
+                            tenant_svc.TenantMember.tenant_id == tenant_id,
+                            tenant_svc.TenantMember.role == "owner",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(remaining) == 1, f"{len(remaining)} owners left — race reached zero"
+    finally:
+        await engine.dispose()
