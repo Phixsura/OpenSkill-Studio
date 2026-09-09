@@ -1097,6 +1097,36 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
     model allowlist, boundary-wrapped untrusted inputs), duplicate.py
     (R89/R135 trails verified), pack_sharing endpoints, peer-review schema
     bounds (score 0..10000; org gate via get_round on both list surfaces).
+- **R181–R184 (line-by-line continuation: auth, frontend components,
+  registries — commits d42bc5d/303d71d)**: 2 confirmed findings fixed +
+  guard-proven; 1 candidate DISPROVEN and reverted; 8 more files read clean.
+  - `auth.py` (R181, d42bc5d, MEDIUM): forgot_password's anti-enumeration
+    dummy work equalized only token hashing (µs) while the real path AWAITED
+    a full SMTP round-trip (100s of ms in production) — response latency was
+    a reliable email-enumeration oracle despite the explicit mitigation
+    intent. Reset email now fire-and-forget (strong task refs); test proves
+    both paths <0.35s under a 0.5s-slow sender AND the email still delivers.
+  - Frontend (R183, 303d71d, LOW ×2): peer-review-section.tsx had no pending
+    guard — double-click on "Create round" created two rounds (legal in
+    multiples, backend cannot dedupe) and raced the phase transitions;
+    comment-panel.tsx disabled the Post button while busy but the Enter-key
+    path called submit() directly, double-posting comments. Both gated
+    (R101 isPending discipline). tsc/eslint/192 vitest green.
+  - R182 DISPROVEN (honest record): hypothesized an unbounded num_reviews
+    DoS via the synchronous allocation loop — the schema already bounds it
+    1..10 in a validator further down the class. Fix attempt reverted in
+    full; no false hardening shipped.
+    Read clean: skill.py (912 lines — every endpoint carries _verify_org after
+    the unscoped service gets; MCQ grader coerces untrusted config; R70 lock on
+    progress recompute), organization.py role-mint/seat-lock (recorded in
+    R177–R180 block), cohort.py (all mutations org-gated + savepointed, R160
+    slug fix verified in context), workflow_registry.py (cached-ids re-filter,
+    R135 paid-pack redaction verified), workflow_installation.py (R55/R67/R70
+    lock ordering verified across install/upgrade/fork/remove/confirm_binding),
+    registry.py compute_quality_score (untrusted-manifest reads are shielded by
+    import-time array validation AND a caller-side try/except),
+    workflow_adapters.py, duplicate.py, notification-bell.tsx,
+    install-button.tsx.
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
