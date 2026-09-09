@@ -1049,4 +1049,32 @@ def downgrade() -> None:
     op.drop_table("email_verification_tokens")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
+    # R192: op.drop_table does NOT drop the ENUM types create_table created —
+    # `alembic downgrade base` left all 20 product enums orphaned, so any
+    # re-upgrade (or a fresh install into a reused database) crashed with
+    # DuplicateObject on `CREATE TYPE user_role`. Found by the fresh-DB
+    # full-chain up→base→up test; the cp* migrations already drop theirs.
+    for _enum in (
+        "content_status",
+        "deliverable_type",
+        "difficulty_level",
+        "eval_status",
+        "eval_type",
+        "exercise_type",
+        "grading_method",
+        "invite_status",
+        "item_type",
+        "item_visibility",
+        "member_status",
+        "org_role",
+        "org_status",
+        "profile_visibility",
+        "progress_status",
+        "review_status",
+        "reviewer_type",
+        "submission_status",
+        "user_role",
+        "user_status",
+    ):
+        op.execute(sa.text(f'DROP TYPE IF EXISTS "{_enum}"'))
     # ### end Alembic commands ###
