@@ -1241,3 +1241,53 @@ async def test_target_org_can_remove_unsolicited_share(c):
         f"/api/v1/orgs/{oid_a}/packs/{pid}/share", json={"target_org_id": oid_b}, headers=ha
     )
     assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_latency_not_an_email_oracle(c, monkeypatch):
+    """R181: the no-user path returned in microseconds while the real path
+    awaited a full SMTP round-trip — response latency was a reliable
+    email-enumeration oracle despite the dummy-work equalizer (which only
+    covered token hashing). The reset email now sends fire-and-forget."""
+    import time
+
+    from app.services import auth as auth_mod
+
+    email = f"oracle-{uuid.uuid4().hex[:8]}@test.com"
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Oracle"},
+    )
+    assert r.status_code in (200, 201), r.text
+
+    sent: list[str] = []
+
+    class SlowSender:
+        async def send(self, to: str, subject: str, html: str):
+            await asyncio.sleep(0.5)  # simulated SMTP round-trip
+            sent.append(to)
+
+    monkeypatch.setattr(auth_mod, "get_email_sender", lambda: SlowSender())
+
+    t0 = time.monotonic()
+    r = await c.post("/api/v1/auth/forgot-password", json={"email": email})
+    real_elapsed = time.monotonic() - t0
+    assert r.status_code in (200, 204), r.text
+
+    t0 = time.monotonic()
+    r = await c.post(
+        "/api/v1/auth/forgot-password", json={"email": f"nouser-{uuid.uuid4().hex[:8]}@test.com"}
+    )
+    ghost_elapsed = time.monotonic() - t0
+    assert r.status_code in (200, 204)
+
+    # The SMTP latency must NOT separate the two paths.
+    assert real_elapsed < 0.35, (
+        f"existing-account path took {real_elapsed:.2f}s — SMTP latency leaks account existence"
+    )
+    assert ghost_elapsed < 0.35
+
+    # The email is still actually delivered (fire-and-forget, not dropped).
+    if auth_mod._email_tasks:
+        await asyncio.gather(*auth_mod._email_tasks, return_exceptions=True)
+    assert sent == [email]
