@@ -1197,6 +1197,21 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
     (memory-only token), main.py (fail-hard prod boot, drain ordering),
     workflow_runtime.py full pass (closed-vocabulary template rendering,
     R11/R13/R85 claim discipline re-verified).
+- **R190 (full-suite verification of the R171–R189 continuation)**: backend
+  full suite at R187-state HEAD: **2204 passed / 1 skipped / 0 failed**
+  (42:54). One earlier full run showed a single failure
+  (test_checkout_completion_honors_pinned_version) that did NOT recur and
+  was pinned as the documented cross-file event-loop teardown flake moving
+  targets, with an evidence chain: passes in isolation, passes in its whole
+  file (61/61), passes with all 11 alphabetically-preceding files (245),
+  billing.py untouched in the regression window (diff-verified), and the
+  test's own db fixture carries the R134 stale-loop mitigation for exactly
+  this class. R188/R189 landed mid-run and are covered by their targeted
+  suites (media/video 20/20, core-unit 22/22) plus a follow-up full run.
+  cp01's 197k-org backfill was additionally cross-verified against live
+  data (org→tenant status mapping exact; 3,411 ARCHIVED orgs all mapped
+  ARCHIVED); cp19's repair SQL re-derived correct; cp21–cp23 read clean
+  (cp22/cp23 round-tripped on the dev DB).
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
