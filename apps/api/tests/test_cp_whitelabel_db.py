@@ -775,7 +775,7 @@ async def test_export_truncation_never_ships_partial_invoice(db, monkeypatch):
     tenant = await _mk_tenant(db, user)
     # Two invoices, two lines each. Cap at 3 joined rows: the window holds
     # inv1(line,line) + inv2(line) — inv2 is cut mid-lines.
-    for n in range(2):
+    for _n in range(2):
         inv = Invoice(
             tenant_id=tenant.id,
             number=f"INV-{ULID()}",

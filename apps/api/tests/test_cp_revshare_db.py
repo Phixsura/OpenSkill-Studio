@@ -791,3 +791,57 @@ async def test_credit_note_retry_covers_dead_lettered_finalize(db):
         await _handle_credit_note(
             db, {"credit_note_id": "01JBLNOTE0000000000000000X", "invoice_id": invoice.id}
         )
+
+
+@pytest.mark.asyncio
+async def test_void_after_credit_note_nets_history_to_zero(db):
+    """R139: reverse_invoice_accruals claimed to net an invoice's rev-share
+    history to zero (R97[m13]), but its query filtered source_type=='invoice'
+    while credit-note adjustments carry source_type=='invoice_line'
+    (source_id=note.id). A credit note on an OPEN invoice followed by a void
+    left the note's negative adjustment standing — after the re-close the
+    partner was UNDER-paid by the note's reversal amount."""
+    from app.controlplane.models.billing import CreditNote
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="30")
+    invoice = await _mk_invoice(db, tenant, subtotal=1000)
+    orig = await revshare_svc.accrue_for_invoice(db, invoice.id)
+    assert orig.share_amount_minor == 300
+    # Credit note on the still-open invoice: 400/1000 → -120 adjustment.
+    note = CreditNote(
+        invoice_id=invoice.id,
+        tenant_id=tenant.id,
+        amount_minor=400,
+        currency="USD",
+        reason="partial",
+        status="applied",
+    )
+    db.add(note)
+    await db.flush()
+    n_adj = await revshare_svc.accrue_credit_note(db, note.id, invoice.id)
+    assert n_adj == 1
+    # Void the invoice → the WHOLE history for this invoice must net to zero
+    # (original + note adjustment + their reversals), so the re-close's fresh
+    # accrual is the partner's only standing entry for the revenue.
+    await revshare_svc.reverse_invoice_accruals(db, invoice.id)
+    live = (
+        (
+            await db.execute(
+                select(RevenueShareEntry).where(
+                    (RevenueShareEntry.source_id == invoice.id)
+                    | (RevenueShareEntry.source_id == note.id)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert sum(e.share_amount_minor for e in live) == 0, (
+        f"void left {sum(e.share_amount_minor for e in live)} standing — "
+        "partner under-paid by the note reversal"
+    )
+    # Idempotent second pass.
+    assert await revshare_svc.reverse_invoice_accruals(db, invoice.id) == 0

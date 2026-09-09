@@ -570,6 +570,20 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   tenant-scoped, PII-whitelisted (deleted users excluded, presign mints
   audited), and REPEATABLE-READ snapshot-consistent with the tx released
   before the S3 upload.
+- **R139 (revenue-share accrual/reversal deep-dive)**: 1 confirmed (med,
+  partner money), fixed + guard-proven. reverse_invoice_accruals (void path)
+  documents that it nets an invoice's rev-share history to zero (R97[m13]),
+  but its selection filtered source_type=='invoice' while a credit note's
+  negative adjustment carries source_type=='invoice_line' + source_id=note.id
+  — a credit note on an OPEN invoice followed by a void left the note's
+  reversal standing, so after the re-close the partner was UNDER-paid by the
+  note amount (the exact class R97[m13] meant to close). The reversal now
+  also selects entries that are adjustments OF this invoice's originals
+  (credit notes), netting the full history to zero; idempotency stays
+  backstopped by _insert_entry's natural-key dedup. Cleared by verification:
+  accrue_credit_note per-note proportional reversal + natural-key replay
+  safety, accrue_refund, rule specificity/versioning, statement lifecycle,
+  FX-blocking-not-vanishing.
 
 ## 4. Convergence
 

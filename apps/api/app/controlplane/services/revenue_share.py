@@ -547,20 +547,32 @@ async def reverse_invoice_accruals(db: AsyncSession, invoice_id: str) -> int:
     # original − note + re-accrual = under-paid by the note amount.
     # Selecting all non-reversal entries and negating each nets the invoice's
     # rev-share history to exactly zero before the re-accrual.
-    already_reversed = select(RevenueShareEntry.adjustment_of_id).where(
+    # R139: a credit note's negative adjustment carries source_type
+    # 'invoice_line' + source_id=note.id (NOT the invoice), so a source_id
+    # filter alone misses it — after a void the note reversal stayed standing
+    # and the partner was under-paid by that amount on the re-close (the exact
+    # bug R97[m13] MEANT to fix but its source_type=='invoice' filter left
+    # uncovered). The invoice's history is: originals sourced from the invoice,
+    # PLUS any entry that is an adjustment OF one of those originals (credit
+    # notes). Reverse both so the history nets to zero.
+    invoice_original_ids = select(RevenueShareEntry.id).where(
         RevenueShareEntry.source_type == "invoice",
         RevenueShareEntry.source_id == invoice_id,
-        RevenueShareEntry.adjustment_of_id.is_not(None),
-        RevenueShareEntry.rule_snapshot["void_reversal"].as_boolean().is_(True),
+        RevenueShareEntry.adjustment_of_id.is_(None),
     )
     originals = (
         (
             await db.execute(
                 select(RevenueShareEntry).where(
-                    RevenueShareEntry.source_type == "invoice",
-                    RevenueShareEntry.source_id == invoice_id,
-                    RevenueShareEntry.id.not_in(already_reversed),
-                    # never reverse a reversal
+                    or_(
+                        # everything sourced directly from the invoice
+                        (RevenueShareEntry.source_type == "invoice")
+                        & (RevenueShareEntry.source_id == invoice_id),
+                        # credit-note adjustments of this invoice's originals
+                        RevenueShareEntry.adjustment_of_id.in_(invoice_original_ids),
+                    ),
+                    # never reverse a void-reversal (idempotency also backstopped
+                    # by _insert_entry's natural-key dedup on adjustment_of_id)
                     ~(
                         RevenueShareEntry.adjustment_of_id.is_not(None)
                         & RevenueShareEntry.rule_snapshot["void_reversal"].as_boolean().is_(True)
