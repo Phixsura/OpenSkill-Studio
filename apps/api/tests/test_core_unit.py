@@ -311,3 +311,42 @@ async def test_rate_limit_keys_on_route_template_not_concrete_path():
     # And the key uses the template, not either concrete path
     assert "{project_id}" in captured_keys[0]
     assert "/P1/" not in captured_keys[0] and "/P2/" not in captured_keys[0]
+
+
+@pytest.mark.asyncio
+async def test_email_log_redacts_tokens_outside_dev(monkeypatch):
+    """R191 (CWE-532): ConsoleEmailSender logged body_preview — reset/verify
+    emails embed SINGLE-USE auth tokens, so a production log line was an
+    account-takeover primitive for anyone with log access; the raw recipient
+    also violated the codebase's email_hash convention. Outside dev/test the
+    log must carry neither the body nor the plaintext address."""
+    import structlog
+
+    from app.config import settings as app_settings
+    from app.core.email import ConsoleEmailSender
+
+    captured: list[dict] = []
+
+    def capture(logger, method, event_dict):
+        captured.append(dict(event_dict))
+        raise structlog.DropEvent
+
+    structlog.configure(processors=[capture])
+    try:
+        sender = ConsoleEmailSender()
+        secret_html = '<a href="https://x/reset-password?token=SECRET_TOKEN_ABC">reset</a>'
+
+        monkeypatch.setattr(app_settings, "app_env", "production")
+        await sender.send(to="victim@example.com", subject="Reset", html=secret_html)
+        prod = captured[-1]
+        flat = str(prod)
+        assert "SECRET_TOKEN_ABC" not in flat, "token leaked into production log"
+        assert "victim@example.com" not in flat, "plaintext email in production log"
+        assert prod.get("to_hash"), "hashed recipient expected"
+
+        monkeypatch.setattr(app_settings, "app_env", "development")
+        await sender.send(to="dev@example.com", subject="Reset", html=secret_html)
+        dev = captured[-1]
+        assert "SECRET_TOKEN_ABC" in str(dev), "dev console IS the delivery mechanism"
+    finally:
+        structlog.reset_defaults()
