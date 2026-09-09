@@ -643,16 +643,23 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   Cleared: supersede double-fire self-corrects through the successor overlap
   409; storage/seat sweeps idempotent per (org, period); plans TOCTOU/
   SAVEPOINT guards from R134/R135 hold.
+- **R148 (API-metering middleware + audit registry + impersonation)**: CLEAN
+  SWEEP, 0 findings — quota INCR-then-check with tenant-local DST-aware day
+  windows, the ent-dirty tombstone honored by the secondary quota cache (key
+  formats verified matching), the closed audit-action registry, and the
+  impersonation privileged-target re-check at every mint all hold.
 
-### Convergence of the R135-R147 continuation
+### Convergence of the R135-R148 continuation
 
 The R135 second wave through R143 ran as targeted fix-of-fix audits and
 fresh-surface sweeps over every control-plane service not yet re-probed
 (credits, billing, marketplace, client-portal, white-label/domains/branding,
 provisioning/export, revenue-share/settlement, platform dashboard, budgets,
-entitlements) plus frontend parity. Confirmed-finding counts by round:
+entitlements, tenants/partners, rating machinery, pricing/plans/metering,
+outbox worker, API-metering middleware, audit registry, impersonation) plus
+frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
-R145=1, R146=0, R147=1** — a clean
+R145=1, R146=0, R147=1, R148=0** — a clean
 convergence curve, the last findings low/medium severity (one partner
 under-payment on a void-after-credit-note edge, one false-429 budget window,
 input-type 500s, TOCTOU re-checks) with no new critical or money-at-scale
