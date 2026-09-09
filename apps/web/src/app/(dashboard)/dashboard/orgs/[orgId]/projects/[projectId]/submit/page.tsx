@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MediaPreview } from "@/components/media-preview";
 import { GenerationData, type GenerationMeta } from "@/components/generation-data";
-import { apiWithAuth, ApiError } from "@/lib/api";
+import { apiWithAuth, ApiError, sharedRefresh } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
 
 interface Deliverable {
@@ -75,7 +75,11 @@ export default function SubmitPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const { data: projectData, isLoading: projectLoading, isError: projectError } = useQuery({
+  const {
+    data: projectData,
+    isLoading: projectLoading,
+    isError: projectError,
+  } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () =>
       apiWithAuth<{ data: { title: string; project_type: string; deliverables: Deliverable[] } }>(
@@ -95,6 +99,7 @@ export default function SubmitPage() {
   // Optional "what changed" note attached to the next upload of a deliverable
   const [versionNotes, setVersionNotes] = useState<Record<string, string>>({});
   const [savedPrompts, setSavedPrompts] = useState<Record<string, boolean>>({});
+  const [savingPrompt, setSavingPrompt] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [submissionId, setSubmissionId] = useState<string | null>(null);
 
@@ -131,7 +136,9 @@ export default function SubmitPage() {
     }
     const accepted = d.config?.accepted_formats;
     if (accepted?.length && !accepted.includes(file.type)) {
-      setError(`"${file.type || "unknown type"}" is not accepted for ${d.name}. Allowed: ${accepted.join(", ")}`);
+      setError(
+        `"${file.type || "unknown type"}" is not accepted for ${d.name}. Allowed: ${accepted.join(", ")}`,
+      );
       return;
     }
 
@@ -142,13 +149,23 @@ export default function SubmitPage() {
       formData.append("deliverable_id", d.id);
       const note = versionNotes[d.id]?.trim();
       if (note) formData.append("note", note);
-      const token = useAuthStore.getState().accessToken;
-      const res = await fetch(`/api/v1/orgs/${orgId}/submissions/${submissionId}/files`, {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      // R184: this is the one call that can't go through apiWithAuth
+      // (FormData must set its own multipart boundary), so it also missed
+      // apiWithAuth's 401 -> sharedRefresh -> retry. Access tokens live 15
+      // minutes; a learner filling the form longer than that got a hard
+      // "Upload failed (401)" on a token apiWithAuth would have refreshed.
+      const doUpload = (tok: string | null) =>
+        fetch(`/api/v1/orgs/${orgId}/submissions/${submissionId}/files`, {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+          headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+        });
+      let res = await doUpload(useAuthStore.getState().accessToken);
+      if (res.status === 401) {
+        const fresh = await sharedRefresh(); // throws ApiError if session dead
+        res = await doUpload(fresh);
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error?.message ?? body?.detail ?? `Upload failed (${res.status})`);
@@ -180,6 +197,7 @@ export default function SubmitPage() {
   };
 
   const handlePromptSave = async (d: Deliverable) => {
+    if (savingPrompt[d.id]) return; // R184: double-click fired two POSTs
     setError(null);
     const p = promptInputs[d.id];
     if (!p?.prompt?.trim()) {
@@ -191,7 +209,7 @@ export default function SubmitPage() {
       try {
         parameters = JSON.parse(p.parameters);
       } catch {
-        setError("Parameters must be valid JSON (e.g. {\"aspect_ratio\": \"9:16\"}).");
+        setError('Parameters must be valid JSON (e.g. {"aspect_ratio": "9:16"}).');
         return;
       }
     }
@@ -202,6 +220,7 @@ export default function SubmitPage() {
       setError("Seed must be a number.");
       return;
     }
+    setSavingPrompt((sp) => ({ ...sp, [d.id]: true }));
     try {
       await apiWithAuth(`/orgs/${orgId}/submissions/${submissionId}/prompt-items`, {
         method: "POST",
@@ -222,6 +241,8 @@ export default function SubmitPage() {
       setSavedPrompts((s) => ({ ...s, [d.id]: true }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to save prompt");
+    } finally {
+      setSavingPrompt((sp) => ({ ...sp, [d.id]: false }));
     }
   };
 
@@ -247,8 +268,10 @@ export default function SubmitPage() {
     setSavedPrompts((s) => ({ ...s, [promptDeliverable.id]: false }));
   };
 
-  if (projectLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading project...</p>;
-  if (projectError) return <p className="text-sm text-red-600">Failed to load project. Please try again.</p>;
+  if (projectLoading)
+    return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading project...</p>;
+  if (projectError)
+    return <p className="text-sm text-red-600">Failed to load project. Please try again.</p>;
 
   if (!submissionId) {
     const requiredCount = deliverables.filter((d) => d.required).length;
@@ -370,9 +393,7 @@ export default function SubmitPage() {
                       type="text"
                       placeholder="What changed in this version? (optional note)"
                       value={versionNotes[d.id] ?? ""}
-                      onChange={(e) =>
-                        setVersionNotes((n) => ({ ...n, [d.id]: e.target.value }))
-                      }
+                      onChange={(e) => setVersionNotes((n) => ({ ...n, [d.id]: e.target.value }))}
                       className="block w-full rounded-md border px-2 py-1 text-xs"
                     />
                   )}
@@ -435,13 +456,13 @@ export default function SubmitPage() {
               {d.type === "prompt" &&
                 (() => {
                   const form = promptInputs[d.id] ?? EMPTY_PROMPT_FORM;
-                  const set = (field: keyof PromptFormState) => (
-                    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-                  ) =>
-                    setPromptInputs((p) => ({
-                      ...p,
-                      [d.id]: { ...(p[d.id] ?? EMPTY_PROMPT_FORM), [field]: e.target.value },
-                    }));
+                  const set =
+                    (field: keyof PromptFormState) =>
+                    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+                      setPromptInputs((p) => ({
+                        ...p,
+                        [d.id]: { ...(p[d.id] ?? EMPTY_PROMPT_FORM), [field]: e.target.value },
+                      }));
                   return (
                     <div className="mt-3 space-y-2">
                       {savedPrompts[d.id] ? (
@@ -515,8 +536,9 @@ export default function SubmitPage() {
                             variant="secondary"
                             size="sm"
                             onClick={() => handlePromptSave(d)}
+                            disabled={savingPrompt[d.id]}
                           >
-                            Save Prompt
+                            {savingPrompt[d.id] ? "Saving…" : "Save Prompt"}
                           </Button>
                         </>
                       )}
@@ -562,7 +584,10 @@ export default function SubmitPage() {
                 deliverable_id: delivId,
                 content: content.trim(),
                 // Preserve the deliverable's declared format so markdown renders as markdown
-                type: deliverables.find((d) => d.id === delivId)?.type === "markdown" ? "markdown" : "text",
+                type:
+                  deliverables.find((d) => d.id === delivId)?.type === "markdown"
+                    ? "markdown"
+                    : "text",
               }));
 
             if (items.length > 0) {
