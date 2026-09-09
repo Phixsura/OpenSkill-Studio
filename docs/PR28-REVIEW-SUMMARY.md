@@ -729,6 +729,27 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   once (never bound to a void invoice, never stranded); per-invoice usage
   lines reconcile to Σ billable; the credit ledger invariants survive the
   whole saga; and no change is left un-folded behind the open period.
+- **R155 (live adversarial battery — hostile-actor simulation)**: 72/72
+  checks against the running API, zero 500s in the monitored log. A new
+  permanent suite (tests/e2e_adversarial.py) drives a registered attacker
+  through: the cross-org IDOR matrix (17 victim-org probes over
+  skills/projects/submissions/reviews/packs/briefs/members/guest-links/eval
+  tasks + 8 parent-confusion probes via the attacker's own org with victim
+  ids), the victim tenant's full control-plane surface (12 probes:
+  credits/ledger/invoices/subscription/budgets/branding/domains/members),
+  platform-endpoint escalation as a plain student, token forgery (tampered
+  signature, alg=none, wrong-key-signed with role=admin, garbage, guest
+  token on product APIs), hostile numerics on authorized surfaces
+  (negative/float/2^63/NaN-string budgets, bad currency, negative/float/huge
+  seats), parser attacks (NUL, 300-deep JSON, 2MB field, bare
+  Infinity/NaN JSON tokens via raw bodies), anonymous probes, and session
+  attacks (refresh rotation, post-logout chain sweep INCLUDING the
+  still-graced rotation predecessor — the R88-91 revocation class verified
+  live). One suspected finding resolved as design: a pre-rotation refresh
+  replay inside refresh_reuse_grace_seconds is the documented
+  rotation-race tolerance, and the battery instead pins the property that
+  matters — explicit revocation kills the whole chain, graced tokens
+  included. Every probe returned a clean 4xx: no bypass, no oracle, no 500.
 
 ### Convergence of the R135-R148 continuation
 
@@ -741,7 +762,8 @@ outbox worker, API-metering middleware, audit registry, impersonation) plus
 frontend parity. Confirmed-finding counts by round:
 **R136=3, R137=2, R138=1, R139=1, R140=0, R141=0, R142=1, R143=0, R144=0,
 R145=1, R146=0, R147=1, R148=0, R149=0 (validation), R150=0,
-R151=1, R152=0, R153=0, R154=0 (property fuzz + saga, new attack
+R151=1, R152=0, R153=0, R154=0, R155=0 (property fuzz + saga + live
+adversarial battery, new attack
 classes)** — a clean
 convergence curve, the last findings low/medium severity (one partner
 under-payment on a void-after-credit-note edge, one false-429 budget window,
