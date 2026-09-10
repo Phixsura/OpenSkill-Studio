@@ -1449,6 +1449,22 @@ the suite the day it lands, each proven by stripping a real gate:
 - **R280 cross-project portal**: project A's guest token on every
   /client-portal route with project B's real ids → uniform 401/403/404.
 
+### R281–R284: fuzz re-verification + the last rating arcs (2026-09-10)
+
+- **R281 Schemathesis re-run** over the R251+ code: 40,247 fuzzed requests
+  (21,092 unauthenticated + 19,155 under a student token, schema exported
+  in-process since docs are disabled in test env) — zero server errors;
+  the API log reached 87,828 lines with zero 500s and zero tracebacks.
+- **R282** the fx.rate_created backlog pager (R129[H4]/R130[12]): 501
+  unfixable blocked rows page in one 500-chunk + a cursor re-enqueue and
+  terminate on the second message; stripping the cursor reproduces the
+  documented livelock and trips the test.
+- **R283** blocked-row unvoid restores to 'blocked', never 'rated'
+  (R132[F5] zero-bill guard, proven by hardcoding the restore), and
+  re-drives rating via usage.recorded (R133[F9]).
+- **R284** the offering cost fallback — the last unexercised rung of the
+  cost-resolution ladder — pinned with snapshot audit fields.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
