@@ -147,3 +147,20 @@ describe("StatusBadgeClass coverage (R299)", () => {
     expect(StatusBadgeClass("some_future_status_xyz")).toContain("gray");
   });
 });
+
+describe("zero-decimal currency set (R300 drift-guard)", () => {
+  // ZERO_DECIMAL is maintained independently from the backend's CURRENCY_MINOR
+  // (apps/api/app/controlplane/models/pricing.py). Any drift is a 100x money
+  // DISPLAY error — the R81/R163 class that recurred twice. The backend test
+  // test_zero_decimal_currency_set_frozen_r300 pins the reciprocal; a v1
+  // currency addition fires BOTH, forcing the two languages to stay in sync.
+  it("is exactly {JPY, KRW} — must match backend CURRENCY_MINOR", () => {
+    // JPY/KRW format as whole units; a 2-decimal currency divides by 100
+    expect(formatMinor(1500, "JPY")).toBe("¥1,500");
+    expect(formatMinor(1500, "KRW")).toBe("₩1,500");
+    expect(formatMinor(1500, "USD")).toBe("$15.00");
+    expect(formatMinor(1500, "EUR")).toBe("€15.00");
+    // a currency NOT in the zero-decimal set must be treated as 2-decimal
+    expect(formatMinor(1500, "GBP")).toBe("£15.00");
+  });
+});

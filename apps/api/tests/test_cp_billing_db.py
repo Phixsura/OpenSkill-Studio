@@ -1750,6 +1750,26 @@ def test_minor_multiplier_case_insensitive():
     assert _platform_minor_from_stripe(1000, "usd") == 1000  # $10.00 both sides
 
 
+def test_zero_decimal_currency_set_frozen_r300():
+    """R300: the zero-decimal currency set is maintained INDEPENDENTLY in two
+    languages — CURRENCY_MINOR here and ZERO_DECIMAL in apps/web/src/lib/cp.ts.
+    A drift (backend treats a currency as zero-decimal, frontend still ÷100 or
+    vice-versa) is a 100x money-DISPLAY error — the exact R81/R163 class that
+    has already recurred twice. This pins the backend side to {JPY, KRW}; the
+    reciprocal frontend test (cp-money.test.ts) pins the same. Adding a v1
+    currency fires BOTH, forcing the two sides to be updated together."""
+    from app.controlplane.models.pricing import CURRENCY_MINOR, DEFAULT_MINOR
+
+    zero_decimal = {c for c, m in CURRENCY_MINOR.items() if m == 1}
+    assert zero_decimal == {"JPY", "KRW"}, (
+        "backend zero-decimal set changed — update apps/web/src/lib/cp.ts "
+        "ZERO_DECIMAL to match, then this assertion"
+    )
+    assert DEFAULT_MINOR == 100
+    # every declared multiplier is either zero-decimal (1) or 2-decimal (100)
+    assert set(CURRENCY_MINOR.values()) <= {1, 100}
+
+
 @pytest.mark.asyncio
 async def test_gap_change_bills_ended_period_at_old_plan(db):
     """R82[1]: an immediate change landing AFTER period_end but BEFORE the
