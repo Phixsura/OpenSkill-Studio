@@ -3851,8 +3851,15 @@ async def test_webhook_failed_handler_records_event_and_dedups_replay(db, monkey
     calls = {"n": 0}
 
     async def boom(db_, provider, parsed):
+        # a DB-LEVEL abort (not a plain Python raise) — this is the R42[7]
+        # scenario: it poisons the transaction, so without the SAVEPOINT the
+        # subsequent event.status='failed' flush would itself fail and the
+        # event row would vanish with the rollback.
+        from sqlalchemy import text as _text
+
         calls["n"] += 1
-        raise RuntimeError("handler exploded mid-apply")
+        await db_.execute(_text("SELECT 1 / 0"))
+        return True
 
     monkeypatch.setattr(bsvc, "_apply_webhook_event", boom)
 
