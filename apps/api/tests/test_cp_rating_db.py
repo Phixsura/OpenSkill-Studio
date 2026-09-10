@@ -1328,3 +1328,58 @@ async def test_fx_and_cost_rate_validation_rejects(db):
     with pytest.raises(AppError) as e:
         await policy(tenant_id="t1", partner_id="p1")
     assert e.value.code == "INVALID_POLICY_PARAMS"
+
+
+@pytest.mark.asyncio
+async def test_overage_prior_quantity_accumulation(db):
+    """R270: the DB-side prior-quantity accumulation for
+    included_quota_then_overage (rating.py's tenant-tz month window) had ZERO
+    integration tests — only the pure function with an injected prior. Pins:
+    sequential events consume the quota in order (only the overflow bills),
+    a VOIDED rating's event stops consuming quota (R52[13]), and a same-
+    timestamp reversal nets its original (R52[10] precedes-ordering)."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await pricing_svc.create_price_policy(
+        db,
+        actor=_actor(user),
+        name=f"quota {ULID()}",
+        policy_type="included_quota_then_overage",
+        usage_type="image_generation",
+        currency="USD",
+        params={"included_quota": "100", "overage_unit_price_minor": 5},
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        tenant_id=tenant.id,
+    )
+    t0 = datetime.now(UTC)
+
+    # 80 within quota → 0; +30 → 10 over → 50; +10 → fully over → 50
+    e1 = await _mk_event(db, tenant, quantity=80, occurred_at=t0)
+    r1 = await rating.rate_event(db, e1.id)
+    assert r1.billable_amount_minor == 0
+
+    e2 = await _mk_event(db, tenant, quantity=30, occurred_at=t0 + timedelta(minutes=1))
+    r2 = await rating.rate_event(db, e2.id)
+    assert r2.billable_amount_minor == 50                  # 10 over × 5
+
+    e3 = await _mk_event(db, tenant, quantity=10, occurred_at=t0 + timedelta(minutes=2))
+    r3 = await rating.rate_event(db, e3.id)
+    assert r3.billable_amount_minor == 50                  # all 10 over × 5
+
+    # R52[13]: void e1's rating — its 80 must stop consuming quota, so a
+    # NEW event of 10 fits back inside the freed quota (prior = 30+10 = 40)
+    await rating.void_rated(db, r1.id, reason="strike", actor=_actor(user))
+    e4 = await _mk_event(db, tenant, quantity=10, occurred_at=t0 + timedelta(minutes=3))
+    r4 = await rating.rate_event(db, e4.id)
+    assert r4.billable_amount_minor == 0                   # 40+10 ≤ 100
+
+    # R52[10]: a reversal sharing the ORIGINAL's occurred_at must include the
+    # original in its prior (created later → ordered after), netting to a
+    # negative of what the original actually billed over quota.
+    e5 = await _mk_event(db, tenant, quantity=60, occurred_at=t0 + timedelta(minutes=4))
+    r5 = await rating.rate_event(db, e5.id)
+    assert r5.billable_amount_minor == 50                  # prior 50, 50→110: 10 over
+    e6 = await _mk_event(db, tenant, quantity=-60, source="adjustment",
+                         occurred_at=t0 + timedelta(minutes=4))  # same timestamp
+    r6 = await rating.rate_event(db, e6.id)
+    assert r6.billable_amount_minor == -50                 # exact mirror, nets to 0
