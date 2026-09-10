@@ -55,3 +55,33 @@ describe("StatusBadgeClass", () => {
     expect(StatusBadgeClass("definitely_not_a_status")).toContain("gray");
   });
 });
+
+describe("majorToMinor contract (R298)", () => {
+  it("passes NEGATIVE amounts through — signed platform adjustments (clawback)", () => {
+    // the docstring once wrongly promised positive-or-zero; the adjust field
+    // relies on negatives reaching the API, so this must NOT be null
+    expect(majorToMinor("-50.00", "USD")).toBe(-5000);
+    expect(majorToMinor("-1500", "JPY")).toBe(-1500);
+  });
+
+  it("returns null only for non-finite input", () => {
+    expect(majorToMinor("", "USD")).toBeNull();
+    expect(majorToMinor("abc", "USD")).toBeNull();
+    expect(majorToMinor("1e999", "USD")).toBeNull(); // Infinity
+    expect(majorToMinor("NaN", "USD")).toBeNull();
+  });
+
+  it("is lenient on trailing junk (parseFloat) — caller must sanitize", () => {
+    // documents the real behavior so no caller assumes strict parsing
+    expect(majorToMinor("12abc", "USD")).toBe(1200);
+  });
+
+  it("rounds to the nearest minor unit at cent precision", () => {
+    // Money fields are 2-decimal; sub-cent input is out of spec and left to
+    // JS float + the backend's exact Decimal re-validation. At true cent
+    // precision the round is unambiguous.
+    expect(majorToMinor("0.004", "USD")).toBe(0);
+    expect(majorToMinor("0.006", "USD")).toBe(1);
+    expect(majorToMinor("2.5", "USD")).toBe(250);
+  });
+});

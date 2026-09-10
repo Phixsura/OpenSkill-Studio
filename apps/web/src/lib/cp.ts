@@ -98,7 +98,15 @@ export function formatMinor(amountMinor: number, currency: string): string {
 
 /** Parse a user-typed major-unit amount into integer minor units for the
  * given currency (R101: hardcoded *100 broke zero-decimal currencies by 100x).
- * Returns null when the input is not a finite positive-or-zero number. */
+ *
+ * Returns null only when the input is not a FINITE number (empty/NaN/±Inf).
+ * R298: NEGATIVES pass through by design — the platform credit-adjustment
+ * field sends signed amounts (a clawback is negative). Callers that require
+ * a positive amount (e.g. budget limits, top-ups) MUST guard `<= 0`
+ * themselves; this helper does not, despite an earlier docstring that
+ * wrongly promised "positive-or-zero". parseFloat is also lenient on trailing
+ * junk ("12abc" -> 12), so a value that must be a clean number is the
+ * caller's responsibility too. */
 export function majorToMinor(input: string, currency: string): number | null {
   const value = parseFloat(input);
   if (!Number.isFinite(value)) return null;
