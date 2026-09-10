@@ -421,3 +421,169 @@ def test_comfyui_infinity_field_does_not_discard_whole_result():
     assert out is not None
     assert "steps" not in out                    # hostile field skipped
     assert out["cfg_scale"] == 7.5 and out["seed"] == 42 and out["sampler"] == "euler"
+
+
+# ── R249: parser kill-tests (mutation-driven — 39/41 genmeta mutants lived) ──
+# Post-wave status: genmeta 41/41, gamification 3/3, duplicate 8/9, sanitize
+# 1/2. The two survivors are equivalent: sanitize's pre-slice multiplier 8→9
+# only widens the DoS bound before the final [:max_len] clamp, and
+# _copy_name's <=→< sends an exact-fit name down the trim path, which
+# reproduces name+suffix byte-for-byte.
+
+
+def test_a1111_exact_extraction():
+    """Pin the a1111 parser's structure: settings-line detection walks from
+    the END, values clamp to the int8 window, strings truncate at 200."""
+    from app.core.genmeta import parse_a1111_infotext
+
+    txt = (
+        "a castle at dawn\n"
+        "Negative prompt: blurry, lowres\n"
+        "Steps: 30, Sampler: Euler a, CFG scale: 4.5, Seed: 123, Size: 832x1216"
+    )
+    out = parse_a1111_infotext(txt)
+    assert out is not None
+    assert out["prompt"] == "a castle at dawn"
+    assert out["negative_prompt"] == "blurry, lowres"
+    assert out["steps"] == 30 and out["seed"] == 123 and out["cfg_scale"] == 4.5
+    assert out["sampler"] == "Euler a"
+
+    # int8-window clamp: 2**63-1 kept, 2**63 dropped, mirror for negatives
+    hi = parse_a1111_infotext(f"p\nSteps: 20, Seed: {2**63 - 1}")
+    assert hi is not None and hi["seed"] == 2**63 - 1
+    over = parse_a1111_infotext(f"p\nSteps: 20, Seed: {2**63}")
+    assert over is not None and "seed" not in over
+    lo = parse_a1111_infotext(f"p\nSteps: 20, Seed: {-(2**63) + 1}")
+    assert lo is not None and lo["seed"] == -(2**63) + 1
+    under = parse_a1111_infotext(f"p\nSteps: 20, Seed: {-(2**63)}")
+    assert under is not None and "seed" not in under
+
+    # sampler string truncates at exactly 200
+    long_sampler = "S" * 300
+    t = parse_a1111_infotext(f"p\nSteps: 20, Sampler: {long_sampler}")
+    assert t is not None and len(t["sampler"]) == 200
+
+    # no settings line and no negative → not a1111 evidence
+    assert parse_a1111_infotext("just some text\nmore text") is None
+    # empty text rejected
+    assert parse_a1111_infotext("") is None
+
+
+def test_comfyui_exact_extraction():
+    """Pin the ComfyUI parser: int8 window on node inputs, 200-char sampler
+    truncation, first/second CLIPTextEncode → prompt/negative ordering."""
+    import json
+
+    from app.core.genmeta import MAX_COMFY_JSON, parse_comfyui_prompt
+
+    wf = {
+        "1": {"class_type": "KSampler",
+              "inputs": {"seed": 2**63 - 1, "steps": 25, "cfg": 7.0,
+                          "sampler_name": "x" * 300}},
+        "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "hero shot"}},
+        "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "ugly"}},
+    }
+    out = parse_comfyui_prompt(json.dumps(wf))
+    assert out is not None
+    assert out["seed"] == 2**63 - 1 and out["steps"] == 25
+    assert len(out["sampler"]) == 200
+    assert out["prompt"] == "hero shot" and out["negative_prompt"] == "ugly"
+
+    # int8 overflow dropped field-locally (R240 companion)
+    wf["1"]["inputs"]["seed"] = 2**63
+    out2 = parse_comfyui_prompt(json.dumps(wf))
+    assert out2 is not None and "seed" not in out2 and out2["steps"] == 25
+    wf["1"]["inputs"]["seed"] = -(2**63)
+    out3 = parse_comfyui_prompt(json.dumps(wf))
+    assert out3 is not None and "seed" not in out3
+
+    # size guard: exactly at the cap parses, one over is rejected
+    pad_needed = MAX_COMFY_JSON - len(json.dumps(wf))
+    wf["2"]["inputs"]["text"] = "hero shot" + " " * 0
+    doc = json.dumps(wf)
+    padded = doc + " " * (MAX_COMFY_JSON - len(doc))
+    assert len(padded) == MAX_COMFY_JSON
+    assert parse_comfyui_prompt(padded) is not None
+    assert parse_comfyui_prompt(padded + " ") is None
+    assert pad_needed > 0
+
+
+def test_sanitize_default_and_dup_suffix_format():
+    """R249: sanitize's default max_len is part of its contract (1000), and
+    _dup_slug's suffix is exactly '-copy-' + 6 hex chars (3 random bytes)."""
+    import re
+
+    from app.core.sanitize import sanitize_untrusted_text
+    from app.services.duplicate import _dup_slug
+
+    assert len(sanitize_untrusted_text("y" * 5000)) == 1000
+    assert re.search(r"-copy-[0-9a-f]{6}$", _dup_slug("my-skill"))
+
+
+def test_parser_edge_kill_set():
+    """R249 second wave: reverse-walk step, unknown settings key, minimal-
+    evidence gates, bounded node scan, first-KSampler-wins, non-str text,
+    single CLIPText, and the exact size caps."""
+    import json
+
+    from app.core.genmeta import MAX_TOTAL_TEXT, parse_a1111_infotext
+    from app.core.genmeta import parse_comfyui_prompt as pc
+
+    # settings line SECOND-TO-LAST: a step<-1 walk skips odd offsets
+    out = parse_a1111_infotext("p\nSteps: 20, Seed: 5\ntrailing")
+    assert out is not None and out["steps"] == 20
+
+    # unknown key on the settings line must be skipped, not KeyError the parse
+    out = parse_a1111_infotext("p\nSteps: 20, Wizardry: max")
+    assert out is not None and out["steps"] == 20
+
+    # single-field settings-only line is still evidence (2 keys > 1)
+    out = parse_a1111_infotext("Steps: 20")
+    assert out is not None and out["steps"] == 20
+    # a settings-only line with nothing parseable is not evidence (R250:
+    # it no longer leaks the whole text into `prompt` via the 0-falsy bug)
+    assert parse_a1111_infotext("Steps: garbage") is None
+    # negative-marker alone yields nothing extractable → no evidence → None
+    assert parse_a1111_infotext("Negative prompt:") is None
+
+    # R250: infotext STARTING with the negative marker (no positive prompt)
+    # must not fall into the whole-text prompt fallback
+    out = parse_a1111_infotext("Negative prompt: blurry\nSteps: 20, Seed: 5")
+    assert out is not None
+    assert "prompt" not in out
+    assert out["negative_prompt"] == "blurry" and out["steps"] == 20
+
+    # exactly at the text cap parses; one over is rejected
+    base = "p\nSteps: 20, Seed: 5"
+    doc = base + " " * (MAX_TOTAL_TEXT - len(base))
+    assert parse_a1111_infotext(doc) is not None
+    assert parse_a1111_infotext(doc + " ") is None
+
+    # comfy: bounded scan reads exactly 200 nodes — a KSampler at #201 is out
+    graph = {str(i): {"class_type": "Note", "inputs": {}} for i in range(199)}
+    graph["clip"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "p"}}
+    graph["late"] = {"class_type": "KSampler", "inputs": {"steps": 9}}
+    out = pc(json.dumps(graph))
+    assert out is not None and out["prompt"] == "p" and "steps" not in out
+
+    # first KSampler wins; a second must not overwrite
+    two = {
+        "1": {"class_type": "KSampler", "inputs": {"steps": 11}},
+        "2": {"class_type": "KSampler", "inputs": {"steps": 22}},
+    }
+    assert pc(json.dumps(two))["steps"] == 11
+
+    # non-str CLIPText text is skipped, not crashed into a None result
+    mixed = {
+        "1": {"class_type": "KSampler", "inputs": {"steps": 7}},
+        "2": {"class_type": "CLIPTextEncode", "inputs": {"text": 123}},
+    }
+    assert pc(json.dumps(mixed))["steps"] == 7
+
+    # single CLIPText → prompt only, no negative, no IndexError
+    single = {"2": {"class_type": "CLIPTextEncode", "inputs": {"text": "solo"}}}
+    out = pc(json.dumps(single))
+    assert out is not None and out["prompt"] == "solo" and "negative_prompt" not in out
+
+    # a graph with nothing extractable is not evidence
+    assert pc(json.dumps({"1": {"class_type": "Note", "inputs": {}}})) is None
