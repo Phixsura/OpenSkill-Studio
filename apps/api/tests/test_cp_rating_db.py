@@ -1258,3 +1258,73 @@ def test_compute_billable_exact_mirrors_minor():
     assert fe("included_quota_then_overage",
               {"included_quota": "100", "overage_unit_price_minor": 2},
               internal_cost_exact=Decimal(0), quantity=Decimal(150)) == Decimal(100)
+
+
+# ── R244: pricing service reject-branch coverage ──
+
+
+@pytest.mark.asyncio
+async def test_fx_and_cost_rate_validation_rejects(db):
+    """R244: create_fx_rate / create_cost_rate / supersede / create_price_policy
+    guards — each reject arc protects money math from unratable state."""
+    user = await _mk_user(db)
+    now = datetime.now(UTC)
+
+    async def fx(**kw):
+        base = dict(base_currency="USD", quote_currency="EUR", rate=Decimal("0.9"),
+                    effective_from=now)
+        base.update(kw)
+        return await pricing_svc.create_fx_rate(db, actor=_actor(user), **base)
+
+    with pytest.raises(AppError) as e:
+        await fx(quote_currency="USD")                       # base == quote
+    assert e.value.code == "FX_RATE_INVALID"
+    with pytest.raises(AppError) as e:
+        await fx(rate=Decimal("0"))                          # non-positive
+    assert e.value.code == "FX_RATE_INVALID"
+    with pytest.raises(AppError) as e:
+        await fx(rate=Decimal("NaN"))                        # non-finite
+    assert e.value.code == "FX_RATE_INVALID"
+
+    async def cost(**kw):
+        base = dict(provider="mock", model_or_service="m", usage_type="image_generation",
+                    currency="USD", unit_cost=Decimal("0.02"), effective_from=now)
+        base.update(kw)
+        return await pricing_svc.create_cost_rate(db, actor=_actor(user), **base)
+
+    with pytest.raises(AppError) as e:
+        await cost(usage_type="quantum_flux")                # unknown usage type
+    assert e.value.code == "UNKNOWN_USAGE_TYPE"
+    with pytest.raises(AppError) as e:
+        await cost(unit="parsecs")                           # unit mismatch
+    assert e.value.code == "VALIDATION_ERROR"
+
+    # supersede guards: window inversion, then double-supersede
+    rate = await cost()
+    succ = {"unit_cost": Decimal("0.03")}
+    with pytest.raises(AppError) as e:
+        await pricing_svc.supersede_cost_rate(
+            db, rate, effective_until=now - timedelta(days=1),
+            successor=dict(succ), actor=_actor(user))
+    assert e.value.code == "VALIDATION_ERROR"
+    await pricing_svc.supersede_cost_rate(
+        db, rate, effective_until=now + timedelta(days=1),
+        successor=dict(succ), actor=_actor(user))
+    with pytest.raises(AppError) as e:
+        await pricing_svc.supersede_cost_rate(
+            db, rate, effective_until=now + timedelta(days=2),
+            successor=dict(succ), actor=_actor(user))
+    assert e.value.code == "COST_RATE_IMMUTABLE"
+
+    # price policy: unknown usage type, multi-scope contradiction
+    async def policy(**kw):
+        base = dict(policy_type="cost_plus_percentage", params={"percentage": "10"})
+        base.update(kw)
+        return await pricing_svc.create_price_policy(db, actor=_actor(user), **base)
+
+    with pytest.raises(AppError) as e:
+        await policy(usage_type="quantum_flux")
+    assert e.value.code == "UNKNOWN_USAGE_TYPE"
+    with pytest.raises(AppError) as e:
+        await policy(tenant_id="t1", partner_id="p1")
+    assert e.value.code == "INVALID_POLICY_PARAMS"
