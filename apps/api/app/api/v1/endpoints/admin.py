@@ -85,14 +85,18 @@ async def update_user_role(
 
     # Prevent removing the last active admin — demoting the final admin would
     # lock the platform out of all admin operations.
+    # R199 (issue-18 class): LOCK the admin rows — the unlocked count raced a
+    # concurrent demotion/deletion of the other remaining admin: both counted
+    # 2 (>1), both proceeded, ZERO active admins remained (platform lockout,
+    # recoverable only by DB surgery). Same fix shape as the org layer's
+    # last-owner lock in update_member_role.
     if old_role == UserRole.ADMIN and new_role != UserRole.ADMIN:
-        admin_count = await db.execute(
-            select(func.count(User.id)).where(
-                User.role == UserRole.ADMIN,
-                User.status == UserStatus.ACTIVE,
-            )
+        admin_rows = await db.execute(
+            select(User.id)
+            .where(User.role == UserRole.ADMIN, User.status == UserStatus.ACTIVE)
+            .with_for_update()
         )
-        if admin_count.scalar_one() <= 1:
+        if len(admin_rows.all()) <= 1:
             raise HTTPException(status_code=422, detail="Cannot demote the last admin")
 
     user.role = new_role
@@ -128,14 +132,14 @@ async def soft_delete_user(
         raise HTTPException(status_code=422, detail="Cannot delete yourself")
 
     # Don't delete the last active admin (platform lockout)
+    # R199: locked for the same reason as the demotion path above.
     if user.role == UserRole.ADMIN:
-        admin_count = await db.execute(
-            select(func.count(User.id)).where(
-                User.role == UserRole.ADMIN,
-                User.status == UserStatus.ACTIVE,
-            )
+        admin_rows = await db.execute(
+            select(User.id)
+            .where(User.role == UserRole.ADMIN, User.status == UserStatus.ACTIVE)
+            .with_for_update()
         )
-        if admin_count.scalar_one() <= 1:
+        if len(admin_rows.all()) <= 1:
             raise HTTPException(status_code=422, detail="Cannot delete the last admin")
 
     user.status = UserStatus.DELETED

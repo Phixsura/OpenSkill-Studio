@@ -586,3 +586,91 @@ async def test_concurrent_set_override_no_500():
             assert rows[0].value == {"v": 9}, "loser's update must win (last-writer)"
     finally:
         await engine.dispose()
+
+
+async def test_concurrent_admin_demotions_never_reach_zero_admins():
+    """R199: the last-admin check was an UNLOCKED count-then-write — two
+    concurrent demotions of the two remaining admins both counted 2 (>1),
+    both proceeded, and ZERO active admins remained (platform lockout).
+    Drive the REAL endpoint concurrently: exactly one demotion must 422."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.database import engine
+    from app.core.security import create_access_token
+    from app.main import app
+
+    try:
+        # The platform may already hold admins from other suites — demote them
+        # so OUR pair are the only two active admins (restored afterwards).
+        async with AsyncSessionLocal() as setup:
+            prior = (
+                (
+                    await setup.execute(
+                        select(User).where(
+                            User.role == UserRole.ADMIN, User.status == UserStatus.ACTIVE
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            prior_ids = [u.id for u in prior]
+            for u in prior:
+                u.role = UserRole.STUDENT
+            a1 = await _mk_user(setup)
+            a2 = await _mk_user(setup)
+            a1.role = UserRole.ADMIN
+            a2.role = UserRole.ADMIN
+            await setup.commit()
+            a1_id, a2_id = a1.id, a2.id
+            t1 = create_access_token(a1_id, a1.email, "admin")
+            t2 = create_access_token(a2_id, a2.email, "admin")
+
+        from contextlib import asynccontextmanager
+
+        orig = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def _noop(a):
+            yield
+
+        app.router.lifespan_context = _noop
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+
+                async def demote(token, target):
+                    return await c.put(
+                        f"/api/v1/admin/users/{target}/role",
+                        json={"role": "student"},
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+
+                r1, r2 = await asyncio.gather(demote(t1, a2_id), demote(t2, a1_id))
+                codes = sorted([r1.status_code, r2.status_code])
+                assert codes == [200, 422], f"expected one success one refusal, got {codes}"
+        finally:
+            app.router.lifespan_context = orig
+
+        async with AsyncSessionLocal() as s:
+            remaining = (
+                (
+                    await s.execute(
+                        select(User.id).where(
+                            User.id.in_([a1_id, a2_id]),
+                            User.role == UserRole.ADMIN,
+                            User.status == UserStatus.ACTIVE,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(remaining) == 1, f"exactly one admin must survive, got {len(remaining)}"
+            # Restore the platform admins demoted for isolation.
+            for pid in prior_ids:
+                u = await s.get(User, pid)
+                if u is not None:
+                    u.role = UserRole.ADMIN
+            await s.commit()
+    finally:
+        await engine.dispose()
