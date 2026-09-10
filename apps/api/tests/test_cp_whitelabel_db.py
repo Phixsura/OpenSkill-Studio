@@ -435,6 +435,68 @@ async def test_provision_resume_tolerates_already_installed_packs(db, monkeypatc
     assert "install_skill_packs" in done
 
 
+@pytest.mark.asyncio
+async def test_provision_pack_savepoint_rolls_back_partial_copy(db, monkeypatch):
+    """R321 (pins R46[28]): each pack install runs in a SAVEPOINT so a
+    mid-copy failure rolls back THAT pack's partially-flushed content
+    (categories/skills) instead of leaving it committed — otherwise a retry
+    duplicates the committed half. Simulate an install that flushes a
+    category then dies; the marker row must be GONE after the failed run."""
+    from app.models.skill import SkillCategory
+    from app.services import installation as install_mod
+
+    user = await _mk_user(db)
+    blueprint = TenantBlueprint(
+        name=f"BPS {ULID()}",
+        config=provision_svc.validate_blueprint_config(
+            {"skill_packs": [{"pack_id": "01JPACKCCCCCCCCCCCCCCCCCCC"}]}
+        ),
+        created_by=user.id,
+    )
+    db.add(blueprint)
+    await db.flush()
+    run = await provision_svc.create_provision_run(
+        db,
+        blueprint_id=blueprint.id,
+        name="Partial Copy",
+        slug=f"pc-{str(ULID()).lower()[:10]}",
+        idempotency_key=f"pc-{ULID()}",
+        partner_id=None,
+        actor=_actor(user),
+    )
+
+    marker_slug = f"r321-partial-{str(ULID()).lower()[:8]}"
+
+    async def dying_install_pack(self, org_id, pack_id, version, installed_by):
+        # flush half the pack's content, then fail mid-copy
+        self.db.add(
+            SkillCategory(org_id=org_id, name="R321 partial", slug=marker_slug)
+        )
+        await self.db.flush()
+        raise AppError("PACK_CORRUPT", "manifest checksum mismatch", 422)
+
+    monkeypatch.setattr(
+        install_mod.InstallationService, "install_pack", dying_install_pack
+    )
+    await provision_svc.execute_provision_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "failed"
+    failed = [s["step"] for s in run.steps if s.get("status") == "failed"]
+    assert failed == ["install_skill_packs"]
+    assert "not installable" in (run.error or "")
+
+    # the SAVEPOINT must have rolled the partial copy back
+    leftover = (
+        await db.execute(
+            select(SkillCategory).where(SkillCategory.slug == marker_slug)
+        )
+    ).scalars().all()
+    assert leftover == [], "partial pack content survived the failed install"
+
+    # and the failure handler's own writes survived (session not aborted)
+    assert run.error is not None
+
+
 # ── Export ───────────────────────────────────────────────────
 
 
