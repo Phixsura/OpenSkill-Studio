@@ -172,6 +172,9 @@ describe("StatusBadgeClass revoked (R326)", () => {
     expect(cls).toContain("red");
     expect(cls).not.toBe(StatusBadgeClass("definitely_unknown_status"));
   });
+  it("maps payment success (R328) as green, not neutral", () => {
+    expect(StatusBadgeClass("succeeded")).toContain("green");
+  });
   it("maps portal review states (R327): action signals are not neutral", () => {
     expect(StatusBadgeClass("revision_requested")).toContain("amber");
     expect(StatusBadgeClass("rejected")).toContain("red");

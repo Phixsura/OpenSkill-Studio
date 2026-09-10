@@ -177,6 +177,11 @@ export const STATUS_COLORS: Record<string, string> = {
   submitted: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
   revision_requested: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
   rejected: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  // R328: the invoice detail page badges PaymentRecord.status and the only
+  // value the backend writes is "succeeded" — a successful payment rendered
+  // neutral gray (fourth instance of the R101[L15] class; found by diffing
+  // backend-emitted status literals against this map's keys).
+  succeeded: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
 };
 
 export function StatusBadgeClass(status: string): string {
