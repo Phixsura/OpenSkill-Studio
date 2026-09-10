@@ -258,3 +258,65 @@ def test_registry_category_rejects():
     _rejects(M, base, "name", "y" * 101)
     _rejects(M, base, "slug", "")
     _rejects(M, base, "slug", "s" * 101)
+
+
+# ── user.py ──────────────────────────────────────────────────
+
+
+def test_update_profile_rejects():
+    from app.schemas.user import UpdateProfileRequest as M
+
+    assert M(display_name="Valid").display_name == "Valid"
+    _rejects(M, {}, "display_name", "x")               # <2
+    _rejects(M, {}, "display_name", "y" * 101)         # >100
+    _rejects(M, {}, "avatar_url", "u" * 501)           # >500
+    _rejects(M, {}, "avatar_url", "ftp://bad")         # scheme
+
+
+# ── workflow_run.py ──────────────────────────────────────────
+
+
+def test_workflow_run_rejects():
+    from app.schemas.workflow_run import CreateRunRequest, DecideReviewRequest
+
+    _rejects(CreateRunRequest, {}, "inputs", {"k": "v" * 50001})
+    _rejects(CreateRunRequest, {}, "idempotency_key", "  ")     # empty-after-strip
+    _rejects(CreateRunRequest, {}, "idempotency_key", "k" * 101)
+    _rejects(DecideReviewRequest, {"decision": "approved"}, "decision", "maybe")
+    _rejects(DecideReviewRequest, {"decision": "approved"}, "note", "n" * 2001)
+
+
+# ── peer_review.py ───────────────────────────────────────────
+
+
+def test_peer_review_rejects():
+    from app.schemas.peer_review import CreateRoundRequest, SubmitAssessmentRequest
+
+    base = dict(project_id="p", name="Round")
+    assert CreateRoundRequest(**base).num_reviews == 2
+    _rejects(CreateRoundRequest, base, "name", "x")
+    _rejects(CreateRoundRequest, base, "name", "y" * 201)
+    _rejects(CreateRoundRequest, base, "num_reviews", 0)
+    _rejects(CreateRoundRequest, base, "num_reviews", 11)
+    _rejects(SubmitAssessmentRequest, {}, "score", -1)
+    _rejects(SubmitAssessmentRequest, {}, "score", 10001)
+    _rejects(SubmitAssessmentRequest, {"score": 5}, "feedback", "f" * 10001)
+    _rejects(SubmitAssessmentRequest, {"score": 5}, "feedback", "bad\x00nul")  # ctrl char
+    _rejects(SubmitAssessmentRequest, {"score": 5}, "score_breakdown", [{}] * 21)
+
+
+# ── pack_review.py ───────────────────────────────────────────
+
+
+def test_pack_review_rejects():
+    from app.schemas.pack_review import CreateReviewRequest as M
+
+    assert M(rating=5).rating == 5
+    _rejects(M, {}, "rating", 0)                 # ge=1
+    _rejects(M, {}, "rating", 6)                 # le=5
+    _rejects(M, {"rating": 5}, "title", "t" * 201)
+    _rejects(M, {"rating": 5}, "body", "b" * 5001)
+    _rejects(M, {"rating": 5}, "title", "bad\x00nul")   # NUL control (R88e)
+    # low rating requires a body (model validator)
+    with pytest.raises(ValidationError):
+        M(rating=1)
