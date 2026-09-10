@@ -1271,6 +1271,37 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   pip-audit clean; Schemathesis 25,532/25,532 (Coverage+Fuzzing+Stateful);
   API log zero 500s/tracebacks. Three consecutive complete passes now
   agree suite-for-suite.
+- **R199–R200 + endpoint-layer closure (commits ba8a7eb/a2e8d6b)**: 2
+  confirmed findings; the entire endpoint layer (product 323 + control-plane
+  159 = 482 routes) re-audited mechanically for auth + object scoping.
+  - admin.py (R199, MEDIUM): the last-admin guard on role demotion AND
+    soft-delete was an UNLOCKED count-then-write — two concurrent demotions
+    of the two remaining admins both counted 2, both proceeded, ZERO active
+    platform admins remained (lockout recoverable only by DB surgery). The
+    org layer's identical last-owner shape was locked long ago; the platform
+    layer was missed. Both paths now FOR UPDATE the admin rows. Regression
+    test drives the REAL endpoint concurrently (ASGI, two admins demoting
+    each other): exactly one 200 + one 422; guard-proven.
+  - project.py (R200, LOW): grant_extension's one-per-(project,user)
+    pre-check raced a concurrent grant → unhandled 500 on
+    uq_extension_project_user (the R187 set_override shape). Savepointed;
+    loser updates the winner. Two-session test guard-proven.
+  - CLASS CLOSED: after the fifth check-then-insert hit, a mechanical sweep
+    crossed every model's unique constraints against every service-layer
+    bare add+flush — zero remaining unguarded sites.
+  - Endpoint audit: all 482 routes verified authed (8 anonymous by design:
+    auth flows + LTI static placeholder; 2 apparent CP flags were regex
+    false-positives — both platform-role routes carry require_role(ADMIN)
+    - audit). All id-bearing routes carry second-level object scoping.
+  - Read clean in the same pass: project.py all 67 methods (create_review
+    self-grade gate + R70 lock; template instantiation; asset upload R49[37]
+    S3 cap; storage-quota gate on BOTH upload paths), evaluation.py all
+    methods (the LLM-output parser clamps even NaN to 0 — derived),
+    upload_cover (chunked read + magic bytes + SVG exclusion),
+    learning_composer.py in full (set-cover backfill, dual cycle detection,
+    R14 budget gate, dependent-protected removal), production_composer.py
+    middles (R83/R84 feature-set dedup, tolerant manifest reads),
+    access log records path only (GET verify-email tokens never logged).
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
