@@ -1893,3 +1893,75 @@ async def test_offering_fallback_scoped_to_connection_and_model(db):
     r3 = await rating.rate_event(db, ev3.id)
     assert (r3.cost_rate_snapshot or {}).get("fallback") != "offering"
     assert r3.internal_cost_minor == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_scope_policy_binds_own_tenants_subscription(db):
+    """R333 (mutation survivors): the PLAN rung (rank 1) had no end-to-end
+    test. Pins: (1) the plan_version comes from THIS tenant's subscription —
+    a cross-tenant pick prices A's usage off B's plan; (2) duplicate active
+    subs (race residue) resolve deterministically, never 500; (3) a policy
+    effective EXACTLY at occurred_at applies (closed start), one expiring
+    exactly at occurred_at does not (open end). Remaining mutants proven
+    EQUIVALENT: sub-lookup limit(1)→2 (uq_cp_sub_live makes a second live sub
+    impossible), type_rank 1→2 (any positive orders the same against 0 inside
+    a rank tier), best-key > → >= (id is unique so keys never tie)."""
+    from app.controlplane.models.billing import Subscription
+    from app.controlplane.models.plan import PlanVersion, ProductPlan
+
+    user = await _mk_user(db)
+    tenant_a = await _mk_tenant(db, user)
+    tenant_b = await _mk_tenant(db, user)
+    now = datetime.now(UTC)
+
+    async def _plan_version(key):
+        plan = ProductPlan(key=f"{key}-{str(ULID()).lower()[:8]}", name=key)
+        db.add(plan)
+        await db.flush()
+        pv = PlanVersion(plan_id=plan.id, version=1, status="active",
+                         entitlements={}, activated_at=now)
+        db.add(pv)
+        await db.flush()
+        return pv
+
+    v1 = await _plan_version("plana")
+    v2 = await _plan_version("planb")
+
+    def _sub(tenant, pv):
+        return Subscription(
+            tenant_id=tenant.id, plan_version_id=pv.id, status="active",
+            currency="USD", interval="month", seat_quantity=0,
+            current_period_start=now - timedelta(days=5),
+            current_period_end=now + timedelta(days=25),
+            provider="manual", created_by=user.id)
+
+    # B first, so a tenant-blind lookup would find B's sub. (A duplicate-
+    # active sub is impossible — uq_cp_sub_live partial unique index — which
+    # also makes the resolver's .limit(1) mutation constraint-equivalent.)
+    db.add(_sub(tenant_b, v2))
+    await db.flush()
+    db.add(_sub(tenant_a, v1))
+    await db.flush()
+
+    # plan-scoped policy for V1, effective EXACTLY at the event instant
+    occurred = now
+    await pricing_svc.create_price_policy(
+        db, actor=_actor(user), name=f"plan-v1 {ULID()}",
+        policy_type="fixed_unit_price", usage_type="image_generation",
+        currency="USD", params={"unit_price_minor": 11},
+        effective_from=occurred,               # closed start boundary
+        plan_version_id=v1.id)
+    # a tenant-scoped decoy that EXPIRED exactly at the event instant — the
+    # open end boundary must exclude it (it would outrank the plan policy)
+    await pricing_svc.create_price_policy(
+        db, actor=_actor(user), name=f"expired-tenant {ULID()}",
+        policy_type="fixed_unit_price", usage_type="image_generation",
+        currency="USD", params={"unit_price_minor": 99},
+        effective_from=occurred - timedelta(days=1),
+        effective_until=occurred,              # open end boundary
+        tenant_id=tenant_a.id)
+
+    event = await _mk_event(db, tenant_a, quantity=10, occurred_at=occurred)
+    rated = await rating.rate_event(db, event.id)
+    assert rated.sell_rate_snapshot["scope"] == "plan_version", rated.sell_rate_snapshot
+    assert rated.billable_amount_minor == 110  # 11×10 via A's OWN plan V1
