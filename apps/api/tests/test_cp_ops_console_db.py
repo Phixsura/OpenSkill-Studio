@@ -438,3 +438,79 @@ async def test_outbox_requeue_and_ops_list_endpoints(db):
             if m is not None:
                 await check.delete(m)
         await check.commit()
+
+
+@pytest.mark.asyncio
+async def test_settlement_entry_trace_resolves_all_source_shapes(db):
+    """R288: the money-audit drill-down — an entry whose source_type is
+    'invoice_line' but whose source_id is a CREDIT NOTE id (the credit-note
+    adjustment natural key, R48[34]) must resolve to the note's invoice
+    (pre-fix it always yielded a null source); plain invoice and marketplace
+    purchase sources resolve to their blocks; unknown entry 404."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.billing import CreditNote, Invoice
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.controlplane.services.revenue_share import _insert_entry
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    invoice = Invoice(
+        tenant_id=tenant.id, currency="USD", status="open",
+        subtotal_minor=10000, total_minor=10000, amount_due_minor=10000)
+    db.add(invoice)
+    await db.flush()
+    note = CreditNote(
+        invoice_id=invoice.id, tenant_id=tenant.id, amount_minor=1000,
+        currency="USD", reason="adj", created_by=user.id)
+    db.add(note)
+    await db.flush()
+
+    e_inv = await _insert_entry(
+        db, beneficiary_type="partner", partner_id=None, beneficiary_org_id=None,
+        source_type="invoice", source_id=invoice.id, rule_id=None,
+        rule_snapshot={}, revenue_base_minor=10000, share_amount_minor=1000,
+        currency="USD", period="2026-09", status="accrued")
+    e_note = await _insert_entry(
+        db, beneficiary_type="partner", partner_id=None, beneficiary_org_id=None,
+        source_type="invoice_line", source_id=note.id, rule_id=None,
+        rule_snapshot={}, revenue_base_minor=-1000, share_amount_minor=-100,
+        currency="USD", period="2026-09", status="accrued")
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+    ids = dict(inv=e_inv.id, note=e_note.id, invoice=invoice.id)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{str(ULID())}",
+                            headers=hdr)
+            assert r.status_code == 404
+
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{ids['inv']}",
+                            headers=hdr)
+            assert r.status_code == 200, r.text
+            src = r.json()["data"]["source"]
+            assert src["type"] == "invoice" and src["invoice_id"] == ids["invoice"]
+
+            # R48[34]: credit-note natural key resolves through the note
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{ids['note']}",
+                            headers=hdr)
+            assert r.status_code == 200, r.text
+            src = r.json()["data"]["source"]
+            assert src is not None, "credit-note-sourced entry traced to null"
+            assert src["invoice_id"] == ids["invoice"]
+    finally:
+        app.router.lifespan_context = orig
