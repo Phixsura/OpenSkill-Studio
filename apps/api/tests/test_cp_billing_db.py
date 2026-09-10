@@ -3275,3 +3275,119 @@ async def test_stripe_webhook_out_of_order_status_events_ignored(db):
     await db.refresh(sub)
     assert sub.status == "active", "a newer paid event must reactivate"
     assert sub.last_billing_event_at == t3
+
+
+# ── R203: preview↔invoice DIFFERENTIAL test ──────────────────
+# Two independent production paths compute the customer-facing net of a
+# mid-period immediate plan change: change_plan() returns the preview shown
+# at approval time, and close_period_and_invoice() emits the proration lines
+# actually billed. If they diverge by a cent, the customer approved a number
+# they never pay (or pay more than). Prior tests hand-computed one side; this
+# drives BOTH on randomized economics and asserts agreement.
+
+
+async def _seed_plan(db, user, key, *, amount, included, seat_price):
+    from app.controlplane.models.plan import PlanPrice
+    from app.controlplane.services import plans as plan_svc
+
+    plan = await plan_svc.create_plan(
+        db, key=key, name=key, description=None, actor=_actor(user)
+    )
+    draft = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    draft.entitlements = {"max_active_learners": 1000, "max_instructors": 100}
+    db.add(
+        PlanPrice(
+            plan_version_id=draft.id,
+            currency="USD",
+            interval="month",
+            amount_minor=amount,
+            included_seats=included,
+            overage_seat_amount_minor=seat_price,
+        )
+    )
+    await db.flush()
+    await plan_svc.activate_version(db, draft, actor=_actor(user))
+    return plan.key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "old_amt,new_amt,old_inc,new_inc,old_sp,new_sp,seats,day",
+    [
+        (10000, 20000, 5, 5, 500, 500, 0, 15),    # pure plan upgrade, no seats
+        (20000, 10000, 5, 5, 500, 500, 0, 15),    # downgrade (immediate)
+        (10000, 8000, 10, 2, 500, 500, 10, 15),   # R123[C0]: shrink included, live seats
+        (10000, 20000, 5, 8, 300, 700, 12, 10),   # included + price both change
+        (15000, 15000, 3, 3, 400, 400, 7, 20),    # same fee, seat band only
+        (9999, 33333, 1, 9, 111, 999, 5, 3),      # odd numbers → rounding stress
+    ],
+)
+async def test_preview_matches_invoice_proration(
+    db, old_amt, new_amt, old_inc, new_inc, old_sp, new_sp, seats, day
+):
+    from app.models.organization import (
+        MemberStatus,
+        Organization,
+        OrgMember,
+        OrgRole,
+    )
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    uniq = str(ULID()).lower()[:8]
+    old_key = await _seed_plan(db, user, f"old-{uniq}", amount=old_amt, included=old_inc, seat_price=old_sp)
+    new_key = await _seed_plan(db, user, f"new-{uniq}", amount=new_amt, included=new_inc, seat_price=new_sp)
+
+    # `seats` live STUDENT members in one org of the tenant → drives billable_seats
+    org = Organization(tenant_id=tenant.id, name=f"o{uniq}", slug=f"o{uniq}", created_by=user.id)
+    db.add(org)
+    await db.flush()
+    for _i in range(seats):
+        m = await _mk_user(db)
+        db.add(OrgMember(org_id=org.id, user_id=m.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+    await db.flush()
+
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key=old_key, interval="month", seats=0, provider="manual", actor=a
+    )
+    period = (
+        await db.execute(select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
+    ).scalar_one()
+    # Anchor a clean 30-day window; the change lands on `day`.
+    period.period_start = datetime(2026, 6, 1, tzinfo=UTC)
+    period.period_end = datetime(2026, 7, 1, tzinfo=UTC)
+    sub.current_period_start = period.period_start
+    sub.current_period_end = period.period_end
+    await db.flush()
+
+    # Freeze the change clock to `day` so preview and close agree on `at`.
+    import app.controlplane.services.billing as bmod
+
+    real_now = bmod._now
+    bmod._now = lambda: datetime(2026, 6, day, tzinfo=UTC)
+    try:
+        result = await billing_svc.change_plan(
+            db, tenant, sub, plan_key=new_key, seats=None, proration_mode="immediate", actor=a
+        )
+    finally:
+        bmod._now = real_now
+    preview_net = result["proration"]["net_minor"]
+    assert result["mode"] == "immediate"
+
+    # Close the period; sum the change's actual invoice contribution =
+    # per-segment plan proration + seat proration lines (the base plan line is
+    # the full-period NEW plan fee, not part of the change delta).
+    invoice = await billing_svc.close_period_and_invoice(db, period.id)
+    lines = (
+        (await db.execute(select(InvoiceLine).where(InvoiceLine.invoice_id == invoice.id)))
+        .scalars()
+        .all()
+    )
+    invoiced_change_net = sum(
+        line.amount_minor for line in lines if line.line_type == "proration"
+    )
+    assert invoiced_change_net == preview_net, (
+        f"preview shown {preview_net} but invoice billed {invoiced_change_net} "
+        f"[lines: {[(ln.line_type, ln.amount_minor) for ln in lines]}]"
+    )
