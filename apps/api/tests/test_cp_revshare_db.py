@@ -991,3 +991,110 @@ async def test_fixed_amount_rule_fx_conversion_and_missing_rate(db):
         effective_from=datetime.now(UTC) - timedelta(days=1))
     entry = await revshare_svc.accrue_for_invoice(db, inv.id)
     assert entry.share_amount_minor == 2000                 # 1000 EUR-minor × 2
+
+
+@pytest.mark.asyncio
+async def test_invoice_accrual_converts_to_partner_currency(db):
+    """R263: the SUCCESS arm of the invoice-path partner-currency conversion
+    (only the missing-rate 409 was tested) — share AND base convert at the
+    resolved rate."""
+    from app.controlplane.services import pricing as pricing_svc
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    partner.currency = "EUR"
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="10")
+    await db.flush()
+    await pricing_svc.create_fx_rate(
+        db, actor=_actor(user), base_currency="USD", quote_currency="EUR",
+        rate=Decimal("0.5"), effective_from=datetime.now(UTC) - timedelta(days=1))
+    invoice = await _mk_invoice(db, tenant, subtotal=100000)  # $1000 USD
+    entry = await revshare_svc.accrue_for_invoice(db, invoice.id)
+    assert entry.currency == "EUR"
+    assert entry.share_amount_minor == 5000            # 10% of $1000 → €50.00
+    assert entry.revenue_base_minor == 50000           # base converted too
+
+
+@pytest.mark.asyncio
+async def test_purchase_accrual_guards(db):
+    """R263: accrue_for_purchase's guard arcs — unknown purchase and unpaid
+    purchase are clean no-ops; a TERMINATED partner stops NEW purchase
+    accruals (R113[H4]'s purchase-path sibling — only the invoice path had a
+    sentinel)."""
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+
+    assert await revshare_svc.accrue_for_purchase(db, str(ULID())) == 0  # unknown
+
+    listing = MarketplaceListing(
+        product_type="workflow_pack", product_id=str(ULID()),
+        seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
+        offer_type="paid", price_minor=10000, currency="USD",
+        platform_commission_pct=Decimal("20"), status="active", created_by=user.id)
+    db.add(listing)
+    await db.flush()
+
+    def mk_purchase(status="paid"):
+        return MarketplacePurchase(
+            listing_id=listing.id, buyer_tenant_id=tenant.id,
+            buyer_org_id=str(ULID()), purchaser_user_id=user.id, status=status,
+            amount_minor=10000, currency="USD", platform_fee_minor=2000,
+            seller_share_minor=7000, partner_share_minor=1000,
+            economics_snapshot={"partner_id": partner.id, "seller_org_id": None})
+
+    pending = mk_purchase(status="pending")
+    db.add(pending)
+    await db.flush()
+    assert await revshare_svc.accrue_for_purchase(db, pending.id) == 0   # unpaid
+
+    partner.status = "terminated"
+    await db.flush()
+    paid = mk_purchase()
+    db.add(paid)
+    await db.flush()
+    assert await revshare_svc.accrue_for_purchase(db, paid.id) == 0      # terminated
+    entries = (
+        (await db.execute(
+            select(RevenueShareEntry).where(RevenueShareEntry.source_id == paid.id)))
+        .scalars().all()
+    )
+    assert entries == []
+
+
+@pytest.mark.asyncio
+async def test_refund_before_accrual_retries_until_paid_lands(db):
+    """R263: purchase.refunded arriving BEFORE purchase.paid was processed —
+    the handler must RAISE (outbox retries) while a live/failed paid message
+    exists, and no-op silently only when the purchase legitimately has no
+    accruals (R129[M7]: including dead-lettered originals keeps both
+    requeueable together)."""
+    from app.controlplane.models.outbox import OutboxMessage, enqueue
+    from app.controlplane.services.revenue_share import _handle_purchase_refunded
+
+    pid = str(ULID())
+    # free/partner-less purchase: no accruals, no pending paid → clean no-op
+    await _handle_purchase_refunded(db, {"purchase_id": pid})
+
+    enqueue(db, "purchase.paid", {"purchase_id": pid})       # paid still queued
+    await db.flush()
+    with pytest.raises(RuntimeError, match="not yet processed"):
+        await _handle_purchase_refunded(db, {"purchase_id": pid})
+
+    msg = (
+        await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "purchase.paid",
+                OutboxMessage.payload["purchase_id"].astext == pid))
+    ).scalar_one()
+    msg.status = "failed"                                    # dead-lettered original
+    await db.flush()
+    with pytest.raises(RuntimeError, match="not yet processed"):
+        await _handle_purchase_refunded(db, {"purchase_id": pid})  # R129[M7]
+
+    msg.status = "done"                                      # processed (no accruals)
+    await db.flush()
+    await _handle_purchase_refunded(db, {"purchase_id": pid})  # now a clean no-op
