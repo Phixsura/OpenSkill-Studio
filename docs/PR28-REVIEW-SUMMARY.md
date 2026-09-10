@@ -1607,6 +1607,24 @@ intent is unreachable). Characterized as current behavior rather than
 silently changed — whether capability should be a distinct lower rung
 needs ADR-014 confirmation. **Open decision for the reviewer.**
 
+### R310: webhook isolation + confirmed convergence (2026-09-11)
+
+R310 pinned the R42[7] billing-webhook SAVEPOINT isolation (a DB-aborting
+handler leaves the event row recorded 'failed' and a replay dedups without
+re-applying) — the first cut raised a plain Python error that did not
+poison the transaction, so the guard-proof did not trip; corrected to a
+real DB abort (SELECT 1/0). That is the FOURTH weak test the revert-proof
+discipline caught this stretch (R274/R296/R308/R310), a strong signal the
+probes are at the coverage frontier.
+
+Convergence is now empirically confirmed: six consecutive probes into
+money-critical surfaces — ledger invariants I1–I4, split-economics
+conservation, resolve_site_context status matrix, enforce_seat_limit
+(R131[4]/R132[F12]), reverse_invoice_accruals (R56[24]/R97[m13]/R139),
+process_webhook idempotency — were all found ALREADY exhaustively covered.
+No tests were manufactured for them. All 329 tests across the ten touched
+control-plane suites pass together (3m29s).
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
