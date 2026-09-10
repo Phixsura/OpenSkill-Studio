@@ -576,3 +576,144 @@ def test_branding_validators_reject():
     bad(validate_legal_links, [{"label": "l", "url": None}])  # dead anchor
     bad(validate_legal_links, [{"label": "l", "url": "http://insecure"}])
     assert validate_legal_links([{"label": "Terms", "url": "https://x.example"}])
+
+
+# ── R245: exact-value kill-tests for the billable core (mutation-driven) ──
+# The metamorphic suite pins RELATIONS (monotonicity, antisymmetry, linearity)
+# which survive constant shifts like (1+pct/100)→(2+pct/100); these pin VALUES.
+# AST-mutation status after these tests: 54/58 killed. The 4 survivors are
+# provably equivalent, one pair per mirrored function: the sign Lt→LtE flips
+# only at quantity==0 where blocks==0 zeroes the term, and `blocks = 1` sits
+# in a dead defensive branch (ROUND_CEILING of a positive magnitude is >= 1).
+
+
+def test_billable_exact_values_all_policies():
+    from decimal import Decimal
+
+    from app.controlplane.services.rating import (
+        compute_billable_exact,
+        compute_billable_minor,
+    )
+
+    # cost_plus_percentage: 1000 @ 10% = 1100 (kills 1→2 and /100→/101)
+    assert compute_billable_minor(
+        "cost_plus_percentage", {"percentage": "10"},
+        internal_cost_minor=1000, quantity=Decimal(1)) == 1100
+    assert compute_billable_exact(
+        "cost_plus_percentage", {"percentage": "10"},
+        internal_cost_exact=Decimal(1000), quantity=Decimal(1)) == Decimal("1100")
+
+    # cost_plus_fixed: 1400 units over per=1000 → 2 started blocks
+    p = {"fixed_markup_minor": 50, "per_quantity": "1000"}
+    assert compute_billable_minor(
+        "cost_plus_fixed", p, internal_cost_minor=300,
+        quantity=Decimal(1400)) == 300 + 2 * 50            # kills +→-, sign 1→2
+    # reversal mirrors exactly (kills sign -1→-2)
+    assert compute_billable_minor(
+        "cost_plus_fixed", p, internal_cost_minor=-300,
+        quantity=Decimal(-1400)) == -300 - 2 * 50
+    # zero quantity bills zero blocks (kills the dead-branch Or variants)
+    assert compute_billable_minor(
+        "cost_plus_fixed", p, internal_cost_minor=300, quantity=Decimal(0)) == 300
+    assert compute_billable_exact(
+        "cost_plus_fixed", p, internal_cost_exact=Decimal("300.5"),
+        quantity=Decimal(1400)) == Decimal("400.5")
+    assert compute_billable_exact(                          # exact reversal sign
+        "cost_plus_fixed", p, internal_cost_exact=Decimal("-300.5"),
+        quantity=Decimal(-1400)) == Decimal("-400.5")
+    assert compute_billable_exact(                          # exact zero-quantity
+        "cost_plus_fixed", p, internal_cost_exact=Decimal("300.5"),
+        quantity=Decimal(0)) == Decimal("300.5")
+
+    # fixed_unit_price: $1/1M tokens on 4000 tokens → exact 0.4, minor 0
+    fp = {"unit_price_minor": 100, "per_quantity": "1000000"}
+    assert compute_billable_exact(
+        "fixed_unit_price", fp, internal_cost_exact=Decimal(0),
+        quantity=Decimal(4000)) == Decimal("0.4")
+    assert compute_billable_minor(
+        "fixed_unit_price", fp, internal_cost_minor=0, quantity=Decimal(4000)) == 0
+
+    # included_quota_then_overage: quota 100, prior 90, +30 → 20 over @ 5/unit
+    q = {"included_quota": "100", "overage_unit_price_minor": 5}
+    assert compute_billable_minor(
+        "included_quota_then_overage", q, internal_cost_minor=0,
+        quantity=Decimal(30), prior_period_quantity=Decimal(90)) == 100
+    assert compute_billable_exact(
+        "included_quota_then_overage", q, internal_cost_exact=Decimal(0),
+        quantity=Decimal(30), prior_period_quantity=Decimal(90)) == Decimal("100")
+    # prior ALREADY over quota: only the delta bills (kills total+already flip)
+    assert compute_billable_minor(
+        "included_quota_then_overage", q, internal_cost_minor=0,
+        quantity=Decimal(30), prior_period_quantity=Decimal(150)) == 150
+    assert compute_billable_exact(
+        "included_quota_then_overage", q, internal_cost_exact=Decimal(0),
+        quantity=Decimal(30), prior_period_quantity=Decimal(150)) == Decimal("150")
+
+
+def test_billable_exclude_failed_gate_both_arms():
+    """R245: `exclude_failed AND status==failed` — an Or mutant either
+    zero-bills every event under the flag or zero-bills every failed event
+    regardless of policy opt-in. Pin all four quadrants."""
+    from decimal import Decimal
+
+    from app.controlplane.services.rating import (
+        compute_billable_exact,
+        compute_billable_minor,
+    )
+
+    pp = {"percentage": "0", "exclude_failed": True}
+    base = dict(internal_cost_minor=500, quantity=Decimal(1))
+    # opted-in + failed → 0
+    assert compute_billable_minor(
+        "cost_plus_percentage", pp, usage_metadata={"status": "failed"}, **base) == 0
+    # opted-in + succeeded → bills
+    assert compute_billable_minor(
+        "cost_plus_percentage", pp, usage_metadata={"status": "completed"}, **base) == 500
+    # not opted-in + failed → bills
+    assert compute_billable_minor(
+        "cost_plus_percentage", {"percentage": "0"},
+        usage_metadata={"status": "failed"}, **base) == 500
+    assert compute_billable_exact(
+        "cost_plus_percentage", pp, internal_cost_exact=Decimal(500),
+        quantity=Decimal(1), usage_metadata={"status": "failed"}) == 0
+    # exact mirror of the other quadrants (the two functions mutate separately)
+    assert compute_billable_exact(
+        "cost_plus_percentage", pp, internal_cost_exact=Decimal(500),
+        quantity=Decimal(1), usage_metadata={"status": "completed"}) == 500
+    assert compute_billable_exact(
+        "cost_plus_percentage", {"percentage": "0"}, internal_cost_exact=Decimal(500),
+        quantity=Decimal(1), usage_metadata={"status": "failed"}) == 500
+
+
+def test_billable_guard_status_codes_and_fup_per_zero():
+    """R245: per_quantity<=0 must raise on EVERY policy path that divides by
+    it (a <= → < mutant lets per=0 reach a Decimal DivisionByZero 500), and
+    the AppError carries HTTP 422 (not just the right code string)."""
+    from decimal import Decimal
+
+    from app.controlplane.services.rating import (
+        compute_billable_exact,
+        compute_billable_minor,
+    )
+    from app.exceptions import AppError
+
+    for policy, params in [
+        ("cost_plus_fixed", {"fixed_markup_minor": 1, "per_quantity": "0"}),
+        ("fixed_unit_price", {"unit_price_minor": 1, "per_quantity": "0"}),
+        ("included_quota_then_overage",
+         {"included_quota": "1", "overage_unit_price_minor": 1, "per_quantity": "0"}),
+    ]:
+        with pytest.raises(AppError) as e:
+            compute_billable_minor(policy, params, internal_cost_minor=1, quantity=Decimal(1))
+        assert e.value.code == "INVALID_POLICY_PARAMS" and e.value.status_code == 422
+        with pytest.raises(AppError) as e:
+            compute_billable_exact(policy, params,
+                                   internal_cost_exact=Decimal(1), quantity=Decimal(1))
+        assert e.value.code == "INVALID_POLICY_PARAMS" and e.value.status_code == 422
+    with pytest.raises(AppError) as e:
+        compute_billable_minor("alchemy", {}, internal_cost_minor=1, quantity=Decimal(1))
+    assert e.value.status_code == 422
+    with pytest.raises(AppError) as e:
+        compute_billable_exact("alchemy", {}, internal_cost_exact=Decimal(1),
+                               quantity=Decimal(1))
+    assert e.value.status_code == 422
