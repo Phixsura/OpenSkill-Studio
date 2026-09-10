@@ -1507,3 +1507,62 @@ async def test_unvoid_blocked_row_restores_to_blocked_and_redrives(db):
         .scalars().all()
     )
     assert len(redrives) == 1                              # R133[F9] re-drive
+
+
+@pytest.mark.asyncio
+async def test_offering_cost_fallback_for_workflow_events(db):
+    """R284: a workflow-run event with no matching cost rate resolves its
+    internal cost from the provider connection's ModelOffering
+    (cost_per_call_usd) — the snapshot records the fallback and the offering
+    id so the rated row stays auditable."""
+    from app.models.organization import (
+        MemberStatus,
+        Organization,
+        OrgMember,
+        OrgRole,
+        OrgStatus,
+    )
+    from app.models.provider import (
+        ProviderAdapter,
+        ProviderConnection,
+        ProviderModelOffering,
+    )
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    org = Organization(
+        name="OffOrg", slug=f"off-{str(ULID()).lower()}", status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id, created_by=user.id)
+    db.add(org)
+    await db.flush()
+    db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.OWNER,
+                     status=MemberStatus.ACTIVE))
+    adapter = ProviderAdapter(key=f"off-{str(ULID()).lower()}", name="Off")
+    db.add(adapter)
+    await db.flush()
+    conn = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="c",
+                              created_by=user.id)
+    db.add(conn)
+    await db.flush()
+    db.add(ProviderModelOffering(
+        connection_id=conn.id, capability_key="text_generation",
+        model_name="off-model", is_active=True, cost_per_call_usd=Decimal("2")))
+    run = WorkflowRun(
+        org_id=org.id, pack_id=None, release_id=None, installation_id=None,
+        definition_snapshot={"steps": [], "edges": []}, inputs={},
+        started_by=user.id, status=RunStatus.COMPLETED)
+    db.add(run)
+    await db.flush()
+
+    # unique provider + voice_generation: no committed cost rate can match
+    event = await _mk_event(
+        db, tenant, org_id=org.id, usage_type="voice_generation", quantity=1,
+        provider=f"prov-{str(ULID()).lower()[:8]}",
+        workflow_run_id=run.id, provider_connection_id=conn.id,
+        model_or_service="off-model")
+    rated = await rating.rate_event(db, event.id)
+    assert rated is not None
+    snap = rated.cost_rate_snapshot or {}
+    assert snap.get("fallback") == "offering"
+    assert rated.internal_cost_minor == 200                # $2 → 200 US cents
