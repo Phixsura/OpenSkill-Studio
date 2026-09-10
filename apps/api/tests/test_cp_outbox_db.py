@@ -1,5 +1,9 @@
 """P12 outbox infrastructure tests (ADR-014 cross-cutting):
-same-tx atomicity, handler idempotency, backoff, dead-letter, SKIP LOCKED."""
+same-tx atomicity, handler idempotency, backoff, dead-letter, SKIP LOCKED.
+
+R253 mutation status for process_outbox_once: 12/13 killed. The survivor
+(claim window <=→< against the DB clock) is timing-equivalent — a message
+due at the exact DB microsecond waits one poll cycle; not pinnable."""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
@@ -121,7 +125,7 @@ async def test_failure_backs_off_then_dead_letters(test_topic, monkeypatch):
 
     @register_handler(test_topic)
     async def _handler(session, payload):  # noqa: ARG001
-        raise RuntimeError("boom")
+        raise RuntimeError("boom" + "x" * 3000)  # R253: >2000 chars, must truncate
 
     try:
         async with AsyncSessionLocal() as db:
@@ -144,10 +148,16 @@ async def test_failure_backs_off_then_dead_letters(test_topic, monkeypatch):
                 ).scalar_one()
                 assert msg.attempts == attempt
                 assert "boom" in (msg.last_error or "")
+                assert len(msg.last_error) == 2000  # R253: exact truncation
                 if attempt < 3:
                     assert msg.status == "pending"
-                    # Exponential backoff pushed available_at into the future
-                    assert msg.available_at.replace(tzinfo=UTC) > datetime.now(UTC)
+                    # R253: pin the exact exponential schedule 30 * 2**attempts
+                    # (a ">now" assert let 30→31 / base-2 drift survive mutation)
+                    delta = (
+                        msg.available_at.replace(tzinfo=UTC) - datetime.now(UTC)
+                    ).total_seconds()
+                    expected = 30 * (2**attempt)
+                    assert expected - 10 < delta <= expected
                 else:
                     assert msg.status == "failed"  # dead-lettered
     finally:
@@ -177,7 +187,9 @@ async def test_unknown_topic_backs_off_then_dead_letters():
                 await db.execute(select(OutboxMessage).where(OutboxMessage.topic == topic))
             ).scalar_one()
             assert msg.status == "pending" and msg.attempts == 1
-            assert msg.available_at > datetime.now(UTC)  # backed off
+            # R253: unknown-topic retry window is exactly 5 minutes
+            delta = (msg.available_at - datetime.now(UTC)).total_seconds()
+            assert 290 < delta <= 300
             # Fast-forward to the dead-letter threshold
             msg.attempts = app_settings.outbox_max_attempts - 1
             msg.available_at = datetime.now(UTC) - timedelta(seconds=1)
