@@ -1087,3 +1087,63 @@ async def test_export_marks_ledger_and_license_truncation(db, monkeypatch):
     assert "licenses" in bundle["truncated_collections"]
     assert len(bundle["credit_ledger"]) == 2               # capped, marked
     assert len(bundle["licenses"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_provision_run_resume_is_step_idempotent(db, monkeypatch):
+    """R320: a provision run that fails MID-machine (here at
+    apply_entitlement_overrides, after create_tenant + create_org) records
+    status=failed with the completed steps' done-marks intact. Re-running
+    RESUMES: it skips create_tenant/create_org (via _step_done) — it must NOT
+    create a SECOND tenant or org — and completes. Guard-proven by forcing
+    _step_done False (a second tenant then appears)."""
+    from sqlalchemy import func as _f
+
+    from app.controlplane.models.tenant import TenantAccount
+    from app.controlplane.services import plans as _plans
+    from app.controlplane.services import provisioning as prov
+
+    user = await _mk_user(db)
+    bp = TenantBlueprint(
+        name=f"R320 {ULID()}",
+        config=provision_svc.validate_blueprint_config(
+            {"plan_key": "school", "entitlement_overrides": {"max_organizations": 5}}),
+        created_by=user.id)
+    db.add(bp)
+    await db.flush()
+    slug = f"r320-{str(ULID()).lower()[:10]}"
+    run = await provision_svc.create_provision_run(
+        db, blueprint_id=bp.id, name="Resume Co", slug=slug,
+        idempotency_key=f"r320-{ULID()}", partner_id=None, actor=_actor(user))
+
+    # fail once at apply_entitlement_overrides
+    real_set_override = _plans.set_override
+    calls = {"n": 0}
+
+    async def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient override failure")
+        return await real_set_override(*a, **kw)
+
+    monkeypatch.setattr(prov, "set_override", flaky, raising=False)
+    # prov imports set_override locally inside the step; patch the source module
+    monkeypatch.setattr(_plans, "set_override", flaky)
+
+    await provision_svc.execute_provision_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "failed"
+    assert provision_svc._step_done(run, "create_tenant")
+    assert run.tenant_id is not None
+    first_tenant_id = run.tenant_id
+
+    # resume → completes, no second tenant/org for this slug
+    await provision_svc.execute_provision_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "completed"
+    assert run.tenant_id == first_tenant_id          # SAME tenant, not re-created
+    n_tenants = (
+        await db.execute(
+            select(_f.count(TenantAccount.id)).where(TenantAccount.slug == slug))
+    ).scalar_one()
+    assert n_tenants == 1                             # resume did not double-create
