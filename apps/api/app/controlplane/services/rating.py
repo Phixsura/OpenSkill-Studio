@@ -340,6 +340,15 @@ async def _resolve_cost_rate(
                 .where(
                     ProviderCostRate.provider == event.provider,
                     ProviderCostRate.model_or_service.is_(None),
+                    # R311: a TRUE provider-wildcard carries no capability_key.
+                    # Without this, a provider-scoped capability rate (model
+                    # NULL, capability_key set) was swallowed here and labeled
+                    # 'provider_wildcard', and the dedicated capability rung
+                    # (ADR-014: exact → provider wildcard → capability) was
+                    # unreachable — conflating two distinct ladder rungs and
+                    # letting effective_from, not the documented precedence,
+                    # pick between a wildcard and a capability rate.
+                    ProviderCostRate.capability_key.is_(None),
                     ProviderCostRate.usage_type == event.usage_type,
                     window,
                 )

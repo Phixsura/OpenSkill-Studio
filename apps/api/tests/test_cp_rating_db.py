@@ -1664,19 +1664,23 @@ async def test_cost_ladder_exact_beats_wildcard(db):
 
 
 @pytest.mark.asyncio
-async def test_capability_rate_resolves_through_wildcard_rung_characterization(db):
-    """R309: CHARACTERIZATION (documents today's behavior, not an endorsement).
-    The provider-wildcard rung query filters only (provider, model IS NULL,
-    usage_type) and does NOT exclude capability_key, so a provider-scoped
-    capability rate (model NULL, capability_key set) is currently resolved AND
-    LABELED 'provider_wildcard'; the dedicated 'capability' rung is reached
-    only when no such row matches. provider is NOT NULL at the schema, so the
-    rung's 'provider-agnostic (NULL provider)' intent is unreachable. Pinned so
-    any INTENTIONAL ladder change (e.g. adding capability_key IS NULL to the
-    wildcard query) shows up as a deliberate diff, never a silent one."""
+async def test_capability_rung_distinct_and_below_wildcard(db):
+    """R311: ADR-014 ladder is exact → provider wildcard → capability, so
+    capability is a DISTINCT rung BELOW provider-wildcard. Two arcs:
+    (1) a provider-scoped capability rate (model NULL, capability_key set)
+        with NO true wildcard resolves through the CAPABILITY rung, labeled
+        'capability' (pre-R311 it was swallowed by the wildcard rung and
+        mislabeled 'provider_wildcard');
+    (2) when BOTH a true provider-wildcard (capability_key NULL) AND a
+        capability rate exist, the WILDCARD wins by rung precedence even if
+        the capability rate is newer — precedence, not effective_from."""
+    from app.controlplane.models.pricing import ProviderCostRate
+
+    t0 = datetime.now(UTC) - timedelta(days=2)
+
+    # (1) capability-only → capability rung
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
-    t0 = datetime.now(UTC) - timedelta(days=2)
     await pricing_svc.create_cost_rate(
         db, actor=_actor(user), provider="acme", model_or_service=None,
         capability_key="image_generation", usage_type="image_generation",
@@ -1684,5 +1688,23 @@ async def test_capability_rate_resolves_through_wildcard_rung_characterization(d
     ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
                          provider="acme", model_or_service="acme-img")
     r = await rating.rate_event(db, ev.id)
-    assert r.cost_rate_snapshot["resolution"] == "provider_wildcard"
+    assert r.cost_rate_snapshot["resolution"] == "capability"
     assert r.internal_cost_minor == 9
+
+    # (2) true wildcard @ 0.05 (older) + capability @ 0.09 (NEWER) → wildcard wins
+    user2 = await _mk_user(db)
+    tenant2 = await _mk_tenant(db, user2)
+    await pricing_svc.create_cost_rate(
+        db, actor=_actor(user2), provider="bolt", model_or_service=None,
+        usage_type="image_generation", currency="USD",
+        unit_cost=Decimal("0.05"), effective_from=t0)
+    await pricing_svc.create_cost_rate(
+        db, actor=_actor(user2), provider="bolt", model_or_service=None,
+        capability_key="image_generation", usage_type="image_generation",
+        currency="USD", unit_cost=Decimal("0.09"),
+        effective_from=t0 + timedelta(days=1))  # newer, but lower rung
+    ev2 = await _mk_event(db, tenant2, usage_type="image_generation", quantity=1,
+                          provider="bolt", model_or_service="bolt-img")
+    r2 = await rating.rate_event(db, ev2.id)
+    assert r2.cost_rate_snapshot["resolution"] == "provider_wildcard"
+    assert r2.internal_cost_minor == 5   # wildcard rung beats the newer capability rate
