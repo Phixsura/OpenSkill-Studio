@@ -2485,6 +2485,72 @@ async def test_workflow_run_enforces_budget_policy(c):
 
 
 @pytest.mark.asyncio
+async def test_workflow_run_enforces_user_scope_budget(c):
+    """R323: every workflow usage event is emitted with
+    user_id=run.started_by, so a user-scoped policy COUNTS workflow spend —
+    but the create_run budget gate never threaded the starter's user dim, so
+    a user-scope hard cap blocked only evaluation spend while the primary
+    costed path ran unbounded. A $0.50 user cap vs a $9.99/call offering must
+    reject the starter's run 429; a cap scoped to a DIFFERENT user must not."""
+    from sqlalchemy import update as sa_update
+    from ulid import ULID
+
+    from app.controlplane.models.credit import BudgetPolicy
+    from app.controlplane.services.tenants import get_tenant_for_org
+    from app.core.database import AsyncSessionLocal
+    from app.models.provider import ProviderModelOffering
+
+    h, user = await _auth(c)
+    oid = await _org(c, h)
+    offering_id = await _mock_offering(c, h, oid)
+    install_id = await _install(c, h, oid, _definition(with_provider=True))
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(ProviderModelOffering)
+            .where(ProviderModelOffering.id == offering_id)
+            .values(cost_per_call_usd=9.99)
+        )
+        tenant = await get_tenant_for_org(db, oid)
+        db.add(
+            BudgetPolicy(
+                tenant_id=tenant.id,
+                scope_type="user",
+                scope_id=user["id"],  # the starter
+                period="monthly",
+                limit_minor=50,  # $0.50
+                currency=tenant.currency,
+                hard_stop=True,
+            )
+        )
+        await db.commit()
+
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "user capped"}},
+        headers=h,
+    )
+    assert r.status_code == 429, r.text
+    assert r.json()["error"]["code"] == "BUDGET_EXCEEDED"
+
+    # Scoped to a DIFFERENT user → must not govern this starter's runs
+    # (proves the dim is per-user matching, not a tenant-wide block).
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_update(BudgetPolicy)
+            .where(BudgetPolicy.scope_id == user["id"])
+            .values(scope_id=str(ULID()))
+        )
+        await db.commit()
+    r2 = await c.post(
+        f"/api/v1/orgs/{oid}/workflow-runs",
+        json={"installation_id": install_id, "inputs": {"topic": "other user cap"}},
+        headers=h,
+    )
+    assert r2.status_code == 201, r2.text
+
+
+@pytest.mark.asyncio
 async def test_idempotent_retry_survives_quota_and_suspension(c):
     """R74[2]: the monthly-run quota + require_tenant_active gated BEFORE the
     idempotency lookup — a retry of an already-accepted run 403'd when the

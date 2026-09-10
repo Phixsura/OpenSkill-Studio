@@ -332,8 +332,18 @@ class WorkflowRuntimeService:
         # R74[2]: budget gate also skipped on idempotent retries (the accepted
         # run's own projected spend must not re-block its retry).
         if not _is_idempotent_retry:
+            # R323: thread the starter as the user dim — every workflow usage
+            # event is emitted with user_id=run.started_by, so a user-scoped
+            # policy COUNTS workflow spend, yet this gate never matched it
+            # (user-scope hard caps only blocked evaluation spend while the
+            # primary costed path ran unbounded).
             await cp_facade.check_budget(
-                self.db, tenant, org_id, usage_type="workflow_run", projected_minor=projected
+                self.db,
+                tenant,
+                org_id,
+                user_id=started_by,
+                usage_type="workflow_run",
+                projected_minor=projected,
             )
 
         # Validate run inputs against the definition's input schema
