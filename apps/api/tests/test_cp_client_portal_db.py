@@ -738,3 +738,37 @@ async def test_final_accept_recheck_under_lock_toctou():
             )
     finally:
         await engine.dispose()
+
+
+# ── R238: guest-link + require_role validation coverage ──
+
+
+def test_require_role_pure():
+    from app.controlplane.services.client_portal import ClientPrincipal, require_role
+    from app.exceptions import AppError
+
+    p = ClientPrincipal(kind="guest", role="reviewer", label="x", project_id="pr")
+    require_role(p, "reviewer", "approver")   # allowed → no raise
+    with pytest.raises(AppError) as e:
+        require_role(p, "approver")           # reviewer lacks approver
+    assert e.value.code == "CLIENT_ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_create_guest_link_validation(db):
+    from datetime import UTC, datetime, timedelta
+
+    user = await _mk_user(db)
+    _, _, _, project, _ = await _mk_project_env(db, user)
+
+    async def rejects(**kw):
+        base = dict(project_id=project.id, label=None, email=None, role="approver",
+                    expires_at=datetime.now(UTC) + timedelta(days=7), actor=_actor(user))
+        base.update(kw)
+        with pytest.raises(AppError) as e:
+            await portal_svc.create_guest_link(db, **base)
+        assert e.value.code == "VALIDATION_ERROR"
+
+    await rejects(role="editor")                                       # bad role
+    await rejects(expires_at=datetime.now(UTC) - timedelta(days=1))    # already expired
+    await rejects(expires_at=datetime.now(UTC) + timedelta(days=91))   # >90 days
