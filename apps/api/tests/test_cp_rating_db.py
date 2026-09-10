@@ -1460,3 +1460,50 @@ async def test_fx_sweep_cursor_advances_past_unfixable_rows(db, monkeypatch):
                 RatedUsage.tenant_id == tenant.id, RatedUsage.status == "blocked"))
     ).scalar_one()
     assert still_blocked == 501                            # unfixable stay blocked
+
+
+@pytest.mark.asyncio
+async def test_unvoid_blocked_row_restores_to_blocked_and_redrives(db):
+    """R283: a row voided while BLOCKED has zero amounts — R132[F5] restores
+    it to 'blocked' (not 'rated', which would sweep a permanent zero-bill
+    into the next close), and R133[F9] re-drives rating via usage.recorded
+    (the FX rate may have landed while the row was voided; the fx sweep
+    skips voided rows, so nothing else would ever re-rate it)."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services.rating import unvoid_rated, void_rated
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    eid = str(ULID())
+    db.add(UsageEvent(
+        id=eid, tenant_id=tenant.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        usage_type="image_generation", quantity=1, unit="images",
+        occurred_at=datetime.now(UTC), source="manual"))
+    await db.flush()
+    row = RatedUsage(
+        usage_event_id=eid, tenant_id=tenant.id,
+        org_id="01JFAKEORGFAKEORGFAKEORGFA", usage_type="image_generation",
+        quantity=1, cost_rate_snapshot={}, internal_cost_minor=0,
+        internal_cost_currency="ZAR",
+        sell_rate_snapshot={"fx_gaps": ["ZAR->USD"]},
+        billable_amount_minor=0, billable_amount_exact=Decimal(0),
+        billable_currency="ZAR", status="blocked", rated_at=datetime.now(UTC))
+    db.add(row)
+    await db.flush()
+
+    await void_rated(db, row.id, reason="strike", actor=_actor(user))
+    await db.refresh(row)
+    assert row.status == "voided"
+
+    restored = await unvoid_rated(db, row.id, reason="restore", actor=_actor(user))
+    assert restored.status == "blocked"                    # NOT 'rated' (R132[F5])
+    redrives = (
+        (await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "usage.recorded",
+                OutboxMessage.payload["usage_event_id"].astext == eid)))
+        .scalars().all()
+    )
+    assert len(redrives) == 1                              # R133[F9] re-drive
