@@ -1484,6 +1484,20 @@ the suite the day it lands, each proven by stripping a real gate:
   source (proven by skipping the note lookup); invoice sources and
   unknown-entry 404.
 
+### R289–R290: fifth sweep dimension + comment input guards (2026-09-10)
+
+- **R289** extends the authz tripwire family to partner self-service: an
+  admin of partner A hitting every /partners/{partner_id} route with
+  partner B's real id gets uniform 401/403/404 (B's revenue-share
+  statements, attributed tenants and settlement CSV are a financial
+  disclosure); guard-proven by dropping require_partner_member.
+- **R290** the guest-facing comment text guards (R87 NUL-to-500 class):
+  NUL/control chars, empty, >5000-char and out-of-range time anchors
+  rejected at the schema; guard-proven by neutering reject_ctrl_str. The
+  statement-CSV export was checked and found NOT injectable — every column
+  is a ULID/enum/int/ISO timestamp with no attacker-controlled free text,
+  so no formula-injection hardening was manufactured.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
