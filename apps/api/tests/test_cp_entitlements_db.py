@@ -1146,3 +1146,68 @@ async def test_update_draft_duplicate_price_pair_422(db):
     await db.execute(_delete(PlanVersion).where(PlanVersion.plan_id == plan.id))
     await db.execute(_delete(ProductPlan).where(ProductPlan.id == plan.id))
     await db.flush()
+
+
+# ── R254: mutation kill-set for the quota/feature gates + decimal normalize ──
+# Status: 26/30 killed. The 4 survivors are equivalent: two limit(1)→limit(2)
+# flips are shielded by the one-live-subscription / one-active-trial-plan data
+# invariants (scalar_one_or_none only differs on invariant-violating rows),
+# and the trial-end / override-expiry <=→< flips differ only at the exact
+# database microsecond — timing, not logic.
+
+
+@pytest.mark.asyncio
+async def test_decimal_normalization_and_none_default(db):
+    """R254: `d.type == "decimal" AND isinstance(Decimal)` — the Or mutant
+    str()'s a None default into the string "None" (poisoning the cache and
+    crashing .get()); the NotEq mutant leaves raw Decimals in the cached
+    values. Pin both: decimal defaults surface as str, None stays None."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    eff = await get_effective(db, tenant)
+    assert eff.values["max_storage_gb"] == "5"          # str-normalized
+    assert isinstance(eff.get("max_storage_gb"), Decimal)
+    assert eff.values["max_ai_budget_usd_month"] is None  # None, never "None"
+    assert eff.get("max_ai_budget_usd_month") is None
+
+
+@pytest.mark.asyncio
+async def test_quota_and_feature_gate_arms(db):
+    """R254: check_quota's guard arms (unknown key, bool key), the soft-storage
+    default arm, and require_feature's arms — with exact HTTP statuses."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+
+    with pytest.raises(AppError) as e:
+        await check_quota(db, tenant, "no_such_key", current=0)
+    assert e.value.code == "UNKNOWN_ENTITLEMENT" and e.value.status_code == 422
+    with pytest.raises(AppError) as e:                   # bool key not numeric
+        await check_quota(db, tenant, "custom_domain", current=0)
+    assert e.value.status_code == 422
+
+    # storage is soft-by-default when over (no override present)
+    dec = await check_quota(db, tenant, "max_storage_gb", current=999)
+    assert dec.allowed is True and dec.soft_warning is True
+    # a hard numeric (max_organizations, default 1) raises 403 when over
+    with pytest.raises(AppError) as e:
+        await check_quota(db, tenant, "max_organizations", current=1)
+    assert e.value.code == "QUOTA_EXCEEDED" and e.value.status_code == 403
+    # at the limit exactly → allowed, no warning
+    ok = await check_quota(db, tenant, "max_organizations", current=0)
+    assert ok.allowed is True and ok.soft_warning is False
+    # a SOFT-CAPABLE key without a soft override is still HARD by default
+    # (kills the `soft and d.soft_capable` → or mutant, which silently made
+    # every soft-capable quota advisory)
+    with pytest.raises(AppError) as e:
+        await check_quota(db, tenant, "max_active_learners", current=10_000)
+    assert e.value.code == "QUOTA_EXCEEDED"
+
+    with pytest.raises(AppError) as e:
+        await require_feature(db, tenant, "no_such_flag")
+    assert e.value.status_code == 422
+    with pytest.raises(AppError) as e:                   # numeric key not a feature
+        await require_feature(db, tenant, "max_organizations")
+    assert e.value.status_code == 422
+    with pytest.raises(AppError) as e:                   # off-by-default feature
+        await require_feature(db, tenant, "custom_domain")
+    assert e.value.code == "FEATURE_NOT_AVAILABLE" and e.value.status_code == 403
