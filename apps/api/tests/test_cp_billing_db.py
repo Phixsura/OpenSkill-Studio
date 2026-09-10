@@ -3685,3 +3685,48 @@ async def test_reactivate_subscription_arcs(db):
     with pytest.raises(AppError) as e:
         await billing_svc.reactivate_subscription(db, tenant, sub, actor=a)
     assert e.value.status_code == 409
+
+
+def test_billing_event_hwm_pure_boundaries():
+    """R271: the R167 event-ordering pair, pinned at the boundaries — an
+    event at EXACTLY the high-water mark is not stale (equal-time retries
+    still apply; dedup lives on the event unique key), the mark advances only
+    on strictly newer, and unknown occurred_at neither stales nor advances.
+
+    Mutation status: 6/7 killed; the survivor (advance > → >=) is provably
+    equivalent — an equal-time "advance" assigns the identical value.
+    """
+    from types import SimpleNamespace
+
+    from app.controlplane.services.billing import (
+        _advance_billing_event_hwm,
+        _is_stale_billing_event,
+    )
+
+    t1 = datetime(2026, 9, 1, tzinfo=UTC)
+    t2 = datetime(2026, 9, 2, tzinfo=UTC)
+
+    sub = SimpleNamespace(last_billing_event_at=None)
+    ev = SimpleNamespace(occurred_at=None)
+    assert _is_stale_billing_event(sub, ev) is False       # unknown time never stale
+    _advance_billing_event_hwm(sub, ev)
+    assert sub.last_billing_event_at is None               # and never advances
+
+    ev1 = SimpleNamespace(occurred_at=t1)
+    assert _is_stale_billing_event(sub, ev1) is False      # first event
+    _advance_billing_event_hwm(sub, ev1)
+    assert sub.last_billing_event_at == t1
+
+    assert _is_stale_billing_event(sub, ev1) is False      # EQUAL time: not stale
+    _advance_billing_event_hwm(sub, ev1)
+    assert sub.last_billing_event_at == t1                 # equal does not re-advance
+
+    ev0 = SimpleNamespace(occurred_at=t1 - timedelta(seconds=1))
+    assert _is_stale_billing_event(sub, ev0) is True       # older → stale
+    _advance_billing_event_hwm(sub, ev0)
+    assert sub.last_billing_event_at == t1                 # never regresses
+
+    ev2 = SimpleNamespace(occurred_at=t2)
+    assert _is_stale_billing_event(sub, ev2) is False
+    _advance_billing_event_hwm(sub, ev2)
+    assert sub.last_billing_event_at == t2

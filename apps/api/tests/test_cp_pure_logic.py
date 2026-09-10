@@ -805,3 +805,25 @@ def test_specificity_rank_matrix():
     # tenant scope wins even when partner/plan also present on the policy
     assert rank(pt="t1", pp="p9", pv="v9") == 3
     assert rank(pt="t2", pp="p1", partner_id="p1") is None
+
+
+def test_convert_minor_exact_across_minor_multipliers():
+    """R271: convert_minor/convert_exact were pinned only by metamorphic
+    RELATIONS — exact values across differing minor multipliers (the R81
+    100x-JPY class) were not. $100.00 at 150 JPY/USD is ¥15,000 (JPY minor
+    ×1), and the round trip returns the original to within rounding."""
+    from decimal import Decimal
+
+    from app.controlplane.services.rating import convert_exact, convert_minor
+
+    # USD (×100) → JPY (×1)
+    assert convert_minor(10000, Decimal("150"), "USD", "JPY") == 15000
+    # JPY (×1) → USD (×100)
+    assert convert_minor(15000, Decimal("0.0066666667"), "JPY", "USD") == 10000
+    # same-multiplier pair stays plain multiplication
+    assert convert_minor(10000, Decimal("0.5"), "USD", "EUR") == 5000
+    # half-minor rounds HALF_UP
+    assert convert_minor(1, Decimal("0.005"), "JPY", "USD") == 1   # 0.5 cent → 1
+    # exact keeps the fraction (sum-then-round, R75)
+    assert convert_exact(Decimal(1), Decimal("0.005"), "JPY", "USD") == Decimal("0.5")
+    assert convert_exact(Decimal(10000), Decimal("150"), "USD", "JPY") == Decimal("15000")

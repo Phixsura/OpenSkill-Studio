@@ -589,3 +589,31 @@ def test_parser_edge_kill_set():
 
     # a graph with nothing extractable is not evidence
     assert pc(json.dumps({"1": {"class_type": "Note", "inputs": {}}})) is None
+
+
+def test_max_json_depth_boundary_and_hostile_short_circuit():
+    """R271: the depth checker's own DoS contract — exactly-at-limit passes,
+    limit+1 rejects, and a 100k-deep hostile value neither recurses (the
+    walker is iterative) nor walks the whole structure (short-circuit)."""
+    import time
+
+    from app.schemas.base import max_json_depth, reject_deep_json
+
+    def nest(n):
+        v = 1
+        for _ in range(n):
+            v = [v]
+        return v
+
+    assert max_json_depth(nest(3)) == 4                    # 3 lists + scalar level
+    reject_deep_json(nest(63), "f", limit=64)              # at limit → ok
+    try:
+        reject_deep_json(nest(64), "f", limit=64)          # one past → rejected
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+
+    hostile = nest(100_000)                                # no RecursionError
+    t0 = time.perf_counter()
+    assert max_json_depth(hostile, limit=64) > 64
+    assert time.perf_counter() - t0 < 0.5                  # short-circuited
