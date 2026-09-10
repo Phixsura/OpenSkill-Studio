@@ -1262,6 +1262,15 @@ crash matrix, cross-cutting money invariants, e2e gap analysis):
   full 60 after the R185 dialog test update); tsc/eslint clean, vitest 192;
   gitleaks/pnpm-audit/pip-audit clean; Schemathesis 25,523/25,523 (Coverage+
   Fuzzing+Stateful). API log across both rounds: zero 500s, zero tracebacks.
+- **ROUND-3 COMPLETE FULL PASS (owner-requested second repeat, @980ada7 —
+  first full pass including R196 sub-second Redis timeouts)**: backend
+  **2218 passed / 1 skipped / 0 failed** (12 chunks); battery 178/178; live
+  e2e 52+49+148+17 (commercial's first attempt hit a provisioning-timing
+  flake under host memory pressure — zero server errors, passed on rerun);
+  browser 19+31+60+42; tsc/eslint clean, vitest 192; gitleaks/pnpm-audit/
+  pip-audit clean; Schemathesis 25,532/25,532 (Coverage+Fuzzing+Stateful);
+  API log zero 500s/tracebacks. Three consecutive complete passes now
+  agree suite-for-suite.
 - **R159 (industry scanner battery — supply chain, static analysis,
   secrets)**: 2 real dependency findings, fixed; code and history clean.
   pip-audit: httpx2 2.10.0 (transitive via openai) carried THREE CVEs —
