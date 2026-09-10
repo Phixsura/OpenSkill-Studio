@@ -401,3 +401,23 @@ def test_sanitize_length_bound_and_prefslice():
     huge = "a" * 10_000_000
     out = sanitize_untrusted_text(huge, 50)
     assert len(out) == 50
+
+
+def test_comfyui_infinity_field_does_not_discard_whole_result():
+    """R240: `"steps": Infinity` made int() raise OverflowError — not in the
+    inner except tuple — so the outer fail-closed handler discarded ALL
+    metadata. One hostile field must skip only itself."""
+    import json
+
+    from app.core.genmeta import parse_comfyui_prompt
+
+    wf = {
+        "3": {
+            "class_type": "KSampler",
+            "inputs": {"steps": 1e999, "cfg": 7.5, "seed": 42, "sampler_name": "euler"},
+        },
+    }
+    out = parse_comfyui_prompt(json.dumps(wf))  # serializes as Infinity
+    assert out is not None
+    assert "steps" not in out                    # hostile field skipped
+    assert out["cfg_scale"] == 7.5 and out["seed"] == 42 and out["sampler"] == "euler"

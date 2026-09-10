@@ -251,7 +251,11 @@ def parse_comfyui_prompt(text: str) -> dict | None:
                     if isinstance(v, (int, float, str)) and dst not in result:
                         try:
                             parsed = coerce(v) if coerce is not str else str(v)[:200]
-                        except (ValueError, TypeError):
+                        except (ValueError, TypeError, OverflowError):
+                            # R240: json.loads accepts `Infinity` — int(inf)
+                            # raises OverflowError, which the outer fail-closed
+                            # handler turned into discarding the WHOLE result.
+                            # Skip just this field like the other bad coercions.
                             continue
                         # json.loads accepts Infinity/NaN literals, which
                         # re-serialize as invalid JSON — clamp like A1111.
