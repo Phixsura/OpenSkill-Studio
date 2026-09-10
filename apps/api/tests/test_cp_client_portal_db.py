@@ -950,3 +950,50 @@ async def test_guest_token_never_outlives_its_link(db):
     _, ctx2 = await portal_svc.exchange_guest_token(db, raw2, None)
     assert ctx2["expires_in"] <= ttl_min * 60 + 5
     assert ctx2["expires_in"] < 80 * 24 * 3600
+
+
+@pytest.mark.asyncio
+async def test_reviewer_guest_cannot_approve_or_final_accept_via_http(db):
+    """R318: the client-decision role gate lives in the ENDPOINTS (approve /
+    final-accept require the 'approver' role; request-revision allows both).
+    A REVIEWER guest token must be 403 on approve and final-accept but 200 on
+    request-revision — enforced through the real HTTP layer, since removing
+    the endpoint's require_role call is exactly the hole this catches."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    user = await _mk_user(db)
+    _, _, _, project, submission = await _mk_project_env(db, user)
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
+    reviewer_auth = await _guest_auth(db, project, user, role="reviewer")
+    await db.commit()
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": reviewer_auth}
+            base = f"/api/v1/client-portal/projects/{project.id}"
+
+            r = await c.post(f"{base}/submissions/{submission.id}/approve",
+                             headers=hdr, json={"comment": "lgtm"})
+            assert r.status_code == 403, r.text
+            assert r.json()["error"]["code"] == "CLIENT_ACCESS_DENIED"
+
+            r = await c.post(f"{base}/final-accept", headers=hdr,
+                             json={"submission_id": submission.id, "comment": "ship"})
+            assert r.status_code == 403, r.text
+
+            # a reviewer CAN request a revision
+            r = await c.post(f"{base}/submissions/{submission.id}/request-revision",
+                             headers=hdr, json={"comment": "please fix the colors"})
+            assert r.status_code in (200, 201), r.text
+    finally:
+        app.router.lifespan_context = orig
