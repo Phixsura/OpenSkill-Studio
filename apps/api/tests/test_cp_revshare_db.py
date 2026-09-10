@@ -927,3 +927,67 @@ async def test_accrual_base_per_rule_type(db):
     await db.flush()
     entry3 = await revshare_svc.accrue_for_invoice(db, inv3.id)
     assert entry3.share_amount_minor == 200 * 5      # prorated units, not 10
+
+
+@pytest.mark.asyncio
+async def test_accrue_refund_mirrors_and_replay_noop(db):
+    """R262: a marketplace refund writes negative adjusted mirrors of the
+    purchase's accruals; an outbox redelivery must NOT double-reverse (the
+    natural key includes adjustment_of_id)."""
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    pid = str(ULID())
+    original = await revshare_svc._insert_entry(
+        db,
+        beneficiary_type="partner", partner_id=partner.id, beneficiary_org_id=None,
+        source_type="marketplace_purchase", source_id=pid,
+        rule_id=None, rule_snapshot={"rate": "30"},
+        revenue_base_minor=10000, share_amount_minor=3000,
+        currency="USD", period="2026-09", status="accrued")
+    assert original is not None
+
+    n = await revshare_svc.accrue_refund(db, pid)
+    assert n == 1
+    mirror = (
+        await db.execute(
+            select(RevenueShareEntry).where(
+                RevenueShareEntry.adjustment_of_id == original.id))
+    ).scalar_one()
+    assert mirror.share_amount_minor == -3000
+    assert mirror.revenue_base_minor == -10000
+    assert mirror.status == "adjusted"
+    assert mirror.rule_snapshot.get("void_reversal") is True
+
+    assert await revshare_svc.accrue_refund(db, pid) == 0   # replay no-op
+
+
+@pytest.mark.asyncio
+async def test_fixed_amount_rule_fx_conversion_and_missing_rate(db):
+    """R262: a fixed-amount rule denominated in another currency converts at
+    accrual time; a missing FX rate is a 409 (retryable), never a silent
+    unconverted amount."""
+    from app.controlplane.services import pricing as pricing_svc
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    rule = RevenueShareRule(
+        beneficiary_type="partner", partner_id=partner.id, revenue_type="all",
+        rule_type="fixed_amount_per_unit", rate=None, amount_minor=1000,
+        amount_currency="EUR", version=1,
+        effective_from=datetime.now(UTC) - timedelta(days=30), created_by=user.id)
+    db.add(rule)
+    await db.flush()
+    await revshare_svc.activate_rule(db, rule, actor=Actor(user_id=user.id, type="platform"))
+
+    inv = await _mk_invoice(db, tenant, subtotal=100000)    # USD invoice
+    with pytest.raises(AppError) as e:                      # no EUR->USD rate
+        await revshare_svc.accrue_for_invoice(db, inv.id)
+    assert e.value.code == "REVSHARE_FX_MISSING" and e.value.status_code == 409
+
+    await pricing_svc.create_fx_rate(
+        db, actor=Actor(user_id=user.id, type="platform"),
+        base_currency="EUR", quote_currency="USD", rate=Decimal("2"),
+        effective_from=datetime.now(UTC) - timedelta(days=1))
+    entry = await revshare_svc.accrue_for_invoice(db, inv.id)
+    assert entry.share_amount_minor == 2000                 # 1000 EUR-minor × 2
