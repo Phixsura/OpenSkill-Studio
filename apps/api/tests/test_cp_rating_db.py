@@ -1383,3 +1383,80 @@ async def test_overage_prior_quantity_accumulation(db):
                          occurred_at=t0 + timedelta(minutes=4))  # same timestamp
     r6 = await rating.rate_event(db, e6.id)
     assert r6.billable_amount_minor == -50                 # exact mirror, nets to 0
+
+
+@pytest.mark.asyncio
+async def test_fx_sweep_cursor_advances_past_unfixable_rows(db, monkeypatch):
+    """R282: the R130[12] anti-livelock cursor. 501 blocked rows that
+    rate_event cannot fix (simulated at the rate_event seam — the exact
+    scenario: a rate that doesn't cover occurred_at leaves rows blocked) —
+    the handler must page past them exactly once (chunk of 500, re-enqueue
+    with after_id = the page's last row) and TERMINATE on the second
+    message instead of re-selecting the same first 500 forever."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services import pricing as pricing_svc
+    from app.controlplane.services.rating import _handle_fx_created
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    occurred = datetime.now(UTC) - timedelta(days=30)
+
+    events, rated = [], []
+    for _ in range(501):
+        eid = str(ULID())
+        events.append(UsageEvent(
+            id=eid, tenant_id=tenant.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
+            usage_type="image_generation", quantity=1, unit="images",
+            occurred_at=occurred, source="manual"))
+        rated.append(RatedUsage(
+            usage_event_id=eid, tenant_id=tenant.id,
+            org_id="01JFAKEORGFAKEORGFAKEORGFA", usage_type="image_generation",
+            quantity=1, cost_rate_snapshot={}, internal_cost_minor=0,
+            internal_cost_currency="ZAR",
+            sell_rate_snapshot={"fx_gaps": ["ZAR->USD"]},
+            billable_amount_minor=0, billable_amount_exact=Decimal(0),
+            billable_currency="ZAR", status="blocked",
+            rated_at=datetime.now(UTC)))
+    db.add_all(events)
+    await db.flush()
+    db.add_all(rated)
+    await db.flush()
+
+    # the new rate does NOT cover occurred_at → every row stays unfixable
+    rate = await pricing_svc.create_fx_rate(
+        db, actor=_actor(user), base_currency="ZAR", quote_currency="USD",
+        rate=Decimal("0.05"), effective_from=datetime.now(UTC))
+
+    from app.controlplane.services import rating as rating_mod
+
+    async def unfixable(db_, event_id):                    # rate stays blocked
+        return None
+
+    monkeypatch.setattr(rating_mod, "rate_event", unfixable)
+
+    def cursor_msgs():
+        return db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "fx.rate_created",
+                OutboxMessage.payload["fx_rate_id"].astext == rate.id,
+                OutboxMessage.payload["after_id"].astext.isnot(None)))
+
+    await _handle_fx_created(db, {"fx_rate_id": rate.id})
+    msgs = (await cursor_msgs()).scalars().all()
+    assert len(msgs) == 1                                  # cursor re-enqueue
+    cursor = msgs[0].payload["after_id"]
+    assert cursor                                          # keyset carried
+
+    await _handle_fx_created(db, msgs[0].payload)          # second page: 1 row
+    msgs2 = (await cursor_msgs()).scalars().all()
+    assert len(msgs2) == 1                                 # no further enqueue
+    from sqlalchemy import func as _f
+
+    still_blocked = (
+        await db.execute(
+            select(_f.count(RatedUsage.id)).where(
+                RatedUsage.tenant_id == tenant.id, RatedUsage.status == "blocked"))
+    ).scalar_one()
+    assert still_blocked == 501                            # unfixable stay blocked
