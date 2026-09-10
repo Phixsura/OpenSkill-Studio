@@ -138,6 +138,19 @@ class StripeProvider(BillingProviderBase):
                 metadata=meta,
             )
         else:  # credit_topup | purchase — one-off payment
+            # R291: a one-off payment MUST carry an amount. amount_minor is
+            # typed int|None (subscriptions leave it unset); reaching this
+            # branch with None made _stripe_unit_amount do Decimal(None) →
+            # TypeError → 500. No live caller does so today (marketplace
+            # passes a NOT NULL column), but the adapter is a reusable surface
+            # a future top-up checkout will call — fail at the boundary with a
+            # clean 422 (the R88 doctrine) instead of a provider-side crash.
+            if amount_minor is None or amount_minor <= 0:
+                raise AppError(
+                    "VALIDATION_ERROR",
+                    f"A '{kind}' checkout requires a positive amount_minor",
+                    422,
+                )
             session = await asyncio.to_thread(
                 sdk.checkout.Session.create,
                 mode="payment",

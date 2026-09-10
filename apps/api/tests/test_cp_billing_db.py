@@ -905,6 +905,19 @@ def test_stripe_checkout_and_subscription_mapping(monkeypatch):
         assert kw2["line_items"][0]["price_data"]["unit_amount"] == 5000
         assert kw2["line_items"][0]["price_data"]["currency"] == "usd"
 
+        # R291: a one-off payment with no/zero amount must be a clean 422 at
+        # the boundary (amount_minor is typed int|None) — NOT Decimal(None)
+        # → TypeError 500 inside _stripe_unit_amount. The SDK is never called.
+        calls.pop("checkout", None)
+        for bad in (None, 0, -100):
+            with pytest.raises(AppError) as exc_amt:
+                await p.create_checkout_session(
+                    tenant=tenant, kind="credit_topup", amount_minor=bad,
+                    currency="USD", success_url="https://s", cancel_url="https://c")
+            assert exc_amt.value.code == "VALIDATION_ERROR"
+            assert exc_amt.value.status_code == 422
+        assert "checkout" not in calls          # guard fired before the SDK call
+
         # change reuses retrieved item id + disables Stripe-side proration
         await p.change_subscription("sub_1", "price_new", 5)
         mk = calls["sub_mod"]["kwargs"]
