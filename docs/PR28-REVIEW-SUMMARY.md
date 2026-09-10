@@ -1644,6 +1644,29 @@ control-plane suites pass together (3m29s).
   Both browser runs: zero 500s / zero tracebacks across 38,382 API log
   lines, memory stable (single Chromium, workers=1).
 
+### R314–R317: continued genuine-gap sweep (2026-09-11)
+
+Each round found a real uncovered arc (guard-proven where a guard exists):
+
+- **R314** purchase gates: draft/archived listing → 409, and R44[19] the
+  delisted-product guard (an active listing whose pack is unpublished/made
+  private must stop selling) — guard-proven.
+- **R316** the content-license invoice path end-to-end: a paid
+  bill_via_invoice purchase becomes one `license` line at period close with
+  invoice_id stamped, skipped while pending, and NOT re-billed on the next
+  close — guard-proven (dropping the stamp re-bills every close, a recurring
+  double-charge). R44[22]/R88[11] had only touched the edges.
+- **R317** the reconciliation-report resolve endpoint (finance-ops) had
+  zero coverage: resolve stamps status/resolved_note/resolved_at, unknown
+  → 404, re-resolve idempotent.
+
+Interleaved probes into fold-restore (R134), credit-note guards (R135),
+reconciliation per-currency scoping (R61[4]), seat-overage peak billing
+(R82[M1]) all found ALREADY covered — no tests manufactured. The full
+re-verification (backend 2360, frontend 221, six live batteries,
+Schemathesis 0 server-errors, browser 23/23, zero 500s) re-ran green after
+R311.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
