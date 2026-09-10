@@ -1409,6 +1409,26 @@ remaining untested money arcs:
   `soft and soft_capable`→or mutant that silently made every soft-capable
   quota advisory.
 
+### R271–R276: final arc closure + full live re-verification (2026-09-10)
+
+- R271 event-ordering HWM boundaries (6/7 mutants, survivor proven
+  equivalent), exact cross-multiplier FX values (the R81 100x-JPY class had
+  only metamorphic relations), the depth-checker's own DoS contract.
+- R272 domain verify exhaustion (threshold guard-proven), DnsTxtVerifier
+  record matching with DNS patched out, TLS provisioner contracts.
+- R273 manual_grant guards (R44[20] uncapped-seat pair, R123[L7]
+  foreign-org grant — both guard-proven).
+- R274 the credit ledger's reserved-funds floor — the first probe was
+  itself caught by the revert-proof discipline (debit's own pre-check
+  masked the guard; the honest vehicle is a negative manual adjustment).
+- R275 tenant member-management arcs incl. the cross-tenant
+  existence-oracle 404.
+- R276 full live re-verification against the R251+ code: backend suite
+  2324 passed / 0 failed (26 min), frontend tsc+eslint+vitest 192/192,
+  adversarial battery 178/178, commercial lifecycle 52/52, smoke 148/148,
+  workflow lifecycle 49/49, concurrency probe 17/17 — zero 500s and zero
+  tracebacks across 1,637 API log lines.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
