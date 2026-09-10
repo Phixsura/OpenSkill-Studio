@@ -1211,3 +1211,42 @@ async def test_quota_and_feature_gate_arms(db):
     with pytest.raises(AppError) as e:                   # off-by-default feature
         await require_feature(db, tenant, "custom_domain")
     assert e.value.code == "FEATURE_NOT_AVAILABLE" and e.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_remove_override_and_stale_activate(db):
+    """R255: remove_override was untested — the 404 arc, the delete flow
+    (effective value returns to the plan/default), and activate_version on a
+    non-draft raises the documented 409 instead of silently re-activating."""
+    user = await _mk_user(db, role=UserRole.ADMIN)
+    tenant = await _mk_tenant(db, user)
+
+    with pytest.raises(AppError) as e:
+        await plan_svc.remove_override(db, tenant.id, "max_organizations", actor=_actor(user))
+    assert e.value.code == "OVERRIDE_NOT_FOUND" and e.value.status_code == 404
+
+    await plan_svc.set_override(
+        db, tenant.id, "max_organizations",
+        value=42, enforcement="hard", expires_at=None, reason="test", actor=_actor(user),
+    )
+    eff = await get_effective(db, tenant)
+    assert eff.get("max_organizations") == 42 and eff.sources["max_organizations"] == "override"
+
+    await plan_svc.remove_override(db, tenant.id, "max_organizations", actor=_actor(user))
+    eff = await get_effective(db, tenant)
+    assert eff.get("max_organizations") != 42
+    assert eff.sources["max_organizations"] in ("default", "plan")
+    with pytest.raises(AppError):                       # idempotence: second remove 404s
+        await plan_svc.remove_override(db, tenant.id, "max_organizations", actor=_actor(user))
+
+    # stale activation: re-activating a non-draft version is the documented
+    # 409 (PLAN_VERSION_IMMUTABLE pre-check; PLAN_VERSION_CONFLICT remains the
+    # locked-race backstop exercised by test_concurrent_activate_single_winner)
+    plan = await plan_svc.create_plan(
+        db, key=f"r255-{str(ULID()).lower()[:8]}", name="R255", description=None,
+        actor=_actor(user))
+    draft = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    await plan_svc.activate_version(db, draft, actor=_actor(user))
+    with pytest.raises(AppError) as e:
+        await plan_svc.activate_version(db, draft, actor=_actor(user))
+    assert e.value.code == "PLAN_VERSION_IMMUTABLE" and e.value.status_code == 409
