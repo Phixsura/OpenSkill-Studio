@@ -3835,3 +3835,46 @@ async def test_subscription_http_self_service_guards(db):
             if s2 is not None:
                 await clean.delete(s2)
                 await clean.commit()
+
+
+@pytest.mark.asyncio
+async def test_webhook_failed_handler_records_event_and_dedups_replay(db, monkeypatch):
+    """R310: the R42[7] SAVEPOINT isolation. If the handler RAISES, the
+    just-inserted BillingWebhookEvent row must SURVIVE (status='failed'),
+    never vanish with a transaction rollback — otherwise the provider's
+    retry re-processes a possibly half-applied event. And a redelivery of the
+    same event id short-circuits as a duplicate: the handler is NOT re-run."""
+    from app.controlplane.models.billing import BillingWebhookEvent
+    from app.controlplane.services import billing as bsvc
+    from app.controlplane.services.billing_providers.mock import sign_mock_event
+
+    calls = {"n": 0}
+
+    async def boom(db_, provider, parsed):
+        calls["n"] += 1
+        raise RuntimeError("handler exploded mid-apply")
+
+    monkeypatch.setattr(bsvc, "_apply_webhook_event", boom)
+
+    event_id = f"mevt_{ULID()}"
+    payload = {"id": event_id, "type": "checkout.completed", "data": {"id": "x"}}
+    raw, sig = sign_mock_event(payload)
+    headers = {"x-mock-signature": sig}
+
+    r1 = await bsvc.process_webhook(db, "mock", headers, raw)
+    assert r1["duplicate"] is False and r1["status"] == "failed"
+    assert calls["n"] == 1
+
+    # the event row survived the handler failure (recorded, not rolled back)
+    row = (
+        await db.execute(
+            select(BillingWebhookEvent).where(
+                BillingWebhookEvent.provider == "mock",
+                BillingWebhookEvent.external_event_id == event_id))
+    ).scalar_one()
+    assert row.status == "failed" and row.error
+
+    # redelivery → duplicate short-circuit; handler is NOT called again
+    r2 = await bsvc.process_webhook(db, "mock", headers, raw)
+    assert r2["duplicate"] is True
+    assert calls["n"] == 1  # never re-applied
