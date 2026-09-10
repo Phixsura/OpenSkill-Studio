@@ -382,3 +382,67 @@ def test_validate_entitlement_value_rejects():
     assert validate_entitlement_value("max_organizations", 25) == 25
     assert validate_entitlement_value("max_storage_gb", None) is None      # unlimited
     assert validate_entitlement_value("max_storage_gb", "5.5") == "5.5"
+
+
+# ── R209: rating pure-function guard coverage (branch-gap analysis) ──
+# compute_billable_minor / compute_billable_exact are the per-policy-type
+# rating kernels called at rate time on STORED policy params (validate runs
+# at create, but a corrupted/legacy row or a bypassed create path reaches
+# these). Their per_quantity<=0, unknown-type, exclude_failed, and
+# included-quota branches were coverage gaps — each is a divide-by-zero or
+# silent-mis-bill sentinel.
+
+
+def test_compute_billable_guards():
+    from decimal import Decimal
+
+    from app.controlplane.services.rating import (
+        compute_billable_exact,
+        compute_billable_minor,
+    )
+    from app.exceptions import AppError
+
+    def rejects(fn, pt, params, **kw):
+        import pytest as _p
+        base = dict(internal_cost_minor=1000, quantity=Decimal(5)) if fn is compute_billable_minor \
+            else dict(internal_cost_exact=Decimal(1000), quantity=Decimal(5))
+        base.update(kw)
+        with _p.raises(AppError) as e:
+            fn(pt, params, **base)
+        assert e.value.code == "INVALID_POLICY_PARAMS"
+
+    for fn in (compute_billable_minor, compute_billable_exact):
+        # per_quantity <= 0 → divide-by-zero guard, all three per-based types
+        rejects(fn, "cost_plus_fixed", {"fixed_markup_minor": 100, "per_quantity": 0})
+        rejects(fn, "fixed_unit_price", {"unit_price_minor": 30, "per_quantity": -1})
+        rejects(fn, "included_quota_then_overage",
+                {"included_quota": 10, "overage_unit_price_minor": 5, "per_quantity": 0})
+        # unknown policy type → terminal raise
+        rejects(fn, "no_such_policy", {})
+
+    # exclude_failed short-circuits to 0 on a failed event (both fns)
+    assert compute_billable_minor(
+        "cost_plus_percentage", {"percentage": 50, "exclude_failed": True},
+        internal_cost_minor=1000, quantity=Decimal(1),
+        usage_metadata={"status": "failed"},
+    ) == 0
+    assert compute_billable_exact(
+        "cost_plus_percentage", {"percentage": 50, "exclude_failed": True},
+        internal_cost_exact=Decimal(1000), quantity=Decimal(1),
+        usage_metadata={"status": "failed"},
+    ) == Decimal(0)
+
+    # included_quota_then_overage: prior usage already past quota → only the
+    # NEW increment over quota is billed (branch that computes already_over)
+    billed = compute_billable_minor(
+        "included_quota_then_overage",
+        {"included_quota": 100, "overage_unit_price_minor": 10},
+        internal_cost_minor=0, quantity=Decimal(50), prior_period_quantity=Decimal(120),
+    )
+    assert billed == 500  # all 50 new units are over quota → 50*10
+    partial = compute_billable_minor(
+        "included_quota_then_overage",
+        {"included_quota": 100, "overage_unit_price_minor": 10},
+        internal_cost_minor=0, quantity=Decimal(50), prior_period_quantity=Decimal(80),
+    )
+    assert partial == 300  # 80→130 crosses at 100: only 30 units over → 30*10

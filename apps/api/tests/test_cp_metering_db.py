@@ -166,6 +166,21 @@ async def test_emit_usage_validation(db):
     with pytest.raises(AppError) as e3:
         await metering.emit_usage(db, usage_type="workflow_run", quantity=float("nan"), **base)
     assert e3.value.code == "INVALID_QUANTITY"
+    # R210: unknown usage SOURCE — the L49 guard had no test reaching its
+    # reject branch. A bad source (client typo, or a new emitter forgetting
+    # to register its source) must 422, not persist an unattributable event.
+    base_no_source = {k: v for k, v in base.items() if k != "source"}
+    with pytest.raises(AppError) as e4:
+        await metering.emit_usage(
+            db, usage_type="workflow_run", quantity=1, source="bogus_source", **base_no_source
+        )
+    assert e4.value.code == "VALIDATION_ERROR"
+    # positive control: a registered source persists
+    ok = await metering.emit_usage(
+        db, usage_type="workflow_run", quantity=1, source="manual",
+        idempotency_key=f"src-ok-{ULID()}", **base_no_source
+    )
+    assert ok is not None
 
 
 @pytest.mark.asyncio
