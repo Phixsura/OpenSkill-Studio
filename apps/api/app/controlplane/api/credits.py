@@ -367,6 +367,38 @@ async def create_budget(
         org = await db.get(Organization, body.scope_id)
         if org is None or org.tenant_id != tenant_id:
             raise AppError("VALIDATION_ERROR", "scope_id is not an org of this tenant", 422)
+    # R322: same inert-policy guard for project/cohort scopes — spend resolves
+    # by scope_id (project dim / cohort→project linkage), so a typo'd or
+    # foreign ULID silently matches nothing and the "hard cap" enforces
+    # nothing while the admin believes a budget exists.
+    if body.scope_type == "project":
+        from app.models.organization import Organization
+        from app.models.project import Project
+
+        row = (
+            await db.execute(
+                select(Organization.tenant_id)
+                .select_from(Project)
+                .join(Organization, Organization.id == Project.org_id)
+                .where(Project.id == body.scope_id)
+            )
+        ).scalar_one_or_none()
+        if row != tenant_id:
+            raise AppError("VALIDATION_ERROR", "scope_id is not a project of this tenant", 422)
+    if body.scope_type == "cohort":
+        from app.models.cohort import Cohort
+        from app.models.organization import Organization
+
+        row = (
+            await db.execute(
+                select(Organization.tenant_id)
+                .select_from(Cohort)
+                .join(Organization, Organization.id == Cohort.org_id)
+                .where(Cohort.id == body.scope_id)
+            )
+        ).scalar_one_or_none()
+        if row != tenant_id:
+            raise AppError("VALIDATION_ERROR", "scope_id is not a cohort of this tenant", 422)
     dup = (
         await db.execute(
             select(BudgetPolicy.id).where(

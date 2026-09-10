@@ -104,8 +104,18 @@ async def _spent_minor(db: AsyncSession, tenant: TenantAccount, policy: BudgetPo
         q = q.where(UsageEvent.project_id == policy.scope_id)
     elif policy.scope_type == "user":
         q = q.where(UsageEvent.user_id == policy.scope_id)
-    # cohort scope resolves through project metadata in v1 — no direct dim on
-    # usage events; enforced only when project→cohort linkage exists (ADR note)
+    elif policy.scope_type == "cohort":
+        # R322: cohort spend = usage in the cohort's projects (usage events
+        # have no cohort dim; Project.cohort_id is the linkage). Without this
+        # filter a matched cohort policy summed the WHOLE tenant's spend
+        # against the cohort limit — false BUDGET_EXCEEDED for the cohort.
+        from app.models.project import Project
+
+        q = q.where(
+            UsageEvent.project_id.in_(
+                select(Project.id).where(Project.cohort_id == policy.scope_id)
+            )
+        )
     if policy.usage_type is not None:
         q = q.where(RatedUsage.usage_type == policy.usage_type)
     total_exact = (await db.execute(q)).scalar_one()
@@ -137,6 +147,20 @@ async def check(
         .scalars()
         .all()
     )
+    # R322: no caller carries a cohort dim — resolve it from the project's
+    # cohort linkage, else every cohort-scope policy is silently inert (the
+    # admin's "hard cap" enforces nothing — same class as the R63[11]
+    # currency-mismatch and foreign-org-id inert policies).
+    if (
+        cohort_id is None
+        and project_id is not None
+        and any(p.scope_type == "cohort" for p in policies)
+    ):
+        from app.models.project import Project
+
+        cohort_id = (
+            await db.execute(select(Project.cohort_id).where(Project.id == project_id))
+        ).scalar_one_or_none()
     matched = [
         p
         for p in policies

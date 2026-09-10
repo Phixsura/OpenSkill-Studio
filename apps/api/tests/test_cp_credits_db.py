@@ -2607,3 +2607,137 @@ async def test_budget_warning_threshold_band(db):
     # 120% on a soft budget → allowed but flagged over (not threshold)
     d = await budget_svc.check(db, tenant, org, projected_minor=120)
     assert d.allowed and d.warnings[0].get("over") is True
+
+
+@pytest.mark.asyncio
+async def test_cohort_budget_enforced_and_scoped(db):
+    """R322: cohort-scope budgets were silently inert — no caller carries a
+    cohort dim, so policy_matches never matched and the admin's "hard cap"
+    enforced nothing (same class as the R63[11] currency-mismatch inert
+    policy). check() must resolve cohort via the project's Project.cohort_id
+    linkage, and _spent_minor must count ONLY the cohort's projects' spend —
+    not the whole tenant's (false BUDGET_EXCEEDED for the cohort)."""
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.models.cohort import Cohort
+    from app.models.organization import Organization, OrgStatus
+    from app.models.project import Project
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)  # USD
+    org = Organization(
+        name="CohortBudgetOrg", slug=f"cbo-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+    db.add(org)
+    await db.flush()
+    cohort = Cohort(org_id=org.id, name="Batch 9",
+                    slug=f"b9-{str(ULID()).lower()}", created_by=user.id)
+    db.add(cohort)
+    await db.flush()
+
+    def _proj(cohort_id):
+        return Project(org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
+                       description="d", instructions="i", rubric={"criteria": []},
+                       cohort_id=cohort_id, created_by=user.id)
+
+    p_in, p_out = _proj(cohort.id), _proj(None)
+    db.add_all([p_in, p_out])
+    await db.flush()
+
+    def _usage(project_id, amount):
+        eid = str(ULID())
+        db.add(UsageEvent(
+            id=eid, tenant_id=tenant.id, org_id=org.id, project_id=project_id,
+            usage_type="image_generation", quantity=1, unit="images",
+            occurred_at=datetime.now(UTC), source="manual"))
+        return RatedUsage(
+            usage_event_id=eid, tenant_id=tenant.id, org_id=org.id,
+            usage_type="image_generation", quantity=1, cost_rate_snapshot={},
+            internal_cost_minor=0, internal_cost_currency="USD",
+            sell_rate_snapshot={}, billable_amount_minor=amount,
+            billable_amount_exact=Decimal(amount), billable_currency="USD",
+            status="rated", rated_at=datetime.now(UTC))
+
+    # in-cohort spend 500; OUTSIDE-cohort spend 10000 (must not count)
+    db.add(_usage(p_in.id, 500))
+    await db.flush()
+    db.add(_usage(p_out.id, 10_000))
+    await db.flush()
+    db.add(BudgetPolicy(
+        tenant_id=tenant.id, scope_type="cohort", scope_id=cohort.id,
+        period="monthly", limit_minor=1000, currency="USD", hard_stop=True,
+        warning_threshold_pct=90))
+    await db.flush()
+
+    # 1. cohort spend (500) under limit — the tenant-wide 10500 must NOT leak in
+    decision = await budget_svc.check(db, tenant, org.id, project_id=p_in.id)
+    assert decision.allowed, "outside-cohort spend counted against the cohort budget"
+
+    # 2. a projected charge that breaches the cohort limit → hard stop fires
+    with pytest.raises(AppError) as e:
+        await budget_svc.check(
+            db, tenant, org.id, project_id=p_in.id, projected_minor=600)
+    assert e.value.code == "BUDGET_EXCEEDED" and e.value.status_code == 429
+
+    # 3. a project OUTSIDE the cohort is not governed by the cohort policy
+    decision = await budget_svc.check(
+        db, tenant, org.id, project_id=p_out.id, projected_minor=600)
+    assert decision.allowed
+
+
+@pytest.mark.asyncio
+async def test_create_budget_rejects_foreign_project_and_cohort_scope(db):
+    """R322: project/cohort scope_ids must belong to THIS tenant — a typo'd or
+    foreign ULID otherwise creates a policy that silently matches nothing
+    (inert "hard cap"), mirroring the existing org-scope ownership guard."""
+    from app.controlplane.api.credits import BudgetPolicyRequest, create_budget
+    from app.models.cohort import Cohort
+    from app.models.organization import Organization, OrgStatus
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)  # USD; user is owner
+    # a cohort under ANOTHER tenant
+    other_user = await _mk_user(db)
+    other_tenant = await _mk_tenant(db, other_user)
+    other_org = Organization(
+        name="OtherT", slug=f"ot-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE, tenant_id=other_tenant.id, created_by=other_user.id)
+    db.add(other_org)
+    await db.flush()
+    foreign_cohort = Cohort(org_id=other_org.id, name="Foreign",
+                            slug=f"fc-{str(ULID()).lower()}", created_by=other_user.id)
+    db.add(foreign_cohort)
+    await db.flush()
+
+    # nonexistent project ULID → 422
+    with pytest.raises(AppError) as e:
+        await create_budget(
+            tenant.id,
+            BudgetPolicyRequest(scope_type="project", scope_id=str(ULID()),
+                                period="monthly", limit_minor=1000, currency="USD"),
+            user=user, db=db)
+    assert e.value.status_code == 422 and "project" in e.value.message
+    # another tenant's cohort → 422 (cross-tenant scope smuggling)
+    with pytest.raises(AppError) as e:
+        await create_budget(
+            tenant.id,
+            BudgetPolicyRequest(scope_type="cohort", scope_id=foreign_cohort.id,
+                                period="monthly", limit_minor=1000, currency="USD"),
+            user=user, db=db)
+    assert e.value.status_code == 422 and "cohort" in e.value.message
+    # a cohort of THIS tenant's org → accepted
+    own_org = Organization(
+        name="OwnT", slug=f"own-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+    db.add(own_org)
+    await db.flush()
+    own_cohort = Cohort(org_id=own_org.id, name="Own",
+                        slug=f"oc-{str(ULID()).lower()}", created_by=user.id)
+    db.add(own_cohort)
+    await db.flush()
+    created = await create_budget(
+        tenant.id,
+        BudgetPolicyRequest(scope_type="cohort", scope_id=own_cohort.id,
+                            period="monthly", limit_minor=1000, currency="USD"),
+        user=user, db=db)
+    assert created.data["scope_type"] == "cohort"
