@@ -912,3 +912,41 @@ async def test_every_portal_route_rejects_foreign_project_guest(db):
             if r2.status_code not in allowed:
                 offenders.append((method, path, r2.status_code))
     assert offenders == [], offenders
+
+
+@pytest.mark.asyncio
+async def test_guest_token_never_outlives_its_link(db):
+    """R305: exp = min(link.expires_at, now + token TTL). A near-expiry link
+    must mint a SHORT token, never one living the full client_guest TTL — a
+    2-minute link handing out a 30-minute credential would keep portal access
+    alive long after the link was meant to die. Also the reciprocal: a
+    long-lived link is capped at the token TTL, not the link's."""
+    import jwt as _jwt
+
+    from app.config import settings as _settings
+    from app.core.security import ALGORITHM
+
+    user = await _mk_user(db)
+    _, _, _, project, _ = await _mk_project_env(db, user)
+    ttl_min = _settings.client_guest_token_expire_minutes
+
+    # link expiring in ~2 minutes — well under the token TTL
+    short = await portal_svc.create_guest_link(
+        db, project_id=project.id, label=None, email=None, role="reviewer",
+        expires_at=datetime.now(UTC) + timedelta(minutes=2), actor=_actor(user))
+    link, raw = short
+    token, ctx = await portal_svc.exchange_guest_token(db, raw, None)
+    # capped by the LINK, not the (larger) token TTL
+    assert ctx["expires_in"] <= 2 * 60 + 5
+    assert ctx["expires_in"] < ttl_min * 60
+    payload = _jwt.decode(token, _settings.jwt_secret, algorithms=[ALGORITHM])
+    exp_dt = datetime.fromtimestamp(payload["exp"], tz=UTC)
+    assert exp_dt <= link.expires_at + timedelta(seconds=1)
+
+    # link far in the future — token capped at the TTL, not the link
+    longlink, raw2 = await portal_svc.create_guest_link(
+        db, project_id=project.id, label=None, email=None, role="reviewer",
+        expires_at=datetime.now(UTC) + timedelta(days=80), actor=_actor(user))
+    _, ctx2 = await portal_svc.exchange_guest_token(db, raw2, None)
+    assert ctx2["expires_in"] <= ttl_min * 60 + 5
+    assert ctx2["expires_in"] < 80 * 24 * 3600
