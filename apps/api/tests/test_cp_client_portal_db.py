@@ -826,17 +826,33 @@ async def test_link_limit_and_auth_arcs(db):
 async def test_cross_project_submission_404_and_revision_replay(db):
     """R269: a submission id from ANOTHER project is a uniform 404 through
     the portal share gate, and a replayed revision-request returns the prior
-    decision (no duplicate decision rows)."""
+    decision replay 409s without double-recording."""
+    from app.controlplane.models.client_portal import ClientApprovalRecord
+
     user = await _mk_user(db)
     _, _, _, project, submission = await _mk_project_env(db, user)
     _, _, _, project2, submission2 = await _mk_project_env(db, user)
     auth = await _guest_auth(db, project, user, role="approver")
     principal = await portal_svc.get_client_principal(db, project.id, auth)
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
+    # share submission2 in ITS project — the cross-project probe must still 404
+    db.add(ClientShare(project_id=project2.id, submission_id=submission2.id, shared_by=user.id))
+    await db.flush()
 
     with pytest.raises(AppError) as e:                    # other project's submission
         await portal_svc.assert_shared(db, project.id, submission2.id)
     assert e.value.code == "SUBMISSION_NOT_SHARED" and e.value.status_code == 404
 
     d1 = await portal_svc.request_revision(db, principal, submission.id, "colors off")
-    d2 = await portal_svc.request_revision(db, principal, submission.id, "again?")
-    assert d2.id == d1.id                                 # replay -> prior returned
+    assert d1 is not None
+    with pytest.raises(AppError) as e:                    # replay: status already
+        await portal_svc.request_revision(db, principal, submission.id, "again?")
+    assert e.value.code == "SUBMISSION_NOT_REVIEWABLE" and e.value.status_code == 409
+    records = (
+        (await db.execute(
+            select(ClientApprovalRecord).where(
+                ClientApprovalRecord.submission_id == submission.id,
+                ClientApprovalRecord.action == "revision_requested")))
+        .scalars().all()
+    )
+    assert len(records) == 1                              # never double-recorded
