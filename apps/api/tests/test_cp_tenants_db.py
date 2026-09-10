@@ -896,3 +896,46 @@ async def test_expire_trials_bounded_batch(db):
     assert n1 == 1
     n_rest = await tenant_svc.expire_trials(db, limit=500)
     assert n_rest >= 2
+
+
+@pytest.mark.asyncio
+async def test_member_management_reject_arcs(db):
+    """R275: add/remove member guards — unknown role 422, unknown user 404,
+    duplicate member 409, unknown member id 404, and a member id from
+    ANOTHER tenant is a uniform 404 (no cross-tenant existence oracle)."""
+    owner = await _mk_user(db)
+    tenant = await _mk_tenant(db, owner)
+    other_owner = await _mk_user(db)
+    other_tenant = await _mk_tenant(db, other_owner)
+
+    with pytest.raises(AppError) as e:
+        await tenant_svc.add_tenant_member(
+            db, tenant, user_id=owner.id, role="wizard", actor=_actor(owner))
+    assert e.value.code == "VALIDATION_ERROR" and e.value.status_code == 422
+
+    with pytest.raises(AppError) as e:
+        await tenant_svc.add_tenant_member(
+            db, tenant, user_id=str(ULID()), role="billing_admin", actor=_actor(owner))
+    assert e.value.status_code == 404
+
+    member2 = await tenant_svc.add_tenant_member(
+        db, tenant, user_id=other_owner.id, role="billing_admin", actor=_actor(owner))
+    with pytest.raises(AppError) as e:                     # duplicate
+        await tenant_svc.add_tenant_member(
+            db, tenant, user_id=other_owner.id, role="billing_admin", actor=_actor(owner))
+    assert e.value.code == "TENANT_MEMBER_EXISTS" and e.value.status_code == 409
+
+    with pytest.raises(AppError) as e:                     # unknown member id
+        await tenant_svc.remove_tenant_member(db, tenant, str(ULID()), actor=_actor(owner))
+    assert e.value.status_code == 404
+
+    other_member = (
+        await db.execute(
+            select(tenant_svc.TenantMember).where(
+                tenant_svc.TenantMember.tenant_id == other_tenant.id))
+    ).scalar_one()
+    with pytest.raises(AppError) as e:                     # cross-tenant id → 404
+        await tenant_svc.remove_tenant_member(db, tenant, other_member.id, actor=_actor(owner))
+    assert e.value.status_code == 404
+
+    await tenant_svc.remove_tenant_member(db, tenant, member2.id, actor=_actor(owner))
