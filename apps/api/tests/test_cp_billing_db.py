@@ -3437,3 +3437,63 @@ async def test_scan_due_periods_dedups_live_close_messages(db):
     await billing_svc.scan_due_periods(db)               # ...but period still open
     msgs = (await count_msgs()).scalars().all()
     assert len(msgs) == 2                                # re-enqueue is allowed again
+
+
+@pytest.mark.asyncio
+async def test_provider_initiated_cancel_webhook_branch(db):
+    """R265: customer.subscription.deleted (dunning exhausted / dashboard
+    cancel) had no sentinel — the sub must cancel, the open period must
+    truncate to now and enqueue its close (R101[H21]'s webhook sibling:
+    cancelled subs fall out of scan_due_periods, stranding the final partial
+    invoice), and tenant owners must be notified (R113[M5]). Unknown ref → no-op."""
+    from types import SimpleNamespace
+
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.controlplane.services.billing import _apply_webhook_event
+    from app.models.notification import Notification
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+    sub.external_ref = f"sub_ext_{ULID()}"
+    await db.flush()
+
+    # unknown external ref → unhandled, nothing changes
+    ghost = SimpleNamespace(event_type="customer.subscription.deleted",
+                            data={"id": "sub_ghost"})
+    assert await _apply_webhook_event(db, "stripe", ghost) is False
+
+    parsed = SimpleNamespace(event_type="customer.subscription.deleted",
+                             data={"id": sub.external_ref})
+    handled = await _apply_webhook_event(db, "stripe", parsed)
+    assert handled is True
+    await db.refresh(sub)
+    assert sub.status == "cancelled" and sub.cancelled_at is not None
+
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
+    ).scalar_one()
+    assert period.period_end <= datetime.now(UTC)          # truncated
+    close_msgs = (
+        (await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "period.close_due",
+                OutboxMessage.payload["billing_period_id"].astext == period.id)))
+        .scalars().all()
+    )
+    assert len(close_msgs) >= 1                            # final invoice enqueued
+
+    notes = (
+        (await db.execute(
+            select(Notification).where(
+                Notification.user_id == user.id,
+                Notification.type == "billing.subscription_cancelled")))
+        .scalars().all()
+    )
+    assert len(notes) >= 1                                 # owner told (R113[M5])
+
+    # replay: sub already cancelled → unhandled, no duplicate close
+    assert await _apply_webhook_event(db, "stripe", parsed) is False
