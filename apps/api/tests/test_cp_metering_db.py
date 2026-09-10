@@ -507,6 +507,27 @@ def test_local_day_buckets_follow_tenant_timezone():
     assert _local_day_buckets("Nope/Zone", now) == utc
 
 
+def test_local_day_buckets_dst_transition_lengths():
+    """R113[L4]: a DST-transition local day is 23h (spring-forward) or 25h
+    (fall-back), NOT 24 — a fixed 24-hour window under-counts (quota leak)
+    or over-counts (double-bill into tomorrow). US/Eastern 2026: DST begins
+    Sun Mar 8 (23h), ends Sun Nov 1 (25h)."""
+    from app.middleware.api_metering import _local_day_buckets
+
+    # Spring-forward day: 23 hourly buckets.
+    spring = _local_day_buckets("America/New_York", datetime(2026, 3, 8, 12, 0, tzinfo=UTC))
+    assert len(spring) == 23, f"spring-forward day must be 23h, got {len(spring)}"
+    # Fall-back day: 25 hourly buckets.
+    fall = _local_day_buckets("America/New_York", datetime(2026, 11, 1, 12, 0, tzinfo=UTC))
+    assert len(fall) == 25, f"fall-back day must be 25h, got {len(fall)}"
+    # A normal (non-transition) day is exactly 24.
+    normal = _local_day_buckets("America/New_York", datetime(2026, 6, 15, 12, 0, tzinfo=UTC))
+    assert len(normal) == 24
+    # Buckets are contiguous and unique (no gap/overlap regardless of length).
+    for buckets in (spring, fall, normal):
+        assert len(set(buckets)) == len(buckets)
+
+
 @pytest.mark.asyncio
 async def test_quota_cache_dropped_on_entitlement_invalidation(db):
     """R55[2]: the middleware's cp:apiquota cache was never invalidated —
