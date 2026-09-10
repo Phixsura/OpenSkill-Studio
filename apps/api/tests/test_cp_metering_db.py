@@ -175,6 +175,25 @@ async def test_emit_usage_validation(db):
             db, usage_type="workflow_run", quantity=1, source="bogus_source", **base_no_source
         )
     assert e4.value.code == "VALIDATION_ERROR"
+    # R325: an oversized quantity must 422 at the boundary, not overflow
+    # Numeric(18,6) at the INSERT as an asyncpg DataError (no sqlstate → raw
+    # 500 on the ingest API; in the workflow step-usage path it escaped the
+    # `except AppError` containment and aborted the run's transaction).
+    with pytest.raises(AppError) as e5:
+        await metering.emit_usage(db, usage_type="workflow_run", quantity="1e15", **base)
+    assert e5.value.code == "INVALID_QUANTITY" and e5.value.status_code == 422
+    with pytest.raises(AppError) as e6:  # negative overflow via adjustment source
+        await metering.emit_usage(
+            db, usage_type="workflow_run", quantity=-10**13,
+            **{**base, "source": "adjustment"},
+        )
+    assert e6.value.code == "INVALID_QUANTITY"
+    # boundary: the exact column max is recordable
+    ok_max = await metering.emit_usage(
+        db, usage_type="workflow_run", quantity="999999999999.999999",
+        idempotency_key=f"max-{ULID()}", **base
+    )
+    assert ok_max is not None
     # positive control: a registered source persists
     ok = await metering.emit_usage(
         db, usage_type="workflow_run", quantity=1, source="manual",

@@ -16,6 +16,9 @@ from app.exceptions import AppError
 
 log = structlog.get_logger()
 
+# UsageEvent.quantity is Numeric(18, 6) — 12 integer digits.
+MAX_QUANTITY = Decimal("999999999999.999999")
+
 
 async def emit_usage(
     db: AsyncSession,
@@ -56,6 +59,13 @@ async def emit_usage(
         raise AppError("INVALID_QUANTITY", "Quantity must be finite", 422)
     if qty < 0 and source != "adjustment":
         raise AppError("INVALID_QUANTITY", "Negative quantity requires an adjustment", 422)
+    # R325: gate to the true column bound (Numeric(18,6)) — an oversized
+    # quantity (≥1e12) overflowed at the INSERT as an asyncpg DataError,
+    # which carries no sqlstate for the global backstop (R88 class): a raw
+    # 500 on the ingest API, and in the workflow step-usage path it escaped
+    # the `except AppError` containment and aborted the run's transaction.
+    if qty.copy_abs() > MAX_QUANTITY:
+        raise AppError("INVALID_QUANTITY", "Quantity exceeds the maximum recordable value", 422)
 
     from ulid import ULID
 
