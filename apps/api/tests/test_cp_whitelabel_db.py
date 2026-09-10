@@ -1032,3 +1032,58 @@ async def test_provision_run_conflict_spoof_and_failed_retry(db):
         .scalars().all()
     )
     assert len(retries) >= 1                               # retry enqueued
+
+
+@pytest.mark.asyncio
+async def test_export_marks_ledger_and_license_truncation(db, monkeypatch):
+    """R286: the remaining truncation markers — a capped credit_ledger and
+    licenses section must SAY it was truncated (a silently-partial offboarding
+    export is a legal exposure), and an unknown tenant is a 404."""
+    import json
+
+    from app.controlplane.models.marketplace import LicenseGrant
+    from app.controlplane.services import credits as credit_svc
+    from app.controlplane.services import provisioning as prov
+
+    with pytest.raises(AppError) as e:
+        await prov.build_export(db, str(ULID()), actor=_actor(await _mk_user(db)))
+    assert e.value.code == "TENANT_NOT_FOUND" and e.value.status_code == 404
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    actor = _actor(user)
+    for i in range(3):                                     # 3 ledger entries
+        await credit_svc.top_up(
+            db, tenant.id, "USD", 100 + i, actor=actor,
+            idempotency_key=f"r286-{i}-{ULID()}")
+    for _ in range(3):                                     # 3 license grants
+        db.add(LicenseGrant(
+            product_type="skill_pack", product_id=str(ULID()),
+            tenant_id=tenant.id, org_id=None, scope="tenant",
+            status="active", source="manual"))
+    await db.flush()
+
+    monkeypatch.setattr(prov, "EXPORT_MAX_ROWS", 2)
+    captured: dict = {}
+
+    async def fake_s3():
+        class FakeClient:
+            async def head_bucket(self, **kw):
+                return {}
+
+            async def create_bucket(self, **kw):
+                return {}
+
+            async def put_object(self, **kw):
+                captured["body"] = kw["Body"].decode()
+
+        yield FakeClient()
+
+    monkeypatch.setattr("app.core.storage.get_s3_client", fake_s3)
+    export = await prov.build_export(db, tenant.id, actor=actor)
+    assert export.status == "completed"
+    bundle = json.loads(captured["body"])
+    assert "credit_ledger" in bundle["truncated_collections"]
+    assert "licenses" in bundle["truncated_collections"]
+    assert len(bundle["credit_ledger"]) == 2               # capped, marked
+    assert len(bundle["licenses"]) == 2
