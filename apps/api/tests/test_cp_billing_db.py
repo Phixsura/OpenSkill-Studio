@@ -3885,3 +3885,69 @@ async def test_webhook_failed_handler_records_event_and_dedups_replay(db, monkey
     r2 = await bsvc.process_webhook(db, "mock", headers, raw)
     assert r2["duplicate"] is True
     assert calls["n"] == 1  # never re-applied
+
+
+@pytest.mark.asyncio
+async def test_bill_via_invoice_purchase_becomes_license_line_at_close(db):
+    """R316: the content-license invoice path. A paid bill_via_invoice
+    purchase (payment_method='invoice', invoice_id NULL) must be assembled
+    into a 'license' invoice line at the tenant's next period close, at
+    amount_minor, with purchase.invoice_id stamped — and a SECOND close must
+    NOT re-bill it (the invoice_id stamp is the dedup). Only the paid-and-
+    unbilled state qualifies; a still-pending invoice purchase is skipped."""
+    from app.controlplane.models.billing import InvoiceLine
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+
+    listing = MarketplaceListing(
+        product_type="skill_pack", product_id=str(ULID()),
+        seller_org_id="01JFAKEORGFAKEORGFAKEORGFA", seller_tenant_id=str(ULID()),
+        offer_type="paid", price_minor=7000, currency="USD",
+        license_scope="organization", platform_commission_pct=30,
+        bill_via_invoice=True, status="active", created_by=user.id)
+    db.add(listing)
+    await db.flush()
+
+    def mk_purchase(status, amount=7000):
+        return MarketplacePurchase(
+            listing_id=listing.id, buyer_tenant_id=tenant.id,
+            buyer_org_id="01JFAKEORGFAKEORGFAKEORGFA", purchaser_user_id=user.id,
+            status=status, amount_minor=amount, currency="USD",
+            economics_snapshot={}, payment_method="invoice", invoice_id=None)
+
+    paid = mk_purchase("paid")
+    pending = mk_purchase("pending", amount=999)   # not yet paid → must be skipped
+    db.add_all([paid, pending])
+    await db.flush()
+
+    inv = await _force_close(db, sub)
+    assert inv is not None
+    lic_lines = (
+        (await db.execute(
+            select(InvoiceLine).where(
+                InvoiceLine.invoice_id == inv.id, InvoiceLine.line_type == "license")))
+        .scalars().all()
+    )
+    assert len(lic_lines) == 1
+    assert lic_lines[0].amount_minor == 7000
+    await db.refresh(paid)
+    await db.refresh(pending)
+    assert paid.invoice_id == inv.id          # stamped
+    assert pending.invoice_id is None         # unpaid → not billed
+
+    # a SECOND close must not re-bill the already-invoiced license
+    inv2 = await _force_close(db, sub)
+    if inv2 is not None:
+        relic = (
+            (await db.execute(
+                select(InvoiceLine).where(
+                    InvoiceLine.invoice_id == inv2.id,
+                    InvoiceLine.line_type == "license")))
+            .scalars().all()
+        )
+        assert relic == [], "already-invoiced license was re-billed on the next close"
