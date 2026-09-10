@@ -1619,3 +1619,70 @@ async def test_sell_policy_tiebreaks_typed_beats_wildcard_then_priority(db):
     ev3 = await _mk_event(db, tenant2, usage_type="image_generation", quantity=1)
     rated3 = await rating.rate_event(db, ev3.id)
     assert rated3.billable_amount_minor == 99
+
+
+@pytest.mark.asyncio
+async def test_cost_ladder_exact_beats_wildcard(db):
+    """R309: internal-cost ladder precedence — an EXACT (provider+model) rate
+    must win over a provider-wildcard (provider, NULL model) rate for the same
+    provider+usage_type; peeling the exact rate falls to the wildcard. Only
+    'exact' resolution was asserted before; a wrong rung is a wrong internal
+    cost -> wrong margin."""
+    from app.controlplane.models.pricing import ProviderCostRate
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    t0 = datetime.now(UTC) - timedelta(days=2)
+
+    async def cost(**kw):
+        base = dict(actor=_actor(user), provider="acme",
+                    usage_type="image_generation", currency="USD", effective_from=t0)
+        base.update(kw)
+        return await pricing_svc.create_cost_rate(db, **base)
+
+    await cost(model_or_service="acme-img", unit_cost=Decimal("0.02"))   # exact
+    await cost(model_or_service=None, unit_cost=Decimal("0.05"))         # provider wildcard
+
+    async def rate_one():
+        ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
+                             provider="acme", model_or_service="acme-img")
+        return await rating.rate_event(db, ev.id)
+
+    r = await rate_one()
+    assert r.cost_rate_snapshot["resolution"] == "exact"
+    assert r.internal_cost_minor == 2
+
+    exact_row = (
+        await db.execute(select(ProviderCostRate).where(
+            ProviderCostRate.model_or_service == "acme-img"))
+    ).scalar_one()
+    exact_row.effective_until = t0 + timedelta(seconds=1)   # retire before events
+    await db.flush()
+    r = await rate_one()
+    assert r.cost_rate_snapshot["resolution"] == "provider_wildcard"
+    assert r.internal_cost_minor == 5
+
+
+@pytest.mark.asyncio
+async def test_capability_rate_resolves_through_wildcard_rung_characterization(db):
+    """R309: CHARACTERIZATION (documents today's behavior, not an endorsement).
+    The provider-wildcard rung query filters only (provider, model IS NULL,
+    usage_type) and does NOT exclude capability_key, so a provider-scoped
+    capability rate (model NULL, capability_key set) is currently resolved AND
+    LABELED 'provider_wildcard'; the dedicated 'capability' rung is reached
+    only when no such row matches. provider is NOT NULL at the schema, so the
+    rung's 'provider-agnostic (NULL provider)' intent is unreachable. Pinned so
+    any INTENTIONAL ladder change (e.g. adding capability_key IS NULL to the
+    wildcard query) shows up as a deliberate diff, never a silent one."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    t0 = datetime.now(UTC) - timedelta(days=2)
+    await pricing_svc.create_cost_rate(
+        db, actor=_actor(user), provider="acme", model_or_service=None,
+        capability_key="image_generation", usage_type="image_generation",
+        currency="USD", unit_cost=Decimal("0.09"), effective_from=t0)
+    ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
+                         provider="acme", model_or_service="acme-img")
+    r = await rating.rate_event(db, ev.id)
+    assert r.cost_rate_snapshot["resolution"] == "provider_wildcard"
+    assert r.internal_cost_minor == 9
