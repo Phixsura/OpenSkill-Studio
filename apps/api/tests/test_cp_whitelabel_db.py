@@ -74,8 +74,24 @@ def test_hostname_normalization_matrix():
     assert n("school.example.com.") == "school.example.com"
     assert n("学校.example.com") == "xn--48s290a.example.com"  # IDNA
     for bad in ("", "single-label", "-bad.example.com", "a b.example.com", "a..b.com"):
-        with pytest.raises(AppError):
+        with pytest.raises(AppError) as exc:
             n(bad)
+        assert exc.value.status_code == 422
+
+    # R248 boundary pins (mutation-driven): exactly-at-limit accepted,
+    # one-past rejected — a >→>= or 253→254 flip breaks real registrations.
+    label63 = "a" * 63
+    host253 = ".".join([label63, label63, label63, "a" * 57, "com"])
+    assert len(host253) == 253
+    assert n(host253) == host253                     # 253 chars OK, 63-label OK
+    with pytest.raises(AppError):                    # 254 chars (valid labels)
+        n(("b." + host253)[:254].rstrip("."))
+    with pytest.raises(AppError):                    # 64-char label
+        n("a" * 64 + ".com")
+    assert n("a.com") == "a.com"                     # exactly two labels OK
+    with pytest.raises(AppError) as exc:             # un-IDNA-encodable label
+        n("\u00ad.example.com")                      # soft hyphen → empty label
+    assert exc.value.status_code == 422
 
 
 def test_reserved_domain_rejection():
@@ -83,8 +99,21 @@ def test_reserved_domain_rejection():
     for reserved in ("localhost", "app.localhost", "192.168.1.1", "2001:db8::1"):
         with pytest.raises(AppError) as exc:
             c(reserved if "." in reserved or ":" in reserved else reserved)
-        assert exc.value.code == "DOMAIN_RESERVED"
+        assert exc.value.code == "DOMAIN_RESERVED" and exc.value.status_code == 422
     c("ai.example-school.com")  # fine
+
+    # R248: the localhost arm must hold WITHOUT the platform-base-domain
+    # fallback (an or→and flip silently delegated it to config).
+    from unittest.mock import patch
+
+    from app.config import settings as _settings
+
+    with patch.object(_settings, "platform_base_domains", []):
+        for host in ("localhost", "dev.localhost"):
+            with pytest.raises(AppError) as exc:
+                c(host)
+            assert exc.value.code == "DOMAIN_RESERVED"
+        c("ai.example-school.com")  # still fine with empty base list
 
 
 def test_theme_token_validation():
@@ -569,6 +598,7 @@ def test_reserved_domain_whitespace_in_config(monkeypatch):
         with pytest.raises(AppError) as exc:
             domain_svc.check_reserved(host)
         assert exc.value.code == "DOMAIN_RESERVED", host
+        assert exc.value.status_code == 422
     domain_svc.check_reserved("unrelated-school.com")  # still fine
 
 
