@@ -1255,3 +1255,49 @@ async def test_concurrent_first_branding_upserts_both_succeed():
         # cleanup (module uses shared DB across tests)
         await s.delete(rows[0])
         await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_branding_explicit_null_clears_to_empty_not_jsonb_null(db):
+    """R330: PUT branding with an explicit null (the schema advertises
+    `dict|None`/`list|None`) was validated as empty but stored RAW — JSONB
+    none_as_null=False persisted a jsonb null, and site-context served it
+    verbatim: the white-label login shell does `branding.legal_links.length`,
+    so one "clear my links" PUT crashed the tenant's entire login page. Null
+    means CLEAR: stored as {} / [], and the read paths coalesce pre-fix null
+    rows."""
+    from app.controlplane.models.branding import TenantBranding
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    b = await branding_svc.upsert_branding(
+        db, tenant.id,
+        {"theme_tokens": {"primary": "#112233"},
+         "legal_links": [{"label": "ToS", "url": "https://x.example/tos"}]},
+        actor=_actor(user))
+    assert b.theme_tokens and b.legal_links
+    # explicit null clears BOTH to empty containers, never jsonb null
+    b = await branding_svc.upsert_branding(
+        db, tenant.id, {"theme_tokens": None, "legal_links": None},
+        actor=_actor(user))
+    assert b.theme_tokens == {}, "explicit null must clear to {}, not jsonb null"
+    assert b.legal_links == [], "explicit null must clear to [], not jsonb null"
+
+    # read-side coalesce: simulate a PRE-FIX row holding jsonb null
+    from sqlalchemy import update as sa_update
+
+    from app.controlplane.models.branding import TenantDomain
+
+    await db.execute(
+        sa_update(TenantBranding)
+        .where(TenantBranding.tenant_id == tenant.id)
+        .values(theme_tokens=None, legal_links=None))
+    await db.flush()
+    domain = TenantDomain(
+        tenant_id=tenant.id, hostname=f"r330-{str(ULID()).lower()[:8]}.example.com",
+        status="active", verification_token_hash="x", created_by=user.id)
+    db.add(domain)
+    await db.flush()
+    ctx = await domain_svc.resolve_site_context(db, domain.hostname)
+    assert ctx["branding"]["theme_tokens"] == {}
+    assert ctx["branding"]["legal_links"] == []

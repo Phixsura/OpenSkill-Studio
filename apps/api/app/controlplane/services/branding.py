@@ -74,12 +74,20 @@ def validate_legal_links(links: list) -> list:
 async def upsert_branding(
     db: AsyncSession, tenant_id: str, updates: dict, *, actor: Actor
 ) -> TenantBranding:
+    # R330: an explicit null (schema advertises `dict|None`/`list|None`) was
+    # validated as empty but then setattr'd RAW — JSONB none_as_null=False
+    # stored it as jsonb null, and site-context served that null verbatim:
+    # the white-label login shell does `branding.legal_links.length` → one
+    # "clear my links" PUT crashed the tenant's entire login page. Null MEANS
+    # clear — normalize to the empty container before validating/storing.
     if "theme_tokens" in updates:
-        validate_theme_tokens(updates["theme_tokens"] or {})
+        updates["theme_tokens"] = updates["theme_tokens"] or {}
+        validate_theme_tokens(updates["theme_tokens"])
     if "support_url" in updates:
         validate_https_url(updates["support_url"], "support_url")
     if "legal_links" in updates:
-        validate_legal_links(updates["legal_links"] or [])
+        updates["legal_links"] = updates["legal_links"] or []
+        validate_legal_links(updates["legal_links"])
     branding = (
         await db.execute(select(TenantBranding).where(TenantBranding.tenant_id == tenant_id))
     ).scalar_one_or_none()

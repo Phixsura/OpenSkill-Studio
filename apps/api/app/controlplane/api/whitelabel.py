@@ -109,14 +109,14 @@ def _branding_response(b: TenantBranding | None) -> dict:
         "product_display_name": b.product_display_name,
         "logo_key": b.logo_key,
         "favicon_key": b.favicon_key,
-        "theme_tokens": b.theme_tokens,
+        "theme_tokens": b.theme_tokens or {},  # R330: pre-fix jsonb-null rows
         "login_tagline": b.login_tagline,
         "email_from_name": b.email_from_name,
         "email_footer": b.email_footer,
         "certificate_footer": b.certificate_footer,
         "support_email": b.support_email,
         "support_url": b.support_url,
-        "legal_links": b.legal_links,
+        "legal_links": b.legal_links or [],  # R330
     }
 
 

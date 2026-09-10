@@ -347,9 +347,12 @@ async def resolve_site_context(db: AsyncSession, host: str) -> dict:
             "product_display_name": branding.product_display_name if branding else None,
             "logo_key": branding.logo_key if branding else None,
             "favicon_key": branding.favicon_key if branding else None,
-            "theme_tokens": branding.theme_tokens if branding else {},
+            # R330: coalesce — pre-fix rows may hold jsonb null (an explicit
+            # null PUT was stored raw); serving null crashes the login shell
+            # (`legal_links.length`) and the portal theme mapper.
+            "theme_tokens": (branding.theme_tokens if branding else None) or {},
             "login_tagline": branding.login_tagline if branding else None,
-            "legal_links": branding.legal_links if branding else [],
+            "legal_links": (branding.legal_links if branding else None) or [],
             "support_email": branding.support_email if branding else None,
             "support_url": branding.support_url if branding else None,
         },
