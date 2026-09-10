@@ -424,11 +424,13 @@ def test_comfyui_infinity_field_does_not_discard_whole_result():
 
 
 # ── R249: parser kill-tests (mutation-driven — 39/41 genmeta mutants lived) ──
-# Post-wave status: genmeta 41/41, gamification 3/3, duplicate 8/9, sanitize
-# 1/2. The two survivors are equivalent: sanitize's pre-slice multiplier 8→9
-# only widens the DoS bound before the final [:max_len] clamp, and
-# _copy_name's <=→< sends an exact-fit name down the trim path, which
-# reproduces name+suffix byte-for-byte.
+# Post-wave status (green-baseline rerun after the R250 fix landed):
+# genmeta 40/41, gamification 3/3, duplicate 8/9, sanitize 1/2. All three
+# survivors are equivalent: genmeta's settings-walk range stop -1→-2 only
+# adds an i=-1 revisit of the last line, reachable when nothing matched
+# anyway; sanitize's pre-slice multiplier 8→9 only widens the DoS bound
+# before the final [:max_len] clamp; _copy_name's <=→< sends an exact-fit
+# name down the trim path, which reproduces name+suffix byte-for-byte.
 
 
 def test_a1111_exact_extraction():
