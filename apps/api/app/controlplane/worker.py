@@ -403,8 +403,13 @@ def _cron_jobs() -> list:
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
         # api-counter flush hourly at :05
-        cron(_sweep_storage, hour=3, minute=23, name="cp_storage_sweep"),
-        cron(_sweep_seats, day={1}, hour=4, minute=17, name="cp_seat_sweep"),
+        # R258: both sweeps emit one event per org-with-usage inside a single
+        # transaction; at 10^5+ orgs that outgrows arq's default 300s
+        # job_timeout, and the cancellation rolls the whole sweep back — a
+        # lost DAY of storage billing / a lost MONTH of seat billing (the
+        # timeout twin of the R169 poison-org failure). Give them an hour.
+        cron(_sweep_storage, hour=3, minute=23, timeout=3600, name="cp_storage_sweep"),
+        cron(_sweep_seats, day={1}, hour=4, minute=17, timeout=3600, name="cp_seat_sweep"),
         cron(_flush_api_counters, minute=5, name="cp_api_flush"),
         # P5 sweeps: reservation expiry every 30 min; promo expiry daily 02:37
         cron(_expire_reservations, minute={7, 37}, name="cp_reservation_expiry"),

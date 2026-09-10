@@ -348,10 +348,15 @@ async def sweep_storage(
     return emitted
 
 
-async def sweep_seats(db: AsyncSession, for_month: str | None = None) -> int:
+async def sweep_seats(
+    db: AsyncSession,
+    for_month: str | None = None,
+    org_ids: list[str] | None = None,
+) -> int:
     """Monthly active_learner_seat events per org. Key: seats:{org}:{YYYY-MM}.
     'Active' = org_members.status=active AND role=student (ADR: login activity
-    not considered in v1)."""
+    not considered in v1). R258: `org_ids` narrows a targeted ops re-run and
+    makes tests hermetic (mirrors sweep_storage)."""
     from app.models.organization import (
         MemberStatus,
         Organization,
@@ -373,6 +378,7 @@ async def sweep_seats(db: AsyncSession, for_month: str | None = None) -> int:
                 Organization.status != OrgStatus.ARCHIVED,
                 OrgMember.status == MemberStatus.ACTIVE,
                 OrgMember.role == OrgRole.STUDENT,
+                *([Organization.id.in_(org_ids)] if org_ids is not None else []),
             )
             .group_by(Organization.id, Organization.tenant_id)
         )

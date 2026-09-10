@@ -284,9 +284,9 @@ async def test_seat_sweep_idempotent(db):
     student = await _mk_user(db)
     await svc.add_member(org.id, student.id, OrgRole.STUDENT)
     month = datetime.now(UTC).strftime("%Y-%m")
-    n1 = await metering.sweep_seats(db, for_month=month)
-    assert n1 >= 1
-    await metering.sweep_seats(db, for_month=month)
+    n1 = await metering.sweep_seats(db, for_month=month, org_ids=[org.id])
+    assert n1 == 1
+    await metering.sweep_seats(db, for_month=month, org_ids=[org.id])
     # Rerun: our org's key already exists → not re-emitted
     seat_events = (
         (
