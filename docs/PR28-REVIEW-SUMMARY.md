@@ -1465,6 +1465,25 @@ the suite the day it lands, each proven by stripping a real gate:
 - **R284** the offering cost fallback — the last unexercised rung of the
   cost-resolution ladder — pinned with snapshot audit fields.
 
+### R285–R288: ops + offboarding surface (2026-09-10)
+
+- **R285** provision-run guards: R72[3] parameter-divergence 409 incl. the
+  cross-partner key-reuse disclosure arm, the partner-scoped blueprint
+  spoof (uniform 404, guard-proven), inactive blueprint, and R101[H7]
+  failed-run replay actually re-enqueuing the retry.
+- **R286** offboarding-export truncation markers for credit_ledger and
+  licenses (a silently-partial export handed to a departing tenant is a
+  legal exposure; guard-proven) + unknown-tenant 404.
+- **R287** dead-letter requeue semantics the R98/R129 flows depend on:
+  only FAILED rows requeue (attempts reset, error cleared), done/pending
+  rows 409 (widening the guarded UPDATE lets requeue steal worker-owned
+  rows — proven), unknown 404; /outbox/failed, /invoices, /settlements
+  ops-list contracts.
+- **R288** settlement-entry trace resolution: the credit-note natural key
+  (R48[34]) resolves through the note to its invoice instead of a null
+  source (proven by skipping the note lookup); invoice sources and
+  unknown-entry 404.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
