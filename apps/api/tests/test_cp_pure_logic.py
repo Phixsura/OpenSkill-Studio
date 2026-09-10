@@ -502,3 +502,31 @@ def test_compute_share_minor_by_type():
     with _p.raises(AppError) as e:
         compute_share_minor("bogus_type", rate=None, amount_minor=0, base_minor=0)
     assert e.value.code == "RULE_PARAM_INVALID"
+
+
+# ── R224: Stripe unit-amount conversion (the R81 100x-JPY critical path) ──
+
+
+def test_stripe_unit_amount_by_currency_class():
+    """_stripe_unit_amount recovers major from platform minor then re-expresses
+    in Stripe's convention. R81 was a 100x over-credit when JPY (zero-decimal,
+    platform minor==major) was ×100'd into Stripe. Pin every currency class
+    AND the round-trip identity against _platform_minor_from_stripe."""
+    from app.controlplane.services.billing_providers.stripe import (
+        _platform_minor_from_stripe,
+        _stripe_unit_amount,
+    )
+
+    # USD: platform 500 minor ($5.00) → Stripe 500 (cents). Identity factor.
+    assert _stripe_unit_amount(500, "USD") == 500
+    # JPY zero-decimal: platform 5000 minor (¥5000, minor==major) → Stripe 5000,
+    # NOT 500000 (the R81 bug: ×100 on an already-whole-yen amount).
+    assert _stripe_unit_amount(5000, "JPY") == 5000
+    assert _stripe_unit_amount(5000, "jpy") == 5000  # case-insensitive (R81 root)
+    # KWD three-decimal: platform 1500 minor (KWD 15.00, ×100) → Stripe 15000 (×1000)
+    assert _stripe_unit_amount(1500, "KWD") == 15000
+
+    # Round-trip identity across all three classes
+    for cur, minor in [("USD", 12345), ("JPY", 9999), ("KWD", 45600), ("EUR", 100)]:
+        stripe_amt = _stripe_unit_amount(minor, cur)
+        assert _platform_minor_from_stripe(stripe_amt, cur) == minor, cur
