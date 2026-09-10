@@ -1429,6 +1429,26 @@ remaining untested money arcs:
   workflow lifecycle 49/49, concurrency probe 17/17 — zero 500s and zero
   tracebacks across 1,637 API log lines.
 
+### R277–R280: the authz tripwire family (2026-09-10)
+
+A route-table diff against the live-battery access log showed 83
+controlplane routes the live runs never touched and 14 endpoint groups
+with no HTTP-layer test anywhere. Instead of per-endpoint tests, four
+DATA-DRIVEN sweeps now enumerate the live route table and enforce each
+authz dimension mechanically — any future route missing its gate fails
+the suite the day it lands, each proven by stripping a real gate:
+
+- **R277 unauthenticated**: every /platform, /tenants, /client-portal and
+  /billing route without credentials → never 2xx, never 500.
+- **R278 unprivileged**: a valid student token on every /platform route →
+  exactly 403/404 (422 admitted only where a body may out-validate the
+  role gate).
+- **R279 cross-tenant**: tenant A's owner on every /tenants/{tenant_id}
+  route with tenant B's real id → uniform 403/404 (the R88
+  existence-oracle class, enforced for every current and future route).
+- **R280 cross-project portal**: project A's guest token on every
+  /client-portal route with project B's real ids → uniform 401/403/404.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
