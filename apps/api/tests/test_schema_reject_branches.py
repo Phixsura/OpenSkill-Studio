@@ -320,3 +320,64 @@ def test_pack_review_rejects():
     # low rating requires a body (model validator)
     with pytest.raises(ValidationError):
         M(rating=1)
+
+
+# ── Update-request variants (None-tolerant mirrors; empty base is valid) ──
+
+
+def test_update_project_rejects():
+    from app.schemas.project import UpdateProjectRequest as M
+
+    assert M().title is None                        # empty update is valid
+    _rejects(M, {}, "difficulty", "wizard")
+    _rejects(M, {}, "title", "x")
+    _rejects(M, {}, "title", "y" * 201)
+    _rejects(M, {}, "max_score", 10001)
+    _rejects(M, {}, "late_penalty_pct", 101)
+    _rejects(M, {}, "max_submissions", 1001)
+    _rejects(M, {}, "rubric", [])
+    _rejects(M, {}, "rubric", [{"criterion": "c", "max_score": 0}])   # not positive
+
+
+def test_update_skill_rejects():
+    from app.schemas.skill import UpdateSkillRequest as M
+
+    assert M().name is None
+    _rejects(M, {}, "difficulty", "wizard")
+    _rejects(M, {}, "sandbox_url", "http://insecure")   # must be https
+    _rejects(M, {}, "sandbox_url", "https://" + "x" * 500)
+
+
+def test_update_skill_pack_rejects():
+    from app.schemas.skill_pack import UpdateSkillPackRequest as M
+
+    assert M().name is None
+    _rejects(M, {}, "name", "x")
+    _rejects(M, {}, "visibility", "cosmic")
+    _rejects(M, {}, "summary", "s" * 501)
+
+
+def test_update_workflow_pack_rejects():
+    from app.schemas.workflow_pack import UpdateWorkflowPackRequest as M
+
+    assert M().name is None
+    _rejects(M, {}, "name", "")
+    _rejects(M, {}, "summary", "s" * 501)
+    _rejects(M, {}, "description", "d" * 20001)
+
+
+def test_update_client_brief_rejects():
+    from app.schemas.client_brief import UpdateClientBriefRequest as M
+
+    assert M().title is None
+    _rejects(M, {}, "title", "x")
+    _rejects(M, {}, "client_name", "y" * 201)
+    _rejects(M, {}, "status", "teleported")
+
+
+def test_update_connection_rejects():
+    from app.schemas.provider import UpdateConnectionRequest as M
+
+    assert M().name is None
+    _rejects(M, {}, "name", "n" * 101)
+    _rejects(M, {}, "status", "frozen")   # must be active/disabled
