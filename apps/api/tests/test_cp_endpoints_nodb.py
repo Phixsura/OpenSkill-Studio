@@ -615,3 +615,37 @@ async def test_every_controlplane_route_rejects_unauthenticated(client):
         if r.status_code >= 500 or 200 <= r.status_code < 300:
             offenders.append((method, path, r.status_code))
     assert offenders == [], offenders
+
+
+def test_portal_comment_text_reject_arcs():
+    """R290: the ClientCommentRequest.text guards (R87 NUL-to-500 class) — a
+    NUL/control char is rejected at the schema (a NUL written to the text
+    column raises 22P05 → 500), empty and >5000-char text rejected, and the
+    time-anchor ms bounds (0..24h) hold. These write the SAME columns as the
+    internal comment schema; the guest link is a shareable bearer credential
+    so the input path is externally reachable."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.controlplane.api.client_portal import ClientCommentRequest
+
+    def mk(**kw):
+        base = {"item_id": "0" * 26, "text": "hi"}
+        base.update(kw)
+        return ClientCommentRequest.model_validate(base)
+
+    with _pytest.raises(ValidationError):
+        mk(text="bad\x00nul")                        # NUL → 22P05-to-500 guard
+    with _pytest.raises(ValidationError):
+        mk(text="ctrl\x07bell")                      # other control char
+    with _pytest.raises(ValidationError):
+        mk(text="")                                   # empty
+    with _pytest.raises(ValidationError):
+        mk(text="x" * 5001)                           # over the column bound
+    with _pytest.raises(ValidationError):
+        mk(anchor_type="time", timestamp_ms=86_400_001)   # past 24h
+    with _pytest.raises(ValidationError):
+        mk(anchor_type="time", timestamp_ms=-1)
+    # boundary values accepted
+    ok = mk(text="x" * 5000, anchor_type="time", timestamp_ms=86_400_000)
+    assert len(ok.text) == 5000 and ok.timestamp_ms == 86_400_000
