@@ -333,7 +333,7 @@ def test_validate_policy_params_rejects():
         from app.exceptions import AppError
         with _p.raises(AppError) as e:
             validate_policy_params(pt, params)
-        assert e.value.code == "INVALID_POLICY_PARAMS"
+        assert e.value.code == "INVALID_POLICY_PARAMS" and e.value.status_code == 422
 
     rejects("no_such_type", {})                                   # unknown policy type
     rejects("cost_plus_percentage", {"percentage": -1})           # negative dec
@@ -365,7 +365,7 @@ def test_validate_entitlement_value_rejects():
         import pytest as _p
         with _p.raises(AppError) as e:
             validate_entitlement_value(key, val)
-        assert e.value.code == "UNKNOWN_ENTITLEMENT"
+        assert e.value.code == "UNKNOWN_ENTITLEMENT" and e.value.status_code == 422
 
     rejects("no_such_key", 1)                       # unknown entitlement
     rejects("custom_domain", None)                  # bool cannot be null
@@ -409,7 +409,7 @@ def test_compute_billable_guards():
         base.update(kw)
         with _p.raises(AppError) as e:
             fn(pt, params, **base)
-        assert e.value.code == "INVALID_POLICY_PARAMS"
+        assert e.value.code == "INVALID_POLICY_PARAMS" and e.value.status_code == 422
 
     for fn in (compute_billable_minor, compute_billable_exact):
         # per_quantity <= 0 → divide-by-zero guard, all three per-based types
@@ -551,7 +551,7 @@ def test_branding_validators_reject():
     def bad(fn, *a):
         with _p.raises(AppError) as e:
             fn(*a)
-        assert e.value.code == "BRANDING_INVALID"
+        assert e.value.code == "BRANDING_INVALID" and e.value.status_code == 422
 
     # theme tokens
     bad(validate_theme_tokens, {"radius": {"x": 1}})          # unhashable radius (R47[29])
@@ -733,3 +733,48 @@ def test_compute_share_default_units_and_status():
     with pytest.raises(AppError) as e:
         compute_share_minor("tithe", rate=Decimal(1), amount_minor=1, base_minor=1)
     assert e.value.code == "RULE_PARAM_INVALID" and e.value.status_code == 422
+
+
+def test_validator_boundary_values_accepted():
+    """R247: boundary-value kill-tests — Lt→LtE / Gt→GtE mutants reject the
+    exact boundary the validators must accept (0 percentages/markups, the
+    10^15 money ceiling itself, max-length branding fields).
+
+    AST-mutation status after these tests + the status-code upgrades:
+    validate_policy_params 21/21, validate_entitlement_value 12/12, branding
+    validators 20/20, api_metering classify/_local_day_buckets 7/8 (survivor:
+    the hours floor max(...,1)→2, reachable only under a pathological tz whose
+    calendar day is shorter than 2h — no real zone). _parse_semver 1/7: its 6
+    survivors shift rank-label constants (e.g. the (1,) release marker → (2,))
+    without reordering any comparison, provably order-preserving.
+    """
+    from app.controlplane.services.branding import (
+        validate_https_url,
+        validate_legal_links,
+        validate_theme_tokens,
+    )
+    from app.controlplane.services.entitlements import validate_entitlement_value
+    from app.controlplane.services.pricing import validate_policy_params
+    from app.exceptions import AppError
+
+    validate_policy_params("cost_plus_percentage", {"percentage": "0"})
+    validate_policy_params("cost_plus_fixed", {"fixed_markup_minor": 0})
+    validate_policy_params("cost_plus_fixed", {"fixed_markup_minor": 10**15})
+
+    assert validate_entitlement_value("max_organizations", 0) == 0
+    assert validate_entitlement_value("max_storage_gb", "0") == "0"
+
+    url = "https://" + "a" * 488 + ".com"       # exactly 500 chars
+    assert len(url) == 500
+    assert validate_https_url(url, "x") == url
+    with pytest.raises(AppError) as e:           # 501 chars → rejected
+        validate_https_url(url + "x", "x")
+    assert e.value.status_code == 422
+    from app.controlplane.services.branding import MAX_LEGAL_LINKS
+
+    links = [
+        {"label": "L" * 50, "url": "https://example.com"}
+        for _ in range(MAX_LEGAL_LINKS)          # exactly the cap → accepted
+    ]
+    assert validate_legal_links(links) == links
+    validate_theme_tokens({})                    # empty tokens are valid
