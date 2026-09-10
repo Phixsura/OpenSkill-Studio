@@ -2074,3 +2074,82 @@ async def test_create_listing_param_validation(db):
     await rejects(license_scope="seat_limited", seat_limit=None)  # seat_limited needs limit
     # R135: seat_limit on a non-seat_limited scope = silently-unlimited seats
     await rejects(license_scope="organization", seat_limit=10)
+
+
+# ── R264: license revocation + cross-currency purchase arcs ──
+
+
+@pytest.mark.asyncio
+async def test_revoke_grant_arcs(db):
+    """R264: revoke_grant was fully untested — unknown grant 404, non-active
+    grant 409, and the happy revoke (status/timestamps/reason + audit)."""
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    await credit_svc.top_up(db, buyer_tenant.id, "USD", 50000, actor=_actor(buyer_user))
+
+    with pytest.raises(AppError) as e:
+        await market_svc.revoke_grant(db, str(ULID()), reason="r", actor=_actor(buyer_user))
+    assert e.value.code == "LICENSE_NOT_FOUND" and e.value.status_code == 404
+
+    purchase = await market_svc.create_purchase(
+        db, listing_id=listing.id, buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user), payment_method="credit",
+        idempotency_key=f"rv-{ULID()}")
+    await credit_svc.debit(
+        db, buyer_tenant.id, "USD", purchase.amount_minor,
+        reference_type="purchase", reference_id=purchase.id,
+        idempotency_key=f"purchase:{purchase.id}")
+    purchase = await market_svc.mark_purchase_paid(
+        db, purchase_id=purchase.id, payment_ref=None, actor=_actor(buyer_user))
+    grant = (
+        await db.execute(select(LicenseGrant).where(LicenseGrant.purchase_id == purchase.id))
+    ).scalar_one()
+
+    revoked = await market_svc.revoke_grant(
+        db, grant.id, reason="chargeback", actor=_actor(seller_user))
+    assert revoked.status == "revoked"
+    assert revoked.revoked_at is not None and revoked.revoke_reason == "chargeback"
+
+    with pytest.raises(AppError) as e:                     # second revoke → 409
+        await market_svc.revoke_grant(db, grant.id, reason="again", actor=_actor(seller_user))
+    assert e.value.code == "PURCHASE_STATUS_CONFLICT" and e.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_purchase_cross_currency_arcs(db):
+    """R264: a listing priced in another currency than the buyer tenant —
+    missing FX rate → LISTING_NOT_PURCHASABLE 409 (never a silent
+    unconverted charge); with a rate the charge converts."""
+    from datetime import timedelta
+
+    from app.controlplane.services import pricing as pricing_svc
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user, currency="EUR",
+                                price_minor=10000)
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    await credit_svc.top_up(db, buyer_tenant.id, "USD", 50000, actor=_actor(buyer_user))
+
+    with pytest.raises(AppError) as e:                     # no EUR→USD rate
+        await market_svc.create_purchase(
+            db, listing_id=listing.id, buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user), payment_method="credit",
+            idempotency_key=f"fx-{ULID()}")
+    assert e.value.code == "LISTING_NOT_PURCHASABLE" and e.value.status_code == 409
+
+    await pricing_svc.create_fx_rate(
+        db, actor=_actor(buyer_user), base_currency="EUR", quote_currency="USD",
+        rate=Decimal("2"), effective_from=datetime.now(UTC) - timedelta(days=1))
+    purchase = await market_svc.create_purchase(
+        db, listing_id=listing.id, buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user), payment_method="credit",
+        idempotency_key=f"fx2-{ULID()}")
+    assert purchase.currency == "USD"
+    assert purchase.amount_minor == 20000                  # €100.00 × 2
