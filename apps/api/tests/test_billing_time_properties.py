@@ -225,3 +225,26 @@ def test_proration_degenerate_denominators():
                           natural_days=0)
     assert q["credit_unused_old_minor"] == 1000
     assert q["charge_new_remaining_minor"] == 2000
+
+
+def test_one_day_period_full_refund_exact():
+    """R242: kill-test for the denominator floor `max(natural_days or
+    total_days, 1)`. A 1-day truncated period must prorate at amount/1 —
+    a floor of 2 silently halves every 1-day credit/charge.
+
+    AST-mutation status for proration_preview/_add_interval/_month_len/
+    _is_leap after this test: 49/50 killed. The lone survivor (the year-path
+    Feb clamp literal 29→30) is provably equivalent: that branch binds only
+    when start.month==2 AND target year is leap, but a leap year is never
+    followed by one, so start.day ≤ 28 there and min(day, 29) == min(day, 30).
+    """
+    start = datetime(2026, 3, 1, tzinfo=UTC)
+    end = start + timedelta(days=1)
+    p = proration_preview(
+        period_start=start, period_end=end, at=start,
+        old_amount_minor=3000, new_amount_minor=5000,
+    )
+    assert p["total_days"] == 1 and p["days_left"] == 1
+    assert p["credit_unused_old_minor"] == 3000   # full unused credit
+    assert p["charge_new_remaining_minor"] == 5000
+    assert p["net_minor"] == 2000
