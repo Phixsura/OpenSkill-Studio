@@ -924,3 +924,30 @@ async def test_connection_config_and_limits_nonfinite_rejected_not_500(c):
         headers=h,
     )
     assert r3.status_code == 201, r3.text[:150]
+
+
+def test_connection_credentials_reject_non_dict_at_schema():
+    """R292: update/create connection credentials are typed dict[str,str]|None
+    and the service's UNSET sentinel widens its param to `object` (mypy flags
+    the `.keys()` there). This pins that the REQUEST boundary rejects every
+    non-dict shape — so a list/str/int never reaches encrypt_credentials or
+    `set(credentials.keys())` as an AttributeError 500 (the R87 untrusted-
+    inner-type class). If the schema is ever loosened, this fails."""
+    from pydantic import ValidationError
+
+    from app.schemas.provider import CreateConnectionRequest, UpdateConnectionRequest
+
+    # UpdateConnectionRequest: every field optional, so a raised error can
+    # only come from the credentials shape — the discriminating assertion.
+    for bad in (["a", "b"], "stringcreds", 123, [{"k": "v"}], {"k": 1}):
+        with pytest.raises(ValidationError):
+            UpdateConnectionRequest.model_validate({"credentials": bad})
+    ok = UpdateConnectionRequest.model_validate({"credentials": {"api_key": "x"}})
+    assert ok.credentials == {"api_key": "x"}
+    assert UpdateConnectionRequest.model_validate({"credentials": None}).credentials is None
+    # CreateConnectionRequest shares the field type — assert the error names
+    # `credentials` specifically (required-field errors alone would not).
+    with pytest.raises(ValidationError) as e:
+        CreateConnectionRequest.model_validate(
+            {"adapter_id": "a", "name": "c", "credentials": ["not", "a", "dict"]})
+    assert any(err["loc"] == ("credentials",) for err in e.value.errors())
