@@ -172,8 +172,13 @@ describe("StatusBadgeClass revoked (R326)", () => {
     expect(cls).toContain("red");
     expect(cls).not.toBe(StatusBadgeClass("definitely_unknown_status"));
   });
+  it("maps portal review states (R327): action signals are not neutral", () => {
+    expect(StatusBadgeClass("revision_requested")).toContain("amber");
+    expect(StatusBadgeClass("rejected")).toContain("red");
+    expect(StatusBadgeClass("submitted")).toContain("blue");
+  });
   it("keeps every stop state visually distinct from neutral gray", () => {
-    for (const s of ["revoked", "terminated", "suspended", "failed", "blocked"]) {
+    for (const s of ["revoked", "terminated", "suspended", "failed", "blocked", "rejected"]) {
       expect(STATUS_COLORS[s], s).toBeDefined();
       expect(STATUS_COLORS[s], s).toContain("red");
     }

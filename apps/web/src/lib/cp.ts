@@ -169,6 +169,14 @@ export const STATUS_COLORS: Record<string, string> = {
   // hiding a stop state (the R101[L15] class): a revoked license read the
   // same as a merely archived one.
   revoked: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  // R327: the client portal badges submission review states
+  // (s.status.toLowerCase()) — submitted/revision_requested/rejected all fell
+  // to neutral gray. revision_requested is THE client-facing action signal
+  // (reviewer asked for changes) and rejected is a stop state; both read as
+  // inert gray (the R101[L15] class, third instance).
+  submitted: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  revision_requested: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  rejected: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
 };
 
 export function StatusBadgeClass(status: string): string {
