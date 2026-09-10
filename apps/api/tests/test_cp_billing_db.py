@@ -3560,3 +3560,74 @@ async def test_push_provider_handler_arcs(db, monkeypatch):
     sub.status = "cancelled"
     await db.flush()
     await handle_subscription_push_provider(db, {"subscription_id": sub.id})  # swallowed
+
+
+@pytest.mark.asyncio
+async def test_cancel_provider_handler_arcs(db, monkeypatch):
+    """R267: handle_subscription_cancel_provider — the R123[H6] reactivation
+    guard (a retried cancel(at_end) after a successful reactivate must NOT
+    re-arm the provider cancel), the R123[M12/M16] already-terminal success
+    mapping, and transient failures still raising for outbox retry."""
+    from app.controlplane.services.billing import handle_subscription_cancel_provider
+    from app.controlplane.services.billing_providers.mock import MockProvider
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+    sub.provider = "mock"
+    sub.external_ref = f"mock_sub_{ULID()}"
+    await db.flush()
+
+    calls: list[tuple] = []
+
+    async def record(self, external_ref, at_period_end):
+        calls.append((external_ref, at_period_end))
+
+    monkeypatch.setattr(MockProvider, "cancel_subscription", record)
+
+    # bad payloads → silent no-ops
+    await handle_subscription_cancel_provider(db, {"provider": "manual", "external_ref": "x"})
+    await handle_subscription_cancel_provider(db, {"provider": "mock", "external_ref": ""})
+    assert calls == []
+
+    # R123[H6]: at_end cancel retried AFTER reactivation → skipped
+    assert sub.status == "active" and not sub.cancel_at_period_end
+    await handle_subscription_cancel_provider(db, {
+        "provider": "mock", "external_ref": sub.external_ref,
+        "at_period_end": True, "subscription_id": sub.id})
+    assert calls == []                                     # obsolete cancel skipped
+
+    # pending cancellation → executes with the flag
+    sub.cancel_at_period_end = True
+    await db.flush()
+    await handle_subscription_cancel_provider(db, {
+        "provider": "mock", "external_ref": sub.external_ref,
+        "at_period_end": True, "subscription_id": sub.id})
+    assert calls == [(sub.external_ref, True)]
+
+    # immediate cancel executes regardless of platform state
+    await handle_subscription_cancel_provider(db, {
+        "provider": "mock", "external_ref": sub.external_ref,
+        "at_period_end": False, "subscription_id": sub.id})
+    assert calls[-1] == (sub.external_ref, False)
+
+    # R123[M12/M16]: provider already-terminal → success; transient → raise
+    class InvalidRequestError(Exception):
+        pass
+
+    async def already_gone(self, *a, **kw):
+        raise InvalidRequestError("No such subscription: sub_x")
+
+    monkeypatch.setattr(MockProvider, "cancel_subscription", already_gone)
+    await handle_subscription_cancel_provider(db, {
+        "provider": "mock", "external_ref": sub.external_ref, "at_period_end": False})
+
+    async def transient(self, *a, **kw):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(MockProvider, "cancel_subscription", transient)
+    with pytest.raises(RuntimeError):
+        await handle_subscription_cancel_provider(db, {
+            "provider": "mock", "external_ref": sub.external_ref, "at_period_end": False})
