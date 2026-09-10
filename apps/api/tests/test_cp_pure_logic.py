@@ -313,3 +313,72 @@ def test_tenant_own_actions_are_tenant_visible():
     ):
         assert action in AUDIT_ACTIONS
         assert action in TENANT_VISIBLE_ACTIONS, f"{action} is a tenant-own action"
+
+
+# ── R208: validation-guard reject-branch coverage (branch-gap analysis) ──
+# validate_policy_params (every pricing-policy create) and
+# validate_entitlement_value (every plan-version/override write) are the
+# pure entry gates for money-shaping config. Branch analysis showed their
+# REJECT arcs largely untested — a weakened guard would let a divide-by-zero
+# per_quantity, an int8-overflowing price, an unknown-key smuggle, or a
+# negative/NaN entitlement into stored config that corrupts rating forever.
+
+
+def test_validate_policy_params_rejects():
+    from app.controlplane.services.pricing import validate_policy_params
+
+    def rejects(pt, params):
+        import pytest as _p
+
+        from app.exceptions import AppError
+        with _p.raises(AppError) as e:
+            validate_policy_params(pt, params)
+        assert e.value.code == "INVALID_POLICY_PARAMS"
+
+    rejects("no_such_type", {})                                   # unknown policy type
+    rejects("cost_plus_percentage", {"percentage": -1})           # negative dec
+    rejects("cost_plus_percentage", {"percentage": "NaN"})        # non-finite
+    rejects("cost_plus_percentage", {})                           # missing required key
+    rejects("cost_plus_fixed", {"fixed_markup_minor": -5})        # negative int
+    rejects("cost_plus_fixed", {"fixed_markup_minor": True})      # bool-is-not-int
+    rejects("cost_plus_fixed", {"fixed_markup_minor": 10**16})    # int8 overflow ceiling
+    rejects("cost_plus_fixed", {"fixed_markup_minor": 1, "per_quantity": 0})   # divide-by-zero
+    rejects("fixed_unit_price", {"unit_price_minor": 1, "per_quantity": -2})   # negative divisor
+    rejects("cost_plus_percentage", {"percentage": 5, "junk": 1})  # unknown key smuggle
+    rejects("cost_plus_percentage", {"percentage": 5, "exclude_failed": "yes"})  # non-bool flag
+
+    # positive controls — valid params pass and round-trip
+    for pt, ok in [
+        ("cost_plus_percentage", {"percentage": 20}),
+        ("cost_plus_fixed", {"fixed_markup_minor": 500, "per_quantity": 1000}),
+        ("fixed_unit_price", {"unit_price_minor": 30}),
+        ("included_quota_then_overage", {"included_quota": 100, "overage_unit_price_minor": 5}),
+    ]:
+        assert validate_policy_params(pt, ok) == ok
+
+
+def test_validate_entitlement_value_rejects():
+    from app.controlplane.services.entitlements import validate_entitlement_value
+    from app.exceptions import AppError
+
+    def rejects(key, val):
+        import pytest as _p
+        with _p.raises(AppError) as e:
+            validate_entitlement_value(key, val)
+        assert e.value.code == "UNKNOWN_ENTITLEMENT"
+
+    rejects("no_such_key", 1)                       # unknown entitlement
+    rejects("custom_domain", None)                  # bool cannot be null
+    rejects("custom_domain", 1)                     # bool expects bool
+    rejects("max_organizations", -1)                # int non-negative
+    rejects("max_organizations", True)              # bool-is-not-int
+    rejects("max_organizations", "5")               # int expects int, not str
+    rejects("max_storage_gb", -0.5)                 # decimal non-negative
+    rejects("max_storage_gb", "NaN")                # non-finite decimal
+    rejects("max_storage_gb", "not-a-number")       # unparseable decimal
+
+    # positive controls incl. the numeric-None-is-unlimited path
+    assert validate_entitlement_value("custom_domain", True) is True
+    assert validate_entitlement_value("max_organizations", 25) == 25
+    assert validate_entitlement_value("max_storage_gb", None) is None      # unlimited
+    assert validate_entitlement_value("max_storage_gb", "5.5") == "5.5"
