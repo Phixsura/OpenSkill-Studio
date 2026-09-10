@@ -1076,3 +1076,44 @@ async def test_portal_download_isolates_cross_submission_items(db):
             assert r.status_code == 404, r.text
     finally:
         app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_guest_link_boundary_expiry_default_label_and_401s(db, monkeypatch):
+    """R337 (mutation survivors): (1) a link expiring EXACTLY at the
+    evaluation instant is dead — on BOTH the exchange and the per-request
+    principal check (half-open, <=); (2) a label-less link presents as
+    'Client reviewer', never None; (3) the dead-credential paths are 401s."""
+    user = await _mk_user(db)
+    _, _, _, project, _ = await _mk_project_env(db, user)
+    frozen = datetime.now(UTC) + timedelta(hours=1)
+
+    # label-less link expiring exactly at `frozen`
+    link, raw = await portal_svc.create_guest_link(
+        db, project_id=project.id, label=None, email=None, role="reviewer",
+        expires_at=frozen, actor=_actor(user))
+
+    # before the boundary: exchange works, principal presents the default label
+    token, _ = await portal_svc.exchange_guest_token(db, raw, None)
+    principal = await portal_svc.get_client_principal(db, project.id, f"Bearer {token}")
+    assert principal.label == "Client reviewer"   # None label → default, not None
+
+    # freeze the clock AT the expiry instant → the same link is now dead
+    monkeypatch.setattr(portal_svc, "_now", lambda: frozen)
+    with pytest.raises(AppError) as e1:
+        await portal_svc.exchange_guest_token(db, raw, None)
+    assert e1.value.status_code == 401            # dead credential = 401
+    with pytest.raises(AppError) as e2:
+        await portal_svc.get_client_principal(db, project.id, f"Bearer {token}")
+    assert e2.value.status_code == 401
+
+    # an unknown token TYPE is also a 401 (not 402/403)
+    import jwt as _jwt
+
+    from app.config import settings as _settings
+
+    weird = _jwt.encode({"type": "something_else", "sub": user.id},
+                        _settings.jwt_secret, algorithm="HS256")
+    with pytest.raises(AppError) as e3:
+        await portal_svc.get_client_principal(db, project.id, f"Bearer {weird}")
+    assert e3.value.status_code == 401 and e3.value.code == "CLIENT_ACCESS_DENIED"
