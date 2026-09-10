@@ -3391,3 +3391,49 @@ async def test_preview_matches_invoice_proration(
         f"preview shown {preview_net} but invoice billed {invoiced_change_net} "
         f"[lines: {[(ln.line_type, ln.amount_minor) for ln in lines]}]"
     )
+
+
+@pytest.mark.asyncio
+async def test_scan_due_periods_dedups_live_close_messages(db):
+    """R260: while the outbox is backlogged, every hourly scan re-enqueued
+    the same still-open periods — duplicate period.close_due messages piling
+    up unboundedly. A live (pending/processing) close message dedups."""
+    from app.controlplane.models.outbox import OutboxMessage
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+    period = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"))
+    ).scalar_one()
+    period.period_end = datetime.now(UTC) - timedelta(hours=1)
+    await db.flush()
+
+    def count_msgs():
+        return (
+            db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.topic == "period.close_due",
+                    OutboxMessage.payload["billing_period_id"].astext == period.id,
+                )
+            )
+        )
+
+    n1 = await billing_svc.scan_due_periods(db)
+    msgs = (await count_msgs()).scalars().all()
+    assert len(msgs) == 1
+
+    await billing_svc.scan_due_periods(db)               # re-scan: deduped
+    msgs = (await count_msgs()).scalars().all()
+    assert len(msgs) == 1
+    assert n1 >= 1
+
+    msgs[0].status = "done"                              # processed → closes...
+    await db.flush()
+    await billing_svc.scan_due_periods(db)               # ...but period still open
+    msgs = (await count_msgs()).scalars().all()
+    assert len(msgs) == 2                                # re-enqueue is allowed again

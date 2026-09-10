@@ -2323,8 +2323,28 @@ async def issue_credit_note(
 # ── Period-close scan + outbox handler ───────────────────────
 
 
-async def scan_due_periods(db: AsyncSession) -> int:
-    """Hourly cron: enqueue period.close_due for every due subscription."""
+async def scan_due_periods(db: AsyncSession, limit: int = 5000) -> int:
+    """Hourly cron: enqueue period.close_due for every due subscription.
+
+    R260: a period stays `open` until its close message is PROCESSED, so
+    while the outbox is backlogged every hourly scan re-enqueued the same
+    periods — duplicate close messages piling up N-per-hour (each an
+    idempotent no-op, but they consume poll slots and can outgrow the drain
+    rate). NOT EXISTS on a live close message dedups; the batch is bounded
+    oldest-first like the R259 expiry crons.
+    """
+
+    from app.controlplane.models.outbox import OutboxMessage
+
+    pending_close = (
+        select(OutboxMessage.id)
+        .where(
+            OutboxMessage.topic == "period.close_due",
+            OutboxMessage.status.in_(["pending", "processing"]),
+            OutboxMessage.payload["billing_period_id"].astext == BillingPeriod.id,
+        )
+        .exists()
+    )
     due = (
         (
             await db.execute(
@@ -2334,7 +2354,10 @@ async def scan_due_periods(db: AsyncSession) -> int:
                     BillingPeriod.status == "open",
                     BillingPeriod.period_end <= _now(),
                     Subscription.status.in_(["active", "cancel_at_period_end", "past_due"]),
+                    ~pending_close,
                 )
+                .order_by(BillingPeriod.period_end)
+                .limit(limit)
             )
         )
         .scalars()
