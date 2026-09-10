@@ -1566,3 +1566,53 @@ async def test_offering_cost_fallback_for_workflow_events(db):
     snap = rated.cost_rate_snapshot or {}
     assert snap.get("fallback") == "offering"
     assert rated.internal_cost_minor == 200                # $2 → 200 US cents
+
+
+@pytest.mark.asyncio
+async def test_sell_policy_tiebreaks_typed_beats_wildcard_then_priority(db):
+    """R308: when several price policies match at the SAME specificity tier,
+    the deterministic tie-break is (rank, typed>wildcard, priority,
+    effective_from, id). Pins the two money-relevant dimensions: an exact
+    usage_type policy beats a NULL-wildcard one for its type, and among two
+    typed same-rank policies the higher `priority` wins — so an event always
+    rates at the intended price, not whichever row the DB returned first."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    now = datetime.now(UTC) - timedelta(days=1)
+
+    async def policy(price, *, usage_type, priority=0):
+        return await pricing_svc.create_price_policy(
+            db, actor=_actor(user), name=f"p{price}-{ULID()}",
+            policy_type="fixed_unit_price", usage_type=usage_type, currency="USD",
+            params={"unit_price_minor": price}, effective_from=now,
+            tenant_id=tenant.id, priority=priority)
+
+    # tenant-scope wildcard (any usage_type) @ 3/unit and a tenant-scope
+    # image_generation-specific policy @ 7/unit
+    await policy(3, usage_type=None)
+    await policy(7, usage_type="image_generation")
+    ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=10)
+    rated = await rating.rate_event(db, ev.id)
+    assert rated.billable_amount_minor == 70   # typed (7) beats wildcard (3)
+
+    # a DIFFERENT usage_type with no specific policy falls to the wildcard
+    ev2 = await _mk_event(db, tenant, usage_type="image_editing", quantity=10)
+    rated2 = await rating.rate_event(db, ev2.id)
+    assert rated2.billable_amount_minor == 30  # wildcard (3)
+
+    # two typed same-rank policies → higher priority wins
+    user2 = await _mk_user(db)
+    tenant2 = await _mk_tenant(db, user2)
+
+    async def policy2(price, priority):
+        return await pricing_svc.create_price_policy(
+            db, actor=_actor(user2), name=f"q{price}-{ULID()}",
+            policy_type="fixed_unit_price", usage_type="image_generation",
+            currency="USD", params={"unit_price_minor": price}, effective_from=now,
+            tenant_id=tenant2.id, priority=priority)
+
+    await policy2(11, priority=1)
+    await policy2(99, priority=5)   # higher priority
+    ev3 = await _mk_event(db, tenant2, usage_type="image_generation", quantity=1)
+    rated3 = await rating.rate_event(db, ev3.id)
+    assert rated3.billable_amount_minor == 99
