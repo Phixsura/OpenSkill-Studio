@@ -1625,6 +1625,25 @@ process_webhook idempotency — were all found ALREADY exhaustively covered.
 No tests were manufactured for them. All 329 tests across the ten touched
 control-plane suites pass together (3m29s).
 
+### R311–R313: capability-rung fix + browser E2E (2026-09-11)
+
+- **R311 (fix)**: acted on the R309 open decision after confirming ADR-014
+  ("exact → provider wildcard → capability → offering"): the provider-
+  wildcard cost-rate rung query did not exclude capability_key, so a
+  provider-scoped capability rate was swallowed and mislabeled
+  provider_wildcard, and effective_from (not rung precedence) picked
+  between a wildcard and a capability rate. Added capability_key IS NULL to
+  the wildcard query — capability now resolves on its own rung, and a true
+  wildcard wins by precedence over a newer capability rate. Guard-proven;
+  rating+money suites (94) green.
+- **R312 (verification)**: browser E2E every-page smoke — 17/17 (all
+  authenticated dashboard/create/detail pages render, no console-crash).
+- **R313 (verification)**: browser E2E sweep-newui — 6/6, exercising the
+  draft-badge status flip (StatusBadge path, R299 neighbor) and
+  logout-before-auth-hydration (R303/R304 auth path) in a real browser.
+  Both browser runs: zero 500s / zero tracebacks across 38,382 API log
+  lines, memory stable (single Chromium, workers=1).
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
