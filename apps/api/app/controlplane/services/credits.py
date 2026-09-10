@@ -528,17 +528,22 @@ async def release(db: AsyncSession, reservation_id: str) -> CreditReservation:
     return reservation
 
 
-async def expire_stale_reservations(db: AsyncSession) -> int:
+async def expire_stale_reservations(db: AsyncSession, limit: int = 500) -> int:
     """Worker cron: held past expiry. Referenced run still RUNNING → extend
-    (max 2×6h); otherwise release."""
+    (max 2×6h); otherwise release. R259: bounded oldest-first batch — see
+    expire_trials (an unbounded backlog + job-timeout cancellation wedges
+    the cron on the identical batch forever)."""
     now = datetime.now(UTC)
     stale = (
         (
             await db.execute(
-                select(CreditReservation).where(
+                select(CreditReservation)
+                .where(
                     CreditReservation.status == "held",
                     CreditReservation.expires_at < now,
                 )
+                .order_by(CreditReservation.expires_at)
+                .limit(limit)
             )
         )
         .scalars()
@@ -594,7 +599,7 @@ async def expire_stale_reservations(db: AsyncSession) -> int:
     return handled
 
 
-async def expire_promotional(db: AsyncSession) -> int:
+async def expire_promotional(db: AsyncSession, limit: int = 500) -> int:
     """Daily cron: expired unconsumed promo lots → negative expiration entries.
 
     v1 simplification (ADR): consumption is not lot-tracked; the expired
@@ -605,12 +610,15 @@ async def expire_promotional(db: AsyncSession) -> int:
     lots = (
         (
             await db.execute(
-                select(CreditLedgerEntry).where(
+                select(CreditLedgerEntry)
+                .where(
                     CreditLedgerEntry.entry_type == "promotional",
                     CreditLedgerEntry.expires_at.is_not(None),
                     CreditLedgerEntry.expires_at < now,
                     CreditLedgerEntry.consumed_expiration_id.is_(None),
                 )
+                .order_by(CreditLedgerEntry.expires_at)  # R259: bounded batch
+                .limit(limit)
             )
         )
         .scalars()

@@ -2473,3 +2473,49 @@ async def test_run_terminal_no_reservation_and_raced_release(db, monkeypatch):
     ).scalar_one()
     assert rated.status == "rated"           # stays billable on the invoice
     assert reservation.status == "released"  # never silently flipped to settled
+
+
+@pytest.mark.asyncio
+async def test_expiry_crons_bounded_batches(db):
+    """R259: every expiry cron takes a bounded oldest-first batch. Unbounded,
+    a post-outage backlog outgrows the job timeout; the cancellation rolls
+    back the single commit and every rerun retries the identical ever-growing
+    batch — expiry wedges platform-wide. Bound respected + progress across
+    successive calls."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await credit_svc.top_up(
+        db, tenant.id, "USD", 50_000, actor=_actor(user), idempotency_key=f"bb-{ULID()}"
+    )
+    past = datetime.now(UTC) - timedelta(hours=1)
+    for i in range(3):
+        r = await credit_svc.reserve(
+            db, tenant.id, "USD", 100,
+            reference_type="workflow_run", reference_id=f"bbrun{i}-{ULID()}")
+        r.expires_at = past - timedelta(minutes=i)
+    await db.flush()
+
+    n1 = await credit_svc.expire_stale_reservations(db, limit=1)
+    assert n1 == 1                          # bound respected
+    n_rest = await credit_svc.expire_stale_reservations(db, limit=500)
+    assert n_rest >= 2                      # progress: the rest drains
+    held = (
+        (await db.execute(
+            select(CreditReservation).where(
+                CreditReservation.tenant_id == tenant.id,
+                CreditReservation.status == "held")))
+        .scalars().all()
+    )
+    assert held == []
+
+    # promotional lots: same bound/progress contract
+    for i in range(3):
+        await credit_svc.grant_promotional(
+            db, tenant.id, "USD", 10, actor=_actor(user),
+            idempotency_key=f"bbp{i}-{ULID()}", reason="bb",
+            expires_at=past - timedelta(minutes=i))
+    await db.flush()
+    p1 = await credit_svc.expire_promotional(db, limit=1)
+    assert p1 == 1
+    p_rest = await credit_svc.expire_promotional(db, limit=500)
+    assert p_rest >= 2

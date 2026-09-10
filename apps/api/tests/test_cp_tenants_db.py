@@ -880,3 +880,19 @@ async def test_expire_trials_isolates_one_bad_tenant(db, monkeypatch):
     assert healthy.status == TenantStatus.ACTIVE, "healthy trial must still expire"
     assert poison.status == TenantStatus.TRIAL, "poison tenant rolled back, left for later"
     assert n >= 1
+
+
+@pytest.mark.asyncio
+async def test_expire_trials_bounded_batch(db):
+    """R259: trial expiry drains a bounded oldest-first batch (see the
+    credits-side bounded-batch test for the failure mode)."""
+    from datetime import timedelta
+
+    for i in range(3):
+        t = await _mk_tenant(db, await _mk_user(db))
+        t.trial_ends_at = datetime.now(UTC) - timedelta(hours=i + 1)
+    await db.flush()
+    n1 = await tenant_svc.expire_trials(db, limit=1)
+    assert n1 == 1
+    n_rest = await tenant_svc.expire_trials(db, limit=500)
+    assert n_rest >= 2

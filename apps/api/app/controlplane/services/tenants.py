@@ -202,20 +202,31 @@ async def transition_status(
     return tenant
 
 
-async def expire_trials(db: AsyncSession) -> int:
+async def expire_trials(db: AsyncSession, limit: int = 500) -> int:
     """Worker cron: TRIAL past trial_ends_at with no live paid subscription →
-    downgrade to ACTIVE-on-community (or suspend, per settings)."""
+    downgrade to ACTIVE-on-community (or suspend, per settings).
+
+    R259: the batch is BOUNDED (oldest expiry first). Unbounded, a backlog
+    after a worker outage could outgrow the cron's job timeout; the
+    cancellation rolls back the single commit wholesale and every rerun
+    retries the identical ever-growing batch — expiry wedges platform-wide
+    (the timeout twin of the R170 poison-row failure). Bounded batches drain
+    a backlog across firings instead.
+    """
     target = (
         TenantStatus.SUSPENDED if settings.trial_expiry_action == "suspend" else TenantStatus.ACTIVE
     )
     rows = (
         (
             await db.execute(
-                select(TenantAccount).where(
+                select(TenantAccount)
+                .where(
                     TenantAccount.status == TenantStatus.TRIAL,
                     TenantAccount.trial_ends_at.is_not(None),
                     TenantAccount.trial_ends_at < datetime.now(UTC),
                 )
+                .order_by(TenantAccount.trial_ends_at)
+                .limit(limit)
             )
         )
         .scalars()

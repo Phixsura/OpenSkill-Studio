@@ -1399,7 +1399,7 @@ Please evaluate the submission against the rubric above."""
         await self.db.flush()
 
 
-async def sweep_wedged_evaluations(db: AsyncSession) -> int:
+async def sweep_wedged_evaluations(db: AsyncSession, limit: int = 500) -> int:
     """R101[H18]: fail evaluations wedged in PROCESSING.
 
     The R94[H5] commit-before-LLM pattern persists status=PROCESSING before
@@ -1418,10 +1418,13 @@ async def sweep_wedged_evaluations(db: AsyncSession) -> int:
     rows = (
         (
             await db.execute(
-                select(EvaluationTask).where(
+                select(EvaluationTask)
+                .where(
                     EvaluationTask.status == EvalStatus.PROCESSING,
                     EvaluationTask.started_at < cutoff,
                 )
+                .order_by(EvaluationTask.started_at)
+                .limit(limit)
             )
         )
         .scalars()
