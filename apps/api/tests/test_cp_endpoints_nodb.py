@@ -560,3 +560,58 @@ async def test_paginated_lists_accept_page_params(client):
         "/api/v1/tenants/01JX0000000000000000000000/payments?page=0&per_page=100000"
     )
     assert r.status_code in (401, 422)
+
+
+# ── R277: data-driven unauthenticated sweep over EVERY controlplane route ──
+
+
+def _controlplane_routes():
+    """Enumerate (method, concrete-path) for every /platform, /tenants,
+    /client-portal and /billing route, path params filled with fake ULIDs."""
+    import re
+
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    found = []
+
+    def walk(r):
+        if isinstance(r, APIRoute):
+            path = "/api/v1" + r.path
+            if path.startswith((
+                "/api/v1/platform", "/api/v1/tenants",
+                "/api/v1/client-portal", "/api/v1/billing",
+            )):
+                concrete = re.sub(r"\{[^}]+\}", "01JFAKEFAKEFAKEFAKEFAKEFAK", path)
+                for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
+                    found.append((m, concrete))
+        for sub in getattr(r, "routes", []) or []:
+            walk(sub)
+        orig = getattr(r, "original_router", None)
+        if orig is not None:
+            walk(orig)
+
+    for r in app.routes:
+        walk(r)
+    return sorted(set(found))
+
+
+@pytest.mark.asyncio
+async def test_every_controlplane_route_rejects_unauthenticated(client):
+    """R277: auth-hole tripwire. EVERY controlplane route hit without
+    credentials must reject (401/403/404/422/405/409) — never 2xx (an
+    unauthenticated success is an auth hole) and never 500. Data-driven over
+    the live route table, so any future route missing its auth dependency
+    fails this test the day it lands."""
+    routes = _controlplane_routes()
+    assert len(routes) > 100, f"route enumeration broke: {len(routes)}"
+    offenders = []
+    for method, path in routes:
+        kwargs = {}
+        if method in ("POST", "PUT", "PATCH"):
+            kwargs["json"] = {}
+        r = await client.request(method, path, **kwargs)
+        if r.status_code >= 500 or 200 <= r.status_code < 300:
+            offenders.append((method, path, r.status_code))
+    assert offenders == [], offenders
