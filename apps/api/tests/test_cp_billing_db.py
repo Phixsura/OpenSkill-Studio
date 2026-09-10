@@ -3743,3 +3743,75 @@ def test_billing_event_hwm_pure_boundaries():
     assert _is_stale_billing_event(sub, ev2) is False
     _advance_billing_event_hwm(sub, ev2)
     assert sub.last_billing_event_at == t2
+
+
+@pytest.mark.asyncio
+async def test_subscription_http_self_service_guards(db):
+    """R293: the tenant-facing subscription endpoints' OWN guards (all prior
+    tests drive the service directly). A non-platform tenant owner cannot
+    self-mint a MANUAL subscription (which never charges — a billing bypass):
+    MANUAL_BILLING_MODE 409. change/cancel/reactivate with no live sub → 404.
+    A change with neither plan_key nor seats → 'Nothing to change' 422."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.security import create_access_token
+    from app.main import app
+
+    owner = await _mk_user(db)
+    tenant = await _mk_tenant(db, owner, status=TenantStatus.ACTIVE)
+    await db.commit()
+    token = create_access_token(owner.id, owner.email, "student")
+    tid = tenant.id
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+
+            # self-mint of a manual subscription → 409 (billing bypass guard)
+            r = await c.post(f"/api/v1/tenants/{tid}/subscription", headers=hdr,
+                             json={"plan_key": "school", "interval": "month",
+                                   "seats": 0, "provider": "manual"})
+            assert r.status_code == 409, r.text
+            assert r.json()["error"]["code"] == "MANUAL_BILLING_MODE"
+
+            # change/cancel/reactivate with no live subscription → 404
+            for path, payload in (
+                ("/subscription/change", {"seats": 5}),
+                ("/subscription/cancel", {"at_period_end": True}),
+                ("/subscription/reactivate", {}),
+            ):
+                r = await c.post(f"/api/v1/tenants/{tid}{path}", headers=hdr, json=payload)
+                assert r.status_code == 404, (path, r.text)
+                assert r.json()["error"]["code"] == "SUBSCRIPTION_NOT_FOUND"
+    finally:
+        app.router.lifespan_context = orig
+
+    # now give the tenant a live sub (service path) and test the empty-change arc
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=_actor(owner))
+    await db.commit()
+
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.post(f"/api/v1/tenants/{tid}/subscription/change",
+                             headers=hdr, json={})
+            assert r.status_code == 422, r.text
+            assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+    finally:
+        app.router.lifespan_context = orig
+        async with AsyncSessionLocal() as clean:
+            s2 = await clean.get(type(sub), sub.id)
+            if s2 is not None:
+                await clean.delete(s2)
+                await clean.commit()

@@ -1250,3 +1250,63 @@ async def test_remove_override_and_stale_activate(db):
     with pytest.raises(AppError) as e:
         await plan_svc.activate_version(db, draft, actor=_actor(user))
     assert e.value.code == "PLAN_VERSION_IMMUTABLE" and e.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_public_plan_catalog_hides_unpublished(db):
+    """R294: the public pricing page (/api/v1/plans, unauthenticated) must
+    expose ONLY active plans with an active version — an inactive plan or a
+    draft/retired version leaking publicly is an unpublished-pricing
+    disclosure. Pinned as a data-exposure sentinel: widening either filter
+    surfaces the hidden rows and trips the test."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    user = await _mk_user(db, role=UserRole.ADMIN)
+    # an INACTIVE plan with an active version → must not appear
+    hidden_plan = await plan_svc.create_plan(
+        db, key=f"hidden-{str(ULID()).lower()[:8]}", name="Hidden",
+        description=None, actor=_actor(user))
+    hv = await plan_svc.create_draft_version(db, hidden_plan, created_by=user.id)
+    await plan_svc.activate_version(db, hv, actor=_actor(user))
+    hidden_plan.is_active = False
+    # an ACTIVE plan whose only version is still DRAFT → must not appear
+    draft_plan = await plan_svc.create_plan(
+        db, key=f"draftonly-{str(ULID()).lower()[:8]}", name="DraftOnly",
+        description=None, actor=_actor(user))
+    await plan_svc.create_draft_version(db, draft_plan, created_by=user.id)  # never activated
+    await db.commit()
+    hidden_key, draft_key = hidden_plan.key, draft_plan.key
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/v1/plans")
+            assert r.status_code == 200, r.text
+            keys = {p["key"] for p in r.json()["data"]}
+            assert hidden_key not in keys, "inactive plan leaked to the public catalog"
+            assert draft_key not in keys, "draft-only plan leaked to the public catalog"
+            # the seeded active plans DO appear, each with an active version
+            assert keys, "public catalog unexpectedly empty"
+            for p in r.json()["data"]:
+                assert p["active_version"]["status"] == "active"
+    finally:
+        app.router.lifespan_context = orig
+        async with AsyncSessionLocal() as clean:
+            for k in (hidden_key, draft_key):
+                pl = (await clean.execute(
+                    select(ProductPlan).where(ProductPlan.key == k))).scalar_one_or_none()
+                if pl is not None:
+                    for v in (await clean.execute(
+                        select(PlanVersion).where(PlanVersion.plan_id == pl.id))).scalars().all():
+                        await clean.delete(v)
+                    await clean.delete(pl)
+            await clean.commit()

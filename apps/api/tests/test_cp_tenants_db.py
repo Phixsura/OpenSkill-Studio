@@ -939,3 +939,125 @@ async def test_member_management_reject_arcs(db):
     assert e.value.status_code == 404
 
     await tenant_svc.remove_tenant_member(db, tenant, member2.id, actor=_actor(owner))
+
+
+@pytest.mark.asyncio
+async def test_update_tenant_http_null_and_tz_ratelimit(db):
+    """R295: update_tenant HTTP guards. R99[m20]: an explicit null on a NOT
+    NULL column (name/timezone/currency) must 422, not IntegrityError-500 at
+    commit. R123[M8]: timezone anchors quota/budget month windows, so a
+    change is rate-limited to once per 30 days — a second flip is 422 (a
+    same-value round-trip must NOT count, R129[M6])."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.security import create_access_token
+    from app.main import app
+
+    owner = await _mk_user(db)
+    tenant = await _mk_tenant(db, owner)
+    await db.commit()
+    token = create_access_token(owner.id, owner.email, "student")
+    tid = tenant.id
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+
+            # explicit null on a NOT NULL column → 422 (R99[m20])
+            r = await c.patch(f"/api/v1/tenants/{tid}", headers=hdr, json={"name": None})
+            assert r.status_code == 422, r.text
+            assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+            # a same-value timezone round-trip must NOT consume the budget
+            same = await c.patch(f"/api/v1/tenants/{tid}", headers=hdr,
+                                 json={"timezone": tenant.timezone})
+            assert same.status_code == 200, same.text
+
+            # first real change lands
+            r1 = await c.patch(f"/api/v1/tenants/{tid}", headers=hdr,
+                               json={"timezone": "America/New_York"})
+            assert r1.status_code == 200, r1.text
+
+            # second change within 30 days → 422 (quota-window anchor guard)
+            r2 = await c.patch(f"/api/v1/tenants/{tid}", headers=hdr,
+                               json={"timezone": "Asia/Tokyo"})
+            assert r2.status_code == 422, r2.text
+            assert "30 days" in r2.json()["error"]["message"]
+    finally:
+        app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_impersonation_grant_mint_is_creator_only_revoke_is_any_admin(db):
+    """R296: the HTTP-layer isolation on the impersonation surface, with its
+    DELIBERATE asymmetry pinned so a future refactor cannot silently flip it:
+
+    - MINT (the privilege-escalation direction — turning a grant into an
+      impersonation token) is CREATOR-ONLY: a different platform admin
+      minting from admin A's grant gets a uniform 404. This guard lives in
+      the endpoint, not the service, so only an HTTP-layer test reaches it;
+      a hole here lets any support admin hijack another's grant to act as
+      the target user.
+    - REVOKE (the defensive direction — disabling a grant) is intentionally
+      open to ANY platform admin: incident response must be able to kill a
+      suspicious grant created by a possibly-compromised admin. Revoke only
+      sets revoked_at and cannot escalate, so this is safe by design."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin_a = await _mk_user(db)
+    admin_b = await _mk_user(db)
+    target = await _mk_user(db)
+    db.add_all([
+        PlatformRoleAssignment(user_id=admin_a.id, role="platform_support"),
+        PlatformRoleAssignment(user_id=admin_b.id, role="platform_support"),
+    ])
+    grant = await tenant_svc.create_impersonation_grant(
+        db, platform_user=admin_a, target_user_id=target.id, tenant_id=None,
+        reason="ticket", expires_in_minutes=30, actor=_actor(admin_a))
+    await db.commit()
+    gid = grant.id
+    tok_b = create_access_token(admin_b.id, admin_b.email, admin_b.role.value)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hb = {"Authorization": f"Bearer {tok_b}"}
+            # admin B mints from A's grant → uniform 404
+            r = await c.post(f"/api/v1/platform/impersonation-grants/{gid}/token", headers=hb)
+            assert r.status_code == 404, r.text
+            assert r.json()["error"]["code"] == "IMPERSONATION_GRANT_NOT_FOUND"
+            # A's own mint works (proves the grant is live, not just absent
+            # for B) — do this BEFORE B revokes, since revoke disables it
+            tok_a = create_access_token(admin_a.id, admin_a.email, admin_a.role.value)
+            r = await c.post(f"/api/v1/platform/impersonation-grants/{gid}/token",
+                             headers={"Authorization": f"Bearer {tok_a}"})
+            assert r.status_code == 200, r.text
+            # admin B CAN revoke A's grant → 200 (deliberate: defensive
+            # incident-response capability; revoke only sets revoked_at)
+            r = await c.post(f"/api/v1/platform/impersonation-grants/{gid}/revoke", headers=hb)
+            assert r.status_code == 200, r.text
+            # once revoked, even the creator can no longer mint from it
+            r = await c.post(f"/api/v1/platform/impersonation-grants/{gid}/token",
+                             headers={"Authorization": f"Bearer {tok_a}"})
+            assert r.status_code != 200, r.text
+    finally:
+        app.router.lifespan_context = orig
