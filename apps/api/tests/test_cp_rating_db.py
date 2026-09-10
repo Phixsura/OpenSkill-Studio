@@ -1706,3 +1706,190 @@ async def test_capability_rung_distinct_and_below_wildcard(db):
     r2 = await rating.rate_event(db, ev2.id)
     assert r2.cost_rate_snapshot["resolution"] == "provider_wildcard"
     assert r2.internal_cost_minor == 5   # wildcard rung beats the newer capability rate
+
+
+@pytest.mark.asyncio
+async def test_cost_resolver_window_boundary_and_race_determinism(db):
+    """R332 (mutation survivors): (1) the rate window is HALF-OPEN — a rate
+    whose effective_until equals occurred_at is already expired at that
+    instant; (2) R147 documents .limit(1)+order_by as the deterministic
+    defense when a lost race leaves two OVERLAPPING same-rung rows — the
+    resolver must pick the latest effective_from, never MultipleResultsFound."""
+    from app.controlplane.models.pricing import ProviderCostRate
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    now = datetime.now(UTC)
+    t0 = now - timedelta(days=3)
+
+    # (1) half-open window: effective_until == occurred_at → expired
+    prov = f"hb-{str(ULID()).lower()[:8]}"
+    db.add(ProviderCostRate(
+        provider=prov, model_or_service="m", usage_type="image_generation", unit="images",
+        unit_cost=Decimal("0.10"), currency="USD",
+        effective_from=t0, effective_until=now, created_by=user.id))
+    await db.flush()
+    ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
+                         provider=prov, model_or_service="m", occurred_at=now)
+    r = await rating.rate_event(db, ev.id)
+    assert (r.cost_rate_snapshot or {}).get("resolution") != "exact", (
+        "a rate expiring exactly at occurred_at must not match (half-open window)")
+
+    # (2) two overlapping EXACT rows (simulated race residue, R147) — the
+    # newer effective_from wins deterministically
+    prov2 = f"race-{str(ULID()).lower()[:8]}"
+    db.add_all([
+        ProviderCostRate(
+            provider=prov2, model_or_service="m", usage_type="image_generation", unit="images",
+            unit_cost=Decimal("0.30"), currency="USD",
+            effective_from=t0, created_by=user.id),
+        ProviderCostRate(
+            provider=prov2, model_or_service="m", usage_type="image_generation", unit="images",
+            unit_cost=Decimal("0.20"), currency="USD",
+            effective_from=t0 + timedelta(hours=1), created_by=user.id),
+    ])
+    await db.flush()
+    ev2 = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
+                          provider=prov2, model_or_service="m")
+    r2 = await rating.rate_event(db, ev2.id)
+    assert (r2.cost_rate_snapshot or {}).get("resolution") == "exact"
+    assert r2.internal_cost_minor == 20                     # newer row (0.20) wins
+
+    # same determinism on the WILDCARD and CAPABILITY rungs
+    prov3 = f"racew-{str(ULID()).lower()[:8]}"
+    db.add_all([
+        ProviderCostRate(
+            provider=prov3, model_or_service=None, usage_type="image_generation", unit="images",
+            unit_cost=Decimal("0.50"), currency="USD",
+            effective_from=t0, created_by=user.id),
+        ProviderCostRate(
+            provider=prov3, model_or_service=None, usage_type="image_generation", unit="images",
+            unit_cost=Decimal("0.40"), currency="USD",
+            effective_from=t0 + timedelta(hours=1), created_by=user.id),
+    ])
+    await db.flush()
+    ev3 = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
+                          provider=prov3, model_or_service="unpriced-model")
+    r3 = await rating.rate_event(db, ev3.id)
+    assert (r3.cost_rate_snapshot or {}).get("resolution") == "provider_wildcard"
+    assert r3.internal_cost_minor == 40
+
+    # capability rung: two overlapping capability rates → newest wins
+    prov4 = f"racec-{str(ULID()).lower()[:8]}"
+    db.add_all([
+        ProviderCostRate(
+            provider=prov4, model_or_service=None, capability_key="image_generation",
+            usage_type="image_generation", unit="images",
+            unit_cost=Decimal("0.70"), currency="USD",
+            effective_from=t0, created_by=user.id),
+        ProviderCostRate(
+            provider=prov4, model_or_service=None, capability_key="image_generation",
+            usage_type="image_generation", unit="images",
+            unit_cost=Decimal("0.60"), currency="USD",
+            effective_from=t0 + timedelta(hours=1), created_by=user.id),
+    ])
+    await db.flush()
+    ev4 = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
+                          provider=prov4, model_or_service="unpriced-model")
+    r4 = await rating.rate_event(db, ev4.id)
+    assert (r4.cost_rate_snapshot or {}).get("resolution") == "capability"
+    assert r4.internal_cost_minor == 60
+
+    # a MODEL-LESS event must resolve on the wildcard rung with that label —
+    # entering the exact rung with model None turns the SQLAlchemy comparison
+    # into IS NULL and mislabels the wildcard row as 'exact'
+    ev5 = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
+                          provider=prov3, model_or_service=None)
+    r5 = await rating.rate_event(db, ev5.id)
+    assert (r5.cost_rate_snapshot or {}).get("resolution") == "provider_wildcard"
+    assert r5.internal_cost_minor == 40
+
+
+@pytest.mark.asyncio
+async def test_offering_fallback_scoped_to_connection_and_model(db):
+    """R332: the offering fallback must resolve THE step's offering — scoped
+    by BOTH connection and model. A same-model offering on another connection
+    (different org pricing) or a same-connection different-model offering must
+    never supply the cost. And when NO offering matches, the event lands at
+    no_rate without touching offering attrs (the `and` short-circuit — mutated
+    to `or` it dereferences None → 500)."""
+    from app.models.organization import Organization, OrgStatus
+    from app.models.provider import (
+        ProviderAdapter,
+        ProviderConnection,
+        ProviderModelOffering,
+    )
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    org = Organization(
+        name="OffScope", slug=f"osc-{str(ULID()).lower()}", status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id, created_by=user.id)
+    db.add(org)
+    await db.flush()
+    adapter = ProviderAdapter(key=f"osc-{str(ULID()).lower()}", name="Osc")
+    db.add(adapter)
+    await db.flush()
+    conn_a = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="a",
+                                created_by=user.id)
+    conn_b = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="b",
+                                created_by=user.id)
+    db.add_all([conn_a, conn_b])
+    await db.flush()
+    db.add_all([
+        ProviderModelOffering(connection_id=conn_a.id, capability_key="text_generation",
+                              model_name="m1", is_active=True,
+                              cost_per_call_usd=Decimal("1")),
+        ProviderModelOffering(connection_id=conn_b.id, capability_key="text_generation",
+                              model_name="m1", is_active=True,
+                              cost_per_call_usd=Decimal("9.99")),   # other connection
+        ProviderModelOffering(connection_id=conn_a.id, capability_key="text_generation",
+                              model_name="m2", is_active=True,
+                              cost_per_call_usd=Decimal("5.55")),   # other model
+    ])
+    run = WorkflowRun(
+        org_id=org.id, pack_id=None, release_id=None, installation_id=None,
+        definition_snapshot={"steps": [], "edges": []}, inputs={},
+        started_by=user.id, status=RunStatus.COMPLETED)
+    db.add(run)
+    await db.flush()
+
+    # a DUPLICATE (conn_a, m1) offering row (no unique constraint exists):
+    # the resolver's .limit(1) must stay deterministic, not
+    # MultipleResultsFound-500 on every rate_event
+    db.add(ProviderModelOffering(connection_id=conn_a.id, capability_key="text_generation",
+                                 model_name="m1", is_active=True,
+                                 cost_per_call_usd=Decimal("1")))
+    await db.flush()
+    ev = await _mk_event(
+        db, tenant, org_id=org.id, usage_type="voice_generation", quantity=1,
+        provider=f"posc-{str(ULID()).lower()[:8]}",
+        workflow_run_id=run.id, provider_connection_id=conn_a.id,
+        model_or_service="m1")
+    r = await rating.rate_event(db, ev.id)
+    snap = r.cost_rate_snapshot or {}
+    assert snap.get("fallback") == "offering"
+    assert r.internal_cost_minor == 100, "must use conn_a/m1 ($1), not another connection/model"
+
+    # no matching offering at all → clean no_rate, no crash
+    ev2 = await _mk_event(
+        db, tenant, org_id=org.id, usage_type="voice_generation", quantity=1,
+        provider=f"posc-{str(ULID()).lower()[:8]}",
+        workflow_run_id=run.id, provider_connection_id=conn_a.id,
+        model_or_service="no-such-model")
+    r2 = await rating.rate_event(db, ev2.id)
+    snap2 = r2.cost_rate_snapshot or {}
+    assert snap2.get("fallback") != "offering"
+    assert r2.internal_cost_minor == 0
+
+    # the offering fallback requires BOTH workflow dims: a connection-bearing
+    # event WITHOUT a workflow_run_id (eval-path shape) must not be
+    # offering-priced
+    ev3 = await _mk_event(
+        db, tenant, org_id=org.id, usage_type="voice_generation", quantity=1,
+        provider=f"posc-{str(ULID()).lower()[:8]}",
+        provider_connection_id=conn_a.id, model_or_service="m1")
+    r3 = await rating.rate_event(db, ev3.id)
+    assert (r3.cost_rate_snapshot or {}).get("fallback") != "offering"
+    assert r3.internal_cost_minor == 0
