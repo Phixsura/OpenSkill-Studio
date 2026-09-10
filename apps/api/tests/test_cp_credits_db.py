@@ -2400,3 +2400,76 @@ def test_budget_period_start_pure():
     assert budget_svc.policy_matches(cpol, cohort_id="c1", **cbase) is True
     assert budget_svc.policy_matches(cpol, cohort_id="c2", **cbase) is False
     assert budget_svc.policy_matches(cpol, cohort_id=None, **cbase) is False
+
+
+@pytest.mark.asyncio
+async def test_run_terminal_no_reservation_and_raced_release(db, monkeypatch):
+    """R256: the two unexercised handler arcs. (1) A run without a credit
+    reservation settles as a no-op. (2) R51 guard: when the expiry cron
+    releases the hold between the handler's select and settle(), the rated
+    rows must STAY 'rated' (billable on the period invoice) — flipping them
+    to 'settled' after a release charges the usage NOWHERE."""
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services import settlement_handlers as sh
+    from app.models.workflow_run import RunStatus, WorkflowRun
+    from app.services.organization import OrgService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"NR {ULID()}", slug=f"nr-{str(ULID()).lower()}",
+        description=None, created_by=user.id)
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+
+    def mk_run():
+        return WorkflowRun(
+            org_id=org.id, pack_id=None, release_id=None, installation_id=None,
+            definition_snapshot={"steps": [], "edges": []}, inputs={},
+            started_by=user.id, status=RunStatus.COMPLETED)
+
+    # (1) no reservation → clean no-op
+    run1 = mk_run()
+    db.add(run1)
+    await db.flush()
+    await sh.handle_run_terminal(db, {"run_id": run1.id, "status": "completed"})
+
+    # (2) raced release
+    await credit_svc.top_up(
+        db, tenant.id, "USD", 10_000, actor=_actor(user), idempotency_key=f"nr-{ULID()}")
+    run2 = mk_run()
+    db.add(run2)
+    await db.flush()
+    eid = str(ULID())
+    db.add(UsageEvent(
+        id=eid, tenant_id=tenant.id, org_id=org.id, workflow_run_id=run2.id,
+        usage_type="image_generation", quantity=1, unit="images",
+        occurred_at=datetime.now(UTC), source="manual"))
+    await db.flush()
+    db.add(RatedUsage(
+        usage_event_id=eid, tenant_id=tenant.id, org_id=org.id,
+        usage_type="image_generation", quantity=1, cost_rate_snapshot={},
+        internal_cost_minor=0, internal_cost_currency="USD",
+        sell_rate_snapshot={}, billable_amount_minor=100,
+        billable_amount_exact=Decimal(100), billable_currency="USD",
+        status="rated", rated_at=datetime.now(UTC)))
+    await db.flush()
+    reservation = await credit_svc.reserve(
+        db, tenant.id, "USD", 500, reference_type="workflow_run", reference_id=run2.id)
+
+    orig = sh.rate_pending
+
+    async def raced(db_, *, tenant_id):
+        await orig(db_, tenant_id=tenant_id)
+        reservation.status = "released"      # expiry cron won the race
+        await db.flush()
+
+    monkeypatch.setattr(sh, "rate_pending", raced)
+    await sh.handle_run_terminal(db, {"run_id": run2.id, "status": "completed"})
+
+    rated = (
+        await db.execute(select(RatedUsage).where(RatedUsage.usage_event_id == eid))
+    ).scalar_one()
+    assert rated.status == "rated"           # stays billable on the invoice
+    assert reservation.status == "released"  # never silently flipped to settled
