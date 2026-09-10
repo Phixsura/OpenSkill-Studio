@@ -2684,6 +2684,15 @@ async def test_cohort_budget_enforced_and_scoped(db):
         db, tenant, org.id, project_id=p_out.id, projected_minor=600)
     assert decision.allowed
 
+    # 4. R329 (mutation survivor L155): an EXPLICIT caller cohort dim wins —
+    # the project-linkage resolution must not run (and overwrite it) when the
+    # caller already supplied cohort_id, even alongside an unlinked project.
+    with pytest.raises(AppError) as e2:
+        await budget_svc.check(
+            db, tenant, org.id, project_id=p_out.id, cohort_id=cohort.id,
+            projected_minor=600)
+    assert e2.value.code == "BUDGET_EXCEEDED"
+
 
 @pytest.mark.asyncio
 async def test_create_budget_rejects_foreign_project_and_cohort_scope(db):
@@ -2741,3 +2750,43 @@ async def test_create_budget_rejects_foreign_project_and_cohort_scope(db):
                             period="monthly", limit_minor=1000, currency="USD"),
         user=user, db=db)
     assert created.data["scope_type"] == "cohort"
+
+
+@pytest.mark.asyncio
+async def test_budget_limit_and_threshold_exact_boundaries(db):
+    """R329 (mutation survivors L209/L202/L220): pin the exact boundary
+    semantics of the implicit AI ceiling — spending EXACTLY the limit is
+    allowed (only strictly-over hard-stops), and the 80% early-warning band
+    opens at exactly limit*80//100, not a point above or below."""
+    from app.controlplane.models.plan import TenantEntitlementOverride
+    from app.controlplane.services.entitlements import invalidate_cache
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)  # USD
+    db.add(
+        TenantEntitlementOverride(
+            tenant_id=tenant.id,
+            key="max_ai_budget_usd_month",
+            value={"v": "10"},  # $10.00 → limit 1000 minor, threshold 800
+            reason="cap",
+            enforcement="hard",
+        )
+    )
+    await db.flush()
+    await invalidate_cache(tenant.id)
+
+    # just below the warning band → clean allow, NO warnings
+    d = await budget_svc.check(db, tenant, None, projected_minor=799)
+    assert d.allowed and d.warnings == []
+    # exactly at the band → threshold warning fires
+    d = await budget_svc.check(db, tenant, None, projected_minor=800)
+    assert d.allowed
+    assert any(w.get("threshold") for w in d.warnings)
+    # exactly at the limit → still allowed (only strictly-over blocks)
+    d = await budget_svc.check(db, tenant, None, projected_minor=1000)
+    assert d.allowed
+    assert any(w.get("threshold") for w in d.warnings)
+    # one past the limit → hard stop
+    with pytest.raises(AppError) as e:
+        await budget_svc.check(db, tenant, None, projected_minor=1001)
+    assert e.value.code == "BUDGET_EXCEEDED" and e.value.status_code == 429
