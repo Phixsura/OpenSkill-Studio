@@ -2197,3 +2197,64 @@ async def test_manual_grant_validation_arcs(db):
 
     ok = await grant(scope="seat_limited", seat_limit=5, org_id=org.id)
     assert ok.status == "active" and ok.seat_limit == 5
+
+
+@pytest.mark.asyncio
+async def test_purchase_blocked_on_inactive_listing_and_delisted_product(db):
+    """R314: purchasability gates. A non-active listing (draft/archived) is
+    LISTING_NOT_PURCHASABLE 409 — a seller building or retiring a listing must
+    not sell. And R44[19]: even an ACTIVE listing must stop selling once its
+    underlying product is unpublished or made private (the delisting guard);
+    the listing row staying active is not enough."""
+    from app.models.skill_pack import PackStatus, PackVisibility, SkillPack
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+    await credit_svc.top_up(db, buyer_tenant.id, "USD", 50000, actor=_actor(buyer_user))
+
+    async def buy():
+        return await market_svc.create_purchase(
+            db, listing_id=listing.id, buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user), payment_method="credit",
+            idempotency_key=f"r314-{ULID()}")
+
+    # draft listing → 409
+    listing.status = "draft"
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await buy()
+    assert e.value.code == "LISTING_NOT_PURCHASABLE" and e.value.status_code == 409
+
+    # archived listing → 409
+    listing.status = "archived"
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await buy()
+    assert e.value.code == "LISTING_NOT_PURCHASABLE"
+
+    # active listing but the PRODUCT was unpublished → still blocked (R44[19])
+    listing.status = "active"
+    pack = await db.get(SkillPack, listing.product_id)
+    pack.status = PackStatus.DRAFT
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await buy()
+    assert e.value.code == "LISTING_NOT_PURCHASABLE"
+
+    # product re-published but made PRIVATE → still blocked (visibility gate)
+    pack.status = PackStatus.PUBLISHED
+    pack.visibility = PackVisibility.PRIVATE
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await buy()
+    assert e.value.code == "LISTING_NOT_PURCHASABLE"
+
+    # published + unlisted → sells again
+    pack.visibility = PackVisibility.UNLISTED
+    await db.flush()
+    purchase = await buy()
+    assert purchase.status == "pending"
