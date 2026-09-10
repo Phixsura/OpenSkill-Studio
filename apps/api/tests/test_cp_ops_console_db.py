@@ -364,3 +364,77 @@ async def test_extreme_datetime_filter_returns_422_not_500(db):
     finally:
         app.router.lifespan_context = orig
         await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_outbox_requeue_and_ops_list_endpoints(db):
+    """R287: the dead-letter recovery endpoint — the R98/R129 flows depend on
+    its semantics: only FAILED rows requeue (attempts reset, error cleared),
+    a done/pending row is a 409 (requeue must never steal a row the worker
+    owns), unknown id 404. Plus the /outbox/failed, /invoices and
+    /settlements ops lists respond with data+meta shapes."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.outbox import OutboxMessage, enqueue
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    dead = enqueue(db, "period.close_due", {"billing_period_id": str(ULID())})
+    dead.status = "failed"
+    dead.attempts = 5
+    dead.last_error = "boom"
+    done = enqueue(db, "period.close_due", {"billing_period_id": str(ULID())})
+    done.status = "done"
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+    dead_id, done_id = dead.id, done.id
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+
+            r = await c.get("/api/v1/platform/outbox/failed",
+                            params={"topic": "period.close_due"}, headers=hdr)
+            assert r.status_code == 200, r.text
+            assert any(m["id"] == dead_id for m in r.json()["data"])
+
+            r = await c.post(f"/api/v1/platform/outbox/{str(ULID())}/requeue", headers=hdr)
+            assert r.status_code == 404
+
+            r = await c.post(f"/api/v1/platform/outbox/{done_id}/requeue", headers=hdr)
+            assert r.status_code == 409                    # done rows stay done
+            assert r.json()["error"]["code"] == "OUTBOX_NOT_FAILED"
+
+            r = await c.post(f"/api/v1/platform/outbox/{dead_id}/requeue", headers=hdr)
+            assert r.status_code == 200, r.text
+            assert r.json()["data"]["status"] == "pending"
+
+            r = await c.get("/api/v1/platform/invoices", headers=hdr)
+            assert r.status_code == 200 and "meta" in r.json()
+            r = await c.get("/api/v1/platform/settlements",
+                            params={"status": "draft"}, headers=hdr)
+            assert r.status_code == 200 and "data" in r.json()
+    finally:
+        app.router.lifespan_context = orig
+
+    async with AsyncSessionLocal() as check:
+        row = await check.get(OutboxMessage, dead_id)
+        assert row.status == "pending" and row.attempts == 0
+        assert row.last_error is None                      # fully reset
+        # cleanup the committed test rows
+        for mid in (dead_id, done_id):
+            m = await check.get(OutboxMessage, mid)
+            if m is not None:
+                await check.delete(m)
+        await check.commit()
