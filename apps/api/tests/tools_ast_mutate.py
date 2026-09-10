@@ -6,7 +6,12 @@ mutants (comparison flips, and/or swaps, int boundary +-1, arith flips),
 apply ONE at a time by rewriting the real file, run the selected tests,
 record killed/survived, restore. Pure functions + property tests = seconds
 per mutant."""
-import ast, subprocess, sys, json, time, pathlib, copy
+import ast
+import json
+import pathlib
+import subprocess
+import sys
+import time
 
 CMP_FLIPS = {ast.Lt: ast.LtE, ast.LtE: ast.Lt, ast.Gt: ast.GtE, ast.GtE: ast.Gt,
              ast.Eq: ast.NotEq, ast.NotEq: ast.Eq}
@@ -88,7 +93,8 @@ def run(path, funcs, test_cmd, limit=None):
     return survived
 
 if __name__ == "__main__":
-    cfg = json.load(open(sys.argv[1]))
+    with open(sys.argv[1]) as _cfgf:
+        cfg = json.load(_cfgf)
     all_surv = {}
     for t in cfg:
         s = run(t["path"], t["funcs"], t["cmd"], t.get("limit"))

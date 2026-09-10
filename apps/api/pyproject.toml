@@ -45,6 +45,9 @@ ignore = ["E501", "B008", "UP046", "UP042", "SIM117"]
 [tool.ruff.lint.per-file-ignores]
 "migrations/env.py" = ["E402"]
 "migrations/versions/*" = ["E501", "W291"]
+# R202: standalone dev tool (CLI mutation harness), not a test module —
+# compact multi-statement AST-dispatch style is intentional.
+"tests/tools_ast_mutate.py" = ["E701", "E702", "RUF001", "RUF003"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
