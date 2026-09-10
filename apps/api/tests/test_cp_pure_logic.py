@@ -446,3 +446,59 @@ def test_compute_billable_guards():
         internal_cost_minor=0, quantity=Decimal(50), prior_period_quantity=Decimal(80),
     )
     assert partial == 300  # 80→130 crosses at 100: only 30 units over → 30*10
+
+
+# ── R223: revenue_share pure-function coverage (specificity + share math) ──
+
+
+def test_rule_specificity_scoring():
+    """rule_specificity: tenant+8|plan+4|listing+2|country+1, None on any
+    dimension mismatch. Precise weights were never asserted — a swapped
+    constant silently reorders which rev-share rule wins."""
+    from types import SimpleNamespace
+
+    from app.controlplane.services.revenue_share import rule_specificity
+
+    def rule(**kw):
+        base = dict(tenant_id=None, plan_id=None, listing_id=None, country=None)
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    ctx = dict(tenant_id="T", plan_id="P", listing_id="L", country="US")
+    # global rule (no dimensions) scores 0
+    assert rule_specificity(rule(), **ctx) == 0
+    # each dimension's exact weight
+    assert rule_specificity(rule(tenant_id="T"), **ctx) == 8
+    assert rule_specificity(rule(plan_id="P"), **ctx) == 4
+    assert rule_specificity(rule(listing_id="L"), **ctx) == 2
+    assert rule_specificity(rule(country="US"), **ctx) == 1
+    # all four → 15, and tenant outweighs plan+listing+country (8 > 4+2+1=7)
+    assert rule_specificity(rule(tenant_id="T", plan_id="P", listing_id="L", country="US"), **ctx) == 15
+    # any mismatch → None (rule does not apply)
+    assert rule_specificity(rule(tenant_id="OTHER"), **ctx) is None
+    assert rule_specificity(rule(plan_id="OTHER"), **ctx) is None
+    assert rule_specificity(rule(listing_id="OTHER"), **ctx) is None
+    assert rule_specificity(rule(country="CA"), **ctx) is None
+
+
+def test_compute_share_minor_by_type():
+    """compute_share_minor: percentage types use rate×base/100; fixed types
+    use amount×units; unknown type raises. Rounding is HALF_UP."""
+    from decimal import Decimal
+
+    from app.controlplane.services.revenue_share import compute_share_minor
+    from app.exceptions import AppError
+
+    # 30% of 10000 = 3000
+    assert compute_share_minor("percentage_of_gross_revenue",
+                               rate=Decimal(30), amount_minor=None, base_minor=10000) == 3000
+    # HALF_UP rounding: 33% of 101 = 33.33 → 33
+    assert compute_share_minor("percentage_of_net_revenue",
+                               rate=Decimal(33), amount_minor=None, base_minor=101) == 33
+    # fixed per seat: 500 × 7 units = 3500
+    assert compute_share_minor("fixed_amount_per_seat",
+                               rate=None, amount_minor=500, base_minor=0, units=Decimal(7)) == 3500
+    import pytest as _p
+    with _p.raises(AppError) as e:
+        compute_share_minor("bogus_type", rate=None, amount_minor=0, base_minor=0)
+    assert e.value.code == "RULE_PARAM_INVALID"
