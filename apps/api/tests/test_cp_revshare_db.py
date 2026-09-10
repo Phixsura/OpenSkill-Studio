@@ -845,3 +845,85 @@ async def test_void_after_credit_note_nets_history_to_zero(db):
     )
     # Idempotent second pass.
     assert await revshare_svc.reverse_invoice_accruals(db, invoice.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_accrual_base_per_rule_type(db):
+    """R261: three of five rule types' accrual BASES were untested end-to-end
+    — net = total − tax; margin = platform-currency margin_minor sum over the
+    invoice's rated rows; per-seat units derive from amount/unit_amount so a
+    TRUNCATED period's prorated seats line pays prorated rev-share (R129[H5],
+    which had no regression sentinel)."""
+    from app.controlplane.models.billing import InvoiceLine
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+
+    # net revenue: 15% of (total 2000_00 − tax 200_00) = 270_00
+    await _mk_rule(db, user, partner, rate="15", rule_type="percentage_of_net_revenue")
+    inv = await _mk_invoice(db, tenant, subtotal=180000)
+    inv.tax_minor = 20000
+    inv.total_minor = 200000
+    await db.flush()
+    entry = await revshare_svc.accrue_for_invoice(db, inv.id)
+    assert entry.share_amount_minor == 27000
+
+    # margin: 25% of the summed margin_minor (platform currency)
+    user2 = await _mk_user(db)
+    partner2 = await _mk_partner(db, user2)
+    tenant2 = await _mk_tenant(db, user2, partner2)
+    await _mk_rule(db, user2, partner2, rate="25", rule_type="percentage_of_margin")
+    inv2 = await _mk_invoice(db, tenant2, subtotal=500000)
+    line = InvoiceLine(
+        invoice_id=inv2.id, line_type="usage", description="u",
+        quantity=1, unit_amount_minor=500000, amount_minor=500000)
+    db.add(line)
+    await db.flush()
+    from app.models.organization import Organization
+
+    org2 = Organization(
+        name=f"RS {ULID()}", slug=f"rs-{str(ULID()).lower()}",
+        tenant_id=tenant2.id, created_by=user2.id)
+    db.add(org2)
+    await db.flush()
+    eid = str(ULID())
+    db.add(UsageEvent(
+        id=eid, tenant_id=tenant2.id, org_id=org2.id, usage_type="image_generation",
+        quantity=1, unit="images", occurred_at=datetime.now(UTC), source="manual"))
+    await db.flush()
+    db.add(RatedUsage(
+        usage_event_id=eid, tenant_id=tenant2.id, org_id=org2.id,
+        usage_type="image_generation", quantity=1, cost_rate_snapshot={},
+        internal_cost_minor=300000, internal_cost_currency="USD",
+        sell_rate_snapshot={}, billable_amount_minor=500000,
+        billable_amount_exact=Decimal(500000), billable_currency="USD",
+        margin_minor=200000, status="invoiced", rated_at=datetime.now(UTC),
+        invoice_line_id=line.id))
+    await db.flush()
+    entry2 = await revshare_svc.accrue_for_invoice(db, inv2.id)
+    assert entry2.share_amount_minor == 50000        # 25% of 2000_00 margin
+
+    # per-seat on a truncated period: seats line amount prorated to 50% —
+    # units must be amount/unit_amount (5), not the full quantity (10)
+    user3 = await _mk_user(db)
+    partner3 = await _mk_partner(db, user3)
+    tenant3 = await _mk_tenant(db, user3, partner3)
+    seat_rule = RevenueShareRule(
+        beneficiary_type="partner", partner_id=partner3.id, revenue_type="all",
+        rule_type="fixed_amount_per_seat", rate=None, amount_minor=200,
+        amount_currency="USD", version=1,
+        effective_from=datetime.now(UTC) - timedelta(days=30), created_by=user3.id)
+    db.add(seat_rule)
+    await db.flush()
+    await revshare_svc.activate_rule(
+        db, seat_rule, actor=Actor(user_id=user3.id, type="platform"))
+    inv3 = await _mk_invoice(db, tenant3, subtotal=50000)
+    db.add(InvoiceLine(
+        invoice_id=inv3.id, line_type="seats", description="seats",
+        quantity=10, unit_amount_minor=10000, amount_minor=50000))  # half period
+    await db.flush()
+    entry3 = await revshare_svc.accrue_for_invoice(db, inv3.id)
+    assert entry3.share_amount_minor == 200 * 5      # prorated units, not 10
