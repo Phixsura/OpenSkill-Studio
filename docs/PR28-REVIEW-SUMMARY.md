@@ -1336,6 +1336,41 @@ under-payment on a void-after-credit-note edge, one false-429 budget window,
 input-type 500s, TOCTOU re-checks) with no new critical or money-at-scale
 class. Three clean sweeps (R140, R141, R143) bracket the tail.
 
+### R159–R250: technique-sweep continuation (2026-09-09/10)
+
+After the fix-of-fix rounds converged, the campaign switched to industry
+techniques not yet applied, then drove them to closure:
+
+- **R159–R210** (prior session): line-by-line service reads, Hypothesis
+  property fuzz on billing time-math, metamorphic money relations,
+  deep import→export round-trip, CrossHair symbolic contracts (10 proven),
+  chaos probes (Redis/MinIO pause → fail-open/fail-closed verified),
+  branch-gap coverage tests over schema validators and service guards,
+  DST 23/25-hour metering buckets, real fixes for Redis/S3 unbounded
+  timeouts, admin-demotion races, downgrade-migration enum leaks.
+- **R211–R239**: data-driven reject-branch suites (schemas + credits,
+  metering, marketplace, client-portal, pricing guards); pure-logic pins
+  (gamification level math, R89 slug/name max-length duplicates, sanitize
+  bounds).
+- **R240** (fix): ComfyUI `Infinity` field → OverflowError missed by the
+  field-skip tuple — one hostile field erased ALL extracted metadata.
+- **R241–R249**: custom-AST mutation campaign over the pure cores with
+  per-function kill-tests and equivalence proofs — allocate_reviews 14/18
+  (4 proven equivalent/near-equivalent), billing time-math 49/50 (1 proven
+  equivalent), billable core 54/58 (4 proven equivalent; killed mutants
+  included exclude_failed And→Or and quota re-billing flips), revenue-share
+  13/13, validators: policy-params 21/21, entitlements 12/12, branding
+  20/20, domains 22/22, api-metering 7/8, metadata parsers 40/41 —
+  boundary-value, status-code, and characterization-snapshot techniques.
+- **R243** (fix): fractional rubric sums 500'd AFTER creating the project
+  row (int_from_float response crash); whole-number gate + total write
+  boundary.
+- **R250** (fix): a 0-falsy `prompt_end` check leaked the negative prompt
+  and settings lines into the extracted prompt for infotexts starting with
+  "Negative prompt:". Found by mutation-driven line reading; the harness
+  also gained a dirty-target abort after its auto-restore wiped this very
+  fix mid-sweep (post-mortem recorded in the commit).
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
@@ -1363,9 +1398,12 @@ that closed PR #22.
 - **~575 confirmed defects fixed across 65 remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
   R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
-  22 from R132, 17 from R133, 14 from R134, 13 from R135 (two waves) and
+  22 from R132, 17 from R133, 14 from R134, 13 from R135 (two waves),
   11 from R136–R151 (fix-of-fix continuation converging to repeated clean
-  rounds), on top of the 12-phase delivery.
+  rounds) and ~50 from R159–R250 (technique sweep: property/metamorphic/
+  symbolic/mutation/chaos — three product fixes R240/R243/R250, the rest
+  regression sentinels killing 200+ surviving mutants), on top of the
+  12-phase delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed
   customers forever, one that silently kept collected cash on credit
