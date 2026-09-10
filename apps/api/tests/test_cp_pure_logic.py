@@ -530,3 +530,49 @@ def test_stripe_unit_amount_by_currency_class():
     for cur, minor in [("USD", 12345), ("JPY", 9999), ("KWD", 45600), ("EUR", 100)]:
         stripe_amt = _stripe_unit_amount(minor, cur)
         assert _platform_minor_from_stripe(stripe_amt, cur) == minor, cur
+
+
+# ── R236: branding pure-validator coverage (untrusted white-label input) ──
+
+
+def test_branding_validators_reject():
+    """validate_theme_tokens / validate_https_url / validate_legal_links take
+    UNTRUSTED white-label input (R47/R87/R137 500-hardening). Cover their
+    reject arcs incl. the unhashable-value and non-str-url type traps."""
+    import pytest as _p
+
+    from app.controlplane.services.branding import (
+        validate_https_url,
+        validate_legal_links,
+        validate_theme_tokens,
+    )
+    from app.exceptions import AppError
+
+    def bad(fn, *a):
+        with _p.raises(AppError) as e:
+            fn(*a)
+        assert e.value.code == "BRANDING_INVALID"
+
+    # theme tokens
+    bad(validate_theme_tokens, {"radius": {"x": 1}})          # unhashable radius (R47[29])
+    bad(validate_theme_tokens, {"radius": "gigantic"})        # bad enum
+    bad(validate_theme_tokens, {"primary": "not-hex"})        # bad color
+    bad(validate_theme_tokens, {"primary": 123})              # non-str color
+    bad(validate_theme_tokens, {"unknown_token": "#ffffff"})  # unknown key
+    assert validate_theme_tokens({"primary": "#aabbcc", "radius": "md"})  # positive
+
+    # https url
+    bad(validate_https_url, 123, "logo")                      # non-str (R137)
+    bad(validate_https_url, "http://insecure", "logo")        # not https
+    bad(validate_https_url, "https://" + "x" * 500, "logo")   # too long
+    assert validate_https_url(None, "logo") is None           # optional
+    assert validate_https_url("https://ok.example", "logo")
+
+    # legal links
+    bad(validate_legal_links, [{"label": "l", "url": "https://x"}] * 6)   # >5
+    bad(validate_legal_links, ["not-a-dict"])
+    bad(validate_legal_links, [{"label": "l"}])               # missing url key
+    bad(validate_legal_links, [{"label": "x" * 51, "url": "https://x"}])  # long label
+    bad(validate_legal_links, [{"label": "l", "url": None}])  # dead anchor
+    bad(validate_legal_links, [{"label": "l", "url": "http://insecure"}])
+    assert validate_legal_links([{"label": "Terms", "url": "https://x.example"}])
