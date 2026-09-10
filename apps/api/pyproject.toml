@@ -57,6 +57,7 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "hypothesis>=6.168.0",
+    "mutmut>=3.7.0",
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",
 ]
@@ -74,4 +75,4 @@ do_not_mutate_patterns = ["log.", "logger."]
 pytest_add_cli_args_test_selection = [
     "tests/",
 ]
-also_copy = [".env", "alembic.ini"]
+also_copy = [".env", "alembic.ini", "migrations"]
