@@ -2573,3 +2573,37 @@ async def test_reserved_floor_and_reject_arcs(db):
     with pytest.raises(AppError) as e:
         await credit_svc.release(db, ghost)
     assert e.value.code == "RESERVATION_CONFLICT" and e.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_budget_warning_threshold_band(db):
+    """R307: the early-warning band. A SOFT budget at warning_threshold_pct
+    (default 80) must emit a `threshold` warning while still allowing spend
+    once projected use crosses 80% but stays under 100% — and NOTHING below
+    80%. This is the heads-up-before-the-wall arc, distinct from the over-limit
+    (`over`) and hard-stop paths."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    org = "01JFAKEORGFAKEORGFAKEORGFA"
+    db.add(BudgetPolicy(
+        tenant_id=tenant.id, scope_type="org", scope_id=org, period="monthly",
+        limit_minor=100, currency="USD", hard_stop=False, warning_threshold_pct=80))
+    await db.flush()
+
+    # 70% → allowed, no warning
+    d = await budget_svc.check(db, tenant, org, projected_minor=70)
+    assert d.allowed and d.warnings == []
+
+    # exactly 80% → allowed WITH a threshold warning (not over)
+    d = await budget_svc.check(db, tenant, org, projected_minor=80)
+    assert d.allowed
+    assert d.warnings and d.warnings[0].get("threshold") is True
+    assert not d.warnings[0].get("over")
+
+    # 95% → still threshold, still allowed
+    d = await budget_svc.check(db, tenant, org, projected_minor=95)
+    assert d.allowed and d.warnings[0].get("threshold") is True
+
+    # 120% on a soft budget → allowed but flagged over (not threshold)
+    d = await budget_svc.check(db, tenant, org, projected_minor=120)
+    assert d.allowed and d.warnings[0].get("over") is True
