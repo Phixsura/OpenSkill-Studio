@@ -2359,3 +2359,44 @@ async def test_settle_rejects_negative_actual(db):
     with pytest.raises(AppError) as e:
         await credit_svc.settle(db, res.id, -100)
     assert e.value.code == "VALIDATION_ERROR"
+
+
+def test_budget_period_start_pure():
+    """R252: _period_start — daily is TENANT-local midnight, monthly is the
+    local 1st, both returned in UTC; a bad tz falls back to UTC."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    ps = budget_svc._period_start
+
+    d = ps("daily", "Pacific/Auckland")
+    local = d.astimezone(ZoneInfo("Pacific/Auckland"))
+    assert (local.hour, local.minute, local.second, local.microsecond) == (0, 0, 0, 0)
+    assert d.tzinfo is not None and d.utcoffset().total_seconds() == 0  # UTC out
+
+    m = ps("monthly", "America/New_York")
+    mlocal = m.astimezone(ZoneInfo("America/New_York"))
+    assert mlocal.day == 1 and (mlocal.hour, mlocal.minute) == (0, 0)
+
+    # bad tz → UTC midnight, not an exception
+    bad = ps("daily", "Nope/Zone")
+    good = ps("daily", "UTC")
+    assert bad == good
+    now = datetime.now(UTC)
+    assert good <= now and (now - good).total_seconds() < 86_400 + 1
+
+    # R252: project-arm of policy_matches both ways (Eq→NotEq survivors)
+    from app.controlplane.models.credit import BudgetPolicy
+
+    pol = BudgetPolicy(scope_type="project", scope_id="p1")
+    base = dict(org_id="o1", cohort_id=None, user_id=None,
+                capability=None, usage_type=None)
+    assert budget_svc.policy_matches(pol, project_id="p1", **base) is True
+    assert budget_svc.policy_matches(pol, project_id="p2", **base) is False
+    assert budget_svc.policy_matches(pol, project_id=None, **base) is False
+    cpol = BudgetPolicy(scope_type="cohort", scope_id="c1")
+    cbase = dict(org_id="o1", project_id=None, user_id=None,
+                 capability=None, usage_type=None)
+    assert budget_svc.policy_matches(cpol, cohort_id="c1", **cbase) is True
+    assert budget_svc.policy_matches(cpol, cohort_id="c2", **cbase) is False
+    assert budget_svc.policy_matches(cpol, cohort_id=None, **cbase) is False
