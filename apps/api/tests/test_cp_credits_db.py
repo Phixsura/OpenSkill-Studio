@@ -2519,3 +2519,49 @@ async def test_expiry_crons_bounded_batches(db):
     assert p1 == 1
     p_rest = await credit_svc.expire_promotional(db, limit=500)
     assert p_rest >= 2
+
+
+@pytest.mark.asyncio
+async def test_reserved_floor_and_reject_arcs(db):
+    """R274: the reserved-funds floor — a debit may not spend money a live
+    hold has already earmarked (top-up 1000, reserve 800: a 300 debit must
+    402 even though the raw balance covers it). Plus: plain overdraft 402,
+    zero adjustment 422, and settle/release on an unknown reservation 404."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await credit_svc.top_up(
+        db, tenant.id, "USD", 1000, actor=_actor(user), idempotency_key=f"rf-{ULID()}")
+    await credit_svc.reserve(
+        db, tenant.id, "USD", 800, reference_type="workflow_run",
+        reference_id=str(ULID()))
+
+    with pytest.raises(AppError) as e:                     # would breach the hold
+        await credit_svc.debit(
+            db, tenant.id, "USD", 300, reference_type="purchase",
+            reference_id=str(ULID()), idempotency_key=f"rf2-{ULID()}")
+    assert e.value.code == "INSUFFICIENT_CREDIT" and e.value.status_code == 402
+
+    ok = await credit_svc.debit(                           # within free balance
+        db, tenant.id, "USD", 200, reference_type="purchase",
+        reference_id=str(ULID()), idempotency_key=f"rf3-{ULID()}")
+    assert ok is not None
+
+    with pytest.raises(AppError) as e:                     # plain overdraft
+        await credit_svc.debit(
+            db, tenant.id, "USD", 5000, reference_type="purchase",
+            reference_id=str(ULID()), idempotency_key=f"rf4-{ULID()}")
+    assert e.value.code == "INSUFFICIENT_CREDIT"
+
+    with pytest.raises(AppError) as e:                     # zero adjustment
+        await credit_svc.adjust(
+            db, tenant.id, "USD", 0, reason="noop", actor=_actor(user),
+            idempotency_key=f"rf5-{ULID()}")
+    assert e.value.code == "VALIDATION_ERROR" and e.value.status_code == 422
+
+    ghost = str(ULID())
+    with pytest.raises(AppError) as e:
+        await credit_svc.settle(db, ghost, 10)
+    assert e.value.code == "RESERVATION_CONFLICT" and e.value.status_code == 404
+    with pytest.raises(AppError) as e:
+        await credit_svc.release(db, ghost)
+    assert e.value.code == "RESERVATION_CONFLICT" and e.value.status_code == 404
