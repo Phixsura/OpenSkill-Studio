@@ -1498,6 +1498,25 @@ the suite the day it lands, each proven by stripping a real gate:
   is a ULID/enum/int/ISO timestamp with no attacker-controlled free text,
   so no formula-injection hardening was manufactured.
 
+### R291–R292: mypy re-triage (2026-09-10)
+
+Re-ran mypy over the control-plane services (the triage that found R243).
+282 findings, almost all noise (missing stubs, Result.rowcount false
+positives, ZoneInfo|timezone assignments, func.coalesce narrowing). Two
+were actionable:
+
+- **R291 (fix)**: StripeProvider.create_checkout_session types amount_minor
+  int|None; the credit_topup/purchase branch fed it to _stripe_unit_amount
+  where Decimal(None) → TypeError 500. Not reachable today (marketplace
+  passes a NOT NULL column, no top-up checkout endpoint exists yet), but
+  the adapter is a reusable payment surface — guarded at the boundary with
+  a clean 422 (the R88 doctrine), guard-proven.
+- **R292 (triaged clean)**: update_connection's set(credentials.keys()) is
+  flagged because the UNSET sentinel widens the param to object; the
+  request schema (dict[str,str]|None) rejects every non-dict shape at the
+  boundary, so the R87 AttributeError-500 is unreachable. Pinned with a
+  boundary sentinel instead of a manufactured service guard.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
