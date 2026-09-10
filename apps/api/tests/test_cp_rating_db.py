@@ -1674,8 +1674,6 @@ async def test_capability_rung_distinct_and_below_wildcard(db):
     (2) when BOTH a true provider-wildcard (capability_key NULL) AND a
         capability rate exist, the WILDCARD wins by rung precedence even if
         the capability rate is newer — precedence, not effective_from."""
-    from app.controlplane.models.pricing import ProviderCostRate
-
     t0 = datetime.now(UTC) - timedelta(days=2)
 
     # (1) capability-only → capability rung
