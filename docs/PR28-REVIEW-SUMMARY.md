@@ -1371,6 +1371,44 @@ techniques not yet applied, then drove them to closure:
   also gained a dirty-target abort after its auto-restore wiped this very
   fix mid-sweep (post-mortem recorded in the commit).
 
+### R251–R270: cron-scale class + provider-sync arc closure (2026-09-10)
+
+A second continuation wave found a NEW systemic class and closed the
+remaining untested money arcs:
+
+- **The unbounded-batch/timeout cron class** (four fixes): R257
+  sweep_storage ran two aggregate queries per org — ~464k round trips on a
+  232k-org database, guaranteed past arq's default 300s job_timeout, whose
+  cancellation rolled back the single commit wholesale: storage billing
+  silently stopped platform-wide, forever (rewritten to GROUP BY
+  aggregates + an org_ids ops/test seam). R258 the monthly seat sweep has
+  the same timeout shape (cron timeout=3600 for both sweeps). R259 all
+  four expiry crons (trials, reservations, promos, wedged evals) selected
+  every eligible row into one transaction — a post-outage backlog wedges
+  them permanently on the identical ever-growing batch (bounded
+  oldest-first batches, guard-proven). R260 the hourly period scan
+  re-enqueued duplicate close messages for every still-open period while
+  the outbox was backlogged (NOT EXISTS dedup on live messages).
+- **Provider-sync and webhook arcs** (R265–R268): the
+  customer.subscription.deleted branch (R101[H21] period truncation +
+  R113[M5] owner notification), the push handler's R113[C0] cancel-flag
+  and R131 terminal tolerance, the cancel handler's R123[H6] reactivation
+  guard, and reactivate_subscription itself — all previously untested,
+  each guard-proven by reverting its fix.
+- **Money-arc closure**: R261 three of five rev-share accrual bases had no
+  end-to-end test (the R129[H5] prorated-seat fix had no sentinel), R262
+  refund mirrors + replay idempotence + fixed-amount FX, R263 the FX
+  success arm and the R113[H4] terminated-partner purchase sibling, R264
+  revoke_grant and cross-currency purchases, R269 the client-portal link
+  cap / impersonation block / share gate, R270 the DB-side quota-overage
+  accumulation window (R52[10]/[13] — voided ratings free their quota,
+  same-timestamp reversals net exactly).
+- **Mutation closure** (R251–R254): SSRF gate (with an extracted testable
+  seam), policy specificity 8/8, budgets 20/20, outbox worker 12/13
+  (exact backoff schedules), entitlement engine 26/30 — including the
+  `soft and soft_capable`→or mutant that silently made every soft-capable
+  quota advisory.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
@@ -1400,10 +1438,11 @@ that closed PR #22.
   R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
   22 from R132, 17 from R133, 14 from R134, 13 from R135 (two waves),
   11 from R136–R151 (fix-of-fix continuation converging to repeated clean
-  rounds) and ~50 from R159–R250 (technique sweep: property/metamorphic/
+  rounds), ~50 from R159–R250 (technique sweep: property/metamorphic/
   symbolic/mutation/chaos — three product fixes R240/R243/R250, the rest
-  regression sentinels killing 200+ surviving mutants), on top of the
-  12-phase delivery.
+  regression sentinels killing 200+ surviving mutants) and ~20 from
+  R251–R270 (the unbounded-batch cron class — four fixes — plus
+  provider-sync and money-arc closure), on top of the 12-phase delivery.
 - 15 critical money/content bugs found and fixed, including three that
   billed or credited at 100×/wrong-currency scale, three that billed
   customers forever, one that silently kept collected cash on credit
