@@ -1572,6 +1572,29 @@ directly, each guard-proven:
   (/dashboard, /platform, /partner bounce to login preserving ?redirect;
   public paths untouched).
 
+### R305–R308: money-path branch closure (2026-09-11)
+
+Continued branch-coverage on money state machines, each guard-proven:
+
+- **R305** guest token exp = min(link.expires_at, TTL) — a near-expiry link
+  never mints a full-TTL credential.
+- **R306** settlement pipeline (draft→finalized→approved→paid_externally):
+  mark-paid requires external_payment_ref (no untraceable payouts), approve
+  /mark-paid flip entries to approved/settled, out-of-order → 409, adjust
+  blocked on approved/paid.
+- **R307** budget early-warning band — a soft budget emits a `threshold`
+  warning at 80–100% (allowed), distinct from `over` and the hard-stop 429.
+- **R308** sell-policy selection tie-break (typed beats wildcard, then
+  priority) so an event rates at the intended price. The first R308 test
+  passed by ULID-id accident with type_rank neutralized; the revert-proof
+  discipline caught it and the test was corrected to isolate type_rank
+  (a high-priority wildcard the typed policy must still beat).
+
+Ledger invariants I1–I4 (balance==Σamounts, running balance_after,
+reserved==Σheld, under concurrency), split-economics conservation, and the
+resolve_site_context tenant-status matrix were re-checked and found already
+exhaustively covered — no tests manufactured for them.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
