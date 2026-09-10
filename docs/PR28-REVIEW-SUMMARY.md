@@ -1595,6 +1595,18 @@ reserved==Σheld, under concurrency), split-economics conservation, and the
 resolve_site_context tenant-status matrix were re-checked and found already
 exhaustively covered — no tests manufactured for them.
 
+### R309: cost-ladder precedence + a surfaced design quirk (2026-09-11)
+
+Pinned exact>provider-wildcard cost-rate precedence (guard-proven). While
+probing, found a genuine quirk worth a product decision: the
+provider-wildcard rung query does NOT exclude capability_key, so a
+provider-scoped **capability** cost rate is resolved and LABELED
+`provider_wildcard`, and the dedicated capability rung is only reached when
+no such row matches (provider is NOT NULL, so its 'provider-agnostic'
+intent is unreachable). Characterized as current behavior rather than
+silently changed — whether capability should be a distinct lower rung
+needs ADR-014 confirmation. **Open decision for the reviewer.**
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
