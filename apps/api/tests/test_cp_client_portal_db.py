@@ -856,3 +856,59 @@ async def test_cross_project_submission_404_and_revision_replay(db):
         .scalars().all()
     )
     assert len(records) == 1                              # never double-recorded
+
+
+@pytest.mark.asyncio
+async def test_every_portal_route_rejects_foreign_project_guest(db):
+    """R280: portal cross-project sweep (fourth member of the R277-R279
+    tripwire family). A guest of project A hitting EVERY
+    /client-portal/projects/{project_id} route with project B's REAL id gets
+    uniform 401/403/404 — never 2xx (cross-client leak of briefs,
+    submissions, comments, downloads) and never 500. Enumerated from the
+    live route table, so future portal routes are covered the day they land."""
+    import re as _re
+
+    from fastapi.routing import APIRoute
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    user = await _mk_user(db)
+    _, _, _, project_a, _ = await _mk_project_env(db, user)
+    _, _, _, project_b, submission_b = await _mk_project_env(db, user)
+    auth_a = await _guest_auth(db, project_a, user, role="approver")
+    await db.commit()  # the ASGI app reads through its own sessions
+
+    routes = []
+
+    def walk(r):
+        if isinstance(r, APIRoute):
+            path = "/api/v1" + r.path
+            if path.startswith("/api/v1/client-portal/projects/{project_id}"):
+                concrete = path.replace("{project_id}", project_b.id)
+                concrete = concrete.replace("{submission_id}", submission_b.id)
+                concrete = _re.sub(r"\{[^}]+\}", "01JFAKEFAKEFAKEFAKEFAKEFAK", concrete)
+                for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
+                    routes.append((m, concrete))
+        for sub in getattr(r, "routes", []) or []:
+            walk(sub)
+        orig = getattr(r, "original_router", None)
+        if orig is not None:
+            walk(orig)
+
+    for r in app.routes:
+        walk(r)
+    routes = sorted(set(routes))
+    assert len(routes) >= 8, f"route enumeration broke: {routes}"
+
+    offenders = []
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        for method, path in routes:
+            kwargs: dict = {"headers": {"Authorization": auth_a}}
+            if method in ("POST", "PUT", "PATCH"):
+                kwargs["json"] = {}
+            r2 = await c.request(method, path, **kwargs)
+            allowed = {401, 403, 404} if method in ("GET", "DELETE") else {401, 403, 404, 422}
+            if r2.status_code not in allowed:
+                offenders.append((method, path, r2.status_code))
+    assert offenders == [], offenders
