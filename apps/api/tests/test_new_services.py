@@ -1306,9 +1306,12 @@ def test_ssrf_gate_v6_edges():
     assert _is_blocked_url("http://[::ffff:169.254.169.254]/latest/meta-data/") is True
     assert _is_blocked_url("http://[::ffff:10.0.0.5]/hook") is True
 
-    # the unwrap itself, platform-independently (macOS getaddrinfo normalizes
-    # mapped literals to v4 before _is_blocked_url sees them; Linux/DNS64
-    # deliver ::ffff:<v4> verbatim)
+    # the mapped-address verdicts, platform-independently (macOS getaddrinfo
+    # normalizes mapped literals to v4 before _is_blocked_url sees them;
+    # Linux/DNS64 deliver ::ffff:<v4> verbatim). Note the explicit unwrap in
+    # _ip_blocked is version-redundant on Python >= 3.12.4 (gh-113171 makes
+    # is_private/is_global delegate to the embedded v4) — kept as defense for
+    # older runtimes, so its mutant is equivalent here and stays unkilled.
     import ipaddress
 
     from app.services.webhook import _ip_blocked
