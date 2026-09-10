@@ -182,6 +182,13 @@ export const STATUS_COLORS: Record<string, string> = {
   // neutral gray (fourth instance of the R101[L15] class; found by diffing
   // backend-emitted status literals against this map's keys).
   succeeded: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  // R335: the partner dashboard and statement detail badge RevenueShareEntry
+  // status — 'accrued' (the default state of every entry) and 'adjusted'
+  // were missing (fifth instance of the R101[L15] class; the R328 audit
+  // wrongly skipped them as render-less). accrued = in-cycle (blue);
+  // adjusted = modified, needs attention (amber).
+  accrued: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  adjusted: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
 };
 
 export function StatusBadgeClass(status: string): string {

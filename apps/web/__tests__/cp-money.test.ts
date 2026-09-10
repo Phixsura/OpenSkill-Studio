@@ -172,6 +172,10 @@ describe("StatusBadgeClass revoked (R326)", () => {
     expect(cls).toContain("red");
     expect(cls).not.toBe(StatusBadgeClass("definitely_unknown_status"));
   });
+  it("maps revenue-share entry states (R335), not neutral", () => {
+    expect(StatusBadgeClass("accrued")).toContain("blue");
+    expect(StatusBadgeClass("adjusted")).toContain("amber");
+  });
   it("maps payment success (R328) as green, not neutral", () => {
     expect(StatusBadgeClass("succeeded")).toContain("green");
   });
