@@ -2523,10 +2523,12 @@ async def test_expiry_crons_bounded_batches(db):
 
 @pytest.mark.asyncio
 async def test_reserved_floor_and_reject_arcs(db):
-    """R274: the reserved-funds floor — a debit may not spend money a live
-    hold has already earmarked (top-up 1000, reserve 800: a 300 debit must
-    402 even though the raw balance covers it). Plus: plain overdraft 402,
-    zero adjustment 422, and settle/release on an unknown reservation 404."""
+    """R274: the reserved-funds floor. debit() has its own available-balance
+    pre-check, so the ledger-level floor guard's real vehicle is a NEGATIVE
+    manual adjustment (no available pre-check): balance 1000, reserved 800 —
+    adjust(−300) must 402 even though the raw balance covers it. Plus the
+    debit available-check both ways, plain overdraft, zero adjustment 422,
+    and settle/release on an unknown reservation 404."""
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     await credit_svc.top_up(
@@ -2535,10 +2537,16 @@ async def test_reserved_floor_and_reject_arcs(db):
         db, tenant.id, "USD", 800, reference_type="workflow_run",
         reference_id=str(ULID()))
 
-    with pytest.raises(AppError) as e:                     # would breach the hold
+    with pytest.raises(AppError) as e:                     # debit available-check
         await credit_svc.debit(
             db, tenant.id, "USD", 300, reference_type="purchase",
             reference_id=str(ULID()), idempotency_key=f"rf2-{ULID()}")
+    assert e.value.code == "INSUFFICIENT_CREDIT" and e.value.status_code == 402
+
+    with pytest.raises(AppError) as e:                     # ledger floor guard:
+        await credit_svc.adjust(                           # adjust has no
+            db, tenant.id, "USD", -300, reason="clawback",  # available pre-check
+            actor=_actor(user), idempotency_key=f"rfa-{ULID()}")
     assert e.value.code == "INSUFFICIENT_CREDIT" and e.value.status_code == 402
 
     ok = await credit_svc.debit(                           # within free balance
