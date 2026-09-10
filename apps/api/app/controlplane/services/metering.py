@@ -269,45 +269,66 @@ async def ingest_adjustment(
 # ── Sweeps (worker crons + CLI) ──────────────────────────────
 
 
-async def sweep_storage(db: AsyncSession, for_date: datetime | None = None) -> int:
-    """Daily storage_gb_day events per org. Idempotency: storage:{org}:{date}."""
+async def sweep_storage(
+    db: AsyncSession,
+    for_date: datetime | None = None,
+    org_ids: list[str] | None = None,
+) -> int:
+    """Daily storage_gb_day events per org. Idempotency: storage:{org}:{date}.
+
+    R257: this used to loop over EVERY non-archived org running two aggregate
+    queries each — O(2N) round trips. Past ~10^5 orgs the daily cron blew
+    arq's 300s job_timeout, the single commit rolled back wholesale, and the
+    next night repeated it: storage billing silently stopped platform-wide.
+    Aggregate once with GROUP BY (the sweep_seats pattern) so only orgs that
+    actually hold bytes are visited. `org_ids` narrows the sweep for a
+    targeted ops re-run (e.g. after fixing a poison org) and for tests.
+    """
     from app.models.organization import Organization, OrgStatus
     from app.models.project import ProjectAsset, Submission, SubmissionItem
 
     day = (for_date or datetime.now(UTC)).date().isoformat()
-    orgs = (
-        await db.execute(
+    totals: dict[str, int] = {}
+    item_q = (
+        select(Submission.org_id, func.sum(SubmissionItem.file_size))
+        .join(Submission, Submission.id == SubmissionItem.submission_id)
+        .group_by(Submission.org_id)
+    )
+    asset_q = select(ProjectAsset.org_id, func.sum(ProjectAsset.file_size)).group_by(
+        ProjectAsset.org_id
+    )
+    if org_ids is not None:
+        item_q = item_q.where(Submission.org_id.in_(org_ids))
+        asset_q = asset_q.where(ProjectAsset.org_id.in_(org_ids))
+    for org_id, nbytes in (await db.execute(item_q)).all():
+        totals[org_id] = totals.get(org_id, 0) + int(nbytes or 0)
+    for org_id, nbytes in (await db.execute(asset_q)).all():
+        totals[org_id] = totals.get(org_id, 0) + int(nbytes or 0)
+    totals = {k: v for k, v in totals.items() if v > 0}
+    if not totals:
+        return 0
+    tenant_by_org: dict[str, str] = {}
+    ids = list(totals)
+    for i in range(0, len(ids), 5000):  # bounded IN-list chunks
+        rows = await db.execute(
             select(Organization.id, Organization.tenant_id).where(
-                Organization.status != OrgStatus.ARCHIVED
+                Organization.id.in_(ids[i : i + 5000]),
+                Organization.status != OrgStatus.ARCHIVED,
             )
         )
-    ).all()
+        tenant_by_org.update(dict(rows.all()))
     emitted = 0
-    for org_id, tenant_id in orgs:
-        # R169: isolate each org in a SAVEPOINT so one org whose size query or
-        # emit raises can't abort the whole DAILY storage sweep (the
-        # expire_promotional/R168 per-item pattern). Without it a single
-        # poison org rolled back every org's event and the sweep re-failed
-        # each day — no storage billed platform-wide until the org was fixed.
+    for org_id, total in totals.items():
+        tenant_id = tenant_by_org.get(org_id)
+        if tenant_id is None:  # archived org — not billed
+            continue
+        # R169: isolate each org in a SAVEPOINT so one org whose emit raises
+        # can't abort the whole DAILY storage sweep (the expire_promotional/
+        # R168 per-item pattern). Without it a single poison org rolled back
+        # every org's event and the sweep re-failed each day — no storage
+        # billed platform-wide until the org was fixed.
         try:
             async with db.begin_nested():
-                item_bytes = (
-                    await db.execute(
-                        select(func.coalesce(func.sum(SubmissionItem.file_size), 0))
-                        .join(Submission, Submission.id == SubmissionItem.submission_id)
-                        .where(Submission.org_id == org_id)
-                    )
-                ).scalar_one()
-                asset_bytes = (
-                    await db.execute(
-                        select(func.coalesce(func.sum(ProjectAsset.file_size), 0)).where(
-                            ProjectAsset.org_id == org_id
-                        )
-                    )
-                ).scalar_one()
-                total = item_bytes + asset_bytes
-                if total == 0:
-                    continue
                 gb = (Decimal(total) / Decimal(1073741824)).quantize(Decimal("0.000001"))
                 event = await emit_usage(
                     db,

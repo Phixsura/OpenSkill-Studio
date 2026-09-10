@@ -812,3 +812,81 @@ async def test_seat_sweep_isolates_one_bad_org(db, monkeypatch):
             assert len(rows) == 1, "healthy org must still be seat-billed"
     assert emitted >= 1
 
+
+
+@pytest.mark.asyncio
+async def test_storage_sweep_exact_gb_idempotent_and_poison_isolated(db, monkeypatch):
+    """R257: sweep_storage was fully untested — exact GB math (bytes/2^30 at
+    6dp), idempotent rerun, zero-storage skip, and the R169 poison-org
+    SAVEPOINT isolation (one org whose emit raises must not wedge the sweep)."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.models.project import ProjectAsset
+    from app.services.organization import OrgService
+    from app.services.project import ProjectService
+
+    owner = await _mk_user(db)
+    svc = OrgService(db)
+    org = await svc.create(
+        name=f"Stor {ULID()}", slug=f"stor-{str(ULID()).lower()}",
+        description=None, created_by=owner.id)
+    project = await ProjectService(db).create_project(
+        org_id=org.id, title="Storage P", slug=None, description="d",
+        instructions="i", difficulty="beginner", max_score=100,
+        rubric=[{"criterion": "Q", "max_score": 100}], deadline=None,
+        late_deadline=None, late_penalty_pct=0, max_submissions=0,
+        skill_ids=None, created_by=owner.id)
+    db.add(ProjectAsset(
+        org_id=org.id, project_id=project.id, name="ref", description=None,
+        file_key=f"k/{ULID()}", file_name="ref.bin", file_size=1073741824,  # 1 GiB
+        mime_type="application/octet-stream", uploaded_by=owner.id))
+    await db.flush()
+
+    n1 = await metering.sweep_storage(db, org_ids=[org.id])
+    assert n1 == 1
+    day = datetime.now(UTC).date().isoformat()
+    ev = (
+        await db.execute(
+            select(UsageEvent).where(UsageEvent.idempotency_key == f"storage:{org.id}:{day}")
+        )
+    ).scalar_one()
+    assert ev.usage_type == "storage_gb_day"
+    assert Decimal(str(ev.quantity)) == Decimal("1")     # exactly 1 GiB → 1.000000
+
+    n2 = await metering.sweep_storage(db, org_ids=[org.id])  # idempotent rerun
+    dup = (
+        (await db.execute(
+            select(UsageEvent).where(UsageEvent.idempotency_key == f"storage:{org.id}:{day}")
+        )).scalars().all()
+    )
+    assert len(dup) == 1 and n2 == 0
+
+    # R169 poison isolation: an emit_usage that raises for one org must not
+    # abort the sweep for the others
+    org2 = await svc.create(
+        name=f"Stor2 {ULID()}", slug=f"stor2-{str(ULID()).lower()}",
+        description=None, created_by=owner.id)
+    db.add(ProjectAsset(
+        org_id=org2.id, project_id=project.id, name="x", description=None,
+        file_key=f"k/{ULID()}", file_name="x.bin", file_size=2147483648,  # 2 GiB
+        mime_type="application/octet-stream", uploaded_by=owner.id))
+    await db.flush()
+    real_emit = metering.emit_usage
+
+    async def poison_emit(db_, **kw):
+        if kw.get("org_id") == org.id:                   # first org poisoned
+            raise RuntimeError("poison org")
+        return await real_emit(db_, **kw)
+
+    monkeypatch.setattr(metering, "emit_usage", poison_emit)
+    n3 = await metering.sweep_storage(
+        db, for_date=datetime.now(UTC) + timedelta(days=1), org_ids=[org.id, org2.id])
+    assert n3 == 1                                       # org2 still swept
+    day2 = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
+    ok2 = (
+        await db.execute(
+            select(UsageEvent).where(UsageEvent.idempotency_key == f"storage:{org2.id}:{day2}")
+        )
+    ).scalar_one_or_none()
+    assert ok2 is not None and Decimal(str(ok2.quantity)) == Decimal("2")
