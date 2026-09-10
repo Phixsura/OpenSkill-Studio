@@ -674,3 +674,75 @@ async def test_concurrent_admin_demotions_never_reach_zero_admins():
             await s.commit()
     finally:
         await engine.dispose()
+
+
+async def test_concurrent_extension_grants_no_500():
+    """R200: grant_extension's one-per-(project,user) pre-check raced a
+    concurrent grant — the loser died on uq_extension_project_user as an
+    unhandled 500. The savepointed insert now falls back to updating the
+    winner's row (last-writer, matching the update branch)."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.database import engine
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+    from app.models.project import SubmissionExtension
+    from app.services.project import ProjectService
+
+    try:
+        async with AsyncSessionLocal() as setup:
+            instructor = await _mk_user(setup)
+            org = await _mk_org(setup, instructor)
+            student = await _mk_user(setup)
+            setup.add(
+                OrgMember(
+                    org_id=org.id, user_id=student.id,
+                    role=OrgRole.STUDENT, status=MemberStatus.ACTIVE,
+                )
+            )
+            project = await ProjectService(setup).create_project(
+                org_id=org.id, title=f"Ext {ULID()}", slug=None, description="d",
+                instructions="i", difficulty="beginner", max_score=100,
+                rubric=[{"criterion": "Q", "max_score": 100}], deadline=None,
+                late_deadline=None, late_penalty_pct=0, max_submissions=0,
+                skill_ids=None, created_by=instructor.id,
+            )
+            await setup.commit()
+            pid, sid, iid = project.id, student.id, instructor.id
+
+        d1 = datetime.now(UTC) + timedelta(days=3)
+        d2 = datetime.now(UTC) + timedelta(days=7)
+        sa = AsyncSessionLocal()
+        sb = AsyncSessionLocal()
+        try:
+            # A inserts and holds (uncommitted)
+            await ProjectService(sa).grant_extension(pid, sid, d1, "A", iid)
+
+            async def b_grant():
+                await ProjectService(sb).grant_extension(pid, sid, d2, "B", iid)
+                await sb.commit()
+
+            b = asyncio.create_task(b_grant())
+            await asyncio.sleep(0.3)
+            await sa.commit()
+            await b  # must not raise
+        finally:
+            await sa.close()
+            await sb.close()
+
+        async with AsyncSessionLocal() as s:
+            rows = (
+                (
+                    await s.execute(
+                        select(SubmissionExtension).where(
+                            SubmissionExtension.project_id == pid,
+                            SubmissionExtension.user_id == sid,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(rows) == 1, "must converge to one extension row"
+            assert rows[0].reason == "B", "loser's update must win"
+    finally:
+        await engine.dispose()

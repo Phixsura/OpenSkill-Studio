@@ -1253,8 +1253,28 @@ class ProjectService:
             reason=reason,
             granted_by=granted_by,
         )
-        self.db.add(ext)
-        await self.db.flush()
+        # R200: the one-per-(project,user) pre-check races a concurrent grant
+        # (instructor double-click) — the loser died on
+        # uq_extension_project_user as an unhandled 500 (same shape as
+        # set_override, fixed in R187). Savepoint; loser updates the winner.
+        try:
+            async with self.db.begin_nested():
+                self.db.add(ext)
+                await self.db.flush()
+        except IntegrityError:
+            winner = (
+                await self.db.execute(
+                    select(SubmissionExtension).where(
+                        SubmissionExtension.project_id == project_id,
+                        SubmissionExtension.user_id == user_id,
+                    )
+                )
+            ).scalar_one()
+            winner.extended_deadline = new_deadline
+            winner.reason = reason
+            winner.granted_by = granted_by
+            ext = winner
+            await self.db.flush()
 
         log.info(
             "extension_granted",
