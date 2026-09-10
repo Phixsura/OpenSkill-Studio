@@ -1,7 +1,7 @@
 // P11: control-plane money display helpers (#27 §11.3)
 import { describe, expect, it } from "vitest";
 
-import { formatMinor, majorToMinor, StatusBadgeClass } from "@/lib/cp";
+import { STATUS_COLORS, formatMinor, majorToMinor, StatusBadgeClass } from "@/lib/cp";
 
 describe("formatMinor", () => {
   it("formats standard 2-decimal currencies from minor units", () => {
@@ -83,5 +83,67 @@ describe("majorToMinor contract (R298)", () => {
     expect(majorToMinor("0.004", "USD")).toBe(0);
     expect(majorToMinor("0.006", "USD")).toBe(1);
     expect(majorToMinor("2.5", "USD")).toBe(250);
+  });
+});
+
+describe("StatusBadgeClass coverage (R299)", () => {
+  // every status the control-plane UI actually renders through <StatusBadge>
+  // must be EXPLICITLY mapped — an unmapped status falls to neutral gray,
+  // hiding warning/error/ended states (the R101[L15] recurrence that let a
+  // TERMINATED partner and a retired plan version render as plain gray).
+  const RENDERED_STATUSES = [
+    // tenant.status
+    "trial",
+    "active",
+    "past_due",
+    "suspended",
+    "cancelled",
+    "archived",
+    // subscription.status
+    "cancel_at_period_end",
+    // invoice.status
+    "draft",
+    "open",
+    "finalized",
+    "paid",
+    "void",
+    "uncollectible",
+    "refunded",
+    // plan version.status
+    "retired",
+    // partner.status
+    "terminated",
+    // settlement.status
+    "approved",
+    "paid_externally",
+    // domain.status
+    "pending_verification",
+    "verified",
+    "disabled",
+    "failed",
+    // reservation / rated-usage
+    "held",
+    "settled",
+    "released",
+    "expired",
+    "rated",
+    "invoiced",
+    "blocked",
+    "voided",
+  ];
+
+  it("maps every rendered status explicitly (no silent fall-through to gray)", () => {
+    const missing = RENDERED_STATUSES.filter(
+      (st) => !Object.prototype.hasOwnProperty.call(STATUS_COLORS, st),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("gives terminated a danger (red) color, not neutral gray", () => {
+    expect(StatusBadgeClass("terminated")).toContain("red");
+  });
+
+  it("still falls back to gray for a genuinely unknown status", () => {
+    expect(StatusBadgeClass("some_future_status_xyz")).toContain("gray");
   });
 });

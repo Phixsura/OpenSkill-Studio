@@ -158,6 +158,12 @@ export const STATUS_COLORS: Record<string, string> = {
   invoiced: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   blocked: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
   voided: "bg-gray-100 text-gray-500 line-through dark:bg-gray-800",
+  // R299: statuses the backend emits AND renders through StatusBadge but the
+  // map missed — they fell to neutral gray (the R101[L15] class). A retired
+  // plan version is muted (explicit gray); a TERMINATED partner is an ended
+  // relationship that must read as a stop state, not neutral.
+  retired: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  terminated: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
 };
 
 export function StatusBadgeClass(status: string): string {
