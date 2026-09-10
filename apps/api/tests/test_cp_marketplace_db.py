@@ -2258,3 +2258,45 @@ async def test_purchase_blocked_on_inactive_listing_and_delisted_product(db):
     await db.flush()
     purchase = await buy()
     assert purchase.status == "pending"
+
+
+def test_grant_rank_ordering_and_equal_seat_width():
+    """R338 (mutation survivors): pin _grant_rank's ORDER directly —
+    tenant > organization > seat_limited; perpetual > expiring; roomier seat
+    cap on ties — and grant_covers_listing_width's equal-width boundary (a
+    grant with EXACTLY the listing's seat cap covers; only a SMALLER cap
+    fails). Order-preserving constant mutants (scope 2→3, expiry-flag 1→2)
+    are equivalent by tuple ordering and intentionally not distinguished."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.controlplane.models.marketplace import LicenseGrant, MarketplaceListing
+
+    later = datetime.now(UTC) + timedelta(days=30)
+
+    def g(scope, expires=None, seats=None):
+        return LicenseGrant(scope=scope, expires_at=expires, seat_limit=seats)
+
+    tenant_exp = g("tenant", expires=later)
+    org_perp = g("organization", seats=999)
+    seat_perp = g("seat_limited", seats=999)
+    org_exp = g("organization", expires=later)
+    seat_5 = g("seat_limited", seats=5)
+    seat_9 = g("seat_limited", seats=9)
+
+    ranked = sorted(
+        [seat_5, org_exp, tenant_exp, seat_perp, org_perp, seat_9],
+        key=market_svc._grant_rank, reverse=True)
+    # tenant beats even a perpetual roomy org grant; org beats seat_limited
+    # regardless of expiry; roomier seat cap wins inside the seat tier
+    assert ranked[0] is tenant_exp
+    assert ranked[1] is org_perp and ranked[2] is org_exp
+    assert ranked[3] is seat_perp
+    assert ranked[4] is seat_9 and ranked[5] is seat_5
+
+    # equal seat width COVERS; one seat short does not
+    listing = MarketplaceListing(license_scope="seat_limited", seat_limit=10,
+                                 upgrade_policy="all_versions")
+    assert market_svc.grant_covers_listing_width(
+        g("seat_limited", seats=10), listing) is True
+    assert market_svc.grant_covers_listing_width(
+        g("seat_limited", seats=9), listing) is False
