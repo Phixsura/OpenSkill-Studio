@@ -2153,3 +2153,47 @@ async def test_purchase_cross_currency_arcs(db):
         idempotency_key=f"fx2-{ULID()}")
     assert purchase.currency == "USD"
     assert purchase.amount_minor == 20000                  # €100.00 × 2
+
+
+@pytest.mark.asyncio
+async def test_manual_grant_validation_arcs(db):
+    """R273: manual_grant's guards — bad product type/scope 422,
+    seat_limited without a positive limit (R44[20]: the seat gate is
+    `if grant.seat_limit:` so a missing limit silently uncapped seats),
+    unknown tenant 404, and an org outside the tenant (R123[L7]: such a
+    grant is silently inert at the install gate)."""
+    user = await _mk_user(db)
+    org = await _mk_org(db, user)
+    pack = await _mk_pack(db, org, user)
+    other_user = await _mk_user(db)
+    other_org = await _mk_org(db, other_user)          # different tenant
+    tenant_id = org.tenant_id
+
+    async def grant(**kw):
+        base = dict(product_type="skill_pack", product_id=pack.id,
+                    tenant_id=tenant_id, org_id=None, scope="organization",
+                    expires_at=None, seat_limit=None, actor=_actor(user))
+        base.update(kw)
+        return await market_svc.manual_grant(db, **base)
+
+    with pytest.raises(AppError) as e:
+        await grant(product_type="spellbook")
+    assert e.value.code == "LISTING_INVALID" and e.value.status_code == 422
+    with pytest.raises(AppError) as e:
+        await grant(scope="galaxy")
+    assert e.value.code == "LISTING_INVALID"
+    with pytest.raises(AppError) as e:                 # R44[20] both arms
+        await grant(scope="seat_limited")
+    assert e.value.code == "LISTING_INVALID"
+    with pytest.raises(AppError) as e:
+        await grant(scope="seat_limited", seat_limit=0)
+    assert e.value.code == "LISTING_INVALID"
+    with pytest.raises(AppError) as e:
+        await grant(tenant_id=str(ULID()))
+    assert e.value.code == "TENANT_NOT_FOUND" and e.value.status_code == 404
+    with pytest.raises(AppError) as e:                 # R123[L7]
+        await grant(org_id=other_org.id)
+    assert e.value.code == "LISTING_INVALID"
+
+    ok = await grant(scope="seat_limited", seat_limit=5, org_id=org.id)
+    assert ok.status == "active" and ok.seat_limit == 5
