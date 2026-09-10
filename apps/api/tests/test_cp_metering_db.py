@@ -194,6 +194,43 @@ async def test_emit_usage_validation(db):
         idempotency_key=f"max-{ULID()}", **base
     )
     assert ok_max is not None
+    # R331 (mutation survivors): pin the remaining validation semantics.
+    # A STRING "Infinity" parses to a non-finite Decimal without being a
+    # float instance — the finiteness guard must catch it on the Decimal
+    # side alone (PG numeric accepts Infinity since v14: it would STORE).
+    with pytest.raises(AppError) as e7:
+        await metering.emit_usage(db, usage_type="workflow_run", quantity="Infinity", **base)
+    assert e7.value.code == "INVALID_QUANTITY" and e7.value.status_code == 422
+    # zero quantity is legal for a non-adjustment source (only NEGATIVE
+    # requires an adjustment) — adapters legitimately report 0-usage steps
+    ok_zero = await metering.emit_usage(
+        db, usage_type="workflow_run", quantity=0,
+        idempotency_key=f"zero-{ULID()}", **base
+    )
+    assert ok_zero is not None
+    # metadata=None must store the empty dict, not jsonb null
+    ok_meta = await metering.emit_usage(
+        db, usage_type="workflow_run", quantity=1, metadata=None,
+        idempotency_key=f"meta-{ULID()}", **base
+    )
+    assert ok_meta is not None and ok_meta.metadata_ == {}
+    ok_meta2 = await metering.emit_usage(  # keyless branch stores {} too
+        db, usage_type="workflow_run", quantity=1, metadata=None, **base
+    )
+    assert ok_meta2 is not None and ok_meta2.metadata_ == {}
+    # an unparseable STRING quantity → 422 (InvalidOperation branch)
+    with pytest.raises(AppError) as e8:
+        await metering.emit_usage(db, usage_type="workflow_run", quantity="abc", **base)
+    assert e8.value.code == "INVALID_QUANTITY" and e8.value.status_code == 422
+    # a STRING "NaN" parses to Decimal NaN without being a float — the
+    # finiteness guard must catch it on the Decimal side alone, or the later
+    # `qty < 0` comparison raises InvalidOperation (a raw 500)
+    with pytest.raises(AppError) as e9:
+        await metering.emit_usage(db, usage_type="workflow_run", quantity="NaN", **base)
+    assert e9.value.code == "INVALID_QUANTITY" and e9.value.status_code == 422
+    # every validation raise is a 422 (not a 4xx-adjacent typo)
+    for exc in (e1, e2, e3, e4, e5, e6):
+        assert exc.value.status_code == 422
     # positive control: a registered source persists
     ok = await metering.emit_usage(
         db, usage_type="workflow_run", quantity=1, source="manual",
