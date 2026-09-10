@@ -164,3 +164,18 @@ describe("zero-decimal currency set (R300 drift-guard)", () => {
     expect(formatMinor(1500, "GBP")).toBe("£15.00");
   });
 });
+
+// ── R326: revoked license grants must read as a stop state ──
+describe("StatusBadgeClass revoked (R326)", () => {
+  it("maps revoked to a danger style, not the neutral fallback", () => {
+    const cls = StatusBadgeClass("revoked");
+    expect(cls).toContain("red");
+    expect(cls).not.toBe(StatusBadgeClass("definitely_unknown_status"));
+  });
+  it("keeps every stop state visually distinct from neutral gray", () => {
+    for (const s of ["revoked", "terminated", "suspended", "failed", "blocked"]) {
+      expect(STATUS_COLORS[s], s).toBeDefined();
+      expect(STATUS_COLORS[s], s).toContain("red");
+    }
+  });
+});

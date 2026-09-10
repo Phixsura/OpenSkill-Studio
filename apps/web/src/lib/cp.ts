@@ -164,6 +164,11 @@ export const STATUS_COLORS: Record<string, string> = {
   // relationship that must read as a stop state, not neutral.
   retired: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
   terminated: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  // R326: refund_purchase revokes the license grant (status="revoked") and the
+  // tenant licenses page badges grant status — revoked fell to neutral gray,
+  // hiding a stop state (the R101[L15] class): a revoked license read the
+  // same as a merely archived one.
+  revoked: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
 };
 
 export function StatusBadgeClass(status: string): string {
