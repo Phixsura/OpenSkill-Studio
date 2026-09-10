@@ -3497,3 +3497,66 @@ async def test_provider_initiated_cancel_webhook_branch(db):
 
     # replay: sub already cancelled → unhandled, no duplicate close
     assert await _apply_webhook_event(db, "stripe", parsed) is False
+
+
+@pytest.mark.asyncio
+async def test_push_provider_handler_arcs(db, monkeypatch):
+    """R266: handle_subscription_push_provider carried five fixed behaviors
+    with zero tests. Pins: the R113[C0] cancel-flag push (a plan push must
+    not silently un-cancel a pending provider cancellation), the missing-
+    price no-crash arc, and the R131 terminal-tolerance rework (a dead
+    provider sub is swallowed ONLY when the platform row is terminal too —
+    a live row must dead-letter loudly)."""
+    from app.controlplane.services.billing import handle_subscription_push_provider
+    from app.controlplane.services.billing_providers.mock import MockProvider
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+
+    # guards: unknown sub / manual provider / missing ref → silent no-ops
+    await handle_subscription_push_provider(db, {"subscription_id": str(ULID())})
+    await handle_subscription_push_provider(db, {"subscription_id": sub.id})
+
+    sub.provider = "mock"
+    sub.external_ref = f"mock_sub_{ULID()}"
+    sub.cancel_at_period_end = True
+    await db.flush()
+
+    calls: list[dict] = []
+
+    async def record(self, external_ref, new_price_ref, seat_quantity,
+                     cancel_at_period_end=False):
+        calls.append(dict(ref=external_ref, price=new_price_ref,
+                          seats=seat_quantity, cape=cancel_at_period_end))
+
+    monkeypatch.setattr(MockProvider, "change_subscription", record)
+    await handle_subscription_push_provider(db, {"subscription_id": sub.id})
+    assert len(calls) == 1
+    assert calls[0]["ref"] == sub.external_ref
+    assert calls[0]["cape"] is True                       # R113[C0]
+
+    # missing PlanPrice (unpriced currency) → logged, no crash, no push
+    sub.currency = "XXX"
+    await db.flush()
+    await handle_subscription_push_provider(db, {"subscription_id": sub.id})
+    assert len(calls) == 1
+    sub.currency = "USD"
+    await db.flush()
+
+    # R131: provider says the sub is dead
+    class InvalidRequestError(Exception):
+        pass
+
+    async def dead(self, *a, **kw):
+        raise InvalidRequestError("No such subscription: sub_x")
+
+    monkeypatch.setattr(MockProvider, "change_subscription", dead)
+    with pytest.raises(InvalidRequestError):              # LIVE platform row → raise
+        await handle_subscription_push_provider(db, {"subscription_id": sub.id})
+
+    sub.status = "cancelled"
+    await db.flush()
+    await handle_subscription_push_provider(db, {"subscription_id": sub.id})  # swallowed
