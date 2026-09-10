@@ -366,6 +366,10 @@ def test_validate_entitlement_value_matrix():
     assert validate_entitlement_value("max_organizations", 5) == 5
     assert validate_entitlement_value("max_storage_gb", "12.5") == "12.5"
     assert validate_entitlement_value("max_ai_budget_usd_month", None) is None
+    # R336 (mutation survivors): ZERO is a legal value on both numeric axes
+    # (0 = none allowed; only NEGATIVES reject) …
+    assert validate_entitlement_value("max_organizations", 0) == 0
+    assert validate_entitlement_value("max_storage_gb", "0") == "0"
     for key, bad in [
         ("nope_key", 1),
         ("custom_domain", "yes"),
@@ -375,8 +379,10 @@ def test_validate_entitlement_value_matrix():
         ("max_storage_gb", "NaN"),
         ("max_storage_gb", "-3"),
     ]:
-        with pytest.raises(AppError):
+        with pytest.raises(AppError) as e:
             validate_entitlement_value(key, bad)
+        # … and every reject is a 422 (R336)
+        assert e.value.status_code == 422, (key, bad)
 
 
 # ── Enforcement wiring: downgrade-no-eviction semantics ──────
@@ -1310,3 +1316,34 @@ async def test_public_plan_catalog_hides_unpublished(db):
                         await clean.delete(v)
                     await clean.delete(pl)
             await clean.commit()
+
+
+@pytest.mark.asyncio
+async def test_override_expiring_exactly_now_is_expired(db, monkeypatch):
+    """R336 (mutation survivor): the override-expiry window is half-open —
+    a grant whose expires_at equals the evaluation instant is ALREADY
+    expired (<=, not <). Frozen clock pins the boundary deterministically."""
+    from datetime import datetime as real_dt
+
+    from app.controlplane.models.plan import TenantEntitlementOverride
+    from app.controlplane.services import entitlements as ent
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    frozen = real_dt.now(UTC)
+
+    class FrozenDT(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen if tz is not None else frozen.replace(tzinfo=None)
+
+    monkeypatch.setattr(ent, "datetime", FrozenDT)
+    db.add(TenantEntitlementOverride(
+        tenant_id=tenant.id, key="max_organizations", value={"v": 42},
+        reason="boundary", enforcement="hard", expires_at=frozen))
+    await db.flush()
+    await ent.invalidate_cache(tenant.id)
+    eff = await ent._compute_effective(db, tenant)
+    assert eff.values["max_organizations"] != 42, (
+        "an override expiring exactly now must not apply (half-open window)")
+    assert eff.sources["max_organizations"] != "override"
