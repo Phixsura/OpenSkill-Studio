@@ -1534,6 +1534,25 @@ were actionable:
   workflow 49, concurrency 17), Schemathesis 17,952 fuzz cases — zero 500s
   and zero tracebacks across 37,704 API log lines.
 
+### R298–R300: frontend money/status cross-boundary sweep (2026-09-11)
+
+Turned the cross-boundary technique on the control-plane UI:
+
+- **R298 (fix)**: majorToMinor's docstring promised "positive-or-zero" but
+  the code only rejects non-finite — negatives pass through BY DESIGN (the
+  credit-adjustment field sends signed clawbacks). Corrected the misleading
+  contract (a trap for future callers) + pinned the real behavior.
+- **R299 (fix)**: STATUS_COLORS missed `retired` (plan version) and
+  `terminated` (partner) — both rendered through <StatusBadge> and falling
+  to neutral gray. A terminated partner reading as muted-gray hides an
+  ended relationship (the R101[L15] class); mapped it to red/danger,
+  retired to explicit gray, + a data-driven coverage sentinel.
+- **R300**: reciprocal drift-guard on the zero-decimal currency set —
+  CURRENCY_MINOR (backend) and ZERO_DECIMAL (frontend) are maintained in
+  two languages and a drift is the twice-recurring R81/R163 100x
+  display error; both sides now pinned so a v1 currency addition fires
+  both tests.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
