@@ -717,3 +717,19 @@ def test_billable_guard_status_codes_and_fup_per_zero():
         compute_billable_exact("alchemy", {}, internal_cost_exact=Decimal(1),
                                quantity=Decimal(1))
     assert e.value.status_code == 422
+
+
+def test_compute_share_default_units_and_status():
+    """R246: `units` defaults to Decimal(1) — a 1→2 default doubles every
+    per-unit share computed without an explicit units argument; the unknown
+    rule-type raise must carry HTTP 422."""
+    from decimal import Decimal
+
+    from app.controlplane.services.revenue_share import compute_share_minor
+    from app.exceptions import AppError
+
+    assert compute_share_minor(
+        "fixed_amount_per_unit", rate=None, amount_minor=500, base_minor=0) == 500
+    with pytest.raises(AppError) as e:
+        compute_share_minor("tithe", rate=Decimal(1), amount_minor=1, base_minor=1)
+    assert e.value.code == "RULE_PARAM_INVALID" and e.value.status_code == 422
