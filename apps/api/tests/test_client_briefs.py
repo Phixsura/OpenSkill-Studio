@@ -523,3 +523,33 @@ async def test_brief_slug_retry_does_not_wipe_transaction(c):
         ids = {r.id for r in rows}
         assert a_id in ids, "retry wiped the earlier uncommitted brief from the transaction"
         assert len(rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_convert_fractional_max_score_is_422_not_500(c):
+    """R243: a fractional rubric sum (50.5 + 49.0 = 99.5) passed the R92b
+    number gate, was written toward Project.max_score (INTEGER), and then
+    crashed ProjectResponse serialization (int_from_float rejects fractional)
+    — a 500 AFTER the project row was created. Whole-number gate → 422;
+    integral floats still convert."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+
+    async def _convert(rubric):
+        bid = (await c.post(f"/api/v1/orgs/{oid}/briefs", json=_brief_body(), headers=h)).json()[
+            "data"
+        ]["id"]
+        return await c.post(
+            f"/api/v1/orgs/{oid}/briefs/{bid}/convert", json={"rubric": rubric}, headers=h
+        )
+
+    r = await _convert(
+        [{"criterion": "A", "max_score": 50.5}, {"criterion": "B", "max_score": 49.0}]
+    )
+    assert r.status_code == 422, r.text
+    # whole-number floats remain accepted and land as a clean int
+    r = await _convert(
+        [{"criterion": "A", "max_score": 60.0}, {"criterion": "B", "max_score": 40.0}]
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["data"]["max_score"] == 100

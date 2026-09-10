@@ -204,7 +204,10 @@ class ClientBriefService:
             description=brief.objective,
             instructions=f"## Client Brief: {brief.client_name}\n\n{brief.objective}",
             difficulty="intermediate",
-            max_score=sum(r.get("max_score", 0) for r in (rubric or [])) or 100,
+            # R243: int() keeps the INTEGER-column write total even for direct
+            # service callers passing float rubric values (schema rejects
+            # fractional sums; integral floats like 100.0 coerce cleanly).
+            max_score=int(sum(r.get("max_score", 0) for r in (rubric or []))) or 100,
             rubric=rubric or [{"criterion": "Overall Quality", "max_score": 100}],
             deadline=deadline,
             late_deadline=late_deadline,
