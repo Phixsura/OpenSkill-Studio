@@ -88,22 +88,28 @@ def _is_blocked_url(url: str) -> bool:
         # Resolve DNS and check all resulting IPs
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         for _family, _, _, _, sockaddr in infos:
-            ip = ipaddress.ip_address(sockaddr[0])
-            # Extract IPv4 from IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254)
-            if ip.version == 6 and ip.ipv4_mapped:
-                ip = ip.ipv4_mapped
-            # Defense-in-depth: catch any unspecified (::, 0.0.0.0), loopback,
-            # link-local, or private address regardless of CIDR list gaps
-            if ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_private:
+            if _ip_blocked(ipaddress.ip_address(sockaddr[0])):
                 return True
-            for network in _BLOCKED_NETWORKS:
-                if ip in network:
-                    return True
     except (socket.gaierror, ValueError):
         # If DNS resolution fails, block the URL
         return True
 
     return False
+
+
+def _ip_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Per-IP SSRF verdict. R251: extracted from _is_blocked_url so the
+    IPv4-mapped unwrap is directly testable — macOS getaddrinfo normalizes
+    mapped literals to plain v4 before this code runs, but Linux resolvers
+    and DNS64 environments hand us ::ffff:<v4> verbatim."""
+    # Extract IPv4 from IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254)
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    # Defense-in-depth: catch any unspecified (::, 0.0.0.0), loopback,
+    # link-local, or private address regardless of CIDR list gaps
+    if ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_private:
+        return True
+    return any(ip in network for network in _BLOCKED_NETWORKS)
 
 
 async def _is_blocked_url_async(url: str) -> bool:

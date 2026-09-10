@@ -1291,3 +1291,30 @@ async def test_forgot_password_latency_not_an_email_oracle(c, monkeypatch):
     if auth_mod._email_tasks:
         await asyncio.gather(*auth_mod._email_tasks, return_exceptions=True)
     assert sent == [email]
+
+
+def test_ssrf_gate_v6_edges():
+    """R251: two defense-in-depth arcs the CIDR list does NOT cover — the
+    ipaddress-flag line must hold on its own for `::` (v6 unspecified, only
+    caught by is_unspecified), and the IPv4-mapped unwrap must let a mapped
+    PUBLIC v4 through (without the unwrap, ::ffff:0:0/96 counts as private
+    and every mapped-public webhook target would be silently blocked)."""
+    from app.services.webhook import _is_blocked_url
+
+    assert _is_blocked_url("http://[::]/hook") is True
+    assert _is_blocked_url("http://[::ffff:93.184.216.34]/hook") is False
+    assert _is_blocked_url("http://[::ffff:169.254.169.254]/latest/meta-data/") is True
+    assert _is_blocked_url("http://[::ffff:10.0.0.5]/hook") is True
+
+    # the unwrap itself, platform-independently (macOS getaddrinfo normalizes
+    # mapped literals to v4 before _is_blocked_url sees them; Linux/DNS64
+    # deliver ::ffff:<v4> verbatim)
+    import ipaddress
+
+    from app.services.webhook import _ip_blocked
+
+    assert _ip_blocked(ipaddress.ip_address("::ffff:169.254.169.254")) is True
+    assert _ip_blocked(ipaddress.ip_address("::ffff:93.184.216.34")) is False
+    assert _ip_blocked(ipaddress.ip_address("::ffff:10.0.0.5")) is True
+    assert _ip_blocked(ipaddress.ip_address("64:ff9b::a9fe:a9fe")) is True
+    assert _ip_blocked(ipaddress.ip_address("2600:1901:0:ab8::")) is False

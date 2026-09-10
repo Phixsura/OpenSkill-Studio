@@ -778,3 +778,30 @@ def test_validator_boundary_values_accepted():
     ]
     assert validate_legal_links(links) == links
     validate_theme_tokens({})                    # empty tokens are valid
+
+
+def test_specificity_rank_matrix():
+    """R251: policy-selection order is money-critical — tenant(3) > partner(2)
+    > plan(1) > global(0), and a scoped policy that doesn't match its scope
+    must be EXCLUDED (None), not demoted."""
+    from app.controlplane.models.pricing import PricePolicy
+    from app.controlplane.services.rating import specificity_rank
+
+    def rank(*, pt=None, pp=None, pv=None, **ctx):
+        pol = PricePolicy(tenant_id=pt, partner_id=pp, plan_version_id=pv)
+        base = dict(tenant_id="t1", partner_id=None, plan_version_id=None)
+        base.update(ctx)
+        return specificity_rank(pol, **base)
+
+    assert rank(pt="t1") == 3                       # tenant match
+    assert rank(pt="t2") is None                    # other tenant → excluded
+    assert rank(pp="p1", partner_id="p1") == 2      # partner match
+    assert rank(pp="p1") is None                    # caller has no partner
+    assert rank(pp="p1", partner_id="p2") is None   # partner mismatch
+    assert rank(pv="v1", plan_version_id="v1") == 1
+    assert rank(pv="v1") is None
+    assert rank(pv="v1", plan_version_id="v2") is None
+    assert rank() == 0                              # global applies to all
+    # tenant scope wins even when partner/plan also present on the policy
+    assert rank(pt="t1", pp="p9", pv="v9") == 3
+    assert rank(pt="t2", pp="p1", partner_id="p1") is None
