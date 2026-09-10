@@ -144,3 +144,66 @@ async def test_every_tenant_route_rejects_foreign_tenant_owner():
                 offenders.append((method, path, r2.status_code))
     await engine.dispose()
     assert offenders == [], offenders
+
+
+@pytest.mark.asyncio
+async def test_every_partner_route_rejects_foreign_partner_member():
+    """R289: fifth member of the sweep family — partner self-service. An
+    admin of partner A hitting every /partners/{partner_id} route with
+    partner B's REAL id gets uniform 401/403/404 (a cross-partner leak of
+    B's revenue-share statements, attributed tenants and settlement exports
+    would be a direct financial disclosure); never 2xx, never 500."""
+    from app.controlplane.models.partner import Partner, PartnerMember
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        user_a = User(
+            email=f"pa-{ULID()}@test.com", email_verified=True,
+            password_hash=hash_password("Test1234!"), display_name="PA",
+            role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(user_a)
+        partner_a = Partner(name="PA", slug=f"pa-{str(ULID()).lower()}",
+                            partner_type="reseller", currency="USD")
+        partner_b = Partner(name="PB", slug=f"pb-{str(ULID()).lower()}",
+                            partner_type="reseller", currency="USD")
+        db.add_all([partner_a, partner_b])
+        await db.flush()
+        db.add(PartnerMember(partner_id=partner_a.id, user_id=user_a.id, role="admin"))
+        await db.commit()
+        token_a = create_access_token(user_a.id, user_a.email, "student")
+        partner_b_id = partner_b.id
+
+    routes = []
+
+    def walk(r):
+        if isinstance(r, APIRoute):
+            path = "/api/v1" + r.path
+            if path.startswith("/api/v1/partners/{partner_id}"):
+                concrete = path.replace("{partner_id}", partner_b_id)
+                concrete = re.sub(r"\{[^}]+\}", "01JFAKEFAKEFAKEFAKEFAKEFAK", concrete)
+                for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
+                    routes.append((m, concrete))
+        for sub in getattr(r, "routes", []) or []:
+            walk(sub)
+        orig = getattr(r, "original_router", None)
+        if orig is not None:
+            walk(orig)
+
+    for r in app.routes:
+        walk(r)
+    routes = sorted(set(routes))
+    assert len(routes) >= 4, f"route enumeration broke: {routes}"
+
+    offenders = []
+    headers = {"Authorization": f"Bearer {token_a}"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        for method, path in routes:
+            kwargs: dict = {"headers": headers}
+            if method in ("POST", "PUT", "PATCH"):
+                kwargs["json"] = {}
+            r2 = await c.request(method, path, **kwargs)
+            allowed = {401, 403, 404} if method in ("GET", "DELETE") else {401, 403, 404, 422}
+            if r2.status_code not in allowed:
+                offenders.append((method, path, r2.status_code))
+    await engine.dispose()
+    assert offenders == [], offenders
