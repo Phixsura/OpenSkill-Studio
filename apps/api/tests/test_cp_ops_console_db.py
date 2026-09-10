@@ -514,3 +514,65 @@ async def test_settlement_entry_trace_resolves_all_source_shapes(db):
             assert src["invoice_id"] == ids["invoice"]
     finally:
         app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_resolve_reconciliation_report(db):
+    """R317: the reconciliation-report resolve endpoint was entirely untested.
+    Resolving an open report stamps status=resolved + the resolved_note
+    (an audit field ops relies on to record how a provider-cost discrepancy
+    was cleared) + resolved_at; an unknown report is 404; a re-resolve is
+    idempotent (re-stamps, no error)."""
+    from contextlib import asynccontextmanager
+    from decimal import Decimal
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.pricing import ReconciliationReport
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    report = ReconciliationReport(
+        provider="acme", usage_type="image_generation", period="2026-09",
+        provider_reported_quantity=Decimal(100), provider_reported_cost_minor=5000,
+        currency="USD", platform_quantity=Decimal(98), platform_cost_minor=4900,
+        delta_quantity=Decimal(2), delta_cost_minor=100, status="open")
+    db.add(report)
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+    rid = report.id
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.patch(f"/api/v1/platform/reconciliation/reports/{str(ULID())}",
+                              headers=hdr, json={"reason": "unknown report probe"})
+            assert r.status_code == 404
+
+            r = await c.patch(f"/api/v1/platform/reconciliation/reports/{rid}",
+                              headers=hdr, json={"reason": "provider re-billed the 2 missing"})
+            assert r.status_code == 200, r.text
+            assert r.json()["data"]["status"] == "resolved"
+
+            # re-resolve is idempotent (no conflict)
+            r = await c.patch(f"/api/v1/platform/reconciliation/reports/{rid}",
+                              headers=hdr, json={"reason": "confirmed"})
+            assert r.status_code == 200
+    finally:
+        app.router.lifespan_context = orig
+
+    async with AsyncSessionLocal() as check:
+        row = await check.get(ReconciliationReport, rid)
+        assert row.status == "resolved"
+        assert row.resolved_note == "confirmed" and row.resolved_at is not None
+        await check.delete(row)
+        await check.commit()
