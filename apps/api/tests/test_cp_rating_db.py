@@ -1587,13 +1587,16 @@ async def test_sell_policy_tiebreaks_typed_beats_wildcard_then_priority(db):
             params={"unit_price_minor": price}, effective_from=now,
             tenant_id=tenant.id, priority=priority)
 
-    # tenant-scope wildcard (any usage_type) @ 3/unit and a tenant-scope
-    # image_generation-specific policy @ 7/unit
-    await policy(3, usage_type=None)
-    await policy(7, usage_type="image_generation")
+    # tenant-scope wildcard @ 3/unit with a HIGH priority, and a tenant-scope
+    # image_generation-specific policy @ 7/unit with LOW priority. type_rank
+    # sits BEFORE priority in the tie-break key, so the typed policy must win
+    # despite the wildcard's higher priority — this is what isolates type_rank
+    # (without it, the wildcard's priority would win and misprice the event).
+    await policy(3, usage_type=None, priority=9)
+    await policy(7, usage_type="image_generation", priority=0)
     ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=10)
     rated = await rating.rate_event(db, ev.id)
-    assert rated.billable_amount_minor == 70   # typed (7) beats wildcard (3)
+    assert rated.billable_amount_minor == 70   # typed (7) beats higher-priority wildcard
 
     # a DIFFERENT usage_type with no specific policy falls to the wildcard
     ev2 = await _mk_event(db, tenant, usage_type="image_editing", quantity=10)
