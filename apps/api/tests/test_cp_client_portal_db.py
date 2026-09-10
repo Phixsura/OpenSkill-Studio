@@ -997,3 +997,82 @@ async def test_reviewer_guest_cannot_approve_or_final_accept_via_http(db):
             assert r.status_code in (200, 201), r.text
     finally:
         app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_portal_download_isolates_cross_submission_items(db):
+    """R319: the guest download gate. Using a SHARED submission's download URL,
+    a guest may fetch an item of THAT submission, but an item_id belonging to
+    a DIFFERENT submission — even in the same project — is a uniform
+    SUBMISSION_NOT_SHARED 404 (no pulling unshared deliverables by guessing
+    ids), and an item with no file_key is 404. Enforced through the real HTTP
+    download endpoint."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+    from app.models.project import (
+        DeliverableType,
+        ItemType,
+        ProjectDeliverable,
+        Submission,
+        SubmissionItem,
+        SubmissionStatus,
+    )
+
+    user = await _mk_user(db)
+    org, _, _, project, submission = await _mk_project_env(db, user)
+    deliverable = ProjectDeliverable(project_id=project.id, name="D", type=DeliverableType.FILE)
+    db.add(deliverable)
+    await db.flush()
+
+    shared_item = SubmissionItem(
+        submission_id=submission.id, deliverable_id=deliverable.id, type=ItemType.FILE,
+        file_key=f"k/{ULID()}", uploaded_by=user.id)
+    db.add(shared_item)
+    # a SECOND submission in the SAME project, NOT shared, with its own item
+    other_sub = Submission(
+        project_id=project.id, org_id=org.id, user_id=user.id,
+        status=SubmissionStatus.SUBMITTED, version=1, submitted_at=datetime.now(UTC))
+    db.add(other_sub)
+    await db.flush()
+    other_item = SubmissionItem(
+        submission_id=other_sub.id, deliverable_id=deliverable.id, type=ItemType.FILE,
+        file_key=f"k/{ULID()}", uploaded_by=user.id)
+    nofile_item = SubmissionItem(
+        submission_id=submission.id, deliverable_id=deliverable.id, type=ItemType.TEXT,
+        content="text only", uploaded_by=user.id)
+    db.add_all([other_item, nofile_item])
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
+    await db.flush()
+    auth = await _guest_auth(db, project, user, role="reviewer")
+    await db.commit()
+    ids = dict(sub=submission.id, shared=shared_item.id, other=other_item.id,
+               nofile=nofile_item.id)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": auth}
+            base = f"/api/v1/client-portal/projects/{project.id}/submissions/{ids['sub']}"
+
+            r = await c.get(f"{base}/items/{ids['shared']}/download", headers=hdr)
+            assert r.status_code == 200, r.text
+            assert r.json()["data"]["download_url"]
+
+            # another submission's item via THIS submission's path → 404
+            r = await c.get(f"{base}/items/{ids['other']}/download", headers=hdr)
+            assert r.status_code == 404, r.text
+            assert r.json()["error"]["code"] == "SUBMISSION_NOT_SHARED"
+
+            # an item with no file_key → 404
+            r = await c.get(f"{base}/items/{ids['nofile']}/download", headers=hdr)
+            assert r.status_code == 404, r.text
+    finally:
+        app.router.lifespan_context = orig
