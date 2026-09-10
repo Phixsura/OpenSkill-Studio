@@ -952,3 +952,83 @@ def test_tls_provisioner_switch_and_punycode_warn():
         assert isinstance(get_tls_provisioner(), NullTlsProvisioner)
 
     check_reserved("xn--48s290a.example.com")              # warns, must not raise
+
+
+@pytest.mark.asyncio
+async def test_provision_run_conflict_spoof_and_failed_retry(db):
+    """R285: create_provision_run's guard arcs — R72[3] parameter-divergence
+    409 on key reuse (incl. partner_id: reuse by a DIFFERENT partner is a
+    cross-partner disclosure), the partner-scoped blueprint spoof (another
+    partner's blueprint → uniform 404), an inactive blueprint → 404, and
+    R101[H7]: replaying a FAILED run re-enqueues the retry instead of
+    toasting a dead run as started."""
+    from app.controlplane.models.outbox import OutboxMessage
+
+    user = await _mk_user(db)
+    bp = TenantBlueprint(
+        name=f"BP285 {ULID()}",
+        config=provision_svc.validate_blueprint_config({"plan_key": "school"}),
+        created_by=user.id)
+    db.add(bp)
+    await db.flush()
+
+    key = f"r285-{ULID()}"
+    run = await provision_svc.create_provision_run(
+        db, blueprint_id=bp.id, name="Acme", slug=f"r285-{str(ULID()).lower()[:8]}",
+        idempotency_key=key, partner_id=None, actor=_actor(user))
+
+    # same key, different name → 409 (R72[3])
+    with pytest.raises(AppError) as e:
+        await provision_svc.create_provision_run(
+            db, blueprint_id=bp.id, name="Evil", slug=run.requested_slug,
+            idempotency_key=key, partner_id=None, actor=_actor(user))
+    assert e.value.code == "PROVISION_CONFLICT" and e.value.status_code == 409
+    # same key, different partner → 409 (cross-partner disclosure guard)
+    with pytest.raises(AppError) as e:
+        await provision_svc.create_provision_run(
+            db, blueprint_id=bp.id, name="Acme", slug=run.requested_slug,
+            idempotency_key=key, partner_id=str(ULID()), actor=_actor(user))
+    assert e.value.code == "PROVISION_CONFLICT"
+
+    # partner-scoped blueprint requested by another/no partner → uniform 404
+    bp_partner = TenantBlueprint(
+        name=f"BPp {ULID()}", partner_id=str(ULID()),
+        config=provision_svc.validate_blueprint_config({"plan_key": "school"}),
+        created_by=user.id)
+    db.add(bp_partner)
+    await db.flush()
+    for pid in (None, str(ULID())):
+        with pytest.raises(AppError) as e:
+            await provision_svc.create_provision_run(
+                db, blueprint_id=bp_partner.id, name="X",
+                slug=f"x-{str(ULID()).lower()[:8]}",
+                idempotency_key=f"r285b-{ULID()}", partner_id=pid,
+                actor=_actor(user))
+        assert e.value.code == "BLUEPRINT_INVALID" and e.value.status_code == 404
+
+    # inactive blueprint → 404
+    bp.is_active = False
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await provision_svc.create_provision_run(
+            db, blueprint_id=bp.id, name="Y", slug=f"y-{str(ULID()).lower()[:8]}",
+            idempotency_key=f"r285c-{ULID()}", partner_id=None, actor=_actor(user))
+    assert e.value.code == "BLUEPRINT_INVALID"
+    bp.is_active = True
+    await db.flush()
+
+    # R101[H7]: replay of a FAILED run re-enqueues provision.run
+    run.status = "failed"
+    await db.flush()
+    replay = await provision_svc.create_provision_run(
+        db, blueprint_id=bp.id, name="Acme", slug=run.requested_slug,
+        idempotency_key=key, partner_id=None, actor=_actor(user))
+    assert replay.id == run.id
+    retries = (
+        (await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "provision.run",
+                OutboxMessage.payload["run_id"].astext == run.id)))
+        .scalars().all()
+    )
+    assert len(retries) >= 1                               # retry enqueued
