@@ -1687,11 +1687,58 @@ that closed PR #22.
 - **included_quota_then_overage concurrent-rating window**: both raters may see
   "within quota" → undercharge-never-overcharge; accepted for v1 (ADR-014).
 
+### R271–R333 (2026-09-10/11): deep-convergence probes + a second mutation wave
+
+**R271–R319** (prior session segment): authz tripwire family extended to a
+data-driven partner sweep (R289); rating cost-ladder R311 fix (capability
+rung was swallowed by the wildcard rung, ADR-014 precedence restored);
+Stripe checkout boundary 422 (R291); frontend STATUS_COLORS + api client
+arcs (R298–R304); settlement/webhook/portal/marketplace state-machine pins
+(R306–R319). Multiple consecutive probes into money-critical surfaces found
+already-covered — no tests manufactured.
+
+**R320–R333** (this segment, 8 product fixes + 4 mutation-hardening rounds):
+
+- **R320/R321** — provisioning: resume is step-idempotent (no double
+  tenant/org); per-pack SAVEPOINT rolls back a mid-copy partial install
+  (pins R46[28]).
+- **R322 FIX** — cohort-scope budgets were silently inert (no caller ever
+  carried a cohort dim): check() now resolves cohort via Project.cohort_id,
+  _spent_minor counts only the cohort's projects (was: whole tenant → false
+  BUDGET_EXCEEDED), create_budget validates project/cohort scope ownership.
+- **R323 FIX** — user-scope budgets never gated workflow runs (usage events
+  carry user_id but the gate didn't) — a user hard cap only blocked eval
+  spend while the primary costed path ran unbounded.
+- **R324 FIX** — concurrent first branding upserts 500'd on the tenant_id
+  unique index (R68[4] class); SAVEPOINT + adopt-winner.
+- **R325 FIX** — usage quantity ≥1e12 overflowed Numeric(18,6) as a raw 500
+  (R88 class); gated to the true column bound, one gate covers ingest API +
+  adapter **usage** + adjustments.
+- **R326–R328 FIXES** — STATUS_COLORS render-path audit (backend-emitted
+  literals diffed against the map): revoked license grants, portal review
+  states (submitted/revision_requested/rejected — the client's action
+  signal), and succeeded payments all fell to neutral gray.
+- **R330 FIX** — explicit-null branding PUT stored jsonb null and crashed
+  the white-label login shell (legal_links.length); null→empty normalize on
+  write + coalesce on read (found via mutation survivor).
+- **R329/R331–R333 mutation wave**: budgets check/policy_matches 28/28,
+  emit_usage 14/14, upsert_branding 4/4, _resolve_cost_rate 19/19,
+  _resolve_sell_policy 6 killed + 3 proven equivalent. New pins include the
+  half-open rate window, per-rung race determinism (R147's documented
+  .limit(1) defense), offering-fallback connection+model scoping, the
+  previously-untested PLAN rung binding to the tenant's OWN subscription,
+  and exact 80%-band boundaries on the implicit AI ceiling.
+
+R334 checkpoint: full backend suite **2375 passed / 0 failed / 1 skipped**
+(524 control-plane + 1851 product, chunked); web tsc/eslint/vitest 226
+passed; full-repo ruff clean. R335: accrued/adjusted revenue-share entries
+badged neutral on the partner pages — fifth STATUS_COLORS instance.
+
 ---
 
 ## 5. Bottom line
 
-- **~575 confirmed defects fixed across 65 remediation commits**: ~230 from
+- **~590 confirmed defects fixed across 77+ remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
   R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
   22 from R132, 17 from R133, 14 from R134, 13 from R135 (two waves),
