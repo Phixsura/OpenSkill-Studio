@@ -2293,3 +2293,69 @@ async def test_expire_stale_reservations_isolates_one_bad_reservation(db, monkey
     # only the healthy 200 freed; the poison 300 savepoint reverted cleanly
     assert balance.reserved_minor == 300, f"reserved drifted: {balance.reserved_minor}"
     assert handled >= 1
+
+
+# ── R207: credit amount-guard coverage (branch-gap analysis) ──
+# The <=0 / <0 validation guards on every credit-mutating entry point had
+# NO test reaching their reject branch: a future refactor that weakened one
+# (letting a zero/negative top-up, grant, refund, debit, reserve, or settle
+# through) would corrupt the ledger silently. Each assertion pins one guard.
+
+
+@pytest.mark.asyncio
+async def test_credit_amount_guards_reject_nonpositive(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    from datetime import UTC, datetime, timedelta
+
+    for amt in (0, -1, -10000):
+        with pytest.raises(AppError) as e:
+            await credit_svc.top_up(db, tenant.id, "USD", amt, actor=a)
+        assert e.value.code == "VALIDATION_ERROR"
+
+        with pytest.raises(AppError) as e:
+            await credit_svc.grant_promotional(
+                db, tenant.id, "USD", amt,
+                expires_at=datetime.now(UTC) + timedelta(days=30),
+                reason="promo", actor=a,
+            )
+        assert e.value.code == "VALIDATION_ERROR"
+
+        with pytest.raises(AppError) as e:
+            await credit_svc.refund(
+                db, tenant.id, "USD", amt,
+                reference_type="purchase", reference_id="p1", reason="r", actor=a,
+            )
+        assert e.value.code == "VALIDATION_ERROR"
+
+        with pytest.raises(AppError) as e:
+            await credit_svc.debit(
+                db, tenant.id, "USD", amt,
+                reference_type="run", reference_id="r1",
+            )
+        assert e.value.code == "VALIDATION_ERROR"
+
+        with pytest.raises(AppError) as e:
+            await credit_svc.reserve(
+                db, tenant.id, "USD", amt,
+                reference_type="run", reference_id="rv1",
+            )
+        assert e.value.code == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_settle_rejects_negative_actual(db):
+    """settle floors actual at 0 as a guard — a negative actual (a bug in an
+    upstream usage sum) must 422, never CREDIT the tenant by 'settling' a
+    negative debit."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    await credit_svc.top_up(db, tenant.id, "USD", 10000, actor=a)
+    res = await credit_svc.reserve(
+        db, tenant.id, "USD", 5000, reference_type="run", reference_id="neg1"
+    )
+    with pytest.raises(AppError) as e:
+        await credit_svc.settle(db, res.id, -100)
+    assert e.value.code == "VALIDATION_ERROR"
