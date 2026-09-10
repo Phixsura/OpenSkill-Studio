@@ -1270,3 +1270,126 @@ async def test_import_rejects_non_object_manifest(c):
         )
         assert r.status_code == 422, f"top-level {type(bad).__name__}: {r.status_code} {r.text}"
         assert r.json()["error"]["code"] == "INVALID_MANIFEST"
+
+
+# ═══════════════ R205: deep round-trip content equivalence ═══════════════
+
+
+@pytest.mark.asyncio
+async def test_deep_roundtrip_preserves_content(c):
+    """R205 (round-trip invariant): import a RICH manifest (multi-skill,
+    prerequisites, MCQ config, template rubric/deliverables, tags), then
+    EXPORT the imported release and assert the re-exported manifest is
+    content-equivalent to the input. The prior round-trip test only checked
+    the pack NAME survived — this pins that exercises, configs, prerequisite
+    edges, rubric, deliverables and metadata all survive the DB→manifest
+    rebuild unchanged (a dropped field = silent content loss on migration)."""
+    import zipfile as _zip
+    from io import BytesIO
+
+    rich = {
+        "schema_version": "1",
+        "pack": {
+            "name": "Deep RT Pack",
+            "summary": "rich round-trip",
+            "metadata": {
+                "difficulty": "advanced",
+                "scenario_tags": ["a", "b"],
+                "tool_tags": ["comfyui"],
+                "capability_tags": ["texturing", "lighting"],
+                "learning_outcomes": ["o1", "o2"],
+                "language": "en",
+            },
+            "provenance": {"author_name": "RT", "license_name": "CC-BY"},
+        },
+        "categories": [{"logical_id": "c1", "name": "Cat One", "slug": "cat-one", "sort_order": 2}],
+        "skills": [
+            {
+                "logical_id": "s-base", "category_logical_id": "c1",
+                "name": "Base Skill", "slug": "s-base", "description": "base d",
+                "learning_content": "# lesson\nbody", "difficulty": "beginner",
+                "estimated_minutes": 30, "tags": ["t1", "t2"], "sort_order": 0,
+                "exercises": [
+                    {"logical_id": "s-base/mcq", "title": "MCQ", "description": "pick",
+                     "type": "multiple_choice",
+                     "config": {"options": ["x", "y", "z"], "correct": [1], "explanation": "y is right"},
+                     "max_score": 50, "sort_order": 0},
+                    {"logical_id": "s-base/txt", "title": "Text", "description": "write",
+                     "type": "text_answer", "config": {}, "max_score": 100, "sort_order": 1},
+                ],
+                "prerequisites": [],
+            },
+            {
+                "logical_id": "s-adv", "category_logical_id": "c1",
+                "name": "Adv Skill", "slug": "s-adv", "description": "adv d",
+                "difficulty": "advanced", "estimated_minutes": 90, "tags": [], "sort_order": 1,
+                "exercises": [],
+                "prerequisites": ["s-base"],  # edge must survive
+            },
+        ],
+        "project_templates": [
+            {"logical_id": "tmpl-1", "name": "Cap Template", "description": "desc",
+             "instructions": "do the thing", "project_type": "ai_visual",
+             "difficulty": "intermediate", "max_score": 100,
+             "rubric": [{"criterion": "Craft", "max_score": 60}, {"criterion": "Concept", "max_score": 40}],
+             "deliverables": [{"name": "Final", "type": "image", "required": True}],
+             "skill_names": ["Base Skill"], "sort_order": 0},
+        ],
+    }
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    # Import the rich manifest
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/packs/import",
+        files={"file": ("rich.zip", _make_zip(rich), "application/zip")},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    imported_pack_id = r.json()["data"]["pack"]["id"]
+
+    # Re-publish (import creates a release already) and export it back out.
+    exp = await c.get(
+        f"/api/v1/orgs/{oid}/packs/{imported_pack_id}/releases/1.0.0/export", headers=h
+    )
+    # Import defaults the version — discover it if not 1.0.0
+    if exp.status_code == 404:
+        rels = (await c.get(f"/api/v1/orgs/{oid}/packs/{imported_pack_id}/releases", headers=h)).json()["data"]
+        version = rels[0]["version"]
+        exp = await c.get(
+            f"/api/v1/orgs/{oid}/packs/{imported_pack_id}/releases/{version}/export", headers=h
+        )
+    assert exp.status_code == 200, exp.text
+
+    with _zip.ZipFile(BytesIO(exp.content)) as zf:
+        out = json.loads(zf.read("openskill-pack.json"))
+
+    # ── content-equivalence assertions (order-insensitive) ──
+    assert out["pack"]["name"] == "Deep RT Pack"
+    md = out["pack"]["metadata"]
+    assert set(md["capability_tags"]) == {"texturing", "lighting"}
+    assert set(md["tool_tags"]) == {"comfyui"}
+    assert sorted(md["learning_outcomes"]) == ["o1", "o2"]
+    assert out["pack"]["provenance"]["license_name"] == "CC-BY"
+
+    skills = {s["name"]: s for s in out["skills"]}
+    assert set(skills) == {"Base Skill", "Adv Skill"}
+    base = skills["Base Skill"]
+    assert base["learning_content"] == "# lesson\nbody"
+    assert base["estimated_minutes"] == 30 and set(base["tags"]) == {"t1", "t2"}
+    exs = {e["title"]: e for e in base["exercises"]}
+    assert set(exs) == {"MCQ", "Text"}
+    assert exs["MCQ"]["type"] == "multiple_choice"
+    assert exs["MCQ"]["config"]["correct"] == [1]
+    assert exs["MCQ"]["config"]["explanation"] == "y is right"
+    assert exs["MCQ"]["max_score"] == 50
+
+    # Prerequisite EDGE survived: Adv Skill still requires Base Skill (by slug)
+    adv = skills["Adv Skill"]
+    assert adv["prerequisites"] == ["s-base"], adv["prerequisites"]
+
+    tmpl = out["project_templates"][0]
+    assert tmpl["name"] == "Cap Template"
+    assert {r["criterion"]: r["max_score"] for r in tmpl["rubric"]} == {"Craft": 60, "Concept": 40}
+    assert tmpl["deliverables"][0]["name"] == "Final"
+    assert tmpl["skill_names"] == ["Base Skill"]
