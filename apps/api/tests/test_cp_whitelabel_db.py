@@ -854,3 +854,101 @@ async def test_export_truncation_never_ships_partial_invoice(db, monkeypatch):
         assert sum(line["amount_minor"] for line in inv["lines"]) == inv["total_minor"], (
             "a partial (boundary-cut) invoice was shipped"
         )
+
+
+# ── R272: verifier/TLS adapter arcs + verify exhaustion ──
+
+
+@pytest.mark.asyncio
+async def test_verify_attempts_exhaustion_fails_domain(db):
+    """R272: MAX_VERIFY_ATTEMPTS consecutive failures flip the domain to
+    'failed' with a reason — and a failed domain may retry verification
+    (status gate admits 'failed')."""
+    import hashlib as _hl
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    domain, raw = await domain_svc.create_domain(
+        db, tenant_id=tenant.id, hostname=f"x{str(ULID()).lower()[:8]}.example.com",
+        actor=_actor(user))
+    non_passing = "openskill-verify-nope"
+    domain.verification_token_hash = _hl.sha256(non_passing.encode()).hexdigest()
+    await db.flush()
+    for _ in range(domain_svc.MAX_VERIFY_ATTEMPTS):
+        with pytest.raises(AppError):
+            await domain_svc.verify_domain(db, domain, non_passing, actor=_actor(user))
+    assert domain.status == "failed"
+    assert domain.verify_attempts == domain_svc.MAX_VERIFY_ATTEMPTS
+    assert domain.failure_reason
+    # 'failed' is still awaiting verification — the gate admits a retry
+    with pytest.raises(AppError) as e:
+        await domain_svc.verify_domain(db, domain, non_passing, actor=_actor(user))
+    assert e.value.code == "DOMAIN_VERIFY_FAILED"          # not STATUS_CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_dns_txt_verifier_lookup_logic(monkeypatch):
+    """R272: DnsTxtVerifier's record-match logic, DNS patched out — multi-
+    string TXT records join before compare, a matching record among noise
+    verifies, NXDOMAIN/timeout and wrong records do not."""
+    import dns.resolver
+
+    from app.controlplane.services.domains import VERIFY_RECORD_PREFIX, DnsTxtVerifier
+
+    class FakeAnswer:
+        def __init__(self, *parts: bytes):
+            self.strings = parts
+
+    calls: list[str] = []
+
+    def fake_resolve(name, rtype, lifetime=None):
+        calls.append(name)
+        assert rtype == "TXT"
+        return [FakeAnswer(b"unrelated"), FakeAnswer(b"tok-", b"abc123")]
+
+    monkeypatch.setattr(dns.resolver, "resolve", fake_resolve)
+    v = DnsTxtVerifier()
+    assert await v.verify("shop.example.com", "tok-abc123") is True   # joined match
+    assert calls[0] == f"{VERIFY_RECORD_PREFIX}.shop.example.com"
+    assert await v.verify("shop.example.com", "tok-other") is False   # no match
+
+    def nxdomain(name, rtype, lifetime=None):
+        raise dns.resolver.NXDOMAIN()
+
+    monkeypatch.setattr(dns.resolver, "resolve", nxdomain)
+    assert await v.verify("shop.example.com", "tok-abc123") is False  # fail closed
+
+
+def test_tls_provisioner_switch_and_punycode_warn():
+    """R272: the TLS provisioner switch and both adapters' contracts, plus
+    check_reserved's punycode arc (warn, never reject — legit IDNs exist)."""
+    import asyncio
+
+    from app.config import settings as _settings
+    from app.controlplane.services.domains import (
+        MockTlsProvisioner,
+        NullTlsProvisioner,
+        check_reserved,
+        get_tls_provisioner,
+    )
+
+    async def run():
+        mock = MockTlsProvisioner()
+        got = await mock.provision("a.example.com")
+        assert got["tls_status"] == "active" and "a.example.com" in got["tls_ref"]
+        assert await mock.status("a.example.com", got["tls_ref"]) == "active"
+        null = NullTlsProvisioner()
+        got2 = await null.provision("a.example.com")
+        assert got2 == {"tls_status": "unmanaged", "tls_ref": None}
+        assert await null.status("a.example.com", None) == "unmanaged"
+
+    asyncio.run(run())
+
+    from unittest.mock import patch
+
+    with patch.object(_settings, "tls_provisioner", "mock"):
+        assert isinstance(get_tls_provisioner(), MockTlsProvisioner)
+    with patch.object(_settings, "tls_provisioner", "null"):
+        assert isinstance(get_tls_provisioner(), NullTlsProvisioner)
+
+    check_reserved("xn--48s290a.example.com")              # warns, must not raise
