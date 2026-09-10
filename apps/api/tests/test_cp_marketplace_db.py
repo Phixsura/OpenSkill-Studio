@@ -2036,3 +2036,41 @@ async def test_listing_rejects_seat_limit_on_non_seat_scope(db):
     # The valid pairing still works.
     listing = await _mk_listing(db, org, user, license_scope="seat_limited", seat_limit=10)
     assert listing.seat_limit == 10
+
+
+# ── R237: create_listing parameter-validation reject branches ──
+
+
+@pytest.mark.asyncio
+async def test_create_listing_param_validation(db):
+    """create_listing's parameter guards (branch-gap): unknown enums, paid-
+    needs-price+currency, and the R135 seat_limit↔scope contradictions.
+    A weakened guard sells a mispriced/unlimited-seat/dead-scope listing."""
+    seller_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    pack = await _mk_pack(db, seller_org, seller_user)
+    a = _actor(seller_user)
+
+    def base(**kw):
+        d = dict(
+            seller_org_id=seller_org.id, product_type="skill_pack", product_id=pack.id,
+            offer_type="paid", price_minor=1000, currency="USD",
+            license_scope="organization", seat_limit=None, upgrade_policy="all_versions",
+            included_plan_keys=[], bill_via_invoice=False, actor=a,
+        )
+        d.update(kw)
+        return d
+
+    async def rejects(**kw):
+        with pytest.raises(AppError) as e:
+            await market_svc.create_listing(db, **base(**kw))
+        assert e.value.code == "LISTING_INVALID"
+
+    await rejects(product_type="quantum_pack")
+    await rejects(offer_type="barter")
+    await rejects(license_scope="galactic")
+    await rejects(offer_type="paid", price_minor=None)         # paid needs price
+    await rejects(offer_type="paid", currency=None)            # paid needs currency
+    await rejects(license_scope="seat_limited", seat_limit=None)  # seat_limited needs limit
+    # R135: seat_limit on a non-seat_limited scope = silently-unlimited seats
+    await rejects(license_scope="organization", seat_limit=10)
