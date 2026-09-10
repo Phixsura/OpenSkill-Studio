@@ -1517,6 +1517,23 @@ were actionable:
   boundary, so the R87 AttributeError-500 is unreachable. Pinned with a
   boundary sentinel instead of a manufactured service guard.
 
+### R293–R297: HTTP-layer guard closure + full re-verification (2026-09-11)
+
+- **R293–R296** closed the control-plane endpoints' OWN guards (prior tests
+  drove the services directly), all guard-proven: subscription
+  self-service billing-bypass (MANUAL_BILLING_MODE 409), public plan
+  catalog unpublished-pricing disclosure, update_tenant null-column
+  IntegrityError + timezone quota-window rate-limit, and the impersonation
+  surface's deliberate mint-creator-only / revoke-any-admin asymmetry
+  (mint escalation locked, revoke kept open for incident response — my
+  first R296 test asserted the wrong contract for revoke and was corrected
+  to the intended design).
+- **R297 full re-verification** on the complete R251+ code: backend 2347
+  passed / 0 failed (21 min), frontend tsc+eslint+vitest 192/192, six live
+  batteries (adversarial 178, commercial 52, smoke 148, lifecycle,
+  workflow 49, concurrency 17), Schemathesis 17,952 fuzz cases — zero 500s
+  and zero tracebacks across 37,704 API log lines.
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
