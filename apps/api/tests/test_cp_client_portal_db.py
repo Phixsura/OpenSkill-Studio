@@ -772,3 +772,71 @@ async def test_create_guest_link_validation(db):
     await rejects(role="editor")                                       # bad role
     await rejects(expires_at=datetime.now(UTC) - timedelta(days=1))    # already expired
     await rejects(expires_at=datetime.now(UTC) + timedelta(days=91))   # >90 days
+
+
+# ── R269: remaining portal arcs ──
+
+
+@pytest.mark.asyncio
+async def test_link_limit_and_auth_arcs(db):
+    """R269: the 20-active-links project cap, malformed/missing Bearer 401s,
+    the impersonation block (an impersonated admin session must NOT act as a
+    client — decisions would be recorded under the impersonated identity)."""
+    user = await _mk_user(db)
+    _, _, _, project, _ = await _mk_project_env(db, user)
+
+    async def mk_link():
+        return await portal_svc.create_guest_link(
+            db, project_id=project.id, label="L", email=None, role="reviewer",
+            expires_at=datetime.now(UTC) + timedelta(days=7), actor=_actor(user))
+
+    for _ in range(portal_svc.MAX_ACTIVE_LINKS_PER_PROJECT):
+        await mk_link()
+    with pytest.raises(AppError) as e:                    # 21st link
+        await mk_link()
+    assert e.value.code == "CLIENT_LINK_LIMIT" and e.value.status_code == 422
+
+    # auth arcs
+    with pytest.raises(AppError) as e:
+        await portal_svc.get_client_principal(db, project.id, None)
+    assert e.value.status_code == 401
+    with pytest.raises(AppError) as e:
+        await portal_svc.get_client_principal(db, project.id, "Basic abc")
+    assert e.value.status_code == 401
+    with pytest.raises(AppError) as e:
+        await portal_svc.get_client_principal(db, project.id, "Bearer not-a-jwt")
+    assert e.value.status_code == 401
+
+    # an impersonated platform-access token is refused as a client principal
+    import jwt as _jwt
+
+    from app.config import settings as _settings
+    from app.core.security import ALGORITHM, create_access_token
+
+    token = create_access_token(user.id, user.email, "admin")
+    payload = _jwt.decode(token, _settings.jwt_secret, algorithms=[ALGORITHM])
+    payload["imp"] = "someone-else"
+    imp_token = _jwt.encode(payload, _settings.jwt_secret, algorithm=ALGORITHM)
+    with pytest.raises(AppError) as e:
+        await portal_svc.get_client_principal(db, project.id, f"Bearer {imp_token}")
+    assert e.value.code == "IMPERSONATION_FORBIDDEN" and e.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_cross_project_submission_404_and_revision_replay(db):
+    """R269: a submission id from ANOTHER project is a uniform 404 through
+    the portal share gate, and a replayed revision-request returns the prior
+    decision (no duplicate decision rows)."""
+    user = await _mk_user(db)
+    _, _, _, project, submission = await _mk_project_env(db, user)
+    _, _, _, project2, submission2 = await _mk_project_env(db, user)
+    auth = await _guest_auth(db, project, user, role="approver")
+    principal = await portal_svc.get_client_principal(db, project.id, auth)
+
+    with pytest.raises(AppError) as e:                    # other project's submission
+        await portal_svc.assert_shared(db, project.id, submission2.id)
+    assert e.value.code == "SUBMISSION_NOT_SHARED" and e.value.status_code == 404
+
+    d1 = await portal_svc.request_revision(db, principal, submission.id, "colors off")
+    d2 = await portal_svc.request_revision(db, principal, submission.id, "again?")
+    assert d2.id == d1.id                                 # replay -> prior returned
