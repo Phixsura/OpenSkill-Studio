@@ -1209,3 +1209,49 @@ async def test_provision_run_resume_is_step_idempotent(db, monkeypatch):
             select(_f.count(TenantAccount.id)).where(TenantAccount.slug == slug))
     ).scalar_one()
     assert n_tenants == 1                             # resume did not double-create
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_branding_upserts_both_succeed():
+    """R324: two concurrent FIRST-EVER branding upserts both pass the
+    existence SELECT (neither committed) — the loser's flush hit the
+    tenant_id unique index as an unhandled IntegrityError 500 (the R68[4]/
+    R113[L10] check-then-insert class). The SAVEPOINT-isolated insert must
+    adopt the winner's row: both PUTs succeed, exactly ONE row exists."""
+    import asyncio
+
+    from app.controlplane.models.branding import TenantBranding
+
+    async with AsyncSessionLocal() as setup:
+        user = await _mk_user(setup)
+        tenant = await _mk_tenant(setup, user)
+        await setup.commit()
+        tid, actor = tenant.id, _actor(user)
+
+    async def winner():
+        async with AsyncSessionLocal() as s:
+            b = await branding_svc.upsert_branding(
+                s, tid, {"login_tagline": "winner"}, actor=actor)
+            await asyncio.sleep(0.4)  # hold the uncommitted insert
+            await s.commit()
+            return b.id
+
+    async def loser():
+        await asyncio.sleep(0.15)  # start while winner's insert is uncommitted
+        async with AsyncSessionLocal() as s:
+            b = await branding_svc.upsert_branding(
+                s, tid, {"login_tagline": "loser"}, actor=actor)
+            await s.commit()
+            return b.id
+
+    id_a, id_b = await asyncio.gather(winner(), loser())
+    assert id_a == id_b, "loser must adopt the winner's row, not 500"
+    async with AsyncSessionLocal() as s:
+        rows = (
+            await s.execute(
+                select(TenantBranding).where(TenantBranding.tenant_id == tid))
+        ).scalars().all()
+        assert len(rows) == 1
+        # cleanup (module uses shared DB across tests)
+        await s.delete(rows[0])
+        await s.commit()

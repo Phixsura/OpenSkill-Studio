@@ -8,6 +8,7 @@ import re
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controlplane.models.branding import (
@@ -84,7 +85,21 @@ async def upsert_branding(
     ).scalar_one_or_none()
     if branding is None:
         branding = TenantBranding(tenant_id=tenant_id, updated_by=actor.user_id)
-        db.add(branding)
+        # R324: two concurrent first-ever upserts both pass the existence
+        # SELECT (neither committed) — the loser's flush hit the tenant_id
+        # unique index as an unhandled IntegrityError 500 (the R68[4]/
+        # R113[L10] check-then-insert class). SAVEPOINT-isolate the insert
+        # and, on a constraint loss, adopt the winner's row.
+        try:
+            async with db.begin_nested():
+                db.add(branding)
+                await db.flush()
+        except IntegrityError:
+            branding = (
+                await db.execute(
+                    select(TenantBranding).where(TenantBranding.tenant_id == tenant_id)
+                )
+            ).scalar_one()
     for field, value in updates.items():
         setattr(branding, field, value)
     branding.updated_by = actor.user_id
