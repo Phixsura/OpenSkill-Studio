@@ -1553,6 +1553,25 @@ Turned the cross-boundary technique on the control-plane UI:
   display error; both sides now pinned so a v1 currency addition fires
   both tests.
 
+### R301–R304: API-client logic pinned directly (2026-09-11)
+
+api.ts defends the client against malformed backends and rotating refresh
+tokens, but that logic was only ever reached through mocks. Pinned
+directly, each guard-proven:
+
+- **R301** error extraction — non-JSON → PARSE_ERROR, missing error.code →
+  UNKNOWN, empty body tolerated, network/abort → NETWORK_ERROR/ABORTED.
+- **R302** apiWithAuth — the security-critical R101[H11] guard (an expired
+  IMPERSONATION token 401 ends the session with ONE fetch, never
+  auto-refreshing into the operator's own privileged token), 204 → undefined.
+- **R303** sharedRefresh — N concurrent 401s collapse to ONE /auth/refresh
+  (rotating tokens make two raw refreshes race the loser into a wrong
+  logout); promise released after settle; non-ok/invalid-body/network all
+  clear auth.
+- **R304** redirectToLoginIfProtected — the R101[M15] protected-path matrix
+  (/dashboard, /platform, /partner bounce to login preserving ?redirect;
+  public paths untouched).
+
 ## 4. Convergence
 
 The final campaign (R81–R100) ran as two independent 10-dimension
