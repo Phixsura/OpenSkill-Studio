@@ -1098,3 +1098,68 @@ async def test_refund_before_accrual_retries_until_paid_lands(db):
     msg.status = "done"                                      # processed (no accruals)
     await db.flush()
     await _handle_purchase_refunded(db, {"purchase_id": pid})  # now a clean no-op
+
+
+@pytest.mark.asyncio
+async def test_settlement_transition_guards_and_entry_flips(db):
+    """R306: settlement state machine — an ordered pipeline moving partner
+    money. Pins: mark-paid REQUIRES an external_payment_ref (a payout marked
+    paid with no wire reference is untraceable money movement); approve flips
+    the statement's entries to 'approved' and mark-paid to 'settled' (the
+    entry money-state follows the statement); every out-of-order transition
+    is a 409; an unknown action is 422; and an approved/paid statement can no
+    longer be adjusted."""
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="10")
+    period = datetime.now(UTC).strftime("%Y-%m")
+    await revshare_svc.accrue_for_invoice(db, (await _mk_invoice(db, tenant, subtotal=100000)).id)
+
+    async def fresh_statement():
+        return await revshare_svc.generate_statement(
+            db, beneficiary_type="partner", partner_id=partner.id,
+            beneficiary_org_id=None, period=period, actor=_actor(user))
+
+    st = await fresh_statement()
+
+    # unknown action → 422
+    with pytest.raises(AppError) as e:
+        await revshare_svc.transition_statement(db, st, "teleport", actor=_actor(user))
+    assert e.value.code == "VALIDATION_ERROR" and e.value.status_code == 422
+
+    # out-of-order from draft: approve and mark-paid both 409
+    for bad in ("approve", "mark-paid"):
+        with pytest.raises(AppError) as e:
+            await revshare_svc.transition_statement(
+                db, st, bad, actor=_actor(user), external_payment_ref="W")
+        assert e.value.code == "STATEMENT_STATUS_CONFLICT"
+
+    st = await revshare_svc.transition_statement(db, st, "finalize", actor=_actor(user))
+    assert st.status == "finalized"
+
+    # mark-paid without a payment ref → 422 (untraceable payout guard)
+    st = await revshare_svc.transition_statement(db, st, "approve", actor=_actor(user))
+    with pytest.raises(AppError) as e:
+        await revshare_svc.transition_statement(db, st, "mark-paid", actor=_actor(user))
+    assert e.value.code == "VALIDATION_ERROR" and "external_payment_ref" in e.value.message
+
+    # after approve, entries are 'approved' (not yet settled)
+    def entry_statuses():
+        return db.execute(
+            select(RevenueShareEntry.status).where(
+                RevenueShareEntry.statement_id == st.id))
+    approved = {r for (r,) in (await entry_statuses()).all()}
+    assert approved == {"approved"}
+
+    # cannot adjust an approved statement
+    with pytest.raises(AppError) as e:
+        await revshare_svc.adjust_statement(
+            db, st, amount_minor=-100, reason="late", actor=_actor(user))
+    assert e.value.code == "STATEMENT_STATUS_CONFLICT" and e.value.status_code == 409
+
+    st = await revshare_svc.transition_statement(
+        db, st, "mark-paid", actor=_actor(user), external_payment_ref="WIRE-99")
+    assert st.status == "paid_externally"
+    settled = {r for (r,) in (await entry_statuses()).all()}
+    assert settled == {"settled"}
