@@ -3631,3 +3631,57 @@ async def test_cancel_provider_handler_arcs(db, monkeypatch):
     with pytest.raises(RuntimeError):
         await handle_subscription_cancel_provider(db, {
             "provider": "mock", "external_ref": sub.external_ref, "at_period_end": False})
+
+
+@pytest.mark.asyncio
+async def test_reactivate_subscription_arcs(db):
+    """R268: the direct un-cancel path (R101[H16/H17]) had no test — a
+    pending-cancellation sub reactivates (flag cleared, change recorded,
+    provider push enqueued); anything else is a 409."""
+    from app.controlplane.models.billing import SubscriptionChange
+    from app.controlplane.models.outbox import OutboxMessage
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=a)
+
+    with pytest.raises(AppError) as e:                     # active sub → 409
+        await billing_svc.reactivate_subscription(db, tenant, sub, actor=a)
+    assert e.value.code == "SUBSCRIPTION_STATUS_CONFLICT" and e.value.status_code == 409
+
+    sub.provider = "mock"
+    sub.external_ref = f"mock_sub_{ULID()}"
+    await db.flush()
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=True, actor=a)
+    await db.refresh(sub)
+    assert sub.status == "cancel_at_period_end"
+
+    sub = await billing_svc.reactivate_subscription(db, tenant, sub, actor=a)
+    assert sub.status == "active" and sub.cancel_at_period_end is False
+    chg = (
+        (await db.execute(
+            select(SubscriptionChange).where(
+                SubscriptionChange.subscription_id == sub.id,
+                SubscriptionChange.change_type == "reactivate")))
+        .scalars().all()
+    )
+    assert len(chg) == 1
+    pushes = (
+        (await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "subscription.push_provider",
+                OutboxMessage.payload["subscription_id"].astext == sub.id)))
+        .scalars().all()
+    )
+    assert len(pushes) >= 1                                # R101[H17] via outbox
+
+    # immediate-cancelled sub can NOT be resurrected
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False, actor=a)
+    await db.refresh(sub)
+    assert sub.status == "cancelled"
+    with pytest.raises(AppError) as e:
+        await billing_svc.reactivate_subscription(db, tenant, sub, actor=a)
+    assert e.value.status_code == 409
