@@ -164,9 +164,11 @@ def parse_a1111_infotext(text: str) -> dict | None:
                 break
 
         prompt_end = neg_idx if neg_idx is not None else settings_idx
-        prompt = "\n".join(lines[:prompt_end]).strip() if prompt_end else text.strip()
-        if prompt_end is None:
-            prompt = text.strip()
+        # R250: `if prompt_end` (truthiness) sent prompt_end == 0 — an
+        # infotext STARTING with "Negative prompt:" — into the whole-text
+        # fallback, polluting `prompt` with the negative and settings lines.
+        # The explicit None re-check below shows the intent was `is not None`.
+        prompt = "\n".join(lines[:prompt_end]).strip() if prompt_end is not None else text.strip()
 
         negative = None
         if neg_idx is not None:

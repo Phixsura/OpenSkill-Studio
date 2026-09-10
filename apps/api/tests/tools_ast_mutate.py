@@ -65,8 +65,10 @@ def run(path, funcs, test_cmd, limit=None):
     # permanently reformats the source). Restore via git if dirty.
     st = subprocess.run(["git", "status", "--short", str(p)], capture_output=True, text=True).stdout.strip()
     if st:
-        subprocess.run(["git", "checkout", "--", str(p)], check=True)
-        print(f"  (restored {path} from git before mutating)")
+        # R250 post-mortem: auto-checkout WIPED an uncommitted fix on the
+        # target file (and the then-red baseline made every mutant look
+        # killed). A dirty target now aborts instead — commit or stash first.
+        raise SystemExit(f"REFUSING to mutate dirty file {path} — commit or stash it first")
     original = p.read_text()
     tree = ast.parse(original)
     sites = enumerate_mutants(tree, set(funcs))
