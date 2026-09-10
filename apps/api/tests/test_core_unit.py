@@ -350,3 +350,54 @@ async def test_email_log_redacts_tokens_outside_dev(monkeypatch):
         assert "SECRET_TOKEN_ABC" in str(dev), "dev console IS the delivery mechanism"
     finally:
         structlog.reset_defaults()
+
+
+# ── R239: gamification level + duplicate slug/name + sanitize (pure) ──
+
+
+def test_compute_level_thresholds():
+    from app.services.gamification import _compute_level
+
+    assert _compute_level(0) == 1
+    assert _compute_level(99) == 1
+    assert _compute_level(100) == 2
+    assert _compute_level(250) == 3
+    assert _compute_level(-50) == 1          # never below level 1
+    # monotonic non-decreasing
+    prev = 0
+    for pts in range(0, 2000, 37):
+        lvl = _compute_level(pts)
+        assert lvl >= prev
+        prev = lvl
+
+
+def test_duplicate_slug_and_name_survive_max_length():
+    """R89: a base already at VARCHAR(200)/name max must keep its uniqueness
+    suffix (slug) / fit the column (name) — else duplicate 500s on the
+    unique index / string-truncation."""
+    from app.services.duplicate import _copy_name, _dup_slug
+
+    long_slug = "s" * 250
+    dup = _dup_slug(long_slug)
+    assert len(dup) <= 200
+    assert "-copy-" in dup                       # suffix survived the trim
+    # re-duplicating strips the prior -copy- marker (no unbounded growth)
+    again = _dup_slug(dup)
+    assert len(again) <= 200 and again.count("-copy-") == 1
+
+    long_name = "n" * 200
+    cp = _copy_name(long_name, 200)
+    assert len(cp) <= 200 and cp.endswith(" (Copy)")
+    # short name just gets the suffix appended
+    assert _copy_name("Skill", 200) == "Skill (Copy)"
+
+
+def test_sanitize_length_bound_and_prefslice():
+    from app.core.sanitize import sanitize_untrusted_text
+
+    assert sanitize_untrusted_text("", 100) == ""
+    assert len(sanitize_untrusted_text("x" * 5000, 100)) == 100
+    # a hostile multi-MB string is pre-sliced before NFKC (no seconds of CPU)
+    huge = "a" * 10_000_000
+    out = sanitize_untrusted_text(huge, 50)
+    assert len(out) == 50
