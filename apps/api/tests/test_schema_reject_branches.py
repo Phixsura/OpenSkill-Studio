@@ -167,3 +167,94 @@ def test_create_offering_rejects():
     _rejects(M, _OFF, "cost_per_call_usd", float("nan"))
     _rejects(M, _OFF, "cost_per_call_usd", 10000.0)   # rounds to >= 10000
     _rejects(M, _OFF, "cost_per_call_usd", -1.0)
+
+
+# ── cohort.py ────────────────────────────────────────────────
+
+
+def test_cohort_rejects():
+    from app.schemas.cohort import CreateCohortRequest as M
+
+    assert M(name="Valid Cohort").name == "Valid Cohort"
+    _rejects(M, {}, "name", "x")
+    _rejects(M, {"name": "ok"}, "name", "y" * 201)
+    _rejects(M, {"name": "ok"}, "description", "d" * 5001)
+    _rejects(M, {"name": "ok"}, "max_learners", 0)
+    _rejects(M, {"name": "ok"}, "max_learners", 10001)
+
+
+# ── learning_path.py ─────────────────────────────────────────
+
+
+def test_learning_path_rejects():
+    from app.schemas.learning_path import AddPathItemRequest
+    from app.schemas.learning_path import CreateLearningPathRequest as M
+
+    assert M(name="Valid Path").name == "Valid Path"
+    _rejects(M, {}, "name", "x")
+    _rejects(M, {"name": "ok"}, "name", "y" * 201)
+    _rejects(M, {"name": "ok"}, "description", "d" * 10001)
+    _rejects(M, {"name": "ok"}, "estimated_minutes", -1)
+    _rejects(M, {"name": "ok"}, "estimated_minutes", 10000)
+    _rejects(AddPathItemRequest, {}, "item_type", "teleport")
+    _rejects(AddPathItemRequest, {"item_type": "section"}, "section_title", "s" * 201)
+
+
+# ── portfolio.py ─────────────────────────────────────────────
+
+
+def test_portfolio_rejects():
+    from app.schemas.portfolio import CreatePortfolioItemRequest as Item
+    from app.schemas.portfolio import UsernameRequest as U
+
+    assert U(username="valid-name").username == "valid-name"
+    _rejects(U, {}, "username", "admin")                  # reserved
+    _rejects(U, {}, "username", "abc")                   # <4 chars
+    _rejects(U, {}, "username", "x" * 41)                # >40
+    _rejects(U, {}, "username", "Bad_Underscore")        # illegal chars
+    assert Item(title="Valid Item").visibility == "public"
+    _rejects(Item, {}, "title", "x")
+    _rejects(Item, {"title": "ok"}, "title", "y" * 201)
+    _rejects(Item, {"title": "ok"}, "description", "d" * 2001)
+    _rejects(Item, {"title": "ok"}, "visibility", "cosmic")
+    _rejects(Item, {"title": "ok"}, "tags", ["t"] * 31)
+    _rejects(Item, {"title": "ok"}, "tags", ["x" * 51])
+    _rejects(Item, {"title": "ok"}, "external_url", "ftp://x")
+
+
+# ── organization.py ──────────────────────────────────────────
+
+
+def test_org_rejects():
+    from app.schemas.organization import CreateOrgRequest as M
+
+    assert M(name="Valid Org").name == "Valid Org"
+    _rejects(M, {}, "name", "x")
+    _rejects(M, {"name": "ok"}, "name", "y" * 101)
+    _rejects(M, {"name": "ok"}, "slug", "s" * 101)
+    _rejects(M, {"name": "ok"}, "description", "d" * 2001)
+
+
+# ── matching.py ──────────────────────────────────────────────
+
+
+def test_matching_rejects():
+    from app.schemas.matching import CreateProfileRequest as M
+
+    assert M(context_type="production").context_type == "production"
+    _rejects(M, {}, "context_type", "telepathy")          # Literal mismatch
+    _rejects(M, {"context_type": "production"}, "raw_request", "r" * 4001)
+
+
+# ── registry.py ──────────────────────────────────────────────
+
+
+def test_registry_category_rejects():
+    from app.schemas.registry import CreateCategoryRequest as M
+
+    base = dict(name="Cat", slug="cat")
+    assert M(**base).slug == "cat"
+    _rejects(M, base, "name", "")
+    _rejects(M, base, "name", "y" * 101)
+    _rejects(M, base, "slug", "")
+    _rejects(M, base, "slug", "s" * 101)
