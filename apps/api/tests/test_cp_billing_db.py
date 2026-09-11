@@ -3935,6 +3935,7 @@ async def test_bill_via_invoice_purchase_becomes_license_line_at_close(db):
     )
     assert len(lic_lines) == 1
     assert lic_lines[0].amount_minor == 7000
+    assert int(lic_lines[0].quantity) == 1  # R346: one license, one unit
     await db.refresh(paid)
     await db.refresh(pending)
     assert paid.invoice_id == inv.id          # stamped

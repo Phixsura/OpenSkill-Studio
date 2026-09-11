@@ -2449,3 +2449,267 @@ async def test_install_gate_boundaries_and_status_codes(db):
     assert e403e.value.code == "LICENSE_UPGRADE_REQUIRED" and e403e.value.status_code == 403
     await market_svc.check_upgrade_license(
         db, "skill_pack", locked.product_id, buyer_org, "2.5")
+
+
+@pytest.mark.asyncio
+async def test_purchase_gate_statuses_and_seller_rule_split(db):
+    """R346 (mutation survivors): purchase-gate rejections carry their HTTP
+    statuses (409s / purchase 404); a seller-scoped rule REBALANCES the whole
+    split end-to-end (seller = rate% of gross, fee = the remainder — R56[25]:
+    fee+seller+partner never exceeds gross); the ALREADY_LICENSED precheck
+    409s on an all_versions repurchase; partner_only listings require an
+    ACTIVE-partner-attributed buyer; a suspended seller tenant is not
+    purchasable; and buying your own product 409s. Documented-equivalent
+    mutants: the idempotency replay limit(1) (uq_cp_purchase_idem + the
+    failed-key rename keep one live row per tenant+key); the recovery-path
+    conflict 409 status (reachable only when a racing winner terminalizes
+    before the loser recovers); the refund invoice-branch And→Or (both flip
+    paths yield charged=False identically for every constructible state)."""
+    from datetime import timedelta
+
+    from app.controlplane.models.partner import Partner, RevenueShareRule
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
+
+    async def _buy(listing, **kw):
+        return await market_svc.create_purchase(
+            db, listing_id=listing.id, buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user), payment_method="credit",
+            idempotency_key=kw.pop("key", f"b-{ULID()}"), **kw)
+
+    # own product → 409
+    own = await _mk_listing(db, seller_org, seller_user)
+    with pytest.raises(AppError) as e_own:
+        await market_svc.create_purchase(
+            db, listing_id=own.id, buyer_org_id=seller_org.id,
+            purchaser=_actor(seller_user), payment_method="credit",
+            idempotency_key=f"own-{ULID()}")
+    assert e_own.value.code == "ALREADY_OWNED" and e_own.value.status_code == 409
+
+    # non-active listing → 409
+    own.status = "delisted"
+    await db.flush()
+    with pytest.raises(AppError) as e_del:
+        await _buy(own)
+    assert e_del.value.code == "LISTING_NOT_PURCHASABLE" and e_del.value.status_code == 409
+
+    # partner_only: unattributed buyer 409; suspended-partner buyer 409
+    po = await _mk_listing(db, seller_org, seller_user, offer_type="partner_only")
+    with pytest.raises(AppError) as e_po:
+        await _buy(po)
+    assert e_po.value.status_code == 409
+    partner = Partner(name=f"P {ULID()}", slug=f"pp-{str(ULID()).lower()[:10]}",
+                      currency="USD", status="suspended", partner_type="reseller",
+                      created_by=buyer_user.id)
+    db.add(partner)
+    await db.flush()
+    buyer_tenant.partner_id = partner.id
+    await db.flush()
+    with pytest.raises(AppError) as e_po2:
+        await _buy(po)
+    assert e_po2.value.status_code == 409
+    partner.status = "active"        # active partner → gate passes
+    await db.flush()
+    ok_po = await _buy(po)
+    assert ok_po.status == "pending"
+
+    # suspended SELLER tenant → 409
+    lst2 = await _mk_listing(db, seller_org, seller_user)
+    seller_tenant = await db.get(TenantAccount, seller_org.tenant_id)
+    seller_tenant.status = TenantStatus.SUSPENDED
+    await db.flush()
+    with pytest.raises(AppError) as e_st:
+        await _buy(lst2)
+    assert e_st.value.code == "LISTING_NOT_PURCHASABLE" and e_st.value.status_code == 409
+    seller_tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+
+    # seller-scoped rule rebalances the split END-TO-END: 90% seller rule on
+    # a 30%-commission listing → seller 90%, fee 10%, partner ≤ fee
+    rule = RevenueShareRule(
+        beneficiary_type="seller_org", tenant_id=seller_org.tenant_id,
+        revenue_type="marketplace", rule_type="percentage_of_gross_revenue",
+        rate=Decimal("90"), version=1, status="active",
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        created_by=seller_user.id)
+    db.add(rule)
+    await db.flush()
+    lst3 = await _mk_listing(db, seller_org, seller_user, price_minor=10000)
+    pur = await _buy(lst3)
+    assert pur.seller_share_minor == 9000            # 90% of gross
+    assert pur.platform_fee_minor == 1000            # fee = remainder
+    assert pur.seller_share_minor + pur.platform_fee_minor == 10000
+    assert pur.partner_share_minor <= pur.platform_fee_minor
+
+    # ALREADY_LICENSED precheck 409s an all_versions repurchase
+    db.add(LicenseGrant(
+        listing_id=lst2.id, product_type="skill_pack", product_id=lst2.product_id,
+        tenant_id=buyer_tenant.id, org_id=None, scope="organization",
+        source="purchase", status="active"))
+    await db.flush()
+    with pytest.raises(AppError) as e_lic:
+        await _buy(lst2)
+    assert e_lic.value.code == "ALREADY_LICENSED" and e_lic.value.status_code == 409
+
+    # a FREE listing is not purchasable (409); invoice billing on a listing
+    # that doesn't support it (409); a dead/unpublished product 409s
+    free_lst = await _mk_listing(db, seller_org, seller_user, offer_type="free",
+                                 price_minor=None, currency=None)
+    with pytest.raises(AppError) as e_free:
+        await _buy(free_lst)
+    assert e_free.value.status_code == 409
+    no_inv = await _mk_listing(db, seller_org, seller_user)   # bill_via_invoice=False
+    with pytest.raises(AppError) as e_inv:
+        await market_svc.create_purchase(
+            db, listing_id=no_inv.id, buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user), payment_method="invoice",
+            idempotency_key=f"inv-{ULID()}")
+    assert e_inv.value.status_code == 409 and "invoice" in e_inv.value.message
+    dead = await _mk_listing(db, seller_org, seller_user)
+    from app.models.skill_pack import PackStatus as PStatus
+    from app.models.skill_pack import SkillPack as SPack
+
+    dead_pack = await db.get(SPack, dead.product_id)
+    dead_pack.status = PStatus.ARCHIVED
+    await db.flush()
+    with pytest.raises(AppError) as e_dead:
+        await _buy(dead)
+    assert e_dead.value.status_code == 409
+
+    # major_locked REPURCHASE for an upgrade is ALLOWED when the latest major
+    # exceeds the purchased one (the flipped policy check re-409s it and
+    # self-serve upgrades become impossible by construction — R135)
+    from app.models.skill_pack import SkillPackRelease as _Rel
+
+    up_lst = await _mk_listing(db, seller_org, seller_user, upgrade_policy="major_locked")
+    db.add(_Rel(pack_id=up_lst.product_id, version="2.0.0", manifest={},
+                checksum="c" * 64, released_by=seller_user.id))
+    db.add(LicenseGrant(
+        listing_id=up_lst.id, product_type="skill_pack", product_id=up_lst.product_id,
+        tenant_id=buyer_tenant.id, org_id=None, scope="organization",
+        source="purchase", status="active", purchased_major=1))
+    await db.flush()
+    up_purchase = await _buy(up_lst)                 # upgrade purchase allowed
+    assert up_purchase.status == "pending"
+
+    # product row GONE entirely (not just archived) → same uniform 409
+    gone = await _mk_listing(db, seller_org, seller_user)
+    gone_pack = await db.get(SPack, gone.product_id)
+    await db.delete(gone_pack)
+    await db.flush()
+    with pytest.raises(AppError) as e_gone:
+        await _buy(gone)
+    assert e_gone.value.status_code == 409
+
+    # paying the upgrade purchase MINTS the new-major grant (the flipped
+    # mint-side policy check re-covers it and skips the mint)
+    await credit_svc.top_up(db, buyer_tenant.id, "USD",
+                            up_purchase.amount_minor + 100000, actor=_actor(buyer_user))
+    await credit_svc.debit(db, buyer_tenant.id, "USD", up_purchase.amount_minor,
+                           reference_type="purchase", reference_id=up_purchase.id,
+                           idempotency_key=f"purchase:{up_purchase.id}")
+    paid_up = await market_svc.mark_purchase_paid(
+        db, purchase_id=up_purchase.id, payment_ref=None, actor=_actor(buyer_user))
+    assert paid_up.status == "paid"
+    majors = (
+        await db.execute(
+            select(LicenseGrant.purchased_major).where(
+                LicenseGrant.product_id == up_lst.product_id,
+                LicenseGrant.tenant_id == buyer_tenant.id))
+    ).scalars().all()
+    assert sorted(m for m in majors if m) == [1, 2]   # upgrade grant minted
+
+    # FAILED-purchase key rename: a retry after failure gets a FRESH purchase
+    # and the dead row's key is renamed at exactly the 90-char truncation
+    long_key = "k" * 95
+    fail_lst = await _mk_listing(db, seller_org, seller_user)
+    p_fail = await market_svc.create_purchase(
+        db, listing_id=fail_lst.id, buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user), payment_method="credit",
+        idempotency_key=long_key)
+    p_fail.status = "failed"
+    await db.flush()
+    p_retry = await market_svc.create_purchase(
+        db, listing_id=fail_lst.id, buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user), payment_method="credit",
+        idempotency_key=long_key)
+    assert p_retry.id != p_fail.id
+    await db.refresh(p_fail)
+    assert p_fail.idempotency_key.startswith("k" * 90 + ":r:")
+
+    # purchase 404 (mark-paid path) + refund's uniform 409 (missing or
+    # non-paid both hit the guarded UPDATE — no existence oracle)
+    with pytest.raises(AppError) as e_404:
+        await market_svc.mark_purchase_paid(db, purchase_id=str(ULID()), payment_ref=None, actor=_actor(buyer_user))
+    assert e_404.value.code == "PURCHASE_NOT_FOUND" and e_404.value.status_code == 404
+    with pytest.raises(AppError) as e_ref0:
+        await market_svc.refund_purchase(db, str(ULID()), reason="x", actor=_actor(buyer_user))
+    assert e_ref0.value.status_code == 409
+    with pytest.raises(AppError) as e_ref:
+        await market_svc.refund_purchase(db, pur.id, reason="x", actor=_actor(buyer_user))
+    assert e_ref.value.code == "PURCHASE_STATUS_CONFLICT" and e_ref.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_purchase_idempotency_is_tenant_scoped(db):
+    """R346: the idempotency-key replay lookup is scoped to the BUYER tenant —
+    tenant B reusing tenant A's key gets a FRESH purchase, never A's row (the
+    flipped-filter mutants replay another tenant's purchase)."""
+    seller_user = await _mk_user(db)
+    a_user, b_user = await _mk_user(db), await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    org_a, org_b = await _mk_org(db, a_user), await _mk_org(db, b_user)
+    listing = await _mk_listing(db, seller_org, seller_user)
+    key = f"shared-{ULID()}"
+
+    async def _buy(org, user):
+        return await market_svc.create_purchase(
+            db, listing_id=listing.id, buyer_org_id=org.id,
+            purchaser=_actor(user), payment_method="credit", idempotency_key=key)
+
+    pa = await _buy(org_a, a_user)
+    pb = await _buy(org_b, b_user)
+    assert pa.id != pb.id                     # B never replays A's purchase
+    assert pb.buyer_tenant_id == org_b.tenant_id
+    # replay WITHIN a tenant returns the same row
+    pa2 = await _buy(org_a, a_user)
+    assert pa2.id == pa.id
+
+
+@pytest.mark.asyncio
+async def test_concurrent_create_purchase_same_key_replays_winner():
+    """R346: two concurrent create_purchase calls with the same (tenant, key)
+    — the loser's IntegrityError recovery re-selects the winner by
+    (tenant, key, live-status) and returns the SAME purchase; flipped filters
+    there 409 a legitimate retry (or replay another tenant's row)."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as setup:
+        seller_user = await _mk_user(setup)
+        buyer_user = await _mk_user(setup)
+        seller_org = await _mk_org(setup, seller_user)
+        buyer_org = await _mk_org(setup, buyer_user)
+        listing = await _mk_listing(setup, seller_org, seller_user)
+        await setup.commit()
+        lid, oid = listing.id, buyer_org.id
+        key = f"race-{ULID()}"
+
+    async def _buy(delay, hold):
+        await asyncio.sleep(delay)
+        async with AsyncSessionLocal() as s:
+            purchase = await market_svc.create_purchase(
+                db=s, listing_id=lid, buyer_org_id=oid,
+                purchaser=_actor(buyer_user), payment_method="credit",
+                idempotency_key=key)
+            await asyncio.sleep(hold)
+            await s.commit()
+            return purchase.id
+
+    id_a, id_b = await asyncio.gather(_buy(0, 0.4), _buy(0.15, 0))
+    assert id_a == id_b, "the loser must replay the winner's purchase"
