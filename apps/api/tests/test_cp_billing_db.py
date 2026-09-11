@@ -4679,3 +4679,170 @@ async def test_webhook_applier_dunning_and_checkout_edges(db):
     assert r["status"] == "processed"
     await db.refresh(pur)
     assert pur.status == "paid"
+
+
+@pytest.mark.asyncio
+async def test_fold_restore_watermark_roundtrip_and_legacy_branches(db):
+    """R359 (the deferred fold-restore internals): three snapshot shapes —
+
+    WATERMARK branch: after a rollover fold (growth→school) the tenant makes
+    a forward immediate ROUND-TRIP (school→growth→school — ending exactly on
+    the post_fold value). Voiding the rollover invoice must SKIP the restore
+    (the forward window owns the axis; ID-order, not value equality): the sub
+    stays on school, never stranded on pre-fold growth — a value neither the
+    deferred change nor the tenant ever finally selected (R135). Kills the
+    mode/to_plan/ownership-gate mutants, which each resurrect the restore.
+
+    LEGACY VALUE-EQUALITY branch (snapshot without change_watermark): restore
+    fires per-axis only while the sub still CARRIES the post-fold value —
+    a hand-flipped plan axis skips its restore while the untouched seats axis
+    still restores.
+
+    LEGACY NO-SNAPSHOT branch (pre-close_snapshot invoice): the earliest
+    rollover-applied change's from_* restore, per-axis guarded the same way.
+
+    Remaining void_invoice mutants are proven equivalents: the credit-refund
+    falsy short-circuits (x and x>0 — three-state exhaustive with x∈{None,0,
+    +}), the later-locked/earliest-change limit(1)s (existence probes; two
+    matching rows would need 2+ later locked periods / 2 same-instant stacked
+    deferreds — shapes the guards themselves prevent), the two log-only
+    warning gates, and the rolled-window µs instant."""
+    from app.controlplane.models.billing import SubscriptionChange
+
+    user = await _mk_user(db)
+    a = _actor(user)
+
+    async def _rollover_fixture(tag, *, seats_change=None):
+        tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+        sub, _ = await billing_svc.start_subscription(
+            db, tenant, plan_key="growth", interval="month", seats=0,
+            provider="manual", actor=a)
+        await billing_svc.change_plan(
+            db, tenant, sub, plan_key="school", seats=seats_change,
+            proration_mode="next_period", actor=a)
+        inv = await _force_close(db, sub)      # rollover applies the fold
+        assert inv is not None
+        await db.refresh(sub)
+        return tenant, sub, inv
+
+    # ── WATERMARK branch: forward round-trip owns the plan axis ──
+    tenant1, sub1, inv1 = await _rollover_fixture("wm")
+    school_version = sub1.plan_version_id
+    growth_version = (
+        await db.execute(
+            select(SubscriptionChange.from_plan_version_id).where(
+                SubscriptionChange.subscription_id == sub1.id,
+                SubscriptionChange.change_type == "plan_change",
+                SubscriptionChange.proration_mode == "next_period"))
+    ).scalar_one()
+    # forward round-trip in the NEW window: school→growth→school
+    await billing_svc.change_plan(db, tenant1, sub1, plan_key="growth",
+                                  seats=None, proration_mode="immediate", actor=a)
+    await billing_svc.change_plan(db, tenant1, sub1, plan_key="school",
+                                  seats=None, proration_mode="immediate", actor=a)
+    await db.refresh(sub1)
+    assert sub1.plan_version_id == school_version   # ends ON the post-fold value
+    await billing_svc.void_invoice(db, inv1, reason="wm dispute", actor=a)
+    await db.refresh(sub1)
+    assert sub1.plan_version_id == school_version, (
+        "forward round-trip owns the axis — restore must NOT strand the sub "
+        "on pre-fold growth (R135)")
+    assert sub1.plan_version_id != growth_version
+
+    # ── WATERMARK == a pre-close immediate change's id (the > boundary) ──
+    # deferred first, then a pre-close IMMEDIATE change (its id becomes the
+    # watermark). After void, NO forward change exists with id > wm — the
+    # restore must fire (to pre_fold, which carries the immediate's value).
+    # The >= mutants match the watermark row itself, fake forward ownership,
+    # and skip the restore.
+    tenant_wb, sub_wb, _ = await _rollover_fixture("wb-warmup")  # burn nothing
+    tenant_w2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub_w2, _ = await billing_svc.start_subscription(
+        db, tenant_w2, plan_key="growth", interval="month", seats=0,
+        provider="manual", actor=a)
+    await billing_svc.change_plan(db, tenant_w2, sub_w2, plan_key="school",
+                                  seats=5, proration_mode="next_period", actor=a)
+    third_pre = await _seed_plan(db, user, f"r359w-{str(ULID()).lower()[:8]}",
+                                 amount=88800, included=2, seat_price=7)
+    await billing_svc.change_plan(db, tenant_w2, sub_w2, plan_key=third_pre,
+                                  seats=3, proration_mode="immediate", actor=a)
+    await db.refresh(sub_w2)
+    pre_fold_plan = sub_w2.plan_version_id           # third_pre (immediate applied)
+    inv_w2 = await _force_close(db, sub_w2)          # watermark = immediate's id
+    assert inv_w2 is not None
+    await db.refresh(sub_w2)
+    post_fold_plan = sub_w2.plan_version_id          # school (deferred folded)
+    assert post_fold_plan != pre_fold_plan
+    assert inv_w2.close_snapshot["change_watermark"] is not None
+    await billing_svc.void_invoice(db, inv_w2, reason="wb dispute", actor=a)
+    await db.refresh(sub_w2)
+    assert sub_w2.plan_version_id == pre_fold_plan, (
+        "no true forward change exists — the restore must fire; the >= "
+        "mutant matches the watermark row itself and skips it")
+    assert sub_w2.seat_quantity == 3, (
+        "seats axis restored to pre-fold 3 (the folded deferred took it to 5; "
+        "the >= mutant fakes forward ownership and leaves it there)")
+
+    # ── LEGACY VALUE-EQUALITY branch (watermark key stripped) ──
+    # flip BOTH axes to THIRD values (≠ pre_fold and ≠ post_fold): the guard
+    # must skip both restores; the or-mutants restore anyway and land on
+    # pre_fold — distinguishable from the third value.
+    tenant2, sub2, inv2 = await _rollover_fixture("lv", seats_change=4)
+    snap2 = dict(inv2.close_snapshot or {})
+    assert "change_watermark" in snap2
+    snap2.pop("change_watermark")                   # legacy-chain shape
+    inv2.close_snapshot = snap2
+    third = await _seed_plan(db, user, f"r359-{str(ULID()).lower()[:8]}",
+                             amount=77700, included=1, seat_price=100)
+    await billing_svc.change_plan(db, tenant2, sub2, plan_key=third,
+                                  seats=9, proration_mode="immediate", actor=a)
+    await db.refresh(sub2)
+    third_version = sub2.plan_version_id
+    assert third_version not in (snap2["pre_fold_version_id"],
+                                 snap2["post_fold_version_id"])
+    assert sub2.seat_quantity == 9
+    await billing_svc.void_invoice(db, inv2, reason="lv dispute", actor=a)
+    await db.refresh(sub2)
+    assert sub2.plan_version_id == third_version    # both guards SKIPPED
+    assert sub2.seat_quantity == 9
+
+    # legacy value-equality POSITIVE side: axes still carrying post_fold DO
+    # restore (plan == post_fold match — the != mutant skips it)
+    tenant2b, sub2b, inv2b = await _rollover_fixture("lv2", seats_change=5)
+    snap2b = dict(inv2b.close_snapshot or {})
+    snap2b.pop("change_watermark")
+    inv2b.close_snapshot = snap2b
+    await db.flush()
+    await billing_svc.void_invoice(db, inv2b, reason="lv2 dispute", actor=a)
+    await db.refresh(sub2b)
+    assert sub2b.plan_version_id == snap2b["pre_fold_version_id"]
+    assert sub2b.seat_quantity == snap2b["pre_fold_seats"]
+
+    # ── LEGACY NO-SNAPSHOT branch ──
+    tenant3, sub3, inv3 = await _rollover_fixture("ln", seats_change=6)
+    assert sub3.seat_quantity == 6
+    chg3 = (
+        await db.execute(
+            select(SubscriptionChange).where(
+                SubscriptionChange.subscription_id == sub3.id,
+                SubscriptionChange.proration_mode == "next_period"))
+    ).scalar_one()
+    inv3.close_snapshot = None                       # pre-snapshot era invoice
+    await db.flush()
+    await billing_svc.void_invoice(db, inv3, reason="ln dispute", actor=a)
+    await db.refresh(sub3)
+    assert sub3.plan_version_id == chg3.from_plan_version_id  # earliest-change restore
+    assert sub3.seat_quantity == chg3.from_seats
+
+    # no-snapshot NEGATIVE side: axes flipped to third values → guards skip
+    tenant4, sub4, inv4 = await _rollover_fixture("ln2", seats_change=6)
+    await billing_svc.change_plan(db, tenant4, sub4, plan_key=third,
+                                  seats=11, proration_mode="immediate", actor=a)
+    await db.refresh(sub4)
+    third4 = sub4.plan_version_id
+    inv4.close_snapshot = None
+    await db.flush()
+    await billing_svc.void_invoice(db, inv4, reason="ln2 dispute", actor=a)
+    await db.refresh(sub4)
+    assert sub4.plan_version_id == third4            # both guards SKIPPED
+    assert sub4.seat_quantity == 11
