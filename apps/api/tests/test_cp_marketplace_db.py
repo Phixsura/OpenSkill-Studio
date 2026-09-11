@@ -2877,3 +2877,53 @@ async def test_relisting_gates_and_listing_statuses(db):
             scope="organization", seat_limit=None, expires_at=None,
             actor=_actor(seller_user))
     assert e_org.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_registry_listings_recheck_product_and_seller_liveness(db):
+    """R386 (the R86[7] re-check arcs): an ACTIVE listing whose underlying
+    pack was archived, turned PRIVATE, or whose seller org was archived must
+    vanish from the public badge endpoint (enumeration oracle) — while a
+    healthy sibling stays with its seller name; and the id list truncates
+    at 50."""
+    from app.controlplane.api.marketplace import registry_listings
+    from app.models.organization import OrgStatus
+    from app.models.skill_pack import PackStatus, PackVisibility, SkillPack
+
+    user = await _mk_user(db)
+    seller_org = await _mk_org(db, user)
+    healthy = await _mk_listing(db, seller_org, user)
+    archived_pack = await _mk_listing(db, seller_org, user)
+    private_pack = await _mk_listing(db, seller_org, user)
+
+    pack_a = await db.get(SkillPack, archived_pack.product_id)
+    pack_a.status = PackStatus.ARCHIVED
+    pack_p = await db.get(SkillPack, private_pack.product_id)
+    pack_p.visibility = PackVisibility.PRIVATE
+    await db.flush()
+
+    ids = ",".join([healthy.product_id, archived_pack.product_id,
+                    private_pack.product_id])
+    resp = await registry_listings(product_type="skill_pack",
+                                   product_ids=ids, db=db)
+    assert healthy.product_id in resp.data
+    assert resp.data[healthy.product_id]["seller_org_name"] == seller_org.name
+    assert archived_pack.product_id not in resp.data     # dead product hidden
+    assert private_pack.product_id not in resp.data      # private hidden
+
+    # archived SELLER org hides its listings too
+    seller_org.status = OrgStatus.ARCHIVED
+    await db.flush()
+    resp2 = await registry_listings(product_type="skill_pack",
+                                    product_ids=healthy.product_id, db=db)
+    assert resp2.data == {}
+
+    # the id list truncates at 50 (the 51st id is never looked up)
+    seller2_user = await _mk_user(db)
+    seller2 = await _mk_org(db, seller2_user)
+    real = await _mk_listing(db, seller2, seller2_user)
+    fillers = ",".join(str(ULID()) for _ in range(50))
+    resp3 = await registry_listings(product_type="skill_pack",
+                                    product_ids=f"{fillers},{real.product_id}",
+                                    db=db)
+    assert real.product_id not in resp3.data             # truncated away
