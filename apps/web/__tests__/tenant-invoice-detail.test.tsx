@@ -67,7 +67,7 @@ function route(inv: Record<string, unknown>) {
   api.mockImplementation(() => Promise.resolve({ data: inv }));
 }
 
-beforeEach(() => api.mockReset());
+beforeEach(() => vi.clearAllMocks());
 
 describe("InvoiceDetailPage (R410)", () => {
   it("renders totals in the invoice currency: subtotal, NEGATIVE credit, tax, amount due", async () => {
@@ -95,6 +95,12 @@ describe("InvoiceDetailPage (R410)", () => {
     expect(body).not.toContain("Tax");
     expect(body).not.toContain("Payments");
     expect(body).not.toContain("Paid "); // no paid_at → no Paid line
+  });
+
+  it("a rejected fetch renders the failure line (isError arm)", async () => {
+    api.mockRejectedValue(new Error("nope"));
+    render(<InvoiceDetailPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("Failed to load invoice.")).toBeTruthy();
   });
 
   it("missing/failed invoice renders the failure line, not a blank invoice", async () => {
