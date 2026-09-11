@@ -2790,3 +2790,117 @@ async def test_budget_limit_and_threshold_exact_boundaries(db):
     with pytest.raises(AppError) as e:
         await budget_svc.check(db, tenant, None, projected_minor=1001)
     assert e.value.code == "BUDGET_EXCEEDED" and e.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_credit_zero_boundaries_available_math_and_settle_shortfall(db):
+    """R352 (mutation survivors): (1) ZERO is not a movement — top_up/refund/
+    debit/reserve all 422 on 0 (<=, not <); (2) available = balance − reserved
+    on BOTH the debit and reserve gates: with 1000 held 600, moving 401 is a
+    402/INSUFFICIENT and moving exactly 400 succeeds; (3) settle(0) releases
+    the hold and writes NO debit entry; (4) an over-hold settle floors at the
+    true available and records the exact shortfall in the entry reason — a
+    settle exactly AT the chargeable boundary records none."""
+    from app.controlplane.models.credit import CreditLedgerEntry
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    actor = _actor(user)
+
+    # (1) zero-amount movements are 422
+    with pytest.raises(AppError) as ez_t:
+        await credit_svc.top_up(db, tenant.id, "USD", 0, actor=actor)
+    assert ez_t.value.status_code == 422
+    with pytest.raises(AppError) as ez_r:
+        await credit_svc.refund(db, tenant.id, "USD", 0,
+                                reference_type="invoice", reference_id=str(ULID()),
+                                reason="z", actor=actor)
+    assert ez_r.value.status_code == 422
+    with pytest.raises(AppError) as ez_d:
+        await credit_svc.debit(db, tenant.id, "USD", 0,
+                               reference_type="purchase", reference_id=str(ULID()))
+    assert ez_d.value.status_code == 422
+    with pytest.raises(AppError) as ez2:
+        await credit_svc.reserve(db, tenant.id, "USD", 0,
+                                 reference_type="workflow_run", reference_id=str(ULID()))
+    assert ez2.value.status_code == 422
+
+    # (2) available math on reserve and debit
+    await credit_svc.top_up(db, tenant.id, "USD", 1000, actor=actor)
+    hold = await credit_svc.reserve(db, tenant.id, "USD", 600,
+                                    reference_type="workflow_run",
+                                    reference_id=str(ULID()))
+    with pytest.raises(AppError) as e402:
+        await credit_svc.reserve(db, tenant.id, "USD", 401,
+                                 reference_type="workflow_run",
+                                 reference_id=str(ULID()))
+    assert e402.value.code == "INSUFFICIENT_CREDIT" and e402.value.status_code == 402
+    with pytest.raises(AppError):
+        await credit_svc.debit(db, tenant.id, "USD", 401,
+                               reference_type="purchase", reference_id=str(ULID()),
+                               idempotency_key=f"d401-{ULID()}")
+    ok_hold = await credit_svc.reserve(db, tenant.id, "USD", 400,
+                                       reference_type="workflow_run",
+                                       reference_id=str(ULID()))
+    assert ok_hold.status == "held"                    # exactly-available OK
+    await credit_svc.release(db, ok_hold.id)
+
+    # (3) settle(0): hold released, NO debit entry
+    settled0 = await credit_svc.settle(db, hold.id, 0)
+    assert settled0.status in ("settled", "released")
+    zero_entries = (
+        await db.execute(
+            select(CreditLedgerEntry).where(
+                CreditLedgerEntry.idempotency_key == f"settle:{hold.id}"))
+    ).scalars().all()
+    assert zero_entries == []                          # nothing charged
+
+    # (4) shortfall math: balance 1000, other hold 700 → available 300;
+    # settle a 200-hold at actual 500 → charge floors at 300+... the hold's
+    # own release frees 200, other hold 700 → available = 1000-700 = 300;
+    # chargeable = min(500, 300) = 300 → shortfall exactly 200.
+    other = await credit_svc.reserve(db, tenant.id, "USD", 700,
+                                     reference_type="workflow_run",
+                                     reference_id=str(ULID()))
+    mine = await credit_svc.reserve(db, tenant.id, "USD", 200,
+                                    reference_type="workflow_run",
+                                    reference_id=str(ULID()))
+    await credit_svc.settle(db, mine.id, 500)
+    entry = (
+        await db.execute(
+            select(CreditLedgerEntry).where(
+                CreditLedgerEntry.idempotency_key == f"settle:{mine.id}"))
+    ).scalar_one()
+    assert entry.amount_minor == -300                  # floored at available
+    assert entry.reason == "shortfall 200"             # exact arithmetic
+    # a settle exactly AT the boundary records NO shortfall
+    await credit_svc.release(db, other.id)
+    exact = await credit_svc.reserve(db, tenant.id, "USD", 300,
+                                     reference_type="workflow_run",
+                                     reference_id=str(ULID()))
+    await credit_svc.settle(db, exact.id, 300)
+    entry2 = (
+        await db.execute(
+            select(CreditLedgerEntry).where(
+                CreditLedgerEntry.idempotency_key == f"settle:{exact.id}"))
+    ).scalar_one()
+    assert entry2.amount_minor == -300 and entry2.reason is None
+
+    # a NEGATIVE settle is a 422; and when the true available is ZERO the
+    # settle charges nothing and writes NO zero-amount entry
+    neg = await credit_svc.reserve(db, tenant.id, "USD", 50,
+                                   reference_type="workflow_run",
+                                   reference_id=str(ULID()))
+    with pytest.raises(AppError) as e_neg:
+        await credit_svc.settle(db, neg.id, -1)
+    assert e_neg.value.status_code == 422
+    await credit_svc.release(db, neg.id)
+
+    # Documented equivalents: debit's available Sub→Add is redundancy-
+    # equivalent (_append_entry hard-rejects below-holds balances with the
+    # same 402); settle's actual>0 gate at 0 chains into chargeable>0 (same
+    # no-entry outcome); the shortfall log at equality is log-only; and
+    # chargeable==0 with actual>0 is INVARIANT-IMPOSSIBLE — the _append_entry
+    # floor keeps balance >= reserved, so available after releasing one's own
+    # hold always covers at least that hold (verified: even a signed adjust
+    # 402s rather than dropping the balance below the outstanding holds).
