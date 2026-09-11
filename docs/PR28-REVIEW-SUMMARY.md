@@ -1930,6 +1930,23 @@ Harness lesson recorded: `beforeEach(api.mockReset())` makes any
 rejected-query vitest test fail with an escaped unhandled rejection;
 `vi.clearAllMocks()` is the safe reset (bisected & memorialized).
 
+**R417–R421** continued the product strata: dashboard home (to-do
+gating across every arm, null-score badge), settings + orgs (setAuth
+re-seed with the same token, error passthrough), portfolio manager
+(show_score privacy gate, badge-toggle id/state), org members
+(invite-role in the POST body, stale-link clear on failure), and the
+learning-path progress engine (R421 — 50/87 → 65/87 + 22 proven
+equivalents: per-learner/per-org done detection, cert threshold at the
+exact bound, effective-skills union scoping, learner-only cohort
+progress).
+
+**R421 checkpoint (10 rounds R402→R421)**: backend **2446 passed /
+1 skipped** (580 control-plane + 984 + 882 product; one cross-file
+event-loop flake that passes in isolation); web **331 passed (59
+files)**; ruff + tsc + eslint clean. No production code changed since
+R357 — the live verification (six batteries, 24,140 fuzz cases,
+browser 23/23, zero 500s) still stands.
+
 ---
 
 ## 5. Bottom line
