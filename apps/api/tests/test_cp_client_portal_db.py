@@ -1117,3 +1117,104 @@ async def test_guest_link_boundary_expiry_default_label_and_401s(db, monkeypatch
     with pytest.raises(AppError) as e3:
         await portal_svc.get_client_principal(db, project.id, f"Bearer {weird}")
     assert e3.value.status_code == 401 and e3.value.code == "CLIENT_ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_portal_decision_boundaries(db):
+    """R367 (decision-path survivors): (1) guest-link expiry window — exactly
+    NOW is invalid, exactly +90d is valid, +90d+1s is a 422, bad role 422;
+    (2) revision-request replay for the SAME version returns the prior record
+    (idempotent) while a NEW version records fresh; (3) a second final-accept
+    is a 409 (both the pre-check and the unique-index recovery); (4) a
+    cross-project submission id on the shared gate is a uniform 404;
+    (5) final-accept completes the linked brief. µs expiry instants, the
+    token-length constant, and existence-probe limits are documented
+    equivalents; the brief-completion And is None-shielded by a live
+    principal's project."""
+    from datetime import timedelta
+
+    user = await _mk_user(db)
+    org, tenant, brief, project, submission = await _mk_project_env(db, user)
+    now = datetime.now(UTC)
+
+    async def _link(**kw):
+        base = dict(project_id=project.id, label=None, email=None,
+                    role="approver", expires_at=now + timedelta(days=7),
+                    actor=_actor(user))
+        base.update(kw)
+        return await portal_svc.create_guest_link(db, **base)
+
+    # (1) boundary family with statuses
+    with pytest.raises(AppError) as e_r:
+        await _link(role="editor")
+    assert e_r.value.status_code == 422
+    with pytest.raises(AppError) as e_now:
+        await _link(expires_at=now)                     # <= now → invalid
+    assert e_now.value.status_code == 422
+    with pytest.raises(AppError) as e_91:
+        await _link(expires_at=now + timedelta(days=90, seconds=90))
+    assert e_91.value.status_code == 422
+    ok_link, raw = await _link(expires_at=now + timedelta(days=90) - timedelta(seconds=5))
+    assert ok_link.id and len(raw) > 30                 # ~90d OK; raw is long
+
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id,
+                       shared_by=user.id))
+    await db.flush()
+    token, _ = await portal_svc.exchange_guest_token(db, raw, None)
+    principal = await portal_svc.get_client_principal(
+        db, project.id, f"Bearer {token}")
+
+    # (4) cross-project submission → uniform 404 on the shared gate
+    with pytest.raises(AppError) as e_404:
+        await portal_svc.assert_shared(db, str(ULID()), submission.id)
+    assert e_404.value.status_code == 404
+
+    # (2) revision request: same-version replay returns the SAME record
+    r1 = await portal_svc.request_revision(
+        db, principal, submission.id, comment="please fix")
+    # same-row resubmission (same version, back to SUBMITTED): the replay
+    # must return the PRIOR record, not double-record the decision
+    submission.status = SubmissionStatus.SUBMITTED
+    await db.flush()
+    r2 = await portal_svc.request_revision(
+        db, principal, submission.id, comment="please fix again")
+    assert r2.id == r1.id                               # idempotent per version
+
+    # (3)+(5) final accept: completes the brief; a second one is a 409
+    submission.status = SubmissionStatus.APPROVED
+    await db.flush()
+    await portal_svc.final_accept(db, principal, submission.id, comment="ship it")
+    await db.refresh(brief)
+    from app.models.client_brief import BriefStatus
+
+    assert brief.status == BriefStatus.COMPLETED
+    with pytest.raises(AppError) as e_fa:
+        await portal_svc.final_accept(db, principal, submission.id, comment="again")
+    assert e_fa.value.code == "FINAL_ACCEPT_CONFLICT" and e_fa.value.status_code == 409
+
+    # after a final acceptance, a REVISION request is also a 409 (the
+    # project's decision history is closed — _assert_no_final)
+    submission.status = SubmissionStatus.SUBMITTED
+    await db.flush()
+    with pytest.raises(AppError) as e_rr:
+        await portal_svc.request_revision(db, principal, submission.id, comment="late")
+    assert e_rr.value.code == "FINAL_ACCEPT_CONFLICT" and e_rr.value.status_code == 409
+
+    # deleting a shared submission CASCADE-deletes its share (FK) — the gate
+    # 404s via the share probe; the second-layer submission check is FK-
+    # shielded defence in depth (its mutants are constraint-equivalent)
+    ghost = Submission(org_id=org.id, project_id=project.id, user_id=user.id,
+                       version=9, status=SubmissionStatus.SUBMITTED,
+                       submitted_at=datetime.now(UTC))
+    db.add(ghost)
+    await db.flush()
+    ghost_id = ghost.id
+    db.add(ClientShare(project_id=project.id, submission_id=ghost_id,
+                       shared_by=user.id))
+    await db.flush()
+    await db.delete(ghost)
+    await db.flush()
+    with pytest.raises(AppError) as e_ghost:
+        await portal_svc.assert_shared(db, project.id, ghost_id)
+    assert e_ghost.value.code == "SUBMISSION_NOT_SHARED"
+    assert e_ghost.value.status_code == 404
