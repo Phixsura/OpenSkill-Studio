@@ -1755,6 +1755,28 @@ R351 checkpoint: full backend **2398 passed / 0 failed / 1 skipped**
 run.terminal settle test re-verified green in isolation and in a clean
 chunk rerun); web tsc + vitest 226 passed; full-repo ruff clean.
 
+**R352–R357 (mutation completion + full live re-verification)**: credit
+money-movement 34/38 and expiry crons 51/60 (zero-boundaries, available
+math, settle shortfall arithmetic, the WAITING_REVIEW extension ladder, the
+promotional-lot deposit-protection closures at exact face boundaries);
+webhook/checkout handlers 17/19 and the webhook applier + period scan 34/37
+(HWM staleness at the exact instant, basil-shape payload tolerance, dunning
+transitions matrix-shadow-proofed via event result status, the R64[17]
+redelivery-vs-orphan cancel gate); provisioning step machine 32/44
+(completed-replay no-enqueue, global blueprints for partners, version
+pass-through in both pack loops, recovered-org installs, R84[M5]-shaped
+residue resume). Every controlplane service is now mutation-swept; all
+remaining survivors carry in-test equivalence proofs or an explicit fixture
+map (the 22 fold-restore internals).
+
+R357 live re-verification: six batteries green (adversarial 178, commercial
+52, smoke 148, workflow 49, concurrency 17, lifecycle ALL PASS), browser
+E2E 23/23, Schemathesis 24,140 cases 0 server errors, API logs ZERO 500s.
+One observation: a single contained Postgres deadlock (advance-vs-cancel
+race in the concurrency probe) logged by the workflow_advance_crashed
+handler — no user-visible error, run reached the correct terminal state;
+a lock-ordering audit for advance-vs-cancel would remove the noise.
+
 ---
 
 ## 5. Bottom line
