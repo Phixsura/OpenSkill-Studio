@@ -1775,7 +1775,14 @@ E2E 23/23, Schemathesis 24,140 cases 0 server errors, API logs ZERO 500s.
 One observation: a single contained Postgres deadlock (advance-vs-cancel
 race in the concurrency probe) logged by the workflow_advance_crashed
 handler — no user-visible error, run reached the correct terminal state;
-a lock-ordering audit for advance-vs-cancel would remove the noise.
+the R358 lock-ordering audit traced the root cause: _advance_once's
+PENDING→RUNNING branch locks run→steps while cancel/completion/review-sweep
+lock steps→run (ABBA). Unifying on one canonical order would require
+re-sequencing four paths (executor completion, advance, cancel, sweeper) —
+risk out of proportion to the noise, since the race is fully contained
+(Postgres detection + the advance crash handler + guarded conditional
+UPDATEs; the loser's retry converges and the run's terminal state was
+correct). Recorded as an ACCEPTED RESIDUAL alongside R42[7]/R131[9].
 
 ---
 
