@@ -576,3 +576,71 @@ async def test_resolve_reconciliation_report(db):
         assert row.resolved_note == "confirmed" and row.resolved_at is not None
         await check.delete(row)
         await check.commit()
+
+
+@pytest.mark.asyncio
+async def test_trace_settlement_entry_purchase_source(db):
+    """R374: the trace's MARKETPLACE branch — a purchase-sourced entry
+    resolves the purchase as its source (the flipped dispatch falls through
+    to no source)."""
+    from decimal import Decimal
+
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+    from app.controlplane.models.partner import RevenueShareEntry
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    lst = MarketplaceListing(product_type="skill_pack", product_id=str(ULID()),
+                             seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
+                             offer_type="paid", price_minor=100, currency="USD",
+                             platform_commission_pct=Decimal("20"), status="active",
+                             created_by=user.id)
+    db.add(lst)
+    await db.flush()
+    pur = MarketplacePurchase(
+        listing_id=lst.id, buyer_tenant_id=tenant.id, buyer_org_id=str(ULID()),
+        purchaser_user_id=user.id, status="paid", amount_minor=100,
+        currency="USD", platform_fee_minor=20, seller_share_minor=80,
+        partner_share_minor=0, economics_snapshot={})
+    db.add(pur)
+    await db.flush()
+    entry = RevenueShareEntry(
+        beneficiary_type="seller_org", beneficiary_org_id=lst.seller_org_id,
+        source_type="marketplace_purchase", source_id=pur.id,
+        rule_snapshot={}, revenue_base_minor=100, share_amount_minor=80,
+        currency="USD", period="2026-09", status="accrued")
+    db.add(entry)
+    await db.flush()
+    data = (await ops.trace_settlement_entry(entry.id, _user=user, db=db))["data"]
+    assert data["source"]["type"] == "marketplace_purchase"
+    assert data["source"]["purchase_id" if "purchase_id" in data["source"] else "id"] == pur.id
+
+
+def test_period_bounds_pure():
+    """R374: _period_bounds was untested — exact month window math including
+    the DECEMBER year rollover, the default current-month path, and the
+    format 422."""
+    from datetime import UTC, datetime
+
+    import pytest as _pytest
+
+    from app.controlplane.api.platform_dashboard import _period_bounds
+    from app.exceptions import AppError as _AppError
+
+    period, start, end = _period_bounds("2026-03")
+    assert period == "2026-03"
+    assert start == datetime(2026, 3, 1, tzinfo=UTC)
+    assert end == datetime(2026, 4, 1, tzinfo=UTC)
+    # December rolls the YEAR
+    _, start12, end12 = _period_bounds("2025-12")
+    assert start12 == datetime(2025, 12, 1, tzinfo=UTC)
+    assert end12 == datetime(2026, 1, 1, tzinfo=UTC)
+    # default = the current UTC month
+    now = datetime.now(UTC)
+    dperiod, dstart, _ = _period_bounds(None)
+    assert dperiod == f"{now.year:04d}-{now.month:02d}"
+    assert dstart.month == now.month and dstart.day == 1
+    for bad in ("2026-3", "2026/03", "26-03", "2026-13", "garbage"):
+        with _pytest.raises(_AppError) as e:
+            _period_bounds(bad)
+        assert e.value.status_code == 422
