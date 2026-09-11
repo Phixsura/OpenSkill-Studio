@@ -5153,6 +5153,7 @@ async def test_truncated_close_ratio_and_live_seat_decoys(db):
         await db.flush()
 
     await _usage(timedelta(days=-1), 111)            # inside → billed
+    await _usage(timedelta(days=-2), 89)             # second inside event
     await _usage(timedelta(hours=2), 999)            # after the cancel → NOT
 
     await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False,
@@ -5173,5 +5174,8 @@ async def test_truncated_close_ratio_and_live_seat_decoys(db):
     assert abs(by_type.get("plan", 0) - 10000) <= 500, by_type
     # (2) seats: 3 students − 1 included = 2 × 600 = 1200, same 1/3 ratio ≈ 400
     assert abs(by_type.get("seats", 0) - 400) <= 100, by_type
-    # (3) only the inside-window usage line
-    assert by_type.get("usage", 0) == 111, by_type
+    # (3) only the inside-window usage lines: exact sum AND the line's
+    # QUANTITY aggregates positively (the -= mutant shows -2 on the invoice)
+    assert by_type.get("usage", 0) == 200, by_type
+    usage_line = next(ln for ln in lines if ln.line_type == "usage")
+    assert int(usage_line.quantity) == 2
