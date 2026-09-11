@@ -4552,3 +4552,130 @@ async def test_webhook_provider_gate_and_checkout_suspension_rescue(db):
             provider="mock", external_customer_ref=None,
             external_ref=f"cs-orphan-{ULID()}")
         assert len(cancels) == 1
+
+
+@pytest.mark.asyncio
+async def test_webhook_applier_dunning_and_checkout_edges(db):
+    """R356 (mutation survivors in _apply_webhook_event): (1) invoice.paid
+    recovers EXACTLY a PAST_DUE tenant — a SUSPENDED tenant is never
+    self-service reactivated by a payment event; (2) payment_failed marks
+    EXACTLY an ACTIVE tenant past_due — a suspended one stays; (3) a checkout
+    with an EMPTY seats metadata activates with 0 seats (the or→and mutant
+    int('')-crashes); (4) a subscription checkout without a subscription
+    field falls back to the session id as the external ref."""
+    from app.controlplane.services.billing_providers.mock import sign_mock_event
+
+    user = await _mk_user(db)
+
+    async def _send(payload):
+        raw, sig = sign_mock_event(payload)
+        return await billing_svc.process_webhook(
+            db, "mock", {"x-mock-signature": sig}, raw)
+
+    def _checkout(tenant, *, seats, subscription="auto", session=None):
+        data = {
+            "id": session or f"mock_sess_{ULID()}",
+            "customer": f"mock_cus_{tenant.id}",
+            "metadata": {"tenant_id": tenant.id, "kind": "subscription",
+                         "plan_key": "school", "interval": "month",
+                         "seats": seats},
+        }
+        if subscription == "auto":
+            data["subscription"] = f"mock_sub_{ULID()}"
+        return {"id": f"mevt_{ULID()}", "type": "checkout.completed", "data": data}
+
+    # (3) empty seats string → 0 seats, activated
+    t_empty = await _mk_tenant(db, user, status=TenantStatus.TRIAL)
+    r = await _send(_checkout(t_empty, seats=""))
+    assert r["status"] == "processed"
+    sub_e = await billing_svc.get_live_subscription(db, t_empty.id)
+    assert sub_e is not None and sub_e.seat_quantity == 0
+
+    # (4) no subscription field → session id becomes the external ref
+    t_nosub = await _mk_tenant(db, user, status=TenantStatus.TRIAL)
+    session_id = f"mock_sess_{ULID()}"
+    r = await _send(_checkout(t_nosub, seats="0", subscription=None,
+                              session=session_id))
+    assert r["status"] == "processed"
+    sub_n = await billing_svc.get_live_subscription(db, t_nosub.id)
+    assert sub_n is not None and sub_n.external_ref == session_id
+
+    # (1)+(2) dunning transitions keyed to the sub's external ref
+    async def _pay_event(sub, etype):
+        return await _send({
+            "id": f"mevt_{ULID()}", "type": etype,
+            "data": {"id": f"in_{ULID()}", "subscription": sub.external_ref}})
+
+    from app.controlplane.services.tenants import transition_status
+
+    # ACTIVE + payment_failed → PAST_DUE
+    t1 = await _mk_tenant(db, user, status=TenantStatus.TRIAL)
+    await _send(_checkout(t1, seats="0"))
+    sub1 = await billing_svc.get_live_subscription(db, t1.id)
+    await db.refresh(t1)
+    assert t1.status == TenantStatus.ACTIVE
+    await _pay_event(sub1, "invoice.payment_failed")
+    await db.refresh(t1)
+    assert t1.status == TenantStatus.PAST_DUE
+    # PAST_DUE + invoice.paid → ACTIVE again
+    await _pay_event(sub1, "invoice.paid")
+    await db.refresh(t1)
+    assert t1.status == TenantStatus.ACTIVE
+    # SUSPENDED: neither event moves it (no self-service un-suspension,
+    # and payment_failed must not stack a suspension into past_due)
+    await transition_status(db, t1, TenantStatus.SUSPENDED,
+                            actor=_actor(user), reason="abuse")
+    r_paid = await _pay_event(sub1, "invoice.paid")
+    await db.refresh(t1)
+    assert t1.status == TenantStatus.SUSPENDED
+    r_fail = await _pay_event(sub1, "invoice.payment_failed")
+    await db.refresh(t1)
+    assert t1.status == TenantStatus.SUSPENDED
+    # both events PROCESS cleanly (the flipped gates attempt an illegal
+    # matrix transition and dead-letter the webhook instead)
+    assert r_paid["status"] == "processed" and r_fail["status"] == "processed"
+
+    # a TRIAL tenant is not dunned into past_due by a stray payment_failed
+    t_trial2 = await _mk_tenant(db, user, status=TenantStatus.TRIAL)
+    sub_t, _ = await billing_svc.start_subscription(
+        db, t_trial2, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+    sub_t.provider = "mock"
+    sub_t.external_ref = f"mock_sub_{ULID()}"
+    sub_t.status = "trial"
+    t_trial2.status = TenantStatus.TRIAL     # start_subscription activated it
+    await db.flush()
+    r_trial = await _pay_event(sub_t, "invoice.payment_failed")
+    await db.refresh(t_trial2)
+    assert t_trial2.status == TenantStatus.TRIAL
+    assert r_trial["status"] == "processed"
+
+    # a purchase-kind checkout marks the purchase PAID (the flipped kind
+    # matcher routes it to the subscription handler instead)
+    from decimal import Decimal as PDec
+
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+
+    lst = MarketplaceListing(product_type="skill_pack", product_id=str(ULID()),
+                             seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
+                             offer_type="paid", price_minor=100, currency="USD",
+                             platform_commission_pct=PDec("20"), status="active",
+                             created_by=user.id)
+    db.add(lst)
+    await db.flush()
+    pur = MarketplacePurchase(
+        listing_id=lst.id, buyer_tenant_id=t1.id, buyer_org_id=str(ULID()),
+        purchaser_user_id=user.id, status="pending", amount_minor=100,
+        currency="USD", platform_fee_minor=20, seller_share_minor=80,
+        partner_share_minor=0, economics_snapshot={"seller_org_id": None},
+        payment_method="checkout")
+    db.add(pur)
+    await db.flush()
+    r = await _send({
+        "id": f"mevt_{ULID()}", "type": "checkout.completed",
+        "data": {"id": f"mock_sess_{ULID()}",
+                 "metadata": {"tenant_id": t1.id, "kind": "purchase",
+                              "purchase_id": pur.id}}})
+    assert r["status"] == "processed"
+    await db.refresh(pur)
+    assert pur.status == "paid"
