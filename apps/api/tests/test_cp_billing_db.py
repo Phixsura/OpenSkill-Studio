@@ -5256,3 +5256,82 @@ async def test_credit_note_boundaries_and_debt_split(db):
         await billing_svc.issue_credit_note(
             db, inv, amount_minor=1, reason="over", actor=a)
     assert e_cum.value.status_code == 422
+
+
+class _Req384:
+    class _State:
+        request_id = "r384"
+    state = _State()
+
+
+@pytest.mark.asyncio
+async def test_billing_api_handlers_ownership_and_shape(db):
+    """R384: the billing handler layer — get_invoice 404s a FOREIGN tenant's
+    invoice id uniformly (no oracle) and embeds ordered lines + payments;
+    cancel/reactivate 404 when no live subscription exists; list_invoices
+    pages disjointly."""
+    from app.controlplane.api.billing import cancel_subscription as cancel_ep
+    from app.controlplane.api.billing import get_invoice, list_invoices
+    from app.controlplane.api.billing import reactivate_subscription as react_ep
+
+    user = await _mk_user(db)
+    t1 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    t2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    req = _Req384()
+
+    # foreign invoice → uniform 404
+    inv2 = Invoice(tenant_id=t2.id, currency="USD", status="open",
+                   subtotal_minor=500, total_minor=500, amount_due_minor=500,
+                   finalized_at=billing_svc._now())
+    db.add(inv2)
+    await db.flush()
+    with pytest.raises(AppError) as e404:
+        await get_invoice(t1.id, inv2.id, user=user, db=db)
+    assert e404.value.status_code == 404 and e404.value.code == "INVOICE_NOT_FOUND"
+
+    # no live sub → cancel/reactivate 404
+    from app.controlplane.api.billing import CancelSubscriptionRequest
+
+    with pytest.raises(AppError) as e_c:
+        await cancel_ep(t1.id, CancelSubscriptionRequest(), req, user=user, db=db)
+    assert e_c.value.status_code == 404
+    with pytest.raises(AppError) as e_r:
+        await react_ep(t1.id, req, user=user, db=db)
+    assert e_r.value.status_code == 404
+
+    # own invoice: lines ordered by sort_order, payments embedded
+    inv1 = Invoice(tenant_id=t1.id, currency="USD", status="open",
+                   subtotal_minor=900, total_minor=900, amount_due_minor=900,
+                   finalized_at=billing_svc._now())
+    db.add(inv1)
+    await db.flush()
+    db.add_all([
+        InvoiceLine(invoice_id=inv1.id, line_type="usage", description="b",
+                    quantity=1, amount_minor=300, sort_order=2),
+        InvoiceLine(invoice_id=inv1.id, line_type="plan", description="a",
+                    quantity=1, amount_minor=600, sort_order=1),
+    ])
+    await db.flush()
+    await billing_svc.record_payment(
+        db, inv1, amount_minor=100, method="other", external_ref=None,
+        reference_note=None, received_at=None, actor=_actor(user))
+    resp = await get_invoice(t1.id, inv1.id, user=user, db=db)
+    kinds = [ln["line_type"] for ln in resp.data["lines"]]
+    assert kinds == ["plan", "usage"]                 # sort_order respected
+    assert resp.data["payments"][0]["amount_minor"] == 100
+    assert resp.data["payments"][0]["status"] == "succeeded"
+
+    # list pagination: 3 invoices for t1 (inv1 + 2 more), per_page 2
+    for _ in range(2):
+        extra = Invoice(tenant_id=t1.id, currency="USD", status="open",
+                        subtotal_minor=1, total_minor=1, amount_due_minor=1,
+                        finalized_at=billing_svc._now())
+        db.add(extra)
+    await db.flush()
+    p1 = await list_invoices(t1.id, page=1, per_page=2, user=user, db=db)
+    p2 = await list_invoices(t1.id, page=2, per_page=2, user=user, db=db)
+    assert p1.meta.total == 3 and len(p1.data) == 2 and len(p2.data) == 1
+    assert p1.meta.has_more is True and p2.meta.has_more is False
+    ids1 = {d["id"] for d in p1.data}
+    assert inv2.id not in ids1                       # foreign never listed
+    assert ids1.isdisjoint({d["id"] for d in p2.data})
