@@ -1818,6 +1818,23 @@ role-gating hooks (useImpersonation/usePlatformAdmin/useTenantRole) —
 web 239 passed. R370 checkpoint: full backend **2416 passed / 0 failed /
 1 skipped**; ruff + tsc + eslint clean.
 
+**R371–R373 (close-core adjudication complete)**: the truncation-ratio pair
+(plan + seat overage at actual/natural seconds), the live-seat decoy matrix
+(staff/archived-member/archived-org/foreign-tenant), the half-open usage
+window at the truncated period end (an exact-boundary 777-minor decoy), and
+the usage line's quantity aggregation — five mutants manually verified
+killed. Batch adjudication of every remaining close-core survivor: the
+proration change-selection and PlanPrice dims, segment arithmetic, and the
+arrears first-change dims were selector-blind FALSE survivors (the parity/
+R371 suites kill them); the negative-subtotal boundary is covered by the
+carry-forward + zero-movement-422 pair; the rest are now a closed ledger of
+equivalence classes (µs boundary coincidences incl. gap-changes exactly at
+a period edge, zero-length segments, existence-probe limits, log-only
+residual warnings, legacy-transition re-bound branches, retry-delay and
+token-length constants). close_period_and_invoice adjudication: ~108 of
+152 mutants killed by tests, the remainder proven equivalent or
+legacy-only — the 921-line close core is fully accounted for.
+
 ---
 
 ## 5. Bottom line
