@@ -2601,13 +2601,23 @@ async def test_void_restores_rollover_applied_plan(db):
     sub, _ = await billing_svc.start_subscription(
         db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
     )
-    # Deferred downgrade growth → school (next_period).
+    # DECOY: another tenant's sub with a forward IMMEDIATE change — the
+    # restore's forward-ownership discriminator must scope to THIS sub
+    # (R350: the flipped sub filter finds the decoy and skips the restore)
+    t_d = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub_d, _ = await billing_svc.start_subscription(
+        db, t_d, plan_key="school", interval="month", seats=0, provider="manual", actor=a)
+    # Deferred downgrade growth → school (next_period) WITH a seats axis
+    # (0 → 4): the fold applies BOTH axes; the void must restore BOTH.
     await billing_svc.change_plan(
-        db, tenant, sub, plan_key="school", seats=None, proration_mode="next_period", actor=a
+        db, tenant, sub, plan_key="school", seats=4, proration_mode="next_period", actor=a
     )
+    await billing_svc.change_plan(
+        db, t_d, sub_d, plan_key="growth", seats=None, proration_mode="immediate", actor=a)
     inv = await _force_close(db, sub)  # rollover: applies the downgrade
     assert inv is not None
     await db.refresh(sub)
+    assert sub.seat_quantity == 4                       # seats axis folded
     growth_version = None  # capture post-void expectation via the change row
     from app.controlplane.models.billing import SubscriptionChange
 
@@ -2627,6 +2637,7 @@ async def test_void_restores_rollover_applied_plan(db):
     assert sub.plan_version_id == growth_version, (
         "void must restore the pre-rollover plan for the arrears re-close"
     )
+    assert sub.seat_quantity == 0, "void must restore the pre-rollover seats too"
     # Re-close bills the voided period at the OLD (growth) fee.
     inv2 = await billing_svc.close_period_and_invoice(db, inv.billing_period_id)
     assert inv2 is not None
@@ -2636,6 +2647,19 @@ async def test_void_restores_rollover_applied_plan(db):
     # And the downgrade is re-applied at the re-rollover.
     await db.refresh(sub)
     assert sub.plan_version_id == chg.to_plan_version_id
+    assert sub.seat_quantity == 4
+
+    # R350 (L2003 boundary): the deferred change's effective_at sits EXACTLY
+    # at the next period's start — voiding THAT period's invoice must
+    # un-invoice it (>=, not >), or the re-close silently drops the change.
+    inv3 = await _force_close(db, sub)                  # close period 2
+    assert inv3 is not None
+    await db.refresh(chg)
+    assert chg.invoiced is True
+    await billing_svc.void_invoice(db, inv3, reason="p2 dispute", actor=a)
+    await db.refresh(chg)
+    assert chg.invoiced is False, (
+        "a change effective exactly at the period start must be un-invoiced")
 
 
 @pytest.mark.asyncio
@@ -2676,6 +2700,14 @@ async def test_void_reclose_with_forward_immediate_upgrade(db):
     inv1 = await billing_svc.close_period_and_invoice(db, p1.id)
     assert inv1 is not None
     await db.refresh(sub)
+    # DECOY sub (another tenant) with its own immediate change in the same
+    # window — ownership detection must not read it as THIS sub's forward
+    # change (R350)
+    t_d2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub_d2, _ = await billing_svc.start_subscription(
+        db, t_d2, plan_key="school", interval="month", seats=0, provider="manual", actor=a)
+    await billing_svc.change_plan(
+        db, t_d2, sub_d2, plan_key="growth", seats=None, proration_mode="immediate", actor=a)
     # Tenant IMMEDIATELY upgrades back school → growth inside period 2
     # (effective_at = now > P1.period_end).
     await billing_svc.change_plan(
