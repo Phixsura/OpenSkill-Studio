@@ -3131,3 +3131,66 @@ async def test_promo_lot_closure_boundaries_protect_deposits(db):
     await credit_svc.expire_promotional(db)
     await db.refresh(lot_d)
     assert lot_d.consumed_expiration_id is not None
+
+
+@pytest.mark.asyncio
+async def test_run_terminal_cancelled_with_usage_settles_not_releases():
+    """R363 (mutation survivor): a CANCELLED run that already metered usage
+    must SETTLE the actual spend, not release the hold — the Or-mutant
+    releases and the tenant's real provider consumption becomes free money.
+    Release is exclusively for cancelled runs with ZERO actual usage."""
+    from app.controlplane.models.outbox import enqueue
+    from app.controlplane.services import metering
+    from app.controlplane.services import pricing as pricing_svc
+    from app.controlplane.worker import process_outbox_once
+    from app.core.database import engine
+
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await _mk_user(db)
+            tenant = await _mk_tenant(db, user)
+            a = _actor(user)
+            await credit_svc.top_up(db, tenant.id, "USD", 10000, actor=a)
+            run_id = str(ULID())
+            await credit_svc.reserve(db, tenant.id, "USD", 1000,
+                                     reference_type="workflow_run",
+                                     reference_id=run_id)
+            await pricing_svc.create_price_policy(
+                db, actor=a, name=f"rc {ULID()}",
+                policy_type="fixed_unit_price", usage_type="image_generation",
+                currency="USD", params={"unit_price_minor": 70},
+                effective_from=datetime.now(UTC) - timedelta(days=1),
+                tenant_id=tenant.id)
+            await metering.emit_usage(
+                db, tenant_id=tenant.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                usage_type="image_generation", quantity=2,
+                occurred_at=datetime.now(UTC), source="workflow_runtime",
+                idempotency_key=f"rc-{ULID()}", workflow_run_id=run_id)
+            enqueue(db, "run.terminal", {"run_id": run_id, "status": "cancelled"})
+            await db.commit()
+            tid = tenant.id
+
+        for _ in range(30):
+            async with AsyncSessionLocal() as db:
+                if await process_outbox_once(
+                        db, topics=["usage.recorded", "run.terminal"]) == 0:
+                    break
+
+        async with AsyncSessionLocal() as db:
+            balance = (
+                await db.execute(
+                    select(TenantCreditBalance).where(
+                        TenantCreditBalance.tenant_id == tid))
+            ).scalar_one()
+            assert balance.reserved_minor == 0
+            assert balance.balance_minor == 10000 - 140, (
+                "cancelled-with-usage must SETTLE the 2×70 actual spend — "
+                f"balance {balance.balance_minor}")
+            res = (
+                await db.execute(
+                    select(CreditReservation).where(
+                        CreditReservation.reference_id == run_id))
+            ).scalar_one()
+            assert res.status == "settled"      # not released
+    finally:
+        await engine.dispose()
