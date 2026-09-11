@@ -1547,3 +1547,73 @@ async def test_plan_activation_invalidates_subscribed_tenants_cache(db):
     assert await r.get(bkey) is not None, "bystander cache must survive"
     assert await r.get(key) is None, "subscriber cache cleared on activation"
     await r.delete(bkey)
+
+
+class _Req388:
+    class _State:
+        request_id = "r388"
+    state = _State()
+
+
+@pytest.mark.asyncio
+async def test_plans_api_catalog_and_external_ref(db):
+    """R388: public_plan_catalog lists only ACTIVE plans' ACTIVE versions
+    (drafts, retired versions and deactivated plans are invisible);
+    set_plan_price_external_ref 404s an unknown price, sets the ref with a
+    before/after audit and clears via empty-string → None (the one mutable
+    field on an active version — R62[2])."""
+    from app.controlplane.api.plans import (
+        public_plan_catalog,
+        set_plan_price_external_ref,
+    )
+    from app.controlplane.models.plan import PlanPrice
+    from app.controlplane.schemas.plan import SetExternalRefRequest
+    from app.controlplane.services import plans as plan_svc
+
+    user = await _mk_user(db)
+    key = f"r388-{str(ULID()).lower()[:8]}"
+    plan = await plan_svc.create_plan(db, key=key, name="R388", description=None,
+                                      actor=_actor(user))
+    v1 = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    v1.entitlements = {}
+    db.add(PlanPrice(plan_version_id=v1.id, currency="USD", interval="month",
+                     amount_minor=700, included_seats=0))
+    await db.flush()
+
+    # a DRAFT version is not in the public catalog
+    cat = await public_plan_catalog(db=db)
+    assert key not in {p_["key"] for p_ in cat.data}
+    await plan_svc.activate_version(db, v1, actor=_actor(user))
+    cat2 = await public_plan_catalog(db=db)
+    mine = next(p_ for p_ in cat2.data if p_["key"] == key)
+    assert mine["active_version"]["version"] == 1
+
+    # a deactivated PLAN disappears
+    plan.is_active = False
+    await db.flush()
+    cat3 = await public_plan_catalog(db=db)
+    assert key not in {p_["key"] for p_ in cat3.data}
+    plan.is_active = True
+    await db.flush()
+
+    # external ref: unknown price 404; set + audit before/after; clear → None
+    price = (
+        await db.execute(
+            select(PlanPrice).where(PlanPrice.plan_version_id == v1.id))
+    ).scalar_one()
+    req = _Req388()
+    with pytest.raises(AppError) as e404:
+        await set_plan_price_external_ref(
+            str(ULID()), SetExternalRefRequest(external_price_ref="price_x"),
+            req, user=user, db=db)
+    assert e404.value.status_code == 404
+    await set_plan_price_external_ref(
+        price.id, SetExternalRefRequest(external_price_ref="price_123"),
+        req, user=user, db=db)
+    await db.refresh(price)
+    assert price.external_price_ref == "price_123"
+    await set_plan_price_external_ref(
+        price.id, SetExternalRefRequest(external_price_ref=""),
+        req, user=user, db=db)
+    await db.refresh(price)
+    assert price.external_price_ref is None          # empty clears, not ""
