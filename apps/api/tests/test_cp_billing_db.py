@@ -3952,3 +3952,171 @@ async def test_bill_via_invoice_purchase_becomes_license_line_at_close(db):
             .scalars().all()
         )
         assert relic == [], "already-invoiced license was re-billed on the next close"
+
+
+@pytest.mark.asyncio
+async def test_plan_change_boundaries_and_provider_gates(db):
+    """R347 (mutation survivors): (1) an EQUAL-price plan change takes the
+    upgrade path (immediate — GtE, not Gt); (2) an explicit next_period
+    change schedules effective_at at the period end and does NOT flip the
+    sub; (3) a target price with NULL seat overage prices seats at 0, never
+    None-crashes; (4) MANUAL-provider change/cancel enqueue NO provider push;
+    (5) statuses: duplicate sub 409, unknown provider 422, double-cancel 409.
+    (6) provider gates on cancel (topic subscription.cancel_provider) and
+    reactivate (push_provider): mock-no-ref notifies nothing, a ref pushes.
+    Deferred (documented): the gap-window price-dim mutants (change landing
+    after period_end — R135's gap branch) need live-seat scaffolding to be
+    observable (all seat math is zero without students), and the reactivate
+    period_end>now instant is a sub-µs clock race."""
+    from app.controlplane.models.outbox import OutboxMessage
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    ka = await _seed_plan(db, user, f"r347a-{str(ULID()).lower()[:8]}",
+                          amount=10000, included=5, seat_price=500)
+    kb = await _seed_plan(db, user, f"r347b-{str(ULID()).lower()[:8]}",
+                          amount=10000, included=3, seat_price=300)   # EQUAL price
+    kc = await _seed_plan(db, user, f"r347c-{str(ULID()).lower()[:8]}",
+                          amount=4000, included=0, seat_price=None)   # NULL overage
+
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key=ka, interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+    v_a = sub.plan_version_id
+
+    # (5) unknown provider → 422
+    t2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    with pytest.raises(AppError) as e422:
+        await billing_svc.start_subscription(
+            db, t2, plan_key=ka, interval="month", seats=0,
+            provider="carrier_pigeon", actor=_actor(user))
+    assert e422.value.status_code == 422
+    # duplicate sub → 409 with status
+    with pytest.raises(AppError) as e409:
+        await billing_svc.start_subscription(
+            db, tenant, plan_key=kb, interval="month", seats=0,
+            provider="manual", actor=_actor(user))
+    assert e409.value.code == "SUBSCRIPTION_EXISTS" and e409.value.status_code == 409
+
+    # (1) equal-price change → immediate (upgrade path), sub flips NOW
+    res = await billing_svc.change_plan(
+        db, tenant, sub, plan_key=kb, seats=None, proration_mode=None,
+        actor=_actor(user))
+    assert res["mode"] == "immediate"
+    await db.refresh(sub)
+    assert sub.plan_version_id != v_a
+
+    # (2) explicit next_period change: scheduled at period end, sub unchanged
+    from app.controlplane.models.billing import SubscriptionChange
+
+    v_b = sub.plan_version_id
+    res2 = await billing_svc.change_plan(
+        db, tenant, sub, plan_key=kc, seats=None, proration_mode="next_period",
+        actor=_actor(user))
+    assert res2["mode"] == "next_period"
+    await db.refresh(sub)
+    assert sub.plan_version_id == v_b                  # not flipped yet
+    change = (
+        await db.execute(
+            select(SubscriptionChange)
+            .where(SubscriptionChange.subscription_id == sub.id,
+                   SubscriptionChange.proration_mode == "next_period")
+            .order_by(SubscriptionChange.created_at.desc()).limit(1))
+    ).scalars().first()
+    assert change.effective_at == sub.current_period_end
+
+    # (3) NULL seat-overage target, immediate → no crash, seat price 0
+    res3 = await billing_svc.change_plan(
+        db, tenant, sub, plan_key=kc, seats=None, proration_mode="immediate",
+        actor=_actor(user))
+    assert res3["proration"]["seat_proration_minor"] == 0
+
+    # (4) manual provider: NO provider-push outbox rows anywhere in the flow
+    pushes = (
+        await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "subscription.push_provider"))
+    ).scalars().all()
+    assert all(m.payload.get("subscription_id") != sub.id for m in pushes)
+
+    # provider-gate arcs (direct provider/ref flips on the same sub):
+    # a MOCK sub WITHOUT an external ref never pushes (the Or-mutant does) …
+    sub.provider = "mock"
+    sub.external_ref = None
+    await db.flush()
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key=kb, seats=None, proration_mode="immediate",
+        actor=_actor(user))
+    pushes = (
+        await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "subscription.push_provider"))
+    ).scalars().all()
+    assert all(m.payload.get("subscription_id") != sub.id for m in pushes)
+    # … a MOCK sub WITH a ref pushes and is NOT stripe-price-gated …
+    sub.external_ref = "mock-ref-1"
+    await db.flush()
+    await billing_svc.change_plan(
+        db, tenant, sub, plan_key=kc, seats=None, proration_mode="immediate",
+        actor=_actor(user))
+    pushes = (
+        await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "subscription.push_provider"))
+    ).scalars().all()
+    assert any(m.payload.get("subscription_id") == sub.id for m in pushes)
+    # … and a STRIPE sub changing to a plan with no Stripe price ref → 409
+    sub.provider = "stripe"
+    await db.flush()
+    with pytest.raises(AppError) as e_sp:
+        await billing_svc.change_plan(
+            db, tenant, sub, plan_key=ka, seats=None, proration_mode="immediate",
+            actor=_actor(user))
+    assert e_sp.value.code == "PLAN_NOT_AVAILABLE" and e_sp.value.status_code == 409
+    sub.provider = "manual"
+    sub.external_ref = None
+    await db.flush()
+
+    # (5) immediate cancel then a second cancel → guarded-update 409
+    # cancel with mock-no-ref: gate stays closed (no push from cancel)
+    sub.provider = "mock"
+    await db.flush()
+
+    async def _topic_count(topic, sid):
+        rows = (
+            await db.execute(
+                select(OutboxMessage).where(OutboxMessage.topic == topic))
+        ).scalars().all()
+        return sum(1 for m in rows if m.payload.get("subscription_id") == sid)
+
+    before = await _topic_count("subscription.cancel_provider", sub.id)
+    await billing_svc.cancel_subscription(
+        db, tenant, sub, at_period_end=False, actor=_actor(user))
+    # mock-no-ref cancel notifies no provider
+    assert await _topic_count("subscription.cancel_provider", sub.id) == before
+
+    # reactivate gate (un-cancel push): schedule-cancel a fresh manual sub,
+    # flip to mock-no-ref, reactivate → no provider push
+    t3 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub3, _ = await billing_svc.start_subscription(
+        db, t3, plan_key=ka, interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+    await billing_svc.cancel_subscription(
+        db, t3, sub3, at_period_end=True, actor=_actor(user))
+    sub3.provider = "mock"
+    sub3.external_ref = None
+    await db.flush()
+    before3 = await _topic_count("subscription.push_provider", sub3.id)
+    await billing_svc.reactivate_subscription(db, t3, sub3, actor=_actor(user))
+    assert await _topic_count("subscription.push_provider", sub3.id) == before3
+    # with a ref, the un-cancel IS pushed
+    await billing_svc.cancel_subscription(
+        db, t3, sub3, at_period_end=True, actor=_actor(user))
+    sub3.external_ref = "mock-ref-3"
+    await db.flush()
+    await billing_svc.reactivate_subscription(db, t3, sub3, actor=_actor(user))
+    assert await _topic_count("subscription.push_provider", sub3.id) == before3 + 1
+    with pytest.raises(AppError) as e409b:
+        await billing_svc.cancel_subscription(
+            db, tenant, sub, at_period_end=False, actor=_actor(user))
+    assert e409b.value.status_code in (404, 409)
