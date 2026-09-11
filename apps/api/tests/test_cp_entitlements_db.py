@@ -1465,3 +1465,85 @@ async def test_concurrent_set_override_same_key_single_row():
         assert rows[0].value.get("v") in (1, 2)
         await s.delete(rows[0])
         await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_plan_activation_invalidates_subscribed_tenants_cache(db):
+    """R369: invalidate_cache_for_plan must clear the cache of exactly the
+    tenants SUBSCRIBED to the plan (join/where flips clear nobody or the
+    wrong tenants — a plan-version activation then serves STALE entitlements
+    until TTL). Subscribed tenant sees the new value immediately; an
+    unrelated tenant's cache entry is untouched."""
+    from datetime import timedelta
+
+    from app.controlplane.models.billing import Subscription
+    from app.controlplane.models.plan import PlanPrice
+    from app.controlplane.services import plans as plan_svc
+    from app.controlplane.services.entitlements import get_effective
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    plan = await plan_svc.create_plan(
+        db, key=f"r369-{str(ULID()).lower()[:8]}", name="R369", description=None,
+        actor=_actor(user))
+    v1 = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    v1.entitlements = {"max_organizations": 3}
+    db.add(PlanPrice(plan_version_id=v1.id, currency="USD", interval="month",
+                     amount_minor=1000, included_seats=0))
+    await db.flush()
+    await plan_svc.activate_version(db, v1, actor=_actor(user))
+    now = datetime.now(UTC)
+    db.add(Subscription(
+        tenant_id=tenant.id, plan_version_id=v1.id, status="active",
+        currency="USD", interval="month", seat_quantity=0,
+        current_period_start=now - timedelta(days=1),
+        current_period_end=now + timedelta(days=29),
+        provider="manual", created_by=user.id))
+    await db.flush()
+
+    eff1 = await get_effective(db, tenant)      # populates the cache
+    assert eff1.values["max_organizations"] == 3
+
+    v2 = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    v2.entitlements = {"max_organizations": 9}
+    await db.flush()
+    await plan_svc.activate_version(db, v2, actor=_actor(user))
+    # the invalidation contract, asserted at the CACHE LAYER: activation
+    # deletes exactly the subscribed tenant's cache key (the join/where
+    # flips clear nobody / the wrong tenants → stale entitlements to TTL)
+    import app.core.redis as redis_mod
+    from app.controlplane.services.entitlements import CACHE_KEY
+
+    r = redis_mod.redis_pool()
+    key = CACHE_KEY.format(tenant_id=tenant.id)
+    assert await r.get(key) is None, "activation must clear the subscriber's cache"
+    # …and an UNRELATED tenant's cache is NOT actively cleared: plant a
+    # sentinel value under the bystander's key — activation must leave it,
+    # while clearing the subscriber's again
+    bystander = await _mk_tenant(db, user)
+    # the bystander SUBSCRIBES to a DIFFERENT plan — the join-flip mutant
+    # cartesian-matches every other-version subscriber and clears them too
+    other_plan = await plan_svc.create_plan(
+        db, key=f"r369b-{str(ULID()).lower()[:8]}", name="R369b",
+        description=None, actor=_actor(user))
+    ov = await plan_svc.create_draft_version(db, other_plan, created_by=user.id)
+    ov.entitlements = {}
+    await db.flush()
+    await plan_svc.activate_version(db, ov, actor=_actor(user))
+    db.add(Subscription(
+        tenant_id=bystander.id, plan_version_id=ov.id, status="active",
+        currency="USD", interval="month", seat_quantity=0,
+        current_period_start=now - timedelta(days=1),
+        current_period_end=now + timedelta(days=29),
+        provider="manual", created_by=user.id))
+    await db.flush()
+    bkey = CACHE_KEY.format(tenant_id=bystander.id)
+    await r.set(bkey, '{"sentinel": true}', ex=60)
+    await r.set(key, '{"stale": true}', ex=60)   # re-plant the subscriber's
+    v3 = await plan_svc.create_draft_version(db, plan, created_by=user.id)
+    v3.entitlements = {"max_organizations": 12}
+    await db.flush()
+    await plan_svc.activate_version(db, v3, actor=_actor(user))
+    assert await r.get(bkey) is not None, "bystander cache must survive"
+    assert await r.get(key) is None, "subscriber cache cleared on activation"
+    await r.delete(bkey)

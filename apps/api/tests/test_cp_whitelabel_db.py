@@ -1535,3 +1535,33 @@ async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
             db, blueprint_id=bp2.id, name="Inact", slug=f"in-{str(ULID()).lower()[:8]}",
             idempotency_key=f"in-{ULID()}", partner_id=None, actor=_actor(user))
     assert e_inact.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_fresh_pending_domain_claim_not_evictable(db):
+    """R369 (the security-review-flagged eviction boundary): a FRESH pending
+    claim (inside the 7-day grace) is NOT evictable by another tenant — the
+    flipped/widened mutants let any tenant squat-evict a competitor's claim
+    minutes after it was made. Both takeover raises carry 409."""
+    from datetime import UTC, datetime, timedelta
+
+    user = await _mk_user(db)
+    t1 = await _mk_tenant(db, user)
+    t2 = await _mk_tenant(db, user)
+    host = f"fresh-{str(ULID()).lower()[:8]}.example.com"
+    d1, _ = await domain_svc.create_domain(db, tenant_id=t1.id, hostname=host, actor=_actor(user))
+    assert d1.status == "pending_verification"
+
+    # 6 days old: still inside the grace — the second tenant gets a 409
+    d1.created_at = datetime.now(UTC) - timedelta(days=6)
+    await db.flush()
+    with pytest.raises(AppError) as e_taken:
+        await domain_svc.create_domain(db, tenant_id=t2.id, hostname=host, actor=_actor(user))
+    assert e_taken.value.code == "DOMAIN_TAKEN" and e_taken.value.status_code == 409
+
+    # 7.5 days old: past the SEVEN-day window — evictable (7.5 sits between
+    # the real 7d cutoff and the 8d-mutant's, so the widened window 409s it)
+    d1.created_at = datetime.now(UTC) - timedelta(days=7, hours=12)
+    await db.flush()
+    d2, _ = await domain_svc.create_domain(db, tenant_id=t2.id, hostname=host, actor=_actor(user))
+    assert d2.tenant_id == t2.id
