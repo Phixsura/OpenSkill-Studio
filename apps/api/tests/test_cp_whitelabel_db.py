@@ -640,7 +640,7 @@ async def test_partner_blueprint_rejects_entitlement_overrides(db):
 async def test_provision_org_slug_collision_suffixes(db):
     """R46[26]: the create_org step must fall back to a suffixed slug when the
     requested slug collides with any existing org (globally unique)."""
-    from app.controlplane.models.branding import TenantBlueprint, TenantDomain, TenantProvisionRun
+    from app.controlplane.models.branding import TenantBlueprint, TenantProvisionRun
     from app.controlplane.services import provisioning as prov_svc
     from app.models.organization import Organization
     from app.services.organization import OrgService
