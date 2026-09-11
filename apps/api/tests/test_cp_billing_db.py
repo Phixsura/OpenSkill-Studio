@@ -5068,3 +5068,110 @@ async def test_month_end_anchor_restores_after_february(db):
     await db.refresh(sub3)
     assert sub3.current_period_end == dt(2026, 4, 30, 8, 0, tzinfo=UTC), (
         f"anchor 30 must restore in April (30 == max_day), got {sub3.current_period_end}")
+
+
+@pytest.mark.asyncio
+async def test_truncated_close_ratio_and_live_seat_decoys(db):
+    """R371 (close-core survivors): (1) an immediate cancel at ~1/3 period
+    prorates BOTH the plan fee and the seat overage by actual/natural seconds
+    (the flipped comparisons charge the full month — R123[H3]'s exact bug);
+    (2) live seats count ACTIVE STUDENTS of this tenant's NON-ARCHIVED orgs
+    only — archived-org students, staff and another tenant's students are
+    decoys; (3) usage occurred AFTER the (truncated) period end stays out of
+    this invoice."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole, OrgStatus
+
+    user = await _mk_user(db)
+    a = _actor(user)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    ka = await _seed_plan(db, user, f"r371-{str(ULID()).lower()[:8]}",
+                          amount=30000, included=1, seat_price=600)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key=ka, interval="month", seats=0,
+        provider="manual", actor=a)
+
+    # orgs: live one + archived one for THIS tenant; a foreign tenant's org
+    def _org(t, status=OrgStatus.ACTIVE):
+        return Organization(name=f"O {ULID()}", slug=f"o-{str(ULID()).lower()}",
+                            status=status, tenant_id=t.id, created_by=user.id)
+
+    live_org = _org(tenant)
+    dead_org = _org(tenant, OrgStatus.ARCHIVED)
+    foreign = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    foreign_org = _org(foreign)
+    db.add_all([live_org, dead_org, foreign_org])
+    await db.flush()
+
+    async def _member(org, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE):
+        u = await _mk_user(db)
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=role, status=status))
+
+    for _ in range(3):
+        await _member(live_org)                      # 3 real seats
+    await _member(live_org, role=OrgRole.OWNER)      # staff — not a seat
+    await _member(live_org, status=MemberStatus.ARCHIVED)   # archived member
+    await _member(dead_org)                          # archived ORG's student
+    for _ in range(5):
+        await _member(foreign_org)                   # other tenant
+    await db.flush()
+
+    # backdate to 1/3 through a 30-day period, then IMMEDIATE cancel: the
+    # close bills exactly the elapsed third
+    p1 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id,
+                BillingPeriod.status == "open"))
+    ).scalar_one()
+    now = billing_svc._now()
+    p1.period_start = now - timedelta(days=10)
+    p1.period_end = now + timedelta(days=20)
+    sub.current_period_start = p1.period_start
+    sub.current_period_end = p1.period_end
+    await db.flush()
+
+    # usage INSIDE the truncated window vs AFTER the cancel instant
+    async def _usage(offset, amount):
+        eid = str(ULID())
+        db.add(UsageEvent(id=eid, tenant_id=tenant.id, org_id=live_org.id,
+                          usage_type="image_generation", quantity=1, unit="images",
+                          occurred_at=now + offset, source="manual"))
+        await db.flush()
+        db.add(RatedUsage(usage_event_id=eid, tenant_id=tenant.id,
+                          org_id=live_org.id, usage_type="image_generation",
+                          quantity=1, cost_rate_snapshot={}, internal_cost_minor=0,
+                          internal_cost_currency="USD", sell_rate_snapshot={},
+                          billable_amount_minor=amount,
+                          billable_amount_exact=Decimal(amount),
+                          billable_currency="USD", status="rated",
+                          rated_at=billing_svc._now()))
+        await db.flush()
+
+    await _usage(timedelta(days=-1), 111)            # inside → billed
+    await _usage(timedelta(hours=2), 999)            # after the cancel → NOT
+
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False,
+                                          actor=a)
+    # an event at EXACTLY the truncated period end belongs to the NEXT
+    # window (half-open) — the <= mutant pulls it into this invoice
+    await db.refresh(p1)
+    await _usage(p1.period_end - now, 777)
+    inv = await billing_svc.close_period_and_invoice(db, p1.id)
+    assert inv is not None
+    lines = await _lines(db, inv)
+    by_type = {}
+    for ln in lines:
+        by_type.setdefault(ln.line_type, 0)
+        by_type[ln.line_type] += ln.amount_minor
+
+    # (1) plan ≈ 30000 × 10/30 = 10000 (day-resolution tolerance)
+    assert abs(by_type.get("plan", 0) - 10000) <= 500, by_type
+    # (2) seats: 3 students − 1 included = 2 × 600 = 1200, same 1/3 ratio ≈ 400
+    assert abs(by_type.get("seats", 0) - 400) <= 100, by_type
+    # (3) only the inside-window usage line
+    assert by_type.get("usage", 0) == 111, by_type
