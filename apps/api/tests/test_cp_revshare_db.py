@@ -1470,3 +1470,68 @@ async def test_rule_tiebreak_typed_beats_all_then_version(db):
     # (an IDENTICAL (spec, type, version) key pair is constraint-impossible —
     # uq_cp_revshare_rule_version — so the best-key >= mutant is a
     # constraint-equivalent, verified empirically: the second row 23505s.)
+
+
+class _Req387:
+    class _State:
+        request_id = "r387"
+    state = _State()
+
+
+@pytest.mark.asyncio
+async def test_partner_attribution_handlers(db):
+    """R387: set/clear attribution (untested handler pair) — set stamps
+    partner_id + attributed_at and audits the BEFORE value; unknown tenant
+    and unknown partner 404 distinctly; clear resets both fields and audits;
+    require_partner_member is a uniform 404 for non-members AND for unknown
+    partners (no existence oracle)."""
+    from app.controlplane.api.partners import (
+        AttributionRequest,
+        clear_attribution,
+        require_partner_member,
+        set_attribution,
+    )
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, None)
+    req = _Req387()
+
+    with pytest.raises(AppError) as e_t:
+        await set_attribution(str(ULID()),
+                              AttributionRequest(partner_id=partner.id),
+                              req, user=user, db=db)
+    assert e_t.value.code == "TENANT_NOT_FOUND" and e_t.value.status_code == 404
+    with pytest.raises(AppError) as e_p:
+        await set_attribution(tenant.id,
+                              AttributionRequest(partner_id=str(ULID())),
+                              req, user=user, db=db)
+    assert e_p.value.code == "PARTNER_NOT_FOUND" and e_p.value.status_code == 404
+
+    resp = await set_attribution(tenant.id,
+                                 AttributionRequest(partner_id=partner.id),
+                                 req, user=user, db=db)
+    assert resp.data == {"tenant_id": tenant.id, "partner_id": partner.id}
+    await db.refresh(tenant)
+    assert tenant.partner_id == partner.id and tenant.attributed_at is not None
+
+    await clear_attribution(tenant.id, req, user=user, db=db)
+    await db.refresh(tenant)
+    assert tenant.partner_id is None and tenant.attributed_at is None
+    cleared = (
+        await db.execute(
+            select(CommercialAuditEvent).where(
+                CommercialAuditEvent.action == "tenant.attribution_cleared",
+                CommercialAuditEvent.tenant_id == tenant.id))
+    ).scalars().all()
+    assert cleared and cleared[-1].before == {"partner_id": partner.id}
+
+    # membership gate: non-member and unknown partner are the SAME 404
+    outsider = await _mk_user(db)
+    with pytest.raises(AppError) as e_m:
+        await require_partner_member(db, partner.id, outsider)
+    assert e_m.value.code == "PARTNER_NOT_FOUND" and e_m.value.status_code == 404
+    with pytest.raises(AppError) as e_g:
+        await require_partner_member(db, str(ULID()), outsider)
+    assert e_g.value.code == "PARTNER_NOT_FOUND" and e_g.value.status_code == 404
