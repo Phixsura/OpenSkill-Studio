@@ -1835,6 +1835,21 @@ token-length constants). close_period_and_invoice adjudication: ~108 of
 152 mutants killed by tests, the remainder proven equivalent or
 legacy-only — the 921-line close core is fully accounted for.
 
+**R374–R377 (the last money movers)**: platform-dashboard trace/period core
+26/31 (the untested _period_bounds December year-rollover; the marketplace
+trace branch); generate_statement 24/27 (draft regenerates IN PLACE for both
+shapes, finalized 409, gross/refund positive/negative split on a mixed
+period, org filter never sweeps partner entries); **issue_credit_note 27/27
+FULLY killed** — the debt/refund split pinned exactly (a 7000 note on a
+part-paid invoice cuts the 6000 outstanding debt and refunds only the 1000
+remainder; the Sub→Add mutant refunds money out of thin air), the
+cumulative cap at exact headroom, keyed-replay semantics; the rev-share
+rule tie-break (typed beats 'all' regardless of version, snapshot-asserted
+because a typed rule's base is the R56[23] stream slice; the best-key tie
+is constraint-impossible per uq_cp_revshare_rule_version, verified
+empirically). R377 checkpoint: full backend **2422 passed / 0 failed / 1
+skipped**; ruff clean.
+
 ---
 
 ## 5. Bottom line
