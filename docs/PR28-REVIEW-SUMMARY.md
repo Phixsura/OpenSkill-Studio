@@ -1880,6 +1880,56 @@ ruff + tsc + eslint clean. The R357 live verification (six batteries,
 24,140 fuzz cases, browser 23/23, zero 500s) stands — no production code
 has changed since.
 
+**R401–R416 (2026-09-12, the R500 arc): product-service strata + the
+remaining ops pages.** The mutation lens moved off the control plane onto
+the PRODUCT services it gates, and found them nearly bare:
+
+- **R401 auth core** (16/22 + 6 documented equivalents): unknown-email 401
+  (not 500), refresh-grace boundary replay (grace−1 mints / grace+2 401s),
+  INACTIVE-user refresh 401, logout immediately final, ghost-jti logout,
+  passwordless change_password as a domain error.
+- **R402 organization core — was 4/45, now 45/45**: the role/seat security
+  matrix was effectively untested. Pinned: tenant-wide DISTINCT seat
+  counting (sibling-org same-class re-add free, cross-TENANT seats
+  invisible), add-then-promote closed both directions, LATERAL staff moves
+  free even over a lowered cap, LAST_OWNER only on owner→non-owner,
+  cohort-cascade scoped to the org, delete_org archives members + both
+  pack registries (sibling packs untouched).
+- **R403 submission lifecycle — was 19/86, now 73/86 + 13 proven
+  equivalents**: per-(project,user) versioning with max+1 minting, caps at
+  the bound + cohort overrides, the R92f visibility gate (404, fires
+  before the cap), whitespace/foreign items never satisfy deliverables,
+  revision-resubmit bumps exactly one version, timing precedence
+  (most-generous cohort override, None-override skip, per-cohort join
+  proven with a single-membership user, extension re-grant updates one
+  row), review scoring bounds (0 and max legal, 422s), late penalty
+  pct/100 exact at max_score 1000, revision clears score, reject keeps
+  informational score.
+- **R407 evaluation core — was 9/38, now 33/38 + 5 proven equivalents**:
+  cross-org submission 404, prepay zero-estimate → 402 INSUFFICIENT_CREDIT
+  on trigger AND retry, guarded retry/cancel claims proven with decoy
+  rows, estimate averages this-org COMPLETED only + FX conversion (pinned
+  USD→BND), legacy budget at-the-cap block + current-month filter, CP
+  budget code branches, fence-parser trailing-prose/unclosed-fence arcs,
+  hallucinated rubric types (string/bool max_score) count as 0.
+- **R404–R406, R408–R416 (web)**: the last uncovered cp pages, each pin
+  guard-proved by source mutation — platform invoices + §37 billing-trace
+  drawer (margin platform-USD, truncation note), pricing tabs (scope
+  precedence tenant>partner>plan>global), partner statement detail (R101
+  [M10] margin-base masking, click-time token + 401-refresh-retry CSV
+  export), usage events (debounce/trim/page-reset), audit browser (full
+  26-char ULIDs, detail precedence), tenant invoice print view (tax/
+  paid_at rendered, credit shown as −abs()), partner overview (server
+  aggregate, 403 admins-only note), platform dashboard (every currency
+  slice rendered, per-row cost currency, attention sum), fleet +
+  partner CRUD (debounced q, POST body carries the selected type),
+  tenant home (entitlement null/boolean semantics, status-gated
+  banners), plan catalog (Activate only on drafts, version-id endpoint).
+
+Harness lesson recorded: `beforeEach(api.mockReset())` makes any
+rejected-query vitest test fail with an escaped unhandled rejection;
+`vi.clearAllMocks()` is the safe reset (bisected & memorialized).
+
 ---
 
 ## 5. Bottom line
