@@ -1428,3 +1428,42 @@ async def test_generate_statement_boundaries(db):
     # (zero-base entries are numeric no-ops on both gross and refunds — the
     # strict comparisons' boundary mutants are sum-with-zero equivalents; the
     # reversal-snapshot 'or {}' is unreachable-None — documented.)
+
+
+@pytest.mark.asyncio
+async def test_rule_tiebreak_typed_beats_all_then_version(db):
+    """R376 (_resolve_rule survivors): at EQUAL specificity a rule typed to
+    the revenue stream beats an 'all' rule regardless of version, and among
+    equal (spec, type) the HIGHER version wins."""
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+
+    def _active_rule(rate, version, rtype):
+        return RevenueShareRule(
+            beneficiary_type="partner", partner_id=partner.id,
+            revenue_type=rtype, rule_type="percentage_of_gross_revenue",
+            rate=Decimal(rate), version=version, status="active",
+            effective_from=datetime.now(UTC) - timedelta(days=30),
+            created_by=user.id)
+
+    # 'all' at a high version vs TYPED at low version → typed wins
+    # (direct active rows: this pins _resolve_rule's ORDERING, not the
+    # activation flow's same-dims retirement)
+    db.add_all([_active_rule("50", 9, "all"),
+                _active_rule("10", 1, "subscription")])
+    await db.flush()
+    inv = await _mk_invoice(db, tenant, subtotal=100000)
+    entry = await revshare_svc.accrue_for_invoice(db, inv.id)
+    # the TYPED rule won the tie (its R56[23] typed base is 0 on a line-less
+    # invoice — the 'all' rule would have accrued 50% of the full 100000)
+    snap = entry.rule_snapshot or {}
+    assert str(snap.get("rate", "")).startswith("10"), snap
+    assert entry.share_amount_minor == 0            # typed slice, no sub lines
+    # two TYPED rules: higher version wins the (spec, type) tie
+    db.add(_active_rule("20", 2, "subscription"))
+    await db.flush()
+    inv2 = await _mk_invoice(db, tenant, subtotal=100000)
+    entry2 = await revshare_svc.accrue_for_invoice(db, inv2.id)
+    snap2 = entry2.rule_snapshot or {}
+    assert str(snap2.get("rate", "")).startswith("20"), snap2   # v2 beats v1

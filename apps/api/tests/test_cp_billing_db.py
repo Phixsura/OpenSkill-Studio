@@ -5179,3 +5179,80 @@ async def test_truncated_close_ratio_and_live_seat_decoys(db):
     assert by_type.get("usage", 0) == 200, by_type
     usage_line = next(ln for ln in lines if ln.line_type == "usage")
     assert int(usage_line.quantity) == 2
+
+
+@pytest.mark.asyncio
+async def test_credit_note_boundaries_and_debt_split(db):
+    """R376 (issue_credit_note survivors): (1) a note of EXACTLY the invoice
+    total is legal, one over 422, zero/negative 422; (2) a note on a DRAFT
+    invoice 409, keyed replay with a DIFFERENT amount 409; (3) the debt/refund
+    split: on a part-paid invoice the note first reduces the outstanding debt
+    and only the remainder refunds to credit (the Sub→Add mutant refunds the
+    whole note on top of the debt cut — money out of thin air)."""
+    from app.controlplane.models.credit import TenantCreditBalance
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+
+    def _inv(due):
+        return Invoice(tenant_id=tenant.id, currency="USD", status="draft",
+                       subtotal_minor=due, total_minor=due, amount_due_minor=due)
+
+    draft = _inv(5000)
+    db.add(draft)
+    await db.flush()
+    with pytest.raises(AppError) as e_draft:
+        await billing_svc.issue_credit_note(
+            db, draft, amount_minor=100, reason="x", actor=a)
+    assert e_draft.value.status_code == 409
+
+    inv = _inv(10000)
+    db.add(inv)
+    await db.flush()
+    inv = await billing_svc.finalize_invoice(db, inv, actor=a)
+
+    for bad in (0, -5, 10001):
+        with pytest.raises(AppError) as e_amt:
+            await billing_svc.issue_credit_note(
+                db, inv, amount_minor=bad, reason="x", actor=a)
+        assert e_amt.value.status_code == 422, bad
+
+    # part-pay 4000 → outstanding 6000. A 7000 note: 6000 debt cut + 1000
+    # refund to credit, never 7000 refund.
+    await billing_svc.record_payment(
+        db, inv, amount_minor=4000, method="manual_bank_transfer",
+        external_ref=f"W-{ULID()}", reference_note=None, received_at=None,
+        actor=a)
+    key = f"cn-{ULID()}"
+    note = await billing_svc.issue_credit_note(
+        db, inv, amount_minor=7000, reason="partial refund", actor=a,
+        idempotency_key=key)
+    await db.refresh(inv)
+    assert inv.amount_due_minor == 4000              # 10000 − 6000 debt cut
+    bal = (
+        await db.execute(
+            select(TenantCreditBalance.balance_minor).where(
+                TenantCreditBalance.tenant_id == tenant.id,
+                TenantCreditBalance.currency == "USD"))
+    ).scalar_one_or_none() or 0
+    assert bal == 1000, f"only the over-debt remainder refunds, got {bal}"
+
+    # keyed replay: same amount → same note back; different amount → 409
+    replay = await billing_svc.issue_credit_note(
+        db, inv, amount_minor=7000, reason="retry", actor=a, idempotency_key=key)
+    assert replay.id == note.id
+    with pytest.raises(AppError) as e_key:
+        await billing_svc.issue_credit_note(
+            db, inv, amount_minor=500, reason="conflict", actor=a,
+            idempotency_key=key)
+    assert e_key.value.code == "IDEMPOTENCY_CONFLICT" and e_key.value.status_code == 409
+
+    # cumulative cap: remaining headroom is 3000 (10000 − 7000): exactly
+    # 3000 passes, one more 422s
+    await billing_svc.issue_credit_note(
+        db, inv, amount_minor=3000, reason="rest", actor=a)
+    with pytest.raises(AppError) as e_cum:
+        await billing_svc.issue_credit_note(
+            db, inv, amount_minor=1, reason="over", actor=a)
+    assert e_cum.value.status_code == 422
