@@ -7,6 +7,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),
+      // server-runtime shims so server-component libs are unit-testable
+      "server-only": resolve(__dirname, "__tests__/__shims__/empty.ts"),
     },
   },
   test: {

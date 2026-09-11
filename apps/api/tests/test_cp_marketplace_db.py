@@ -2713,3 +2713,167 @@ async def test_concurrent_create_purchase_same_key_replays_winner():
 
     id_a, id_b = await asyncio.gather(_buy(0, 0.4), _buy(0.15, 0))
     assert id_a == id_b, "the loser must replay the winner's purchase"
+
+
+@pytest.mark.asyncio
+async def test_relisting_gates_and_listing_statuses(db):
+    """R365 (create_listing/manual_grant survivors — the H1 anti-
+    redistribution gates were untested): (1) a path installed from a PAID
+    listing cannot be re-listed by the buyer (403), while the ORIGINAL seller
+    re-listing their own content is fine and a FREE-origin copy is fine;
+    (2) a manual-grant copy (origin_source_path_id only, no listing) of
+    ANOTHER org's path is blocked 403, one's own re-import is fine;
+    (3) statuses: unknown product type 422, missing product 404, unpublished
+    422, duplicate listing 409; (4) manual_grant seat/org guards 422."""
+    from app.models.skill import ContentStatus
+    from app.services.learning_path import LearningPathService
+
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+    lp = LearningPathService(db)
+
+    async def _published_path(org, user, name):
+        path = await lp.create_path(org.id, user.id, name=name)
+        path.status = ContentStatus.PUBLISHED
+        await db.flush()
+        return path
+
+    # (3) status family first
+    with pytest.raises(AppError) as e_t:
+        await market_svc.create_listing(
+            db, seller_org_id=seller_org.id, product_type="mixtape",
+            product_id=str(ULID()), offer_type="paid", price_minor=100,
+            currency="USD", license_scope="organization", seat_limit=None,
+            upgrade_policy="all_versions", included_plan_keys=[],
+            bill_via_invoice=False, actor=_actor(seller_user))
+    assert e_t.value.status_code == 422
+    with pytest.raises(AppError) as e_404:
+        await market_svc.create_listing(
+            db, seller_org_id=seller_org.id, product_type="learning_path",
+            product_id=str(ULID()), offer_type="paid", price_minor=100,
+            currency="USD", license_scope="organization", seat_limit=None,
+            upgrade_policy="all_versions", included_plan_keys=[],
+            bill_via_invoice=False, actor=_actor(seller_user))
+    assert e_404.value.status_code == 404
+    draft_path = await lp.create_path(seller_org.id, seller_user.id, name="Draft")
+    with pytest.raises(AppError) as e_unpub:
+        await market_svc.create_listing(
+            db, seller_org_id=seller_org.id, product_type="learning_path",
+            product_id=draft_path.id, offer_type="paid", price_minor=100,
+            currency="USD", license_scope="organization", seat_limit=None,
+            upgrade_policy="all_versions", included_plan_keys=[],
+            bill_via_invoice=False, actor=_actor(seller_user))
+    assert e_unpub.value.status_code == 422
+
+    # (1) paid-origin copy: buyer re-lists → 403; free-origin copy → allowed
+    src_paid = await _published_path(seller_org, seller_user, "Paid Origin")
+    paid_listing = await market_svc.create_listing(
+        db, seller_org_id=seller_org.id, product_type="learning_path",
+        product_id=src_paid.id, offer_type="paid", price_minor=9900,
+        currency="USD", license_scope="organization", seat_limit=None,
+        upgrade_policy="all_versions", included_plan_keys=[],
+        bill_via_invoice=False, actor=_actor(seller_user))
+    paid_listing.status = "active"
+    copy_paid = await _published_path(buyer_org, buyer_user, "Copy of Paid")
+    copy_paid.origin_listing_id = paid_listing.id
+    await db.flush()
+    with pytest.raises(AppError) as e_redis:
+        await market_svc.create_listing(
+            db, seller_org_id=buyer_org.id, product_type="learning_path",
+            product_id=copy_paid.id, offer_type="paid", price_minor=100,
+            currency="USD", license_scope="organization", seat_limit=None,
+            upgrade_policy="all_versions", included_plan_keys=[],
+            bill_via_invoice=False, actor=_actor(buyer_user))
+    assert e_redis.value.code == "LICENSED_CONTENT_NOT_REDISTRIBUTABLE"
+    assert e_redis.value.status_code == 403
+    # ORIGINAL seller carrying its own origin ref may re-list (dup guard → 409
+    # since the product ALREADY has a listing — pin the 409 here too)
+    with pytest.raises(AppError) as e_dup:
+        await market_svc.create_listing(
+            db, seller_org_id=seller_org.id, product_type="learning_path",
+            product_id=src_paid.id, offer_type="paid", price_minor=100,
+            currency="USD", license_scope="organization", seat_limit=None,
+            upgrade_policy="all_versions", included_plan_keys=[],
+            bill_via_invoice=False, actor=_actor(seller_user))
+    assert e_dup.value.code == "LISTING_EXISTS" and e_dup.value.status_code == 409
+    # free-origin copy: re-listable
+    src_free = await _published_path(seller_org, seller_user, "Free Origin")
+    free_listing = await market_svc.create_listing(
+        db, seller_org_id=seller_org.id, product_type="learning_path",
+        product_id=src_free.id, offer_type="free", price_minor=None,
+        currency=None, license_scope="organization", seat_limit=None,
+        upgrade_policy="all_versions", included_plan_keys=[],
+        bill_via_invoice=False, actor=_actor(seller_user))
+    free_listing.status = "active"
+    copy_free = await _published_path(buyer_org, buyer_user, "Copy of Free")
+    copy_free.origin_listing_id = free_listing.id
+    await db.flush()
+    ok_free = await market_svc.create_listing(
+        db, seller_org_id=buyer_org.id, product_type="learning_path",
+        product_id=copy_free.id, offer_type="paid", price_minor=100,
+        currency="USD", license_scope="organization", seat_limit=None,
+        upgrade_policy="all_versions", included_plan_keys=[],
+        bill_via_invoice=False, actor=_actor(buyer_user))
+    assert ok_free.id is not None
+
+    # (2) manual-grant copy (source-path ref only): other-org source → 403,
+    # own re-import → allowed
+    src2 = await _published_path(seller_org, seller_user, "Grant Origin")
+    copy_grant = await _published_path(buyer_org, buyer_user, "Granted Copy")
+    copy_grant.origin_source_path_id = src2.id
+    await db.flush()
+    with pytest.raises(AppError) as e_grant:
+        await market_svc.create_listing(
+            db, seller_org_id=buyer_org.id, product_type="learning_path",
+            product_id=copy_grant.id, offer_type="paid", price_minor=100,
+            currency="USD", license_scope="organization", seat_limit=None,
+            upgrade_policy="all_versions", included_plan_keys=[],
+            bill_via_invoice=False, actor=_actor(buyer_user))
+    assert e_grant.value.code == "LICENSED_CONTENT_NOT_REDISTRIBUTABLE"
+    assert e_grant.value.status_code == 403
+    own_reimport = await _published_path(seller_org, seller_user, "Own Reimport")
+    own_reimport.origin_source_path_id = src2.id       # own org's source
+    await db.flush()
+    ok_own = await market_svc.create_listing(
+        db, seller_org_id=seller_org.id, product_type="learning_path",
+        product_id=own_reimport.id, offer_type="paid", price_minor=100,
+        currency="USD", license_scope="organization", seat_limit=None,
+        upgrade_policy="all_versions", included_plan_keys=[],
+        bill_via_invoice=False, actor=_actor(seller_user))
+    assert ok_own.id is not None
+
+    # (3b) the whole create_listing validation family carries 422
+    base_kw = dict(
+        db=db, seller_org_id=seller_org.id, product_type="skill_pack",
+        product_id=str(ULID()), offer_type="paid", price_minor=100,
+        currency="USD", license_scope="organization", seat_limit=None,
+        upgrade_policy="all_versions", included_plan_keys=[],
+        bill_via_invoice=False, actor=_actor(seller_user))
+    for bad_kw in (
+        {"offer_type": "barter"},
+        {"license_scope": "galaxy"},
+        {"price_minor": None},                      # paid without price
+        {"license_scope": "seat_limited"},          # seat scope without limit
+        {"seat_limit": 5},                          # limit on non-seat scope
+    ):
+        with pytest.raises(AppError) as e_v:
+            await market_svc.create_listing(**{**base_kw, **bad_kw})
+        assert e_v.value.status_code == 422, bad_kw
+
+    # (4) manual_grant guards with statuses
+    with pytest.raises(AppError) as e_seat:
+        await market_svc.manual_grant(
+            db, product_type="skill_pack", product_id=str(ULID()),
+            tenant_id=buyer_org.tenant_id, org_id=buyer_org.id,
+            scope="seat_limited", seat_limit=None, expires_at=None,
+            actor=_actor(seller_user))
+    assert e_seat.value.status_code == 422
+    with pytest.raises(AppError) as e_org:
+        await market_svc.manual_grant(
+            db, product_type="skill_pack", product_id=str(ULID()),
+            tenant_id=buyer_org.tenant_id, org_id=seller_org.id,   # foreign org
+            scope="organization", seat_limit=None, expires_at=None,
+            actor=_actor(seller_user))
+    assert e_org.value.status_code == 422
