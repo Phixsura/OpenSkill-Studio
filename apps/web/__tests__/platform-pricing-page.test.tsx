@@ -153,7 +153,7 @@ describe("PlatformPricingPage (R405)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "price policies" }));
     await screen.findByText("Tenant deal");
     const rows = document.querySelectorAll("tbody tr");
-    const scopes = Array.from(rows).map((r) => r.children[2].textContent);
+    const scopes = Array.from(rows).map((r) => r.children[2]?.textContent);
     expect(scopes).toEqual(["tenant", "partner", "plan", "global"]);
     // inactive policy row is visually muted
     const inactiveRow = Array.from(rows).find((r) => r.textContent?.includes("Plan price"));

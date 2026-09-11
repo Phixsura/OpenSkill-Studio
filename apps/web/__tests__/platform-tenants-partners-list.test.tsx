@@ -104,14 +104,14 @@ describe("PlatformTenantsPage (R413)", () => {
 describe("PlatformPartnersPage (R413)", () => {
   it("create flow posts name/slug/type, closes the form, and clears fields on success", async () => {
     const posts: { path: string; body: unknown }[] = [];
-    api.mockImplementation((rawPath: unknown, init?: { method?: string; body?: string }) => {
+    api.mockImplementation(((rawPath: unknown, init?: { method?: string; body?: string }) => {
       const path = String(rawPath ?? "");
       if (init?.method === "POST") {
         posts.push({ path, body: JSON.parse(init.body ?? "{}") });
         return Promise.resolve({ data: { id: "pt-9" } });
       }
       return Promise.resolve({ data: [], meta: { has_more: false } });
-    });
+    }) as typeof apiWithAuth);
     render(<PlatformPartnersPage />, { wrapper: wrapper() });
     fireEvent.click(await screen.findByRole("button", { name: "New partner" }));
     // Create is disabled until BOTH name and slug are set
@@ -126,8 +126,8 @@ describe("PlatformPartnersPage (R413)", () => {
     expect(create.disabled).toBe(false);
     fireEvent.click(create);
     await waitFor(() => expect(posts.length).toBe(1));
-    expect(posts[0].path).toBe("/platform/partners");
-    expect(posts[0].body).toEqual({ name: "Acme", slug: "acme", partner_type: "school_channel" });
+    expect(posts[0]?.path).toBe("/platform/partners");
+    expect(posts[0]?.body).toEqual({ name: "Acme", slug: "acme", partner_type: "school_channel" });
     await waitFor(() => expect(toasts.success).toHaveBeenCalledWith("Partner created"));
     // form closed after success
     expect(screen.queryByPlaceholderText("Name")).toBeNull();

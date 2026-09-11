@@ -134,7 +134,7 @@ describe("StatementDetailPage (R406)", () => {
     await screen.findByText("Statement 2026-08");
     const rows = Array.from(document.querySelectorAll("tbody tr"));
     const baseOf = (frag: string) =>
-      rows.find((r) => r.textContent?.includes(frag))?.children[2].textContent;
+      rows.find((r) => r.textContent?.includes(frag))?.children[2]?.textContent;
     expect(baseOf("src-aaaaaaaa")).toBe("—"); // null base
     expect(baseOf("src-bbbbbbbb")).toBe("—"); // 0 + percentage_of_margin
     expect(baseOf("src-cccccccc")).toBe(formatMinor(0, "EUR")); // genuine zero
@@ -153,7 +153,10 @@ describe("StatementDetailPage (R406)", () => {
     tokenState.accessToken = "tok-rotated"; // rotate AFTER render, BEFORE click
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit & { headers: Record<string, string> },
+    ];
     expect(String(url)).toContain("/partners/pt-1/statements/st-1/export.csv");
     expect(init.headers.Authorization).toBe("Bearer tok-rotated");
   });
@@ -173,7 +176,8 @@ describe("StatementDetailPage (R406)", () => {
     await screen.findByText("Statement 2026-08");
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer tok-fresh");
+    const retryInit = fetchMock.mock.calls[1]?.[1] as { headers: Record<string, string> };
+    expect(retryInit.headers.Authorization).toBe("Bearer tok-fresh");
     expect(toasts.error).not.toHaveBeenCalled();
   });
 
