@@ -3194,3 +3194,112 @@ async def test_run_terminal_cancelled_with_usage_settles_not_releases():
             assert res.status == "settled"      # not released
     finally:
         await engine.dispose()
+
+
+class _FakeRequest:
+    class _State:
+        request_id = "r378-test"
+    state = _State()
+
+
+@pytest.mark.asyncio
+async def test_credits_api_handlers_direct(db):
+    """R378: the credits API handler layer had ZERO direct coverage (0/33
+    mutants) — every prior test called the service layer. Pins:
+    (1) credit_ledger pagination arithmetic (offset=(page-1)×per_page,
+        has_more at the exact boundary) and the currency filter;
+    (2) platform adjust/grant 404 on unknown tenants; adjust replay returns
+        {duplicate: true};
+    (3) update_budget: cross-tenant policy 404, explicit-null field 422,
+        real update lands; delete_budget: cross-tenant 404, then deletes.
+    The 18 remaining mutants are FastAPI decorator/Query constants
+    (rate_limit windows, status_code, ge/le/default) — not evaluated on
+    direct handler calls; equivalence class for the whole API layer."""
+    from app.controlplane.api.credits import (
+        AdjustCreditRequest,
+        GrantPromoRequest,
+        UpdateBudgetPolicyRequest,
+        credit_ledger,
+        delete_budget,
+        grant_promotional,
+        platform_adjust_credit,
+        update_budget,
+    )
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    other = await _mk_tenant(db, user)
+    req = _FakeRequest()
+
+    # seed 3 USD entries + 1 EUR entry via the service layer
+    for amt in (100, 200, 300):
+        await credit_svc.top_up(db, tenant.id, "USD", amt, actor=_actor(user))
+    await credit_svc.top_up(db, tenant.id, "EUR", 999, actor=_actor(user))
+
+    # (1) pagination: page 2 of per_page 2 over 4 rows → 2 rows, has_more False
+    resp = await credit_ledger(tenant.id, currency=None, page=2, per_page=2,
+                               user=user, db=db)
+    assert resp.meta.total == 4
+    assert len(resp.data) == 2
+    assert resp.meta.has_more is False
+    # page 1 → has_more True (offset+per_page=2 < 4)
+    resp1 = await credit_ledger(tenant.id, currency=None, page=1, per_page=2,
+                                user=user, db=db)
+    assert resp1.meta.has_more is True
+    # rows are newest-first and pages don't overlap
+    ids1 = {e["id"] for e in resp1.data}
+    ids2 = {e["id"] for e in resp.data}
+    assert ids1.isdisjoint(ids2)
+    # currency filter
+    resp_eur = await credit_ledger(tenant.id, currency="EUR", page=1,
+                                   per_page=50, user=user, db=db)
+    assert resp_eur.meta.total == 1
+    assert resp_eur.data[0]["amount_minor"] == 999
+
+    # (2) 404s + adjust replay semantics
+    adj = AdjustCreditRequest(amount_minor=-50, currency="USD",
+                              reason="ops correction",
+                              idempotency_key=f"adj-{ULID()}")
+    with pytest.raises(AppError) as e404a:
+        await platform_adjust_credit(str(ULID()), adj, req, user=user, db=db)
+    assert e404a.value.status_code == 404
+    first = await platform_adjust_credit(tenant.id, adj, req, user=user, db=db)
+    assert first.data["amount_minor"] == -50
+    replay = await platform_adjust_credit(tenant.id, adj, req, user=user, db=db)
+    assert replay.data == {"duplicate": True}
+    promo = GrantPromoRequest(amount_minor=100, currency="USD",
+                              expires_at=datetime.now(UTC) + timedelta(days=5),
+                              reason="promo", idempotency_key=f"pg-{ULID()}")
+    with pytest.raises(AppError) as e404g:
+        await grant_promotional(str(ULID()), promo, req, user=user, db=db)
+    assert e404g.value.status_code == 404
+
+    # (3) budget update/delete ownership + null guard
+    policy = BudgetPolicy(tenant_id=tenant.id, scope_type="tenant",
+                          period="monthly", limit_minor=1000, currency="USD",
+                          hard_stop=True)
+    foreign = BudgetPolicy(tenant_id=other.id, scope_type="tenant",
+                           period="monthly", limit_minor=1000, currency="USD",
+                           hard_stop=True)
+    db.add_all([policy, foreign])
+    await db.flush()
+    with pytest.raises(AppError) as e404u:
+        await update_budget(tenant.id, foreign.id,
+                            UpdateBudgetPolicyRequest(limit_minor=5),
+                            user=user, db=db)
+    assert e404u.value.status_code == 404
+    with pytest.raises(AppError) as e422:
+        await update_budget(tenant.id, policy.id,
+                            UpdateBudgetPolicyRequest(limit_minor=None,
+                                                      hard_stop=False),
+                            user=user, db=db)
+    assert e422.value.status_code == 422
+    ok = await update_budget(tenant.id, policy.id,
+                             UpdateBudgetPolicyRequest(limit_minor=2222),
+                             user=user, db=db)
+    assert ok.data["limit_minor"] == 2222
+    with pytest.raises(AppError) as e404d:
+        await delete_budget(tenant.id, foreign.id, user=user, db=db)
+    assert e404d.value.status_code == 404
+    await delete_budget(tenant.id, policy.id, user=user, db=db)
+    assert await db.get(BudgetPolicy, policy.id) is None
