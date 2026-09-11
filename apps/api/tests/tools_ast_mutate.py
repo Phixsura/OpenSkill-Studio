@@ -73,7 +73,13 @@ def run(path, funcs, test_cmd, limit=None, timeout=300):
     tree = ast.parse(original)
     sites = enumerate_mutants(tree, set(funcs))
     if limit: sites = sites[:limit]
-    print(f"{path} funcs={funcs}: {len(sites)} mutants", flush=True)
+    # a RED baseline makes every mutant a spurious kill — verify first
+    base = subprocess.run(test_cmd, capture_output=True, timeout=timeout)
+    if base.returncode != 0:
+        raise SystemExit(
+            f"BASELINE RED for {path} — fix the tests before mutating "
+            f"(rc={base.returncode})")
+    print(f"{path} funcs={funcs}: {len(sites)} mutants (baseline green)", flush=True)
     killed, survived = 0, []
     t0 = time.time()
     try:

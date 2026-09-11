@@ -2904,3 +2904,230 @@ async def test_credit_zero_boundaries_available_math_and_settle_shortfall(db):
     # floor keeps balance >= reserved, so available after releasing one's own
     # hold always covers at least that hold (verified: even a signed adjust
     # 402s rather than dropping the balance below the outstanding holds).
+
+
+@pytest.mark.asyncio
+async def test_stale_reservation_expiry_extension_ladder(db):
+    """R353 (mutation survivors): the expiry cron's extension ladder —
+    a WAITING_REVIEW run's hold is extended ~24h (never released, unbounded
+    count — R31/C9); a RUNNING run's hold gets at most TWO 6h extensions and
+    is released on the third pass; a reference-less stale hold releases
+    immediately; the return value counts handled rows. (expires_at < now
+    instants and the limit defaults are µs/default-arg equivalents.)"""
+    from datetime import timedelta
+
+    from app.models.organization import Organization, OrgStatus
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    org = Organization(name=f"Exp {ULID()}", slug=f"exp-{str(ULID()).lower()}",
+                       status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+    db.add(org)
+    await db.flush()
+    await credit_svc.top_up(db, tenant.id, "USD", 10000, actor=_actor(user))
+    now = datetime.now(UTC)
+
+    def _run(status):
+        return WorkflowRun(org_id=org.id, pack_id=None, release_id=None,
+                           installation_id=None,
+                           definition_snapshot={"steps": [], "edges": []},
+                           inputs={}, started_by=user.id, status=status)
+
+    review_run, running_run = _run(RunStatus.WAITING_REVIEW), _run(RunStatus.RUNNING)
+    db.add_all([review_run, running_run])
+    await db.flush()
+
+    async def _stale_hold(ref_id, ref_type="workflow_run"):
+        r = await credit_svc.reserve(db, tenant.id, "USD", 100,
+                                     reference_type=ref_type, reference_id=ref_id)
+        r.expires_at = now - timedelta(minutes=5)
+        await db.flush()
+        return r
+
+    r_review = await _stale_hold(review_run.id)
+    r_running = await _stale_hold(running_run.id)
+    r_orphan = await _stale_hold(str(ULID()))          # run row gone
+
+    handled = await credit_svc.expire_stale_reservations(db)
+    assert handled >= 3   # ours counted (shared DB may hold other stale rows)
+
+    await db.refresh(r_review)
+    assert r_review.status == "held"                    # review: extended
+    assert r_review.expires_at > now + timedelta(hours=23)
+    assert r_review.expires_at < now + timedelta(hours=25)   # ~24h, not 6h
+    await db.refresh(r_running)
+    assert r_running.status == "held"                   # running: extended 6h
+    assert now + timedelta(hours=5) < r_running.expires_at < now + timedelta(hours=7)
+    assert r_running.extension_count == 1
+    await db.refresh(r_orphan)
+    assert r_orphan.status == "released"                # orphan: released now
+
+    # exhaust the RUNNING ladder: 2nd extension, then the 3rd pass releases
+    r_running.expires_at = now - timedelta(minutes=1)
+    await db.flush()
+    await credit_svc.expire_stale_reservations(db)
+    await db.refresh(r_running)
+    assert r_running.status == "held" and r_running.extension_count == 2
+    r_running.expires_at = now - timedelta(minutes=1)
+    await db.flush()
+    await credit_svc.expire_stale_reservations(db)
+    await db.refresh(r_running)
+    assert r_running.status == "released"               # bounded at 2
+
+    # the REVIEW hold keeps extending past any count (unbounded by design)
+    for _ in range(3):
+        r_review.expires_at = now - timedelta(minutes=1)
+        await db.flush()
+        await credit_svc.expire_stale_reservations(db)
+        await db.refresh(r_review)
+        assert r_review.status == "held"
+    assert r_review.extension_count == 4               # exactly one per pass
+
+    # promo grants: zero amount 422; duplicate promo key 409; and
+    # require_available on an empty balance is a 402
+    with pytest.raises(AppError) as e_p0:
+        await credit_svc.grant_promotional(
+            db, tenant.id, "USD", 0, expires_at=now + timedelta(days=9),
+            reason="z", actor=_actor(user), idempotency_key=f"p0-{ULID()}")
+    assert e_p0.value.status_code == 422
+    pk = f"promo-{ULID()}"
+    await credit_svc.grant_promotional(
+        db, tenant.id, "USD", 100, expires_at=now + timedelta(days=9),
+        reason="a", actor=_actor(user), idempotency_key=pk)
+    with pytest.raises(AppError) as e_p409:
+        await credit_svc.grant_promotional(
+            db, tenant.id, "USD", 200, expires_at=now + timedelta(days=9),
+            reason="b", actor=_actor(user), idempotency_key=pk)
+    assert e_p409.value.status_code == 409
+    empty = await _mk_tenant(db, user)
+    with pytest.raises(AppError) as e_402:
+        await credit_svc.require_available(db, empty.id, "USD")
+    assert e_402.value.status_code == 402
+
+
+@pytest.mark.asyncio
+async def test_promo_lot_closure_boundaries_protect_deposits(db):
+    """R353b (lot-math mutation survivors): the promotional-expiry closure
+    gates — (A) a fully PRE-SPENT expired lot closes immediately and never
+    sweeps a later deposit; (B) a reserved remainder expires to EXACTLY the
+    face on release and the lot closes at the == boundary; (C) a remainder
+    SPENT via settle closes the lot even while an unrelated hold is live
+    (the Or gate — the And-mutant waits on the hold and stalks deposits);
+    (D) a lot whose face is already fully expired closes on the next pass
+    (remaining_face == 0). Anchor/filter mutants at the spent-since query
+    are equivalent (first-pass NULL anchor, 0-amount entries, the first
+    expiration excluded by its own lot reference) — documented, as are the
+    remaining_face==0 close (redundant with the sweepable<=0 elif — both set
+    the same closure id), the cron limit default-args, the two expires_at
+    µs instants, and the handled counter (shared-DB residue makes exact
+    counts unpinnable)."""
+    from datetime import timedelta
+
+    from app.controlplane.models.credit import CreditLedgerEntry
+
+    user = await _mk_user(db)
+    actor = _actor(user)
+    now = datetime.now(UTC)
+
+    async def _lot(tenant, amount):
+        lot = await credit_svc.grant_promotional(
+            db, tenant.id, "USD", amount, expires_at=now + timedelta(days=1),
+            reason="promo", actor=actor, idempotency_key=f"g-{ULID()}")
+        lot.expires_at = now - timedelta(minutes=1)     # already expired
+        await db.flush()
+        return lot
+
+    async def _balance(tenant):
+        from app.controlplane.models.credit import TenantCreditBalance
+        return (
+            await db.execute(
+                select(TenantCreditBalance).where(
+                    TenantCreditBalance.tenant_id == tenant.id,
+                    TenantCreditBalance.currency == "USD"))
+        ).scalar_one()
+
+    # (A) fully pre-spent lot: closes, later deposit untouched
+    ta = await _mk_tenant(db, user)
+    lot_a = await _lot(ta, 100)
+    await credit_svc.debit(db, ta.id, "USD", 100,
+                           reference_type="purchase", reference_id=str(ULID()),
+                           idempotency_key=f"sp-{ULID()}")
+    await credit_svc.expire_promotional(db)
+    await db.refresh(lot_a)
+    assert lot_a.consumed_expiration_id is not None     # closed, not stalking
+    await credit_svc.top_up(db, ta.id, "USD", 500, actor=actor)
+    await credit_svc.expire_promotional(db)
+    assert (await _balance(ta)).balance_minor == 500    # deposit intact
+
+    # (B) reserved remainder: pass1 expires the available 60 and stays open;
+    # release; pass2 expires exactly 40 → cumulative == face → closed
+    tb = await _mk_tenant(db, user)
+    lot_b = await _lot(tb, 100)
+    hold_b = await credit_svc.reserve(db, tb.id, "USD", 40,
+                                      reference_type="workflow_run",
+                                      reference_id=str(ULID()))
+    await credit_svc.expire_promotional(db)
+    await db.refresh(lot_b)
+    assert lot_b.consumed_expiration_id is None         # open: live hold waits
+    assert (await _balance(tb)).balance_minor == 40     # 60 expired
+    await credit_svc.release(db, hold_b.id)
+    await credit_svc.expire_promotional(db)
+    await db.refresh(lot_b)
+    assert lot_b.consumed_expiration_id is not None     # closed at == face
+    assert (await _balance(tb)).balance_minor == 0
+
+    # (B') the == face boundary ISOLATED from the reserved==0 disjunct: the
+    # final pass completes the face EXACTLY while an unrelated hold is live —
+    # the GtE closes it; the Gt-mutant (and the +→− cumulative flip) leave it
+    # open to stalk the fresh deposit
+    tbp = await _mk_tenant(db, user)
+    lot_bp = await _lot(tbp, 100)
+    hold_bp = await credit_svc.reserve(db, tbp.id, "USD", 40,
+                                       reference_type="workflow_run",
+                                       reference_id=str(ULID()))
+    await credit_svc.expire_promotional(db)             # expires 60, open
+    await credit_svc.release(db, hold_bp.id)
+    await credit_svc.top_up(db, tbp.id, "USD", 500, actor=actor)
+    await credit_svc.reserve(db, tbp.id, "USD", 500,
+                             reference_type="workflow_run",
+                             reference_id=str(ULID()))  # live unrelated hold
+    await credit_svc.expire_promotional(db)             # expires exactly 40
+    await db.refresh(lot_bp)
+    assert lot_bp.consumed_expiration_id is not None    # closed AT the == face
+    assert (await _balance(tbp)).balance_minor == 500   # deposit intact
+
+    # (C) remainder spent via SETTLE while an unrelated hold lives: the lot
+    # closes (Or), the deposit stays
+    tc = await _mk_tenant(db, user)
+    lot_c = await _lot(tc, 100)
+    hold_c = await credit_svc.reserve(db, tc.id, "USD", 40,
+                                      reference_type="workflow_run",
+                                      reference_id=str(ULID()))
+    await credit_svc.expire_promotional(db)             # expires 60, open
+    await credit_svc.top_up(db, tc.id, "USD", 500, actor=actor)
+    await credit_svc.reserve(db, tc.id, "USD", 200,   # live unrelated hold
+                             reference_type="workflow_run",
+                             reference_id=str(ULID()))
+    await credit_svc.settle(db, hold_c.id, 40)          # spends the remainder
+    await credit_svc.expire_promotional(db)
+    await db.refresh(lot_c)
+    assert lot_c.consumed_expiration_id is not None, (
+        "spent remainder must close the lot even with a live unrelated hold")
+    assert (await _balance(tc)).balance_minor == 500    # deposit never swept
+
+    # (D) face already fully expired but the lot was left open (hand-crafted
+    # residue): the next pass closes it via the remaining_face == 0 gate
+    td = await _mk_tenant(db, user)
+    lot_d = await _lot(td, 100)
+    bal_d = await _balance(td)
+    db.add(CreditLedgerEntry(
+        tenant_id=td.id, currency="USD", entry_type="expiration",
+        amount_minor=-100, balance_after_minor=0,
+        reference_type="promotional_lot", reference_id=lot_d.id,
+        idempotency_key=f"hand-{ULID()}"))
+    bal_d.balance_minor = 0
+    await db.flush()
+    await credit_svc.expire_promotional(db)
+    await db.refresh(lot_d)
+    assert lot_d.consumed_expiration_id is not None
