@@ -1784,6 +1784,21 @@ risk out of proportion to the noise, since the race is fully contained
 UPDATEs; the loser's retry converges and the run's terminal state was
 correct). Recorded as an ACCEPTED RESIDUAL alongside R42[7]/R131[9].
 
+**R359–R362 (the close-core assault)**: the fold-restore internals fell —
+void_invoice now 51/58 (watermark round-trip ownership, the > boundary
+where a pre-close immediate change IS the watermark, both legacy snapshot
+shapes with third-value flips; 7 in-test equivalence proofs). The 921-line
+close_period_and_invoice was two-pass screened (152 mutants → 88 killed;
+the harness gained per-site filtering) and its highest-value survivors
+pinned with manual mutant verification: credit auto-apply uses AVAILABLE
+(balance − holds) credit — the mutant spends a tenant's live workflow hold
+on the invoice; due_at = issued + 14d; the multi-change segment walk needs
+THREE stacked changes to be observable (with two, idx−1 == idx+1 by
+negative indexing) and a golden-total assert catches the mis-walked middle
+segment; the R113[L5] month-end anchor restore (Jan-31 → Feb-28 → Mar-31)
+was fully untested and is now pinned at both boundaries. R362 checkpoint:
+full backend **2409 passed / 0 failed / 1 skipped**; ruff clean.
+
 ---
 
 ## 5. Bottom line
