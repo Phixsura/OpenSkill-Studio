@@ -1349,3 +1349,82 @@ async def test_purchase_accrual_seller_fx_counts_and_snapshots(db):
     # replaying the refund does not re-mirror (natural-key idempotent), and
     # the negative mirrors themselves are never mirrored (> 0 guard)
     assert await revshare_svc.accrue_refund(db, p2.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_generate_statement_boundaries(db):
+    """R375 (generate_statement survivors): (1) an unknown partner is a 404
+    and an org-type statement without an org id is a 422; (2) regenerating a
+    period statement while it is DRAFT recomputes in place, while a FINALIZED
+    one is a 409; (3) gross counts POSITIVE bases only and refunds NEGATIVE
+    only — a mixed period (accrual + refund mirror) splits exactly; (4) the
+    org-scoped entry filter never sweeps a partner's entries."""
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="10")
+    a = _actor(user)
+
+    # (1) statuses
+    with pytest.raises(AppError) as e404:
+        await revshare_svc.generate_statement(
+            db, beneficiary_type="partner", partner_id=str(ULID()),
+            beneficiary_org_id=None, period="2026-09", actor=a)
+    assert e404.value.status_code == 404
+    with pytest.raises(AppError) as e422:
+        await revshare_svc.generate_statement(
+            db, beneficiary_type="seller_org", partner_id=None,
+            beneficiary_org_id=None, period="2026-09", actor=a)
+    assert e422.value.status_code == 422
+
+    # (3) mixed period: +1000 accrual and its -1000 refund mirror
+    inv = await _mk_invoice(db, tenant, subtotal=10000)
+    entry = await revshare_svc.accrue_for_invoice(db, inv.id)
+    assert entry is not None and entry.share_amount_minor == 1000
+    period = entry.period
+    from app.controlplane.models.partner import RevenueShareEntry as REntry
+
+    db.add(REntry(beneficiary_type="partner", partner_id=partner.id,
+              source_type="invoice", source_id=inv.id, rule_snapshot={},
+              revenue_base_minor=-4000, share_amount_minor=-400,
+              currency=partner.currency, period=period, status="adjusted",
+              adjustment_of_id=entry.id))
+    await db.flush()
+
+    st = await revshare_svc.generate_statement(
+        db, beneficiary_type="partner", partner_id=partner.id,
+        beneficiary_org_id=None, period=period, actor=a)
+    assert st.gross_revenue_minor == 10000          # positive bases only
+    assert st.refunds_minor == -4000                # negative bases only
+    assert st.share_total_minor == 600              # 1000 − 400
+    assert st.status == "draft"
+
+    # (2) draft regenerate recomputes IN PLACE (same row)
+    st2 = await revshare_svc.generate_statement(
+        db, beneficiary_type="partner", partner_id=partner.id,
+        beneficiary_org_id=None, period=period, actor=a)
+    assert st2.id == st.id
+    # finalized → 409
+    await revshare_svc.transition_statement(db, st, "finalize", actor=a)
+    with pytest.raises(AppError) as e409:
+        await revshare_svc.generate_statement(
+            db, beneficiary_type="partner", partner_id=partner.id,
+            beneficiary_org_id=None, period=period, actor=a)
+    assert e409.value.code == "STATEMENT_STATUS_CONFLICT" and e409.value.status_code == 409
+
+    # (4) an ORG-scoped statement for some org never sweeps the partner's
+    # entries (the flipped org filter would)
+    org_id = str(ULID())
+    st_org = await revshare_svc.generate_statement(
+        db, beneficiary_type="seller_org", partner_id=None,
+        beneficiary_org_id=org_id, period=period, actor=a)
+    assert st_org.share_total_minor == 0            # nothing for that org
+    # org-type regenerate finds ITS OWN draft (the flipped org filter builds
+    # a duplicate row instead)
+    st_org2 = await revshare_svc.generate_statement(
+        db, beneficiary_type="seller_org", partner_id=None,
+        beneficiary_org_id=org_id, period=period, actor=a)
+    assert st_org2.id == st_org.id
+    # (zero-base entries are numeric no-ops on both gross and refunds — the
+    # strict comparisons' boundary mutants are sum-with-zero equivalents; the
+    # reversal-snapshot 'or {}' is unreachable-None — documented.)
