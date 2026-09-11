@@ -90,12 +90,11 @@ async def _project(db, org, owner, *, published=True, deadline=None):
 
 
 async def test_add_member_guards_r422(db):
-    from app.models.organization import OrgRole
     from app.services.cohort import (
         AlreadyCohortMemberError,
         CohortFullError,
-        CohortService,
         CohortNotFoundError,
+        CohortService,
     )
     from app.services.organization import OrgService
 
@@ -148,7 +147,7 @@ async def test_add_member_guards_r422(db):
 
 async def test_assign_skill_and_project_guards_r422(db):
     from app.models.project import ContentStatus
-    from app.services.cohort import CohortService, CohortNotFoundError
+    from app.services.cohort import CohortNotFoundError, CohortService
     from app.services.organization import OrgService
 
     owner = await _user(db)
