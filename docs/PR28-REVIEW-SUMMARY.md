@@ -1850,11 +1850,41 @@ is constraint-impossible per uq_cp_revshare_rule_version, verified
 empirically). R377 checkpoint: full backend **2422 passed / 0 failed / 1
 skipped**; ruff clean.
 
+**R378–R400 (the API-handler layer + the cp page suite — campaign close at
+R400)**: the direct-call handler layer had ZERO coverage (every prior test
+hit services or full HTTP) — pinned across credits (pagination arithmetic,
+adjust replay {duplicate}, budget ownership 404/422), tenants (my_tenants
+role scoping, the tenant-visible audit feed, non-archived org quota),
+whitelabel (the domain ownership gate across all four lifecycle verbs),
+billing (invoice ownership + ordered lines + payments embed), usage (the
+tenant-tz half-open aggregate window — both boundary flips mutant-verified),
+marketplace (the R86[7] public-badge liveness re-checks — all three continue
+branches — and the 50-id truncation), partners (set/clear attribution +
+the uniform membership 404), plans (public catalog active-only + the R62[2]
+external-ref backfill), pricing (the tenant rated-usage field WHITELIST —
+a planted margin_minor leak trips the per-row sentinel).
+
+The cp web pages got their first direct tests: budgets (JPY zero-decimal
+minor math + the unknown-currency Create gate, guard-proven), credits
+(available-first + M31 pagination), billing (cancel gating: owner yes /
+billing_admin no / impersonation no), members (M30/L6/M27 add gating),
+domains (the M34 token trim), platform tenant lifecycle (L18 terminal-hide),
+branding (token-delete + ''→null semantics), partner provision (L6
+blueprint filter + the H7 all-params idempotency key), licenses (the
+R130[32] tenant-scoped admin-org install fallback, guard-proven),
+settlements (the action ladder with the payment-ref gate).
+
+**R400 final checkpoint**: backend **2431 passed / 0 failed / 1 skipped**
+(580 control-plane + 867 + 984 product); web **263 passed (44 files)**;
+ruff + tsc + eslint clean. The R357 live verification (six batteries,
+24,140 fuzz cases, browser 23/23, zero 500s) stands — no production code
+has changed since.
+
 ---
 
 ## 5. Bottom line
 
-- **~590 confirmed defects fixed across 77+ remediation commits**: ~230 from
+- **~600 confirmed defects fixed across 120+ remediation commits**: ~230 from
   R1–R100 (backend), 89 from R101–R112 (frontend/integration), 61 from
   R113–R122, 44 from R123–R128, 25 from R129, 38 from R130, 16 from R131,
   22 from R132, 17 from R133, 14 from R134, 13 from R135 (two waves),
