@@ -146,6 +146,30 @@ async def test_legal_transition_matrix(db):
         )
         await db.commit()
         assert tenant.status == target
+        # R339 (mutation survivors): suspension bookkeeping is exclusive to
+        # the SUSPENDED target — set (with the reason) on suspend, cleared on
+        # reactivate, untouched by every other transition.
+        await db.refresh(tenant)
+        if target == TenantStatus.SUSPENDED:
+            assert tenant.suspended_at is not None
+            assert tenant.suspension_reason == "test"
+        else:
+            assert tenant.suspended_at is None and tenant.suspension_reason is None
+
+    # R339: reactivation from suspension writes the dedicated audit action
+    from sqlalchemy import select as _sel
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    actions = (
+        await db.execute(
+            _sel(CommercialAuditEvent.action).where(
+                CommercialAuditEvent.tenant_id == tenant.id))
+    ).scalars().all()
+    assert "tenant.suspended" in actions
+    # EXACTLY one reactivation in the chain (suspended→active); the other
+    # →ACTIVE transitions (trial→, past_due→) are plain status_changed
+    assert actions.count("tenant.reactivated") == 1
 
 
 @pytest.mark.asyncio
@@ -155,6 +179,7 @@ async def test_illegal_transition_rejected(db):
     with pytest.raises(AppError) as exc:
         await tenant_svc.transition_status(db, tenant, TenantStatus.ARCHIVED, actor=_actor(user))
     assert exc.value.code == "TENANT_STATUS_CONFLICT"
+    assert exc.value.status_code == 409  # R339
 
 
 @pytest.mark.asyncio
@@ -1061,3 +1086,51 @@ async def test_impersonation_grant_mint_is_creator_only_revoke_is_any_admin(db):
             assert r.status_code != 200, r.text
     finally:
         app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_tenant_resolution_and_gate_status_codes(db):
+    """R339 (mutation survivors): get_tenant_for_org resolves the org's OWN
+    tenant (two-tenant setup — a join/where flip returns the other tenant);
+    require_tenant_active is a 403; require_tenant_member on a missing
+    tenant is a 404; a stale-status transition is a 409."""
+    from app.models.organization import Organization, OrgStatus
+
+    user = await _mk_user(db)
+    tenant_a = await _mk_tenant(db, user)
+    tenant_b = await _mk_tenant(db, user)
+
+    def _org(t, tag):
+        return Organization(name=f"O{tag}", slug=f"o{tag}-{str(ULID()).lower()}",
+                            status=OrgStatus.ACTIVE, tenant_id=t.id, created_by=user.id)
+
+    org_a, org_b = _org(tenant_a, "a"), _org(tenant_b, "b")
+    db.add_all([org_a, org_b])
+    await db.flush()
+    assert (await tenant_svc.get_tenant_for_org(db, org_a.id)).id == tenant_a.id
+    assert (await tenant_svc.get_tenant_for_org(db, org_b.id)).id == tenant_b.id
+    with pytest.raises(AppError) as e_no:
+        await tenant_svc.get_tenant_for_org(db, str(ULID()))
+    assert e_no.value.status_code == 404 and e_no.value.code == "TENANT_NOT_FOUND"
+
+    tenant_a.status = TenantStatus.SUSPENDED
+    with pytest.raises(AppError) as e403:
+        tenant_svc.require_tenant_active(tenant_a)
+    assert e403.value.status_code == 403 and e403.value.code == "TENANT_SUSPENDED"
+
+    with pytest.raises(AppError) as e404:
+        await tenant_svc.require_tenant_member(db, str(ULID()), user)
+    assert e404.value.status_code == 404
+
+    # stale-status concurrent-conflict arc: a DETACHED snapshot lies about
+    # the from-status (mutating the live ORM object would autoflush the lie
+    # into the DB and defeat the guard we're testing)
+    from types import SimpleNamespace
+
+    await tenant_svc.transition_status(
+        db, tenant_b, TenantStatus.ACTIVE, actor=_actor(user))
+    stale = SimpleNamespace(id=tenant_b.id, status=TenantStatus.TRIAL)
+    with pytest.raises(AppError) as e409:
+        await tenant_svc.transition_status(
+            db, stale, TenantStatus.ACTIVE, actor=_actor(user))
+    assert e409.value.status_code == 409

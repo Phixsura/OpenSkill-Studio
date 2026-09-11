@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import func, select
 from ulid import ULID
 
-from app.controlplane.models.branding import TenantBlueprint
+from app.controlplane.models.branding import TenantBlueprint, TenantDomain
 from app.controlplane.models.tenant import TenantAccount, TenantStatus
 from app.controlplane.services import branding as branding_svc
 from app.controlplane.services import domains as domain_svc
@@ -169,7 +169,7 @@ def test_blueprint_config_rejects_runtime_data_keys():
 
 
 @pytest.mark.asyncio
-async def test_domain_flow_verify_activate(db):
+async def test_domain_flow_verify_activate(db, monkeypatch):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     domain, raw = await domain_svc.create_domain(
@@ -183,6 +183,11 @@ async def test_domain_flow_verify_activate(db):
     with pytest.raises(AppError) as exc:
         await domain_svc.verify_domain(db, domain, "ok-forged", actor=_actor(user))
     assert exc.value.code == "DOMAIN_VERIFY_FAILED"
+    assert exc.value.status_code == 422  # R339
+    # R339: activation is gated on VERIFIED — a pending domain 409s
+    with pytest.raises(AppError) as excg:
+        await domain_svc.activate_domain(db, domain, actor=_actor(user))
+    assert excg.value.code == "DOMAIN_STATUS_CONFLICT" and excg.value.status_code == 409
     # Verifier consultation: rewrite the hash to a NON-passing token → the
     # mock verifier rejects it and counts the attempt
     import hashlib
@@ -193,17 +198,38 @@ async def test_domain_flow_verify_activate(db):
     with pytest.raises(AppError) as exc2:
         await domain_svc.verify_domain(db, domain, non_passing, actor=_actor(user))
     assert exc2.value.code == "DOMAIN_VERIFY_FAILED"
+    assert exc2.value.status_code == 422  # R339
     assert domain.verify_attempts == 1
     # Restore the real token → passes (mock mode issues "ok-" tokens)
     domain.verification_token_hash = hashlib.sha256(raw.encode()).hexdigest()
     await db.flush()
     domain = await domain_svc.verify_domain(db, domain, raw, actor=_actor(user))
     assert domain.status == "verified"
+    # R339: a SECOND (unrelated) domain must be untouched by activation —
+    # the TLS-values UPDATE targets exactly the activated row
+    other = TenantDomain(
+        tenant_id=domain.tenant_id, hostname=f"other-{str(ULID()).lower()[:8]}.example.com",
+        status="pending_verification", verification_token_hash="y", created_by=user.id)
+    db.add(other)
+    await db.flush()
+    from app.config import settings as _settings
+
+    monkeypatch.setattr(_settings, "tls_provisioner", "mock")
     domain = await domain_svc.activate_domain(db, domain, actor=_actor(user))
     assert domain.status == "active"
+    await db.refresh(domain)
+    assert domain.tls_ref == f"mock-cert-{domain.hostname}"  # cert landed HERE
+    await db.refresh(other)
+    # the TLS update targeted exactly the activated row
+    assert other.tls_ref is None and other.status == "pending_verification"
     # Activation is guarded: re-activating an active domain → 409
-    with pytest.raises(AppError):
+    with pytest.raises(AppError) as exca:
         await domain_svc.activate_domain(db, domain, actor=_actor(user))
+    assert exca.value.status_code == 409  # R339
+    # R339: re-verifying an ACTIVE domain is also a status conflict (409)
+    with pytest.raises(AppError) as excv:
+        await domain_svc.verify_domain(db, domain, raw, actor=_actor(user))
+    assert excv.value.code == "DOMAIN_STATUS_CONFLICT" and excv.value.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -614,7 +640,7 @@ async def test_partner_blueprint_rejects_entitlement_overrides(db):
 async def test_provision_org_slug_collision_suffixes(db):
     """R46[26]: the create_org step must fall back to a suffixed slug when the
     requested slug collides with any existing org (globally unique)."""
-    from app.controlplane.models.branding import TenantBlueprint, TenantProvisionRun
+    from app.controlplane.models.branding import TenantBlueprint, TenantDomain, TenantProvisionRun
     from app.controlplane.services import provisioning as prov_svc
     from app.models.organization import Organization
     from app.services.organization import OrgService
