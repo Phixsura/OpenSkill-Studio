@@ -4120,3 +4120,52 @@ async def test_plan_change_boundaries_and_provider_gates(db):
         await billing_svc.cancel_subscription(
             db, tenant, sub, at_period_end=False, actor=_actor(user))
     assert e409b.value.status_code in (404, 409)
+
+
+@pytest.mark.asyncio
+async def test_gap_window_change_prices_seats_off_own_plan(db):
+    """R348 (kills the R347-deferred gap cluster): a change landing AFTER the
+    period elapsed but before the close (the R131[5]/R135 gap) must price the
+    OLD seat side off the subscription's OWN plan price — the flipped-dim
+    mutants pick another plan's included/overage and the seat net silently
+    shifts. 4 live students, own plan (included 2, seat 500) → new plan
+    (included 0, seat 300): old overage (4-2)×500=1000, new (4-0)×300=1200,
+    net exactly +200 at full-window factor. (The gap-entry >= instant itself
+    is a sub-µs race — documented.)"""
+    from datetime import timedelta
+
+    from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole, OrgStatus
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    org = Organization(name=f"Gap {ULID()}", slug=f"gap-{str(ULID()).lower()}",
+                       status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+    db.add(org)
+    await db.flush()
+    for _ in range(4):
+        stu = await _mk_user(db)
+        db.add(OrgMember(org_id=org.id, user_id=stu.id,
+                         role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+    await db.flush()
+
+    ka = await _seed_plan(db, user, f"r348a-{str(ULID()).lower()[:8]}",
+                          amount=10000, included=2, seat_price=500)
+    kb = await _seed_plan(db, user, f"r348b-{str(ULID()).lower()[:8]}",
+                          amount=10000, included=0, seat_price=300)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key=ka, interval="month", seats=0,
+        provider="manual", actor=_actor(user))
+    # force the gap: the period elapsed an hour ago, close not yet run
+    sub.current_period_start = billing_svc._now() - timedelta(days=30, hours=1)
+    sub.current_period_end = billing_svc._now() - timedelta(hours=1)
+    await db.flush()
+
+    res = await billing_svc.change_plan(
+        db, tenant, sub, plan_key=kb, seats=None, proration_mode="immediate",
+        actor=_actor(user))
+    # equal plan fee → plan-fee net 0; the whole net is the seat repricing,
+    # computed against the OWN plan's gap price. Nominal +200 at factor 1;
+    # the hour already elapsed shaves a sub-day fraction (observed ~193).
+    # The mutant (other plan's dims: old=(4-0)×300 == new) nets ~0 — assert
+    # the own-plan magnitude band.
+    assert 150 <= res["proration"]["seat_proration_minor"] <= 200, res["proration"]
