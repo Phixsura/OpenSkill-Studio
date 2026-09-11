@@ -255,7 +255,7 @@ async def test_missing_fx_raises_not_silently_drops(db):
     invoice = await _mk_invoice(db, tenant, subtotal=100000)  # USD invoice, no USD→EUR rate
     with pytest.raises(AppError) as exc:
         await revshare_svc.accrue_for_invoice(db, invoice.id)
-    assert exc.value.code == "REVSHARE_FX_MISSING"
+    assert exc.value.code == "REVSHARE_FX_MISSING" and exc.value.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -1133,7 +1133,7 @@ async def test_settlement_transition_guards_and_entry_flips(db):
         with pytest.raises(AppError) as e:
             await revshare_svc.transition_statement(
                 db, st, bad, actor=_actor(user), external_payment_ref="W")
-        assert e.value.code == "STATEMENT_STATUS_CONFLICT"
+        assert e.value.code == "STATEMENT_STATUS_CONFLICT" and e.value.status_code == 409
 
     st = await revshare_svc.transition_statement(db, st, "finalize", actor=_actor(user))
     assert st.status == "finalized"
@@ -1143,6 +1143,7 @@ async def test_settlement_transition_guards_and_entry_flips(db):
     with pytest.raises(AppError) as e:
         await revshare_svc.transition_statement(db, st, "mark-paid", actor=_actor(user))
     assert e.value.code == "VALIDATION_ERROR" and "external_payment_ref" in e.value.message
+    assert e.value.status_code == 422  # R344
 
     # after approve, entries are 'approved' (not yet settled)
     def entry_statuses():
@@ -1163,3 +1164,188 @@ async def test_settlement_transition_guards_and_entry_flips(db):
     assert st.status == "paid_externally"
     settled = {r for (r,) in (await entry_statuses()).all()}
     assert settled == {"settled"}
+
+
+@pytest.mark.asyncio
+async def test_accrual_gates_and_per_seat_free_line(db):
+    """R344 (mutation survivors): (1) a DRAFT invoice never accrues; (2) an
+    OPEN invoice whose finalized_at is NULL still accrues (`at` falls back to
+    now — the Or→And mutant silently skips it); (3) per-seat units on a FREE
+    seats line (unit_amount 0) fall back to the line quantity, not zero. The
+    percentage-branch `units = 1` mutants are equivalent (amount_minor is
+    None for percentage rules, so units multiplies nothing) — documented."""
+    from app.controlplane.models.billing import InvoiceLine
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)
+    tenant = await _mk_tenant(db, user, partner)
+    await _mk_rule(db, user, partner, rate="10")
+
+    draft = await _mk_invoice(db, tenant)
+    draft.status = "draft"
+    await db.flush()
+    assert await revshare_svc.accrue_for_invoice(db, draft.id) is None
+
+    unfinalized = await _mk_invoice(db, tenant, subtotal=50000)
+    unfinalized.finalized_at = None
+    await db.flush()
+    entry = await revshare_svc.accrue_for_invoice(db, unfinalized.id)
+    assert entry is not None and entry.share_amount_minor == 5000
+
+    # per-seat rule: free seats line (unit_amount 0, qty 3) → units == 3
+    partner2 = await _mk_partner(db, user)
+    tenant2 = await _mk_tenant(db, user, partner2)
+    await _mk_rule(db, user, partner2, rule_type="fixed_amount_per_seat",
+                   rate="0", amount_minor=200, amount_currency="USD",
+                   revenue_type="subscription")
+    inv = await _mk_invoice(db, tenant2, subtotal=0)
+    db.add(InvoiceLine(
+        invoice_id=inv.id, line_type="seats", description="free seats",
+        quantity=3, unit_amount_minor=0, amount_minor=0))
+    await db.flush()
+    e2 = await revshare_svc.accrue_for_invoice(db, inv.id)
+    assert e2 is not None and e2.share_amount_minor == 600     # 3 × $2.00
+
+
+@pytest.mark.asyncio
+async def test_purchase_accrual_seller_fx_counts_and_snapshots(db):
+    """R344: the SELLER path (R56[22] only pinned the partner path) —
+    (1) a non-platform-currency purchase's seller entry converts to the
+    platform currency; (2) a purchase with no seller_rule_snapshot writes the
+    from_economics_snapshot marker, never null; (3) the return value counts
+    BOTH entries once each; (4) a same-currency partner entry carries NO fx
+    snapshot; (5) a missing seller-FX rate is a 409, not a silent buyer-
+    currency entry; (6) no partner in the snapshot → seller entry only.
+    Documented-equivalent mutants: percentage-branch units=1 (amount_minor is
+    None so units multiplies nothing); the tenant/partner_id Or (redundant
+    with the partner-None return, tenant FK-guaranteed); the refund share>0
+    guard (0-share originals are never created — the partner_share gate skips
+    them); the refund snapshot  (originals always carry a snapshot via
+    the from_economics_snapshot fallback)."""
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+    from app.controlplane.services import pricing as pricing_svc
+
+    user = await _mk_user(db)
+    partner = await _mk_partner(db, user)  # USD partner
+    tenant = await _mk_tenant(db, user, partner)
+    await pricing_svc.create_fx_rate(
+        db, actor=_actor(user), base_currency="JPY", quote_currency="USD",
+        rate=Decimal("0.0066667"),
+        effective_from=datetime.now(UTC) - timedelta(days=1))
+
+    def _listing(cur):
+        return MarketplaceListing(
+            product_type="workflow_pack", product_id=str(ULID()),
+            seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
+            offer_type="paid", price_minor=150000, currency=cur,
+            platform_commission_pct=Decimal("20"), status="active",
+            created_by=user.id)
+
+    def _purchase(listing, cur, *, partner_id, seller_org):
+        return MarketplacePurchase(
+            listing_id=listing.id, buyer_tenant_id=tenant.id,
+            buyer_org_id=str(ULID()), purchaser_user_id=user.id, status="paid",
+            amount_minor=150000, currency=cur, platform_fee_minor=30000,
+            seller_share_minor=120000, partner_share_minor=15000,
+            economics_snapshot={"partner_id": partner_id,
+                                "seller_org_id": seller_org})
+
+    # (1)(2)(3): JPY purchase with seller + partner
+    l1 = _listing("JPY")
+    db.add(l1)
+    await db.flush()
+    seller_org = str(ULID())
+    p1 = _purchase(l1, "JPY", partner_id=partner.id, seller_org=seller_org)
+    db.add(p1)
+    await db.flush()
+    created = await revshare_svc.accrue_for_purchase(db, p1.id)
+    assert created == 2                                   # seller + partner, once each
+    seller_entry = (
+        await db.execute(
+            select(RevenueShareEntry).where(
+                RevenueShareEntry.source_id == p1.id,
+                RevenueShareEntry.beneficiary_type == "seller_org"))
+    ).scalar_one()
+    assert seller_entry.currency == "USD"                 # platform currency
+    assert abs(seller_entry.share_amount_minor - 80000) <= 4  # ¥120,000 → ~$800
+    assert seller_entry.rule_snapshot == {"from_economics_snapshot": True}
+
+    # (4): USD purchase, USD partner → no FX snapshot on the partner entry
+    l2 = _listing("USD")
+    db.add(l2)
+    await db.flush()
+    p2 = _purchase(l2, "USD", partner_id=partner.id, seller_org=None)
+    db.add(p2)
+    await db.flush()
+    assert await revshare_svc.accrue_for_purchase(db, p2.id) == 1
+    partner_entry = (
+        await db.execute(
+            select(RevenueShareEntry).where(
+                RevenueShareEntry.source_id == p2.id,
+                RevenueShareEntry.beneficiary_type == "partner"))
+    ).scalar_one()
+    assert partner_entry.fx_rate_snapshot is None
+    assert partner_entry.currency == "USD"
+
+    # (6): no partner in the snapshot → only the seller entry
+    l3 = _listing("USD")
+    db.add(l3)
+    await db.flush()
+    p3 = _purchase(l3, "USD", partner_id=None, seller_org=str(ULID()))
+    db.add(p3)
+    await db.flush()
+    assert await revshare_svc.accrue_for_purchase(db, p3.id) == 1
+    kinds = (
+        await db.execute(
+            select(RevenueShareEntry.beneficiary_type).where(
+                RevenueShareEntry.source_id == p3.id))
+    ).scalars().all()
+    assert kinds == ["seller_org"]
+
+    # (5): GBP purchase with NO GBP→USD rate → 409, never a buyer-currency entry
+    l4 = _listing("GBP")
+    db.add(l4)
+    await db.flush()
+    p4 = _purchase(l4, "GBP", partner_id=None, seller_org=str(ULID()))
+    db.add(p4)
+    await db.flush()
+    with pytest.raises(AppError) as e409:
+        await revshare_svc.accrue_for_purchase(db, p4.id)
+    assert e409.value.code == "REVSHARE_FX_MISSING" and e409.value.status_code == 409
+
+    # (7): the partner entry ALSO writes the marker snapshot when the
+    # economics snapshot has no partner_rule_snapshot
+    assert partner_entry.rule_snapshot == {"from_economics_snapshot": True}
+
+    # (8): partner in a THIRD currency with no rate → 409 with status
+    from app.controlplane.models.partner import Partner as _Partner
+
+    eur_partner = _Partner(name=f"EURP {ULID()}", slug=f"eurp-{str(ULID()).lower()[:10]}",
+                           currency="EUR", status="active", partner_type="reseller", created_by=user.id)
+    db.add(eur_partner)
+    await db.flush()
+    l5 = _listing("USD")
+    db.add(l5)
+    await db.flush()
+    p5 = _purchase(l5, "USD", partner_id=eur_partner.id, seller_org=None)
+    db.add(p5)
+    await db.flush()
+    with pytest.raises(AppError) as e409b:
+        await revshare_svc.accrue_for_purchase(db, p5.id)
+    assert e409b.value.code == "REVSHARE_FX_MISSING" and e409b.value.status_code == 409
+
+    # (9): refunds mirror only POSITIVE originals, copying the snapshot with
+    # the void_reversal marker (a null original snapshot still yields a dict)
+    n_ref = await revshare_svc.accrue_refund(db, p2.id)
+    assert n_ref == 1
+    mirror = (
+        await db.execute(
+            select(RevenueShareEntry).where(
+                RevenueShareEntry.source_id == p2.id,
+                RevenueShareEntry.adjustment_of_id.is_not(None)))
+    ).scalar_one()
+    assert mirror.share_amount_minor == -partner_entry.share_amount_minor
+    assert mirror.rule_snapshot.get("void_reversal") is True
+    # replaying the refund does not re-mirror (natural-key idempotent), and
+    # the negative mirrors themselves are never mirrored (> 0 guard)
+    assert await revshare_svc.accrue_refund(db, p2.id) == 0
