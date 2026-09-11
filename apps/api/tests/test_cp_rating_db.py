@@ -2129,3 +2129,196 @@ async def test_fx_and_supersede_boundaries(db):
             effective_from=t0 - timedelta(days=5),
             effective_until=t0 + timedelta(seconds=1))
     assert e8.value.code == "COST_RATE_OVERLAP" and e8.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_rating_body_boundaries(db):
+    """R364 (rate_event/void/unvoid/rate_pending survivors): (1) rate_pending
+    is TENANT-scoped and counts only successfully-rated rows (a blocked FX row
+    is retried but not counted); (2) the quota window excludes exactly-at-
+    month-start… includes it (>=) and skips FAILED events under
+    exclude_failed; (3) margin = billable − cost in platform currency;
+    (4) the blocked→rated retry bumps rating_version to exactly 2;
+    (5) void/unvoid status codes (404 unknown id, 409 wrong state, 409
+    double-correct) and unvoid restores a NON-blocked row to 'rated' WITHOUT
+    re-enqueueing a rating retry (redrive is blocked-only). Documented
+    equivalents among the remaining mutants: the existing-row/orig-lock/open-
+    period limit(1)s (existence probes), the quota-branch entry And (a non-
+    quota policy entering the prior_qty scan changes no output — prior_qty is
+    consumed only by quota pricing), the snapshot-unit Decimal(1) (unit-cost
+    normalization with quantity 1 is identity), the rate_pending default
+    limit, the double-correct outerjoin dim (masked by the is-None disjunct),
+    and the open-period warning tenant filter (log-only)."""
+    from app.controlplane.models.pricing import FxRate, ProviderCostRate, RatedUsage
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)     # USD
+    other = await _mk_tenant(db, user)
+    a = _actor(user)
+
+    # tenant-scoped COST-PLUS policy (needs the cost→policy FX bridge, so a
+    # missing BND→USD rate genuinely BLOCKS): cost + 100%
+    await pricing_svc.create_price_policy(
+        db, actor=a, name=f"r364 {ULID()}", policy_type="cost_plus_percentage",
+        usage_type="image_generation", currency="USD",
+        params={"percentage": "100"},
+        effective_from=datetime.now(UTC) - timedelta(days=1), tenant_id=tenant.id)
+    # cost rate in BND (no FX anywhere in the shared DB) → blocked row
+    prov = f"r364-{str(ULID()).lower()[:8]}"
+    db.add(ProviderCostRate(
+        provider=prov, model_or_service="m", usage_type="image_generation",
+        unit="images", unit_cost=Decimal("0.10"), currency="BND",
+        effective_from=datetime.now(UTC) - timedelta(days=2), created_by=user.id))
+    await db.flush()
+
+    ev_blocked = await _mk_event(db, tenant, quantity=1,
+                                 provider=prov, model_or_service="m")
+    await _mk_event(db, tenant, quantity=2)   # the countable, rateable one
+    ev_other = await _mk_event(db, other, quantity=1)
+
+    # (1) tenant-scoped rate_pending: rates tenant's 2 events; counts ONLY the
+    # non-blocked one; the other tenant's event is untouched
+    n = await rating.rate_pending(db, tenant_id=tenant.id)
+    assert n == 1, f"only the successfully-rated row counts, got {n}"
+    other_rated = (
+        await db.execute(
+            select(RatedUsage).where(RatedUsage.usage_event_id == ev_other.id))
+    ).scalar_one_or_none()
+    assert other_rated is None            # tenant scope held
+
+    blocked_row = (
+        await db.execute(
+            select(RatedUsage).where(RatedUsage.usage_event_id == ev_blocked.id))
+    ).scalar_one()
+    assert blocked_row.status == "blocked"
+    assert blocked_row.rating_version == 1
+
+    # (4) FX lands → retry re-rates; version bumps to exactly 2; margin math
+    db.add(FxRate(base_currency="BND", quote_currency="USD", rate=Decimal("2"),
+                  effective_from=datetime.now(UTC) - timedelta(days=3),
+                  created_by=user.id))
+    await db.flush()
+    n2 = await rating.rate_pending(db, tenant_id=tenant.id)
+    assert n2 == 1
+    await db.refresh(blocked_row)
+    assert blocked_row.status == "rated"
+    assert blocked_row.rating_version == 2
+    # (3) cost 0.10 BND ×1 = 10 BND-minor → $0.20 at rate 2; +100% → billable
+    # $0.40; margin = billable − cost in platform currency = 40 − 20 = 20
+    assert blocked_row.internal_cost_minor == 10   # BND minor (cost currency)
+    assert blocked_row.billable_amount_minor == 40
+    assert blocked_row.margin_minor == 20
+
+    # (5) void/unvoid arcs with statuses
+    with pytest.raises(AppError) as e404:
+        await rating.void_rated(db, str(ULID()), reason="x", actor=a)
+    assert e404.value.status_code == 404
+    with pytest.raises(AppError) as e404b:
+        await rating.unvoid_rated(db, str(ULID()), reason="x", actor=a)
+    assert e404b.value.status_code == 404
+    with pytest.raises(AppError) as e409:
+        await rating.unvoid_rated(db, blocked_row.id, reason="x", actor=a)   # not voided
+    assert e409.value.status_code == 409
+    voided = await rating.void_rated(db, blocked_row.id, reason="strike", actor=a)
+    assert voided.status == "voided"
+    with pytest.raises(AppError) as e409b:
+        await rating.void_rated(db, blocked_row.id, reason="again", actor=a)
+    assert e409b.value.status_code == 409
+    restored = await rating.unvoid_rated(db, blocked_row.id, reason="restore", actor=a)
+    assert restored.status == "rated"     # non-blocked row restores to rated
+
+    # (6) the void double-correct gate keys on adjustments OF THIS EVENT —
+    # a DECOY adjustment pointing at a different original must not 409 the
+    # void, while a real adjustment of THIS event must (with status 409)
+    from app.controlplane.services import metering as _metering
+
+    ev_target = await _mk_event(db, tenant, quantity=1)
+    ev_decoy_orig = await _mk_event(db, tenant, quantity=1)
+    r_target = await rating.rate_event(db, ev_target.id)
+    await rating.rate_event(db, ev_decoy_orig.id)
+    await _metering.ingest_adjustment(
+        db, original_event_id=ev_decoy_orig.id, delta_quantity=-1,
+        reason="decoy", actor=a)
+    # decoy adjustment (of the OTHER event) → this void succeeds
+    v_ok = await rating.void_rated(db, r_target.id, reason="ok", actor=a)
+    assert v_ok.status == "voided"
+    await rating.unvoid_rated(db, r_target.id, reason="undo", actor=a)
+    # real adjustment of THIS event → 409 with status
+    await _metering.ingest_adjustment(
+        db, original_event_id=ev_target.id, delta_quantity=-1,
+        reason="real", actor=a)
+    with pytest.raises(AppError) as e_dc:
+        await rating.void_rated(db, r_target.id, reason="dc", actor=a)
+    assert e_dc.value.status_code == 409
+
+    # (7) unvoid of a blocked-restored row re-enqueues the rating retry and
+    # unvoid of an ADJUSTMENT whose original is voided → 409 (polarity gate)
+    from app.controlplane.models.outbox import OutboxMessage
+
+    v2 = await rating.void_rated(db, blocked_row.id, reason="again2", actor=a)
+    assert v2.status == "voided"
+    # a NON-blocked unvoid must NOT re-enqueue a rating retry (the redrive is
+    # exclusively for blocked-restored rows — the Or-mutant floods the outbox
+    # with spurious usage.recorded messages on every unvoid)
+    before_msgs = (
+        await db.execute(
+            select(OutboxMessage).where(OutboxMessage.topic == "usage.recorded"))
+    ).scalars().all()
+    before_n = sum(1 for m in before_msgs
+                   if m.payload.get("usage_event_id") == blocked_row.usage_event_id
+                   and m.status == "pending")
+    await rating.unvoid_rated(db, blocked_row.id, reason="undo2", actor=a)
+    after_msgs = (
+        await db.execute(
+            select(OutboxMessage).where(OutboxMessage.topic == "usage.recorded"))
+    ).scalars().all()
+    after_n = sum(1 for m in after_msgs
+                  if m.payload.get("usage_event_id") == blocked_row.usage_event_id
+                  and m.status == "pending")
+    assert after_n == before_n, "rated-restore must not re-enqueue a rating retry"
+
+
+@pytest.mark.asyncio
+async def test_quota_month_window_boundaries_and_failed_exclusion(db):
+    """R364b (quota-window survivors): (1) prior usage from the PREVIOUS
+    month never counts (an event exactly AT month start does — >=); (2) with
+    exclude_failed, FAILED events don't consume quota while a status-less
+    event does; (3) the window is the TENANT-TZ calendar month."""
+    from datetime import datetime as dt
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)   # USD, UTC tz
+    a = _actor(user)
+    await pricing_svc.create_price_policy(
+        db, actor=a, name=f"r364q {ULID()}",
+        policy_type="included_quota_then_overage",
+        usage_type="image_generation", currency="USD",
+        params={"included_quota": "100", "overage_unit_price_minor": 5,
+                "exclude_failed": True},
+        effective_from=dt(2026, 1, 1, tzinfo=UTC), tenant_id=tenant.id)
+
+    m_start = dt(2026, 6, 1, 0, 0, tzinfo=UTC)
+    # previous-month bulk: must NOT count toward June
+    e_prev = await _mk_event(db, tenant, quantity=95,
+                             occurred_at=m_start - timedelta(minutes=1))
+    await rating.rate_event(db, e_prev.id)
+    # exactly AT month start: counts (>= boundary)
+    e_at = await _mk_event(db, tenant, quantity=60, occurred_at=m_start)
+    r_at = await rating.rate_event(db, e_at.id)
+    assert r_at.billable_amount_minor == 0            # 60 ≤ 100, May's 95 excluded
+    # a FAILED event mid-June: excluded from quota accumulation
+    e_failed = await _mk_event(db, tenant, quantity=50,
+                               occurred_at=m_start + timedelta(days=1),
+                               metadata={"status": "failed"})
+    await rating.rate_event(db, e_failed.id)
+    # next real event: prior = 60 (not 110) → 30 within quota, 0 overage…
+    e_next = await _mk_event(db, tenant, quantity=30,
+                             occurred_at=m_start + timedelta(days=2))
+    r_next = await rating.rate_event(db, e_next.id)
+    assert r_next.billable_amount_minor == 0, (
+        "failed events must not consume quota (prior must be 60, not 110)")
+    # …and one more pushes past 100 by exactly 10 → 50 minor
+    e_over = await _mk_event(db, tenant, quantity=20,
+                             occurred_at=m_start + timedelta(days=3))
+    r_over = await rating.rate_event(db, e_over.id)
+    assert r_over.billable_amount_minor == 50         # (60+30+20)-100=10 × 5
