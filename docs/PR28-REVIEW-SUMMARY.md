@@ -1734,6 +1734,27 @@ R334 checkpoint: full backend suite **2375 passed / 0 failed / 1 skipped**
 passed; full-repo ruff clean. R335: accrued/adjusted revenue-share entries
 badged neutral on the partner pages — fifth STATUS_COLORS instance.
 
+**R336–R351 (third mutation wave — the async orchestration cores)**: every
+remaining controlplane service mutated with per-function harness slices:
+entitlements 29/29, client-portal auth 32/32, marketplace grant-width +
+install/seat gates 34/35 + purchase money path 55/59, outbox reaper 27/31,
+metering crons (adjustment 15/15, sweeps 7/7 + 10/12, flush 11/12),
+revenue-share accrual 54/60, pricing windows + plan overrides (14 killed),
+tenant lifecycle + domains 33/33, subscription lifecycle 32/34 (incl. the
+R348 gap-window live-seat scaffold), invoice money-motion 47 killed
+(payment/finalize 25/26, void 34/58 — fold-restore internals mapped and
+deferred with fixture requirements). Documented equivalents carry their
+proofs in-test (constraint-, tuple-order-, falsy-, log-only, and sub-µs
+classes). Harness hardened: configurable per-mutant timeout, hanging
+mutants count as killed, OOM-kill residue swept via git status (three
+occurrences — the security bot's CRITICAL flags on live mutants were all
+harness transients).
+
+R351 checkpoint: full backend **2398 passed / 0 failed / 1 skipped**
+(+23 new mutation-derived pins since R334; one load-timing flake in the
+run.terminal settle test re-verified green in isolation and in a clean
+chunk rerun); web tsc + vitest 226 passed; full-repo ruff clean.
+
 ---
 
 ## 5. Bottom line
