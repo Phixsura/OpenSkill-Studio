@@ -1799,6 +1799,25 @@ segment; the R113[L5] month-end anchor restore (Jan-31 → Feb-28 → Mar-31)
 was fully untested and is now pinned at both boundaries. R362 checkpoint:
 full backend **2409 passed / 0 failed / 1 skipped**; ruff clean.
 
+**R363–R370 (sweep completion + frontend gating)**: run.terminal settlement
+13/15 (a CANCELLED run with metered usage SETTLES, never releases — the
+mutant made real consumption free); rating body 52/64 (tenant-scoped
+rate_pending, blocked→rated version bump, cost-plus margin math, the quota
+month window with failed-exclusion, void double-correct keyed to THIS
+event, no spurious redrive on rated-restores); marketplace listing gates
+42/56 including the two untested H1 anti-redistribution gates (paid-origin
+and grant-origin copies are un-re-listable); portal decisions 26/35 (link
+expiry window, same-version replay idempotency, decision history closed
+after final-accept, brief completion); domain squat-eviction boundary
+(fresh 6-day claims un-evictable, 7.5-day evictable — the exact window the
+security bot's live-mutant flag pointed at); plan-activation cache
+invalidation asserted at the redis layer with a cross-plan bystander.
+Frontend: the white-label theme generator (exact HSL triples + a
+guard-proven style-injection barrier), portalApi network arcs, and the
+role-gating hooks (useImpersonation/usePlatformAdmin/useTenantRole) —
+web 239 passed. R370 checkpoint: full backend **2416 passed / 0 failed /
+1 skipped**; ruff + tsc + eslint clean.
+
 ---
 
 ## 5. Bottom line
