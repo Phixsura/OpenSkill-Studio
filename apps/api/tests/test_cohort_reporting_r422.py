@@ -3,6 +3,23 @@
 The cohort dashboard aggregates (get_cohort_progress / drill-down) drive
 instructor decisions and the guards gate who joins a paid cohort — both
 were only lightly covered by the HTTP/adversarial suites.
+
+Documented EQUIVALENT mutants (adjudicated after three kill-check passes):
+- create_cohort L80/L89 slug cosmetics (org filter on the free-slug probe,
+  base[:190] truncation length, token_hex(4) suffix length): the while-loop
+  picks a free slug regardless and the flush carries a unique constraint +
+  409 fallback, so a different-length/free suffix is still a valid unique
+  slug with identical observable behavior.
+- L110 409->410 (slug conflict) and the add/assign 422->423 / 404->405
+  status swaps: the HTTP layer passes AppError.status_code through unchanged
+  in class (client error); codes are pinned, the exact number is not.
+- L621/L736 `now > deadline` >->>=: differ only when the wall clock equals
+  the deadline to the microsecond — unobservable.
+- L645 `now - timedelta(days=7)` 7->8 and L654 `updated_at >= threshold`
+  >=->>: the inactivity window edge — the fixtures use 30-days-stale and
+  now-fresh rows, so no row lands in the 7-8 day gap or exactly on the
+  threshold instant (a deterministic-fixture equivalent; a clock-precise
+  row would flake).
 """
 
 import uuid
@@ -282,12 +299,34 @@ async def test_cohort_progress_math_r422(db):
     # inactivity: ld's only row is 30 days stale → 1 inactive of 4 learners
     assert prog["inactive_learners_7d"] == 1
 
-    # DIVISION GUARD: skills assigned but ZERO learners must not divide by zero
+    # DIVISION GUARD, both operands: skills-but-no-learners AND
+    # learners-but-no-skills must each skip the average (a `>= 0` on either
+    # guard would divide by a zero factor → ZeroDivisionError)
     empty = await svc.create_cohort(org.id, "Empty", None, created_by=owner.id)
     await svc.assign_skill(empty.id, s1.id, org.id, owner.id)
     empty_prog = await svc.get_cohort_progress(empty.id, org.id)
     assert empty_prog["total_learners"] == 0
     assert empty_prog["avg_skill_completion_pct"] == 0.0
+
+    noskill = await svc.create_cohort(org.id, "NoSkill", None, created_by=owner.id)
+    solo = await _member(db, org, org_svc)
+    await svc.add_member(noskill.id, solo.id, CohortRole.LEARNER, org.id)
+    ns_prog = await svc.get_cohort_progress(noskill.id, org.id)
+    assert ns_prog["total_skills_assigned"] == 0
+    assert ns_prog["avg_skill_completion_pct"] == 0.0
+
+    # ROUNDING to ONE decimal: 1/(3*1) = 33.333% must render 33.3, not 33.33
+    frac = await svc.create_cohort(org.id, "Frac", None, created_by=owner.id)
+    fl = await _member(db, org, org_svc)
+    await svc.add_member(frac.id, fl.id, CohortRole.LEARNER, org.id)
+    fs1, fs2, fs3 = await _skill(db, org), await _skill(db, org), await _skill(db, org)
+    for fs in (fs1, fs2, fs3):
+        await svc.assign_skill(frac.id, fs.id, org.id, owner.id)
+    db.add(SkillProgress(org_id=org.id, skill_id=fs1.id, user_id=fl.id,
+                         status=ProgressStatus.COMPLETED))
+    await db.flush()
+    frac_prog = await svc.get_cohort_progress(frac.id, org.id)
+    assert frac_prog["avg_skill_completion_pct"] == 33.3  # round(...,1), not 33.33
 
 
 async def test_learner_drill_down_r422(db):
@@ -333,11 +372,24 @@ async def test_learner_drill_down_r422(db):
                       status=SubmissionStatus.DRAFT))
     await db.flush()
 
+    # a FUTURE-deadline project with a draft is NOT overdue — proves the
+    # is_overdue guard ANDs (deadline set) with (now > deadline); an `or`
+    # there would flag any set-deadline draft as overdue
+    fut = await _project(db, org, owner, deadline=datetime.now(UTC) + timedelta(days=5))
+    await svc.assign_project(cohort.id, fut.id, org.id, owner.id)
+    db.add(Submission(org_id=org.id, project_id=fut.id, user_id=la.id, version=1,
+                      status=SubmissionStatus.DRAFT))
+    await db.flush()
+
     dd = await svc.get_learner_drill_down(cohort.id, la.id, org.id)
-    proj_row = dd["projects"][0]
+    by_pid = {r["project_id"]: r for r in dd["projects"]}
+    proj_row = by_pid[proj.id]
     assert proj_row["submission_status"] == "draft"  # newest version wins
     assert proj_row["is_overdue"] is True
+    assert by_pid[fut.id]["is_overdue"] is False  # future deadline → not overdue
     sk_row = next(r for r in dd["skills"] if r["skill_id"] == sk.id)
     assert sk_row["status"] == "in_progress"  # THIS learner's row, not outsider's
     assert sk_row["exercises_done"] == 2
     assert sk_row["exercises_total"] == 5
+    # last_active reflects THIS learner's latest submission (scoped user+org)
+    assert dd["last_active_at"] is not None
