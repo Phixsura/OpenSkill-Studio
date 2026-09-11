@@ -58,7 +58,7 @@ def apply_site(kind, node, idx, repl):
     if kind == "const":
         old = node.value; node.value = repl; return (lambda: setattr(node, "value", old))
 
-def run(path, funcs, test_cmd, limit=None):
+def run(path, funcs, test_cmd, limit=None, timeout=300):
     p = pathlib.Path(path)
     # Corruption guard: only mutate a git-clean file (a killed prior run can
     # leave an ast.unparse'd copy on disk — baking that in as "original"
@@ -80,12 +80,18 @@ def run(path, funcs, test_cmd, limit=None):
         for n, (kind, node, idx, repl, desc) in enumerate(sites):
             undo = apply_site(kind, node, idx, repl)
             p.write_text(ast.unparse(tree))
-            r = subprocess.run(test_cmd, capture_output=True, timeout=300)
+            try:
+                r = subprocess.run(test_cmd, capture_output=True, timeout=timeout)
+                rc = r.returncode
+            except subprocess.TimeoutExpired:
+                # a mutant that HANGS the tests (infinite loop/retry) is dead,
+                # not a harness crash — count it killed and keep sweeping
+                rc = -1
             undo()
-            if r.returncode == 0:
+            if rc == 0:
                 survived.append(desc); tag = "SURVIVED"
             else:
-                killed += 1; tag = "killed"
+                killed += 1; tag = "killed (timeout)" if rc == -1 else "killed"
             if tag == "SURVIVED" or (n+1) % 25 == 0:
                 print(f"  [{n+1}/{len(sites)}] {desc}: {tag}", flush=True)
     finally:
@@ -99,7 +105,7 @@ if __name__ == "__main__":
         cfg = json.load(_cfgf)
     all_surv = {}
     for t in cfg:
-        s = run(t["path"], t["funcs"], t["cmd"], t.get("limit"))
+        s = run(t["path"], t["funcs"], t["cmd"], t.get("limit"), t.get("timeout", 300))
         if s: all_surv[f"{t['path']}:{','.join(t['funcs'])}"] = s
     print("\n═══ SURVIVORS ═══")
     print(json.dumps(all_surv, indent=1))

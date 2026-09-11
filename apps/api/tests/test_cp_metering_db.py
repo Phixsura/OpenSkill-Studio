@@ -946,3 +946,228 @@ async def test_storage_sweep_exact_gb_idempotent_and_poison_isolated(db, monkeyp
         )
     ).scalar_one_or_none()
     assert ok2 is not None and Decimal(str(ok2.quantity)) == Decimal("2")
+
+
+@pytest.mark.asyncio
+async def test_adjustment_keyed_retry_semantics(db):
+    """R341 (mutation survivors — the keyed-retry arcs R131[10]/R132[F6][15]/
+    R133[F8] had no tests): a keyed adjustment retry with the SAME payload is
+    an idempotent success (same row back), even when ANOTHER tenant holds the
+    same key (per-tenant index scope) and even when the retry's delta differs
+    only past the column's 6dp scale; the same key with a DIFFERENT delta is
+    a 409; a key already used by a NON-adjustment event is a 409; adjusting a
+    voided rating is a 409; a missing original is a 404."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    tenant_b = await _mk_tenant(db, user)
+    actor = Actor(user_id=user.id, type="platform")
+
+    def _emit_kw(t, key):
+        return dict(tenant_id=t.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                    usage_type="image_generation", quantity=10,
+                    occurred_at=_now(), source="manual", idempotency_key=key)
+
+    original = await metering.emit_usage(db, **_emit_kw(tenant, f"orig-{ULID()}"))
+    adj_key = f"adj-{ULID()}"
+    # tenant B holds the SAME key (per-tenant unique index allows it) — the
+    # retry lookup must never match B's event
+    await metering.emit_usage(db, **_emit_kw(tenant_b, adj_key))
+
+    adj = await metering.ingest_adjustment(
+        db, original_event_id=original.id, delta_quantity=-4,
+        reason="r341", actor=actor, idempotency_key=adj_key)
+    # 1. same key + same delta → idempotent success, SAME row
+    again = await metering.ingest_adjustment(
+        db, original_event_id=original.id, delta_quantity=-4,
+        reason="r341 retry", actor=actor, idempotency_key=adj_key)
+    assert again.id == adj.id
+    # 2. same at the 6dp column scale (7th-decimal noise) → still idempotent
+    again2 = await metering.ingest_adjustment(
+        db, original_event_id=original.id, delta_quantity="-4.0000004",
+        reason="r341 retry 6dp", actor=actor, idempotency_key=adj_key)
+    assert again2.id == adj.id
+    # 3. same key, DIFFERENT delta → 409 (Stripe-style key semantics)
+    with pytest.raises(AppError) as e409:
+        await metering.ingest_adjustment(
+            db, original_event_id=original.id, delta_quantity=-5,
+            reason="r341 conflict", actor=actor, idempotency_key=adj_key)
+    assert e409.value.status_code == 409
+    assert "different delta_quantity" in e409.value.message
+    # 4. a key already used by a NON-adjustment event → duplicate 409
+    with pytest.raises(AppError) as e409b:
+        await metering.ingest_adjustment(
+            db, original_event_id=original.id, delta_quantity=-1,
+            reason="r341 dup", actor=actor,
+            idempotency_key=original.idempotency_key)
+    assert e409b.value.status_code == 409
+    assert "Duplicate adjustment idempotency key" in e409b.value.message
+    # 5. missing original → 404
+    with pytest.raises(AppError) as e404:
+        await metering.ingest_adjustment(
+            db, original_event_id=str(ULID()), delta_quantity=-1,
+            reason="r341 gone", actor=actor)
+    assert e404.value.status_code == 404 and e404.value.code == "USAGE_EVENT_NOT_FOUND"
+
+    # 6. adjusting a VOIDED rating double-corrects → 409 (R130[37]) — fresh
+    # original (the mirror gate correctly refuses to void an ADJUSTED event)
+    from app.controlplane.services import rating as rating_svc
+
+    orig2 = await metering.emit_usage(db, **_emit_kw(tenant, f"orig2-{ULID()}"))
+    rated2 = await rating_svc.rate_event(db, orig2.id)
+    await rating_svc.void_rated(db, rated2.id, reason="strike", actor=actor)
+    with pytest.raises(AppError) as e409c:
+        await metering.ingest_adjustment(
+            db, original_event_id=orig2.id, delta_quantity=-2,
+            reason="r341 voided", actor=actor)
+    assert e409c.value.status_code == 409 and "voided" in e409c.value.message
+
+
+@pytest.mark.asyncio
+async def test_adjustment_open_period_warning_is_tenant_scoped(db, monkeypatch):
+    """R341: the no-open-period warning (money that will never be invoiced)
+    must key off the ORIGINAL's tenant — tenant A's open period must not
+    silence tenant B's warning — and two open periods (live + cancelled subs'
+    residue) must not 500 the lookup."""
+    from datetime import timedelta
+
+    from app.controlplane.models.billing import BillingPeriod, Subscription
+    from app.controlplane.models.plan import PlanVersion, ProductPlan
+
+    user = await _mk_user(db)
+    a = await _mk_tenant(db, user)
+    b = await _mk_tenant(db, user)
+    actor = Actor(user_id=user.id, type="platform")
+    now = _now()
+
+    plan = ProductPlan(key=f"r341-{str(ULID()).lower()[:8]}", name="R341")
+    db.add(plan)
+    await db.flush()
+    pv = PlanVersion(plan_id=plan.id, version=1, status="active",
+                     entitlements={}, activated_at=now)
+    db.add(pv)
+    await db.flush()
+
+    def _sub(status):
+        return Subscription(
+            tenant_id=a.id, plan_version_id=pv.id, status=status,
+            currency="USD", interval="month", seat_quantity=0,
+            current_period_start=now - timedelta(days=5),
+            current_period_end=now + timedelta(days=25),
+            provider="manual", created_by=user.id)
+
+    live, dead = _sub("active"), _sub("cancelled")
+    db.add_all([live, dead])
+    await db.flush()
+    # TWO open periods for tenant A (live sub + a cancelled sub's residue)
+    db.add_all([
+        BillingPeriod(tenant_id=a.id, subscription_id=live.id, status="open",
+                      period_start=now - timedelta(days=5),
+                      period_end=now + timedelta(days=25)),
+        BillingPeriod(tenant_id=a.id, subscription_id=dead.id, status="open",
+                      period_start=now - timedelta(days=35),
+                      period_end=now - timedelta(days=5)),
+    ])
+    await db.flush()
+
+    warnings: list = []
+    real_warning = metering.log.warning
+    monkeypatch.setattr(metering.log, "warning",
+                        lambda *aa, **kw: warnings.append((aa, kw)) or real_warning(*aa, **kw))
+
+    def _kw(t):
+        return dict(tenant_id=t.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                    usage_type="image_generation", quantity=5,
+                    occurred_at=now, source="manual",
+                    idempotency_key=f"w-{ULID()}")
+
+    # A HAS open periods (two of them) → no warning, no 500
+    orig_a = await metering.emit_usage(db, **_kw(a))
+    await metering.ingest_adjustment(db, original_event_id=orig_a.id,
+                                     delta_quantity=-1, reason="a", actor=actor)
+    assert not any(x[0] and x[0][0] == "cp_adjustment_no_open_period" for x in warnings)
+
+    # B has NONE → warning fires (A's period must not silence it)
+    orig_b = await metering.emit_usage(db, **_kw(b))
+    await metering.ingest_adjustment(db, original_event_id=orig_b.id,
+                                     delta_quantity=-1, reason="b", actor=actor)
+    assert any(x[0] and x[0][0] == "cp_adjustment_no_open_period" for x in warnings)
+
+
+@pytest.mark.asyncio
+async def test_flush_boundaries_zero_buckets_and_org_attribution(db):
+    """R341 (mutation survivors): the hourly flush's exact edges —
+    (1) the CURRENT hour bucket is never flushed mid-accumulation;
+    (2) a ZERO-count bucket emits nothing but still counts as landed (an
+        ancient zero bucket is deleted, not kept forever);
+    (3) a bucket exactly AT the 25h delete-cutoff is KEPT (strict <);
+    (4) org attribution resolves an org of THIS tenant (a two-org tenant
+        flushes cleanly — limit(1)). The scan_iter count=500 mutant is a
+    performance hint with no semantics — documented equivalent."""
+    from datetime import timedelta
+
+    from app.controlplane.services.metering import flush_api_request_counters
+    from app.models.organization import Organization
+
+    user = await _mk_user(db)
+    other_tenant = await _mk_tenant(db, user)   # decoy first (scan-order bait)
+    other_org = Organization(name=f"D {ULID()}", slug=f"do-{str(ULID()).lower()}",
+                             tenant_id=other_tenant.id, created_by=user.id)
+    db.add(other_org)
+    tenant = await _mk_tenant(db, user)
+    org1 = Organization(name=f"A {ULID()}", slug=f"oa-{str(ULID()).lower()}",
+                        tenant_id=tenant.id, created_by=user.id)
+    org2 = Organization(name=f"B {ULID()}", slug=f"ob-{str(ULID()).lower()}",
+                        tenant_id=tenant.id, created_by=user.id)
+    db.add_all([org1, org2])
+    await db.flush()
+    await db.commit()
+
+    r = await _fresh_redis()
+    now = datetime.now(UTC)
+    cur_bucket = now.strftime("%Y%m%d%H")
+    cutoff_bucket = (now - timedelta(hours=25)).strftime("%Y%m%d%H")
+    zero_bucket = (now - timedelta(hours=30)).strftime("%Y%m%d%H")
+    recent_bucket = (now - timedelta(hours=2)).strftime("%Y%m%d%H")
+    keys = {
+        "cur": f"cp:apireq:{tenant.id}:{cur_bucket}",
+        "cutoff": f"cp:apireq:{tenant.id}:{cutoff_bucket}",
+        "zero": f"cp:apireq:{tenant.id}:{zero_bucket}",
+        "recent": f"cp:apireq:{tenant.id}:{recent_bucket}",
+    }
+    old26_bucket = (now - timedelta(hours=26)).strftime("%Y%m%d%H")
+    keys["old26"] = f"cp:apireq:{tenant.id}:{old26_bucket}"
+    # clear any residue from other tests so the emitted count is exact
+    async for stale in r.scan_iter(match="cp:apireq:*", count=500):
+        await r.delete(stale)
+    await r.set(keys["cur"], 11, ex=90_000)
+    await r.set(keys["cutoff"], 13, ex=90_000)
+    await r.set(keys["zero"], 0, ex=90_000)
+    await r.set(keys["recent"], 17, ex=90_000)
+    await r.set(keys["old26"], 19, ex=90_000)
+    try:
+        emitted = await flush_api_request_counters(db)
+        # exact landing count: cutoff-13, recent-17, old26-19 (zero + current
+        # hour emit nothing) — each counted ONCE
+        assert emitted == 3
+        # a bucket STRICTLY older than the 25h cutoff is deleted after landing
+        assert await r.get(keys["old26"]) is None
+        # (1) current hour untouched — not emitted, not deleted
+        assert await r.get(keys["cur"]) is not None
+        # (3) exactly-at-cutoff bucket KEPT (delete is strictly older-than)
+        assert await r.get(keys["cutoff"]) is not None
+        # (2) ancient zero bucket deleted without emitting an event
+        assert await r.get(keys["zero"]) is None
+        events = (
+            await db.execute(
+                select(UsageEvent).where(
+                    UsageEvent.tenant_id == tenant.id,
+                    UsageEvent.usage_type == "api_request"))
+        ).scalars().all()
+        quantities = sorted(int(e.quantity) for e in events)
+        assert 11 not in quantities          # current hour never landed
+        assert 0 not in quantities           # zero bucket emitted nothing
+        assert 13 in quantities and 17 in quantities and 19 in quantities
+        # (4) attribution org belongs to THIS tenant (two orgs, no 500)
+        assert {e.org_id for e in events} <= {org1.id, org2.id}
+    finally:
+        await r.delete(*keys.values())
