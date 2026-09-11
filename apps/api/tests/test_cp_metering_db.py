@@ -1171,3 +1171,92 @@ async def test_flush_boundaries_zero_buckets_and_org_attribution(db):
         assert {e.org_id for e in events} <= {org1.id, org2.id}
     finally:
         await r.delete(*keys.values())
+
+
+@pytest.mark.asyncio
+async def test_storage_sweep_combines_sources_and_skips_zero(db):
+    """R342 (mutation survivors): per-org storage totals must (1) attribute
+    submission-item bytes through the item→submission JOIN (a flipped join
+    smears every other submission's bytes into the org), (2) SUM item + asset
+    bytes for the same org, and (3) skip zero-byte orgs entirely (no
+    0-quantity events). The 5000-chunk mutants are IN-list sizing —
+    documented equivalent below that cardinality."""
+    from decimal import Decimal
+
+    from app.models.project import (
+        DeliverableType,
+        ItemType,
+        ProjectAsset,
+        ProjectDeliverable,
+        Submission,
+        SubmissionItem,
+        SubmissionStatus,
+    )
+    from app.services.organization import OrgService
+    from app.services.project import ProjectService
+
+    owner = await _mk_user(db)
+    svc = OrgService(db)
+
+    async def _org_with_project(tag):
+        org = await svc.create(name=f"S{tag} {ULID()}",
+                               slug=f"s{tag}-{str(ULID()).lower()}",
+                               description=None, created_by=owner.id)
+        project = await ProjectService(db).create_project(
+            org_id=org.id, title=f"P{tag}", slug=None, description="d",
+            instructions="i", difficulty="beginner", max_score=100,
+            rubric=[{"criterion": "Q", "max_score": 100}], deadline=None,
+            late_deadline=None, late_penalty_pct=0, max_submissions=0,
+            skill_ids=None, created_by=owner.id)
+        return org, project
+
+    async def _item(org, project, size):
+        sub = Submission(org_id=org.id, project_id=project.id, user_id=owner.id,
+                         version=1, status=SubmissionStatus.SUBMITTED,
+                         submitted_at=datetime.now(UTC))
+        db.add(sub)
+        await db.flush()
+        deliverable = ProjectDeliverable(project_id=project.id, name="D",
+                                         type=DeliverableType.TEXT)
+        db.add(deliverable)
+        await db.flush()
+        db.add(SubmissionItem(submission_id=sub.id, deliverable_id=deliverable.id,
+                              type=ItemType.TEXT, content="x", file_size=size,
+                              uploaded_by=owner.id))
+        await db.flush()
+
+    gib = 1073741824
+    # org D: asset 1 GiB + submission item 0.5 GiB → 1.5 GB event
+    org_d, proj_d = await _org_with_project("d")
+    db.add(ProjectAsset(org_id=org_d.id, project_id=proj_d.id, name="a",
+                        description=None, file_key=f"k/{ULID()}", file_name="a.bin",
+                        file_size=gib, mime_type="application/octet-stream",
+                        uploaded_by=owner.id))
+    await _item(org_d, proj_d, gib // 2)
+    # org E: its own item 0.25 GiB (join-flip bait: with != it would absorb D's)
+    org_e, proj_e = await _org_with_project("e")
+    await _item(org_e, proj_e, gib // 4)
+    # org F: a zero-byte asset → NO event
+    org_f, proj_f = await _org_with_project("f")
+    db.add(ProjectAsset(org_id=org_f.id, project_id=proj_f.id, name="z",
+                        description=None, file_key=f"k/{ULID()}", file_name="z.bin",
+                        file_size=0, mime_type="application/octet-stream",
+                        uploaded_by=owner.id))
+    await db.flush()
+
+    emitted = await metering.sweep_storage(
+        db, org_ids=[org_d.id, org_e.id, org_f.id])
+    assert emitted == 2                      # D and E; F (zero bytes) skipped
+    day = datetime.now(UTC).date().isoformat()
+
+    async def _qty(org):
+        ev = (
+            await db.execute(
+                select(UsageEvent).where(
+                    UsageEvent.idempotency_key == f"storage:{org.id}:{day}"))
+        ).scalar_one_or_none()
+        return None if ev is None else Decimal(str(ev.quantity))
+
+    assert await _qty(org_d) == Decimal("1.5")     # asset + item summed
+    assert await _qty(org_e) == Decimal("0.25")    # only its own item
+    assert await _qty(org_f) is None               # zero bytes → no event
