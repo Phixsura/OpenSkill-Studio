@@ -2300,3 +2300,152 @@ def test_grant_rank_ordering_and_equal_seat_width():
         g("seat_limited", seats=10), listing) is True
     assert market_svc.grant_covers_listing_width(
         g("seat_limited", seats=9), listing) is False
+
+
+@pytest.mark.asyncio
+async def test_seat_gate_counting_semantics(db):
+    """R345 (mutation survivors): enforce_seat_limit counts ACTIVE STUDENTS
+    only (archived members and staff roles never consume a seat), allows
+    occupancy EXACTLY at the cap (only strictly-over blocks, 403), and is a
+    no-op for tenant-scope grants and for seat_limited grants with no cap."""
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+
+    user = await _mk_user(db)
+    org = await _mk_org(db, user)
+
+    async def _member(role, status=MemberStatus.ACTIVE):
+        u = await _mk_user(db)
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=role, status=status))
+        await db.flush()
+
+    # 2 active students + 1 archived student + 1 active owner
+    await _member(OrgRole.STUDENT)
+    await _member(OrgRole.STUDENT)
+    await _member(OrgRole.STUDENT, MemberStatus.ARCHIVED)
+    await _member(OrgRole.OWNER)
+
+    def _grant(scope, seats):
+        return LicenseGrant(
+            product_type="skill_pack", product_id=str(ULID()),
+            tenant_id=org.tenant_id, org_id=org.id, scope=scope,
+            seat_limit=seats, status="active")
+
+    # cap == occupancy (2 active students) → allowed (only archived/staff
+    # excluded keeps it at 2; counting them would blow the cap)
+    await market_svc.enforce_seat_limit(db, _grant("seat_limited", 2), org.id)
+    # cap one below → 403 with the occupancy detail
+    with pytest.raises(AppError) as e:
+        await market_svc.enforce_seat_limit(db, _grant("seat_limited", 1), org.id)
+    assert e.value.code == "SEAT_LIMIT_EXCEEDED" and e.value.status_code == 403
+    # tenant-scope and uncapped seat_limited grants are no-ops
+    await market_svc.enforce_seat_limit(db, _grant("tenant", None), org.id)
+    await market_svc.enforce_seat_limit(db, _grant("seat_limited", None), org.id)
+
+    # R132[F12] tenant-WIDE branch (grant.org_id NULL): occupancy sums the
+    # tenant's orgs and excludes other tenants' — a second org of the same
+    # tenant adds its student; a foreign tenant's students never count
+    from app.models.organization import Organization, OrgStatus
+
+    sibling = Organization(name=f"Sib {ULID()}", slug=f"sib-{str(ULID()).lower()}",
+                           status=OrgStatus.ACTIVE, tenant_id=org.tenant_id,
+                           created_by=user.id)
+    db.add(sibling)
+    await db.flush()
+    sib_student = await _mk_user(db)
+    db.add(OrgMember(org_id=sibling.id, user_id=sib_student.id,
+                     role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+    foreign_user = await _mk_user(db)
+    foreign_org = await _mk_org(db, foreign_user)     # different tenant
+    for _ in range(5):
+        fu = await _mk_user(db)
+        db.add(OrgMember(org_id=foreign_org.id, user_id=fu.id,
+                         role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+    await db.flush()
+
+    def _wide(seats):
+        return LicenseGrant(
+            product_type="skill_pack", product_id=str(ULID()),
+            tenant_id=org.tenant_id, org_id=None, scope="seat_limited",
+            seat_limit=seats, status="active")
+
+    # tenant occupancy = 2 (org) + 1 (sibling) = 3; foreign 5 never counted
+    await market_svc.enforce_seat_limit(db, _wide(3), org.id)
+    with pytest.raises(AppError) as e_wide:
+        await market_svc.enforce_seat_limit(db, _wide(2), org.id)
+    assert "3" in e_wide.value.message                 # exact tenant-wide count
+
+
+@pytest.mark.asyncio
+async def test_install_gate_boundaries_and_status_codes(db):
+    """R345: (1) the NEWEST non-draft listing governs (an older paid listing
+    superseded by a free one → allowed; deterministic under duplicate
+    listings); (2) included_with_plan with NULL plan keys is a 403, never a
+    TypeError 500; (3) major_locked install gate: a target EXACTLY at the
+    purchased major is allowed, one above is 403 LICENSE_UPGRADE_REQUIRED,
+    and an all_versions listing never major-gates; (4) private listings 404
+    (anti-enumeration); plan-gated and unlicensed installs 403."""
+    seller_user = await _mk_user(db)
+    buyer_user = await _mk_user(db)
+    seller_org = await _mk_org(db, seller_user)
+    buyer_org = await _mk_org(db, buyer_user)
+
+    # (4) statuses
+    private = await _mk_listing(db, seller_org, seller_user, offer_type="private")
+    with pytest.raises(AppError) as e404:
+        await market_svc.check_install_license(db, "skill_pack", private.product_id, buyer_org)
+    assert e404.value.code == "PACK_NOT_FOUND" and e404.value.status_code == 404
+    plan_gated = await _mk_listing(db, seller_org, seller_user,
+                                   offer_type="included_with_plan",
+                                   included_plan_keys=["enterprise"])
+    with pytest.raises(AppError) as e403a:
+        await market_svc.check_install_license(db, "skill_pack", plan_gated.product_id, buyer_org)
+    assert e403a.value.status_code == 403
+    paid = await _mk_listing(db, seller_org, seller_user)
+    with pytest.raises(AppError) as e403b:
+        await market_svc.check_install_license(db, "skill_pack", paid.product_id, buyer_org)
+    assert e403b.value.code == "LICENSE_REQUIRED" and e403b.value.status_code == 403
+
+    # (2) included_with_plan with NULL keys → 403, not a 500
+    null_keys = await _mk_listing(db, seller_org, seller_user,
+                                  offer_type="included_with_plan")
+    null_keys.included_plan_keys = None
+    await db.flush()
+    with pytest.raises(AppError) as e403c:
+        await market_svc.check_install_license(db, "skill_pack", null_keys.product_id, buyer_org)
+    assert e403c.value.status_code == 403
+
+    # (1) is constraint-impossible: uq_cp_listing_product allows ONE listing
+    # per product ever, so the resolver's limit(1) mutant is
+    # constraint-equivalent — documented here instead of force-tested.
+
+    # (3) major_locked boundaries
+    locked = await _mk_listing(db, seller_org, seller_user, upgrade_policy="major_locked")
+    db.add(LicenseGrant(
+        listing_id=locked.id, product_type="skill_pack", product_id=locked.product_id,
+        tenant_id=buyer_org.tenant_id, org_id=buyer_org.id, scope="organization", source="purchase",
+        status="active", purchased_major=2))
+    await db.flush()
+    # exactly at the purchased major → allowed
+    await market_svc.check_install_license(
+        db, "skill_pack", locked.product_id, buyer_org, target_version="2.9")
+    with pytest.raises(AppError) as e403d:
+        await market_svc.check_install_license(
+            db, "skill_pack", locked.product_id, buyer_org, target_version="3.0")
+    assert e403d.value.code == "LICENSE_UPGRADE_REQUIRED" and e403d.value.status_code == 403
+    # all_versions listing never major-gates
+    open_lst = await _mk_listing(db, seller_org, seller_user)
+    db.add(LicenseGrant(
+        listing_id=open_lst.id, product_type="skill_pack", product_id=open_lst.product_id,
+        tenant_id=buyer_org.tenant_id, org_id=buyer_org.id, scope="organization", source="purchase",
+        status="active", purchased_major=1))
+    await db.flush()
+    await market_svc.check_install_license(
+        db, "skill_pack", open_lst.product_id, buyer_org, target_version="9.0")
+
+    # check_upgrade_license mirrors the boundary with the same 403
+    with pytest.raises(AppError) as e403e:
+        await market_svc.check_upgrade_license(
+            db, "skill_pack", locked.product_id, buyer_org, "3.1")
+    assert e403e.value.code == "LICENSE_UPGRADE_REQUIRED" and e403e.value.status_code == 403
+    await market_svc.check_upgrade_license(
+        db, "skill_pack", locked.product_id, buyer_org, "2.5")
