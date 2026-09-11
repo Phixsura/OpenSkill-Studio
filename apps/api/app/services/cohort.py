@@ -282,9 +282,15 @@ class CohortService:
             user_id=user_id,
             role=role,
         )
-        self.db.add(member)
+        # R422: add INSIDE the savepoint (matching organization.add_member) so a
+        # duplicate-key rollback fully expunges the pending row. With the add
+        # outside, a caught AlreadyCohortMember left the ORM object in
+        # session.new, poisoning the NEXT flush with a re-attempted duplicate
+        # INSERT (PendingRollbackError) — harmless on the request path (session
+        # discarded after the 409) but a latent hazard for any in-session caller.
         try:
             async with self.db.begin_nested():
+                self.db.add(member)
                 await self.db.flush()
         except IntegrityError:
             raise AlreadyCohortMemberError() from None
@@ -366,9 +372,12 @@ class CohortService:
             skill_id=skill_id,
             assigned_by=assigned_by,
         )
-        self.db.add(assignment)
+        # R422: add inside the savepoint so a duplicate-key rollback expunges
+        # the pending row (see add_member) — an outside add poisons the next
+        # flush for any in-session caller that catches ALREADY_ASSIGNED.
         try:
             async with self.db.begin_nested():
+                self.db.add(assignment)
                 await self.db.flush()
         except IntegrityError:
             raise AppError(
@@ -448,9 +457,10 @@ class CohortService:
             participation_mode=mode,
             assigned_by=assigned_by,
         )
-        self.db.add(assignment)
+        # R422: add inside the savepoint (see add_member / assign_skill).
         try:
             async with self.db.begin_nested():
+                self.db.add(assignment)
                 await self.db.flush()
         except IntegrityError:
             raise AppError(
