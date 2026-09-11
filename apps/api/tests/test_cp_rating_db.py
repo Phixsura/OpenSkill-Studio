@@ -2322,3 +2322,45 @@ async def test_quota_month_window_boundaries_and_failed_exclusion(db):
                              occurred_at=m_start + timedelta(days=3))
     r_over = await rating.rate_event(db, e_over.id)
     assert r_over.billable_amount_minor == 50         # (60+30+20)-100=10 × 5
+
+
+@pytest.mark.asyncio
+async def test_tenant_rated_usage_handler_scope_and_whitelist(db):
+    """R389: the tenant rated-usage feed — cross-tenant rows never appear,
+    the usage_type filter narrows, pagination is exact, and every row's
+    field set is EXACTLY the tenant whitelist (cost/margin/fx never leave
+    the platform scope — the R82 rule, asserted per row)."""
+    from app.controlplane.api.pricing import (
+        TENANT_RATED_FIELDS,
+        tenant_rated_usage,
+    )
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    other = await _mk_tenant(db, user)
+    await pricing_svc.create_price_policy(
+        db, actor=_actor(user), name=f"r389 {ULID()}",
+        policy_type="fixed_unit_price", usage_type="image_generation",
+        currency="USD", params={"unit_price_minor": 10},
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        tenant_id=tenant.id)
+    for t, utype, n in ((tenant, "image_generation", 3),
+                        (tenant, "workflow_run", 1),
+                        (other, "image_generation", 2)):
+        for _ in range(n):
+            ev = await _mk_event(db, t, usage_type=utype, quantity=1)
+            await rating.rate_event(db, ev.id)
+
+    resp = await tenant_rated_usage(tenant.id, usage_type=None, page=1,
+                                    per_page=3, user=user, db=db)
+    assert resp.meta.total == 4                      # other tenant's 2 excluded
+    assert len(resp.data) == 3 and resp.meta.has_more is True
+    for row in resp.data:
+        assert set(row.keys()) == set(TENANT_RATED_FIELDS), row.keys()
+        assert "internal_cost_minor" not in row and "margin_minor" not in row
+    p2 = await tenant_rated_usage(tenant.id, usage_type=None, page=2,
+                                  per_page=3, user=user, db=db)
+    assert len(p2.data) == 1 and p2.meta.has_more is False
+    filt = await tenant_rated_usage(tenant.id, usage_type="workflow_run",
+                                    page=1, per_page=50, user=user, db=db)
+    assert filt.meta.total == 1
