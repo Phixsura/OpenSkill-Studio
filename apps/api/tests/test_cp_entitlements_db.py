@@ -1347,3 +1347,121 @@ async def test_override_expiring_exactly_now_is_expired(db, monkeypatch):
     assert eff.values["max_organizations"] != 42, (
         "an override expiring exactly now must not apply (half-open window)")
     assert eff.sources["max_organizations"] != "override"
+
+
+@pytest.mark.asyncio
+async def test_set_override_is_tenant_scoped_and_status_codes(db):
+    """R340 (mutation survivors): set_override's existing-row lookup is
+    keyed by (tenant, key) — a flipped tenant filter would UPDATE another
+    tenant's override instead of creating this tenant's. Two tenants, same
+    key: each keeps its own value. Plus: bad enforcement is a 422 and a
+    concurrent plan-version activation conflict is a 409."""
+    from app.controlplane.models.plan import PlanVersion, ProductPlan, TenantEntitlementOverride
+    from app.controlplane.services import plans as plan_svc
+
+    user = await _mk_user(db)
+    a = await _mk_tenant(db, user)
+    b = await _mk_tenant(db, user)
+    await plan_svc.set_override(db, a.id, "max_organizations", value=3,
+                                enforcement="hard", expires_at=None,
+                                reason="A", actor=_actor(user))
+    await plan_svc.set_override(db, b.id, "max_organizations", value=7,
+                                enforcement="hard", expires_at=None,
+                                reason="B", actor=_actor(user))
+    rows = (
+        await db.execute(
+            select(TenantEntitlementOverride).where(
+                TenantEntitlementOverride.key == "max_organizations",
+                TenantEntitlementOverride.tenant_id.in_([a.id, b.id])))
+    ).scalars().all()
+    by_tenant = {r.tenant_id: r.value.get("v") for r in rows}
+    assert by_tenant == {a.id: 3, b.id: 7}   # B's write never mutated A's row
+
+    # the lookup is also KEY-scoped: updating k1 must not touch A's k2 row
+    await plan_svc.set_override(db, a.id, "max_storage_gb", value="50",
+                                enforcement="hard", expires_at=None,
+                                reason="k2", actor=_actor(user))
+    await plan_svc.set_override(db, a.id, "max_organizations", value=4,
+                                enforcement="hard", expires_at=None,
+                                reason="A2", actor=_actor(user))
+    from app.controlplane.models.plan import TenantEntitlementOverride as _TEO
+
+    a_rows = (
+        await db.execute(select(_TEO).where(_TEO.tenant_id == a.id))
+    ).scalars().all()
+    a_by_key = {r.key: r.value.get("v") for r in a_rows}
+    assert a_by_key == {"max_organizations": 4, "max_storage_gb": "50"}
+
+    with pytest.raises(AppError) as e422:
+        await plan_svc.set_override(db, a.id, "max_organizations", value=1,
+                                    enforcement="maybe", expires_at=None,
+                                    reason="x", actor=_actor(user))
+    assert e422.value.status_code == 422
+
+    # activation guard: activating a non-draft version is a 409
+    plan = ProductPlan(key=f"r340-{str(ULID()).lower()[:8]}", name="R340")
+    db.add(plan)
+    await db.flush()
+    pv = PlanVersion(plan_id=plan.id, version=1, status="active",
+                     entitlements={}, activated_at=datetime.now(UTC))
+    db.add(pv)
+    await db.flush()
+    # non-draft → immutable 409 up front
+    with pytest.raises(AppError) as e_imm:
+        await plan_svc.activate_version(db, pv, actor=_actor(user))
+    assert e_imm.value.code == "PLAN_VERSION_IMMUTABLE" and e_imm.value.status_code == 409
+    # stale-draft race: the object SAYS draft but the row is already active →
+    # the guarded UPDATE loses and raises the concurrent-conflict 409
+    from types import SimpleNamespace
+
+    stale = SimpleNamespace(id=pv.id, plan_id=pv.plan_id, status="draft", version=1)
+    with pytest.raises(AppError) as e409:
+        await plan_svc.activate_version(db, stale, actor=_actor(user))
+    assert e409.value.code == "PLAN_VERSION_CONFLICT" and e409.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_concurrent_set_override_same_key_single_row():
+    """R340: two concurrent first-ever set_override calls for the same
+    (tenant, key) must BOTH succeed with exactly one row — the loser's
+    IntegrityError recovery re-selects the winner's row by (tenant, key);
+    a flipped filter there finds nothing and 500s."""
+    import asyncio
+
+    from app.controlplane.models.plan import TenantEntitlementOverride as _TEO
+    from app.controlplane.services import plans as plan_svc
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as setup:
+        user = await _mk_user(setup)
+        tenant = await _mk_tenant(setup, user)
+        await setup.commit()
+        tid, actor = tenant.id, _actor(user)
+
+    async def winner():
+        async with AsyncSessionLocal() as s:
+            await plan_svc.set_override(s, tid, "max_organizations", value=1,
+                                        enforcement="hard", expires_at=None,
+                                        reason="w", actor=actor)
+            await asyncio.sleep(0.4)
+            await s.commit()
+
+    async def loser():
+        await asyncio.sleep(0.15)
+        async with AsyncSessionLocal() as s:
+            await plan_svc.set_override(s, tid, "max_organizations", value=2,
+                                        enforcement="hard", expires_at=None,
+                                        reason="l", actor=actor)
+            await s.commit()
+
+    await asyncio.gather(winner(), loser())
+    async with AsyncSessionLocal() as s:
+        rows = (
+            await s.execute(
+                select(_TEO).where(_TEO.tenant_id == tid,
+                                   _TEO.key == "max_organizations"))
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].value.get("v") in (1, 2)
+        await s.delete(rows[0])
+        await s.commit()

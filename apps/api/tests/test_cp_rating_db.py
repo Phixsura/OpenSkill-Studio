@@ -1965,3 +1965,167 @@ async def test_plan_scope_policy_binds_own_tenants_subscription(db):
     rated = await rating.rate_event(db, event.id)
     assert rated.sell_rate_snapshot["scope"] == "plan_version", rated.sell_rate_snapshot
     assert rated.billable_amount_minor == 110  # 11×10 via A's OWN plan V1
+
+
+@pytest.mark.asyncio
+async def test_fx_and_supersede_boundaries(db):
+    """R340 (mutation survivors): (1) a supersede window closing EXACTLY at
+    the rate's effective_from is invalid (422) and superseding twice is a 409;
+    (2) an open-ended FX rate starting EXACTLY at the new rate's
+    effective_from is NOT auto-closed (strict <) — it overlaps → 409, never a
+    silent zero-width close; (3) two half-open ADJACENT bounded windows
+    (new.effective_until == existing.effective_from) do not overlap; (4) racy
+    duplicate open-ended rows resolve deterministically (limit(1)) — auto-
+    close one, 409 on the other — never MultipleResultsFound."""
+    from app.controlplane.models.pricing import FxRate
+
+    user = await _mk_user(db)
+    t0 = datetime.now(UTC) - timedelta(days=10)
+
+    # (1) supersede boundary + double-supersede
+    rate = await pricing_svc.create_cost_rate(
+        db, actor=_actor(user), provider=f"sb-{str(ULID()).lower()[:8]}",
+        model_or_service="m", usage_type="image_generation", currency="USD",
+        unit_cost=Decimal("0.10"), effective_from=t0)
+    succ = dict(provider=rate.provider, model_or_service="m",
+                usage_type="image_generation", currency="USD",
+                unit_cost="0.20", effective_from=t0 + timedelta(days=1))
+    with pytest.raises(AppError) as e1:
+        await pricing_svc.supersede_cost_rate(
+            db, rate, effective_until=t0, successor=succ, actor=_actor(user))
+    assert e1.value.status_code == 422   # equal-to-from close is invalid
+    await pricing_svc.supersede_cost_rate(
+        db, rate, effective_until=t0 + timedelta(days=1),
+        successor=succ, actor=_actor(user))
+    with pytest.raises(AppError) as e2:
+        await pricing_svc.supersede_cost_rate(
+            db, rate, effective_until=t0 + timedelta(days=2),
+            successor=succ, actor=_actor(user))
+    assert e2.value.code == "COST_RATE_IMMUTABLE" and e2.value.status_code == 409
+
+    # (2) same-instant open-ended FX rate → overlap 409, not zero-width close
+    pair = dict(base_currency="USD", quote_currency="NOK")
+    first = await pricing_svc.create_fx_rate(
+        db, actor=_actor(user), rate=Decimal("10"), effective_from=t0, **pair)
+    with pytest.raises(AppError) as e3:
+        await pricing_svc.create_fx_rate(
+            db, actor=_actor(user), rate=Decimal("11"), effective_from=t0, **pair)
+    assert e3.value.code == "FX_RATE_OVERLAP" and e3.value.status_code == 409
+    await db.refresh(first)
+    assert first.effective_until is None   # untouched, no zero-width close
+
+    # (3) half-open adjacency: bounded new window ending exactly where a
+    # bounded existing one starts is NOT an overlap
+    pair2 = dict(base_currency="USD", quote_currency="DKK")
+    db.add(FxRate(base_currency="USD", quote_currency="DKK", rate=Decimal("7"),
+                  effective_from=t0, effective_until=t0 + timedelta(days=5),
+                  created_by=user.id))
+    await db.flush()
+    ok = await pricing_svc.create_fx_rate(
+        db, actor=_actor(user), rate=Decimal("6.9"),
+        effective_from=t0 - timedelta(days=5), effective_until=t0, **pair2)
+    assert ok.id is not None
+
+    # (4) racy DUPLICATE open-ended rows (no DB constraint): a newer rate
+    # auto-closes ONE (deterministic limit(1)) and 409s on the survivor —
+    # never a MultipleResultsFound 500
+    pair3 = dict(base_currency="USD", quote_currency="ISK")
+    db.add_all([
+        FxRate(base_currency="USD", quote_currency="ISK", rate=Decimal("140"),
+               effective_from=t0, created_by=user.id),
+        FxRate(base_currency="USD", quote_currency="ISK", rate=Decimal("141"),
+               effective_from=t0, created_by=user.id),
+    ])
+    await db.flush()
+    with pytest.raises(AppError) as e4:
+        await pricing_svc.create_fx_rate(
+            db, actor=_actor(user), rate=Decimal("142"),
+            effective_from=t0 + timedelta(days=1), **pair3)
+    assert e4.value.code == "FX_RATE_OVERLAP"   # deterministic, not a 500
+
+    # fx validation status codes
+    with pytest.raises(AppError) as e5:
+        await pricing_svc.create_fx_rate(
+            db, actor=_actor(user), rate=Decimal("1"), effective_from=t0,
+            base_currency="USD", quote_currency="USD")
+    assert e5.value.status_code == 422
+    with pytest.raises(AppError) as e6:
+        await pricing_svc.create_fx_rate(
+            db, actor=_actor(user), rate=Decimal("NaN"), effective_from=t0,
+            base_currency="USD", quote_currency="CZK")
+    assert e6.value.status_code == 422
+    with pytest.raises(AppError) as e6z:   # ZERO is not a rate (<=, not <)
+        await pricing_svc.create_fx_rate(
+            db, actor=_actor(user), rate=Decimal("0"), effective_from=t0,
+            base_currency="USD", quote_currency="CZK")
+    assert e6z.value.code == "FX_RATE_INVALID"
+
+    # overlap checking is CAPABILITY-scoped: same window, different
+    # capability_key → no conflict; same capability_key → 409
+    provc = f"cap-{str(ULID()).lower()[:8]}"
+    await pricing_svc.create_cost_rate(
+        db, actor=_actor(user), provider=provc, model_or_service=None,
+        capability_key="image_generation", usage_type="image_generation",
+        currency="USD", unit_cost=Decimal("0.10"), effective_from=t0)
+    ok3 = await pricing_svc.create_cost_rate(
+        db, actor=_actor(user), provider=provc, model_or_service=None,
+        capability_key="voice_generation", usage_type="image_generation",
+        currency="USD", unit_cost=Decimal("0.20"), effective_from=t0)
+    assert ok3.id is not None              # different capability: no overlap
+    with pytest.raises(AppError) as e9:
+        await pricing_svc.create_cost_rate(
+            db, actor=_actor(user), provider=provc, model_or_service=None,
+            capability_key="image_generation", usage_type="image_generation",
+            currency="USD", unit_cost=Decimal("0.30"), effective_from=t0)
+    assert e9.value.code == "COST_RATE_OVERLAP"
+
+    # TWO overlapping bounded FX rows already present (race residue): a third
+    # overlapping create must 409 deterministically (probe limit(1)), not
+    # MultipleResultsFound-500
+    db.add_all([
+        FxRate(base_currency="USD", quote_currency="HUF", rate=Decimal("350"),
+               effective_from=t0, effective_until=t0 + timedelta(days=9),
+               created_by=user.id),
+        FxRate(base_currency="USD", quote_currency="HUF", rate=Decimal("351"),
+               effective_from=t0, effective_until=t0 + timedelta(days=9),
+               created_by=user.id),
+    ])
+    await db.flush()
+    with pytest.raises(AppError) as e7:
+        await pricing_svc.create_fx_rate(
+            db, actor=_actor(user), rate=Decimal("352"),
+            effective_from=t0 + timedelta(days=1),
+            effective_until=t0 + timedelta(days=2),
+            base_currency="USD", quote_currency="HUF")
+    assert e7.value.code == "FX_RATE_OVERLAP"
+
+    # cost-rate bounded adjacency + duplicate-row determinism + 409 status:
+    # existing [t0, t0+5d); a new window ENDING exactly at t0 is legal …
+    provb = f"adj-{str(ULID()).lower()[:8]}"
+    from app.controlplane.models.pricing import ProviderCostRate as _PCR
+
+    db.add_all([
+        _PCR(provider=provb, model_or_service="m", usage_type="image_generation",
+             unit="images", unit_cost=Decimal("0.10"), currency="USD",
+             effective_from=t0, effective_until=t0 + timedelta(days=5),
+             created_by=user.id),
+        _PCR(provider=provb, model_or_service="m", usage_type="image_generation",
+             unit="images", unit_cost=Decimal("0.11"), currency="USD",
+             effective_from=t0, effective_until=t0 + timedelta(days=5),
+             created_by=user.id),   # racy duplicate
+    ])
+    await db.flush()
+    ok2 = await pricing_svc.create_cost_rate(
+        db, actor=_actor(user), provider=provb, model_or_service="m",
+        usage_type="image_generation", currency="USD", unit_cost=Decimal("0.09"),
+        effective_from=t0 - timedelta(days=5), effective_until=t0)
+    assert ok2.id is not None                      # half-open adjacency allowed
+    # … but one that CROSSES t0 overlaps (against duplicate rows: still a
+    # clean 409, never MultipleResultsFound)
+    with pytest.raises(AppError) as e8:
+        await pricing_svc.create_cost_rate(
+            db, actor=_actor(user), provider=provb, model_or_service="m",
+            usage_type="image_generation", currency="USD", unit_cost=Decimal("0.09"),
+            effective_from=t0 - timedelta(days=5),
+            effective_until=t0 + timedelta(seconds=1))
+    assert e8.value.code == "COST_RATE_OVERLAP" and e8.value.status_code == 409
