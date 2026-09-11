@@ -4977,3 +4977,94 @@ async def test_close_two_segment_proration_boundaries(db):
     assert abs(total - 119999) <= 1500, (
         f"four-segment walk total drifted: {total} "
         f"({[(ln.line_type, ln.amount_minor) for ln in lines]})")
+
+
+@pytest.mark.asyncio
+async def test_month_end_anchor_restores_after_february(db):
+    """R361 (pins R113[L5], previously untested): a Jan-31 subscription rolls
+    Jan-31 → Feb-28 (clamped) → the MARCH close must restore the 31st (the
+    anchor day is created_at's, for the sub's lifetime) — the un-anchored
+    mutants leave every later period on the 28th forever, silently shortening
+    billing months; the GtE/LtE mutants mis-fire the restore in months that
+    exactly hold the anchor. Also: a mid-month (15th) anchor never triggers
+    the clamp path at all. (The > boundary at anchor == day is equivalent:
+    the restore replaces the day with itself — verified manually.)"""
+    from datetime import datetime as dt
+
+    user = await _mk_user(db)
+    a = _actor(user)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    ka = await _seed_plan(db, user, f"r361-{str(ULID()).lower()[:8]}",
+                          amount=1000, included=0, seat_price=None)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key=ka, interval="month", seats=0,
+        provider="manual", actor=a)
+    # pin the sub's lifetime anchor: created Jan 31
+    sub.created_at = dt(2026, 1, 31, 12, 0, tzinfo=UTC)
+    p1 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id,
+                BillingPeriod.status == "open"))
+    ).scalar_one()
+    # current window: Jan 31 → Feb 28 (the natural add_interval clamp)
+    p1.period_start = dt(2026, 1, 31, 12, 0, tzinfo=UTC)
+    p1.period_end = dt(2026, 2, 28, 12, 0, tzinfo=UTC)
+    sub.current_period_start = p1.period_start
+    sub.current_period_end = p1.period_end
+    await db.flush()
+
+    inv = await billing_svc.close_period_and_invoice(db, p1.id)
+    assert inv is not None
+    await db.refresh(sub)
+    # the rollover window must restore the 31st: Feb 28 → Mar 31
+    assert sub.current_period_start == dt(2026, 2, 28, 12, 0, tzinfo=UTC)
+    assert sub.current_period_end == dt(2026, 3, 31, 12, 0, tzinfo=UTC), (
+        f"anchor day must restore to the 31st, got {sub.current_period_end}")
+
+    # a mid-month anchor is untouched: created the 15th, window on the 15th
+    tenant2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub2, _ = await billing_svc.start_subscription(
+        db, tenant2, plan_key=ka, interval="month", seats=0,
+        provider="manual", actor=a)
+    sub2.created_at = dt(2026, 1, 15, 9, 0, tzinfo=UTC)
+    p2 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub2.id,
+                BillingPeriod.status == "open"))
+    ).scalar_one()
+    p2.period_start = dt(2026, 1, 15, 9, 0, tzinfo=UTC)
+    p2.period_end = dt(2026, 2, 15, 9, 0, tzinfo=UTC)
+    sub2.current_period_start = p2.period_start
+    sub2.current_period_end = p2.period_end
+    await db.flush()
+    inv2 = await billing_svc.close_period_and_invoice(db, p2.id)
+    assert inv2 is not None
+    await db.refresh(sub2)
+    assert sub2.current_period_end == dt(2026, 3, 15, 9, 0, tzinfo=UTC)
+
+    # anchor 30 rolling into a month WITH 30 days but from a 28-end (Feb):
+    # restore fires exactly when anchor <= max_day (the LtE→Lt mutant skips
+    # April's 30th)
+    tenant3 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub3, _ = await billing_svc.start_subscription(
+        db, tenant3, plan_key=ka, interval="month", seats=0,
+        provider="manual", actor=a)
+    sub3.created_at = dt(2026, 1, 30, 8, 0, tzinfo=UTC)
+    p3 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub3.id,
+                BillingPeriod.status == "open"))
+    ).scalar_one()
+    p3.period_start = dt(2026, 2, 28, 8, 0, tzinfo=UTC)   # clamped Feb window
+    p3.period_end = dt(2026, 3, 28, 8, 0, tzinfo=UTC)
+    sub3.current_period_start = p3.period_start
+    sub3.current_period_end = p3.period_end
+    await db.flush()
+    inv3 = await billing_svc.close_period_and_invoice(db, p3.id)
+    assert inv3 is not None
+    await db.refresh(sub3)
+    assert sub3.current_period_end == dt(2026, 4, 30, 8, 0, tzinfo=UTC), (
+        f"anchor 30 must restore in April (30 == max_day), got {sub3.current_period_end}")
