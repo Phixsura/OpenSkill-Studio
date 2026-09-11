@@ -1384,10 +1384,10 @@ async def test_set_override_is_tenant_scoped_and_status_codes(db):
     await plan_svc.set_override(db, a.id, "max_organizations", value=4,
                                 enforcement="hard", expires_at=None,
                                 reason="A2", actor=_actor(user))
-    from app.controlplane.models.plan import TenantEntitlementOverride as _TEO
+    from app.controlplane.models.plan import TenantEntitlementOverride as TEOverride
 
     a_rows = (
-        await db.execute(select(_TEO).where(_TEO.tenant_id == a.id))
+        await db.execute(select(TEOverride).where(TEOverride.tenant_id == a.id))
     ).scalars().all()
     a_by_key = {r.key: r.value.get("v") for r in a_rows}
     assert a_by_key == {"max_organizations": 4, "max_storage_gb": "50"}
@@ -1428,7 +1428,7 @@ async def test_concurrent_set_override_same_key_single_row():
     a flipped filter there finds nothing and 500s."""
     import asyncio
 
-    from app.controlplane.models.plan import TenantEntitlementOverride as _TEO
+    from app.controlplane.models.plan import TenantEntitlementOverride as TEOverride
     from app.controlplane.services import plans as plan_svc
     from app.core.database import AsyncSessionLocal
 
@@ -1458,8 +1458,8 @@ async def test_concurrent_set_override_same_key_single_row():
     async with AsyncSessionLocal() as s:
         rows = (
             await s.execute(
-                select(_TEO).where(_TEO.tenant_id == tid,
-                                   _TEO.key == "max_organizations"))
+                select(TEOverride).where(TEOverride.tenant_id == tid,
+                                   TEOverride.key == "max_organizations"))
         ).scalars().all()
         assert len(rows) == 1
         assert rows[0].value.get("v") in (1, 2)

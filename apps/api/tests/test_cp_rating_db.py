@@ -2102,14 +2102,14 @@ async def test_fx_and_supersede_boundaries(db):
     # cost-rate bounded adjacency + duplicate-row determinism + 409 status:
     # existing [t0, t0+5d); a new window ENDING exactly at t0 is legal …
     provb = f"adj-{str(ULID()).lower()[:8]}"
-    from app.controlplane.models.pricing import ProviderCostRate as _PCR
+    from app.controlplane.models.pricing import ProviderCostRate as PCRate
 
     db.add_all([
-        _PCR(provider=provb, model_or_service="m", usage_type="image_generation",
+        PCRate(provider=provb, model_or_service="m", usage_type="image_generation",
              unit="images", unit_cost=Decimal("0.10"), currency="USD",
              effective_from=t0, effective_until=t0 + timedelta(days=5),
              created_by=user.id),
-        _PCR(provider=provb, model_or_service="m", usage_type="image_generation",
+        PCRate(provider=provb, model_or_service="m", usage_type="image_generation",
              unit="images", unit_cost=Decimal("0.11"), currency="USD",
              effective_from=t0, effective_until=t0 + timedelta(days=5),
              created_by=user.id),   # racy duplicate
