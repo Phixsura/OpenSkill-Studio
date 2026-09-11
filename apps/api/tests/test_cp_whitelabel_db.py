@@ -1235,6 +1235,13 @@ async def test_provision_run_resume_is_step_idempotent(db, monkeypatch):
             select(_f.count(TenantAccount.id)).where(TenantAccount.slug == slug))
     ).scalar_one()
     assert n_tenants == 1                             # resume did not double-create
+    from app.models.organization import Organization as _Org355
+
+    n_orgs = (
+        await db.execute(
+            select(_f.count(_Org355.id)).where(_Org355.tenant_id == first_tenant_id))
+    ).scalar_one()
+    assert n_orgs == 1                                # …nor a second org (R355)
 
 
 @pytest.mark.asyncio
@@ -1327,3 +1334,204 @@ async def test_branding_explicit_null_clears_to_empty_not_jsonb_null(db):
     ctx = await domain_svc.resolve_site_context(db, domain.hostname)
     assert ctx["branding"]["theme_tokens"] == {}
     assert ctx["branding"]["legal_links"] == []
+
+
+@pytest.mark.asyncio
+async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
+    """R355 (mutation survivors): (1) replaying a COMPLETED run never
+    re-enqueues (only FAILED does — R101[H7]'s other side); (2) a partner may
+    use a GLOBAL blueprint (the Or-mutant 404s every global blueprint for
+    partner callers); (3) executing a nonexistent run id is a silent no-op,
+    never a crash; (4) pack version "latest" installs as None while a pinned
+    version passes through VERBATIM — for BOTH the skill and workflow loops;
+    (5) the workflow loop tolerates ALREADY_INSTALLED on resume like the
+    skill loop; (6) a column-max (100-char) requested slug lands within the 100-char org
+    slug column; (7) resume reuses the already-created ORG (exactly one).
+    Documented-equivalent mutants: the [:100]/[:101] slug truncations
+    (identity — the API caps slugs at 100), the collision-retry internals
+    (unique index + ULID randomness), the entitlement-overrides depth limit
+    (shadowed by per-key validation into the same BLUEPRINT_INVALID),
+    error-list/audit truncation cosmetics, and the pack-unavailable 422
+    statuses (contained by the run's failure handler — never cross the API)."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.models.organization import Organization
+    from app.services import installation as install_mod
+    from app.services import workflow_installation as winstall_mod
+
+    user = await _mk_user(db)
+    partner_user = await _mk_user(db)
+    from app.controlplane.models.partner import Partner
+
+    partner = Partner(name=f"P {ULID()}", slug=f"p-{str(ULID()).lower()[:10]}",
+                      currency="USD", status="active", partner_type="reseller",
+                      created_by=partner_user.id)
+    db.add(partner)
+    await db.flush()
+
+    installed: list = []
+
+    async def fake_skill_install(self, org_id, pack_id, version, installed_by):
+        if pack_id.endswith("AAA"):
+            raise AppError("ALREADY_INSTALLED", "dup", 409)
+        installed.append(("skill", pack_id, version, org_id))
+
+    async def fake_wf_install(self, org_id, pack_id, version, installed_by):
+        if pack_id.endswith("AAA"):
+            raise AppError("ALREADY_INSTALLED", "dup", 409)
+        installed.append(("workflow", pack_id, version))
+
+    monkeypatch.setattr(install_mod.InstallationService, "install_pack", fake_skill_install)
+    monkeypatch.setattr(winstall_mod.WorkflowInstallationService, "install", fake_wf_install)
+
+    # (2)+(4)+(5): GLOBAL blueprint used BY A PARTNER, latest + pinned +
+    # already-installed refs in both loops
+    bp = TenantBlueprint(
+        name=f"R355 {ULID()}",
+        config=provision_svc.validate_blueprint_config({
+            "skill_packs": [
+                {"pack_id": "01JPACKAAAAAAAAAAAAAAAAAAA"},                    # dup-tolerated
+                {"pack_id": "01JPACKBBBBBBBBBBBBBBBBBBB", "version": "1.2.3"},
+                {"pack_id": "01JPACKCCCCCCCCCCCCCCCCCCC", "version": "latest"},
+            ],
+            "workflow_packs": [
+                {"pack_id": "01JWPACKAAAAAAAAAAAAAAAAAA"[:26].ljust(26, "A")},  # dup-tolerated
+                {"pack_id": "01JWPACKBBBBBBBBBBBBBBBBBB"[:26].ljust(26, "B"), "version": "2.0.0"},
+            ],
+        }),
+        created_by=user.id)
+    db.add(bp)
+    await db.flush()
+
+    long_slug = ("r355-" + "x" * 100)[:100]              # (6) column-max slug
+    run = await provision_svc.create_provision_run(
+        db, blueprint_id=bp.id, name="R355 Co", slug=long_slug,
+        idempotency_key=f"r355-{ULID()}",
+        partner_id=partner.id,                            # partner ON a global bp
+        actor=_actor(partner_user))
+    await provision_svc.execute_provision_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "completed", run.steps
+
+    # (4): version pass-through semantics
+    by_pack = {e[1]: e[2] for e in installed if e[0] == "skill"}
+    assert by_pack["01JPACKBBBBBBBBBBBBBBBBBBB"] == "1.2.3"
+    assert by_pack["01JPACKCCCCCCCCCCCCCCCCCCC"] is None            # latest → None
+    assert ("workflow", "01JWPACKBBBBBBBBBBBBBBBBBB"[:26].ljust(26, "B"), "2.0.0") in installed
+
+    # (6)+(7): org slug bounded; exactly one org for this run
+    orgs = (
+        await db.execute(select(Organization).where(
+            Organization.tenant_id == run.tenant_id))
+    ).scalars().all()
+    assert len(orgs) == 1 and len(orgs[0].slug) <= 100
+
+    # (1): replaying the COMPLETED run returns it WITHOUT re-enqueueing
+    pending_before = (
+        await db.execute(select(OutboxMessage).where(
+            OutboxMessage.topic == "provision.run",
+            OutboxMessage.status == "pending"))
+    ).scalars().all()
+    replay = await provision_svc.create_provision_run(
+        db, blueprint_id=bp.id, name="R355 Co", slug=long_slug,
+        idempotency_key=run.idempotency_key, partner_id=partner.id,
+        actor=_actor(partner_user))
+    assert replay.id == run.id
+    pending_after = (
+        await db.execute(select(OutboxMessage).where(
+            OutboxMessage.topic == "provision.run",
+            OutboxMessage.status == "pending"))
+    ).scalars().all()
+    assert len(pending_after) == len(pending_before)     # completed: no enqueue
+
+    # (3): nonexistent run id → silent no-op
+    await provision_svc.execute_provision_run(db, str(ULID()))
+
+    # the NON-collision path uses the requested slug VERBATIM
+    assert orgs[0].slug == long_slug
+
+    # config-validation boundaries: feature_settings nests to depth 4, one
+    # deeper is a 422; a malformed config is a 422; a partner-blueprint spoof
+    # is a uniform 404 (statuses pinned)
+    deep_ok = {"a": {"b": {"c": "d"}}}                    # 4 levels incl. root
+    provision_svc.validate_blueprint_config({"feature_settings": deep_ok})
+    with pytest.raises(AppError) as e_deep:
+        provision_svc.validate_blueprint_config(
+            {"feature_settings": {"a": {"b": {"c": {"d": "e"}}}}})
+    assert e_deep.value.status_code == 422
+    with pytest.raises(AppError) as e_bad:
+        provision_svc.validate_blueprint_config({"skill_packs": [{"nope": 1}]})
+    assert e_bad.value.status_code == 422
+    other_partner = Partner(name=f"P2 {ULID()}", slug=f"p2-{str(ULID()).lower()[:10]}",
+                            currency="USD", status="active", partner_type="reseller",
+                            created_by=partner_user.id)
+    db.add(other_partner)
+    await db.flush()
+    scoped_bp = TenantBlueprint(
+        name=f"R355s {ULID()}", partner_id=partner.id,
+        config=provision_svc.validate_blueprint_config({}), created_by=user.id)
+    db.add(scoped_bp)
+    await db.flush()
+    with pytest.raises(AppError) as e_404:
+        await provision_svc.create_provision_run(
+            db, blueprint_id=scoped_bp.id, name="Spoof", slug=f"sp-{str(ULID()).lower()[:8]}",
+            idempotency_key=f"sp-{ULID()}", partner_id=other_partner.id,
+            actor=_actor(partner_user))
+    assert e_404.value.status_code == 404
+
+    # a pack that raises a non-dup AppError fails the run with a 422-coded
+    # BLUEPRINT_PACK_UNAVAILABLE detail (status pinned via the raise class)
+    async def corrupt_install(self, org_id, pack_id, version, installed_by):
+        raise AppError("PACK_CORRUPT", "checksum", 422)
+
+    monkeypatch.setattr(install_mod.InstallationService, "install_pack", corrupt_install)
+    bp2 = TenantBlueprint(
+        name=f"R355c {ULID()}",
+        config=provision_svc.validate_blueprint_config(
+            {"skill_packs": [{"pack_id": "01JPACKDDDDDDDDDDDDDDDDDDD"}]}),
+        created_by=user.id)
+    db.add(bp2)
+    await db.flush()
+    run2 = await provision_svc.create_provision_run(
+        db, blueprint_id=bp2.id, name="Corrupt", slug=f"co-{str(ULID()).lower()[:8]}",
+        idempotency_key=f"co-{ULID()}", partner_id=None, actor=_actor(user))
+    await provision_svc.execute_provision_run(db, run2.id)
+    await db.refresh(run2)
+    assert run2.status == "failed" and "not installable" in (run2.error or "")
+
+    # heal the pack step and RESUME with the real step ledger intact: the
+    # install must run against the RECOVERED org id (create_org step payload),
+    # never a None from a flipped step matcher
+    monkeypatch.setattr(install_mod.InstallationService, "install_pack",
+                        fake_skill_install)
+    installed.clear()
+    await provision_svc.execute_provision_run(db, run2.id)
+    await db.refresh(run2)
+    assert run2.status == "completed"
+    run2_org = next(st.get("org_id") for st in run2.steps
+                    if st.get("step") == "create_org" and st.get("status") == "done")
+    assert installed and installed[0][3] == run2_org and run2_org is not None
+
+    # R84[M5]: a FAILED snapshot_config residue (no 'config' key) plus a done
+    # one — resume must match ONLY the done+config entry, never KeyError-wedge
+    run3 = await provision_svc.create_provision_run(
+        db, blueprint_id=bp2.id, name="Craft", slug=f"cr-{str(ULID()).lower()[:8]}",
+        idempotency_key=f"cr-{ULID()}", partner_id=None, actor=_actor(user))
+    run3.status = "failed"
+    run3.steps = [
+        {"step": "snapshot_config", "status": "failed"},
+        {"step": "snapshot_config", "status": "done",
+         "config": provision_svc.validate_blueprint_config({})},
+    ]
+    await db.flush()
+    await provision_svc.execute_provision_run(db, run3.id)   # no KeyError wedge
+    await db.refresh(run3)
+    assert run3.status == "completed"
+
+    # inactive blueprint → 404 with status
+    bp2.is_active = False
+    await db.flush()
+    with pytest.raises(AppError) as e_inact:
+        await provision_svc.create_provision_run(
+            db, blueprint_id=bp2.id, name="Inact", slug=f"in-{str(ULID()).lower()[:8]}",
+            idempotency_key=f"in-{ULID()}", partner_id=None, actor=_actor(user))
+    assert e_inact.value.status_code == 404
