@@ -4169,3 +4169,246 @@ async def test_gap_window_change_prices_seats_off_own_plan(db):
     # The mutant (other plan's dims: old=(4-0)×300 == new) nets ~0 — assert
     # the own-plan magnitude band.
     assert 150 <= res["proration"]["seat_proration_minor"] <= 200, res["proration"]
+
+
+@pytest.mark.asyncio
+async def test_payment_finalize_void_boundary_family(db):
+    """R349 (mutation survivors): the invoice money-motion edges —
+    finalize: double-finalize 409; a ZERO-due invoice auto-pays on finalize.
+    record_payment: paying a draft/void invoice 409; duplicate
+    (external_ref, method) 409 while the same ref under ANOTHER method is
+    fine; a PARTIAL payment keeps the invoice open; completing it flips paid
+    and reactivates a PAST_DUE tenant; require_mutable is a 409.
+    void: voiding a PAID invoice 409 (credit note instead); double-void 409;
+    a partly-paid open invoice's collected cash returns to the credit
+    balance on void (R123[H4])."""
+    from app.controlplane.models.credit import TenantCreditBalance
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+
+    def _inv(due):
+        return Invoice(tenant_id=tenant.id, currency="USD", status="draft",
+                       subtotal_minor=due, total_minor=due, amount_due_minor=due)
+
+    # zero-due draft → finalize auto-pays; second finalize 409
+    z = _inv(0)
+    db.add(z)
+    await db.flush()
+    z = await billing_svc.finalize_invoice(db, z, actor=_actor(user))
+    assert z.status == "paid" and z.paid_at is not None and z.number
+    with pytest.raises(AppError) as e_fin:
+        await billing_svc.finalize_invoice(db, z, actor=_actor(user))
+    assert e_fin.value.code == "INVOICE_NOT_DRAFT" and e_fin.value.status_code == 409
+
+    # payments: draft invoice not payable; require_mutable 409
+    inv = _inv(10000)
+    db.add(inv)
+    await db.flush()
+    with pytest.raises(AppError) as e_pay0:
+        await billing_svc.record_payment(
+            db, inv, amount_minor=1000, method="manual_bank_transfer",
+            external_ref=None, reference_note=None, received_at=None,
+            actor=_actor(user))
+    assert e_pay0.value.code == "INVOICE_NOT_OPEN" and e_pay0.value.status_code == 409
+    inv = await billing_svc.finalize_invoice(db, inv, actor=_actor(user))
+    assert inv.status == "open"
+
+    # partial payment keeps it open
+    await billing_svc.record_payment(
+        db, inv, amount_minor=4000, method="manual_bank_transfer",
+        external_ref="WIRE-1", reference_note=None, received_at=None,
+        actor=_actor(user))
+    await db.refresh(inv)
+    assert inv.status == "open" and inv.paid_at is None
+
+    # duplicate (ref, method) 409; same ref under another method is FINE
+    with pytest.raises(AppError) as e_dup:
+        await billing_svc.record_payment(
+            db, inv, amount_minor=1000, method="manual_bank_transfer",
+            external_ref="WIRE-1", reference_note=None, received_at=None,
+            actor=_actor(user))
+    assert e_dup.value.code == "PAYMENT_INVALID" and e_dup.value.status_code == 409
+    await billing_svc.record_payment(
+        db, inv, amount_minor=1000, method="other",
+        external_ref="WIRE-1", reference_note=None, received_at=None,
+        actor=_actor(user))
+
+    # completing payment flips paid AND reactivates a past_due tenant
+    from app.controlplane.services.tenants import transition_status
+
+    await transition_status(db, tenant, TenantStatus.PAST_DUE,
+                            actor=_actor(user), reason="dunning")
+    await billing_svc.record_payment(
+        db, inv, amount_minor=5000, method="manual_bank_transfer",
+        external_ref="WIRE-2", reference_note=None, received_at=None,
+        actor=_actor(user))
+    await db.refresh(inv)
+    assert inv.status == "paid" and inv.paid_at is not None
+    await db.refresh(tenant)
+    assert tenant.status == TenantStatus.ACTIVE
+
+    # voiding the PAID invoice → 409 (credit note territory)
+    with pytest.raises(AppError) as e_vp:
+        await billing_svc.void_invoice(db, inv, reason="nope", actor=_actor(user))
+    assert e_vp.value.status_code == 409
+
+    # a partly-paid OPEN invoice: void returns collected cash to credit
+    inv2 = _inv(8000)
+    db.add(inv2)
+    await db.flush()
+    inv2 = await billing_svc.finalize_invoice(db, inv2, actor=_actor(user))
+    await billing_svc.record_payment(
+        db, inv2, amount_minor=3000, method="manual_bank_transfer",
+        external_ref="WIRE-3", reference_note=None, received_at=None,
+        actor=_actor(user))
+    bal_before = (
+        await db.execute(
+            select(TenantCreditBalance.balance_minor).where(
+                TenantCreditBalance.tenant_id == tenant.id,
+                TenantCreditBalance.currency == "USD"))
+    ).scalar_one_or_none() or 0
+    inv2 = await billing_svc.void_invoice(db, inv2, reason="mistake", actor=_actor(user))
+    assert inv2.status == "void"
+    bal_after = (
+        await db.execute(
+            select(TenantCreditBalance.balance_minor).where(
+                TenantCreditBalance.tenant_id == tenant.id,
+                TenantCreditBalance.currency == "USD"))
+    ).scalar_one()
+    assert bal_after - bal_before == 3000        # collected cash → credit
+    with pytest.raises(AppError) as e_vv:         # double void 409
+        await billing_svc.void_invoice(db, inv2, reason="again", actor=_actor(user))
+    assert e_vv.value.status_code == 409
+
+    # invoice numbers are CONSECUTIVE (no sequence skips), require_mutable is
+    # a 409, and a payment recorded without received_at gets stamped now
+    # (never NULL). The duplicate-payment pre-check limit(1) mutant is
+    # constraint-equivalent (uq_cp_payment_external) — documented.
+    a, b = _inv(100), _inv(100)
+    db.add_all([a, b])
+    await db.flush()
+    a = await billing_svc.finalize_invoice(db, a, actor=_actor(user))
+    b = await billing_svc.finalize_invoice(db, b, actor=_actor(user))
+    assert int(b.number.rsplit("-", 1)[1]) - int(a.number.rsplit("-", 1)[1]) == 1
+    with pytest.raises(AppError) as e_mut:
+        billing_svc.require_mutable(a)
+    assert e_mut.value.code == "INVOICE_FINALIZED" and e_mut.value.status_code == 409
+    pay = await billing_svc.record_payment(
+        db, a, amount_minor=50, method="other", external_ref=None,
+        reference_note=None, received_at=None, actor=_actor(user))
+    assert pay.received_at is not None
+
+
+@pytest.mark.asyncio
+async def test_void_scoping_usage_purchases_and_later_locked_decoys(db):
+    """R349b (void_invoice mutation survivors): void's write-set is scoped to
+    THE voided invoice — (1) another invoice's usage lines stay invoiced;
+    (2) a purchase attached to ANOTHER invoice keeps its invoice link;
+    (3) the later-locked rewind guard looks at THIS subscription's periods —
+    a decoy sub's later locked period must not suppress the rewind, and this
+    sub's own later locked period must. (The credit-refund gate's falsy
+    short-circuits and the deep fold-restore internals — watermark ordering,
+    axis Nones — are documented deferrals: they encode the R129/133/135
+    stacked-change semantics and need those rounds' repro shapes.)"""
+    from datetime import timedelta as _td
+    from decimal import Decimal
+
+    from app.controlplane.models.marketplace import MarketplacePurchase
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+
+    user = await _mk_user(db)
+    a = _actor(user)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=a)
+    # decoy tenant+sub with a later LOCKED period
+    t2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    sub2, _ = await billing_svc.start_subscription(
+        db, t2, plan_key="school", interval="month", seats=0,
+        provider="manual", actor=a)
+    inv2 = await _force_close(db, sub2)          # decoy: closed+invoiced period
+
+    def _usage_line(inv, tenant_id):
+        eid = str(ULID())
+        db.add(UsageEvent(id=eid, tenant_id=tenant_id, org_id=str(ULID()),
+                          usage_type="image_generation", quantity=1, unit="images",
+                          occurred_at=billing_svc._now(), source="manual"))
+        line = InvoiceLine(invoice_id=inv.id, line_type="usage", description="u",
+                           quantity=1, unit_amount_minor=100, amount_minor=100)
+        db.add(line)
+        return eid, line
+
+    inv = await _force_close(db, sub)
+    assert inv is not None
+    eid1, line1 = _usage_line(inv, tenant.id)
+    eid2, line2 = _usage_line(inv2, t2.id)
+    await db.flush()
+
+    def _rated(eid, tenant_id, line):
+        return RatedUsage(usage_event_id=eid, tenant_id=tenant_id,
+                          org_id=str(ULID()), usage_type="image_generation",
+                          quantity=1, cost_rate_snapshot={}, internal_cost_minor=0,
+                          internal_cost_currency="USD", sell_rate_snapshot={},
+                          billable_amount_minor=100, billable_amount_exact=Decimal(100),
+                          billable_currency="USD", status="invoiced",
+                          rated_at=billing_svc._now(), invoice_line_id=line.id)
+
+    r1, r2 = _rated(eid1, tenant.id, line1), _rated(eid2, t2.id, line2)
+    db.add_all([r1, r2])
+    # a purchase attached to the OTHER invoice
+    from app.controlplane.models.marketplace import MarketplaceListing
+
+    lst = MarketplaceListing(product_type="skill_pack", product_id=str(ULID()),
+                             seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
+                             offer_type="paid", price_minor=100, currency="USD",
+                             platform_commission_pct=Decimal("20"), status="active",
+                             created_by=user.id)
+    db.add(lst)
+    await db.flush()
+    other_purchase = MarketplacePurchase(
+        listing_id=lst.id, buyer_tenant_id=t2.id, buyer_org_id=str(ULID()),
+        purchaser_user_id=user.id, status="paid", amount_minor=100,
+        currency="USD", platform_fee_minor=20, seller_share_minor=80,
+        partner_share_minor=0, economics_snapshot={}, invoice_id=inv2.id,
+        payment_method="invoice")
+    db.add(other_purchase)
+    await db.flush()
+
+    voided = await billing_svc.void_invoice(db, inv, reason="scope", actor=a)
+    assert voided.status == "void"
+    await db.refresh(r1)
+    await db.refresh(r2)
+    assert r1.status == "rated" and r1.invoice_line_id is None      # unbound
+    assert r2.status == "invoiced" and r2.invoice_line_id == line2.id  # untouched
+    await db.refresh(other_purchase)
+    assert other_purchase.invoice_id == inv2.id                     # link kept
+
+    # rewind DID happen for this sub (decoy's later period didn't block it):
+    # the voided invoice's period is open again
+    period = await db.get(BillingPeriod, voided.billing_period_id)
+    assert period.status == "open"
+
+    # now give THIS sub a later locked period → voiding the OLDER invoice
+    # must NOT rewind (its period stays closed/invoiced)
+    period.status = "invoiced"
+    sub.current_period_start = sub.current_period_end
+    sub.current_period_end = sub.current_period_end + _td(days=30)
+    db.add(BillingPeriod(tenant_id=tenant.id, subscription_id=sub.id,
+                         status="open",
+                         period_start=sub.current_period_start,
+                         period_end=sub.current_period_end))
+    await db.flush()
+    inv_b = Invoice(tenant_id=tenant.id, currency="USD", status="open",
+                    subtotal_minor=0, total_minor=0, amount_due_minor=0,
+                    billing_period_id=period.id, finalized_at=billing_svc._now())
+    db.add(inv_b)
+    later = await _force_close(db, sub)          # later period → closed/invoiced
+    assert later is not None
+    await db.flush()
+    voided_b = await billing_svc.void_invoice(db, inv_b, reason="older", actor=a)
+    assert voided_b.status == "void"
+    await db.refresh(period)
+    assert period.status == "invoiced"           # rewind suppressed (own later lock)
