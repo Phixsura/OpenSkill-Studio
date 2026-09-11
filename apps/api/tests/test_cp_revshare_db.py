@@ -1467,3 +1467,6 @@ async def test_rule_tiebreak_typed_beats_all_then_version(db):
     entry2 = await revshare_svc.accrue_for_invoice(db, inv2.id)
     snap2 = entry2.rule_snapshot or {}
     assert str(snap2.get("rate", "")).startswith("20"), snap2   # v2 beats v1
+    # (an IDENTICAL (spec, type, version) key pair is constraint-impossible —
+    # uq_cp_revshare_rule_version — so the best-key >= mutant is a
+    # constraint-equivalent, verified empirically: the second row 23505s.)
