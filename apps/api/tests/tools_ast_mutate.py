@@ -58,7 +58,7 @@ def apply_site(kind, node, idx, repl):
     if kind == "const":
         old = node.value; node.value = repl; return (lambda: setattr(node, "value", old))
 
-def run(path, funcs, test_cmd, limit=None, timeout=300):
+def run(path, funcs, test_cmd, limit=None, timeout=300, only_descs=None):
     p = pathlib.Path(path)
     # Corruption guard: only mutate a git-clean file (a killed prior run can
     # leave an ast.unparse'd copy on disk — baking that in as "original"
@@ -73,6 +73,8 @@ def run(path, funcs, test_cmd, limit=None, timeout=300):
     tree = ast.parse(original)
     sites = enumerate_mutants(tree, set(funcs))
     if limit: sites = sites[:limit]
+    if only_descs is not None:
+        sites = [x for x in sites if x[4] in only_descs]
     # a RED baseline makes every mutant a spurious kill — verify first
     base = subprocess.run(test_cmd, capture_output=True, timeout=timeout)
     if base.returncode != 0:
@@ -111,7 +113,7 @@ if __name__ == "__main__":
         cfg = json.load(_cfgf)
     all_surv = {}
     for t in cfg:
-        s = run(t["path"], t["funcs"], t["cmd"], t.get("limit"), t.get("timeout", 300))
+        s = run(t["path"], t["funcs"], t["cmd"], t.get("limit"), t.get("timeout", 300), set(t["only_descs"]) if t.get("only_descs") else None)
         if s: all_surv[f"{t['path']}:{','.join(t['funcs'])}"] = s
     print("\n═══ SURVIVORS ═══")
     print(json.dumps(all_surv, indent=1))

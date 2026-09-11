@@ -4846,3 +4846,134 @@ async def test_fold_restore_watermark_roundtrip_and_legacy_branches(db):
     await db.refresh(sub4)
     assert sub4.plan_version_id == third4            # both guards SKIPPED
     assert sub4.seat_quantity == 11
+
+
+@pytest.mark.asyncio
+async def test_close_credit_available_respects_holds_and_due_date(db):
+    """R360 (close_period survivors): the close's credit auto-apply uses
+    AVAILABLE credit (balance − reserved) — the Sub→Add mutant spends a live
+    workflow hold on the invoice (balance 1000, hold 600, invoice 800: apply
+    400, never 800). Also pins due_at = issued + 14d (the −14d mutant issues
+    invoices already two weeks overdue)."""
+    from datetime import timedelta
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    ka = await _seed_plan(db, user, f"r360-{str(ULID()).lower()[:8]}",
+                          amount=800, included=0, seat_price=None)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key=ka, interval="month", seats=0,
+        provider="manual", actor=a)
+    await credit_svc.top_up(db, tenant.id, "USD", 1000, actor=a)
+    hold = await credit_svc.reserve(db, tenant.id, "USD", 600,
+                                    reference_type="workflow_run",
+                                    reference_id=str(ULID()))
+    inv = await _force_close(db, sub)
+    assert inv is not None
+    assert inv.credit_applied_minor == 400, (
+        "close must apply only AVAILABLE credit (1000 − 600 hold), "
+        f"got {inv.credit_applied_minor}")
+    assert inv.amount_due_minor == 400
+    # the hold is untouched — settling it later still succeeds
+    settled = await credit_svc.settle(db, hold.id, 600)
+    assert settled.status == "settled"
+    # due date: 14 days AFTER issue
+    assert inv.due_at - inv.issued_at >= timedelta(days=13)
+    assert inv.due_at - inv.issued_at <= timedelta(days=15)
+
+
+@pytest.mark.asyncio
+async def test_close_two_segment_proration_boundaries(db):
+    """R360: two stacked IMMEDIATE changes in one period — the segment walk's
+    seg_end must be the NEXT change's effective_at (the idx+1→idx−1 mutant
+    walks backwards and double-charges the first segment). Pinned via exact
+    plan-fee arithmetic across three segments of a backdated period."""
+    from datetime import timedelta
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+    a = _actor(user)
+    k1 = await _seed_plan(db, user, f"r360a-{str(ULID()).lower()[:8]}",
+                          amount=30000, included=0, seat_price=10000)
+    k2 = await _seed_plan(db, user, f"r360b-{str(ULID()).lower()[:8]}",
+                          amount=60000, included=0, seat_price=20000)
+    k3 = await _seed_plan(db, user, f"r360c-{str(ULID()).lower()[:8]}",
+                          amount=90000, included=0, seat_price=30000)
+    # two live students → billable seats = 2 on every segment
+    from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole, OrgStatus
+
+    org = Organization(name=f"Seg {ULID()}", slug=f"seg-{str(ULID()).lower()}",
+                       status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+    db.add(org)
+    await db.flush()
+    for _ in range(2):
+        stu = await _mk_user(db)
+        db.add(OrgMember(org_id=org.id, user_id=stu.id,
+                         role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+    await db.flush()
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key=k1, interval="month", seats=0,
+        provider="manual", actor=a)
+    # backdate: period started 30d ago, ends now
+    p1 = (
+        await db.execute(
+            select(BillingPeriod).where(
+                BillingPeriod.subscription_id == sub.id,
+                BillingPeriod.status == "open"))
+    ).scalar_one()
+    now = billing_svc._now()
+    p1.period_start = now - timedelta(days=30)
+    p1.period_end = now + timedelta(seconds=2)
+    sub.current_period_start = p1.period_start
+    sub.current_period_end = p1.period_end
+    await db.flush()
+    # two immediate upgrades at ~10d and ~20d (created now; their
+    # effective_at is now — so instead craft the CHANGES directly)
+    from app.controlplane.models.billing import SubscriptionChange
+    from app.controlplane.models.plan import PlanVersion, ProductPlan
+
+    async def _version_of(key):
+        return (
+            await db.execute(
+                select(PlanVersion.id)
+                .join(ProductPlan, ProductPlan.id == PlanVersion.plan_id)
+                .where(ProductPlan.key == key, PlanVersion.status == "active"))
+        ).scalar_one()
+
+    k4 = await _seed_plan(db, user, f"r360d-{str(ULID()).lower()[:8]}",
+                          amount=120000, included=0, seat_price=40000)
+    v1, v2, v3, v4 = [await _version_of(k) for k in (k1, k2, k3, k4)]
+    # THREE stacked changes (a middle segment must exist: with only two,
+    # idx−1 == idx+1 by Python negative indexing and the mutant is coincid-
+    # entally equivalent): 7.5d each @300/600/900/1200
+    db.add_all([
+        SubscriptionChange(
+            subscription_id=sub.id, change_type="plan_change",
+            from_plan_version_id=v1, to_plan_version_id=v2,
+            effective_at=p1.period_start + timedelta(days=7, hours=12),
+            proration_mode="immediate", created_by=user.id),
+        SubscriptionChange(
+            subscription_id=sub.id, change_type="plan_change",
+            from_plan_version_id=v2, to_plan_version_id=v3,
+            effective_at=p1.period_start + timedelta(days=15),
+            proration_mode="immediate", created_by=user.id),
+        SubscriptionChange(
+            subscription_id=sub.id, change_type="plan_change",
+            from_plan_version_id=v3, to_plan_version_id=v4,
+            effective_at=p1.period_start + timedelta(days=22, hours=12),
+            proration_mode="immediate", created_by=user.id),
+    ])
+    sub.plan_version_id = v4            # sub already carries the final plan
+    await db.flush()
+    inv = await billing_svc.close_period_and_invoice(db, p1.id)
+    assert inv is not None
+    lines = await _lines(db, inv)
+    total = _plan_lines_total(lines, "plan", "proration", "seats")
+    # observed golden total (plan 29032 + seats 19355 + three segment
+    # prorations 26774/23548/21290 = 119999): each segment's seat delta rides
+    # its own proration line, so a mis-walked seg_end (idx−1) zeroes the
+    # middle segment's days and drops ~9.7k
+    assert abs(total - 119999) <= 1500, (
+        f"four-segment walk total drifted: {total} "
+        f"({[(ln.line_type, ln.amount_minor) for ln in lines]})")
