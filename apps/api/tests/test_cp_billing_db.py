@@ -4444,3 +4444,111 @@ async def test_void_scoping_usage_purchases_and_later_locked_decoys(db):
     assert voided_b.status == "void"
     await db.refresh(period)
     assert period.status == "invoiced"           # rewind suppressed (own later lock)
+
+
+def test_webhook_pure_boundaries():
+    """R354 (mutation survivors, pure units): (1) an event at EXACTLY the
+    HWM instant is NOT stale (equal-time redelivery still applies) and does
+    not re-advance the HWM (idempotent); (2) _subscription_ref tolerates a
+    NULL parent / NULL subscription_details (basil-shape payloads) without
+    crashing and reads both API shapes."""
+    from types import SimpleNamespace
+
+    now = datetime.now(UTC)
+    sub = SimpleNamespace(last_billing_event_at=now)
+    same = SimpleNamespace(occurred_at=now)
+    older = SimpleNamespace(occurred_at=now - timedelta(seconds=1))
+    newer = SimpleNamespace(occurred_at=now + timedelta(seconds=1))
+    assert billing_svc._is_stale_billing_event(sub, same) is False   # == not stale
+    assert billing_svc._is_stale_billing_event(sub, older) is True
+    assert billing_svc._is_stale_billing_event(sub, newer) is False
+    billing_svc._advance_billing_event_hwm(sub, same)
+    assert sub.last_billing_event_at == now                          # == no advance
+    billing_svc._advance_billing_event_hwm(sub, newer)
+    assert sub.last_billing_event_at == newer.occurred_at
+
+    assert billing_svc._subscription_ref({}) is None
+    assert billing_svc._subscription_ref({"parent": None}) is None
+    assert billing_svc._subscription_ref({"parent": {"subscription_details": None}}) is None
+    assert billing_svc._subscription_ref({"subscription": "sub_1"}) == "sub_1"
+    assert billing_svc._subscription_ref(
+        {"parent": {"subscription_details": {"subscription": "sub_2"}}}) == "sub_2"
+    assert billing_svc._subscription_ref(
+        {"parent": {"subscription_details": {"subscription": {"id": "sub_3"}}}}) == "sub_3"
+
+
+@pytest.mark.asyncio
+async def test_webhook_provider_gate_and_checkout_suspension_rescue(db):
+    """R354: (1) process_webhook for 'manual' and unknown providers is a
+    uniform 401 (no oracle); (2) checkout activation rescues EXACTLY the
+    trial-expiry suspension — an ABUSE-suspended tenant completing checkout
+    stays suspended (payment is never self-service un-suspension), a
+    'trial expired' suspension reactivates."""
+    with pytest.raises(AppError) as e_m:
+        await billing_svc.process_webhook(db, "manual", {}, b"{}")
+    assert e_m.value.code == "WEBHOOK_SIGNATURE_INVALID" and e_m.value.status_code == 401
+    with pytest.raises(AppError) as e_u:
+        await billing_svc.process_webhook(db, "carrier_pigeon", {}, b"{}")
+    assert e_u.value.status_code == 401
+
+    user = await _mk_user(db)
+    ka = await _seed_plan(db, user, f"r354-{str(ULID()).lower()[:8]}",
+                          amount=5000, included=0, seat_price=None)
+
+    async def _suspended_tenant(reason):
+        t = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
+        from app.controlplane.services.tenants import transition_status
+        await transition_status(db, t, TenantStatus.SUSPENDED,
+                                actor=_actor(user), reason=reason)
+        return t
+
+    t_abuse = await _suspended_tenant("terms violation")
+    t_trial = await _suspended_tenant("trial expired")
+    for t, ref in ((t_abuse, f"cs-a-{ULID()}"), (t_trial, f"cs-t-{ULID()}")):
+        await billing_svc.activate_subscription_from_checkout(
+            db, t, plan_key=ka, interval="month", seats=0,
+            provider="mock", external_customer_ref=None, external_ref=ref)
+    await db.refresh(t_abuse)
+    await db.refresh(t_trial)
+    assert t_abuse.status == TenantStatus.SUSPENDED    # payment ≠ un-suspend
+    assert t_trial.status == TenantStatus.ACTIVE       # cron's suspension rescued
+
+    # duplicate-checkout orphan handling: a REDELIVERY (same external_ref)
+    # must NOT cancel the live provider subscription; a genuinely different
+    # second checkout cancels the orphan exactly once (R64[17])
+    import app.controlplane.services.billing_providers as bp_mod
+
+    cancels: list = []
+    real_get = bp_mod.get_billing_provider
+
+    def spying_get(provider):
+        adapter = real_get(provider)
+        if adapter is not None:
+            class Spy:
+                def __getattr__(self, name):
+                    attr = getattr(adapter, name)
+                    if name == "cancel_subscription":
+                        async def rec(*a, **kw):
+                            cancels.append((a, kw))
+                            return None
+                        return rec
+                    return attr
+            return Spy()
+        return adapter
+
+    import unittest.mock as _mock
+
+    with _mock.patch.object(bp_mod, "get_billing_provider", spying_get):
+        sub_live = await billing_svc.get_live_subscription(db, t_trial.id)
+        # redelivery: SAME ref as the live sub → no cancel
+        await billing_svc.activate_subscription_from_checkout(
+            db, t_trial, plan_key=ka, interval="month", seats=0,
+            provider="mock", external_customer_ref=None,
+            external_ref=sub_live.external_ref)
+        assert cancels == []
+        # different ref (double-click second session) → orphan cancelled once
+        await billing_svc.activate_subscription_from_checkout(
+            db, t_trial, plan_key=ka, interval="month", seats=0,
+            provider="mock", external_customer_ref=None,
+            external_ref=f"cs-orphan-{ULID()}")
+        assert len(cancels) == 1
