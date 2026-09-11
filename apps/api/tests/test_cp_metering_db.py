@@ -1260,3 +1260,44 @@ async def test_storage_sweep_combines_sources_and_skips_zero(db):
     assert await _qty(org_d) == Decimal("1.5")     # asset + item summed
     assert await _qty(org_e) == Decimal("0.25")    # only its own item
     assert await _qty(org_f) is None               # zero bytes → no event
+
+
+@pytest.mark.asyncio
+async def test_usage_aggregate_handler_windows_and_scope(db):
+    """R385: tenant_usage_aggregate — the period window is the TENANT-TZ
+    calendar month half-open [start, end): an event exactly at next-month
+    start is excluded; the org filter narrows; another tenant's usage never
+    aggregates in."""
+    from datetime import datetime as dt
+    from datetime import timedelta
+
+    from app.controlplane.api.usage import tenant_usage_aggregate
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)     # UTC tz
+    other = await _mk_tenant(db, user)
+    org_a, org_b = str(ULID()), str(ULID())
+    m_start = dt(2026, 5, 1, tzinfo=UTC)
+    nxt = dt(2026, 6, 1, tzinfo=UTC)
+
+    async def _ev(t, org, qty, at):
+        await metering.emit_usage(
+            db, tenant_id=t.id, org_id=org, usage_type="image_generation",
+            quantity=qty, occurred_at=at, source="manual",
+            idempotency_key=f"agg-{ULID()}")
+
+    await _ev(tenant, org_a, 5, m_start)                      # inclusive start
+    await _ev(tenant, org_a, 7, nxt - timedelta(seconds=1))   # inside
+    await _ev(tenant, org_a, 999, nxt)                        # EXCLUDED (next month)
+    await _ev(tenant, org_b, 11, m_start + timedelta(days=3)) # other org
+    await _ev(other, org_a, 555, m_start + timedelta(days=1)) # other tenant
+
+    resp = await tenant_usage_aggregate(tenant.id, period="2026-05",
+                                        org_id=None, user=user, db=db)
+    rows = {r["usage_type"]: r for r in resp.data["usage"]}
+    assert float(rows["image_generation"]["quantity"]) == 23      # 5+7+11
+    assert rows["image_generation"]["event_count"] == 3
+    resp_a = await tenant_usage_aggregate(tenant.id, period="2026-05",
+                                          org_id=org_a, user=user, db=db)
+    rows_a = {r["usage_type"]: r for r in resp_a.data["usage"]}
+    assert float(rows_a["image_generation"]["quantity"]) == 12    # 5+7
