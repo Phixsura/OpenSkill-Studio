@@ -1565,3 +1565,68 @@ async def test_fresh_pending_domain_claim_not_evictable(db):
     await db.flush()
     d2, _ = await domain_svc.create_domain(db, tenant_id=t2.id, hostname=host, actor=_actor(user))
     assert d2.tenant_id == t2.id
+
+
+class _Req383:
+    class _State:
+        request_id = "r383"
+    state = _State()
+
+
+@pytest.mark.asyncio
+async def test_whitelabel_api_handlers_cross_tenant_404(db):
+    """R383: the whitelabel handler layer — the _tenant_domain ownership gate
+    404s a FOREIGN tenant's domain id uniformly on verify/activate/disable/
+    delete (no existence oracle), and update_branding round-trips through the
+    handler with the tenant actor."""
+    from app.controlplane.api.whitelabel import (
+        BrandingRequest,
+        delete_domain,
+        disable_domain,
+        update_branding,
+    )
+    from app.controlplane.api.whitelabel import (
+        activate_domain as activate_ep,
+    )
+    from app.controlplane.api.whitelabel import (
+        verify_domain as verify_ep,
+    )
+    from app.controlplane.services.plans import set_override
+
+    user = await _mk_user(db)
+    t1 = await _mk_tenant(db, user)
+    t2 = await _mk_tenant(db, user)
+    req = _Req383()
+    await set_override(db, t1.id, "custom_domain", value=True,
+                       enforcement="hard", expires_at=None,
+                       reason="r383", actor=_actor(user))
+    await set_override(db, t1.id, "white_label", value=True,
+                       enforcement="hard", expires_at=None,
+                       reason="r383", actor=_actor(user))
+    from app.controlplane.services.entitlements import invalidate_cache
+    await invalidate_cache(t1.id)
+
+    # a domain owned by TENANT 2
+    foreign, _ = await domain_svc.create_domain(
+        db, tenant_id=t2.id, hostname=f"f383-{str(ULID()).lower()[:8]}.example.com",
+        actor=_actor(user))
+
+    from app.controlplane.api.whitelabel import VerifyDomainRequest
+
+    with pytest.raises(AppError) as e_v:
+        await verify_ep(t1.id, foreign.id,
+                        VerifyDomainRequest(token="tok-r383-aaaa"), req,
+                        user=user, db=db)
+    assert e_v.value.status_code == 404 and e_v.value.code == "DOMAIN_INVALID"
+    for ep in (activate_ep, disable_domain, delete_domain):
+        with pytest.raises(AppError) as e404:
+            await ep(t1.id, foreign.id, req, user=user, db=db)
+        assert e404.value.status_code == 404, ep.__name__
+        assert e404.value.code == "DOMAIN_INVALID"
+
+    # branding handler round-trip (tenant actor threading + response shape)
+    resp = await update_branding(
+        t1.id, BrandingRequest(login_tagline="Hello R383"), req,
+        user=user, db=db)
+    assert resp.data["login_tagline"] == "Hello R383"
+    assert resp.data["theme_tokens"] == {}
