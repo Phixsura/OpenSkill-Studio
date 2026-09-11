@@ -1134,3 +1134,102 @@ async def test_tenant_resolution_and_gate_status_codes(db):
         await tenant_svc.transition_status(
             db, stale, TenantStatus.ACTIVE, actor=_actor(user))
     assert e409.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_tenants_api_handlers_direct(db):
+    """R379: the tenants API handler layer (my_tenants / audit feed) had no
+    direct coverage. Pins: (1) my_tenants returns exactly the CALLER's
+    memberships with the caller's role attached — another user's tenant and
+    another member's role are invisible (the join/where flips leak them);
+    (2) the tenant audit feed shows ONLY TENANT_VISIBLE_ACTIONS, honors the
+    action filter, and pages with exact offset arithmetic; (3) the org quota
+    counts NON-ARCHIVED orgs of THIS tenant; a membership-less user's list
+    meta coalesces per_page 0→1. Remaining survivors are FastAPI decorator/
+    Query constants plus two filter dims shielded by adjacent gates."""
+    from app.controlplane.api.tenants import my_tenants, tenant_audit_events
+    from app.controlplane.models.tenant import TenantMember
+    from app.controlplane.services.audit import record_audit
+
+    user_a = await _mk_user(db)
+    user_b = await _mk_user(db)
+    t1 = await _mk_tenant(db, user_a)                  # A owner
+    t2 = await _mk_tenant(db, user_b)                  # B's tenant — invisible to A
+    db.add(TenantMember(tenant_id=t2.id, user_id=user_a.id,
+                        role="billing_admin", created_by=user_b.id))
+    await db.flush()
+
+    resp = await my_tenants(user=user_a, db=db)
+    mine = {d["id"]: d["my_role"] for d in resp.data}
+    assert mine[t1.id] == "owner"
+    assert mine[t2.id] == "billing_admin"              # A's OWN role on t2
+    resp_b = await my_tenants(user=user_b, db=db)
+    ids_b = {d["id"] for d in resp_b.data}
+    assert t1.id not in ids_b                          # B never sees A's tenant
+
+    # audit feed: one visible + one platform-internal + one other-action
+    for action in ("tenant.updated", "tenant.updated", "branding.updated"):
+        await record_audit(db, actor=_actor(user_a), action=action,
+                           target_type="tenant", target_id=t1.id,
+                           tenant_id=t1.id)
+    await record_audit(db, actor=_actor(user_a), action="pricing.cost_rate_created",
+                       target_type="cost_rate", target_id=str(ULID()),
+                       tenant_id=t1.id)               # platform-internal
+    await db.flush()
+
+    feed = await tenant_audit_events(t1.id, action=None, page=1, per_page=50,
+                                     user=user_a, db=db)
+    actions = [e.action for e in feed.data]
+    assert "pricing.cost_rate_created" not in actions  # never tenant-visible
+    assert actions.count("tenant.updated") >= 2
+    # action filter narrows
+    feed_f = await tenant_audit_events(t1.id, action="branding.updated",
+                                       page=1, per_page=50, user=user_a, db=db)
+    assert {e.action for e in feed_f.data} == {"branding.updated"}
+    # exact pagination: per_page 2 of >=4 visible rows → page 2 disjoint
+    p1 = await tenant_audit_events(t1.id, action=None, page=1, per_page=2,
+                                   user=user_a, db=db)
+    p2 = await tenant_audit_events(t1.id, action=None, page=2, per_page=2,
+                                   user=user_a, db=db)
+    assert len(p1.data) == 2
+    assert {e.id for e in p1.data}.isdisjoint({e.id for e in p2.data})
+    assert p1.meta.has_more is True
+    # exact boundary on the LAST page (total includes tenant.created etc.)
+    import math
+    last = math.ceil(p1.meta.total / 2)
+    p_last = await tenant_audit_events(t1.id, action=None, page=last, per_page=2,
+                                       user=user_a, db=db)
+    assert p_last.meta.has_more is False
+    assert len(p_last.data) >= 1
+
+    # a membership-less user gets an EMPTY list with a sane meta (per_page
+    # coalesces 0 → 1; the Or→And mutant emits per_page 0)
+    loner = await _mk_user(db)
+    empty = await my_tenants(user=loner, db=db)
+    assert empty.data == [] and empty.meta.per_page == 1
+
+    # create_org_under_tenant counts NON-ARCHIVED orgs of THIS tenant for the
+    # max_organizations quota: an archived org and another tenant's org are
+    # not counted (the filter flips block org creation for the wrong tenants)
+    from app.controlplane.api.tenants import create_org_under_tenant
+    from app.controlplane.schemas.tenant import CreateOrgUnderTenantRequest
+    from app.controlplane.services.plans import set_override
+    from app.models.organization import Organization, OrgStatus
+
+    await set_override(db, t1.id, "max_organizations", value=1,
+                       enforcement="hard", expires_at=None,
+                       reason="r379", actor=_actor(user_a))
+    db.add_all([
+        Organization(name="Arch", slug=f"ar-{str(ULID()).lower()}",
+                     status=OrgStatus.ARCHIVED, tenant_id=t1.id, created_by=user_a.id),
+        Organization(name="Other", slug=f"ot-{str(ULID()).lower()}",
+                     status=OrgStatus.ACTIVE, tenant_id=t2.id, created_by=user_b.id),
+    ])
+    await db.flush()
+    from app.controlplane.services.entitlements import invalidate_cache
+    await invalidate_cache(t1.id)
+    ok = await create_org_under_tenant(
+        t1.id, CreateOrgUnderTenantRequest(name="First Real", slug=f"fr-{str(ULID()).lower()[:10]}"),
+        user=user_a, db=db)          # 0 live orgs counted → under the cap of 1
+    ok_data = ok if isinstance(ok, dict) else ok.data
+    assert (ok_data.get("data") or ok_data)["id"]
