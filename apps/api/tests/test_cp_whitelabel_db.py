@@ -275,8 +275,28 @@ async def test_domain_uniqueness_and_site_context(db):
     await db.flush()
     await domain_svc.verify_domain(db, domain, passing, actor=_actor(user_a))
     await domain_svc.activate_domain(db, domain, actor=_actor(user_a))
+    # R518 mutation kill: real branding CONTENT must survive resolution — the
+    # `(x if branding else None) or {}` fallbacks flipped to `and` serve {}/[]
+    # for every tenant with real tokens/links (only the null-coalesce R330
+    # path was asserted before).
+    from app.controlplane.services import branding as branding_svc
+
+    await branding_svc.upsert_branding(
+        db,
+        tenant_a.id,
+        {
+            "product_display_name": "Acme Academy",
+            "theme_tokens": {"primary": "#112233"},
+            "legal_links": [{"label": "Terms", "url": "https://a.example/terms"}],
+        },
+        actor=_actor(user_a),
+    )
     ctx = await domain_svc.resolve_site_context(db, host)
     assert ctx["tenant_id"] == tenant_a.id
+    assert ctx["branding"]["theme_tokens"] == {"primary": "#112233"}
+    assert ctx["branding"]["legal_links"] == [
+        {"label": "Terms", "url": "https://a.example/terms"}
+    ]
     await domain_svc.disable_domain(db, domain, actor=_actor(user_a))
     ctx = await domain_svc.resolve_site_context(db, host)
     assert ctx["tenant_id"] is None

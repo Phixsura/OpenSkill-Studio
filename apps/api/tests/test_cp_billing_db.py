@@ -1,5 +1,10 @@
 """P6 DB tests: subscription lifecycle, proration, invoice generation,
-webhook replay, manual ops, concurrent finalize."""
+webhook replay, manual ops, concurrent finalize.
+R519 mutation sweep of record_payment/issue_credit_note: 1 survivor —
+the duplicate-external-ref check's .limit(1) -> limit(2): structurally
+equivalent, uq_cp_payment_external (partial unique on external_ref,
+method) makes a second matching row impossible before the check runs.
+"""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
