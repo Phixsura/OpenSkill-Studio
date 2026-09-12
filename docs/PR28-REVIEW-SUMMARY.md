@@ -2018,6 +2018,32 @@ additions) — repo-wide ruff clean; the R433–R440 suites pass together
 (27) with no cross-file event-loop pollution. ~20 more mutation-verified
 tests added across R431–R440; branch still unmerged.
 
+**R441–R450 (remaining services + web pages).** Finished the service
+sweep and paired web pages:
+
+- **R441 notification** (create/suppress via TYPE→PREF-KEY map, list,
+  mark-read ownership, mark-all count, preferences merge).
+- **R442 discussion** two-level threading (R93a reply-depth guard,
+  public-pack gate, ownership delete).
+- **R443 pack-sharing** push-model (R3-style guards, share limit at the
+  bound, owner-revoke + R172 target-remove).
+- **R444 skill-pack approval** lifecycle (R60 create public-gate, submit/
+  approve/reject state machine, audit trail, no-self-notification).
+- **R445 workflow-registry search** (public gate, tag filters, LIKE-
+  escaping, input/output-type post-filter, sort) — DB-residue-proof via
+  per-test unique tags.
+- **R446 workflow adapters** (mock usage mapping, registry, Anthropic
+  org-key + model-allowlist guards + mocked full path).
+- **R447 pack export** (zip contents, manifest round-trip, filename slug).
+- **R448 org AI-evaluation page**, **R449 cohort-progress instructor
+  page** (web, guard-proved).
+
+**R450 checkpoint**: web **339 passed (61 files)**; tsc + eslint clean;
+backend ruff clean; the R441–R447 suites pass together (22). No
+production code changed since R430 (all test-only). ~9 more
+mutation-verified test files added across R441–R449; branch still
+unmerged.
+
 ---
 
 ## 5. Bottom line
