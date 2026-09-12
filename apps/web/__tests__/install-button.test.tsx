@@ -90,8 +90,13 @@ describe("InstallButton (R503)", () => {
   it("role gate: learner-only orgs get the instructor/admin notice, no install CTA", async () => {
     route({ orgs: [{ id: "org-a", name: "Org A", role: "member" }] });
     render(<InstallButton {...props} />, { wrapper: wrapper() });
-    expect(await screen.findByText(/Installing requires an instructor or admin role/)).toBeTruthy();
+    // the no-org notice also renders while the orgs query is loading — wait
+    // for the query to SETTLE before asserting, so a dropped role filter
+    // (which would then surface the CTA) actually fails this test
+    await waitFor(() => expect(api).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByRole("button", { name: /Install Render Pack/ })).toBeNull();
+    expect(screen.getByText(/Installing requires an instructor or admin role/)).toBeTruthy();
   });
 
   it("unauthenticated renders a login link; LICENSE_REQUIRED explains the org mismatch (R113[L8])", async () => {
