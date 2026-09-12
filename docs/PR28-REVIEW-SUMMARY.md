@@ -2062,6 +2062,20 @@ submit block, breakdown payload).
 **R460 checkpoint**: web **372 passed (70 files)**; tsc + eslint clean.
 All changes remain test-only since R430; branch still unmerged.
 
+**R461–R470 (web sweep continues, each guard-proved by source
+mutation)**: learner drilldown (row-scoped Overdue chip), workflow runs
+list, cohorts list, org settings, cohort detail, briefs list (POST omits
+blank optional fields), R468 requirement-profiles list (goal →
+raw_request → placeholder fallback chain), R469 org overview (Settings
+link owner/admin role gate — `true &&` mutation fails the member case),
+R470 workflow-installations list (registry name resolution fail-silent
+per pack AND unique-id dedup both proved; ULID fallback, "(pack
+removed)", row-scoped modified chip).
+
+**R470 checkpoint**: web **399 passed (80 files)**; repo ruff clean;
+tsc + eslint clean. No production code changed since R422's cohort
+savepoint fix; branch still unmerged.
+
 ---
 
 ## 5. Bottom line
