@@ -207,11 +207,18 @@ rated-usage response is a field-whitelisted constructor
 - Provider-retry deduped executions still meter (reconciliation corrects).
 - No automated dunning suspension; PAST_DUE keeps consuming until ops act.
 - Rev-share periods are UTC months; tenant tz applies to billing/budgets.
-- Self-service tenant signup (issue §33 "where enabled") is deferred:
-  v1 tenants are provisioned only by platform admins and partner admins
-  (both idempotent + resumable). Public signup needs abuse/fraud
-  controls (rate limits, email verification tiers, trial-quota hardening)
-  that belong to a launch decision, not this epic's control-plane core.
+- ~~Self-service tenant signup deferred~~ **Corrected + built (R535)**:
+  the deferral note was written in error — standalone org creation
+  (POST /orgs without tenant context) has ALWAYS auto-minted a TRIAL
+  tenant owned by the creator, i.e. the §33 self-service path existed;
+  what was missing were its abuse controls. Now enforced in the minting
+  branch itself: `self_service_signup_enabled` kill-switch ("where
+  enabled" — 403 SELF_SERVICE_DISABLED; platform/partner provisioning
+  unaffected), verified email required (403 EMAIL_NOT_VERIFIED), and a
+  per-user owned-tenant cap (`self_service_max_tenants_per_user`,
+  default 2; 403 SELF_SERVICE_TENANT_LIMIT) serialized by a user-row
+  FOR UPDATE so racing creates cannot overshoot — on top of the existing
+  10/min endpoint rate limit and the trial-quota/expiry hardening.
 
 ## Verification
 

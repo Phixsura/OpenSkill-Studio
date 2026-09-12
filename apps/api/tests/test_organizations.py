@@ -229,7 +229,12 @@ async def test_org_member_matrix_and_seat_quota_r402():
 
         async def _user(tag):
             u = User(
-                email=f"{tag}-{str(_ULID()).lower()[:8]}@x.com", display_name=tag, password_hash="x"
+                email=f"{tag}-{str(_ULID()).lower()[:8]}@x.com",
+                display_name=tag,
+                password_hash="x",
+                # R535: self-service tenant minting (org creation without a
+                # tenant) now requires a verified email
+                email_verified=True,
             )
             db.add(u)
             await db.flush()

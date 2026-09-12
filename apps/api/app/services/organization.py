@@ -111,8 +111,48 @@ class OrgService:
         # the tenant-scoped path (POST /tenants/{id}/orgs) passes tenant_id and
         # enforces the max_organizations entitlement at the endpoint.
         if tenant_id is None:
+            from app.config import settings as _settings
             from app.controlplane.services.audit import Actor
             from app.controlplane.services.tenants import create_tenant
+
+            # R535 (§33 abuse controls — the ADR's stated blockers, now built):
+            # this branch IS the self-service tenant signup, so it carries the
+            # gates the platform/partner provisioning paths don't need.
+            if not _settings.self_service_signup_enabled:
+                raise AppError(
+                    "SELF_SERVICE_DISABLED",
+                    "Self-service workspace creation is disabled — contact your administrator",
+                    403,
+                )
+            from app.controlplane.models.tenant import TenantMember
+            from app.models.user import User as _User
+
+            # Serialize per-user minting: two concurrent creates both counted
+            # under the cap and both minted without this row lock.
+            creator = (
+                await self.db.execute(select(_User).where(_User.id == created_by).with_for_update())
+            ).scalar_one()
+            if not creator.email_verified:
+                raise AppError(
+                    "EMAIL_NOT_VERIFIED",
+                    "Verify your email address before creating a workspace",
+                    403,
+                )
+            owned = (
+                await self.db.execute(
+                    select(func.count(TenantMember.id)).where(
+                        TenantMember.user_id == created_by,
+                        TenantMember.role == "owner",
+                    )
+                )
+            ).scalar_one()
+            if owned >= _settings.self_service_max_tenants_per_user:
+                raise AppError(
+                    "SELF_SERVICE_TENANT_LIMIT",
+                    "You already own the maximum number of self-service "
+                    f"workspaces ({_settings.self_service_max_tenants_per_user})",
+                    403,
+                )
 
             tenant = await create_tenant(
                 self.db,

@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # Control plane (Issue #27)
     platform_currency: str = "USD"
     trial_days: int = 14
+    # §33 self-service tenant signup (org creation without tenant context
+    # auto-mints a TRIAL tenant). "Where enabled": ops can turn the door off;
+    # the platform/partner provisioning paths are unaffected either way.
+    self_service_signup_enabled: bool = True
+    self_service_max_tenants_per_user: int = 2
     trial_expiry_action: str = "downgrade"  # downgrade | suspend
     impersonation_max_minutes: int = 60
     client_guest_token_expire_minutes: int = 30

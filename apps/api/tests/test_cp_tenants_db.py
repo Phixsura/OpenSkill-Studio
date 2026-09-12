@@ -1322,3 +1322,114 @@ async def test_has_platform_role_with_multiple_matching_roles(db):
     assert await tenant_svc.has_platform_role(db, user, "platform_support", "billing_admin") is True
     # non-matching query still False for a multi-role user
     assert await tenant_svc.has_platform_role(db, user, "platform_admin") is False
+
+
+async def test_self_service_signup_gates(db, monkeypatch):
+    """R535 (§33 abuse controls on the org-creation self-service path):
+    the tenant-minting branch of OrgService.create is the self-service
+    signup — it must enforce the enabled flag, a verified email, and the
+    per-user owned-tenant cap; the tenant-scoped path stays unaffected."""
+    from app.config import settings as app_settings
+    from app.services.organization import OrgService
+
+    def mk_user(verified: bool) -> User:
+        u = User(
+            email=f"ss-{ULID()}@test.com",
+            email_verified=verified,
+            password_hash=hash_password("Test1234!"),
+            display_name="SS",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
+        db.add(u)
+        return u
+
+    svc = OrgService(db)
+
+    # unverified email → 403 EMAIL_NOT_VERIFIED
+    ghost = mk_user(verified=False)
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await svc.create(
+            name="Ghost Org", slug=f"gh-{str(ULID()).lower()[:10]}",
+            description=None, created_by=ghost.id,
+        )
+    assert exc.value.code == "EMAIL_NOT_VERIFIED"
+    assert exc.value.status_code == 403
+
+    # per-user cap: verified user mints up to the cap, then 403
+    monkeypatch.setattr(app_settings, "self_service_max_tenants_per_user", 2)
+    maker = mk_user(verified=True)
+    await db.flush()
+    for i in range(2):
+        org = await svc.create(
+            name=f"Mint {i}", slug=f"mint{i}-{str(ULID()).lower()[:10]}",
+            description=None, created_by=maker.id,
+        )
+        assert org.tenant_id is not None
+    with pytest.raises(AppError) as exc:
+        await svc.create(
+            name="Mint 2", slug=f"mint2-{str(ULID()).lower()[:10]}",
+            description=None, created_by=maker.id,
+        )
+    assert exc.value.code == "SELF_SERVICE_TENANT_LIMIT"
+
+    # the TENANT-SCOPED path is exempt from all three gates: the capped,
+    # even-unverified user may still create orgs under an existing tenant
+    tenant_id = org.tenant_id
+    monkeypatch.setattr(app_settings, "self_service_signup_enabled", False)
+    scoped = await svc.create(
+        name="Scoped", slug=f"sc-{str(ULID()).lower()[:10]}",
+        description=None, created_by=maker.id, tenant_id=tenant_id,
+    )
+    assert scoped.tenant_id == tenant_id
+
+    # disabled flag → 403 SELF_SERVICE_DISABLED for fresh self-service mints
+    fresh = mk_user(verified=True)
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await svc.create(
+            name="Door Closed", slug=f"dc-{str(ULID()).lower()[:10]}",
+            description=None, created_by=fresh.id,
+        )
+    assert exc.value.code == "SELF_SERVICE_DISABLED"
+
+
+async def test_self_service_concurrent_mint_respects_cap():
+    """R535: two RACING self-service creates by the same user must not
+    overshoot the cap — the user-row FOR UPDATE serializes count+mint."""
+    import asyncio
+
+    from app.config import settings as app_settings
+    from app.services.organization import OrgService
+
+    async with AsyncSessionLocal() as setup:
+        u = User(
+            email=f"ssr-{ULID()}@test.com", email_verified=True,
+            password_hash=hash_password("Test1234!"), display_name="SSR",
+            role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        )
+        setup.add(u)
+        await setup.commit()
+        uid = u.id
+
+    orig = app_settings.self_service_max_tenants_per_user
+    app_settings.self_service_max_tenants_per_user = 1
+    try:
+        async def mint(i: int):
+            async with AsyncSessionLocal() as s:
+                try:
+                    await OrgService(s).create(
+                        name=f"Race {i}", slug=f"race{i}-{str(ULID()).lower()[:10]}",
+                        description=None, created_by=uid,
+                    )
+                    await s.commit()
+                    return "ok"
+                except AppError as e:
+                    await s.rollback()
+                    return e.code
+
+        r1, r2 = await asyncio.gather(mint(1), mint(2))
+        assert sorted([r1, r2]) == ["SELF_SERVICE_TENANT_LIMIT", "ok"], (r1, r2)
+    finally:
+        app_settings.self_service_max_tenants_per_user = orig
