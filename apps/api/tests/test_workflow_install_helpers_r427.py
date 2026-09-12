@@ -7,9 +7,8 @@ changed step — preventing a deferred mid-run NO_ELIGIBLE_PROVIDER.
 
 import uuid
 
-from ulid import ULID
-
 import pytest
+from ulid import ULID
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
