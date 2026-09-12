@@ -70,7 +70,11 @@ describe("LearnerDrilldownPage (R462)", () => {
     expect(body).toContain("in progress"); // underscore humanized
     expect(body).toContain("88 pts");
     expect(body).toContain("—"); // null score
-    expect(screen.getByText("Overdue")).toBeTruthy(); // only on the overdue project
+    // the Overdue chip sits on the OVERDUE project's row, not the on-time one
+    const overdueRow = screen.getByText("Overdue Draft").closest("div")?.parentElement;
+    expect(overdueRow?.textContent).toContain("Overdue");
+    const ontimeRow = screen.getByText("Chatbot").closest("div")?.parentElement;
+    expect(ontimeRow?.textContent).not.toContain("Overdue");
     expect(body).toContain("Last active: Never"); // null last_active_at
     // deep links to the skill and project
     expect(screen.getByText("Prompting").closest("a")?.getAttribute("href")).toBe(
