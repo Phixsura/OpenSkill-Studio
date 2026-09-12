@@ -178,6 +178,28 @@ async def test_purchase_credit_flow_and_grant(db):
         )
     ).scalar_one()
     assert grants == 1
+    # R518 mutation kill: the §9 content_license usage event records EXACTLY
+    # one license per purchase (quantity 1→2 survived: the ledger would count
+    # double licenses per sale), idempotent across the replay above.
+    from decimal import Decimal as _Dec
+
+    from app.controlplane.models.usage import UsageEvent as _Ue
+
+    lic_events = (
+        (
+            await db.execute(
+                select(_Ue).where(
+                    _Ue.tenant_id == buyer_tenant.id,
+                    _Ue.usage_type == "content_license",
+                    _Ue.idempotency_key == f"license:{purchase.id}",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(lic_events) == 1  # replay did not double-meter
+    assert lic_events[0].quantity == _Dec(1)
 
 
 @pytest.mark.asyncio
@@ -2473,7 +2495,15 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
     failed-key rename keep one live row per tenant+key); the recovery-path
     conflict 409 status (reachable only when a racing winner terminalizes
     before the loser recovers); the refund invoice-branch And→Or (both flip
-    paths yield charged=False identically for every constructible state)."""
+    paths yield charged=False identically for every constructible state).
+
+    R518 re-sweep (77 mutants, 69 killed): L677/L679 invoice-status flips
+    are killed by test_cp_billing_db's R88[11] test (suite-selection false
+    survivors here); L900 check_install_license .limit(1) is structural —
+    uq_cp_listing_product guarantees one listing per product; the
+    content_license usage quantity (L612) gained a kill assert in
+    test_purchase_credit_flow_and_grant; L351/L507/L666 remain the
+    documented equivalents above."""
     from datetime import timedelta
 
     from app.controlplane.models.partner import Partner, RevenueShareRule
