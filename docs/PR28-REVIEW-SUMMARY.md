@@ -2277,6 +2277,25 @@ tenants, 2 branding-through-resolution, 1 license-usage quantity, 4
 stripe, 4 budgets — counting per assertion family), every other
 survivor dispositioned in-module. Branch unmerged.
 
+### R523–R524: facade storage core + all four browser suites live
+
+- **R523 — check_storage_quota (§5 storage quota)**: the trio sweep's
+  headline — ALL THREE mutants survived because the live-SUM aggregation
+  had zero coverage (the lone "storage" test hand-fed numbers to
+  check_quota). New test seeds 0.6 GB of submission items + 0.6 GB of
+  project assets under a 1 GB hard override: only the correct 1.2 GB sum
+  rejects; a flipped join drops one source and Add→Sub nets ~0 — both
+  pass the cap. Three verified kills; the QUOTA_EXCEEDED message pins
+  the exact live sum. audit.record_audit had zero mutable sites;
+  branding.upsert_branding swept 4/4.
+- **R524 — browser E2E, all four suites re-run LIVE on the branch tip**:
+  full lifecycle part 1 **60/60**, part 2 **42/42**, base **31/31**
+  (commercial 19/19 ran in R509) — 152 browser checks total, zero
+  console errors, on top of the 395 live API-level checks from R509.
+
+Second-wave grand total: **~430 mutants across 14 services + facade;
+16 real test gaps found and killed**; every survivor dispositioned.
+
 ---
 
 ## 5. Bottom line
