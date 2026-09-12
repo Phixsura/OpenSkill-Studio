@@ -1633,7 +1633,17 @@ def test_workflow_sweep_cron_registered():
 async def test_run_terminal_defers_while_step_lease_live(db):
     """R66[3]: cancel enqueues run.terminal while a provider call is mid-
     flight; settling then misses the late-landing usage. The handler must
-    defer (raise → outbox backoff) while any step lease is live."""
+    defer (raise → outbox backoff) while any step lease is live.
+
+    R510 mutation sweep of handle_run_terminal: 13/15 killed; 2 equivalents:
+    - L45 `lease_expires_at > now` → `>=`: clock-instant boundary — a lease
+      expiring at the exact query instant defers one extra outbox round;
+      untestable without freezing the DB clock, harmless either way.
+    - L47 `.limit(1)` → `.limit(2)`: with two in-flight steps
+      scalar_one_or_none raises MultipleResultsFound instead of the intended
+      RuntimeError — EITHER exception defers via outbox backoff, so the
+      observable behavior (retry until leases clear) is identical.
+    """
     from datetime import timedelta as _td
 
     from app.controlplane.services.settlement_handlers import handle_run_terminal
