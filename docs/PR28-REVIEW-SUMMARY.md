@@ -2296,6 +2296,29 @@ survivor dispositioned in-module. Branch unmerged.
 Second-wave grand total: **~430 mutants across 14 services + facade;
 16 real test gaps found and killed**; every survivor dispositioned.
 
+### R525–R527: Part N route inventory + frontend cp libs (2026-09-12)
+
+- **R525 — Part N API-group audit**: all 25 listed API groups verified
+  present against the LIVE OpenAPI spec (373 paths) — tenant lifecycle,
+  impersonation, plans, entitlements, subscriptions, branding, domains,
+  provisioning, usage/reconciliation, cost catalog, price policies,
+  rated usage, credits, invoices/payments/notes, webhooks, partners,
+  rev-share rules, statements, listings, licenses, client portal,
+  client review, ops dashboards/trace, export/suspend/reactivate,
+  audit logs. Zero missing groups.
+- **R526 — cp.ts money core**: five-mutant battery (R163 case
+  normalization, zero-decimal divisor both directions, rounding, finite
+  guard) — all five killed by the existing suite; measured tight.
+- **R527 — site-context.ts theme pipeline**: 3 real gaps killed — the
+  hex-regex anchors (embedded "#ff0000; } body{…}" reached the style
+  tag under the anchor-dropped mutant; the injection list had no
+  embedded-valid-hex case), the l>0.5 saturation denominator (no light
+  saturated color in the palette), and the hue +6 wrap (no
+  red-max/blue>green sample → negative hue). Radius gate already tight.
+
+Wave totals now: **~440 mutants, 19 real gaps killed** (16 backend + 3
+frontend theme). Web 536/115 green, tsc 0, eslint clean.
+
 ---
 
 ## 5. Bottom line
