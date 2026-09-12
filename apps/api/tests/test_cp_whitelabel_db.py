@@ -1642,7 +1642,7 @@ async def test_export_sections_are_tenant_scoped(db, monkeypatch):
     """
     import json as _json
     from datetime import UTC, datetime, timedelta
-    from decimal import Decimal as _D
+    from decimal import Decimal as _Dec
 
     from app.controlplane.models.billing import Invoice, PaymentRecord, Subscription
     from app.controlplane.models.branding import TenantDomain
@@ -1676,7 +1676,7 @@ async def test_export_sections_are_tenant_scoped(db, monkeypatch):
         # else's rows and can no longer produce exactly this sum.
         qty = 31 if tag == "alpha" else 37
         usage = UsageEvent(tenant_id=tenant_id, org_id=str(ULID()),
-                           usage_type="content_license", quantity=_D(qty),
+                           usage_type="content_license", quantity=_Dec(qty),
                            unit="licenses", occurred_at=datetime.now(UTC),
                            source="manual", metadata_={})
         dom = TenantDomain(tenant_id=tenant_id, verification_token_hash="x" * 64,
@@ -1688,10 +1688,10 @@ async def test_export_sections_are_tenant_scoped(db, monkeypatch):
     a = await seed(ten_a.id, "alpha")
     b = await seed(ten_b.id, "bravo")
     # a CANCELLED subscription for tenant A must be excluded (L529)
-    from app.controlplane.models.plan import PlanVersion as _PV
+    from app.controlplane.models.plan import PlanVersion as _Pv
 
     pv_id = (
-        await db.execute(select(_PV.id).limit(1))
+        await db.execute(select(_Pv.id).limit(1))
     ).scalar_one_or_none()
     assert pv_id is not None, "dev DB has no plan versions seeded"
     db.add(Subscription(tenant_id=ten_a.id, plan_version_id=pv_id,
