@@ -1346,13 +1346,17 @@ async def test_self_service_signup_gates(db, monkeypatch):
 
     svc = OrgService(db)
 
-    # unverified email → 403 EMAIL_NOT_VERIFIED
+    # unverified email → 403 EMAIL_NOT_VERIFIED (opt-in gate: default-off so
+    # existing unverified dev/test users keep working; production enables it)
+    monkeypatch.setattr(app_settings, "self_service_require_verified_email", True)
     ghost = mk_user(verified=False)
     await db.flush()
     with pytest.raises(AppError) as exc:
         await svc.create(
-            name="Ghost Org", slug=f"gh-{str(ULID()).lower()[:10]}",
-            description=None, created_by=ghost.id,
+            name="Ghost Org",
+            slug=f"gh-{str(ULID()).lower()[:10]}",
+            description=None,
+            created_by=ghost.id,
         )
     assert exc.value.code == "EMAIL_NOT_VERIFIED"
     assert exc.value.status_code == 403
@@ -1363,14 +1367,18 @@ async def test_self_service_signup_gates(db, monkeypatch):
     await db.flush()
     for i in range(2):
         org = await svc.create(
-            name=f"Mint {i}", slug=f"mint{i}-{str(ULID()).lower()[:10]}",
-            description=None, created_by=maker.id,
+            name=f"Mint {i}",
+            slug=f"mint{i}-{str(ULID()).lower()[:10]}",
+            description=None,
+            created_by=maker.id,
         )
         assert org.tenant_id is not None
     with pytest.raises(AppError) as exc:
         await svc.create(
-            name="Mint 2", slug=f"mint2-{str(ULID()).lower()[:10]}",
-            description=None, created_by=maker.id,
+            name="Mint 2",
+            slug=f"mint2-{str(ULID()).lower()[:10]}",
+            description=None,
+            created_by=maker.id,
         )
     assert exc.value.code == "SELF_SERVICE_TENANT_LIMIT"
 
@@ -1379,8 +1387,11 @@ async def test_self_service_signup_gates(db, monkeypatch):
     tenant_id = org.tenant_id
     monkeypatch.setattr(app_settings, "self_service_signup_enabled", False)
     scoped = await svc.create(
-        name="Scoped", slug=f"sc-{str(ULID()).lower()[:10]}",
-        description=None, created_by=maker.id, tenant_id=tenant_id,
+        name="Scoped",
+        slug=f"sc-{str(ULID()).lower()[:10]}",
+        description=None,
+        created_by=maker.id,
+        tenant_id=tenant_id,
     )
     assert scoped.tenant_id == tenant_id
 
@@ -1389,8 +1400,10 @@ async def test_self_service_signup_gates(db, monkeypatch):
     await db.flush()
     with pytest.raises(AppError) as exc:
         await svc.create(
-            name="Door Closed", slug=f"dc-{str(ULID()).lower()[:10]}",
-            description=None, created_by=fresh.id,
+            name="Door Closed",
+            slug=f"dc-{str(ULID()).lower()[:10]}",
+            description=None,
+            created_by=fresh.id,
         )
     assert exc.value.code == "SELF_SERVICE_DISABLED"
 
@@ -1405,9 +1418,12 @@ async def test_self_service_concurrent_mint_respects_cap():
 
     async with AsyncSessionLocal() as setup:
         u = User(
-            email=f"ssr-{ULID()}@test.com", email_verified=True,
-            password_hash=hash_password("Test1234!"), display_name="SSR",
-            role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+            email=f"ssr-{ULID()}@test.com",
+            email_verified=True,
+            password_hash=hash_password("Test1234!"),
+            display_name="SSR",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
         )
         setup.add(u)
         await setup.commit()
@@ -1416,12 +1432,15 @@ async def test_self_service_concurrent_mint_respects_cap():
     orig = app_settings.self_service_max_tenants_per_user
     app_settings.self_service_max_tenants_per_user = 1
     try:
+
         async def mint(i: int):
             async with AsyncSessionLocal() as s:
                 try:
                     await OrgService(s).create(
-                        name=f"Race {i}", slug=f"race{i}-{str(ULID()).lower()[:10]}",
-                        description=None, created_by=uid,
+                        name=f"Race {i}",
+                        slug=f"race{i}-{str(ULID()).lower()[:10]}",
+                        description=None,
+                        created_by=uid,
                     )
                     await s.commit()
                     return "ok"

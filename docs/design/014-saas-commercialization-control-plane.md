@@ -214,9 +214,11 @@ rated-usage response is a field-whitelisted constructor
   what was missing were its abuse controls. Now enforced in the minting
   branch itself: `self_service_signup_enabled` kill-switch ("where
   enabled" — 403 SELF_SERVICE_DISABLED; platform/partner provisioning
-  unaffected), verified email required (403 EMAIL_NOT_VERIFIED), and a
-  per-user owned-tenant cap (`self_service_max_tenants_per_user`,
-  default 2; 403 SELF_SERVICE_TENANT_LIMIT) serialized by a user-row
+  unaffected), verified-email gate (`self_service_require_verified_email`,
+  DEFAULT OFF — enabling it is a launch decision since existing dev/test
+  users are unverified; 403 EMAIL_NOT_VERIFIED when on), and a per-user
+  owned-tenant cap (`self_service_max_tenants_per_user`, default 20;
+  403 SELF_SERVICE_TENANT_LIMIT) serialized by a user-row
   FOR UPDATE so racing creates cannot overshoot — on top of the existing
   10/min endpoint rate limit and the trial-quota/expiry hardening.
 

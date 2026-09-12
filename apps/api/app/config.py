@@ -75,7 +75,10 @@ class Settings(BaseSettings):
     # auto-mints a TRIAL tenant). "Where enabled": ops can turn the door off;
     # the platform/partner provisioning paths are unaffected either way.
     self_service_signup_enabled: bool = True
-    self_service_max_tenants_per_user: int = 2
+    # Off by default: flipping this on is a launch decision (existing dev/test
+    # users are unverified); production deployments set it via env.
+    self_service_require_verified_email: bool = False
+    self_service_max_tenants_per_user: int = 20
     trial_expiry_action: str = "downgrade"  # downgrade | suspend
     impersonation_max_minutes: int = 60
     client_guest_token_expire_minutes: int = 30

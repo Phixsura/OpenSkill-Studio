@@ -132,7 +132,7 @@ class OrgService:
             creator = (
                 await self.db.execute(select(_User).where(_User.id == created_by).with_for_update())
             ).scalar_one()
-            if not creator.email_verified:
+            if _settings.self_service_require_verified_email and not creator.email_verified:
                 raise AppError(
                     "EMAIL_NOT_VERIFIED",
                     "Verify your email address before creating a workspace",
