@@ -668,7 +668,14 @@ async def test_concurrent_admin_demotions_never_reach_zero_admins():
 
                 r1, r2 = await asyncio.gather(demote(t1, a2_id), demote(t2, a1_id))
                 codes = sorted([r1.status_code, r2.status_code])
-                assert codes == [200, 422], f"expected one success one refusal, got {codes}"
+                # R530: the refusal leg is timing-dependent — a loser whose
+                # own demotion COMMITS first is rejected at the admin gate
+                # (403, no longer admin) instead of reaching the last-admin
+                # 422 guard. Both are the correct safety outcome (exactly one
+                # demotion succeeds; never zero admins).
+                assert codes[0] == 200 and codes[1] in (403, 422), (
+                    f"expected one success one refusal, got {codes}"
+                )
         finally:
             app.router.lifespan_context = orig
 
