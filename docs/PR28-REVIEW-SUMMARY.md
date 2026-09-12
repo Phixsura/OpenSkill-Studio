@@ -2141,6 +2141,39 @@ SURVIVING mutations (R462 overdue chip, R482 single-wave 401 latch,
 R490 publish status guard) were each strengthened until they failed.
 Branch feature/saas-commercialization remains unmerged.
 
+### R501–R507: full issue-detail audit, round 2 (2026-09-12)
+
+A bullet-by-bullet re-audit of issue #27's 39 detail sections (not just
+the acceptance-criteria headlines) found and closed four gaps:
+
+- **R501 (AC gap)**: "concurrent settlement tests" had no gather-based
+  race for statement generation — new test proves create-create mints
+  exactly one statement (uq_cp_statement) and regenerate-regenerate is
+  FOR UPDATE-serialized with no double-collect (mutation-proved).
+- **R502–R506 (Part O/§30 gaps)**: five clause-carrying components were
+  mocked away by every page test and had ZERO direct coverage —
+  MarketplacePanel (price/license badge, R101[H0] per-attempt
+  idempotency key, R101[H1] included_with_plan), InstallButton
+  (role gate + product-typed endpoints; the initial role-gate assertion
+  was itself mutant-surviving — the loading state also renders the
+  notice — and was strengthened until the mutant died), CommentPanel
+  (R183 double-submit gate, reply-vs-anchor precedence, item scoping),
+  AnnotatedImage (normalized/clamped/reordered region bounds, point
+  threshold), MediaPreview + VersionHistory (mime-family routing,
+  newest-first + image-only thumb presigns). 14 mutations killed.
+- **R507 (spec delta)**: §33 "self-service signup where enabled" is not
+  implemented — now recorded in ADR-014 known limitations as a
+  deliberate v1 deferral with rationale.
+
+Everything else in the 39 sections verified present bullet-by-bullet
+(fields, enums, lifecycle states, rule styles, pricing policies, §32
+guest-link hardening incl. rate limits, §37 trace chains, §38 audit
+kinds incl. impersonation, §39 all 17 bullets named in
+test_cp_adversarial.py).
+
+**Post-audit checkpoint**: web **531 passed (114 files)**, tsc 0,
+eslint + repo ruff clean, cp revshare suite 36 passed. Branch unmerged.
+
 ---
 
 ## 5. Bottom line
