@@ -103,7 +103,7 @@ role (login activity not considered).
 - Invoicing: period close via hourly scan → outbox; invoice assembles
   plan lines (proration segments), seat overage (max(actual peak,
   reserved)), usage lines (consumption window: `occurred_at <
-  period_end`, rated rows marked `invoiced`), license lines, credit
+period_end`, rated rows marked `invoiced`), license lines, credit
   application. Finalize = sequence `FOR UPDATE` + guarded draft→open (one
   winner, no number gaps). Post-finalize corrections via CreditNote only.
 - API metering middleware: Redis hourly buckets, **fail-open** on Redis
@@ -207,6 +207,11 @@ rated-usage response is a field-whitelisted constructor
 - Provider-retry deduped executions still meter (reconciliation corrects).
 - No automated dunning suspension; PAST_DUE keeps consuming until ops act.
 - Rev-share periods are UTC months; tenant tz applies to billing/budgets.
+- Self-service tenant signup (issue §33 "where enabled") is deferred:
+  v1 tenants are provisioned only by platform admins and partner admins
+  (both idempotent + resumable). Public signup needs abuse/fraud
+  controls (rate limits, email verification tiers, trial-quota hardening)
+  that belong to a launch decision, not this epic's control-plane core.
 
 ## Verification
 
