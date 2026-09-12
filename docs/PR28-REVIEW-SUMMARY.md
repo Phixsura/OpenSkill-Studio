@@ -2113,6 +2113,34 @@ assertion).
 **R490 checkpoint**: web **475 passed (100 files)**; tsc + eslint clean
 throughout; branch unmerged.
 
+**R491–R500 (final sweep to the R500 target, each guard-proved)**:
+project submit page (R184 upload 401 → sharedRefresh retry with the
+fresh token; client size/format pre-checks; markdown deliverable type
+preserved on the pre-submit PUT), submission detail (latest-version
+grouping; instructor Start-review gate requires SUBMITTED), new skill
+(integer-parsed estimated_minutes), public portfolio item RSC (http(s)
+scheme gate on the external link), public workflow registry list
+(300ms debounce + filter-driven page reset; noted a self-correcting
+transient stale-page request), workflow-pack detail (R83/R84 duplicate
+capability badges keyed by feature-set; conditional required marker;
+preview-403 graceful degrade), new workflow pack (blank-optional
+omission), my-progress (bar width bound to the percentage),
+workflow-installation detail (untouched auto-suggested binding merges
+the suggested offering into the PUT — the 422 class; json run inputs
+must parse to object/array with scalars rejected; fork/remove confirm
+gates).
+
+**R500 FINAL checkpoint (2026-09-12)**: web **507 passed (109 test
+files)**, tsc **0 errors**, eslint clean, repo ruff clean, backend
+spot-chunks green. Session R402–R500: 99 rounds, ~70 new
+mutation/guard-verified web test files + 27 backend DB-level suites,
+two production fixes (R422 cohort savepoint isolation, R486
+profile-edit message tone). Every guard-proof mutation was applied to
+committed source and restored via git checkout; three initially
+SURVIVING mutations (R462 overdue chip, R482 single-wave 401 latch,
+R490 publish status guard) were each strengthened until they failed.
+Branch feature/saas-commercialization remains unmerged.
+
 ---
 
 ## 5. Bottom line
