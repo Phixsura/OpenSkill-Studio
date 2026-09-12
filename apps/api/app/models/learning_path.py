@@ -39,6 +39,33 @@ class LearningPath(Base):
     __table_args__ = (
         Index("uq_path_org_slug", "org_id", "slug", unique=True),
         Index("ix_paths_org_status", "org_id", "status"),
+        # R130[20]: mirror the migration-created indexes (cp15/cp17/cp18) so
+        # autogenerate doesn't emit DROP INDEX for them — the partial uniques
+        # are the race-closers install_from_listing's IntegrityError-resume
+        # path depends on.
+        Index(
+            "ix_paths_origin_listing",
+            "origin_listing_id",
+            postgresql_where="origin_listing_id IS NOT NULL",
+        ),
+        Index(
+            "uq_paths_org_origin_live",
+            "org_id",
+            "origin_listing_id",
+            unique=True,
+            postgresql_where="origin_listing_id IS NOT NULL AND status != 'ARCHIVED'",
+        ),
+        Index(
+            "uq_paths_org_source_live",
+            "org_id",
+            "origin_source_path_id",
+            unique=True,
+            postgresql_where=(
+                "origin_source_path_id IS NOT NULL "
+                "AND origin_listing_id IS NULL "
+                "AND status != 'ARCHIVED'"
+            ),
+        ),
     )
 
     id: Mapped[str] = ulid_pk()
@@ -53,6 +80,13 @@ class LearningPath(Base):
         default=ContentStatus.DRAFT,
     )
     estimated_minutes: Mapped[int | None] = mapped_column(Integer)
+    # R113[H0]: paid-content provenance — set when the path was installed from
+    # a marketplace listing; the create_listing gate blocks re-selling copies.
+    origin_listing_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    # R129[M2]: the SOURCE path this copy was forked from — the reliable
+    # idempotency key for listing-less (manual-grant) installs, which have no
+    # origin_listing_id and must not be deduped by name (collides with local).
+    origin_source_path_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

@@ -164,6 +164,9 @@ def test_calculate_cost_openai():
 
 
 def test_calculate_cost_unknown_model():
+    # R67[6]: unknown models are charged at the flagship fallback tier —
+    # $0 would exempt an org-selectable model from every budget while real
+    # provider spend accrued.
     resp = LLMResponse(
         content="test",
         input_tokens=100,
@@ -172,7 +175,8 @@ def test_calculate_cost_unknown_model():
         provider="unknown",
     )
     cost = calculate_cost(resp)
-    assert cost == 0
+    assert cost > 0
+    assert cost == round(100 * 3.00 / 1e6 + 50 * 15.00 / 1e6, 6)
 
 
 # ── Unit tests: response parsing ─────────────────────────────

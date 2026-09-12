@@ -1,0 +1,196 @@
+/** Control-plane shared types + helpers (issue #27, ADR-014 §11.2). */
+
+export interface TenantMembership {
+  tenant_id: string;
+  slug: string;
+  name: string;
+  role: string;
+  status: string;
+}
+
+export interface PartnerMembership {
+  partner_id: string;
+  name: string;
+  role: string;
+}
+
+export interface MeExtended {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  platform_roles: string[];
+  tenant_memberships: TenantMembership[];
+  partner_memberships: PartnerMembership[];
+  impersonation: { grant_id: string; platform_user_id: string } | null;
+}
+
+export interface EntitlementEntry {
+  value: unknown;
+  source: string;
+  enforcement?: string;
+  usage?: unknown;
+  expires_at?: string | null;
+}
+
+export interface TenantEntitlements {
+  plan: { key: string; version: number; trial: boolean; trial_ends_at: string | null } | null;
+  entitlements: Record<string, EntitlementEntry>;
+}
+
+export interface Subscription {
+  id: string;
+  status: string;
+  plan_key: string;
+  plan_version: number;
+  interval: string;
+  currency: string;
+  seat_quantity: number;
+  current_period_start: string;
+  current_period_end: string;
+  cancel_at_period_end: boolean;
+}
+
+export interface InvoiceSummary {
+  id: string;
+  number: string | null;
+  status: string;
+  currency: string;
+  subtotal_minor: number;
+  credit_applied_minor: number;
+  total_minor: number;
+  amount_due_minor: number;
+  issued_at: string | null;
+  due_at: string | null;
+}
+
+export interface InvoiceLine {
+  id: string;
+  line_type: string;
+  description: string;
+  quantity: string;
+  unit_amount_minor: number;
+  amount_minor: number;
+  usage_summary: Record<string, unknown> | null;
+}
+
+/** Zero-decimal currencies bill in whole units (mirror of backend CURRENCY_MINOR). */
+const ZERO_DECIMAL = new Set(["JPY", "KRW"]);
+
+/** Format integer minor units as a display amount ("$199.00", "¥1,500"). */
+export function formatMinor(amountMinor: number, currency: string): string {
+  // R163: normalize case like the backend's minor_multiplier (R81[0]) — a
+  // lowercase code ("jpy") missed ZERO_DECIMAL and divided by 100, a 100x
+  // display error for zero-decimal currencies.
+  currency = currency.toUpperCase();
+  const divisor = ZERO_DECIMAL.has(currency) ? 1 : 100;
+  const value = amountMinor / divisor;
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: ZERO_DECIMAL.has(currency) ? 0 : 2,
+    }).format(value);
+  } catch {
+    return `${currency} ${value.toFixed(ZERO_DECIMAL.has(currency) ? 0 : 2)}`;
+  }
+}
+
+/** Parse a user-typed major-unit amount into integer minor units for the
+ * given currency (R101: hardcoded *100 broke zero-decimal currencies by 100x).
+ *
+ * Returns null only when the input is not a FINITE number (empty/NaN/±Inf).
+ * R298: NEGATIVES pass through by design — the platform credit-adjustment
+ * field sends signed amounts (a clawback is negative). Callers that require
+ * a positive amount (e.g. budget limits, top-ups) MUST guard `<= 0`
+ * themselves; this helper does not, despite an earlier docstring that
+ * wrongly promised "positive-or-zero". parseFloat is also lenient on trailing
+ * junk ("12abc" -> 12), so a value that must be a clean number is the
+ * caller's responsibility too. */
+export function majorToMinor(input: string, currency: string): number | null {
+  const value = parseFloat(input);
+  if (!Number.isFinite(value)) return null;
+  const factor = ZERO_DECIMAL.has(currency.toUpperCase()) ? 1 : 100;
+  return Math.round(value * factor);
+}
+
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export const STATUS_COLORS: Record<string, string> = {
+  active: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  trial: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  past_due: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  suspended: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  cancelled: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  archived: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  open: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  paid: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  draft: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  void: "bg-gray-100 text-gray-500 line-through dark:bg-gray-800",
+  finalized: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  approved: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  paid_externally: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  pending_verification: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  verified: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  disabled: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  failed: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  running: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  // R101[L15]: statuses the backend actually emits but the map missed — they
+  // all fell through to neutral gray, hiding warning/error states in every
+  // badge (subscription, invoice, purchase, reservation, rated-usage).
+  cancel_at_period_end: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  uncollectible: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  pending: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  refunded: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  held: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  settled: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  released: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  expired: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  rated: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  invoiced: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  blocked: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  voided: "bg-gray-100 text-gray-500 line-through dark:bg-gray-800",
+  // R299: statuses the backend emits AND renders through StatusBadge but the
+  // map missed — they fell to neutral gray (the R101[L15] class). A retired
+  // plan version is muted (explicit gray); a TERMINATED partner is an ended
+  // relationship that must read as a stop state, not neutral.
+  retired: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  terminated: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  // R326: refund_purchase revokes the license grant (status="revoked") and the
+  // tenant licenses page badges grant status — revoked fell to neutral gray,
+  // hiding a stop state (the R101[L15] class): a revoked license read the
+  // same as a merely archived one.
+  revoked: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  // R327: the client portal badges submission review states
+  // (s.status.toLowerCase()) — submitted/revision_requested/rejected all fell
+  // to neutral gray. revision_requested is THE client-facing action signal
+  // (reviewer asked for changes) and rejected is a stop state; both read as
+  // inert gray (the R101[L15] class, third instance).
+  submitted: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  revision_requested: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  rejected: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  // R328: the invoice detail page badges PaymentRecord.status and the only
+  // value the backend writes is "succeeded" — a successful payment rendered
+  // neutral gray (fourth instance of the R101[L15] class; found by diffing
+  // backend-emitted status literals against this map's keys).
+  succeeded: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  // R335: the partner dashboard and statement detail badge RevenueShareEntry
+  // status — 'accrued' (the default state of every entry) and 'adjusted'
+  // were missing (fifth instance of the R101[L15] class; the R328 audit
+  // wrongly skipped them as render-less). accrued = in-cycle (blue);
+  // adjusted = modified, needs attention (amber).
+  accrued: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  adjusted: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+};
+
+export function StatusBadgeClass(status: string): string {
+  return STATUS_COLORS[status] ?? "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
+}

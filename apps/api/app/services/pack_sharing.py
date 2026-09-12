@@ -87,6 +87,30 @@ class PackSharingService:
         )
         return list(result.scalars().all())
 
+    async def remove_incoming_share(self, org_id: str, pack_id: str) -> None:
+        """R172: TARGET-side removal of a share directed at this org.
+
+        Sharing is push-model — any instructor of any org can point a share at
+        an arbitrary org with no consent step, and revoke_share is gated to the
+        OWNER org only. The receiving org therefore had no way to clear
+        unsolicited (potentially hostile) packs out of /shared-with-me — or to
+        cut the installability that share grants. Symmetric with revoke: the
+        share row is deleted, so the pack drops out of the list AND the
+        install path's PackShare grant check.
+        """
+        result = await self.db.execute(
+            select(PackShare).where(
+                PackShare.pack_id == pack_id,
+                PackShare.target_org_id == org_id,
+            )
+        )
+        share = result.scalar_one_or_none()
+        if share is None:
+            raise AppError("SHARE_NOT_FOUND", "Share not found", 404)
+        await self.db.delete(share)
+        await self.db.flush()
+        log.info("pack_share_removed_by_target", pack_id=pack_id, target_org_id=org_id)
+
     async def revoke_share(
         self,
         org_id: str,

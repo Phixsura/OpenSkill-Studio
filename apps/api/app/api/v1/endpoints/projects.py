@@ -736,6 +736,10 @@ async def upload_file(
     svc = ProjectService(db)
     await _verify_submission_org(svc, submission_id, org_id)
     content = await _read_limited(file)
+    # Issue #27: tenant storage entitlement (soft-by-default for storage)
+    from app.controlplane import facade as cp_facade
+
+    await cp_facade.check_storage_quota(db, org_id, len(content))
     item = await svc.upload_file(
         submission_id,
         deliverable_id,
@@ -1092,6 +1096,10 @@ async def upload_asset(
     svc = ProjectService(db)
     await _verify_project_org(svc, project_id, org_id)
     content = await _read_limited(file)
+    # Issue #27: tenant storage entitlement
+    from app.controlplane import facade as cp_facade
+
+    await cp_facade.check_storage_quota(db, org_id, len(content))
     asset = await svc.upload_asset(
         org_id,
         project_id,
@@ -1215,7 +1223,10 @@ async def list_comments(
     return DataResponse(
         data=[
             CommentResponse(
-                **CommentResponse.model_validate(cm).model_dump() | {"author_name": name}
+                **CommentResponse.model_validate(cm).model_dump()
+                # Guest portal comments have author_id=NULL; their identity is
+                # the client_author_label captured at post time (R45[24]).
+                | {"author_name": name or getattr(cm, "client_author_label", None)}
             )
             for cm, name in comments
         ]
@@ -1291,9 +1302,15 @@ async def delete_comment(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await require_org_member(org_id, user, db)
+    member = await require_org_member(org_id, user, db)
     svc = ProjectService(db)
-    await svc.delete_comment(comment_id, org_id, user.id)
+    await svc.delete_comment(
+        comment_id,
+        org_id,
+        user.id,
+        # R87[M12]: staff may moderate (guest comments are authorless)
+        is_staff=member.role in INSTRUCTOR_ROLES,
+    )
     await db.commit()
 
 

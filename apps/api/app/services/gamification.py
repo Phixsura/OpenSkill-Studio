@@ -203,7 +203,7 @@ class GamificationService:
                 PointsLedger.user_id == user_id,
                 PointsLedger.org_id == org_id,
             )
-            .order_by(PointsLedger.created_at.desc())
+            .order_by(PointsLedger.created_at.desc(), PointsLedger.id.desc())
             .limit(limit)
         )
         return [

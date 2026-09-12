@@ -33,6 +33,22 @@ async def get_current_user(
     if not isinstance(sub, str) or not sub:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+    # R59[5]: revoking an impersonation grant must kill already-minted tokens
+    # immediately — they otherwise stayed valid for up to 15 minutes, making
+    # /revoke a placebo exactly when it matters (support account compromised,
+    # session gone rogue). Impersonated sessions are rare, so a per-request
+    # grant point-lookup is negligible and needs no cache to invalidate.
+    imp_grant = payload.get("imp_grant")
+    if imp_grant is not None:
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+
+        from app.controlplane.models.tenant import SupportImpersonationGrant
+
+        grant = await db.get(SupportImpersonationGrant, imp_grant)
+        if grant is None or grant.revoked_at is not None or grant.expires_at <= _dt.now(_UTC):
+            raise HTTPException(status_code=401, detail="Impersonation grant revoked")
+
     user = await db.get(User, sub)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")

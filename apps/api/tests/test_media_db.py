@@ -54,10 +54,22 @@ async def _user(db, role=UserRole.STUDENT):
 
 
 async def _org_with_member(db, user, role=OrgRole.OWNER):
+    # Issue #27: organizations.tenant_id is NOT NULL — create the owning tenant
+    from app.controlplane.services.audit import Actor
+    from app.controlplane.services.tenants import create_tenant
+
+    tenant = await create_tenant(
+        db,
+        name=f"MediaTenant-{uuid.uuid4().hex[:6]}",
+        slug=f"media-t-{uuid.uuid4().hex[:8]}",
+        actor=Actor(user_id=user.id, type="tenant"),
+        owner_user_id=user.id,
+    )
     org = Organization(
         name=f"MediaOrg-{uuid.uuid4().hex[:6]}",
         slug=f"media-{uuid.uuid4().hex[:8]}",
         created_by=user.id,
+        tenant_id=tenant.id,
     )
     db.add(org)
     await db.flush()

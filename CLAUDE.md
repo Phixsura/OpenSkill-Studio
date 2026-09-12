@@ -74,3 +74,4 @@ All architecture decisions are documented in `docs/design/`:
 - ADR-011: Provider capability abstraction
 - ADR-012: Explainable matching engine
 - ADR-013: Solution composers & creator matching
+- ADR-014: SaaS commercialization control plane

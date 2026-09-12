@@ -3,6 +3,7 @@
 APP_ENV=test PYTHONPATH=. uv run pytest tests/test_new_services.py -v
 """
 
+import asyncio
 import uuid
 
 import pytest
@@ -1014,3 +1015,309 @@ async def test_share_then_install_end_to_end(c):
         headers=hd_,
     )
     assert r.status_code == 404, r.text
+
+
+@pytest.mark.asyncio
+async def test_duplicate_skill_preserves_origin_provenance(c):
+    """R135 (high): duplication must NOT sever provenance — a copy of
+    licensed-in content is still licensed-in content. Dropping origin_pack_id
+    made duplicate a two-click laundering primitive: the resale gate keys on
+    it, so a provenance-free copy of a paid pack's skill was freely
+    repackagable and resellable (fork already preserves it)."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.skill import Skill as SkillModel
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    sid = await _skill(c, h, oid, "Licensed Skill")
+    pack_id = "01ORIGINPACK00000000000000"
+    release_id = "01ORIGINRELEASE00000000000"
+    async with AsyncSessionLocal() as s:
+        skill = await s.get(SkillModel, sid)
+        skill.origin_pack_id = pack_id
+        skill.origin_release_id = release_id
+        skill.origin_component_id = "skill-1"
+        await s.commit()
+
+    r = await c.post(f"/api/v1/orgs/{oid}/skills/{sid}/duplicate", headers=h)
+    assert r.status_code == 201, r.text
+    new_id = r.json()["data"]["id"]
+    async with AsyncSessionLocal() as s:
+        dup = await s.get(SkillModel, new_id)
+        assert dup.origin_pack_id == pack_id, "duplicate severed origin_pack_id"
+        assert dup.origin_release_id == release_id
+        assert dup.origin_component_id == "skill-1"
+
+
+# ═══════════════ R171: webhook SSRF gaps + event-loop stall + streamed delivery ═══════════════
+
+
+def test_webhook_blocklist_cgnat_and_nat64():
+    """R171: 100.64.0.0/10 (CGNAT / Tailscale overlay) has is_private=False and
+    was in no CIDR entry — webhooks to cloud-internal LBs / tailnet services
+    passed the SSRF check. NAT64 64:ff9b::<v4> bypassed every IPv4 rule."""
+    from app.services.webhook import _is_blocked_url
+
+    assert _is_blocked_url("http://100.64.0.5/hook") is True
+    assert _is_blocked_url("http://100.127.255.254/hook") is True
+    # NAT64 well-known prefix embedding the AWS metadata IP
+    assert _is_blocked_url("http://[64:ff9b::a9fe:a9fe]/latest/meta-data/") is True
+    # Sanity: a public IP literal still passes
+    assert _is_blocked_url("https://93.184.216.34/hook") is False
+
+
+@pytest.mark.asyncio
+async def test_webhook_blocked_cgnat_endpoint(c):
+    """R171: the create endpoint rejects CGNAT-space URLs with 422."""
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    r = await c.post(
+        f"/api/v1/orgs/{oid}/webhooks",
+        json={"url": "http://100.64.0.5/hook", "events": []},
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert "WEBHOOK_URL_BLOCKED" in r.text
+
+
+@pytest.mark.asyncio
+async def test_webhook_dns_check_does_not_stall_event_loop(monkeypatch):
+    """R171: _is_blocked_url runs a SYNCHRONOUS getaddrinfo. Called directly
+    from async code, a slow resolver (attacker-controlled NS) froze the whole
+    event loop. The async wrapper must keep the loop ticking during lookup."""
+    import socket
+    import time as _time
+
+    from app.services import webhook as wh
+
+    def slow_getaddrinfo(*a, **kw):
+        _time.sleep(0.5)  # simulated slow authoritative NS
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        for _ in range(20):
+            ticks += 1
+            await asyncio.sleep(0.02)
+
+    t = asyncio.create_task(ticker())
+    blocked = await wh._is_blocked_url_async("https://slow-ns.example.com/hook")
+    t.cancel()
+    assert blocked is False
+    # With the sync call inline, the loop is frozen for 0.5s → ticks stays 0.
+    assert ticks >= 5, f"event loop stalled during DNS lookup (ticks={ticks})"
+
+
+@pytest.mark.asyncio
+async def test_webhook_delivery_streams_and_signs(monkeypatch):
+    """R171: functional delivery through the new stream path — a local server
+    receives the POST, the HMAC signature verifies, and the (large) response
+    body is never buffered by the sender."""
+    import hashlib
+    import hmac as hmac_mod
+
+    from app.services import webhook as wh
+    from app.services.webhook import WebhookService
+
+    received: dict = {}
+
+    async def handle(reader, writer):
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += await reader.read(1024)
+        head, _, rest = data.partition(b"\r\n\r\n")
+        headers = {}
+        for line in head.split(b"\r\n")[1:]:
+            k, _, v = line.partition(b": ")
+            headers[k.decode().lower()] = v.decode()
+        clen = int(headers.get("content-length", "0"))
+        body = rest
+        while len(body) < clen:
+            body += await reader.read(4096)
+        received["headers"] = headers
+        received["body"] = body
+        # Answer with a deliberately large body — sender must not buffer it.
+        # Written in small chunks so the SERVER side never holds it either
+        # (tracemalloc below measures the whole process).
+        total = 8 * 1024 * 1024
+        chunk = b"x" * 8192
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: " + str(total).encode() + b"\r\n\r\n")
+        try:
+            for _ in range(total // len(chunk)):
+                writer.write(chunk)
+                await writer.drain()
+        except (ConnectionResetError, BrokenPipeError):
+            pass  # sender closed without reading — exactly what we want
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    # 127.0.0.1 is (correctly) blocklisted — bypass only for this delivery test
+    monkeypatch.setattr(wh, "_is_blocked_url", lambda url: False)
+    # Keep a developer machine's HTTP(S)_PROXY out of the loopback connection
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    secret = "s3cr3t" * 8
+    import tracemalloc
+
+    tracemalloc.start()
+    await WebhookService._deliver_background(
+        f"http://127.0.0.1:{port}/hook", secret, "wh_test", "pack.published", {"pack_id": "p1"}
+    )
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    # Streamed-and-discarded: the 8MB response body must never be buffered.
+    assert peak < 2 * 1024 * 1024, f"response body was buffered (peak={peak})"
+    server.close()
+    await server.wait_closed()
+
+    assert received, "server never received the delivery"
+    body = received["body"]
+    sig = received["headers"]["x-webhook-signature"]
+    expect = hmac_mod.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    assert hmac_mod.compare_digest(sig, expect), "HMAC signature mismatch"
+    assert received["headers"]["x-webhook-event"] == "pack.published"
+
+
+@pytest.mark.asyncio
+async def test_target_org_can_remove_unsolicited_share(c):
+    """R172: sharing is push-model with no consent step, and revoke was gated
+    to the OWNER org only — the receiving org had no way to clear a hostile
+    pack out of /shared-with-me or cut its installability. Target-side
+    removal: instructor of the TARGET org deletes the incoming share."""
+    ha, _ = await _auth(c)
+    oid_a = await _org(c, ha)
+    hb, _ = await _auth(c)
+    oid_b = await _org(c, hb)
+
+    pid = (
+        await c.post(f"/api/v1/orgs/{oid_a}/packs", json={"name": "Unsolicited"}, headers=ha)
+    ).json()["data"]["id"]
+    sid = await _skill(c, ha, oid_a, "Unsolicited Skill")
+    await c.post(f"/api/v1/orgs/{oid_a}/packs/{pid}/skills", json={"skill_id": sid}, headers=ha)
+    await c.post(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}/releases", json={"version": "1.0.0"}, headers=ha
+    )
+    await c.put(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}",
+        json={"sharing_enabled": True},
+        headers=ha,
+    )
+    r = await c.post(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}/share", json={"target_org_id": oid_b}, headers=ha
+    )
+    assert r.status_code == 201, r.text
+    shared = (await c.get(f"/api/v1/orgs/{oid_b}/shared-with-me", headers=hb)).json()["data"]
+    assert any(p["id"] == pid for p in shared)
+
+    # A third org that is NOT the target cannot remove B's incoming share
+    hc, _ = await _auth(c)
+    oid_c = await _org(c, hc)
+    r = await c.delete(f"/api/v1/orgs/{oid_c}/shared-with-me/{pid}", headers=hc)
+    assert r.status_code == 404, r.text
+
+    # B (target) removes it
+    r = await c.delete(f"/api/v1/orgs/{oid_b}/shared-with-me/{pid}", headers=hb)
+    assert r.status_code == 204, r.text
+    shared = (await c.get(f"/api/v1/orgs/{oid_b}/shared-with-me", headers=hb)).json()["data"]
+    assert not any(p["id"] == pid for p in shared)
+
+    # ... and the installability the share granted is gone too
+    r = await c.post(
+        f"/api/v1/orgs/{oid_b}/installations", json={"pack_id": pid, "version": "1.0.0"}, headers=hb
+    )
+    assert r.status_code == 404, r.text
+
+    # removing again → 404; owner org can re-share afterwards (no tombstone)
+    r = await c.delete(f"/api/v1/orgs/{oid_b}/shared-with-me/{pid}", headers=hb)
+    assert r.status_code == 404
+    r = await c.post(
+        f"/api/v1/orgs/{oid_a}/packs/{pid}/share", json={"target_org_id": oid_b}, headers=ha
+    )
+    assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_latency_not_an_email_oracle(c, monkeypatch):
+    """R181: the no-user path returned in microseconds while the real path
+    awaited a full SMTP round-trip — response latency was a reliable
+    email-enumeration oracle despite the dummy-work equalizer (which only
+    covered token hashing). The reset email now sends fire-and-forget."""
+    import time
+
+    from app.services import auth as auth_mod
+
+    email = f"oracle-{uuid.uuid4().hex[:8]}@test.com"
+    r = await c.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "Oracle"},
+    )
+    assert r.status_code in (200, 201), r.text
+
+    sent: list[str] = []
+
+    class SlowSender:
+        async def send(self, to: str, subject: str, html: str):
+            await asyncio.sleep(0.5)  # simulated SMTP round-trip
+            sent.append(to)
+
+    monkeypatch.setattr(auth_mod, "get_email_sender", lambda: SlowSender())
+
+    t0 = time.monotonic()
+    r = await c.post("/api/v1/auth/forgot-password", json={"email": email})
+    real_elapsed = time.monotonic() - t0
+    assert r.status_code in (200, 204), r.text
+
+    t0 = time.monotonic()
+    r = await c.post(
+        "/api/v1/auth/forgot-password", json={"email": f"nouser-{uuid.uuid4().hex[:8]}@test.com"}
+    )
+    ghost_elapsed = time.monotonic() - t0
+    assert r.status_code in (200, 204)
+
+    # The SMTP latency must NOT separate the two paths.
+    assert real_elapsed < 0.35, (
+        f"existing-account path took {real_elapsed:.2f}s — SMTP latency leaks account existence"
+    )
+    assert ghost_elapsed < 0.35
+
+    # The email is still actually delivered (fire-and-forget, not dropped).
+    if auth_mod._email_tasks:
+        await asyncio.gather(*auth_mod._email_tasks, return_exceptions=True)
+    assert sent == [email]
+
+
+def test_ssrf_gate_v6_edges():
+    """R251: two defense-in-depth arcs the CIDR list does NOT cover — the
+    ipaddress-flag line must hold on its own for `::` (v6 unspecified, only
+    caught by is_unspecified), and the IPv4-mapped unwrap must let a mapped
+    PUBLIC v4 through (without the unwrap, ::ffff:0:0/96 counts as private
+    and every mapped-public webhook target would be silently blocked)."""
+    from app.services.webhook import _is_blocked_url
+
+    assert _is_blocked_url("http://[::]/hook") is True
+    assert _is_blocked_url("http://[::ffff:93.184.216.34]/hook") is False
+    assert _is_blocked_url("http://[::ffff:169.254.169.254]/latest/meta-data/") is True
+    assert _is_blocked_url("http://[::ffff:10.0.0.5]/hook") is True
+
+    # the mapped-address verdicts, platform-independently (macOS getaddrinfo
+    # normalizes mapped literals to v4 before _is_blocked_url sees them;
+    # Linux/DNS64 deliver ::ffff:<v4> verbatim). Note the explicit unwrap in
+    # _ip_blocked is version-redundant on Python >= 3.12.4 (gh-113171 makes
+    # is_private/is_global delegate to the embedded v4) — kept as defense for
+    # older runtimes, so its mutant is equivalent here and stays unkilled.
+    import ipaddress
+
+    from app.services.webhook import _ip_blocked
+
+    assert _ip_blocked(ipaddress.ip_address("::ffff:169.254.169.254")) is True
+    assert _ip_blocked(ipaddress.ip_address("::ffff:93.184.216.34")) is False
+    assert _ip_blocked(ipaddress.ip_address("::ffff:10.0.0.5")) is True
+    assert _ip_blocked(ipaddress.ip_address("64:ff9b::a9fe:a9fe")) is True
+    assert _ip_blocked(ipaddress.ip_address("2600:1901:0:ab8::")) is False

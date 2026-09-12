@@ -72,6 +72,12 @@ class ProviderService:
         if adapter is None or not adapter.is_active:
             raise AppError("ADAPTER_NOT_FOUND", "Provider adapter not found", 404)
 
+        # Issue #27: suspended tenants cannot add new provider capacity
+        from app.controlplane import facade as cp_facade
+
+        tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+        cp_facade.require_tenant_active(tenant)
+
         # Reject credential field names smuggled into non-sensitive config (R3)
         cred_fields = set(adapter.credential_fields or [])
         leaked = cred_fields & set(config.keys())

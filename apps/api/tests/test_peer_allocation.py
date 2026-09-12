@@ -114,3 +114,77 @@ def test_num_reviews_exceeds_pool():
     assert len(pairs) == len(set(pairs))  # no duplicates
     for _r, cnt in Counter(r for r, _s in pairs).items():
         assert cnt <= 2  # at most n-1 = 2 distinct peers
+
+
+def test_seeded_rng_is_deterministic():
+    """R241: `rng = rng or random.Random()` — a mutation to `and` silently
+    swaps the caller's seeded rng for a fresh unseeded one. Same seed must
+    give the identical allocation (re-allocation audits depend on it)."""
+    subs, reviewers = _setup(8)
+    a = allocate_reviews(subs, reviewers, 2, rng=random.Random(1234))
+    b = allocate_reviews(subs, reviewers, 2, rng=random.Random(1234))
+    assert a == b
+
+
+def test_characterization_snapshot():
+    """R241: characterization sentinel for the repair pass (mutation-driven).
+
+    AST-mutation status after this test: 14/18 killed. The 4 survivors are
+    analyzed non-bugs: the L59 guard pair is provably equivalent (empty
+    inputs fall through to an empty allocation anyway), and the repair-pass
+    load-bookkeeping pair (±1 on donor/orphan) showed zero behavioral
+    difference across 1,500 scenario×seed probes — the orphan list is
+    precomputed, so post-swap loads are only re-read by later orphans whose
+    donor sets the probes could not make intersect.
+
+    Count-based invariants cannot distinguish "leave the orphan alone" from
+    "steal a single-review donor's only review" — both leave exactly one
+    zero-load submission, just a different one. Pin exact outcomes for fixed
+    seeds so any semantic drift in allocation/repair (donor threshold, load
+    bookkeeping, self-review gate in the swap) is flagged. If the algorithm
+    changes INTENTIONALLY, regenerate via the snippet in the repo history.
+    """
+    cases = {
+        # 2 reviewers / 3 subs: one orphan always remains; all donors are
+        # load-1 so repair must NOT fire (donor keeps >= 1 review).
+        ("S1", seed): sorted(
+            allocate_reviews(
+                {"sa": "A", "sb": "B", "sc": "C"}, ["A", "B"], 1, rng=random.Random(seed)
+            )
+        )
+        for seed in range(10)
+    }
+    cases.update(
+        {
+            # author-of-orphan among reviewers: repair path reachable
+            ("S2", seed): sorted(
+                allocate_reviews(
+                    {"so": "C", "s1": "A", "s2": "B"}, ["A", "B", "C"], 1, rng=random.Random(seed)
+                )
+            )
+            for seed in range(10)
+        }
+    )
+    expected = {
+        ("S1", 0): [("A", "sc"), ("B", "sa")],
+        ("S1", 1): [("A", "sc"), ("B", "sa")],
+        ("S1", 2): [("A", "sb"), ("B", "sa")],
+        ("S1", 3): [("A", "sc"), ("B", "sa")],
+        ("S1", 4): [("A", "sb"), ("B", "sc")],
+        ("S1", 5): [("A", "sc"), ("B", "sa")],
+        ("S1", 6): [("A", "sb"), ("B", "sc")],
+        ("S1", 7): [("A", "sb"), ("B", "sc")],
+        ("S1", 8): [("A", "sb"), ("B", "sc")],
+        ("S1", 9): [("A", "sc"), ("B", "sa")],
+        ("S2", 0): [("A", "so"), ("B", "s1"), ("C", "s2")],
+        ("S2", 1): [("A", "so"), ("B", "s1"), ("C", "s2")],
+        ("S2", 2): [("A", "so"), ("B", "s1"), ("C", "s2")],
+        ("S2", 3): [("A", "so"), ("B", "s1"), ("C", "s2")],
+        ("S2", 4): [("A", "s2"), ("B", "so"), ("C", "s1")],
+        ("S2", 5): [("A", "s2"), ("B", "so"), ("C", "s1")],
+        ("S2", 6): [("A", "s2"), ("B", "so"), ("C", "s1")],
+        ("S2", 7): [("A", "so"), ("B", "s1"), ("C", "s2")],
+        ("S2", 8): [("A", "so"), ("B", "s1"), ("C", "s2")],
+        ("S2", 9): [("A", "s2"), ("B", "so"), ("C", "s1")],
+    }
+    assert cases == expected

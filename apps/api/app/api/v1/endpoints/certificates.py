@@ -26,6 +26,8 @@ class CertificateResponse(BaseModel):
     path_name: str | None = None
     org_name: str | None = None
     skills_completed: int | None = None
+    # R113[M6]: white-label footer (tenant branding), verification view only
+    certificate_footer: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -73,4 +75,27 @@ async def verify_certificate(
     cert = result.scalar_one_or_none()
     if cert is None:
         raise AppError("CERTIFICATE_NOT_FOUND", "Certificate not found", 404)
-    return DataResponse(data=CertificateResponse.model_validate(cert))
+    response = CertificateResponse.model_validate(cert)
+    # R113[M6]: certificate_footer was validated, stored and UI-editable but
+    # nothing ever read it — wire the tenant's white-label footer into the
+    # public verification view (the only certificate rendering surface).
+    try:
+        from app.controlplane.models.branding import TenantBranding
+        from app.models.organization import Organization
+
+        tenant_id = (
+            await db.execute(select(Organization.tenant_id).where(Organization.id == cert.org_id))
+        ).scalar_one_or_none()
+        if tenant_id:
+            footer = (
+                await db.execute(
+                    select(TenantBranding.certificate_footer).where(
+                        TenantBranding.tenant_id == tenant_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if footer:
+                response.certificate_footer = footer
+    except Exception:  # noqa: BLE001 — branding is cosmetic; never fail verification
+        pass
+    return DataResponse(data=response)

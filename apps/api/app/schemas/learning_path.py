@@ -33,6 +33,23 @@ class CreateLearningPathRequest(BaseModel):
         return v
 
 
+class InstallPathRequest(BaseModel):
+    """ADR-014 §8.5: install a purchased learning path from its listing.
+
+    R123[H1]: manual license grants carry NO listing_id — product_id is the
+    alternative handle so manually-granted paths are redeemable too. Exactly
+    one of the two must be provided."""
+
+    listing_id: str | None = Field(default=None, min_length=26, max_length=26)
+    product_id: str | None = Field(default=None, min_length=26, max_length=26)
+
+    @model_validator(mode="after")
+    def _one_of(self) -> "InstallPathRequest":
+        if bool(self.listing_id) == bool(self.product_id):
+            raise ValueError("Provide exactly one of listing_id or product_id")
+        return self
+
+
 class UpdateLearningPathRequest(BaseModel):
     name: str | None = None
     description: str | None = None

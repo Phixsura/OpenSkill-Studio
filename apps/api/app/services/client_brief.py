@@ -45,11 +45,16 @@ class ClientBriefService:
             created_by=created_by,
             **fields,
         )
-        self.db.add(brief)
+        # R177: slug-collision recovery previously called session.rollback() —
+        # a FULL transaction rollback, not a savepoint. Any uncommitted work
+        # the caller had already done in the same transaction was silently
+        # wiped before the retry (and only the brief itself was re-added).
+        # Savepoint the insert instead, same pattern as portfolio.create_item.
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(brief)
+                await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
             brief.slug = f"{slug[:290]}-{secrets.token_hex(3)}"
             self.db.add(brief)
             await self.db.flush()
@@ -77,7 +82,9 @@ class ClientBriefService:
         total = total_r.scalar_one()
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(ClientBrief.created_at.desc()).offset(offset).limit(per_page)
+            base.order_by(ClientBrief.created_at.desc(), ClientBrief.id.desc())
+            .offset(offset)
+            .limit(per_page)
         )
         return list(result.scalars().all()), total
 
@@ -123,9 +130,19 @@ class ClientBriefService:
 
     async def delete_brief(self, brief_id: str) -> None:
         brief = await self.get_brief(brief_id)
-        if brief.status != BriefStatus.DRAFT:
+        # issue-18 debt (R70 class): guarded transition — the stale-read gate
+        # raced a concurrent convert/open (delete landed ARCHIVED over a brief
+        # that had just gone ACTIVE, killing its linked project's brief).
+        from sqlalchemy import update as _sa_update
+
+        result = await self.db.execute(
+            _sa_update(ClientBrief)
+            .where(ClientBrief.id == brief_id, ClientBrief.status == BriefStatus.DRAFT)
+            .values(status=BriefStatus.ARCHIVED)
+        )
+        if not result.rowcount:
             raise AppError("INVALID_STATE", "Only draft briefs can be deleted", 422)
-        brief.status = BriefStatus.ARCHIVED
+        await self.db.refresh(brief)
         await self.db.flush()
 
     async def convert_to_project(
@@ -155,6 +172,19 @@ class ClientBriefService:
         # active brief would create duplicate projects and crash on lazy-load.
         if brief.status != BriefStatus.DRAFT:
             raise AppError("INVALID_STATE", "Only draft briefs can be converted", 422)
+        # issue-18 debt (R70 class): claim DRAFT→ACTIVE up front — two
+        # concurrent converts both passed the stale-read gate and created TWO
+        # projects off one brief. The loser blocks on the row lock and 422s;
+        # a failure later in project creation rolls the claim back with the tx.
+        from sqlalchemy import update as _sa_update
+
+        claim = await self.db.execute(
+            _sa_update(ClientBrief)
+            .where(ClientBrief.id == brief_id, ClientBrief.status == BriefStatus.DRAFT)
+            .values(status=BriefStatus.ACTIVE)
+        )
+        if not claim.rowcount:
+            raise AppError("INVALID_STATE", "Only draft briefs can be converted", 422)
 
         # Validate cohort belongs to the same org
         if cohort_id:
@@ -176,7 +206,10 @@ class ClientBriefService:
             description=brief.objective,
             instructions=f"## Client Brief: {brief.client_name}\n\n{brief.objective}",
             difficulty="intermediate",
-            max_score=sum(r.get("max_score", 0) for r in (rubric or [])) or 100,
+            # R243: int() keeps the INTEGER-column write total even for direct
+            # service callers passing float rubric values (schema rejects
+            # fractional sums; integral floats like 100.0 coerce cleanly).
+            max_score=int(sum(r.get("max_score", 0) for r in (rubric or []))) or 100,
             rubric=rubric or [{"criterion": "Overall Quality", "max_score": 100}],
             deadline=deadline,
             late_deadline=late_deadline,
@@ -204,8 +237,8 @@ class ClientBriefService:
                 i,
             )
 
-        # Mark brief as assigned
-        brief.status = BriefStatus.ACTIVE
+        # Brief already claimed DRAFT→ACTIVE above; keep the ORM copy in sync.
+        await self.db.refresh(brief)
         await self.db.flush()
 
         log.info(

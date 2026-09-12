@@ -6,8 +6,11 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { MarketplacePanel } from "@/components/marketplace-panel";
+import { InstallButton } from "@/components/install-button";
 
 interface PackDetail {
   id: string;
@@ -58,7 +61,31 @@ const STEP_TYPE_COLORS: Record<string, string> = {
 export default function PublicWorkflowPackPage() {
   const { packId } = useParams<{ packId: string }>();
 
-  const { data: packData, isLoading, isError } = useQuery({
+  const [isAuthed, setIsAuthed] = useState(false);
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    import("@/stores/auth").then((m) => {
+      if (m.useAuthStore.getState().isAuthenticated) {
+        setIsAuthed(true);
+        return;
+      }
+      unsub = m.useAuthStore.subscribe((state) => {
+        if (state.isAuthenticated) {
+          setIsAuthed(true);
+          unsub?.();
+        }
+      });
+    });
+    return () => {
+      unsub?.();
+    };
+  }, []);
+
+  const {
+    data: packData,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["wf-registry-pack", packId],
     queryFn: () => api<{ data: PackDetail }>(`/registry/workflow-packs/${packId}`),
   });
@@ -119,21 +146,23 @@ export default function PublicWorkflowPackPage() {
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {pack.capability_tags.map((cap) => (
-          <span
-            key={cap}
-            className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs"
-          >
+          <span key={cap} className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs">
             {cap.replace(/_/g, " ")}
           </span>
         ))}
       </div>
 
-      <div className="mt-6 rounded-lg border border-dashed p-4 text-sm">
-        Install this workflow from your organization dashboard:{" "}
-        <Link href="/login?redirect=/dashboard" className="underline">
-          Sign in
-        </Link>{" "}
-        → Workflow Installations → install by pack.
+      <div className="mt-6">
+        <MarketplacePanel productType="workflow_pack" productId={packId} isAuthed={isAuthed} />
+      </div>
+
+      <div className="mt-4">
+        <InstallButton
+          productType="workflow_pack"
+          packId={packId}
+          packName={pack.name}
+          isAuthed={isAuthed}
+        />
       </div>
 
       {pack.description && (
@@ -162,9 +191,7 @@ export default function PublicWorkflowPackPage() {
                       {input.type}
                     </span>
                     {input.required !== false && (
-                      <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                        required
-                      </span>
+                      <span className="text-xs text-[hsl(var(--muted-foreground))]">required</span>
                     )}
                   </li>
                 ))}
@@ -267,8 +294,7 @@ export default function PublicWorkflowPackPage() {
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-sm font-semibold">v{rel.version}</span>
                   <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                    {rel.step_count} steps ·{" "}
-                    {new Date(rel.released_at).toLocaleDateString()}
+                    {rel.step_count} steps · {new Date(rel.released_at).toLocaleDateString()}
                   </span>
                   <code
                     className="ml-auto text-xs text-[hsl(var(--muted-foreground))]"

@@ -64,7 +64,10 @@ export function CommentPanel({
   const regionOrder = itemComments.filter((c) => c.anchor_type === "region" && c.region);
 
   const submit = async () => {
-    if (!text.trim()) return;
+    // R183: the Post button is disabled while busy, but the Enter-key path
+    // called submit() directly — a second Enter before the first POST
+    // resolved double-posted the comment. Gate the function, not the button.
+    if (busy || !text.trim()) return;
     setBusy(true);
     setError(null);
     try {

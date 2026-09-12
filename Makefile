@@ -23,6 +23,9 @@ dev-web:                          ## Start frontend only
 dev-api:                          ## Start backend only (hot reload)
 	cd apps/api && uv run uvicorn app.main:app --reload --reload-dir app --port 8000
 
+dev-worker:                       ## Start control-plane worker (outbox + crons)
+	cd apps/api && uv run arq app.controlplane.worker.WorkerSettings
+
 # ─── Infrastructure ──────────────────────────────────────
 infra-up:                         ## Start Docker infrastructure
 	docker compose up -d

@@ -403,6 +403,9 @@ async def test_portfolio_upload_cover_endpoint(c):
 
     mock_client = AsyncMock()
     mock_client.put_object = AsyncMock()
+    # R49[37]: the handler now sums the user's covers prefix via
+    # list_objects_v2 — return a real dict so IsTruncated is falsy.
+    mock_client.list_objects_v2 = AsyncMock(return_value={"Contents": [], "IsTruncated": False})
 
     async def fake_s3():
         yield mock_client
@@ -617,3 +620,53 @@ async def test_skills_exercise_org_check(c):
     # Try to delete exercise from wrong org
     r2 = await c.delete(f"/api/v1/orgs/{oid}/exercises/nonexistent", headers=h)
     assert r2.status_code in (404, 500)
+
+
+@pytest.mark.asyncio
+async def test_portfolio_upload_cover_per_user_cap(c):
+    """R49[37]: cover uploads had no total bound and no DB record — unbounded
+    unaccounted storage growth. The handler now sums the user's covers prefix
+    in S3 and 413s past 100MB."""
+    h, _ = await _auth(c)
+    import io
+
+    mock_client = AsyncMock()
+    mock_client.put_object = AsyncMock()
+    # User already has ~99.9MiB of covers → a 1MiB upload crosses the 100MiB cap
+    mock_client.list_objects_v2 = AsyncMock(
+        return_value={
+            "Contents": [{"Size": 100 * 1024 * 1024 - 500_000}, {"Size": 100_000}],
+            "IsTruncated": False,
+        }
+    )
+
+    async def fake_s3():
+        yield mock_client
+
+    body = b"\xff\xd8\xff\xe0" + b"\x00" * (1024 * 1024)
+    with patch("app.core.storage.get_s3_client", return_value=fake_s3()):
+        files = {"file": ("c.jpg", io.BytesIO(body), "image/jpeg")}
+        r = await c.post("/api/v1/portfolio/upload-cover", headers=h, files=files)
+    assert r.status_code == 413
+    assert "storage limit" in r.text
+    mock_client.put_object.assert_not_called()
+
+    # Under the cap → accepted (paginated listing exercised via IsTruncated)
+    mock_client2 = AsyncMock()
+    mock_client2.put_object = AsyncMock()
+    mock_client2.list_objects_v2 = AsyncMock(
+        side_effect=[
+            {"Contents": [{"Size": 1000}], "IsTruncated": True, "NextContinuationToken": "t"},
+            {"Contents": [{"Size": 2000}], "IsTruncated": False},
+        ]
+    )
+
+    async def fake_s3_2():
+        yield mock_client2
+
+    with patch("app.core.storage.get_s3_client", return_value=fake_s3_2()):
+        files = {"file": ("c.jpg", io.BytesIO(body), "image/jpeg")}
+        r = await c.post("/api/v1/portfolio/upload-cover", headers=h, files=files)
+    assert r.status_code == 200
+    mock_client2.put_object.assert_called_once()
+    assert mock_client2.list_objects_v2.await_count == 2

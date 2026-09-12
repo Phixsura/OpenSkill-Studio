@@ -297,6 +297,11 @@ class ConvertBriefToProjectRequest(BaseModel):
             ms = item["max_score"]
             if isinstance(ms, bool) or not isinstance(ms, (int, float)) or not (0 <= ms <= 10000):
                 raise ValueError("Criterion max_score must be a number between 0 and 10000")
+            # R243: the sum lands in Project.max_score (INTEGER) and round-trips
+            # through ProjectResponse's int field — a fractional sum (50.5+49.0)
+            # crashed response serialization AFTER the project row was created.
+            if isinstance(ms, float) and not ms.is_integer():
+                raise ValueError("Criterion max_score must be a whole number")
             total += ms
         # Project.max_score is a 32-bit INTEGER; the derived sum must fit.
         if total > 1_000_000:

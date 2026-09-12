@@ -71,7 +71,13 @@ try {
   await page.click('button[type="submit"]');
   await page.waitForTimeout(3000);
   const regBody = await page.textContent("body");
-  check("registration succeeds", regBody.includes("Check your email") || regBody.includes("Continue"));
+  // Registration now auto-authenticates and lands on the dashboard (the
+  // register→auto-tenant flow) — the old "Check your email"/"Continue" copy
+  // only appears on the verification-required variant.
+  check(
+    "registration succeeds",
+    page.url().includes("dashboard") || regBody.includes("Check your email") || regBody.includes("Continue"),
+  );
   await page.screenshot({ path: "/tmp/e2e-03-register-success.png" });
 
   // Click "Continue to Dashboard"
@@ -95,6 +101,9 @@ try {
 
   // ── 4. Logout + Login ──
   section("4. Login Flow");
+  // Log out first: the refresh token lives in an httpOnly cookie, and /login
+  // redirects an authenticated session straight back to the dashboard.
+  await page.context().clearCookies();
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle", timeout: 10000 });
   check("login page loads", page.url().includes("login"));
 
@@ -144,7 +153,13 @@ try {
       const orgResp = await fetch(`${API}/orgs`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: "Browser Test Org", description: "Playwright E2E" }),
+        // Unique per run — a hardcoded name/slug 409s against the shared dev
+        // DB on every rerun (orgs from prior runs are committed).
+        body: JSON.stringify({
+          name: `Browser Test Org ${Date.now().toString(36)}`,
+          slug: `bto-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+          description: "Playwright E2E",
+        }),
       });
       const orgData = await orgResp.json();
       orgId = orgData.data?.id || "";

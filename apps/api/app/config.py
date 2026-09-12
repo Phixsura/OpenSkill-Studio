@@ -8,6 +8,14 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Application
     app_env: str = "development"
+    # R78b (issue-18 addendum): number of TRUSTED reverse-proxy hops in front
+    # of the app. 0 (default) = X-Forwarded-For is untrusted and ignored —
+    # rate limiting keys on the direct peer IP. Behind a load balancer set 1
+    # (CDN + LB = 2): the client is then read from the N-th-from-the-right
+    # X-Forwarded-For entry (the address the innermost trusted proxy saw).
+    # Without this, every deployment behind a proxy collapsed ALL users into
+    # the proxy IP's single bucket per route.
+    trusted_proxy_hops: int = 0
     debug: bool = False  # Override via DEBUG=true env var
     log_level: str = "INFO"
     log_format: str = "console"  # console | json
@@ -25,6 +33,10 @@ class Settings(BaseSettings):
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "openskill"
+    # R65[23]: tenant-export PII bundles must not share a bucket with
+    # publicly-served assets (portfolio covers use direct URLs on s3_bucket).
+    # Exports go to a dedicated private bucket, presigned-GET only.
+    s3_export_bucket: str = "openskill-exports"
     s3_region: str = "us-east-1"
 
     # Auth / JWT
@@ -56,6 +68,31 @@ class Settings(BaseSettings):
     workflow_step_timeout_seconds: int = 120
     workflow_max_concurrent_runs: int = 20
 
+    # Control plane (Issue #27)
+    platform_currency: str = "USD"
+    trial_days: int = 14
+    # §33 self-service tenant signup (org creation without tenant context
+    # auto-mints a TRIAL tenant). "Where enabled": ops can turn the door off;
+    # the platform/partner provisioning paths are unaffected either way.
+    self_service_signup_enabled: bool = True
+    # Off by default: flipping this on is a launch decision (existing dev/test
+    # users are unverified); production deployments set it via env.
+    self_service_require_verified_email: bool = False
+    self_service_max_tenants_per_user: int = 20
+    trial_expiry_action: str = "downgrade"  # downgrade | suspend
+    impersonation_max_minutes: int = 60
+    client_guest_token_expire_minutes: int = 30
+    reservation_ttl_hours: int = 24
+    billing_provider_default: str = "manual"  # manual | mock | stripe
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    platform_default_commission_pct: str = "30.00"
+    platform_base_domains: list[str] = ["localhost"]
+    domain_verifier: str = "mock"  # mock | dns
+    tls_provisioner: str = "null"  # null | mock
+    outbox_max_attempts: int = 8
+    outbox_batch_size: int = 50
+
     # Frontend
     frontend_url: str = "http://localhost:3000"
 
@@ -65,11 +102,44 @@ class Settings(BaseSettings):
     # API
     api_prefix: str = "/api/v1"
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "platform_base_domains", mode="before")
     @classmethod
     def parse_cors(cls, v: object) -> object:
         if isinstance(v, str):
             return json.loads(v)
+        return v
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, v: list[str], info: Any) -> list[str]:
+        # R189: the app runs CORSMiddleware with allow_credentials=True. With
+        # a wildcard origin, starlette ECHOES the request Origin instead of
+        # sending "*" (which is invalid with credentials) — so an ops
+        # CORS_ORIGINS='["*"]' silently granted EVERY website credentialed
+        # access to the API: any page could call /auth/refresh with the
+        # visitor's httpOnly refresh cookie and mint access tokens (full
+        # account takeover for any logged-in visitor). Same boot-guard
+        # pattern as jwt_secret/domain_verifier: refuse to start production
+        # with a wildcard.
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if app_env not in ("development", "test") and any("*" in o for o in v):
+            raise ValueError(
+                "CORS_ORIGINS must not contain wildcards in production "
+                "(credentials mode echoes any origin)"
+            )
+        return v
+
+    @field_validator("domain_verifier")
+    @classmethod
+    def validate_domain_verifier(cls, v: str, info: Any) -> str:
+        # R83[4]: 'mock' issues 'ok-'-prefixed tokens that ALWAYS verify —
+        # in production that is a complete domain-ownership bypass (any
+        # tenant activates any hostname, incl. lookalikes of other tenants).
+        # Same boot-guard pattern as jwt_secret/s3_secret_key: refuse to
+        # start production with the dev default.
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if app_env not in ("development", "test") and v == "mock":
+            raise ValueError("DOMAIN_VERIFIER must be 'dns' in production (mock always verifies)")
         return v
 
     @field_validator("jwt_secret")

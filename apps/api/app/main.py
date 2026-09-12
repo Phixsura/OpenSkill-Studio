@@ -11,6 +11,8 @@ from app.core.database import engine
 from app.core.logging import setup_logging
 from app.core.redis import redis_pool
 from app.exceptions import register_exception_handlers
+from app.middleware.api_metering import ApiRequestMeteringMiddleware
+from app.middleware.impersonation import ImpersonationGuardMiddleware
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.middleware.security import BodySizeLimitMiddleware, SecurityHeadersMiddleware
@@ -73,11 +75,13 @@ async def lifespan(app: FastAPI):
 
     # 1. Drain in-flight webhook deliveries and workflow executions before
     #    tearing down connections
+    from app.services.auth import drain_email_tasks
     from app.services.webhook import drain_webhook_tasks
     from app.services.workflow_runtime import drain_workflow_tasks
 
     await drain_webhook_tasks()
     await drain_workflow_tasks()
+    await drain_email_tasks()
 
     # 2. Close DB pool
     await engine.dispose()
@@ -100,6 +104,13 @@ app = FastAPI(
 )
 
 # ── Middleware stack (registered bottom-up, executed top-down) ──
+# Innermost (added first, runs last on request): impersonation guard — placed
+# inside RequestID/Logging so blocked responses carry a request_id and are
+# access-logged like any other 403.
+app.add_middleware(ImpersonationGuardMiddleware)
+# API request metering (Issue #27): Redis hourly buckets, fail-open, zero DB
+# writes on the request path; 429 on daily-quota hard-over.
+app.add_middleware(ApiRequestMeteringMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)

@@ -22,8 +22,35 @@ _INPUT_SQLSTATES = frozenset(
         "22P05",  # untranslatable_character ( escape materialized)
         "22P02",  # invalid_text_representation (NaN/Infinity in JSONB)
         "22001",  # string_data_right_truncation (value too long for VARCHAR(N))
+        "22003",  # numeric_value_out_of_range (Numeric(p,s) overflow — reaches PG)
+        # R76[1]: asyncpg's timestamptz encoder calls .astimezone(utc) which
+        # OverflowErrors for extreme-but-Pydantic-valid datetimes (year 1 at
+        # +14:00); asyncpg wraps it in DataError with the GENERIC sqlstate
+        # 22000 — the earlier no-sqlstate arm never matched, so every
+        # datetime filter param was a 500 vector.
+        "22000",  # data_exception (generic — asyncpg client-side encode faults)
+        "22008",  # datetime_field_overflow (server-side variant)
     }
 )
+
+
+def _is_asyncpg_input_data_error(exc: object) -> bool:
+    """asyncpg raises DataError CLIENT-SIDE (before the query reaches Postgres)
+    for an argument that can't be encoded to the column type — e.g. an int
+    beyond int64 range bound for a BIGINT column. It carries NO sqlstate, so
+    the SQLSTATE set above can't catch it; it's still purely input-driven.
+    (R88 kept re-finding this per-endpoint: money amount_minor / limit_minor /
+    quantity past the column bound → unhandled 500.)"""
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+    try:
+        from asyncpg.exceptions import DataError as _AsyncpgDataError
+    except Exception:  # noqa: BLE001 — driver optional
+        return False
+    # A server-side PostgresError subclass would carry a sqlstate; a bare
+    # client-side DataError does not. Only treat the latter as an input fault.
+    return isinstance(orig, _AsyncpgDataError) and getattr(orig, "sqlstate", None) is None
 
 
 class AppError(Exception):
@@ -113,7 +140,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         input-fault SQLSTATEs to a clean 422; anything else is a genuine server
         fault and re-raises to the 500 handler."""
         sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
-        if sqlstate in _INPUT_SQLSTATES:
+        if sqlstate in _INPUT_SQLSTATES or _is_asyncpg_input_data_error(exc):
             log.warning(
                 "db_input_rejected",
                 sqlstate=sqlstate,

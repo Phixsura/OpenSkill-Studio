@@ -53,7 +53,15 @@ MAX_FILENAME_LEN = 200
 def _clamp_filename(name: str) -> str:
     """Clamp a client-supplied filename, preserving the extension, so a very
     long name doesn't raise a DataError 500 on insert or an invalid-object-name
-    error from object storage."""
+    error from object storage.
+
+    R156 (adversarial battery): also strip PATH COMPONENTS — a filename like
+    '../../../etc/passwd.png' was stored verbatim and echoed by every API
+    response. The S3 key was already sanitized and Content-Disposition carries
+    no filename, so nothing traverses TODAY — but stored hostile path data is
+    a footgun for any future consumer (exports, zips, desktop clients) that
+    trusts file_name as a save path. Basename at ingestion, defense in depth."""
+    name = name.replace("\\", "/").rsplit("/", 1)[-1].lstrip(".") or "file"
     if len(name) <= MAX_FILENAME_LEN:
         return name
     dot = name.rfind(".")
@@ -415,7 +423,9 @@ class ProjectService:
 
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(Project.deadline.asc().nulls_last(), Project.created_at.desc())
+            base.order_by(
+                Project.deadline.asc().nulls_last(), Project.created_at.desc(), Project.id.desc()
+            )
             .offset(offset)
             .limit(per_page)
         )
@@ -666,8 +676,17 @@ class ProjectService:
         await self.db.flush()
         return submission
 
-    async def get_submission(self, submission_id: str) -> Submission:
-        sub = await self.db.get(Submission, submission_id)
+    async def get_submission(self, submission_id: str, *, for_update: bool = False) -> Submission:
+        # for_update (issue-18 debt, R70 pattern): transition callers
+        # (submit_draft, create_review) lock the row so their status gates
+        # cannot race each other; populate_existing overwrites a stale
+        # identity-map copy read earlier in the same session.
+        sub = await self.db.get(
+            Submission,
+            submission_id,
+            with_for_update=for_update or None,
+            populate_existing=for_update,
+        )
         if sub is None:
             raise SubmissionNotFoundError()
         return sub
@@ -698,14 +717,20 @@ class ProjectService:
         if user_id:
             joined = joined.where(Submission.user_id == user_id)
         result = await self.db.execute(
-            joined.order_by(Submission.created_at.desc()).offset(offset).limit(per_page)
+            joined.order_by(Submission.created_at.desc(), Submission.id.desc())
+            .offset(offset)
+            .limit(per_page)
         )
         return [(sub, name) for sub, name in result.all()], total
 
     async def submit_draft(
         self, submission_id: str, user_id: str, require_published: bool = False
     ) -> Submission:
-        sub = await self.get_submission(submission_id)
+        # issue-18 debt: locked read — a double submit raced the status gate
+        # (double version bump on revision-resubmit, double gamification
+        # points), and a submit racing create_review's status write interleaved
+        # unserialised. Both paths now contend on the submission row.
+        sub = await self.get_submission(submission_id, for_update=True)
 
         if sub.user_id != user_id:
             raise AppError("PERMISSION_DENIED", "Not your submission", 403)
@@ -736,6 +761,14 @@ class ProjectService:
         if timing == "closed":
             raise DeadlinePassedError()
 
+        # R87[8]: a RESUBMISSION after revision-requested is a NEW version of
+        # the work — bump the counter. The client portal's decision
+        # idempotency is keyed on (submission, version, action); without the
+        # bump, a revise→resubmit cycle kept the same version and the
+        # client's decision on the NEW work was silently swallowed by the
+        # prior-version record (returned as "already decided").
+        if sub.status == SubmissionStatus.REVISION_REQUESTED:
+            sub.version += 1
         sub.status = SubmissionStatus.SUBMITTED
         sub.submitted_at = datetime.now(UTC)
         sub.is_late = timing == "late"
@@ -1032,7 +1065,10 @@ class ProjectService:
         score_breakdown: dict | None,
         feedback: str | None,
     ) -> SubmissionReview:
-        sub = await self.get_submission(submission_id)
+        # issue-18 debt: locked read — see submit_draft (a review racing a
+        # resubmission otherwise stamped APPROVED/final_score onto the NEW
+        # version's row off a stale SUBMITTED read of the old one).
+        sub = await self.get_submission(submission_id, for_update=True)
         project = await self.get_project(sub.project_id)
 
         # No self-review (R86). An instructor can submit to their own project;
@@ -1224,8 +1260,28 @@ class ProjectService:
             reason=reason,
             granted_by=granted_by,
         )
-        self.db.add(ext)
-        await self.db.flush()
+        # R200: the one-per-(project,user) pre-check races a concurrent grant
+        # (instructor double-click) — the loser died on
+        # uq_extension_project_user as an unhandled 500 (same shape as
+        # set_override, fixed in R187). Savepoint; loser updates the winner.
+        try:
+            async with self.db.begin_nested():
+                self.db.add(ext)
+                await self.db.flush()
+        except IntegrityError:
+            winner = (
+                await self.db.execute(
+                    select(SubmissionExtension).where(
+                        SubmissionExtension.project_id == project_id,
+                        SubmissionExtension.user_id == user_id,
+                    )
+                )
+            ).scalar_one()
+            winner.extended_deadline = new_deadline
+            winner.reason = reason
+            winner.granted_by = granted_by
+            ext = winner
+            await self.db.flush()
 
         log.info(
             "extension_granted",
@@ -1834,9 +1890,15 @@ class ProjectService:
         await self.db.flush()
         return comment
 
-    async def delete_comment(self, comment_id: str, org_id: str, user_id: str) -> None:
+    async def delete_comment(
+        self, comment_id: str, org_id: str, user_id: str, *, is_staff: bool = False
+    ) -> None:
         comment = await self.get_comment(comment_id, org_id)
-        if comment.author_id != user_id:
+        # R87[M12]: guest portal comments have author_id=NULL — author-only
+        # deletion made them permanently undeletable (spam/abusive guest
+        # comments stuck on the record). Org staff may moderate any comment;
+        # authorless comments are deletable ONLY by staff.
+        if comment.author_id != user_id and not is_staff:
             raise AppError("PERMISSION_DENIED", "Only the author can delete a comment", 403)
         await self.db.delete(comment)
         await self.db.flush()

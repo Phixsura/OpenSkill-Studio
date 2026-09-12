@@ -36,12 +36,16 @@ export default function LoginPage() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
-  // Redirect to dashboard if already logged in
+  // Redirect if already logged in.
+  // R113[H5]: honor ?redirect here too — handleSubmit's setAuth() flips
+  // isAuthenticated and re-renders this still-mounted page, so this effect
+  // raced router.push(safeRedirect(...)) and clobbered every deep link to
+  // /dashboard (platform/partner/invoice links from emails all lost).
   useEffect(() => {
     if (isAuthenticated) {
-      router.replace("/dashboard");
+      router.replace(safeRedirect(searchParams.get("redirect")));
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, searchParams]);
 
   const verified = searchParams.get("verified") === "true";
 
@@ -64,9 +68,7 @@ export default function LoginPage() {
       setAuth(data.access_token, data.user);
       router.push(safeRedirect(searchParams.get("redirect")));
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Login failed. Please try again.",
-      );
+      setError(err instanceof ApiError ? err.message : "Login failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -76,9 +78,7 @@ export default function LoginPage() {
     <>
       <div className="text-center">
         <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
-        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-          Log in to your account
-        </p>
+        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Log in to your account</p>
       </div>
 
       {verified && (
@@ -88,7 +88,10 @@ export default function LoginPage() {
       )}
 
       {error && (
-        <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div
+          role="alert"
+          className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
+        >
           {error}
         </div>
       )}

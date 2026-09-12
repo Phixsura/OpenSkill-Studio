@@ -44,8 +44,17 @@ class InviteStatus(str, enum.Enum):
 
 class Organization(Base):
     __tablename__ = "organizations"
+    __table_args__ = (Index("ix_orgs_tenant", "tenant_id"),)
 
     id: Mapped[str] = ulid_pk()
+    # Commercial owner (Issue #27): every org belongs to exactly one
+    # TenantAccount. NOT NULL after the backfill migration; RESTRICT so a
+    # tenant can never be physically deleted out from under its orgs.
+    tenant_id: Mapped[str] = mapped_column(
+        String(26),
+        ForeignKey("cp_tenant_accounts.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(2000), nullable=True)

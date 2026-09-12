@@ -114,6 +114,7 @@ async def create_org(
         role="owner",
         member_count=count,
         created_at=org.created_at,
+        tenant_id=org.tenant_id,
     )
     return DataResponse(data=resp)
 
@@ -139,6 +140,7 @@ async def list_my_orgs(
             role=o["role"],
             member_count=o["member_count"],
             created_at=o["org"].created_at,
+            tenant_id=o["org"].tenant_id,
         )
         for o in orgs
     ]
@@ -176,6 +178,7 @@ async def get_org(
         role=member.role.value,
         member_count=count,
         created_at=org.created_at,
+        tenant_id=org.tenant_id,
     )
     return DataResponse(data=resp)
 
@@ -207,6 +210,7 @@ async def update_org(
         logo_url=org.logo_url,
         member_count=count,
         created_at=org.created_at,
+        tenant_id=org.tenant_id,
     )
     return DataResponse(data=resp)
 
@@ -252,6 +256,7 @@ async def update_org_settings(
         role=member.role.value,
         member_count=count,
         created_at=org.created_at,
+        tenant_id=org.tenant_id,
     )
     return DataResponse(data=resp)
 

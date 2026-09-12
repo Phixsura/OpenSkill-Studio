@@ -17,8 +17,14 @@ def redis_pool() -> Redis:
             decode_responses=True,
             max_connections=50,
             health_check_interval=30,
-            socket_connect_timeout=5,
-            socket_timeout=5,
+            # R196 (chaos probe: docker-paused Redis): 5s+5s socket timeouts
+            # meant every cache-touching request blocked 10s (cache_get +
+            # cache_set) during a Redis outage — fail-OPEN semantics held
+            # (zero 500s) but the platform soft-died at 10s/page. Same-host
+            # Redis p99 is single-digit ms; sub-second timeouts turn an
+            # outage into ≤2s of degradation per cold request.
+            socket_connect_timeout=0.5,
+            socket_timeout=1.0,
         )
     return _redis
 

@@ -9,6 +9,7 @@ for i in 1..N — same video always produces the same frames.
 
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import shutil
@@ -25,6 +26,26 @@ log = structlog.get_logger()
 DEFAULT_MAX_FRAMES = 8
 MAX_VIDEO_DURATION_SECONDS = 600  # 10 minutes
 MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500 MB download cap
+# R188: ffprobe/ffmpeg run on ATTACKER-CONTROLLED bytes with no deadline — a
+# crafted stream that hangs the decoder parked the evaluation coroutine
+# forever and LEAKED the subprocess (the wedged-eval sweeper flips the task
+# to FAILED but cannot reap the process or resume the coroutine). Every
+# subprocess call is now bounded; on timeout the process is killed.
+FFMPEG_TIMEOUT_SECONDS = 60
+
+
+async def _communicate_bounded(proc, what: str) -> tuple[bytes, bytes]:
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=FFMPEG_TIMEOUT_SECONDS)
+    except TimeoutError:
+        proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.communicate()  # reap — kill() alone leaves a zombie
+        raise AppError(
+            "VIDEO_PROCESSING_TIMEOUT",
+            f"{what} timed out — the video may be malformed",
+            422,
+        ) from None
 
 
 def check_ffmpeg() -> None:
@@ -51,7 +72,7 @@ async def _get_video_duration(video_path: str) -> float:
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
-    stdout, _ = await proc.communicate()
+    stdout, _ = await _communicate_bounded(proc, "Video probe")
     try:
         data = json.loads(stdout)
         return float(data["format"]["duration"])
@@ -77,7 +98,7 @@ async def _extract_frame(video_path: str, timestamp: float, output_path: str) ->
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
-    await proc.communicate()
+    await _communicate_bounded(proc, "Frame extraction")
     return os.path.exists(output_path) and os.path.getsize(output_path) > 0
 
 
