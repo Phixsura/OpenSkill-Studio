@@ -1642,7 +1642,16 @@ async def test_tenant_scope_purchase_not_suppressed_by_narrower_grant(db):
 
 
 def test_grant_covers_listing_width_matrix():
-    """R132 ([F0]/[F1]/[F2]): pure width matrix — scope, duration, seats."""
+    """R132 ([F0]/[F1]/[F2]): pure width matrix — scope, duration, seats.
+
+    R511 mutation sweep of split_economics/_grant_rank/
+    grant_covers_listing_width: 20/22 killed; 2 equivalents, both in
+    _grant_rank's tuple encoding (L724 scope_rank 2→3, L725 perpetual
+    bonus 1→2): the tuple is ONLY compared relatively (sort/max), so any
+    values preserving tenant > org/cohort > seat_limited and
+    perpetual > expiring are behaviorally identical — the absolute rank
+    numbers never leave the function.
+    """
     from types import SimpleNamespace
 
     from app.controlplane.services.marketplace import grant_covers_listing_width
