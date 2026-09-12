@@ -2,6 +2,15 @@
 
 Requires Postgres (make infra-up && make db-migrate). Follows the
 test_services_db.py session pattern.
+
+R514 mutation sweep of require_tenant_active/transition_status/expire_trials/
+has_platform_role/remove_tenant_member: 21/25 killed by the pre-existing
+suite; 2 more killed by new tests (multi-role has_platform_role limit(1),
+409 status class on LAST_OWNER_REMOVAL); 2 equivalents:
+- expire_trials `limit: int = 500` -> 501: cron batch-size default — any
+  positive batch converges over rounds, no behavioral contract.
+- `trial_ends_at < now` -> `<=`: clock-instant boundary (a trial ending at
+  the exact sweep instant expires one cron round later).
 """
 
 import asyncio
