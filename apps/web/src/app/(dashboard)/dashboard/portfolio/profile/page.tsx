@@ -25,7 +25,7 @@ export default function EditProfilePage() {
 
   const profile = data?.data;
   const [form, setForm] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
 
   // Initialize form with existing profile data
   useEffect(() => {
@@ -49,10 +49,15 @@ export default function EditProfilePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["portfolio-profile"] });
       setUsernameDraft(null);
-      setMessage("Username updated.");
+      setMessage({ text: "Username updated.", ok: true });
     },
     onError: (err) => {
-      setMessage(err instanceof Error ? err.message : "Failed to update username.");
+      // R486: tone tracked explicitly — keying the color on a "fail" substring
+      // painted server errors like "username taken" green.
+      setMessage({
+        text: err instanceof Error ? err.message : "Failed to update username.",
+        ok: false,
+      });
     },
   });
 
@@ -69,10 +74,10 @@ export default function EditProfilePage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["portfolio-profile"] });
-      setMessage("Profile saved.");
+      setMessage({ text: "Profile saved.", ok: true });
     },
     onError: () => {
-      setMessage("Failed to save profile.");
+      setMessage({ text: "Failed to save profile.", ok: false });
     },
   });
 
@@ -163,10 +168,8 @@ export default function EditProfilePage() {
         </div>
 
         {message && (
-          <p
-            className={`text-sm ${message.toLowerCase().includes("fail") ? "text-red-600" : "text-green-600"}`}
-          >
-            {message}
+          <p className={`text-sm ${message.ok ? "text-green-600" : "text-red-600"}`}>
+            {message.text}
           </p>
         )}
 
