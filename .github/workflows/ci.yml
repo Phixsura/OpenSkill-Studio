@@ -69,9 +69,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
+      minio:
+        # bitnami image starts the server from env alone (GH services
+        # cannot pass a command to the vanilla minio/minio image)
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports: ["9000:9000"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      # test_multimodal_eval probes the real ffmpeg/ffprobe binaries
+      - run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
       - run: cd apps/api && uv sync --extra dev
       # the DB suites run against a REAL migrated schema — same as local dev
       - run: cd apps/api && uv run alembic upgrade head
@@ -85,8 +95,8 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
           REDIS_URL: redis://localhost:6379/0
           S3_ENDPOINT: http://localhost:9000
-          S3_ACCESS_KEY: test
-          S3_SECRET_KEY: test
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
 
   build:
     name: Build

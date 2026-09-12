@@ -536,7 +536,11 @@ class SkillPackService:
         result = await self.db.execute(
             select(PackApprovalEvent)
             .where(PackApprovalEvent.pack_id == pack_id)
-            .order_by(PackApprovalEvent.created_at.desc())
+            # R530: created_at has second granularity — a fast test/CI run
+            # writes several events in the same instant and the newest-first
+            # contract collapsed to arbitrary order. ULID ids are time-ordered;
+            # id desc is the deterministic tiebreak.
+            .order_by(PackApprovalEvent.created_at.desc(), PackApprovalEvent.id.desc())
         )
         return list(result.scalars().all())
 
