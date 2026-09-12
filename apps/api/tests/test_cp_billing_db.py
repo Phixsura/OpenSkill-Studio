@@ -821,9 +821,34 @@ def test_stripe_webhook_signature_with_fake_secret(monkeypatch):
     parsed = StripeProvider().verify_webhook({"stripe-signature": header}, payload)
     assert parsed.external_event_id == "evt_1"
     assert parsed.event_type == "invoice.paid"
-    # Tampered body fails
-    with pytest.raises(AppError):
+    # Tampered body fails — as a 401 (R521: the status class was unasserted)
+    with pytest.raises(AppError) as exc:
         StripeProvider().verify_webhook({"stripe-signature": header}, payload + b"tampered")
+    assert exc.value.status_code == 401
+    # R521 mutation kills:
+    # missing signature takes the EXPLICIT missing-branch (an `or`->`and`
+    # mutant falls through to the SDK and reports "Invalid" instead)
+    with pytest.raises(AppError) as exc:
+        StripeProvider().verify_webhook({}, payload)
+    assert exc.value.status_code == 401
+    assert "Missing signature" in exc.value.message
+    # the canonical-case header fallback resolves Stripe-Signature too
+    parsed2 = StripeProvider().verify_webhook({"Stripe-Signature": header}, payload)
+    assert parsed2.external_event_id == "evt_1"
+    # amount_total WITHOUT currency passes through un-normalized instead of
+    # crashing the normalizer (`and`->`or` mutant calls it with currency=None)
+    payload3 = json.dumps(
+        {"id": "evt_3", "type": "checkout.session.completed",
+         "data": {"object": {"amount_total": 5000}}}
+    ).encode()
+    ts3 = str(int(time.time()))
+    sig3 = hmac_mod.new(
+        b"whsec_test123", f"{ts3}.{payload3.decode()}".encode(), hashlib.sha256
+    ).hexdigest()
+    parsed3 = StripeProvider().verify_webhook(
+        {"stripe-signature": f"t={ts3},v1={sig3}"}, payload3
+    )
+    assert parsed3.data["amount_total"] == 5000  # untouched
 
 
 # ── R20: Stripe adapter param assembly + response mapping (thin wrapper) ──

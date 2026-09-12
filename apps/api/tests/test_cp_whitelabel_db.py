@@ -14,6 +14,15 @@ cancelled-subscription gate). Remaining classified survivors:
   MECHANISM is pinned for ledger/licenses/invoices (R138); these two
   flags share the identical code shape.
 - L779 error-message truncation 2000 -> 2001: cosmetic bound.
+
+R521 sweep of execute_provision_run (the step machine itself): survivors
+are all equivalence-class members — org name/slug caps [:100]/[:92] and
+the -XXXX suffix width (truncation cosmetics), the 3-round slug-collision
+retry count, a .limit(1) probe on the GLOBALLY-unique org slug
+(structural), the BLUEPRINT_PACK_UNAVAILABLE 422 status class (the raise
+is swallowed by the run-failure except — only the message reaches
+run.error, so the status is unobservable through any call path), and the
+[:500]/[:2000] error truncations.
 """
 
 import pytest
