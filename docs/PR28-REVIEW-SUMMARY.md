@@ -2174,6 +2174,29 @@ test_cp_adversarial.py).
 **Post-audit checkpoint**: web **531 passed (114 files)**, tsc 0,
 eslint + repo ruff clean, cp revshare suite 36 passed. Branch unmerged.
 
+### R508–R509: component sweep round 3 + LIVE re-verification (2026-09-12)
+
+- **R508**: PeerReviewSection — the last 290-loc component with zero
+  direct coverage — pinned (2 mutations killed; the function-level busy
+  gate is documented in-test as an EQUIVALENT mutant through this UI:
+  disabled={busy} blocks the second click before onClick; the follow-up
+  also fixed a TS2322 the pre-commit gates missed and corrected the
+  original commit's over-claim). Component inventory now: only lightbox
+  (58 loc), cp-list (42), status-badge (18) remain untested — all
+  presentational.
+- **R509 — the E2E acceptance criteria re-verified LIVE on the branch
+  tip (not from historical records)**: commercial lifecycle
+  **52/52**, adversarial battery **178/178** (all §39 bullets),
+  concurrency probe **17/17**, smoke **148/148**, browser E2E
+  commercial (Playwright) **19/19** with zero console errors — all
+  against localhost:8000/3000 today. One environmental finding: the
+  shared dev DB had accumulated ~588 stale pending outbox rows from
+  earlier metering tests; the lifecycle script's drain (10×50) burned
+  its rounds on the backlog before reaching the fresh provision.run —
+  cleared by a full drain, then everything passed. Not a product bug
+  (the worker loop in production is unbounded), but worth knowing when
+  running the script on a long-lived dev DB.
+
 ---
 
 ## 5. Bottom line
