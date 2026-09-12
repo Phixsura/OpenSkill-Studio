@@ -2319,6 +2319,33 @@ Second-wave grand total: **~430 mutants across 14 services + facade;
 Wave totals now: **~440 mutants, 19 real gaps killed** (16 backend + 3
 frontend theme). Web 536/115 green, tsc 0, eslint clean.
 
+### R528–R529: component coverage 100% + FULL-STACK final verification
+
+- **R528**: the last three presentational components pinned
+  (StatusBadge null-guard, the R101 Pager's page>1 go-back visibility,
+  Lightbox image-click stopPropagation + scroll-lock/listener cleanup,
+  QueryError fallback) — 3 guard-proof mutations killed. **Every
+  component in src/components now has direct tests.**
+- **R529 — FINAL FULL VERIFICATION (2026-09-12)**:
+  - Backend, complete suite: **2557 passed / 0 failed / 1 skipped**
+    (23 min) — first full run since R421 (then 2446); even the
+    documented cross-file teardown flake did not fire.
+  - Web, complete suite: **543 passed / 116 files**, tsc 0, eslint
+    clean, repo ruff clean.
+  - Live E2E (all run today on the branch tip): API-level 52+178+148+17
+    = 395 checks; browser 19+60+42+31 = 152 checks. Zero failures,
+    zero console errors, zero 500s.
+
+**FINAL AUDIT LEDGER (R501–R529)**: ~450 mutants measured across 14
+backend services, facade, worker, two adapters and two frontend libs;
+**22 real test gaps found and killed**; 1 AC test gap closed (concurrent
+settlement); 6 clause-carrying components rescued from zero coverage;
+1 spec delta written down (§33 self-service signup deferral); Part N
+25/25 API groups verified against the live OpenAPI spec; 3 honest
+corrections of over-claimed kills. All 39 issue sections have
+implementation + mutation-verified test evidence. Branch
+feature/saas-commercialization remains unmerged, awaiting human review.
+
 ---
 
 ## 5. Bottom line
