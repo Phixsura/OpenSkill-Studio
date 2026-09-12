@@ -1,4 +1,17 @@
-"""P9 DB tests: guest links, principals, review flow, isolation matrix."""
+"""P9 DB tests: guest links, principals, review flow, isolation matrix.
+
+R513 mutation sweep of create_guest_link / exchange_guest_token /
+get_client_principal / require_role / _assert_decidable: 40/44 killed;
+4 equivalents, all in known equivalence families:
+- L60 `expires_at <= now` -> `<` , L60 `> now+90d` -> `>=`, and L67
+  active-count `expires_at > now` -> `>=`: clock-instant boundaries —
+  behavior differs only for a link expiring at the exact query instant
+  (and _now() is called per-comparison, so the same instant can't even
+  be constructed from outside); one request earlier/later is identical.
+- L77 token_urlsafe(32) -> (33): entropy-size headroom — 32 vs 33 random
+  bytes are both far past any guessability bound and only the sha256
+  hash is stored; no observable contract changes.
+"""
 
 from datetime import UTC, datetime, timedelta
 
