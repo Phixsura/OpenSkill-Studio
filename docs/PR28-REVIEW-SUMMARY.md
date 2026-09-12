@@ -2044,6 +2044,24 @@ production code changed since R430 (all test-only). ~9 more
 mutation-verified test files added across R441–R449; branch still
 unmerged.
 
+**R451–R460 (product web-page sweep, each guard-proved by source
+mutation).** Pending-reviews grading queue (late/on-time, pager range),
+commercial opportunities (type-label fallback), creator shortlist
+(ADR-013 R9: confirmed-profile filter, two-click assign with
+match_run_id, already-offered state), AI-evaluation settings (null
+budget = unlimited, blank threshold omitted so it can't wipe the stored
+value), learner cohort my-dashboard (reviewer emoji, other-cohorts-only
+switcher, empty-section hiding), client-brief detail (draft+owner
+convert with rubric max-score fallback, apply 409 dedicated message),
+requirement-profile review/confirm (R14 provenance badges,
+changed-fields-only PATCH with list split/trim, confirmed lockout),
+pack review-queue (pending-only filter, non-blank trimmed reject
+reason), peer-assessment scoring (per-criterion clamp, out-of-range
+submit block, breakdown payload).
+
+**R460 checkpoint**: web **372 passed (70 files)**; tsc + eslint clean.
+All changes remain test-only since R430; branch still unmerged.
+
 ---
 
 ## 5. Bottom line
