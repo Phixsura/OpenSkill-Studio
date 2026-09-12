@@ -63,8 +63,8 @@ async def test_duplicate_skill_r439(db):
     skill.origin_component_id = "comp-789"
     await sksvc.publish_skill(skill.id)
     # two exercises: one live, one archived (archived must NOT be copied)
-    e_live = await sksvc.create_exercise(org.id, skill.id, "Live", "d", "text_answer", {}, 100,
-                                         owner.id)
+    await sksvc.create_exercise(org.id, skill.id, "Live", "d", "text_answer", {}, 100,
+                                owner.id)
     e_arch = await sksvc.create_exercise(org.id, skill.id, "Arch", "d", "text_answer", {}, 100,
                                          owner.id)
     e_arch.status = ContentStatus.ARCHIVED
