@@ -3,7 +3,16 @@ same-tx atomicity, handler idempotency, backoff, dead-letter, SKIP LOCKED.
 
 R253 mutation status for process_outbox_once: 12/13 killed. The survivor
 (claim window <=→< against the DB clock) is timing-equivalent — a message
-due at the exact DB microsecond waits one poll cycle; not pinnable."""
+due at the exact DB microsecond waits one poll cycle; not pinnable.
+R520 mutation sweep of process_outbox_once/reap_stuck: 27/31 killed
+(atomicity, backoff math, dead-letter attempts, SKIP LOCKED shape,
+retention delete). 4 equivalents, all clock-instant boundaries:
+available_at <= now() vs <, two locked_at < cutoff vs <=, and the
+30-day retention < vs <= — each differs only for a row timestamped at
+the exact query instant (server-side now(), unconstructible from
+tests); one poll/reap round later is identical. The mock billing
+adapter's signer swept 1/1.
+"""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
