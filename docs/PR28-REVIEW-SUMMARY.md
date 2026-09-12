@@ -1988,6 +1988,36 @@ cohort.py (R422 savepoint isolation) — cohort regression **71 passed**;
 web **331 passed (59 files)**; ruff + tsc + eslint clean. ~40 new
 mutation-verified tests added across R402–R430; branch still unmerged.
 
+**R431–R440 (product-service branch coverage sweep).** Continued the
+mutation-first sweep across the remaining product services, several with
+near-zero branch coverage:
+
+- **R431 portfolio** — the anon-facing privacy surface had 0/39 mutants
+  killed; now 37/39 (private-profile leak-nothing, show_on_profile badge
+  gate, PUBLIC-only items, score-privacy, ownership 404s).
+- **R432 client-brief** conversion state machine (rubric defaulting,
+  deliverable materialization, draft-only claim, cross-org cohort guard).
+- **R433 gamification** award idempotency (review/resubmit anti-abuse),
+  level math, org-scoped leaderboard.
+- **R434 registry** quality-score signals + badge recompute.
+- **R435 peer-review** lifecycle (allocation count, self-review inclusion,
+  score-max, deadline, phase, cross-org).
+- **R436 pack-review** rating aggregation (owning-org self-review block,
+  distribution histogram, helpful-vote clamp, low-rating body gate).
+- **R437 provider check_capabilities** install gate — 9/9 (untrusted-
+  manifest MALFORMED_REQUIREMENT hardening).
+- **R438 provider** connection/offering creation (R3 credential-in-config
+  leak, limits at the bound, closed capability taxonomy).
+- **R439 duplicate** — R135 provenance preservation (anti-laundering),
+  archived-guard, DRAFT reset.
+- **R440 workflow_pack** dependency validation — 28/28 (R7 untrusted-input
+  type-checks).
+
+**R440 checkpoint**: no production code changed since R430 (all test-only
+additions) — repo-wide ruff clean; the R433–R440 suites pass together
+(27) with no cross-file event-loop pollution. ~20 more mutation-verified
+tests added across R431–R440; branch still unmerged.
+
 ---
 
 ## 5. Bottom line
