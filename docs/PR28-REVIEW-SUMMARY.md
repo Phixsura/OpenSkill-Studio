@@ -2092,6 +2092,27 @@ ref guard + auto-slug edge trim), create-project (rubric parser NaN→25
 **R480 checkpoint**: web **437 passed (90 files)**; tsc + eslint clean
 throughout. Still test-only since R422; branch unmerged.
 
+**R481–R490 (web sweep, each guard-proved by source mutation)**:
+forgot/reset password (no user-existence oracle + confirm-mismatch
+gate), client-portal project page (R123 two-wave 401 latch — the
+single-wave test survived mutation and was strengthened to staggered
+rejections; R113[H3] member-vs-guest redirect split; R101[L0] revision
+comment reset; R185 confirm gate), org skills list (combined filter
+querystring), dashboard hubs (org-scoped links), new portfolio item
+(tag trim/filter + blank-optional omission), **R486 fix — profile-edit
+status color keyed on a "fail" substring painted server errors like
+"username taken" green; tone now carried in state** (first production
+change since R422), production composer (capability pills keyed by
+(capability, feature-set) per R83/R84 + order sort + has_more
+pagination), skill detail (markdown lesson + per-exercise links),
+exercise attempt (multi-toggle vs single-replace MCQ selection),
+project detail (instructor publish gate — the status-guard mutation
+survived and the test was strengthened with a Publish-absent
+assertion).
+
+**R490 checkpoint**: web **475 passed (100 files)**; tsc + eslint clean
+throughout; branch unmerged.
+
 ---
 
 ## 5. Bottom line
