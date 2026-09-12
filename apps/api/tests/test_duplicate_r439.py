@@ -46,7 +46,7 @@ async def _setup(db):
 
 
 async def test_duplicate_skill_r439(db):
-    from app.models.skill import Exercise, Skill
+    from app.models.skill import Exercise
     from app.services.duplicate import DuplicateService
     from app.services.skill import SkillService
 
