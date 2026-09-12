@@ -1947,6 +1947,47 @@ files)**; ruff + tsc + eslint clean. No production code changed since
 R357 — the live verification (six batteries, 24,140 fuzz cases,
 browser 23/23, zero 500s) still stands.
 
+**R422–R430 (product-service strata, mutation-first).** Moved the lens
+onto the remaining product services, finding real gaps and one latent
+fix:
+
+- **R422 cohort** — a genuine fix: add_member / assign_skill /
+  assign_project added their new row OUTSIDE the begin_nested savepoint,
+  so a caught duplicate-key left the pending ORM object in session.new
+  and poisoned the next flush (PendingRollbackError) for any in-session
+  caller. Moved each add inside the savepoint (matching organization.py,
+  guard-proved). Plus a progress/reporting suite: learner-only counts,
+  avg-completion math, best-status project rollup, overdue arithmetic,
+  no-deadline guard, division-by-zero guard, inactivity window.
+- **R423 skill engine** (13/61 → 47/61): MCQ auto-grade incl. the
+  malformed correct==[] never-full-marks guard, no-self-grading, 60%
+  threshold, unlock gating with archived-prereq handling, completion
+  detection (only passed attempts) with the award-once gate proven by a
+  hand-applied mutant, archived-skill exclusion from progress.
+- **R424 requirement-profile** (38/65 → 55/65): the R14 fairness rule
+  (extracted capabilities demoted, never hard S2 filters), _validate/
+  _normalize bounds, owner/instructor authz.
+- **R425 creator-assignment** (30/39 → 33/39): the three cross-org IDOR
+  guards (offer/respond/withdraw) + the decline→re-offer-in-place state
+  machine.
+- **R426 composer** (16/24 → 20/24): budget-cut transitive propagation
+  (waived≠cut), draft dependent-removal guard incl. the legacy
+  prereq_slugs path.
+- **R427 workflow-install** (15/15): _diff_definitions + the R73 upgrade
+  binding-validity gate — clean 100%.
+- **R428 workflow-runtime pure helpers** (22/27 killable): control-char/
+  non-finite/deep-nesting input guards, template dependency scan,
+  render/transform semantics.
+- **R429 comfyui import** (6/12 killable): the R86 fold-disguise
+  invariant (classify on raw class_type) + NUL scan.
+- **R430 cross-service pure helpers**: semver ordering, level/badge math
+  (100%), R89 copy-slug/name truncation, R156 filename path-stripping.
+
+**R430 checkpoint**: the only production code changed since R421 is
+cohort.py (R422 savepoint isolation) — cohort regression **71 passed**;
+web **331 passed (59 files)**; ruff + tsc + eslint clean. ~40 new
+mutation-verified tests added across R402–R430; branch still unmerged.
+
 ---
 
 ## 5. Bottom line
