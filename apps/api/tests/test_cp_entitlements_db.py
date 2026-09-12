@@ -1638,3 +1638,72 @@ async def test_plans_api_catalog_and_external_ref(db):
         req, user=user, db=db)
     await db.refresh(price)
     assert price.external_price_ref is None          # empty clears, not ""
+
+
+async def test_check_storage_quota_live_sum_and_hard_stop(db):
+    """R523 mutation kills: check_storage_quota's live SUM was untested —
+    the submission-item join, the asset org filter, and the item+asset
+    ADDITION all had surviving flips. Seed 0.6 GB of submission items and
+    0.6 GB of assets under a 1 GB HARD storage limit: only the correct SUM
+    (1.2 GB > 1) rejects — a flipped join drops one source (0.6 <= 1
+    passes) and Add->Sub yields ~0 (passes)."""
+
+    from app.controlplane import facade as cp_facade
+    from app.controlplane.models.plan import TenantEntitlementOverride
+    from app.exceptions import AppError as _App
+    from app.models.project import (
+        DeliverableType,
+        ItemType,
+        Project,
+        ProjectAsset,
+        ProjectDeliverable,
+        Submission,
+        SubmissionItem,
+    )
+    from app.services.organization import OrgService
+
+    user = await _mk_user(db)
+    org = await OrgService(db).create(
+        name=f"SQ {ULID()}", slug=f"sq-{str(ULID()).lower()}",
+        description=None, created_by=user.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    # 1 GB HARD limit (storage is soft-by-default — hard enforcement here)
+    db.add(TenantEntitlementOverride(
+        tenant_id=tenant.id, key="max_storage_gb", value={"v": "1"},
+        enforcement="hard", reason="r523", created_by=user.id,
+    ))
+    await db.flush()
+    gb6 = int(0.6 * 1073741824)
+    project = Project(
+        org_id=org.id, title="SQ", slug=f"sq-{str(ULID()).lower()[:10]}",
+        description="d", instructions="i", rubric=[], created_by=user.id,
+    )
+    db.add(project)
+    await db.flush()
+    deliverable = ProjectDeliverable(
+        project_id=project.id, name="file", type=DeliverableType.FILE,
+    )
+    db.add(deliverable)
+    await db.flush()
+    sub = Submission(org_id=org.id, project_id=project.id, user_id=user.id)
+    db.add(sub)
+    await db.flush()
+    db.add(SubmissionItem(
+        submission_id=sub.id, deliverable_id=deliverable.id,
+        type=ItemType.FILE, file_size=gb6,
+    ))
+    db.add(ProjectAsset(
+        org_id=org.id, project_id=project.id, name="a",
+        file_key="k", file_name="a.bin", file_size=gb6,
+        mime_type="application/octet-stream", uploaded_by=user.id,
+    ))
+    await db.flush()
+    # 0.6 + 0.6 = 1.2 GB stored; ANY further byte crosses the 1 GB hard cap
+    with pytest.raises(_App) as exc:
+        await cp_facade.check_storage_quota(db, org.id, incoming_bytes=1)
+    assert exc.value.code == "QUOTA_EXCEEDED"
+    assert exc.value.status_code == 403
+    # the message carries the CORRECT live sum — 0.6 + 0.6 GB
+    assert "1.200000" in exc.value.message
