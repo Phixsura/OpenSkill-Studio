@@ -74,14 +74,20 @@ const props = { orgId: "o-1", projectId: "p-1", isInstructor: true };
 beforeEach(() => vi.clearAllMocks());
 
 describe("PeerReviewSection (R508)", () => {
+  // EQUIVALENT-MUTANT NOTE: the function-level `if (busy) return` in
+  // createRound/transition is UNREACHABLE through this UI — the buttons set
+  // disabled={busy}, so RTL's second click never fires onClick. Removing the
+  // function gate does NOT fail this test; it is defense-in-depth against
+  // future non-button invocation paths (cf. CommentPanel's Enter-key path,
+  // where the same gate IS load-bearing and mutation-proved in R504).
   it("create round posts trimmed name + parsed num_reviews + flags; double-click posts ONCE (R183)", async () => {
     const posts: { path: string; body?: unknown }[] = [];
-    let resolve!: (v: unknown) => void;
+    let resolve!: (v: { data: { id: string } }) => void;
     api.mockImplementation(((rawPath: unknown, init?: { method?: string; body?: string }) => {
       const path = String(rawPath ?? "");
       if (init?.method === "POST") {
         posts.push({ path, body: init.body ? JSON.parse(init.body) : undefined });
-        return new Promise((r) => (resolve = r));
+        return new Promise<{ data: { id: string } }>((r) => (resolve = r));
       }
       return Promise.resolve({ data: [] });
     }) as typeof apiWithAuth);
