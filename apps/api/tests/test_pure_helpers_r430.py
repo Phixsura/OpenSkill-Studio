@@ -40,11 +40,11 @@ def test_parse_semver_ordering_r430():
 
 def test_compute_level_r430():
     assert _LEVEL_STEP == 100
-    assert _compute_level(0) == 1     # floor is level 1
+    assert _compute_level(0) == 1  # floor is level 1
     assert _compute_level(99) == 1
-    assert _compute_level(100) == 2   # step boundary
+    assert _compute_level(100) == 2  # step boundary
     assert _compute_level(250) == 3
-    assert _compute_level(-50) == 1   # never below 1
+    assert _compute_level(-50) == 1  # never below 1
 
 
 def test_compute_badges_r430():

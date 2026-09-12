@@ -423,7 +423,9 @@ class ProjectService:
 
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(Project.deadline.asc().nulls_last(), Project.created_at.desc(), Project.id.desc())
+            base.order_by(
+                Project.deadline.asc().nulls_last(), Project.created_at.desc(), Project.id.desc()
+            )
             .offset(offset)
             .limit(per_page)
         )
@@ -680,7 +682,10 @@ class ProjectService:
         # cannot race each other; populate_existing overwrites a stale
         # identity-map copy read earlier in the same session.
         sub = await self.db.get(
-            Submission, submission_id, with_for_update=for_update or None, populate_existing=for_update
+            Submission,
+            submission_id,
+            with_for_update=for_update or None,
+            populate_existing=for_update,
         )
         if sub is None:
             raise SubmissionNotFoundError()
@@ -712,7 +717,9 @@ class ProjectService:
         if user_id:
             joined = joined.where(Submission.user_id == user_id)
         result = await self.db.execute(
-            joined.order_by(Submission.created_at.desc(), Submission.id.desc()).offset(offset).limit(per_page)
+            joined.order_by(Submission.created_at.desc(), Submission.id.desc())
+            .offset(offset)
+            .limit(per_page)
         )
         return [(sub, name) for sub, name in result.all()], total
 

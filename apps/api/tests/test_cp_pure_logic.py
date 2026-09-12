@@ -331,19 +331,20 @@ def test_validate_policy_params_rejects():
         import pytest as _p
 
         from app.exceptions import AppError
+
         with _p.raises(AppError) as e:
             validate_policy_params(pt, params)
         assert e.value.code == "INVALID_POLICY_PARAMS" and e.value.status_code == 422
 
-    rejects("no_such_type", {})                                   # unknown policy type
-    rejects("cost_plus_percentage", {"percentage": -1})           # negative dec
-    rejects("cost_plus_percentage", {"percentage": "NaN"})        # non-finite
-    rejects("cost_plus_percentage", {})                           # missing required key
-    rejects("cost_plus_fixed", {"fixed_markup_minor": -5})        # negative int
-    rejects("cost_plus_fixed", {"fixed_markup_minor": True})      # bool-is-not-int
-    rejects("cost_plus_fixed", {"fixed_markup_minor": 10**16})    # int8 overflow ceiling
-    rejects("cost_plus_fixed", {"fixed_markup_minor": 1, "per_quantity": 0})   # divide-by-zero
-    rejects("fixed_unit_price", {"unit_price_minor": 1, "per_quantity": -2})   # negative divisor
+    rejects("no_such_type", {})  # unknown policy type
+    rejects("cost_plus_percentage", {"percentage": -1})  # negative dec
+    rejects("cost_plus_percentage", {"percentage": "NaN"})  # non-finite
+    rejects("cost_plus_percentage", {})  # missing required key
+    rejects("cost_plus_fixed", {"fixed_markup_minor": -5})  # negative int
+    rejects("cost_plus_fixed", {"fixed_markup_minor": True})  # bool-is-not-int
+    rejects("cost_plus_fixed", {"fixed_markup_minor": 10**16})  # int8 overflow ceiling
+    rejects("cost_plus_fixed", {"fixed_markup_minor": 1, "per_quantity": 0})  # divide-by-zero
+    rejects("fixed_unit_price", {"unit_price_minor": 1, "per_quantity": -2})  # negative divisor
     rejects("cost_plus_percentage", {"percentage": 5, "junk": 1})  # unknown key smuggle
     rejects("cost_plus_percentage", {"percentage": 5, "exclude_failed": "yes"})  # non-bool flag
 
@@ -363,24 +364,25 @@ def test_validate_entitlement_value_rejects():
 
     def rejects(key, val):
         import pytest as _p
+
         with _p.raises(AppError) as e:
             validate_entitlement_value(key, val)
         assert e.value.code == "UNKNOWN_ENTITLEMENT" and e.value.status_code == 422
 
-    rejects("no_such_key", 1)                       # unknown entitlement
-    rejects("custom_domain", None)                  # bool cannot be null
-    rejects("custom_domain", 1)                     # bool expects bool
-    rejects("max_organizations", -1)                # int non-negative
-    rejects("max_organizations", True)              # bool-is-not-int
-    rejects("max_organizations", "5")               # int expects int, not str
-    rejects("max_storage_gb", -0.5)                 # decimal non-negative
-    rejects("max_storage_gb", "NaN")                # non-finite decimal
-    rejects("max_storage_gb", "not-a-number")       # unparseable decimal
+    rejects("no_such_key", 1)  # unknown entitlement
+    rejects("custom_domain", None)  # bool cannot be null
+    rejects("custom_domain", 1)  # bool expects bool
+    rejects("max_organizations", -1)  # int non-negative
+    rejects("max_organizations", True)  # bool-is-not-int
+    rejects("max_organizations", "5")  # int expects int, not str
+    rejects("max_storage_gb", -0.5)  # decimal non-negative
+    rejects("max_storage_gb", "NaN")  # non-finite decimal
+    rejects("max_storage_gb", "not-a-number")  # unparseable decimal
 
     # positive controls incl. the numeric-None-is-unlimited path
     assert validate_entitlement_value("custom_domain", True) is True
     assert validate_entitlement_value("max_organizations", 25) == 25
-    assert validate_entitlement_value("max_storage_gb", None) is None      # unlimited
+    assert validate_entitlement_value("max_storage_gb", None) is None  # unlimited
     assert validate_entitlement_value("max_storage_gb", "5.5") == "5.5"
 
 
@@ -404,8 +406,12 @@ def test_compute_billable_guards():
 
     def rejects(fn, pt, params, **kw):
         import pytest as _p
-        base = dict(internal_cost_minor=1000, quantity=Decimal(5)) if fn is compute_billable_minor \
+
+        base = (
+            dict(internal_cost_minor=1000, quantity=Decimal(5))
+            if fn is compute_billable_minor
             else dict(internal_cost_exact=Decimal(1000), quantity=Decimal(5))
+        )
         base.update(kw)
         with _p.raises(AppError) as e:
             fn(pt, params, **base)
@@ -415,20 +421,30 @@ def test_compute_billable_guards():
         # per_quantity <= 0 → divide-by-zero guard, all three per-based types
         rejects(fn, "cost_plus_fixed", {"fixed_markup_minor": 100, "per_quantity": 0})
         rejects(fn, "fixed_unit_price", {"unit_price_minor": 30, "per_quantity": -1})
-        rejects(fn, "included_quota_then_overage",
-                {"included_quota": 10, "overage_unit_price_minor": 5, "per_quantity": 0})
+        rejects(
+            fn,
+            "included_quota_then_overage",
+            {"included_quota": 10, "overage_unit_price_minor": 5, "per_quantity": 0},
+        )
         # unknown policy type → terminal raise
         rejects(fn, "no_such_policy", {})
 
     # exclude_failed short-circuits to 0 on a failed event (both fns)
-    assert compute_billable_minor(
-        "cost_plus_percentage", {"percentage": 50, "exclude_failed": True},
-        internal_cost_minor=1000, quantity=Decimal(1),
-        usage_metadata={"status": "failed"},
-    ) == 0
+    assert (
+        compute_billable_minor(
+            "cost_plus_percentage",
+            {"percentage": 50, "exclude_failed": True},
+            internal_cost_minor=1000,
+            quantity=Decimal(1),
+            usage_metadata={"status": "failed"},
+        )
+        == 0
+    )
     assert compute_billable_exact(
-        "cost_plus_percentage", {"percentage": 50, "exclude_failed": True},
-        internal_cost_exact=Decimal(1000), quantity=Decimal(1),
+        "cost_plus_percentage",
+        {"percentage": 50, "exclude_failed": True},
+        internal_cost_exact=Decimal(1000),
+        quantity=Decimal(1),
         usage_metadata={"status": "failed"},
     ) == Decimal(0)
 
@@ -437,13 +453,17 @@ def test_compute_billable_guards():
     billed = compute_billable_minor(
         "included_quota_then_overage",
         {"included_quota": 100, "overage_unit_price_minor": 10},
-        internal_cost_minor=0, quantity=Decimal(50), prior_period_quantity=Decimal(120),
+        internal_cost_minor=0,
+        quantity=Decimal(50),
+        prior_period_quantity=Decimal(120),
     )
     assert billed == 500  # all 50 new units are over quota → 50*10
     partial = compute_billable_minor(
         "included_quota_then_overage",
         {"included_quota": 100, "overage_unit_price_minor": 10},
-        internal_cost_minor=0, quantity=Decimal(50), prior_period_quantity=Decimal(80),
+        internal_cost_minor=0,
+        quantity=Decimal(50),
+        prior_period_quantity=Decimal(80),
     )
     assert partial == 300  # 80→130 crosses at 100: only 30 units over → 30*10
 
@@ -473,7 +493,10 @@ def test_rule_specificity_scoring():
     assert rule_specificity(rule(listing_id="L"), **ctx) == 2
     assert rule_specificity(rule(country="US"), **ctx) == 1
     # all four → 15, and tenant outweighs plan+listing+country (8 > 4+2+1=7)
-    assert rule_specificity(rule(tenant_id="T", plan_id="P", listing_id="L", country="US"), **ctx) == 15
+    assert (
+        rule_specificity(rule(tenant_id="T", plan_id="P", listing_id="L", country="US"), **ctx)
+        == 15
+    )
     # any mismatch → None (rule does not apply)
     assert rule_specificity(rule(tenant_id="OTHER"), **ctx) is None
     assert rule_specificity(rule(plan_id="OTHER"), **ctx) is None
@@ -490,15 +513,28 @@ def test_compute_share_minor_by_type():
     from app.exceptions import AppError
 
     # 30% of 10000 = 3000
-    assert compute_share_minor("percentage_of_gross_revenue",
-                               rate=Decimal(30), amount_minor=None, base_minor=10000) == 3000
+    assert (
+        compute_share_minor(
+            "percentage_of_gross_revenue", rate=Decimal(30), amount_minor=None, base_minor=10000
+        )
+        == 3000
+    )
     # HALF_UP rounding: 33% of 101 = 33.33 → 33
-    assert compute_share_minor("percentage_of_net_revenue",
-                               rate=Decimal(33), amount_minor=None, base_minor=101) == 33
+    assert (
+        compute_share_minor(
+            "percentage_of_net_revenue", rate=Decimal(33), amount_minor=None, base_minor=101
+        )
+        == 33
+    )
     # fixed per seat: 500 × 7 units = 3500
-    assert compute_share_minor("fixed_amount_per_seat",
-                               rate=None, amount_minor=500, base_minor=0, units=Decimal(7)) == 3500
+    assert (
+        compute_share_minor(
+            "fixed_amount_per_seat", rate=None, amount_minor=500, base_minor=0, units=Decimal(7)
+        )
+        == 3500
+    )
     import pytest as _p
+
     with _p.raises(AppError) as e:
         compute_share_minor("bogus_type", rate=None, amount_minor=0, base_minor=0)
     assert e.value.code == "RULE_PARAM_INVALID"
@@ -554,24 +590,24 @@ def test_branding_validators_reject():
         assert e.value.code == "BRANDING_INVALID" and e.value.status_code == 422
 
     # theme tokens
-    bad(validate_theme_tokens, {"radius": {"x": 1}})          # unhashable radius (R47[29])
-    bad(validate_theme_tokens, {"radius": "gigantic"})        # bad enum
-    bad(validate_theme_tokens, {"primary": "not-hex"})        # bad color
-    bad(validate_theme_tokens, {"primary": 123})              # non-str color
+    bad(validate_theme_tokens, {"radius": {"x": 1}})  # unhashable radius (R47[29])
+    bad(validate_theme_tokens, {"radius": "gigantic"})  # bad enum
+    bad(validate_theme_tokens, {"primary": "not-hex"})  # bad color
+    bad(validate_theme_tokens, {"primary": 123})  # non-str color
     bad(validate_theme_tokens, {"unknown_token": "#ffffff"})  # unknown key
     assert validate_theme_tokens({"primary": "#aabbcc", "radius": "md"})  # positive
 
     # https url
-    bad(validate_https_url, 123, "logo")                      # non-str (R137)
-    bad(validate_https_url, "http://insecure", "logo")        # not https
-    bad(validate_https_url, "https://" + "x" * 500, "logo")   # too long
-    assert validate_https_url(None, "logo") is None           # optional
+    bad(validate_https_url, 123, "logo")  # non-str (R137)
+    bad(validate_https_url, "http://insecure", "logo")  # not https
+    bad(validate_https_url, "https://" + "x" * 500, "logo")  # too long
+    assert validate_https_url(None, "logo") is None  # optional
     assert validate_https_url("https://ok.example", "logo")
 
     # legal links
-    bad(validate_legal_links, [{"label": "l", "url": "https://x"}] * 6)   # >5
+    bad(validate_legal_links, [{"label": "l", "url": "https://x"}] * 6)  # >5
     bad(validate_legal_links, ["not-a-dict"])
-    bad(validate_legal_links, [{"label": "l"}])               # missing url key
+    bad(validate_legal_links, [{"label": "l"}])  # missing url key
     bad(validate_legal_links, [{"label": "x" * 51, "url": "https://x"}])  # long label
     bad(validate_legal_links, [{"label": "l", "url": None}])  # dead anchor
     bad(validate_legal_links, [{"label": "l", "url": "http://insecure"}])
@@ -596,58 +632,101 @@ def test_billable_exact_values_all_policies():
     )
 
     # cost_plus_percentage: 1000 @ 10% = 1100 (kills 1→2 and /100→/101)
-    assert compute_billable_minor(
-        "cost_plus_percentage", {"percentage": "10"},
-        internal_cost_minor=1000, quantity=Decimal(1)) == 1100
+    assert (
+        compute_billable_minor(
+            "cost_plus_percentage",
+            {"percentage": "10"},
+            internal_cost_minor=1000,
+            quantity=Decimal(1),
+        )
+        == 1100
+    )
     assert compute_billable_exact(
-        "cost_plus_percentage", {"percentage": "10"},
-        internal_cost_exact=Decimal(1000), quantity=Decimal(1)) == Decimal("1100")
+        "cost_plus_percentage",
+        {"percentage": "10"},
+        internal_cost_exact=Decimal(1000),
+        quantity=Decimal(1),
+    ) == Decimal("1100")
 
     # cost_plus_fixed: 1400 units over per=1000 → 2 started blocks
     p = {"fixed_markup_minor": 50, "per_quantity": "1000"}
-    assert compute_billable_minor(
-        "cost_plus_fixed", p, internal_cost_minor=300,
-        quantity=Decimal(1400)) == 300 + 2 * 50            # kills +→-, sign 1→2
+    assert (
+        compute_billable_minor(
+            "cost_plus_fixed", p, internal_cost_minor=300, quantity=Decimal(1400)
+        )
+        == 300 + 2 * 50
+    )  # kills +→-, sign 1→2
     # reversal mirrors exactly (kills sign -1→-2)
-    assert compute_billable_minor(
-        "cost_plus_fixed", p, internal_cost_minor=-300,
-        quantity=Decimal(-1400)) == -300 - 2 * 50
+    assert (
+        compute_billable_minor(
+            "cost_plus_fixed", p, internal_cost_minor=-300, quantity=Decimal(-1400)
+        )
+        == -300 - 2 * 50
+    )
     # zero quantity bills zero blocks (kills the dead-branch Or variants)
-    assert compute_billable_minor(
-        "cost_plus_fixed", p, internal_cost_minor=300, quantity=Decimal(0)) == 300
+    assert (
+        compute_billable_minor("cost_plus_fixed", p, internal_cost_minor=300, quantity=Decimal(0))
+        == 300
+    )
     assert compute_billable_exact(
-        "cost_plus_fixed", p, internal_cost_exact=Decimal("300.5"),
-        quantity=Decimal(1400)) == Decimal("400.5")
-    assert compute_billable_exact(                          # exact reversal sign
-        "cost_plus_fixed", p, internal_cost_exact=Decimal("-300.5"),
-        quantity=Decimal(-1400)) == Decimal("-400.5")
-    assert compute_billable_exact(                          # exact zero-quantity
-        "cost_plus_fixed", p, internal_cost_exact=Decimal("300.5"),
-        quantity=Decimal(0)) == Decimal("300.5")
+        "cost_plus_fixed", p, internal_cost_exact=Decimal("300.5"), quantity=Decimal(1400)
+    ) == Decimal("400.5")
+    assert compute_billable_exact(  # exact reversal sign
+        "cost_plus_fixed", p, internal_cost_exact=Decimal("-300.5"), quantity=Decimal(-1400)
+    ) == Decimal("-400.5")
+    assert compute_billable_exact(  # exact zero-quantity
+        "cost_plus_fixed", p, internal_cost_exact=Decimal("300.5"), quantity=Decimal(0)
+    ) == Decimal("300.5")
 
     # fixed_unit_price: $1/1M tokens on 4000 tokens → exact 0.4, minor 0
     fp = {"unit_price_minor": 100, "per_quantity": "1000000"}
     assert compute_billable_exact(
-        "fixed_unit_price", fp, internal_cost_exact=Decimal(0),
-        quantity=Decimal(4000)) == Decimal("0.4")
-    assert compute_billable_minor(
-        "fixed_unit_price", fp, internal_cost_minor=0, quantity=Decimal(4000)) == 0
+        "fixed_unit_price", fp, internal_cost_exact=Decimal(0), quantity=Decimal(4000)
+    ) == Decimal("0.4")
+    assert (
+        compute_billable_minor(
+            "fixed_unit_price", fp, internal_cost_minor=0, quantity=Decimal(4000)
+        )
+        == 0
+    )
 
     # included_quota_then_overage: quota 100, prior 90, +30 → 20 over @ 5/unit
     q = {"included_quota": "100", "overage_unit_price_minor": 5}
-    assert compute_billable_minor(
-        "included_quota_then_overage", q, internal_cost_minor=0,
-        quantity=Decimal(30), prior_period_quantity=Decimal(90)) == 100
+    assert (
+        compute_billable_minor(
+            "included_quota_then_overage",
+            q,
+            internal_cost_minor=0,
+            quantity=Decimal(30),
+            prior_period_quantity=Decimal(90),
+        )
+        == 100
+    )
     assert compute_billable_exact(
-        "included_quota_then_overage", q, internal_cost_exact=Decimal(0),
-        quantity=Decimal(30), prior_period_quantity=Decimal(90)) == Decimal("100")
+        "included_quota_then_overage",
+        q,
+        internal_cost_exact=Decimal(0),
+        quantity=Decimal(30),
+        prior_period_quantity=Decimal(90),
+    ) == Decimal("100")
     # prior ALREADY over quota: only the delta bills (kills total+already flip)
-    assert compute_billable_minor(
-        "included_quota_then_overage", q, internal_cost_minor=0,
-        quantity=Decimal(30), prior_period_quantity=Decimal(150)) == 150
+    assert (
+        compute_billable_minor(
+            "included_quota_then_overage",
+            q,
+            internal_cost_minor=0,
+            quantity=Decimal(30),
+            prior_period_quantity=Decimal(150),
+        )
+        == 150
+    )
     assert compute_billable_exact(
-        "included_quota_then_overage", q, internal_cost_exact=Decimal(0),
-        quantity=Decimal(30), prior_period_quantity=Decimal(150)) == Decimal("150")
+        "included_quota_then_overage",
+        q,
+        internal_cost_exact=Decimal(0),
+        quantity=Decimal(30),
+        prior_period_quantity=Decimal(150),
+    ) == Decimal("150")
 
 
 def test_billable_exclude_failed_gate_both_arms():
@@ -664,25 +743,57 @@ def test_billable_exclude_failed_gate_both_arms():
     pp = {"percentage": "0", "exclude_failed": True}
     base = dict(internal_cost_minor=500, quantity=Decimal(1))
     # opted-in + failed → 0
-    assert compute_billable_minor(
-        "cost_plus_percentage", pp, usage_metadata={"status": "failed"}, **base) == 0
+    assert (
+        compute_billable_minor(
+            "cost_plus_percentage", pp, usage_metadata={"status": "failed"}, **base
+        )
+        == 0
+    )
     # opted-in + succeeded → bills
-    assert compute_billable_minor(
-        "cost_plus_percentage", pp, usage_metadata={"status": "completed"}, **base) == 500
+    assert (
+        compute_billable_minor(
+            "cost_plus_percentage", pp, usage_metadata={"status": "completed"}, **base
+        )
+        == 500
+    )
     # not opted-in + failed → bills
-    assert compute_billable_minor(
-        "cost_plus_percentage", {"percentage": "0"},
-        usage_metadata={"status": "failed"}, **base) == 500
-    assert compute_billable_exact(
-        "cost_plus_percentage", pp, internal_cost_exact=Decimal(500),
-        quantity=Decimal(1), usage_metadata={"status": "failed"}) == 0
+    assert (
+        compute_billable_minor(
+            "cost_plus_percentage", {"percentage": "0"}, usage_metadata={"status": "failed"}, **base
+        )
+        == 500
+    )
+    assert (
+        compute_billable_exact(
+            "cost_plus_percentage",
+            pp,
+            internal_cost_exact=Decimal(500),
+            quantity=Decimal(1),
+            usage_metadata={"status": "failed"},
+        )
+        == 0
+    )
     # exact mirror of the other quadrants (the two functions mutate separately)
-    assert compute_billable_exact(
-        "cost_plus_percentage", pp, internal_cost_exact=Decimal(500),
-        quantity=Decimal(1), usage_metadata={"status": "completed"}) == 500
-    assert compute_billable_exact(
-        "cost_plus_percentage", {"percentage": "0"}, internal_cost_exact=Decimal(500),
-        quantity=Decimal(1), usage_metadata={"status": "failed"}) == 500
+    assert (
+        compute_billable_exact(
+            "cost_plus_percentage",
+            pp,
+            internal_cost_exact=Decimal(500),
+            quantity=Decimal(1),
+            usage_metadata={"status": "completed"},
+        )
+        == 500
+    )
+    assert (
+        compute_billable_exact(
+            "cost_plus_percentage",
+            {"percentage": "0"},
+            internal_cost_exact=Decimal(500),
+            quantity=Decimal(1),
+            usage_metadata={"status": "failed"},
+        )
+        == 500
+    )
 
 
 def test_billable_guard_status_codes_and_fup_per_zero():
@@ -700,22 +811,24 @@ def test_billable_guard_status_codes_and_fup_per_zero():
     for policy, params in [
         ("cost_plus_fixed", {"fixed_markup_minor": 1, "per_quantity": "0"}),
         ("fixed_unit_price", {"unit_price_minor": 1, "per_quantity": "0"}),
-        ("included_quota_then_overage",
-         {"included_quota": "1", "overage_unit_price_minor": 1, "per_quantity": "0"}),
+        (
+            "included_quota_then_overage",
+            {"included_quota": "1", "overage_unit_price_minor": 1, "per_quantity": "0"},
+        ),
     ]:
         with pytest.raises(AppError) as e:
             compute_billable_minor(policy, params, internal_cost_minor=1, quantity=Decimal(1))
         assert e.value.code == "INVALID_POLICY_PARAMS" and e.value.status_code == 422
         with pytest.raises(AppError) as e:
-            compute_billable_exact(policy, params,
-                                   internal_cost_exact=Decimal(1), quantity=Decimal(1))
+            compute_billable_exact(
+                policy, params, internal_cost_exact=Decimal(1), quantity=Decimal(1)
+            )
         assert e.value.code == "INVALID_POLICY_PARAMS" and e.value.status_code == 422
     with pytest.raises(AppError) as e:
         compute_billable_minor("alchemy", {}, internal_cost_minor=1, quantity=Decimal(1))
     assert e.value.status_code == 422
     with pytest.raises(AppError) as e:
-        compute_billable_exact("alchemy", {}, internal_cost_exact=Decimal(1),
-                               quantity=Decimal(1))
+        compute_billable_exact("alchemy", {}, internal_cost_exact=Decimal(1), quantity=Decimal(1))
     assert e.value.status_code == 422
 
 
@@ -728,8 +841,10 @@ def test_compute_share_default_units_and_status():
     from app.controlplane.services.revenue_share import compute_share_minor
     from app.exceptions import AppError
 
-    assert compute_share_minor(
-        "fixed_amount_per_unit", rate=None, amount_minor=500, base_minor=0) == 500
+    assert (
+        compute_share_minor("fixed_amount_per_unit", rate=None, amount_minor=500, base_minor=0)
+        == 500
+    )
     with pytest.raises(AppError) as e:
         compute_share_minor("tithe", rate=Decimal(1), amount_minor=1, base_minor=1)
     assert e.value.code == "RULE_PARAM_INVALID" and e.value.status_code == 422
@@ -764,20 +879,20 @@ def test_validator_boundary_values_accepted():
     assert validate_entitlement_value("max_organizations", 0) == 0
     assert validate_entitlement_value("max_storage_gb", "0") == "0"
 
-    url = "https://" + "a" * 488 + ".com"       # exactly 500 chars
+    url = "https://" + "a" * 488 + ".com"  # exactly 500 chars
     assert len(url) == 500
     assert validate_https_url(url, "x") == url
-    with pytest.raises(AppError) as e:           # 501 chars → rejected
+    with pytest.raises(AppError) as e:  # 501 chars → rejected
         validate_https_url(url + "x", "x")
     assert e.value.status_code == 422
     from app.controlplane.services.branding import MAX_LEGAL_LINKS
 
     links = [
         {"label": "L" * 50, "url": "https://example.com"}
-        for _ in range(MAX_LEGAL_LINKS)          # exactly the cap → accepted
+        for _ in range(MAX_LEGAL_LINKS)  # exactly the cap → accepted
     ]
     assert validate_legal_links(links) == links
-    validate_theme_tokens({})                    # empty tokens are valid
+    validate_theme_tokens({})  # empty tokens are valid
 
 
 def test_specificity_rank_matrix():
@@ -793,15 +908,15 @@ def test_specificity_rank_matrix():
         base.update(ctx)
         return specificity_rank(pol, **base)
 
-    assert rank(pt="t1") == 3                       # tenant match
-    assert rank(pt="t2") is None                    # other tenant → excluded
-    assert rank(pp="p1", partner_id="p1") == 2      # partner match
-    assert rank(pp="p1") is None                    # caller has no partner
-    assert rank(pp="p1", partner_id="p2") is None   # partner mismatch
+    assert rank(pt="t1") == 3  # tenant match
+    assert rank(pt="t2") is None  # other tenant → excluded
+    assert rank(pp="p1", partner_id="p1") == 2  # partner match
+    assert rank(pp="p1") is None  # caller has no partner
+    assert rank(pp="p1", partner_id="p2") is None  # partner mismatch
     assert rank(pv="v1", plan_version_id="v1") == 1
     assert rank(pv="v1") is None
     assert rank(pv="v1", plan_version_id="v2") is None
-    assert rank() == 0                              # global applies to all
+    assert rank() == 0  # global applies to all
     # tenant scope wins even when partner/plan also present on the policy
     assert rank(pt="t1", pp="p9", pv="v9") == 3
     assert rank(pt="t2", pp="p1", partner_id="p1") is None
@@ -823,7 +938,7 @@ def test_convert_minor_exact_across_minor_multipliers():
     # same-multiplier pair stays plain multiplication
     assert convert_minor(10000, Decimal("0.5"), "USD", "EUR") == 5000
     # half-minor rounds HALF_UP
-    assert convert_minor(1, Decimal("0.005"), "JPY", "USD") == 1   # 0.5 cent → 1
+    assert convert_minor(1, Decimal("0.005"), "JPY", "USD") == 1  # 0.5 cent → 1
     # exact keeps the fraction (sum-then-round, R75)
     assert convert_exact(Decimal(1), Decimal("0.005"), "JPY", "USD") == Decimal("0.5")
     assert convert_exact(Decimal(10000), Decimal("150"), "USD", "JPY") == Decimal("15000")

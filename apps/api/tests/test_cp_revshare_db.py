@@ -878,33 +878,62 @@ async def test_accrual_base_per_rule_type(db):
     await _mk_rule(db, user2, partner2, rate="25", rule_type="percentage_of_margin")
     inv2 = await _mk_invoice(db, tenant2, subtotal=500000)
     line = InvoiceLine(
-        invoice_id=inv2.id, line_type="usage", description="u",
-        quantity=1, unit_amount_minor=500000, amount_minor=500000)
+        invoice_id=inv2.id,
+        line_type="usage",
+        description="u",
+        quantity=1,
+        unit_amount_minor=500000,
+        amount_minor=500000,
+    )
     db.add(line)
     await db.flush()
     from app.models.organization import Organization
 
     org2 = Organization(
-        name=f"RS {ULID()}", slug=f"rs-{str(ULID()).lower()}",
-        tenant_id=tenant2.id, created_by=user2.id)
+        name=f"RS {ULID()}",
+        slug=f"rs-{str(ULID()).lower()}",
+        tenant_id=tenant2.id,
+        created_by=user2.id,
+    )
     db.add(org2)
     await db.flush()
     eid = str(ULID())
-    db.add(UsageEvent(
-        id=eid, tenant_id=tenant2.id, org_id=org2.id, usage_type="image_generation",
-        quantity=1, unit="images", occurred_at=datetime.now(UTC), source="manual"))
+    db.add(
+        UsageEvent(
+            id=eid,
+            tenant_id=tenant2.id,
+            org_id=org2.id,
+            usage_type="image_generation",
+            quantity=1,
+            unit="images",
+            occurred_at=datetime.now(UTC),
+            source="manual",
+        )
+    )
     await db.flush()
-    db.add(RatedUsage(
-        usage_event_id=eid, tenant_id=tenant2.id, org_id=org2.id,
-        usage_type="image_generation", quantity=1, cost_rate_snapshot={},
-        internal_cost_minor=300000, internal_cost_currency="USD",
-        sell_rate_snapshot={}, billable_amount_minor=500000,
-        billable_amount_exact=Decimal(500000), billable_currency="USD",
-        margin_minor=200000, status="invoiced", rated_at=datetime.now(UTC),
-        invoice_line_id=line.id))
+    db.add(
+        RatedUsage(
+            usage_event_id=eid,
+            tenant_id=tenant2.id,
+            org_id=org2.id,
+            usage_type="image_generation",
+            quantity=1,
+            cost_rate_snapshot={},
+            internal_cost_minor=300000,
+            internal_cost_currency="USD",
+            sell_rate_snapshot={},
+            billable_amount_minor=500000,
+            billable_amount_exact=Decimal(500000),
+            billable_currency="USD",
+            margin_minor=200000,
+            status="invoiced",
+            rated_at=datetime.now(UTC),
+            invoice_line_id=line.id,
+        )
+    )
     await db.flush()
     entry2 = await revshare_svc.accrue_for_invoice(db, inv2.id)
-    assert entry2.share_amount_minor == 50000        # 25% of 2000_00 margin
+    assert entry2.share_amount_minor == 50000  # 25% of 2000_00 margin
 
     # per-seat on a truncated period: seats line amount prorated to 50% —
     # units must be amount/unit_amount (5), not the full quantity (10)
@@ -912,21 +941,34 @@ async def test_accrual_base_per_rule_type(db):
     partner3 = await _mk_partner(db, user3)
     tenant3 = await _mk_tenant(db, user3, partner3)
     seat_rule = RevenueShareRule(
-        beneficiary_type="partner", partner_id=partner3.id, revenue_type="all",
-        rule_type="fixed_amount_per_seat", rate=None, amount_minor=200,
-        amount_currency="USD", version=1,
-        effective_from=datetime.now(UTC) - timedelta(days=30), created_by=user3.id)
+        beneficiary_type="partner",
+        partner_id=partner3.id,
+        revenue_type="all",
+        rule_type="fixed_amount_per_seat",
+        rate=None,
+        amount_minor=200,
+        amount_currency="USD",
+        version=1,
+        effective_from=datetime.now(UTC) - timedelta(days=30),
+        created_by=user3.id,
+    )
     db.add(seat_rule)
     await db.flush()
-    await revshare_svc.activate_rule(
-        db, seat_rule, actor=Actor(user_id=user3.id, type="platform"))
+    await revshare_svc.activate_rule(db, seat_rule, actor=Actor(user_id=user3.id, type="platform"))
     inv3 = await _mk_invoice(db, tenant3, subtotal=50000)
-    db.add(InvoiceLine(
-        invoice_id=inv3.id, line_type="seats", description="seats",
-        quantity=10, unit_amount_minor=10000, amount_minor=50000))  # half period
+    db.add(
+        InvoiceLine(
+            invoice_id=inv3.id,
+            line_type="seats",
+            description="seats",
+            quantity=10,
+            unit_amount_minor=10000,
+            amount_minor=50000,
+        )
+    )  # half period
     await db.flush()
     entry3 = await revshare_svc.accrue_for_invoice(db, inv3.id)
-    assert entry3.share_amount_minor == 200 * 5      # prorated units, not 10
+    assert entry3.share_amount_minor == 200 * 5  # prorated units, not 10
 
 
 @pytest.mark.asyncio
@@ -939,26 +981,34 @@ async def test_accrue_refund_mirrors_and_replay_noop(db):
     pid = str(ULID())
     original = await revshare_svc._insert_entry(
         db,
-        beneficiary_type="partner", partner_id=partner.id, beneficiary_org_id=None,
-        source_type="marketplace_purchase", source_id=pid,
-        rule_id=None, rule_snapshot={"rate": "30"},
-        revenue_base_minor=10000, share_amount_minor=3000,
-        currency="USD", period="2026-09", status="accrued")
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        beneficiary_org_id=None,
+        source_type="marketplace_purchase",
+        source_id=pid,
+        rule_id=None,
+        rule_snapshot={"rate": "30"},
+        revenue_base_minor=10000,
+        share_amount_minor=3000,
+        currency="USD",
+        period="2026-09",
+        status="accrued",
+    )
     assert original is not None
 
     n = await revshare_svc.accrue_refund(db, pid)
     assert n == 1
     mirror = (
         await db.execute(
-            select(RevenueShareEntry).where(
-                RevenueShareEntry.adjustment_of_id == original.id))
+            select(RevenueShareEntry).where(RevenueShareEntry.adjustment_of_id == original.id)
+        )
     ).scalar_one()
     assert mirror.share_amount_minor == -3000
     assert mirror.revenue_base_minor == -10000
     assert mirror.status == "adjusted"
     assert mirror.rule_snapshot.get("void_reversal") is True
 
-    assert await revshare_svc.accrue_refund(db, pid) == 0   # replay no-op
+    assert await revshare_svc.accrue_refund(db, pid) == 0  # replay no-op
 
 
 @pytest.mark.asyncio
@@ -972,25 +1022,36 @@ async def test_fixed_amount_rule_fx_conversion_and_missing_rate(db):
     partner = await _mk_partner(db, user)
     tenant = await _mk_tenant(db, user, partner)
     rule = RevenueShareRule(
-        beneficiary_type="partner", partner_id=partner.id, revenue_type="all",
-        rule_type="fixed_amount_per_unit", rate=None, amount_minor=1000,
-        amount_currency="EUR", version=1,
-        effective_from=datetime.now(UTC) - timedelta(days=30), created_by=user.id)
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        revenue_type="all",
+        rule_type="fixed_amount_per_unit",
+        rate=None,
+        amount_minor=1000,
+        amount_currency="EUR",
+        version=1,
+        effective_from=datetime.now(UTC) - timedelta(days=30),
+        created_by=user.id,
+    )
     db.add(rule)
     await db.flush()
     await revshare_svc.activate_rule(db, rule, actor=Actor(user_id=user.id, type="platform"))
 
-    inv = await _mk_invoice(db, tenant, subtotal=100000)    # USD invoice
-    with pytest.raises(AppError) as e:                      # no EUR->USD rate
+    inv = await _mk_invoice(db, tenant, subtotal=100000)  # USD invoice
+    with pytest.raises(AppError) as e:  # no EUR->USD rate
         await revshare_svc.accrue_for_invoice(db, inv.id)
     assert e.value.code == "REVSHARE_FX_MISSING" and e.value.status_code == 409
 
     await pricing_svc.create_fx_rate(
-        db, actor=Actor(user_id=user.id, type="platform"),
-        base_currency="EUR", quote_currency="USD", rate=Decimal("2"),
-        effective_from=datetime.now(UTC) - timedelta(days=1))
+        db,
+        actor=Actor(user_id=user.id, type="platform"),
+        base_currency="EUR",
+        quote_currency="USD",
+        rate=Decimal("2"),
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+    )
     entry = await revshare_svc.accrue_for_invoice(db, inv.id)
-    assert entry.share_amount_minor == 2000                 # 1000 EUR-minor × 2
+    assert entry.share_amount_minor == 2000  # 1000 EUR-minor × 2
 
 
 @pytest.mark.asyncio
@@ -1007,13 +1068,18 @@ async def test_invoice_accrual_converts_to_partner_currency(db):
     await _mk_rule(db, user, partner, rate="10")
     await db.flush()
     await pricing_svc.create_fx_rate(
-        db, actor=_actor(user), base_currency="USD", quote_currency="EUR",
-        rate=Decimal("0.5"), effective_from=datetime.now(UTC) - timedelta(days=1))
+        db,
+        actor=_actor(user),
+        base_currency="USD",
+        quote_currency="EUR",
+        rate=Decimal("0.5"),
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+    )
     invoice = await _mk_invoice(db, tenant, subtotal=100000)  # $1000 USD
     entry = await revshare_svc.accrue_for_invoice(db, invoice.id)
     assert entry.currency == "EUR"
-    assert entry.share_amount_minor == 5000            # 10% of $1000 → €50.00
-    assert entry.revenue_base_minor == 50000           # base converted too
+    assert entry.share_amount_minor == 5000  # 10% of $1000 → €50.00
+    assert entry.revenue_base_minor == 50000  # base converted too
 
 
 @pytest.mark.asyncio
@@ -1031,36 +1097,50 @@ async def test_purchase_accrual_guards(db):
     assert await revshare_svc.accrue_for_purchase(db, str(ULID())) == 0  # unknown
 
     listing = MarketplaceListing(
-        product_type="workflow_pack", product_id=str(ULID()),
-        seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
-        offer_type="paid", price_minor=10000, currency="USD",
-        platform_commission_pct=Decimal("20"), status="active", created_by=user.id)
+        product_type="workflow_pack",
+        product_id=str(ULID()),
+        seller_org_id=str(ULID()),
+        seller_tenant_id=str(ULID()),
+        offer_type="paid",
+        price_minor=10000,
+        currency="USD",
+        platform_commission_pct=Decimal("20"),
+        status="active",
+        created_by=user.id,
+    )
     db.add(listing)
     await db.flush()
 
     def mk_purchase(status="paid"):
         return MarketplacePurchase(
-            listing_id=listing.id, buyer_tenant_id=tenant.id,
-            buyer_org_id=str(ULID()), purchaser_user_id=user.id, status=status,
-            amount_minor=10000, currency="USD", platform_fee_minor=2000,
-            seller_share_minor=7000, partner_share_minor=1000,
-            economics_snapshot={"partner_id": partner.id, "seller_org_id": None})
+            listing_id=listing.id,
+            buyer_tenant_id=tenant.id,
+            buyer_org_id=str(ULID()),
+            purchaser_user_id=user.id,
+            status=status,
+            amount_minor=10000,
+            currency="USD",
+            platform_fee_minor=2000,
+            seller_share_minor=7000,
+            partner_share_minor=1000,
+            economics_snapshot={"partner_id": partner.id, "seller_org_id": None},
+        )
 
     pending = mk_purchase(status="pending")
     db.add(pending)
     await db.flush()
-    assert await revshare_svc.accrue_for_purchase(db, pending.id) == 0   # unpaid
+    assert await revshare_svc.accrue_for_purchase(db, pending.id) == 0  # unpaid
 
     partner.status = "terminated"
     await db.flush()
     paid = mk_purchase()
     db.add(paid)
     await db.flush()
-    assert await revshare_svc.accrue_for_purchase(db, paid.id) == 0      # terminated
+    assert await revshare_svc.accrue_for_purchase(db, paid.id) == 0  # terminated
     entries = (
-        (await db.execute(
-            select(RevenueShareEntry).where(RevenueShareEntry.source_id == paid.id)))
-        .scalars().all()
+        (await db.execute(select(RevenueShareEntry).where(RevenueShareEntry.source_id == paid.id)))
+        .scalars()
+        .all()
     )
     assert entries == []
 
@@ -1079,7 +1159,7 @@ async def test_refund_before_accrual_retries_until_paid_lands(db):
     # free/partner-less purchase: no accruals, no pending paid → clean no-op
     await _handle_purchase_refunded(db, {"purchase_id": pid})
 
-    enqueue(db, "purchase.paid", {"purchase_id": pid})       # paid still queued
+    enqueue(db, "purchase.paid", {"purchase_id": pid})  # paid still queued
     await db.flush()
     with pytest.raises(RuntimeError, match="not yet processed"):
         await _handle_purchase_refunded(db, {"purchase_id": pid})
@@ -1088,14 +1168,16 @@ async def test_refund_before_accrual_retries_until_paid_lands(db):
         await db.execute(
             select(OutboxMessage).where(
                 OutboxMessage.topic == "purchase.paid",
-                OutboxMessage.payload["purchase_id"].astext == pid))
+                OutboxMessage.payload["purchase_id"].astext == pid,
+            )
+        )
     ).scalar_one()
-    msg.status = "failed"                                    # dead-lettered original
+    msg.status = "failed"  # dead-lettered original
     await db.flush()
     with pytest.raises(RuntimeError, match="not yet processed"):
         await _handle_purchase_refunded(db, {"purchase_id": pid})  # R129[M7]
 
-    msg.status = "done"                                      # processed (no accruals)
+    msg.status = "done"  # processed (no accruals)
     await db.flush()
     await _handle_purchase_refunded(db, {"purchase_id": pid})  # now a clean no-op
 
@@ -1118,8 +1200,13 @@ async def test_settlement_transition_guards_and_entry_flips(db):
 
     async def fresh_statement():
         return await revshare_svc.generate_statement(
-            db, beneficiary_type="partner", partner_id=partner.id,
-            beneficiary_org_id=None, period=period, actor=_actor(user))
+            db,
+            beneficiary_type="partner",
+            partner_id=partner.id,
+            beneficiary_org_id=None,
+            period=period,
+            actor=_actor(user),
+        )
 
     st = await fresh_statement()
 
@@ -1132,7 +1219,8 @@ async def test_settlement_transition_guards_and_entry_flips(db):
     for bad in ("approve", "mark-paid"):
         with pytest.raises(AppError) as e:
             await revshare_svc.transition_statement(
-                db, st, bad, actor=_actor(user), external_payment_ref="W")
+                db, st, bad, actor=_actor(user), external_payment_ref="W"
+            )
         assert e.value.code == "STATEMENT_STATUS_CONFLICT" and e.value.status_code == 409
 
     st = await revshare_svc.transition_statement(db, st, "finalize", actor=_actor(user))
@@ -1148,19 +1236,22 @@ async def test_settlement_transition_guards_and_entry_flips(db):
     # after approve, entries are 'approved' (not yet settled)
     def entry_statuses():
         return db.execute(
-            select(RevenueShareEntry.status).where(
-                RevenueShareEntry.statement_id == st.id))
+            select(RevenueShareEntry.status).where(RevenueShareEntry.statement_id == st.id)
+        )
+
     approved = {r for (r,) in (await entry_statuses()).all()}
     assert approved == {"approved"}
 
     # cannot adjust an approved statement
     with pytest.raises(AppError) as e:
         await revshare_svc.adjust_statement(
-            db, st, amount_minor=-100, reason="late", actor=_actor(user))
+            db, st, amount_minor=-100, reason="late", actor=_actor(user)
+        )
     assert e.value.code == "STATEMENT_STATUS_CONFLICT" and e.value.status_code == 409
 
     st = await revshare_svc.transition_statement(
-        db, st, "mark-paid", actor=_actor(user), external_payment_ref="WIRE-99")
+        db, st, "mark-paid", actor=_actor(user), external_payment_ref="WIRE-99"
+    )
     assert st.status == "paid_externally"
     settled = {r for (r,) in (await entry_statuses()).all()}
     assert settled == {"settled"}
@@ -1195,16 +1286,30 @@ async def test_accrual_gates_and_per_seat_free_line(db):
     # per-seat rule: free seats line (unit_amount 0, qty 3) → units == 3
     partner2 = await _mk_partner(db, user)
     tenant2 = await _mk_tenant(db, user, partner2)
-    await _mk_rule(db, user, partner2, rule_type="fixed_amount_per_seat",
-                   rate="0", amount_minor=200, amount_currency="USD",
-                   revenue_type="subscription")
+    await _mk_rule(
+        db,
+        user,
+        partner2,
+        rule_type="fixed_amount_per_seat",
+        rate="0",
+        amount_minor=200,
+        amount_currency="USD",
+        revenue_type="subscription",
+    )
     inv = await _mk_invoice(db, tenant2, subtotal=0)
-    db.add(InvoiceLine(
-        invoice_id=inv.id, line_type="seats", description="free seats",
-        quantity=3, unit_amount_minor=0, amount_minor=0))
+    db.add(
+        InvoiceLine(
+            invoice_id=inv.id,
+            line_type="seats",
+            description="free seats",
+            quantity=3,
+            unit_amount_minor=0,
+            amount_minor=0,
+        )
+    )
     await db.flush()
     e2 = await revshare_svc.accrue_for_invoice(db, inv.id)
-    assert e2 is not None and e2.share_amount_minor == 600     # 3 × $2.00
+    assert e2 is not None and e2.share_amount_minor == 600  # 3 × $2.00
 
 
 @pytest.mark.asyncio
@@ -1229,26 +1334,42 @@ async def test_purchase_accrual_seller_fx_counts_and_snapshots(db):
     partner = await _mk_partner(db, user)  # USD partner
     tenant = await _mk_tenant(db, user, partner)
     await pricing_svc.create_fx_rate(
-        db, actor=_actor(user), base_currency="JPY", quote_currency="USD",
+        db,
+        actor=_actor(user),
+        base_currency="JPY",
+        quote_currency="USD",
         rate=Decimal("0.0066667"),
-        effective_from=datetime.now(UTC) - timedelta(days=1))
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+    )
 
     def _listing(cur):
         return MarketplaceListing(
-            product_type="workflow_pack", product_id=str(ULID()),
-            seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
-            offer_type="paid", price_minor=150000, currency=cur,
-            platform_commission_pct=Decimal("20"), status="active",
-            created_by=user.id)
+            product_type="workflow_pack",
+            product_id=str(ULID()),
+            seller_org_id=str(ULID()),
+            seller_tenant_id=str(ULID()),
+            offer_type="paid",
+            price_minor=150000,
+            currency=cur,
+            platform_commission_pct=Decimal("20"),
+            status="active",
+            created_by=user.id,
+        )
 
     def _purchase(listing, cur, *, partner_id, seller_org):
         return MarketplacePurchase(
-            listing_id=listing.id, buyer_tenant_id=tenant.id,
-            buyer_org_id=str(ULID()), purchaser_user_id=user.id, status="paid",
-            amount_minor=150000, currency=cur, platform_fee_minor=30000,
-            seller_share_minor=120000, partner_share_minor=15000,
-            economics_snapshot={"partner_id": partner_id,
-                                "seller_org_id": seller_org})
+            listing_id=listing.id,
+            buyer_tenant_id=tenant.id,
+            buyer_org_id=str(ULID()),
+            purchaser_user_id=user.id,
+            status="paid",
+            amount_minor=150000,
+            currency=cur,
+            platform_fee_minor=30000,
+            seller_share_minor=120000,
+            partner_share_minor=15000,
+            economics_snapshot={"partner_id": partner_id, "seller_org_id": seller_org},
+        )
 
     # (1)(2)(3): JPY purchase with seller + partner
     l1 = _listing("JPY")
@@ -1259,14 +1380,16 @@ async def test_purchase_accrual_seller_fx_counts_and_snapshots(db):
     db.add(p1)
     await db.flush()
     created = await revshare_svc.accrue_for_purchase(db, p1.id)
-    assert created == 2                                   # seller + partner, once each
+    assert created == 2  # seller + partner, once each
     seller_entry = (
         await db.execute(
             select(RevenueShareEntry).where(
                 RevenueShareEntry.source_id == p1.id,
-                RevenueShareEntry.beneficiary_type == "seller_org"))
+                RevenueShareEntry.beneficiary_type == "seller_org",
+            )
+        )
     ).scalar_one()
-    assert seller_entry.currency == "USD"                 # platform currency
+    assert seller_entry.currency == "USD"  # platform currency
     assert abs(seller_entry.share_amount_minor - 80000) <= 4  # ¥120,000 → ~$800
     assert seller_entry.rule_snapshot == {"from_economics_snapshot": True}
 
@@ -1282,7 +1405,9 @@ async def test_purchase_accrual_seller_fx_counts_and_snapshots(db):
         await db.execute(
             select(RevenueShareEntry).where(
                 RevenueShareEntry.source_id == p2.id,
-                RevenueShareEntry.beneficiary_type == "partner"))
+                RevenueShareEntry.beneficiary_type == "partner",
+            )
+        )
     ).scalar_one()
     assert partner_entry.fx_rate_snapshot is None
     assert partner_entry.currency == "USD"
@@ -1296,10 +1421,16 @@ async def test_purchase_accrual_seller_fx_counts_and_snapshots(db):
     await db.flush()
     assert await revshare_svc.accrue_for_purchase(db, p3.id) == 1
     kinds = (
-        await db.execute(
-            select(RevenueShareEntry.beneficiary_type).where(
-                RevenueShareEntry.source_id == p3.id))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(RevenueShareEntry.beneficiary_type).where(
+                    RevenueShareEntry.source_id == p3.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert kinds == ["seller_org"]
 
     # (5): GBP purchase with NO GBP→USD rate → 409, never a buyer-currency entry
@@ -1320,8 +1451,14 @@ async def test_purchase_accrual_seller_fx_counts_and_snapshots(db):
     # (8): partner in a THIRD currency with no rate → 409 with status
     from app.controlplane.models.partner import Partner as _Partner
 
-    eur_partner = _Partner(name=f"EURP {ULID()}", slug=f"eurp-{str(ULID()).lower()[:10]}",
-                           currency="EUR", status="active", partner_type="reseller", created_by=user.id)
+    eur_partner = _Partner(
+        name=f"EURP {ULID()}",
+        slug=f"eurp-{str(ULID()).lower()[:10]}",
+        currency="EUR",
+        status="active",
+        partner_type="reseller",
+        created_by=user.id,
+    )
     db.add(eur_partner)
     await db.flush()
     l5 = _listing("USD")
@@ -1342,7 +1479,9 @@ async def test_purchase_accrual_seller_fx_counts_and_snapshots(db):
         await db.execute(
             select(RevenueShareEntry).where(
                 RevenueShareEntry.source_id == p2.id,
-                RevenueShareEntry.adjustment_of_id.is_not(None)))
+                RevenueShareEntry.adjustment_of_id.is_not(None),
+            )
+        )
     ).scalar_one()
     assert mirror.share_amount_minor == -partner_entry.share_amount_minor
     assert mirror.rule_snapshot.get("void_reversal") is True
@@ -1368,13 +1507,23 @@ async def test_generate_statement_boundaries(db):
     # (1) statuses
     with pytest.raises(AppError) as e404:
         await revshare_svc.generate_statement(
-            db, beneficiary_type="partner", partner_id=str(ULID()),
-            beneficiary_org_id=None, period="2026-09", actor=a)
+            db,
+            beneficiary_type="partner",
+            partner_id=str(ULID()),
+            beneficiary_org_id=None,
+            period="2026-09",
+            actor=a,
+        )
     assert e404.value.status_code == 404
     with pytest.raises(AppError) as e422:
         await revshare_svc.generate_statement(
-            db, beneficiary_type="seller_org", partner_id=None,
-            beneficiary_org_id=None, period="2026-09", actor=a)
+            db,
+            beneficiary_type="seller_org",
+            partner_id=None,
+            beneficiary_org_id=None,
+            period="2026-09",
+            actor=a,
+        )
     assert e422.value.status_code == 422
 
     # (3) mixed period: +1000 accrual and its -1000 refund mirror
@@ -1384,46 +1533,81 @@ async def test_generate_statement_boundaries(db):
     period = entry.period
     from app.controlplane.models.partner import RevenueShareEntry as REntry
 
-    db.add(REntry(beneficiary_type="partner", partner_id=partner.id,
-              source_type="invoice", source_id=inv.id, rule_snapshot={},
-              revenue_base_minor=-4000, share_amount_minor=-400,
-              currency=partner.currency, period=period, status="adjusted",
-              adjustment_of_id=entry.id))
+    db.add(
+        REntry(
+            beneficiary_type="partner",
+            partner_id=partner.id,
+            source_type="invoice",
+            source_id=inv.id,
+            rule_snapshot={},
+            revenue_base_minor=-4000,
+            share_amount_minor=-400,
+            currency=partner.currency,
+            period=period,
+            status="adjusted",
+            adjustment_of_id=entry.id,
+        )
+    )
     await db.flush()
 
     st = await revshare_svc.generate_statement(
-        db, beneficiary_type="partner", partner_id=partner.id,
-        beneficiary_org_id=None, period=period, actor=a)
-    assert st.gross_revenue_minor == 10000          # positive bases only
-    assert st.refunds_minor == -4000                # negative bases only
-    assert st.share_total_minor == 600              # 1000 − 400
+        db,
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        beneficiary_org_id=None,
+        period=period,
+        actor=a,
+    )
+    assert st.gross_revenue_minor == 10000  # positive bases only
+    assert st.refunds_minor == -4000  # negative bases only
+    assert st.share_total_minor == 600  # 1000 − 400
     assert st.status == "draft"
 
     # (2) draft regenerate recomputes IN PLACE (same row)
     st2 = await revshare_svc.generate_statement(
-        db, beneficiary_type="partner", partner_id=partner.id,
-        beneficiary_org_id=None, period=period, actor=a)
+        db,
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        beneficiary_org_id=None,
+        period=period,
+        actor=a,
+    )
     assert st2.id == st.id
     # finalized → 409
     await revshare_svc.transition_statement(db, st, "finalize", actor=a)
     with pytest.raises(AppError) as e409:
         await revshare_svc.generate_statement(
-            db, beneficiary_type="partner", partner_id=partner.id,
-            beneficiary_org_id=None, period=period, actor=a)
+            db,
+            beneficiary_type="partner",
+            partner_id=partner.id,
+            beneficiary_org_id=None,
+            period=period,
+            actor=a,
+        )
     assert e409.value.code == "STATEMENT_STATUS_CONFLICT" and e409.value.status_code == 409
 
     # (4) an ORG-scoped statement for some org never sweeps the partner's
     # entries (the flipped org filter would)
     org_id = str(ULID())
     st_org = await revshare_svc.generate_statement(
-        db, beneficiary_type="seller_org", partner_id=None,
-        beneficiary_org_id=org_id, period=period, actor=a)
-    assert st_org.share_total_minor == 0            # nothing for that org
+        db,
+        beneficiary_type="seller_org",
+        partner_id=None,
+        beneficiary_org_id=org_id,
+        period=period,
+        actor=a,
+    )
+    assert st_org.share_total_minor == 0  # nothing for that org
     # org-type regenerate finds ITS OWN draft (the flipped org filter builds
     # a duplicate row instead)
     st_org2 = await revshare_svc.generate_statement(
-        db, beneficiary_type="seller_org", partner_id=None,
-        beneficiary_org_id=org_id, period=period, actor=a)
+        db,
+        beneficiary_type="seller_org",
+        partner_id=None,
+        beneficiary_org_id=org_id,
+        period=period,
+        actor=a,
+    )
     assert st_org2.id == st_org.id
     # (zero-base entries are numeric no-ops on both gross and refunds — the
     # strict comparisons' boundary mutants are sum-with-zero equivalents; the
@@ -1441,17 +1625,21 @@ async def test_rule_tiebreak_typed_beats_all_then_version(db):
 
     def _active_rule(rate, version, rtype):
         return RevenueShareRule(
-            beneficiary_type="partner", partner_id=partner.id,
-            revenue_type=rtype, rule_type="percentage_of_gross_revenue",
-            rate=Decimal(rate), version=version, status="active",
+            beneficiary_type="partner",
+            partner_id=partner.id,
+            revenue_type=rtype,
+            rule_type="percentage_of_gross_revenue",
+            rate=Decimal(rate),
+            version=version,
+            status="active",
             effective_from=datetime.now(UTC) - timedelta(days=30),
-            created_by=user.id)
+            created_by=user.id,
+        )
 
     # 'all' at a high version vs TYPED at low version → typed wins
     # (direct active rows: this pins _resolve_rule's ORDERING, not the
     # activation flow's same-dims retirement)
-    db.add_all([_active_rule("50", 9, "all"),
-                _active_rule("10", 1, "subscription")])
+    db.add_all([_active_rule("50", 9, "all"), _active_rule("10", 1, "subscription")])
     await db.flush()
     inv = await _mk_invoice(db, tenant, subtotal=100000)
     entry = await revshare_svc.accrue_for_invoice(db, inv.id)
@@ -1459,14 +1647,14 @@ async def test_rule_tiebreak_typed_beats_all_then_version(db):
     # invoice — the 'all' rule would have accrued 50% of the full 100000)
     snap = entry.rule_snapshot or {}
     assert str(snap.get("rate", "")).startswith("10"), snap
-    assert entry.share_amount_minor == 0            # typed slice, no sub lines
+    assert entry.share_amount_minor == 0  # typed slice, no sub lines
     # two TYPED rules: higher version wins the (spec, type) tie
     db.add(_active_rule("20", 2, "subscription"))
     await db.flush()
     inv2 = await _mk_invoice(db, tenant, subtotal=100000)
     entry2 = await revshare_svc.accrue_for_invoice(db, inv2.id)
     snap2 = entry2.rule_snapshot or {}
-    assert str(snap2.get("rate", "")).startswith("20"), snap2   # v2 beats v1
+    assert str(snap2.get("rate", "")).startswith("20"), snap2  # v2 beats v1
     # (an IDENTICAL (spec, type, version) key pair is constraint-impossible —
     # uq_cp_revshare_rule_version — so the best-key >= mutant is a
     # constraint-equivalent, verified empirically: the second row 23505s.)
@@ -1475,6 +1663,7 @@ async def test_rule_tiebreak_typed_beats_all_then_version(db):
 class _Req387:
     class _State:
         request_id = "r387"
+
     state = _State()
 
 
@@ -1499,19 +1688,19 @@ async def test_partner_attribution_handlers(db):
     req = _Req387()
 
     with pytest.raises(AppError) as e_t:
-        await set_attribution(str(ULID()),
-                              AttributionRequest(partner_id=partner.id),
-                              req, user=user, db=db)
+        await set_attribution(
+            str(ULID()), AttributionRequest(partner_id=partner.id), req, user=user, db=db
+        )
     assert e_t.value.code == "TENANT_NOT_FOUND" and e_t.value.status_code == 404
     with pytest.raises(AppError) as e_p:
-        await set_attribution(tenant.id,
-                              AttributionRequest(partner_id=str(ULID())),
-                              req, user=user, db=db)
+        await set_attribution(
+            tenant.id, AttributionRequest(partner_id=str(ULID())), req, user=user, db=db
+        )
     assert e_p.value.code == "PARTNER_NOT_FOUND" and e_p.value.status_code == 404
 
-    resp = await set_attribution(tenant.id,
-                                 AttributionRequest(partner_id=partner.id),
-                                 req, user=user, db=db)
+    resp = await set_attribution(
+        tenant.id, AttributionRequest(partner_id=partner.id), req, user=user, db=db
+    )
     assert resp.data == {"tenant_id": tenant.id, "partner_id": partner.id}
     await db.refresh(tenant)
     assert tenant.partner_id == partner.id and tenant.attributed_at is not None
@@ -1520,11 +1709,17 @@ async def test_partner_attribution_handlers(db):
     await db.refresh(tenant)
     assert tenant.partner_id is None and tenant.attributed_at is None
     cleared = (
-        await db.execute(
-            select(CommercialAuditEvent).where(
-                CommercialAuditEvent.action == "tenant.attribution_cleared",
-                CommercialAuditEvent.tenant_id == tenant.id))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "tenant.attribution_cleared",
+                    CommercialAuditEvent.tenant_id == tenant.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert cleared and cleared[-1].before == {"partner_id": partner.id}
 
     # membership gate: non-member and unknown partner are the SAME 404

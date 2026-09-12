@@ -91,9 +91,7 @@ class PortfolioService:
             if existing is not None:
                 return existing
             # Username race: retry once with a random suffix.
-            profile = UserProfile(
-                user_id=user_id, username=f"{base[:30]}-{secrets.token_hex(3)}"
-            )
+            profile = UserProfile(user_id=user_id, username=f"{base[:30]}-{secrets.token_hex(3)}")
             self.db.add(profile)
             await self.db.flush()
         return profile

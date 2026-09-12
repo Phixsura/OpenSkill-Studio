@@ -32,14 +32,21 @@ async def _setup(db):
     from app.services.organization import OrgService
     from app.services.skill import SkillService
 
-    owner = User(email=f"r439-{uuid.uuid4().hex[:10]}@t.com",
-                 password_hash=hash_password("Test123!"), display_name="R439",
-                 role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    owner = User(
+        email=f"r439-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R439",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(owner)
     await db.flush()
-    org = await OrgService(db).create(name=f"R439 {uuid.uuid4().hex[:5]}",
-                                      slug=f"r439-{uuid.uuid4().hex[:10]}",
-                                      description=None, created_by=owner.id)
+    org = await OrgService(db).create(
+        name=f"R439 {uuid.uuid4().hex[:5]}",
+        slug=f"r439-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     cat = await SkillService(db).create_category(org.id, "AI", None, None, None, owner.id)
     return org, owner, cat
@@ -55,18 +62,29 @@ async def test_duplicate_skill_r439(db):
     sksvc = SkillService(db)
     dup = DuplicateService(db)
 
-    skill = await sksvc.create_skill(org.id, cat.id, "Prompting", None, "desc", "# content",
-                                     "beginner", 30, ["ai", "nlp"], None, owner.id)
+    skill = await sksvc.create_skill(
+        org.id,
+        cat.id,
+        "Prompting",
+        None,
+        "desc",
+        "# content",
+        "beginner",
+        30,
+        ["ai", "nlp"],
+        None,
+        owner.id,
+    )
     # licensed-in provenance markers must survive the copy (R135)
     skill.origin_pack_id = "pack-123"
     skill.origin_release_id = "rel-456"
     skill.origin_component_id = "comp-789"
     await sksvc.publish_skill(skill.id)
     # two exercises: one live, one archived (archived must NOT be copied)
-    await sksvc.create_exercise(org.id, skill.id, "Live", "d", "text_answer", {}, 100,
-                                owner.id)
-    e_arch = await sksvc.create_exercise(org.id, skill.id, "Arch", "d", "text_answer", {}, 100,
-                                         owner.id)
+    await sksvc.create_exercise(org.id, skill.id, "Live", "d", "text_answer", {}, 100, owner.id)
+    e_arch = await sksvc.create_exercise(
+        org.id, skill.id, "Arch", "d", "text_answer", {}, 100, owner.id
+    )
     e_arch.status = ContentStatus.ARCHIVED
     await db.flush()
 
@@ -77,7 +95,7 @@ async def test_duplicate_skill_r439(db):
 
     copy = await dup.duplicate_skill(org.id, skill.id, owner.id)
     assert copy.id != skill.id
-    assert copy.status == ContentStatus.DRAFT       # reset to draft
+    assert copy.status == ContentStatus.DRAFT  # reset to draft
     assert copy.name == "Prompting (Copy)"
     assert copy.slug != skill.slug
     assert copy.tags == ["ai", "nlp"]
@@ -89,8 +107,9 @@ async def test_duplicate_skill_r439(db):
     # exactly the LIVE exercise is copied (archived skipped), reset to DRAFT
     from sqlalchemy import select
 
-    copied_ex = (await db.execute(
-        select(Exercise).where(Exercise.skill_id == copy.id))).scalars().all()
+    copied_ex = (
+        (await db.execute(select(Exercise).where(Exercise.skill_id == copy.id))).scalars().all()
+    )
     assert [e.title for e in copied_ex] == ["Live"]
     assert copied_ex[0].status == ContentStatus.DRAFT
     assert copied_ex[0].max_score == 100
@@ -116,8 +135,21 @@ async def test_duplicate_project_r439(db):
     dup = DuplicateService(db)
 
     proj = await psvc.create_project(
-        org.id, "Chatbot", None, "desc", "instr", "intermediate", 80,
-        [{"criterion": "Q", "max_score": 80}], datetime.now(UTC), None, 25, 3, None, owner.id)
+        org.id,
+        "Chatbot",
+        None,
+        "desc",
+        "instr",
+        "intermediate",
+        80,
+        [{"criterion": "Q", "max_score": 80}],
+        datetime.now(UTC),
+        None,
+        25,
+        3,
+        None,
+        owner.id,
+    )
     await psvc.create_deliverable(proj.id, "Report", "d", "text", True, {}, 0)
     await psvc.create_deliverable(proj.id, "Video", None, "file", False, {}, 1)
 
@@ -139,9 +171,17 @@ async def test_duplicate_project_r439(db):
     # all deliverables copied in order
     from sqlalchemy import select
 
-    dels = (await db.execute(
-        select(ProjectDeliverable).where(ProjectDeliverable.project_id == copy.id)
-        .order_by(ProjectDeliverable.sort_order))).scalars().all()
+    dels = (
+        (
+            await db.execute(
+                select(ProjectDeliverable)
+                .where(ProjectDeliverable.project_id == copy.id)
+                .order_by(ProjectDeliverable.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert [d.name for d in dels] == ["Report", "Video"]
     assert dels[0].required is True and dels[1].required is False
 

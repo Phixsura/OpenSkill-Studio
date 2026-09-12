@@ -761,9 +761,9 @@ def test_require_role_pure():
     from app.exceptions import AppError
 
     p = ClientPrincipal(kind="guest", role="reviewer", label="x", project_id="pr")
-    require_role(p, "reviewer", "approver")   # allowed → no raise
+    require_role(p, "reviewer", "approver")  # allowed → no raise
     with pytest.raises(AppError) as e:
-        require_role(p, "approver")           # reviewer lacks approver
+        require_role(p, "approver")  # reviewer lacks approver
     assert e.value.code == "CLIENT_ACCESS_DENIED"
 
 
@@ -775,16 +775,22 @@ async def test_create_guest_link_validation(db):
     _, _, _, project, _ = await _mk_project_env(db, user)
 
     async def rejects(**kw):
-        base = dict(project_id=project.id, label=None, email=None, role="approver",
-                    expires_at=datetime.now(UTC) + timedelta(days=7), actor=_actor(user))
+        base = dict(
+            project_id=project.id,
+            label=None,
+            email=None,
+            role="approver",
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+            actor=_actor(user),
+        )
         base.update(kw)
         with pytest.raises(AppError) as e:
             await portal_svc.create_guest_link(db, **base)
         assert e.value.code == "VALIDATION_ERROR"
 
-    await rejects(role="editor")                                       # bad role
-    await rejects(expires_at=datetime.now(UTC) - timedelta(days=1))    # already expired
-    await rejects(expires_at=datetime.now(UTC) + timedelta(days=91))   # >90 days
+    await rejects(role="editor")  # bad role
+    await rejects(expires_at=datetime.now(UTC) - timedelta(days=1))  # already expired
+    await rejects(expires_at=datetime.now(UTC) + timedelta(days=91))  # >90 days
 
 
 # ── R269: remaining portal arcs ──
@@ -800,12 +806,18 @@ async def test_link_limit_and_auth_arcs(db):
 
     async def mk_link():
         return await portal_svc.create_guest_link(
-            db, project_id=project.id, label="L", email=None, role="reviewer",
-            expires_at=datetime.now(UTC) + timedelta(days=7), actor=_actor(user))
+            db,
+            project_id=project.id,
+            label="L",
+            email=None,
+            role="reviewer",
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+            actor=_actor(user),
+        )
 
     for _ in range(portal_svc.MAX_ACTIVE_LINKS_PER_PROJECT):
         await mk_link()
-    with pytest.raises(AppError) as e:                    # 21st link
+    with pytest.raises(AppError) as e:  # 21st link
         await mk_link()
     assert e.value.code == "CLIENT_LINK_LIMIT" and e.value.status_code == 422
 
@@ -852,23 +864,28 @@ async def test_cross_project_submission_404_and_revision_replay(db):
     db.add(ClientShare(project_id=project2.id, submission_id=submission2.id, shared_by=user.id))
     await db.flush()
 
-    with pytest.raises(AppError) as e:                    # other project's submission
+    with pytest.raises(AppError) as e:  # other project's submission
         await portal_svc.assert_shared(db, project.id, submission2.id)
     assert e.value.code == "SUBMISSION_NOT_SHARED" and e.value.status_code == 404
 
     d1 = await portal_svc.request_revision(db, principal, submission.id, "colors off")
     assert d1 is not None
-    with pytest.raises(AppError) as e:                    # replay: status already
+    with pytest.raises(AppError) as e:  # replay: status already
         await portal_svc.request_revision(db, principal, submission.id, "again?")
     assert e.value.code == "SUBMISSION_NOT_REVIEWABLE" and e.value.status_code == 409
     records = (
-        (await db.execute(
-            select(ClientApprovalRecord).where(
-                ClientApprovalRecord.submission_id == submission.id,
-                ClientApprovalRecord.action == "revision_requested")))
-        .scalars().all()
+        (
+            await db.execute(
+                select(ClientApprovalRecord).where(
+                    ClientApprovalRecord.submission_id == submission.id,
+                    ClientApprovalRecord.action == "revision_requested",
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    assert len(records) == 1                              # never double-recorded
+    assert len(records) == 1  # never double-recorded
 
 
 @pytest.mark.asyncio
@@ -945,8 +962,14 @@ async def test_guest_token_never_outlives_its_link(db):
 
     # link expiring in ~2 minutes — well under the token TTL
     short = await portal_svc.create_guest_link(
-        db, project_id=project.id, label=None, email=None, role="reviewer",
-        expires_at=datetime.now(UTC) + timedelta(minutes=2), actor=_actor(user))
+        db,
+        project_id=project.id,
+        label=None,
+        email=None,
+        role="reviewer",
+        expires_at=datetime.now(UTC) + timedelta(minutes=2),
+        actor=_actor(user),
+    )
     link, raw = short
     token, ctx = await portal_svc.exchange_guest_token(db, raw, None)
     # capped by the LINK, not the (larger) token TTL
@@ -958,8 +981,14 @@ async def test_guest_token_never_outlives_its_link(db):
 
     # link far in the future — token capped at the TTL, not the link
     longlink, raw2 = await portal_svc.create_guest_link(
-        db, project_id=project.id, label=None, email=None, role="reviewer",
-        expires_at=datetime.now(UTC) + timedelta(days=80), actor=_actor(user))
+        db,
+        project_id=project.id,
+        label=None,
+        email=None,
+        role="reviewer",
+        expires_at=datetime.now(UTC) + timedelta(days=80),
+        actor=_actor(user),
+    )
     _, ctx2 = await portal_svc.exchange_guest_token(db, raw2, None)
     assert ctx2["expires_in"] <= ttl_min * 60 + 5
     assert ctx2["expires_in"] < 80 * 24 * 3600
@@ -995,18 +1024,25 @@ async def test_reviewer_guest_cannot_approve_or_final_accept_via_http(db):
             hdr = {"Authorization": reviewer_auth}
             base = f"/api/v1/client-portal/projects/{project.id}"
 
-            r = await c.post(f"{base}/submissions/{submission.id}/approve",
-                             headers=hdr, json={"comment": "lgtm"})
+            r = await c.post(
+                f"{base}/submissions/{submission.id}/approve", headers=hdr, json={"comment": "lgtm"}
+            )
             assert r.status_code == 403, r.text
             assert r.json()["error"]["code"] == "CLIENT_ACCESS_DENIED"
 
-            r = await c.post(f"{base}/final-accept", headers=hdr,
-                             json={"submission_id": submission.id, "comment": "ship"})
+            r = await c.post(
+                f"{base}/final-accept",
+                headers=hdr,
+                json={"submission_id": submission.id, "comment": "ship"},
+            )
             assert r.status_code == 403, r.text
 
             # a reviewer CAN request a revision
-            r = await c.post(f"{base}/submissions/{submission.id}/request-revision",
-                             headers=hdr, json={"comment": "please fix the colors"})
+            r = await c.post(
+                f"{base}/submissions/{submission.id}/request-revision",
+                headers=hdr,
+                json={"comment": "please fix the colors"},
+            )
             assert r.status_code in (200, 201), r.text
     finally:
         app.router.lifespan_context = orig
@@ -1041,28 +1077,44 @@ async def test_portal_download_isolates_cross_submission_items(db):
     await db.flush()
 
     shared_item = SubmissionItem(
-        submission_id=submission.id, deliverable_id=deliverable.id, type=ItemType.FILE,
-        file_key=f"k/{ULID()}", uploaded_by=user.id)
+        submission_id=submission.id,
+        deliverable_id=deliverable.id,
+        type=ItemType.FILE,
+        file_key=f"k/{ULID()}",
+        uploaded_by=user.id,
+    )
     db.add(shared_item)
     # a SECOND submission in the SAME project, NOT shared, with its own item
     other_sub = Submission(
-        project_id=project.id, org_id=org.id, user_id=user.id,
-        status=SubmissionStatus.SUBMITTED, version=1, submitted_at=datetime.now(UTC))
+        project_id=project.id,
+        org_id=org.id,
+        user_id=user.id,
+        status=SubmissionStatus.SUBMITTED,
+        version=1,
+        submitted_at=datetime.now(UTC),
+    )
     db.add(other_sub)
     await db.flush()
     other_item = SubmissionItem(
-        submission_id=other_sub.id, deliverable_id=deliverable.id, type=ItemType.FILE,
-        file_key=f"k/{ULID()}", uploaded_by=user.id)
+        submission_id=other_sub.id,
+        deliverable_id=deliverable.id,
+        type=ItemType.FILE,
+        file_key=f"k/{ULID()}",
+        uploaded_by=user.id,
+    )
     nofile_item = SubmissionItem(
-        submission_id=submission.id, deliverable_id=deliverable.id, type=ItemType.TEXT,
-        content="text only", uploaded_by=user.id)
+        submission_id=submission.id,
+        deliverable_id=deliverable.id,
+        type=ItemType.TEXT,
+        content="text only",
+        uploaded_by=user.id,
+    )
     db.add_all([other_item, nofile_item])
     db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
     await db.flush()
     auth = await _guest_auth(db, project, user, role="reviewer")
     await db.commit()
-    ids = dict(sub=submission.id, shared=shared_item.id, other=other_item.id,
-               nofile=nofile_item.id)
+    ids = dict(sub=submission.id, shared=shared_item.id, other=other_item.id, nofile=nofile_item.id)
 
     @asynccontextmanager
     async def _noop(a):
@@ -1103,19 +1155,25 @@ async def test_guest_link_boundary_expiry_default_label_and_401s(db, monkeypatch
 
     # label-less link expiring exactly at `frozen`
     link, raw = await portal_svc.create_guest_link(
-        db, project_id=project.id, label=None, email=None, role="reviewer",
-        expires_at=frozen, actor=_actor(user))
+        db,
+        project_id=project.id,
+        label=None,
+        email=None,
+        role="reviewer",
+        expires_at=frozen,
+        actor=_actor(user),
+    )
 
     # before the boundary: exchange works, principal presents the default label
     token, _ = await portal_svc.exchange_guest_token(db, raw, None)
     principal = await portal_svc.get_client_principal(db, project.id, f"Bearer {token}")
-    assert principal.label == "Client reviewer"   # None label → default, not None
+    assert principal.label == "Client reviewer"  # None label → default, not None
 
     # freeze the clock AT the expiry instant → the same link is now dead
     monkeypatch.setattr(portal_svc, "_now", lambda: frozen)
     with pytest.raises(AppError) as e1:
         await portal_svc.exchange_guest_token(db, raw, None)
-    assert e1.value.status_code == 401            # dead credential = 401
+    assert e1.value.status_code == 401  # dead credential = 401
     with pytest.raises(AppError) as e2:
         await portal_svc.get_client_principal(db, project.id, f"Bearer {token}")
     assert e2.value.status_code == 401
@@ -1125,8 +1183,9 @@ async def test_guest_link_boundary_expiry_default_label_and_401s(db, monkeypatch
 
     from app.config import settings as _settings
 
-    weird = _jwt.encode({"type": "something_else", "sub": user.id},
-                        _settings.jwt_secret, algorithm="HS256")
+    weird = _jwt.encode(
+        {"type": "something_else", "sub": user.id}, _settings.jwt_secret, algorithm="HS256"
+    )
     with pytest.raises(AppError) as e3:
         await portal_svc.get_client_principal(db, project.id, f"Bearer {weird}")
     assert e3.value.status_code == 401 and e3.value.code == "CLIENT_ACCESS_DENIED"
@@ -1151,9 +1210,14 @@ async def test_portal_decision_boundaries(db):
     now = datetime.now(UTC)
 
     async def _link(**kw):
-        base = dict(project_id=project.id, label=None, email=None,
-                    role="approver", expires_at=now + timedelta(days=7),
-                    actor=_actor(user))
+        base = dict(
+            project_id=project.id,
+            label=None,
+            email=None,
+            role="approver",
+            expires_at=now + timedelta(days=7),
+            actor=_actor(user),
+        )
         base.update(kw)
         return await portal_svc.create_guest_link(db, **base)
 
@@ -1162,20 +1226,18 @@ async def test_portal_decision_boundaries(db):
         await _link(role="editor")
     assert e_r.value.status_code == 422
     with pytest.raises(AppError) as e_now:
-        await _link(expires_at=now)                     # <= now → invalid
+        await _link(expires_at=now)  # <= now → invalid
     assert e_now.value.status_code == 422
     with pytest.raises(AppError) as e_91:
         await _link(expires_at=now + timedelta(days=90, seconds=90))
     assert e_91.value.status_code == 422
     ok_link, raw = await _link(expires_at=now + timedelta(days=90) - timedelta(seconds=5))
-    assert ok_link.id and len(raw) > 30                 # ~90d OK; raw is long
+    assert ok_link.id and len(raw) > 30  # ~90d OK; raw is long
 
-    db.add(ClientShare(project_id=project.id, submission_id=submission.id,
-                       shared_by=user.id))
+    db.add(ClientShare(project_id=project.id, submission_id=submission.id, shared_by=user.id))
     await db.flush()
     token, _ = await portal_svc.exchange_guest_token(db, raw, None)
-    principal = await portal_svc.get_client_principal(
-        db, project.id, f"Bearer {token}")
+    principal = await portal_svc.get_client_principal(db, project.id, f"Bearer {token}")
 
     # (4) cross-project submission → uniform 404 on the shared gate
     with pytest.raises(AppError) as e_404:
@@ -1183,15 +1245,13 @@ async def test_portal_decision_boundaries(db):
     assert e_404.value.status_code == 404
 
     # (2) revision request: same-version replay returns the SAME record
-    r1 = await portal_svc.request_revision(
-        db, principal, submission.id, comment="please fix")
+    r1 = await portal_svc.request_revision(db, principal, submission.id, comment="please fix")
     # same-row resubmission (same version, back to SUBMITTED): the replay
     # must return the PRIOR record, not double-record the decision
     submission.status = SubmissionStatus.SUBMITTED
     await db.flush()
-    r2 = await portal_svc.request_revision(
-        db, principal, submission.id, comment="please fix again")
-    assert r2.id == r1.id                               # idempotent per version
+    r2 = await portal_svc.request_revision(db, principal, submission.id, comment="please fix again")
+    assert r2.id == r1.id  # idempotent per version
 
     # (3)+(5) final accept: completes the brief; a second one is a 409
     submission.status = SubmissionStatus.APPROVED
@@ -1216,14 +1276,18 @@ async def test_portal_decision_boundaries(db):
     # deleting a shared submission CASCADE-deletes its share (FK) — the gate
     # 404s via the share probe; the second-layer submission check is FK-
     # shielded defence in depth (its mutants are constraint-equivalent)
-    ghost = Submission(org_id=org.id, project_id=project.id, user_id=user.id,
-                       version=9, status=SubmissionStatus.SUBMITTED,
-                       submitted_at=datetime.now(UTC))
+    ghost = Submission(
+        org_id=org.id,
+        project_id=project.id,
+        user_id=user.id,
+        version=9,
+        status=SubmissionStatus.SUBMITTED,
+        submitted_at=datetime.now(UTC),
+    )
     db.add(ghost)
     await db.flush()
     ghost_id = ghost.id
-    db.add(ClientShare(project_id=project.id, submission_id=ghost_id,
-                       shared_by=user.id))
+    db.add(ClientShare(project_id=project.id, submission_id=ghost_id, shared_by=user.id))
     await db.flush()
     await db.delete(ghost)
     await db.flush()

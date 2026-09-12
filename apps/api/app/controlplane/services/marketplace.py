@@ -568,11 +568,7 @@ async def mark_purchase_paid(
         else None
     )
     existing_grant = next(
-        (
-            g
-            for g in _all_covering
-            if grant_covers_listing_width(g, listing, latest_major=_lm_paid)
-        ),
+        (g for g in _all_covering if grant_covers_listing_width(g, listing, latest_major=_lm_paid)),
         None,
     )
     if existing_grant is None:

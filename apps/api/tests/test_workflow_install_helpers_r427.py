@@ -72,8 +72,11 @@ async def _offering(db, conn_id, capability="image_generation", features=None, i
     from app.models.provider import ProviderModelOffering
 
     o = ProviderModelOffering(
-        connection_id=conn_id, capability_key=capability, model_name="m",
-        features=features or [], is_active=is_active,
+        connection_id=conn_id,
+        capability_key=capability,
+        model_name="m",
+        features=features or [],
+        is_active=is_active,
     )
     db.add(o)
     await db.flush()
@@ -84,14 +87,22 @@ def _binding(offering_id):
     from app.models.workflow_run import WorkflowStepBinding
 
     return WorkflowStepBinding(
-        org_id="o-1", installation_id="i-1", step_id="s1",
-        binding_mode="offering", offering_id=offering_id,
+        org_id="o-1",
+        installation_id="i-1",
+        step_id="s1",
+        binding_mode="offering",
+        offering_id=offering_id,
     )
 
 
 async def _user(db):
-    u = User(email=f"r427-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R427", role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r427-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R427",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -101,9 +112,12 @@ async def _org(db):
     from app.services.organization import OrgService
 
     owner = await _user(db)
-    o = await OrgService(db).create(name=f"R427 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r427-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R427 {uuid.uuid4().hex[:5]}",
+        slug=f"r427-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o
 

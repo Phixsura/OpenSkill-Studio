@@ -949,5 +949,6 @@ def test_connection_credentials_reject_non_dict_at_schema():
     # `credentials` specifically (required-field errors alone would not).
     with pytest.raises(ValidationError) as e:
         CreateConnectionRequest.model_validate(
-            {"adapter_id": "a", "name": "c", "credentials": ["not", "a", "dict"]})
+            {"adapter_id": "a", "name": "c", "credentials": ["not", "a", "dict"]}
+        )
     assert any(err["loc"] == ("credentials",) for err in e.value.errors())

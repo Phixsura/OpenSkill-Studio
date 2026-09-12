@@ -1192,7 +1192,7 @@ async def test_decimal_normalization_and_none_default(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     eff = await get_effective(db, tenant)
-    assert eff.values["max_storage_gb"] == "5"          # str-normalized
+    assert eff.values["max_storage_gb"] == "5"  # str-normalized
     assert isinstance(eff.get("max_storage_gb"), Decimal)
     assert eff.values["max_ai_budget_usd_month"] is None  # None, never "None"
     assert eff.get("max_ai_budget_usd_month") is None
@@ -1208,7 +1208,7 @@ async def test_quota_and_feature_gate_arms(db):
     with pytest.raises(AppError) as e:
         await check_quota(db, tenant, "no_such_key", current=0)
     assert e.value.code == "UNKNOWN_ENTITLEMENT" and e.value.status_code == 422
-    with pytest.raises(AppError) as e:                   # bool key not numeric
+    with pytest.raises(AppError) as e:  # bool key not numeric
         await check_quota(db, tenant, "custom_domain", current=0)
     assert e.value.status_code == 422
 
@@ -1232,10 +1232,10 @@ async def test_quota_and_feature_gate_arms(db):
     with pytest.raises(AppError) as e:
         await require_feature(db, tenant, "no_such_flag")
     assert e.value.status_code == 422
-    with pytest.raises(AppError) as e:                   # numeric key not a feature
+    with pytest.raises(AppError) as e:  # numeric key not a feature
         await require_feature(db, tenant, "max_organizations")
     assert e.value.status_code == 422
-    with pytest.raises(AppError) as e:                   # off-by-default feature
+    with pytest.raises(AppError) as e:  # off-by-default feature
         await require_feature(db, tenant, "custom_domain")
     assert e.value.code == "FEATURE_NOT_AVAILABLE" and e.value.status_code == 403
 
@@ -1253,8 +1253,14 @@ async def test_remove_override_and_stale_activate(db):
     assert e.value.code == "OVERRIDE_NOT_FOUND" and e.value.status_code == 404
 
     await plan_svc.set_override(
-        db, tenant.id, "max_organizations",
-        value=42, enforcement="hard", expires_at=None, reason="test", actor=_actor(user),
+        db,
+        tenant.id,
+        "max_organizations",
+        value=42,
+        enforcement="hard",
+        expires_at=None,
+        reason="test",
+        actor=_actor(user),
     )
     eff = await get_effective(db, tenant)
     assert eff.get("max_organizations") == 42 and eff.sources["max_organizations"] == "override"
@@ -1263,15 +1269,15 @@ async def test_remove_override_and_stale_activate(db):
     eff = await get_effective(db, tenant)
     assert eff.get("max_organizations") != 42
     assert eff.sources["max_organizations"] in ("default", "plan")
-    with pytest.raises(AppError):                       # idempotence: second remove 404s
+    with pytest.raises(AppError):  # idempotence: second remove 404s
         await plan_svc.remove_override(db, tenant.id, "max_organizations", actor=_actor(user))
 
     # stale activation: re-activating a non-draft version is the documented
     # 409 (PLAN_VERSION_IMMUTABLE pre-check; PLAN_VERSION_CONFLICT remains the
     # locked-race backstop exercised by test_concurrent_activate_single_winner)
     plan = await plan_svc.create_plan(
-        db, key=f"r255-{str(ULID()).lower()[:8]}", name="R255", description=None,
-        actor=_actor(user))
+        db, key=f"r255-{str(ULID()).lower()[:8]}", name="R255", description=None, actor=_actor(user)
+    )
     draft = await plan_svc.create_draft_version(db, plan, created_by=user.id)
     await plan_svc.activate_version(db, draft, actor=_actor(user))
     with pytest.raises(AppError) as e:
@@ -1295,15 +1301,23 @@ async def test_public_plan_catalog_hides_unpublished(db):
     user = await _mk_user(db, role=UserRole.ADMIN)
     # an INACTIVE plan with an active version → must not appear
     hidden_plan = await plan_svc.create_plan(
-        db, key=f"hidden-{str(ULID()).lower()[:8]}", name="Hidden",
-        description=None, actor=_actor(user))
+        db,
+        key=f"hidden-{str(ULID()).lower()[:8]}",
+        name="Hidden",
+        description=None,
+        actor=_actor(user),
+    )
     hv = await plan_svc.create_draft_version(db, hidden_plan, created_by=user.id)
     await plan_svc.activate_version(db, hv, actor=_actor(user))
     hidden_plan.is_active = False
     # an ACTIVE plan whose only version is still DRAFT → must not appear
     draft_plan = await plan_svc.create_plan(
-        db, key=f"draftonly-{str(ULID()).lower()[:8]}", name="DraftOnly",
-        description=None, actor=_actor(user))
+        db,
+        key=f"draftonly-{str(ULID()).lower()[:8]}",
+        name="DraftOnly",
+        description=None,
+        actor=_actor(user),
+    )
     await plan_svc.create_draft_version(db, draft_plan, created_by=user.id)  # never activated
     await db.commit()
     hidden_key, draft_key = hidden_plan.key, draft_plan.key
@@ -1329,11 +1343,19 @@ async def test_public_plan_catalog_hides_unpublished(db):
         app.router.lifespan_context = orig
         async with AsyncSessionLocal() as clean:
             for k in (hidden_key, draft_key):
-                pl = (await clean.execute(
-                    select(ProductPlan).where(ProductPlan.key == k))).scalar_one_or_none()
+                pl = (
+                    await clean.execute(select(ProductPlan).where(ProductPlan.key == k))
+                ).scalar_one_or_none()
                 if pl is not None:
-                    for v in (await clean.execute(
-                        select(PlanVersion).where(PlanVersion.plan_id == pl.id))).scalars().all():
+                    for v in (
+                        (
+                            await clean.execute(
+                                select(PlanVersion).where(PlanVersion.plan_id == pl.id)
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    ):
                         await clean.delete(v)
                     await clean.delete(pl)
             await clean.commit()
@@ -1359,14 +1381,22 @@ async def test_override_expiring_exactly_now_is_expired(db, monkeypatch):
             return frozen if tz is not None else frozen.replace(tzinfo=None)
 
     monkeypatch.setattr(ent, "datetime", FrozenDT)
-    db.add(TenantEntitlementOverride(
-        tenant_id=tenant.id, key="max_organizations", value={"v": 42},
-        reason="boundary", enforcement="hard", expires_at=frozen))
+    db.add(
+        TenantEntitlementOverride(
+            tenant_id=tenant.id,
+            key="max_organizations",
+            value={"v": 42},
+            reason="boundary",
+            enforcement="hard",
+            expires_at=frozen,
+        )
+    )
     await db.flush()
     await ent.invalidate_cache(tenant.id)
     eff = await ent._compute_effective(db, tenant)
     assert eff.values["max_organizations"] != 42, (
-        "an override expiring exactly now must not apply (half-open window)")
+        "an override expiring exactly now must not apply (half-open window)"
+    )
     assert eff.sources["max_organizations"] != "override"
 
 
@@ -1383,48 +1413,90 @@ async def test_set_override_is_tenant_scoped_and_status_codes(db):
     user = await _mk_user(db)
     a = await _mk_tenant(db, user)
     b = await _mk_tenant(db, user)
-    await plan_svc.set_override(db, a.id, "max_organizations", value=3,
-                                enforcement="hard", expires_at=None,
-                                reason="A", actor=_actor(user))
-    await plan_svc.set_override(db, b.id, "max_organizations", value=7,
-                                enforcement="hard", expires_at=None,
-                                reason="B", actor=_actor(user))
+    await plan_svc.set_override(
+        db,
+        a.id,
+        "max_organizations",
+        value=3,
+        enforcement="hard",
+        expires_at=None,
+        reason="A",
+        actor=_actor(user),
+    )
+    await plan_svc.set_override(
+        db,
+        b.id,
+        "max_organizations",
+        value=7,
+        enforcement="hard",
+        expires_at=None,
+        reason="B",
+        actor=_actor(user),
+    )
     rows = (
-        await db.execute(
-            select(TenantEntitlementOverride).where(
-                TenantEntitlementOverride.key == "max_organizations",
-                TenantEntitlementOverride.tenant_id.in_([a.id, b.id])))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(TenantEntitlementOverride).where(
+                    TenantEntitlementOverride.key == "max_organizations",
+                    TenantEntitlementOverride.tenant_id.in_([a.id, b.id]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     by_tenant = {r.tenant_id: r.value.get("v") for r in rows}
-    assert by_tenant == {a.id: 3, b.id: 7}   # B's write never mutated A's row
+    assert by_tenant == {a.id: 3, b.id: 7}  # B's write never mutated A's row
 
     # the lookup is also KEY-scoped: updating k1 must not touch A's k2 row
-    await plan_svc.set_override(db, a.id, "max_storage_gb", value="50",
-                                enforcement="hard", expires_at=None,
-                                reason="k2", actor=_actor(user))
-    await plan_svc.set_override(db, a.id, "max_organizations", value=4,
-                                enforcement="hard", expires_at=None,
-                                reason="A2", actor=_actor(user))
+    await plan_svc.set_override(
+        db,
+        a.id,
+        "max_storage_gb",
+        value="50",
+        enforcement="hard",
+        expires_at=None,
+        reason="k2",
+        actor=_actor(user),
+    )
+    await plan_svc.set_override(
+        db,
+        a.id,
+        "max_organizations",
+        value=4,
+        enforcement="hard",
+        expires_at=None,
+        reason="A2",
+        actor=_actor(user),
+    )
     from app.controlplane.models.plan import TenantEntitlementOverride as TEOverride
 
     a_rows = (
-        await db.execute(select(TEOverride).where(TEOverride.tenant_id == a.id))
-    ).scalars().all()
+        (await db.execute(select(TEOverride).where(TEOverride.tenant_id == a.id))).scalars().all()
+    )
     a_by_key = {r.key: r.value.get("v") for r in a_rows}
     assert a_by_key == {"max_organizations": 4, "max_storage_gb": "50"}
 
     with pytest.raises(AppError) as e422:
-        await plan_svc.set_override(db, a.id, "max_organizations", value=1,
-                                    enforcement="maybe", expires_at=None,
-                                    reason="x", actor=_actor(user))
+        await plan_svc.set_override(
+            db,
+            a.id,
+            "max_organizations",
+            value=1,
+            enforcement="maybe",
+            expires_at=None,
+            reason="x",
+            actor=_actor(user),
+        )
     assert e422.value.status_code == 422
 
     # activation guard: activating a non-draft version is a 409
     plan = ProductPlan(key=f"r340-{str(ULID()).lower()[:8]}", name="R340")
     db.add(plan)
     await db.flush()
-    pv = PlanVersion(plan_id=plan.id, version=1, status="active",
-                     entitlements={}, activated_at=datetime.now(UTC))
+    pv = PlanVersion(
+        plan_id=plan.id, version=1, status="active", entitlements={}, activated_at=datetime.now(UTC)
+    )
     db.add(pv)
     await db.flush()
     # non-draft → immutable 409 up front
@@ -1461,27 +1533,47 @@ async def test_concurrent_set_override_same_key_single_row():
 
     async def winner():
         async with AsyncSessionLocal() as s:
-            await plan_svc.set_override(s, tid, "max_organizations", value=1,
-                                        enforcement="hard", expires_at=None,
-                                        reason="w", actor=actor)
+            await plan_svc.set_override(
+                s,
+                tid,
+                "max_organizations",
+                value=1,
+                enforcement="hard",
+                expires_at=None,
+                reason="w",
+                actor=actor,
+            )
             await asyncio.sleep(0.4)
             await s.commit()
 
     async def loser():
         await asyncio.sleep(0.15)
         async with AsyncSessionLocal() as s:
-            await plan_svc.set_override(s, tid, "max_organizations", value=2,
-                                        enforcement="hard", expires_at=None,
-                                        reason="l", actor=actor)
+            await plan_svc.set_override(
+                s,
+                tid,
+                "max_organizations",
+                value=2,
+                enforcement="hard",
+                expires_at=None,
+                reason="l",
+                actor=actor,
+            )
             await s.commit()
 
     await asyncio.gather(winner(), loser())
     async with AsyncSessionLocal() as s:
         rows = (
-            await s.execute(
-                select(TEOverride).where(TEOverride.tenant_id == tid,
-                                   TEOverride.key == "max_organizations"))
-        ).scalars().all()
+            (
+                await s.execute(
+                    select(TEOverride).where(
+                        TEOverride.tenant_id == tid, TEOverride.key == "max_organizations"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].value.get("v") in (1, 2)
         await s.delete(rows[0])
@@ -1505,24 +1597,39 @@ async def test_plan_activation_invalidates_subscribed_tenants_cache(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     plan = await plan_svc.create_plan(
-        db, key=f"r369-{str(ULID()).lower()[:8]}", name="R369", description=None,
-        actor=_actor(user))
+        db, key=f"r369-{str(ULID()).lower()[:8]}", name="R369", description=None, actor=_actor(user)
+    )
     v1 = await plan_svc.create_draft_version(db, plan, created_by=user.id)
     v1.entitlements = {"max_organizations": 3}
-    db.add(PlanPrice(plan_version_id=v1.id, currency="USD", interval="month",
-                     amount_minor=1000, included_seats=0))
+    db.add(
+        PlanPrice(
+            plan_version_id=v1.id,
+            currency="USD",
+            interval="month",
+            amount_minor=1000,
+            included_seats=0,
+        )
+    )
     await db.flush()
     await plan_svc.activate_version(db, v1, actor=_actor(user))
     now = datetime.now(UTC)
-    db.add(Subscription(
-        tenant_id=tenant.id, plan_version_id=v1.id, status="active",
-        currency="USD", interval="month", seat_quantity=0,
-        current_period_start=now - timedelta(days=1),
-        current_period_end=now + timedelta(days=29),
-        provider="manual", created_by=user.id))
+    db.add(
+        Subscription(
+            tenant_id=tenant.id,
+            plan_version_id=v1.id,
+            status="active",
+            currency="USD",
+            interval="month",
+            seat_quantity=0,
+            current_period_start=now - timedelta(days=1),
+            current_period_end=now + timedelta(days=29),
+            provider="manual",
+            created_by=user.id,
+        )
+    )
     await db.flush()
 
-    eff1 = await get_effective(db, tenant)      # populates the cache
+    eff1 = await get_effective(db, tenant)  # populates the cache
     assert eff1.values["max_organizations"] == 3
 
     v2 = await plan_svc.create_draft_version(db, plan, created_by=user.id)
@@ -1545,22 +1652,34 @@ async def test_plan_activation_invalidates_subscribed_tenants_cache(db):
     # the bystander SUBSCRIBES to a DIFFERENT plan — the join-flip mutant
     # cartesian-matches every other-version subscriber and clears them too
     other_plan = await plan_svc.create_plan(
-        db, key=f"r369b-{str(ULID()).lower()[:8]}", name="R369b",
-        description=None, actor=_actor(user))
+        db,
+        key=f"r369b-{str(ULID()).lower()[:8]}",
+        name="R369b",
+        description=None,
+        actor=_actor(user),
+    )
     ov = await plan_svc.create_draft_version(db, other_plan, created_by=user.id)
     ov.entitlements = {}
     await db.flush()
     await plan_svc.activate_version(db, ov, actor=_actor(user))
-    db.add(Subscription(
-        tenant_id=bystander.id, plan_version_id=ov.id, status="active",
-        currency="USD", interval="month", seat_quantity=0,
-        current_period_start=now - timedelta(days=1),
-        current_period_end=now + timedelta(days=29),
-        provider="manual", created_by=user.id))
+    db.add(
+        Subscription(
+            tenant_id=bystander.id,
+            plan_version_id=ov.id,
+            status="active",
+            currency="USD",
+            interval="month",
+            seat_quantity=0,
+            current_period_start=now - timedelta(days=1),
+            current_period_end=now + timedelta(days=29),
+            provider="manual",
+            created_by=user.id,
+        )
+    )
     await db.flush()
     bkey = CACHE_KEY.format(tenant_id=bystander.id)
     await r.set(bkey, '{"sentinel": true}', ex=60)
-    await r.set(key, '{"stale": true}', ex=60)   # re-plant the subscriber's
+    await r.set(key, '{"stale": true}', ex=60)  # re-plant the subscriber's
     v3 = await plan_svc.create_draft_version(db, plan, created_by=user.id)
     v3.entitlements = {"max_organizations": 12}
     await db.flush()
@@ -1573,6 +1692,7 @@ async def test_plan_activation_invalidates_subscribed_tenants_cache(db):
 class _Req388:
     class _State:
         request_id = "r388"
+
     state = _State()
 
 
@@ -1593,12 +1713,20 @@ async def test_plans_api_catalog_and_external_ref(db):
 
     user = await _mk_user(db)
     key = f"r388-{str(ULID()).lower()[:8]}"
-    plan = await plan_svc.create_plan(db, key=key, name="R388", description=None,
-                                      actor=_actor(user))
+    plan = await plan_svc.create_plan(
+        db, key=key, name="R388", description=None, actor=_actor(user)
+    )
     v1 = await plan_svc.create_draft_version(db, plan, created_by=user.id)
     v1.entitlements = {}
-    db.add(PlanPrice(plan_version_id=v1.id, currency="USD", interval="month",
-                     amount_minor=700, included_seats=0))
+    db.add(
+        PlanPrice(
+            plan_version_id=v1.id,
+            currency="USD",
+            interval="month",
+            amount_minor=700,
+            included_seats=0,
+        )
+    )
     await db.flush()
 
     # a DRAFT version is not in the public catalog
@@ -1619,25 +1747,24 @@ async def test_plans_api_catalog_and_external_ref(db):
 
     # external ref: unknown price 404; set + audit before/after; clear → None
     price = (
-        await db.execute(
-            select(PlanPrice).where(PlanPrice.plan_version_id == v1.id))
+        await db.execute(select(PlanPrice).where(PlanPrice.plan_version_id == v1.id))
     ).scalar_one()
     req = _Req388()
     with pytest.raises(AppError) as e404:
         await set_plan_price_external_ref(
-            str(ULID()), SetExternalRefRequest(external_price_ref="price_x"),
-            req, user=user, db=db)
+            str(ULID()), SetExternalRefRequest(external_price_ref="price_x"), req, user=user, db=db
+        )
     assert e404.value.status_code == 404
     await set_plan_price_external_ref(
-        price.id, SetExternalRefRequest(external_price_ref="price_123"),
-        req, user=user, db=db)
+        price.id, SetExternalRefRequest(external_price_ref="price_123"), req, user=user, db=db
+    )
     await db.refresh(price)
     assert price.external_price_ref == "price_123"
     await set_plan_price_external_ref(
-        price.id, SetExternalRefRequest(external_price_ref=""),
-        req, user=user, db=db)
+        price.id, SetExternalRefRequest(external_price_ref=""), req, user=user, db=db
+    )
     await db.refresh(price)
-    assert price.external_price_ref is None          # empty clears, not ""
+    assert price.external_price_ref is None  # empty clears, not ""
 
 
 async def test_check_storage_quota_live_sum_and_hard_stop(db):
@@ -1664,41 +1791,67 @@ async def test_check_storage_quota_live_sum_and_hard_stop(db):
 
     user = await _mk_user(db)
     org = await OrgService(db).create(
-        name=f"SQ {ULID()}", slug=f"sq-{str(ULID()).lower()}",
-        description=None, created_by=user.id,
+        name=f"SQ {ULID()}",
+        slug=f"sq-{str(ULID()).lower()}",
+        description=None,
+        created_by=user.id,
     )
     tenant = await db.get(TenantAccount, org.tenant_id)
     tenant.status = TenantStatus.ACTIVE
     # 1 GB HARD limit (storage is soft-by-default — hard enforcement here)
-    db.add(TenantEntitlementOverride(
-        tenant_id=tenant.id, key="max_storage_gb", value={"v": "1"},
-        enforcement="hard", reason="r523", created_by=user.id,
-    ))
+    db.add(
+        TenantEntitlementOverride(
+            tenant_id=tenant.id,
+            key="max_storage_gb",
+            value={"v": "1"},
+            enforcement="hard",
+            reason="r523",
+            created_by=user.id,
+        )
+    )
     await db.flush()
     gb6 = int(0.6 * 1073741824)
     project = Project(
-        org_id=org.id, title="SQ", slug=f"sq-{str(ULID()).lower()[:10]}",
-        description="d", instructions="i", rubric=[], created_by=user.id,
+        org_id=org.id,
+        title="SQ",
+        slug=f"sq-{str(ULID()).lower()[:10]}",
+        description="d",
+        instructions="i",
+        rubric=[],
+        created_by=user.id,
     )
     db.add(project)
     await db.flush()
     deliverable = ProjectDeliverable(
-        project_id=project.id, name="file", type=DeliverableType.FILE,
+        project_id=project.id,
+        name="file",
+        type=DeliverableType.FILE,
     )
     db.add(deliverable)
     await db.flush()
     sub = Submission(org_id=org.id, project_id=project.id, user_id=user.id)
     db.add(sub)
     await db.flush()
-    db.add(SubmissionItem(
-        submission_id=sub.id, deliverable_id=deliverable.id,
-        type=ItemType.FILE, file_size=gb6,
-    ))
-    db.add(ProjectAsset(
-        org_id=org.id, project_id=project.id, name="a",
-        file_key="k", file_name="a.bin", file_size=gb6,
-        mime_type="application/octet-stream", uploaded_by=user.id,
-    ))
+    db.add(
+        SubmissionItem(
+            submission_id=sub.id,
+            deliverable_id=deliverable.id,
+            type=ItemType.FILE,
+            file_size=gb6,
+        )
+    )
+    db.add(
+        ProjectAsset(
+            org_id=org.id,
+            project_id=project.id,
+            name="a",
+            file_key="k",
+            file_name="a.bin",
+            file_size=gb6,
+            mime_type="application/octet-stream",
+            uploaded_by=user.id,
+        )
+    )
     await db.flush()
     # 0.6 + 0.6 = 1.2 GB stored; ANY further byte crosses the 1 GB hard cap
     with pytest.raises(_App) as exc:

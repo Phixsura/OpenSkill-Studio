@@ -2246,9 +2246,7 @@ async def test_append_entry_reraises_non_idempotency_integrity_error(db, monkeyp
     assert calls["n"] == 1
     # The true-duplicate path still no-ops: pre-existing winner with the key.
     key = f"win-{ULID()}"
-    e1 = await credit_svc.adjust(
-        db, tenant.id, "USD", 70, reason="w", actor=a, idempotency_key=key
-    )
+    e1 = await credit_svc.adjust(db, tenant.id, "USD", 70, reason="w", actor=a, idempotency_key=key)
     assert e1 is not None
     dup = await credit_svc.adjust(
         db, tenant.id, "USD", 70, reason="w", actor=a, idempotency_key=key
@@ -2326,30 +2324,48 @@ async def test_credit_amount_guards_reject_nonpositive(db):
 
         with pytest.raises(AppError) as e:
             await credit_svc.grant_promotional(
-                db, tenant.id, "USD", amt,
+                db,
+                tenant.id,
+                "USD",
+                amt,
                 expires_at=datetime.now(UTC) + timedelta(days=30),
-                reason="promo", actor=a,
+                reason="promo",
+                actor=a,
             )
         assert e.value.code == "VALIDATION_ERROR"
 
         with pytest.raises(AppError) as e:
             await credit_svc.refund(
-                db, tenant.id, "USD", amt,
-                reference_type="purchase", reference_id="p1", reason="r", actor=a,
+                db,
+                tenant.id,
+                "USD",
+                amt,
+                reference_type="purchase",
+                reference_id="p1",
+                reason="r",
+                actor=a,
             )
         assert e.value.code == "VALIDATION_ERROR"
 
         with pytest.raises(AppError) as e:
             await credit_svc.debit(
-                db, tenant.id, "USD", amt,
-                reference_type="run", reference_id="r1",
+                db,
+                tenant.id,
+                "USD",
+                amt,
+                reference_type="run",
+                reference_id="r1",
             )
         assert e.value.code == "VALIDATION_ERROR"
 
         with pytest.raises(AppError) as e:
             await credit_svc.reserve(
-                db, tenant.id, "USD", amt,
-                reference_type="run", reference_id="rv1",
+                db,
+                tenant.id,
+                "USD",
+                amt,
+                reference_type="run",
+                reference_id="rv1",
             )
         assert e.value.code == "VALIDATION_ERROR"
 
@@ -2399,14 +2415,12 @@ def test_budget_period_start_pure():
     from app.controlplane.models.credit import BudgetPolicy
 
     pol = BudgetPolicy(scope_type="project", scope_id="p1")
-    base = dict(org_id="o1", cohort_id=None, user_id=None,
-                capability=None, usage_type=None)
+    base = dict(org_id="o1", cohort_id=None, user_id=None, capability=None, usage_type=None)
     assert budget_svc.policy_matches(pol, project_id="p1", **base) is True
     assert budget_svc.policy_matches(pol, project_id="p2", **base) is False
     assert budget_svc.policy_matches(pol, project_id=None, **base) is False
     cpol = BudgetPolicy(scope_type="cohort", scope_id="c1")
-    cbase = dict(org_id="o1", project_id=None, user_id=None,
-                 capability=None, usage_type=None)
+    cbase = dict(org_id="o1", project_id=None, user_id=None, capability=None, usage_type=None)
     assert budget_svc.policy_matches(cpol, cohort_id="c1", **cbase) is True
     assert budget_svc.policy_matches(cpol, cohort_id="c2", **cbase) is False
     assert budget_svc.policy_matches(cpol, cohort_id=None, **cbase) is False
@@ -2427,17 +2441,23 @@ async def test_run_terminal_no_reservation_and_raced_release(db, monkeypatch):
 
     user = await _mk_user(db)
     org = await OrgService(db).create(
-        name=f"NR {ULID()}", slug=f"nr-{str(ULID()).lower()}",
-        description=None, created_by=user.id)
+        name=f"NR {ULID()}", slug=f"nr-{str(ULID()).lower()}", description=None, created_by=user.id
+    )
     tenant = await db.get(TenantAccount, org.tenant_id)
     tenant.status = TenantStatus.ACTIVE
     await db.flush()
 
     def mk_run():
         return WorkflowRun(
-            org_id=org.id, pack_id=None, release_id=None, installation_id=None,
-            definition_snapshot={"steps": [], "edges": []}, inputs={},
-            started_by=user.id, status=RunStatus.COMPLETED)
+            org_id=org.id,
+            pack_id=None,
+            release_id=None,
+            installation_id=None,
+            definition_snapshot={"steps": [], "edges": []},
+            inputs={},
+            started_by=user.id,
+            status=RunStatus.COMPLETED,
+        )
 
     # (1) no reservation → clean no-op
     run1 = mk_run()
@@ -2447,32 +2467,54 @@ async def test_run_terminal_no_reservation_and_raced_release(db, monkeypatch):
 
     # (2) raced release
     await credit_svc.top_up(
-        db, tenant.id, "USD", 10_000, actor=_actor(user), idempotency_key=f"nr-{ULID()}")
+        db, tenant.id, "USD", 10_000, actor=_actor(user), idempotency_key=f"nr-{ULID()}"
+    )
     run2 = mk_run()
     db.add(run2)
     await db.flush()
     eid = str(ULID())
-    db.add(UsageEvent(
-        id=eid, tenant_id=tenant.id, org_id=org.id, workflow_run_id=run2.id,
-        usage_type="image_generation", quantity=1, unit="images",
-        occurred_at=datetime.now(UTC), source="manual"))
+    db.add(
+        UsageEvent(
+            id=eid,
+            tenant_id=tenant.id,
+            org_id=org.id,
+            workflow_run_id=run2.id,
+            usage_type="image_generation",
+            quantity=1,
+            unit="images",
+            occurred_at=datetime.now(UTC),
+            source="manual",
+        )
+    )
     await db.flush()
-    db.add(RatedUsage(
-        usage_event_id=eid, tenant_id=tenant.id, org_id=org.id,
-        usage_type="image_generation", quantity=1, cost_rate_snapshot={},
-        internal_cost_minor=0, internal_cost_currency="USD",
-        sell_rate_snapshot={}, billable_amount_minor=100,
-        billable_amount_exact=Decimal(100), billable_currency="USD",
-        status="rated", rated_at=datetime.now(UTC)))
+    db.add(
+        RatedUsage(
+            usage_event_id=eid,
+            tenant_id=tenant.id,
+            org_id=org.id,
+            usage_type="image_generation",
+            quantity=1,
+            cost_rate_snapshot={},
+            internal_cost_minor=0,
+            internal_cost_currency="USD",
+            sell_rate_snapshot={},
+            billable_amount_minor=100,
+            billable_amount_exact=Decimal(100),
+            billable_currency="USD",
+            status="rated",
+            rated_at=datetime.now(UTC),
+        )
+    )
     await db.flush()
     reservation = await credit_svc.reserve(
-        db, tenant.id, "USD", 500, reference_type="workflow_run", reference_id=run2.id)
+        db, tenant.id, "USD", 500, reference_type="workflow_run", reference_id=run2.id
+    )
 
     orig = sh.rate_pending
 
     async def raced(db_, *, tenant_id):
         await orig(db_, tenant_id=tenant_id)
-        reservation.status = "released"      # expiry cron won the race
+        reservation.status = "released"  # expiry cron won the race
         await db.flush()
 
     monkeypatch.setattr(sh, "rate_pending", raced)
@@ -2481,7 +2523,7 @@ async def test_run_terminal_no_reservation_and_raced_release(db, monkeypatch):
     rated = (
         await db.execute(select(RatedUsage).where(RatedUsage.usage_event_id == eid))
     ).scalar_one()
-    assert rated.status == "rated"           # stays billable on the invoice
+    assert rated.status == "rated"  # stays billable on the invoice
     assert reservation.status == "released"  # never silently flipped to settled
 
 
@@ -2500,30 +2542,45 @@ async def test_expiry_crons_bounded_batches(db):
     past = datetime.now(UTC) - timedelta(hours=1)
     for i in range(3):
         r = await credit_svc.reserve(
-            db, tenant.id, "USD", 100,
-            reference_type="workflow_run", reference_id=f"bbrun{i}-{ULID()}")
+            db,
+            tenant.id,
+            "USD",
+            100,
+            reference_type="workflow_run",
+            reference_id=f"bbrun{i}-{ULID()}",
+        )
         r.expires_at = past - timedelta(minutes=i)
     await db.flush()
 
     n1 = await credit_svc.expire_stale_reservations(db, limit=1)
-    assert n1 == 1                          # bound respected
+    assert n1 == 1  # bound respected
     n_rest = await credit_svc.expire_stale_reservations(db, limit=500)
-    assert n_rest >= 2                      # progress: the rest drains
+    assert n_rest >= 2  # progress: the rest drains
     held = (
-        (await db.execute(
-            select(CreditReservation).where(
-                CreditReservation.tenant_id == tenant.id,
-                CreditReservation.status == "held")))
-        .scalars().all()
+        (
+            await db.execute(
+                select(CreditReservation).where(
+                    CreditReservation.tenant_id == tenant.id, CreditReservation.status == "held"
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
     assert held == []
 
     # promotional lots: same bound/progress contract
     for i in range(3):
         await credit_svc.grant_promotional(
-            db, tenant.id, "USD", 10, actor=_actor(user),
-            idempotency_key=f"bbp{i}-{ULID()}", reason="bb",
-            expires_at=past - timedelta(minutes=i))
+            db,
+            tenant.id,
+            "USD",
+            10,
+            actor=_actor(user),
+            idempotency_key=f"bbp{i}-{ULID()}",
+            reason="bb",
+            expires_at=past - timedelta(minutes=i),
+        )
     await db.flush()
     p1 = await credit_svc.expire_promotional(db, limit=1)
     assert p1 == 1
@@ -2542,38 +2599,69 @@ async def test_reserved_floor_and_reject_arcs(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     await credit_svc.top_up(
-        db, tenant.id, "USD", 1000, actor=_actor(user), idempotency_key=f"rf-{ULID()}")
+        db, tenant.id, "USD", 1000, actor=_actor(user), idempotency_key=f"rf-{ULID()}"
+    )
     await credit_svc.reserve(
-        db, tenant.id, "USD", 800, reference_type="workflow_run",
-        reference_id=str(ULID()))
+        db, tenant.id, "USD", 800, reference_type="workflow_run", reference_id=str(ULID())
+    )
 
-    with pytest.raises(AppError) as e:                     # debit available-check
+    with pytest.raises(AppError) as e:  # debit available-check
         await credit_svc.debit(
-            db, tenant.id, "USD", 300, reference_type="purchase",
-            reference_id=str(ULID()), idempotency_key=f"rf2-{ULID()}")
+            db,
+            tenant.id,
+            "USD",
+            300,
+            reference_type="purchase",
+            reference_id=str(ULID()),
+            idempotency_key=f"rf2-{ULID()}",
+        )
     assert e.value.code == "INSUFFICIENT_CREDIT" and e.value.status_code == 402
 
-    with pytest.raises(AppError) as e:                     # ledger floor guard:
-        await credit_svc.adjust(                           # adjust has no
-            db, tenant.id, "USD", -300, reason="clawback",  # available pre-check
-            actor=_actor(user), idempotency_key=f"rfa-{ULID()}")
+    with pytest.raises(AppError) as e:  # ledger floor guard:
+        await credit_svc.adjust(  # adjust has no
+            db,
+            tenant.id,
+            "USD",
+            -300,
+            reason="clawback",  # available pre-check
+            actor=_actor(user),
+            idempotency_key=f"rfa-{ULID()}",
+        )
     assert e.value.code == "INSUFFICIENT_CREDIT" and e.value.status_code == 402
 
-    ok = await credit_svc.debit(                           # within free balance
-        db, tenant.id, "USD", 200, reference_type="purchase",
-        reference_id=str(ULID()), idempotency_key=f"rf3-{ULID()}")
+    ok = await credit_svc.debit(  # within free balance
+        db,
+        tenant.id,
+        "USD",
+        200,
+        reference_type="purchase",
+        reference_id=str(ULID()),
+        idempotency_key=f"rf3-{ULID()}",
+    )
     assert ok is not None
 
-    with pytest.raises(AppError) as e:                     # plain overdraft
+    with pytest.raises(AppError) as e:  # plain overdraft
         await credit_svc.debit(
-            db, tenant.id, "USD", 5000, reference_type="purchase",
-            reference_id=str(ULID()), idempotency_key=f"rf4-{ULID()}")
+            db,
+            tenant.id,
+            "USD",
+            5000,
+            reference_type="purchase",
+            reference_id=str(ULID()),
+            idempotency_key=f"rf4-{ULID()}",
+        )
     assert e.value.code == "INSUFFICIENT_CREDIT"
 
-    with pytest.raises(AppError) as e:                     # zero adjustment
+    with pytest.raises(AppError) as e:  # zero adjustment
         await credit_svc.adjust(
-            db, tenant.id, "USD", 0, reason="noop", actor=_actor(user),
-            idempotency_key=f"rf5-{ULID()}")
+            db,
+            tenant.id,
+            "USD",
+            0,
+            reason="noop",
+            actor=_actor(user),
+            idempotency_key=f"rf5-{ULID()}",
+        )
     assert e.value.code == "VALIDATION_ERROR" and e.value.status_code == 422
 
     ghost = str(ULID())
@@ -2595,9 +2683,18 @@ async def test_budget_warning_threshold_band(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     org = "01JFAKEORGFAKEORGFAKEORGFA"
-    db.add(BudgetPolicy(
-        tenant_id=tenant.id, scope_type="org", scope_id=org, period="monthly",
-        limit_minor=100, currency="USD", hard_stop=False, warning_threshold_pct=80))
+    db.add(
+        BudgetPolicy(
+            tenant_id=tenant.id,
+            scope_type="org",
+            scope_id=org,
+            period="monthly",
+            limit_minor=100,
+            currency="USD",
+            hard_stop=False,
+            warning_threshold_pct=80,
+        )
+    )
     await db.flush()
 
     # 70% → allowed, no warning
@@ -2636,19 +2733,31 @@ async def test_cohort_budget_enforced_and_scoped(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)  # USD
     org = Organization(
-        name="CohortBudgetOrg", slug=f"cbo-{str(ULID()).lower()}",
-        status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+        name="CohortBudgetOrg",
+        slug=f"cbo-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
     db.add(org)
     await db.flush()
-    cohort = Cohort(org_id=org.id, name="Batch 9",
-                    slug=f"b9-{str(ULID()).lower()}", created_by=user.id)
+    cohort = Cohort(
+        org_id=org.id, name="Batch 9", slug=f"b9-{str(ULID()).lower()}", created_by=user.id
+    )
     db.add(cohort)
     await db.flush()
 
     def _proj(cohort_id):
-        return Project(org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
-                       description="d", instructions="i", rubric={"criteria": []},
-                       cohort_id=cohort_id, created_by=user.id)
+        return Project(
+            org_id=org.id,
+            title="P",
+            slug=f"p-{str(ULID()).lower()}",
+            description="d",
+            instructions="i",
+            rubric={"criteria": []},
+            cohort_id=cohort_id,
+            created_by=user.id,
+        )
 
     p_in, p_out = _proj(cohort.id), _proj(None)
     db.add_all([p_in, p_out])
@@ -2656,27 +2765,53 @@ async def test_cohort_budget_enforced_and_scoped(db):
 
     def _usage(project_id, amount):
         eid = str(ULID())
-        db.add(UsageEvent(
-            id=eid, tenant_id=tenant.id, org_id=org.id, project_id=project_id,
-            usage_type="image_generation", quantity=1, unit="images",
-            occurred_at=datetime.now(UTC), source="manual"))
+        db.add(
+            UsageEvent(
+                id=eid,
+                tenant_id=tenant.id,
+                org_id=org.id,
+                project_id=project_id,
+                usage_type="image_generation",
+                quantity=1,
+                unit="images",
+                occurred_at=datetime.now(UTC),
+                source="manual",
+            )
+        )
         return RatedUsage(
-            usage_event_id=eid, tenant_id=tenant.id, org_id=org.id,
-            usage_type="image_generation", quantity=1, cost_rate_snapshot={},
-            internal_cost_minor=0, internal_cost_currency="USD",
-            sell_rate_snapshot={}, billable_amount_minor=amount,
-            billable_amount_exact=Decimal(amount), billable_currency="USD",
-            status="rated", rated_at=datetime.now(UTC))
+            usage_event_id=eid,
+            tenant_id=tenant.id,
+            org_id=org.id,
+            usage_type="image_generation",
+            quantity=1,
+            cost_rate_snapshot={},
+            internal_cost_minor=0,
+            internal_cost_currency="USD",
+            sell_rate_snapshot={},
+            billable_amount_minor=amount,
+            billable_amount_exact=Decimal(amount),
+            billable_currency="USD",
+            status="rated",
+            rated_at=datetime.now(UTC),
+        )
 
     # in-cohort spend 500; OUTSIDE-cohort spend 10000 (must not count)
     db.add(_usage(p_in.id, 500))
     await db.flush()
     db.add(_usage(p_out.id, 10_000))
     await db.flush()
-    db.add(BudgetPolicy(
-        tenant_id=tenant.id, scope_type="cohort", scope_id=cohort.id,
-        period="monthly", limit_minor=1000, currency="USD", hard_stop=True,
-        warning_threshold_pct=90))
+    db.add(
+        BudgetPolicy(
+            tenant_id=tenant.id,
+            scope_type="cohort",
+            scope_id=cohort.id,
+            period="monthly",
+            limit_minor=1000,
+            currency="USD",
+            hard_stop=True,
+            warning_threshold_pct=90,
+        )
+    )
     await db.flush()
 
     # 1. cohort spend (500) under limit — the tenant-wide 10500 must NOT leak in
@@ -2685,13 +2820,11 @@ async def test_cohort_budget_enforced_and_scoped(db):
 
     # 2. a projected charge that breaches the cohort limit → hard stop fires
     with pytest.raises(AppError) as e:
-        await budget_svc.check(
-            db, tenant, org.id, project_id=p_in.id, projected_minor=600)
+        await budget_svc.check(db, tenant, org.id, project_id=p_in.id, projected_minor=600)
     assert e.value.code == "BUDGET_EXCEEDED" and e.value.status_code == 429
 
     # 3. a project OUTSIDE the cohort is not governed by the cohort policy
-    decision = await budget_svc.check(
-        db, tenant, org.id, project_id=p_out.id, projected_minor=600)
+    decision = await budget_svc.check(db, tenant, org.id, project_id=p_out.id, projected_minor=600)
     assert decision.allowed
 
     # 4. R329 (mutation survivor L155): an EXPLICIT caller cohort dim wins —
@@ -2699,8 +2832,8 @@ async def test_cohort_budget_enforced_and_scoped(db):
     # caller already supplied cohort_id, even alongside an unlinked project.
     with pytest.raises(AppError) as e2:
         await budget_svc.check(
-            db, tenant, org.id, project_id=p_out.id, cohort_id=cohort.id,
-            projected_minor=600)
+            db, tenant, org.id, project_id=p_out.id, cohort_id=cohort.id, projected_minor=600
+        )
     assert e2.value.code == "BUDGET_EXCEEDED"
 
 
@@ -2719,12 +2852,20 @@ async def test_create_budget_rejects_foreign_project_and_cohort_scope(db):
     other_user = await _mk_user(db)
     other_tenant = await _mk_tenant(db, other_user)
     other_org = Organization(
-        name="OtherT", slug=f"ot-{str(ULID()).lower()}",
-        status=OrgStatus.ACTIVE, tenant_id=other_tenant.id, created_by=other_user.id)
+        name="OtherT",
+        slug=f"ot-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=other_tenant.id,
+        created_by=other_user.id,
+    )
     db.add(other_org)
     await db.flush()
-    foreign_cohort = Cohort(org_id=other_org.id, name="Foreign",
-                            slug=f"fc-{str(ULID()).lower()}", created_by=other_user.id)
+    foreign_cohort = Cohort(
+        org_id=other_org.id,
+        name="Foreign",
+        slug=f"fc-{str(ULID()).lower()}",
+        created_by=other_user.id,
+    )
     db.add(foreign_cohort)
     await db.flush()
 
@@ -2732,33 +2873,59 @@ async def test_create_budget_rejects_foreign_project_and_cohort_scope(db):
     with pytest.raises(AppError) as e:
         await create_budget(
             tenant.id,
-            BudgetPolicyRequest(scope_type="project", scope_id=str(ULID()),
-                                period="monthly", limit_minor=1000, currency="USD"),
-            user=user, db=db)
+            BudgetPolicyRequest(
+                scope_type="project",
+                scope_id=str(ULID()),
+                period="monthly",
+                limit_minor=1000,
+                currency="USD",
+            ),
+            user=user,
+            db=db,
+        )
     assert e.value.status_code == 422 and "project" in e.value.message
     # another tenant's cohort → 422 (cross-tenant scope smuggling)
     with pytest.raises(AppError) as e:
         await create_budget(
             tenant.id,
-            BudgetPolicyRequest(scope_type="cohort", scope_id=foreign_cohort.id,
-                                period="monthly", limit_minor=1000, currency="USD"),
-            user=user, db=db)
+            BudgetPolicyRequest(
+                scope_type="cohort",
+                scope_id=foreign_cohort.id,
+                period="monthly",
+                limit_minor=1000,
+                currency="USD",
+            ),
+            user=user,
+            db=db,
+        )
     assert e.value.status_code == 422 and "cohort" in e.value.message
     # a cohort of THIS tenant's org → accepted
     own_org = Organization(
-        name="OwnT", slug=f"own-{str(ULID()).lower()}",
-        status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+        name="OwnT",
+        slug=f"own-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
     db.add(own_org)
     await db.flush()
-    own_cohort = Cohort(org_id=own_org.id, name="Own",
-                        slug=f"oc-{str(ULID()).lower()}", created_by=user.id)
+    own_cohort = Cohort(
+        org_id=own_org.id, name="Own", slug=f"oc-{str(ULID()).lower()}", created_by=user.id
+    )
     db.add(own_cohort)
     await db.flush()
     created = await create_budget(
         tenant.id,
-        BudgetPolicyRequest(scope_type="cohort", scope_id=own_cohort.id,
-                            period="monthly", limit_minor=1000, currency="USD"),
-        user=user, db=db)
+        BudgetPolicyRequest(
+            scope_type="cohort",
+            scope_id=own_cohort.id,
+            period="monthly",
+            limit_minor=1000,
+            currency="USD",
+        ),
+        user=user,
+        db=db,
+    )
     assert created.data["scope_type"] == "cohort"
 
 
@@ -2822,85 +2989,110 @@ async def test_credit_zero_boundaries_available_math_and_settle_shortfall(db):
         await credit_svc.top_up(db, tenant.id, "USD", 0, actor=actor)
     assert ez_t.value.status_code == 422
     with pytest.raises(AppError) as ez_r:
-        await credit_svc.refund(db, tenant.id, "USD", 0,
-                                reference_type="invoice", reference_id=str(ULID()),
-                                reason="z", actor=actor)
+        await credit_svc.refund(
+            db,
+            tenant.id,
+            "USD",
+            0,
+            reference_type="invoice",
+            reference_id=str(ULID()),
+            reason="z",
+            actor=actor,
+        )
     assert ez_r.value.status_code == 422
     with pytest.raises(AppError) as ez_d:
-        await credit_svc.debit(db, tenant.id, "USD", 0,
-                               reference_type="purchase", reference_id=str(ULID()))
+        await credit_svc.debit(
+            db, tenant.id, "USD", 0, reference_type="purchase", reference_id=str(ULID())
+        )
     assert ez_d.value.status_code == 422
     with pytest.raises(AppError) as ez2:
-        await credit_svc.reserve(db, tenant.id, "USD", 0,
-                                 reference_type="workflow_run", reference_id=str(ULID()))
+        await credit_svc.reserve(
+            db, tenant.id, "USD", 0, reference_type="workflow_run", reference_id=str(ULID())
+        )
     assert ez2.value.status_code == 422
 
     # (2) available math on reserve and debit
     await credit_svc.top_up(db, tenant.id, "USD", 1000, actor=actor)
-    hold = await credit_svc.reserve(db, tenant.id, "USD", 600,
-                                    reference_type="workflow_run",
-                                    reference_id=str(ULID()))
+    hold = await credit_svc.reserve(
+        db, tenant.id, "USD", 600, reference_type="workflow_run", reference_id=str(ULID())
+    )
     with pytest.raises(AppError) as e402:
-        await credit_svc.reserve(db, tenant.id, "USD", 401,
-                                 reference_type="workflow_run",
-                                 reference_id=str(ULID()))
+        await credit_svc.reserve(
+            db, tenant.id, "USD", 401, reference_type="workflow_run", reference_id=str(ULID())
+        )
     assert e402.value.code == "INSUFFICIENT_CREDIT" and e402.value.status_code == 402
     with pytest.raises(AppError):
-        await credit_svc.debit(db, tenant.id, "USD", 401,
-                               reference_type="purchase", reference_id=str(ULID()),
-                               idempotency_key=f"d401-{ULID()}")
-    ok_hold = await credit_svc.reserve(db, tenant.id, "USD", 400,
-                                       reference_type="workflow_run",
-                                       reference_id=str(ULID()))
-    assert ok_hold.status == "held"                    # exactly-available OK
+        await credit_svc.debit(
+            db,
+            tenant.id,
+            "USD",
+            401,
+            reference_type="purchase",
+            reference_id=str(ULID()),
+            idempotency_key=f"d401-{ULID()}",
+        )
+    ok_hold = await credit_svc.reserve(
+        db, tenant.id, "USD", 400, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    assert ok_hold.status == "held"  # exactly-available OK
     await credit_svc.release(db, ok_hold.id)
 
     # (3) settle(0): hold released, NO debit entry
     settled0 = await credit_svc.settle(db, hold.id, 0)
     assert settled0.status in ("settled", "released")
     zero_entries = (
-        await db.execute(
-            select(CreditLedgerEntry).where(
-                CreditLedgerEntry.idempotency_key == f"settle:{hold.id}"))
-    ).scalars().all()
-    assert zero_entries == []                          # nothing charged
+        (
+            await db.execute(
+                select(CreditLedgerEntry).where(
+                    CreditLedgerEntry.idempotency_key == f"settle:{hold.id}"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert zero_entries == []  # nothing charged
 
     # (4) shortfall math: balance 1000, other hold 700 → available 300;
     # settle a 200-hold at actual 500 → charge floors at 300+... the hold's
     # own release frees 200, other hold 700 → available = 1000-700 = 300;
     # chargeable = min(500, 300) = 300 → shortfall exactly 200.
-    other = await credit_svc.reserve(db, tenant.id, "USD", 700,
-                                     reference_type="workflow_run",
-                                     reference_id=str(ULID()))
-    mine = await credit_svc.reserve(db, tenant.id, "USD", 200,
-                                    reference_type="workflow_run",
-                                    reference_id=str(ULID()))
+    other = await credit_svc.reserve(
+        db, tenant.id, "USD", 700, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    mine = await credit_svc.reserve(
+        db, tenant.id, "USD", 200, reference_type="workflow_run", reference_id=str(ULID())
+    )
     await credit_svc.settle(db, mine.id, 500)
     entry = (
         await db.execute(
             select(CreditLedgerEntry).where(
-                CreditLedgerEntry.idempotency_key == f"settle:{mine.id}"))
+                CreditLedgerEntry.idempotency_key == f"settle:{mine.id}"
+            )
+        )
     ).scalar_one()
-    assert entry.amount_minor == -300                  # floored at available
-    assert entry.reason == "shortfall 200"             # exact arithmetic
+    assert entry.amount_minor == -300  # floored at available
+    assert entry.reason == "shortfall 200"  # exact arithmetic
     # a settle exactly AT the boundary records NO shortfall
     await credit_svc.release(db, other.id)
-    exact = await credit_svc.reserve(db, tenant.id, "USD", 300,
-                                     reference_type="workflow_run",
-                                     reference_id=str(ULID()))
+    exact = await credit_svc.reserve(
+        db, tenant.id, "USD", 300, reference_type="workflow_run", reference_id=str(ULID())
+    )
     await credit_svc.settle(db, exact.id, 300)
     entry2 = (
         await db.execute(
             select(CreditLedgerEntry).where(
-                CreditLedgerEntry.idempotency_key == f"settle:{exact.id}"))
+                CreditLedgerEntry.idempotency_key == f"settle:{exact.id}"
+            )
+        )
     ).scalar_one()
     assert entry2.amount_minor == -300 and entry2.reason is None
 
     # a NEGATIVE settle is a 422; and when the true available is ZERO the
     # settle charges nothing and writes NO zero-amount entry
-    neg = await credit_svc.reserve(db, tenant.id, "USD", 50,
-                                   reference_type="workflow_run",
-                                   reference_id=str(ULID()))
+    neg = await credit_svc.reserve(
+        db, tenant.id, "USD", 50, reference_type="workflow_run", reference_id=str(ULID())
+    )
     with pytest.raises(AppError) as e_neg:
         await credit_svc.settle(db, neg.id, -1)
     assert e_neg.value.status_code == 422
@@ -2931,47 +3123,59 @@ async def test_stale_reservation_expiry_extension_ladder(db):
 
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
-    org = Organization(name=f"Exp {ULID()}", slug=f"exp-{str(ULID()).lower()}",
-                       status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+    org = Organization(
+        name=f"Exp {ULID()}",
+        slug=f"exp-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
     db.add(org)
     await db.flush()
     await credit_svc.top_up(db, tenant.id, "USD", 10000, actor=_actor(user))
     now = datetime.now(UTC)
 
     def _run(status):
-        return WorkflowRun(org_id=org.id, pack_id=None, release_id=None,
-                           installation_id=None,
-                           definition_snapshot={"steps": [], "edges": []},
-                           inputs={}, started_by=user.id, status=status)
+        return WorkflowRun(
+            org_id=org.id,
+            pack_id=None,
+            release_id=None,
+            installation_id=None,
+            definition_snapshot={"steps": [], "edges": []},
+            inputs={},
+            started_by=user.id,
+            status=status,
+        )
 
     review_run, running_run = _run(RunStatus.WAITING_REVIEW), _run(RunStatus.RUNNING)
     db.add_all([review_run, running_run])
     await db.flush()
 
     async def _stale_hold(ref_id, ref_type="workflow_run"):
-        r = await credit_svc.reserve(db, tenant.id, "USD", 100,
-                                     reference_type=ref_type, reference_id=ref_id)
+        r = await credit_svc.reserve(
+            db, tenant.id, "USD", 100, reference_type=ref_type, reference_id=ref_id
+        )
         r.expires_at = now - timedelta(minutes=5)
         await db.flush()
         return r
 
     r_review = await _stale_hold(review_run.id)
     r_running = await _stale_hold(running_run.id)
-    r_orphan = await _stale_hold(str(ULID()))          # run row gone
+    r_orphan = await _stale_hold(str(ULID()))  # run row gone
 
     handled = await credit_svc.expire_stale_reservations(db)
-    assert handled >= 3   # ours counted (shared DB may hold other stale rows)
+    assert handled >= 3  # ours counted (shared DB may hold other stale rows)
 
     await db.refresh(r_review)
-    assert r_review.status == "held"                    # review: extended
+    assert r_review.status == "held"  # review: extended
     assert r_review.expires_at > now + timedelta(hours=23)
-    assert r_review.expires_at < now + timedelta(hours=25)   # ~24h, not 6h
+    assert r_review.expires_at < now + timedelta(hours=25)  # ~24h, not 6h
     await db.refresh(r_running)
-    assert r_running.status == "held"                   # running: extended 6h
+    assert r_running.status == "held"  # running: extended 6h
     assert now + timedelta(hours=5) < r_running.expires_at < now + timedelta(hours=7)
     assert r_running.extension_count == 1
     await db.refresh(r_orphan)
-    assert r_orphan.status == "released"                # orphan: released now
+    assert r_orphan.status == "released"  # orphan: released now
 
     # exhaust the RUNNING ladder: 2nd extension, then the 3rd pass releases
     r_running.expires_at = now - timedelta(minutes=1)
@@ -2983,7 +3187,7 @@ async def test_stale_reservation_expiry_extension_ladder(db):
     await db.flush()
     await credit_svc.expire_stale_reservations(db)
     await db.refresh(r_running)
-    assert r_running.status == "released"               # bounded at 2
+    assert r_running.status == "released"  # bounded at 2
 
     # the REVIEW hold keeps extending past any count (unbounded by design)
     for _ in range(3):
@@ -2992,23 +3196,44 @@ async def test_stale_reservation_expiry_extension_ladder(db):
         await credit_svc.expire_stale_reservations(db)
         await db.refresh(r_review)
         assert r_review.status == "held"
-    assert r_review.extension_count == 4               # exactly one per pass
+    assert r_review.extension_count == 4  # exactly one per pass
 
     # promo grants: zero amount 422; duplicate promo key 409; and
     # require_available on an empty balance is a 402
     with pytest.raises(AppError) as e_p0:
         await credit_svc.grant_promotional(
-            db, tenant.id, "USD", 0, expires_at=now + timedelta(days=9),
-            reason="z", actor=_actor(user), idempotency_key=f"p0-{ULID()}")
+            db,
+            tenant.id,
+            "USD",
+            0,
+            expires_at=now + timedelta(days=9),
+            reason="z",
+            actor=_actor(user),
+            idempotency_key=f"p0-{ULID()}",
+        )
     assert e_p0.value.status_code == 422
     pk = f"promo-{ULID()}"
     await credit_svc.grant_promotional(
-        db, tenant.id, "USD", 100, expires_at=now + timedelta(days=9),
-        reason="a", actor=_actor(user), idempotency_key=pk)
+        db,
+        tenant.id,
+        "USD",
+        100,
+        expires_at=now + timedelta(days=9),
+        reason="a",
+        actor=_actor(user),
+        idempotency_key=pk,
+    )
     with pytest.raises(AppError) as e_p409:
         await credit_svc.grant_promotional(
-            db, tenant.id, "USD", 200, expires_at=now + timedelta(days=9),
-            reason="b", actor=_actor(user), idempotency_key=pk)
+            db,
+            tenant.id,
+            "USD",
+            200,
+            expires_at=now + timedelta(days=9),
+            reason="b",
+            actor=_actor(user),
+            idempotency_key=pk,
+        )
     assert e_p409.value.status_code == 409
     empty = await _mk_tenant(db, user)
     with pytest.raises(AppError) as e_402:
@@ -3042,49 +3267,65 @@ async def test_promo_lot_closure_boundaries_protect_deposits(db):
 
     async def _lot(tenant, amount):
         lot = await credit_svc.grant_promotional(
-            db, tenant.id, "USD", amount, expires_at=now + timedelta(days=1),
-            reason="promo", actor=actor, idempotency_key=f"g-{ULID()}")
-        lot.expires_at = now - timedelta(minutes=1)     # already expired
+            db,
+            tenant.id,
+            "USD",
+            amount,
+            expires_at=now + timedelta(days=1),
+            reason="promo",
+            actor=actor,
+            idempotency_key=f"g-{ULID()}",
+        )
+        lot.expires_at = now - timedelta(minutes=1)  # already expired
         await db.flush()
         return lot
 
     async def _balance(tenant):
         from app.controlplane.models.credit import TenantCreditBalance
+
         return (
             await db.execute(
                 select(TenantCreditBalance).where(
                     TenantCreditBalance.tenant_id == tenant.id,
-                    TenantCreditBalance.currency == "USD"))
+                    TenantCreditBalance.currency == "USD",
+                )
+            )
         ).scalar_one()
 
     # (A) fully pre-spent lot: closes, later deposit untouched
     ta = await _mk_tenant(db, user)
     lot_a = await _lot(ta, 100)
-    await credit_svc.debit(db, ta.id, "USD", 100,
-                           reference_type="purchase", reference_id=str(ULID()),
-                           idempotency_key=f"sp-{ULID()}")
+    await credit_svc.debit(
+        db,
+        ta.id,
+        "USD",
+        100,
+        reference_type="purchase",
+        reference_id=str(ULID()),
+        idempotency_key=f"sp-{ULID()}",
+    )
     await credit_svc.expire_promotional(db)
     await db.refresh(lot_a)
-    assert lot_a.consumed_expiration_id is not None     # closed, not stalking
+    assert lot_a.consumed_expiration_id is not None  # closed, not stalking
     await credit_svc.top_up(db, ta.id, "USD", 500, actor=actor)
     await credit_svc.expire_promotional(db)
-    assert (await _balance(ta)).balance_minor == 500    # deposit intact
+    assert (await _balance(ta)).balance_minor == 500  # deposit intact
 
     # (B) reserved remainder: pass1 expires the available 60 and stays open;
     # release; pass2 expires exactly 40 → cumulative == face → closed
     tb = await _mk_tenant(db, user)
     lot_b = await _lot(tb, 100)
-    hold_b = await credit_svc.reserve(db, tb.id, "USD", 40,
-                                      reference_type="workflow_run",
-                                      reference_id=str(ULID()))
+    hold_b = await credit_svc.reserve(
+        db, tb.id, "USD", 40, reference_type="workflow_run", reference_id=str(ULID())
+    )
     await credit_svc.expire_promotional(db)
     await db.refresh(lot_b)
-    assert lot_b.consumed_expiration_id is None         # open: live hold waits
-    assert (await _balance(tb)).balance_minor == 40     # 60 expired
+    assert lot_b.consumed_expiration_id is None  # open: live hold waits
+    assert (await _balance(tb)).balance_minor == 40  # 60 expired
     await credit_svc.release(db, hold_b.id)
     await credit_svc.expire_promotional(db)
     await db.refresh(lot_b)
-    assert lot_b.consumed_expiration_id is not None     # closed at == face
+    assert lot_b.consumed_expiration_id is not None  # closed at == face
     assert (await _balance(tb)).balance_minor == 0
 
     # (B') the == face boundary ISOLATED from the reserved==0 disjunct: the
@@ -3093,49 +3334,62 @@ async def test_promo_lot_closure_boundaries_protect_deposits(db):
     # open to stalk the fresh deposit
     tbp = await _mk_tenant(db, user)
     lot_bp = await _lot(tbp, 100)
-    hold_bp = await credit_svc.reserve(db, tbp.id, "USD", 40,
-                                       reference_type="workflow_run",
-                                       reference_id=str(ULID()))
-    await credit_svc.expire_promotional(db)             # expires 60, open
+    hold_bp = await credit_svc.reserve(
+        db, tbp.id, "USD", 40, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    await credit_svc.expire_promotional(db)  # expires 60, open
     await credit_svc.release(db, hold_bp.id)
     await credit_svc.top_up(db, tbp.id, "USD", 500, actor=actor)
-    await credit_svc.reserve(db, tbp.id, "USD", 500,
-                             reference_type="workflow_run",
-                             reference_id=str(ULID()))  # live unrelated hold
-    await credit_svc.expire_promotional(db)             # expires exactly 40
+    await credit_svc.reserve(
+        db, tbp.id, "USD", 500, reference_type="workflow_run", reference_id=str(ULID())
+    )  # live unrelated hold
+    await credit_svc.expire_promotional(db)  # expires exactly 40
     await db.refresh(lot_bp)
-    assert lot_bp.consumed_expiration_id is not None    # closed AT the == face
-    assert (await _balance(tbp)).balance_minor == 500   # deposit intact
+    assert lot_bp.consumed_expiration_id is not None  # closed AT the == face
+    assert (await _balance(tbp)).balance_minor == 500  # deposit intact
 
     # (C) remainder spent via SETTLE while an unrelated hold lives: the lot
     # closes (Or), the deposit stays
     tc = await _mk_tenant(db, user)
     lot_c = await _lot(tc, 100)
-    hold_c = await credit_svc.reserve(db, tc.id, "USD", 40,
-                                      reference_type="workflow_run",
-                                      reference_id=str(ULID()))
-    await credit_svc.expire_promotional(db)             # expires 60, open
+    hold_c = await credit_svc.reserve(
+        db, tc.id, "USD", 40, reference_type="workflow_run", reference_id=str(ULID())
+    )
+    await credit_svc.expire_promotional(db)  # expires 60, open
     await credit_svc.top_up(db, tc.id, "USD", 500, actor=actor)
-    await credit_svc.reserve(db, tc.id, "USD", 200,   # live unrelated hold
-                             reference_type="workflow_run",
-                             reference_id=str(ULID()))
-    await credit_svc.settle(db, hold_c.id, 40)          # spends the remainder
+    await credit_svc.reserve(
+        db,
+        tc.id,
+        "USD",
+        200,  # live unrelated hold
+        reference_type="workflow_run",
+        reference_id=str(ULID()),
+    )
+    await credit_svc.settle(db, hold_c.id, 40)  # spends the remainder
     await credit_svc.expire_promotional(db)
     await db.refresh(lot_c)
     assert lot_c.consumed_expiration_id is not None, (
-        "spent remainder must close the lot even with a live unrelated hold")
-    assert (await _balance(tc)).balance_minor == 500    # deposit never swept
+        "spent remainder must close the lot even with a live unrelated hold"
+    )
+    assert (await _balance(tc)).balance_minor == 500  # deposit never swept
 
     # (D) face already fully expired but the lot was left open (hand-crafted
     # residue): the next pass closes it via the remaining_face == 0 gate
     td = await _mk_tenant(db, user)
     lot_d = await _lot(td, 100)
     bal_d = await _balance(td)
-    db.add(CreditLedgerEntry(
-        tenant_id=td.id, currency="USD", entry_type="expiration",
-        amount_minor=-100, balance_after_minor=0,
-        reference_type="promotional_lot", reference_id=lot_d.id,
-        idempotency_key=f"hand-{ULID()}"))
+    db.add(
+        CreditLedgerEntry(
+            tenant_id=td.id,
+            currency="USD",
+            entry_type="expiration",
+            amount_minor=-100,
+            balance_after_minor=0,
+            reference_type="promotional_lot",
+            reference_id=lot_d.id,
+            idempotency_key=f"hand-{ULID()}",
+        )
+    )
     bal_d.balance_minor = 0
     await db.flush()
     await credit_svc.expire_promotional(db)
@@ -3162,46 +3416,57 @@ async def test_run_terminal_cancelled_with_usage_settles_not_releases():
             a = _actor(user)
             await credit_svc.top_up(db, tenant.id, "USD", 10000, actor=a)
             run_id = str(ULID())
-            await credit_svc.reserve(db, tenant.id, "USD", 1000,
-                                     reference_type="workflow_run",
-                                     reference_id=run_id)
+            await credit_svc.reserve(
+                db, tenant.id, "USD", 1000, reference_type="workflow_run", reference_id=run_id
+            )
             await pricing_svc.create_price_policy(
-                db, actor=a, name=f"rc {ULID()}",
-                policy_type="fixed_unit_price", usage_type="image_generation",
-                currency="USD", params={"unit_price_minor": 70},
+                db,
+                actor=a,
+                name=f"rc {ULID()}",
+                policy_type="fixed_unit_price",
+                usage_type="image_generation",
+                currency="USD",
+                params={"unit_price_minor": 70},
                 effective_from=datetime.now(UTC) - timedelta(days=1),
-                tenant_id=tenant.id)
+                tenant_id=tenant.id,
+            )
             await metering.emit_usage(
-                db, tenant_id=tenant.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
-                usage_type="image_generation", quantity=2,
-                occurred_at=datetime.now(UTC), source="workflow_runtime",
-                idempotency_key=f"rc-{ULID()}", workflow_run_id=run_id)
+                db,
+                tenant_id=tenant.id,
+                org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                usage_type="image_generation",
+                quantity=2,
+                occurred_at=datetime.now(UTC),
+                source="workflow_runtime",
+                idempotency_key=f"rc-{ULID()}",
+                workflow_run_id=run_id,
+            )
             enqueue(db, "run.terminal", {"run_id": run_id, "status": "cancelled"})
             await db.commit()
             tid = tenant.id
 
         for _ in range(30):
             async with AsyncSessionLocal() as db:
-                if await process_outbox_once(
-                        db, topics=["usage.recorded", "run.terminal"]) == 0:
+                if await process_outbox_once(db, topics=["usage.recorded", "run.terminal"]) == 0:
                     break
 
         async with AsyncSessionLocal() as db:
             balance = (
                 await db.execute(
-                    select(TenantCreditBalance).where(
-                        TenantCreditBalance.tenant_id == tid))
+                    select(TenantCreditBalance).where(TenantCreditBalance.tenant_id == tid)
+                )
             ).scalar_one()
             assert balance.reserved_minor == 0
             assert balance.balance_minor == 10000 - 140, (
                 "cancelled-with-usage must SETTLE the 2×70 actual spend — "
-                f"balance {balance.balance_minor}")
+                f"balance {balance.balance_minor}"
+            )
             res = (
                 await db.execute(
-                    select(CreditReservation).where(
-                        CreditReservation.reference_id == run_id))
+                    select(CreditReservation).where(CreditReservation.reference_id == run_id)
+                )
             ).scalar_one()
-            assert res.status == "settled"      # not released
+            assert res.status == "settled"  # not released
     finally:
         await engine.dispose()
 
@@ -3209,6 +3474,7 @@ async def test_run_terminal_cancelled_with_usage_settles_not_releases():
 class _FakeRequest:
     class _State:
         request_id = "r378-test"
+
     state = _State()
 
 
@@ -3247,29 +3513,26 @@ async def test_credits_api_handlers_direct(db):
     await credit_svc.top_up(db, tenant.id, "EUR", 999, actor=_actor(user))
 
     # (1) pagination: page 2 of per_page 2 over 4 rows → 2 rows, has_more False
-    resp = await credit_ledger(tenant.id, currency=None, page=2, per_page=2,
-                               user=user, db=db)
+    resp = await credit_ledger(tenant.id, currency=None, page=2, per_page=2, user=user, db=db)
     assert resp.meta.total == 4
     assert len(resp.data) == 2
     assert resp.meta.has_more is False
     # page 1 → has_more True (offset+per_page=2 < 4)
-    resp1 = await credit_ledger(tenant.id, currency=None, page=1, per_page=2,
-                                user=user, db=db)
+    resp1 = await credit_ledger(tenant.id, currency=None, page=1, per_page=2, user=user, db=db)
     assert resp1.meta.has_more is True
     # rows are newest-first and pages don't overlap
     ids1 = {e["id"] for e in resp1.data}
     ids2 = {e["id"] for e in resp.data}
     assert ids1.isdisjoint(ids2)
     # currency filter
-    resp_eur = await credit_ledger(tenant.id, currency="EUR", page=1,
-                                   per_page=50, user=user, db=db)
+    resp_eur = await credit_ledger(tenant.id, currency="EUR", page=1, per_page=50, user=user, db=db)
     assert resp_eur.meta.total == 1
     assert resp_eur.data[0]["amount_minor"] == 999
 
     # (2) 404s + adjust replay semantics
-    adj = AdjustCreditRequest(amount_minor=-50, currency="USD",
-                              reason="ops correction",
-                              idempotency_key=f"adj-{ULID()}")
+    adj = AdjustCreditRequest(
+        amount_minor=-50, currency="USD", reason="ops correction", idempotency_key=f"adj-{ULID()}"
+    )
     with pytest.raises(AppError) as e404a:
         await platform_adjust_credit(str(ULID()), adj, req, user=user, db=db)
     assert e404a.value.status_code == 404
@@ -3277,36 +3540,53 @@ async def test_credits_api_handlers_direct(db):
     assert first.data["amount_minor"] == -50
     replay = await platform_adjust_credit(tenant.id, adj, req, user=user, db=db)
     assert replay.data == {"duplicate": True}
-    promo = GrantPromoRequest(amount_minor=100, currency="USD",
-                              expires_at=datetime.now(UTC) + timedelta(days=5),
-                              reason="promo", idempotency_key=f"pg-{ULID()}")
+    promo = GrantPromoRequest(
+        amount_minor=100,
+        currency="USD",
+        expires_at=datetime.now(UTC) + timedelta(days=5),
+        reason="promo",
+        idempotency_key=f"pg-{ULID()}",
+    )
     with pytest.raises(AppError) as e404g:
         await grant_promotional(str(ULID()), promo, req, user=user, db=db)
     assert e404g.value.status_code == 404
 
     # (3) budget update/delete ownership + null guard
-    policy = BudgetPolicy(tenant_id=tenant.id, scope_type="tenant",
-                          period="monthly", limit_minor=1000, currency="USD",
-                          hard_stop=True)
-    foreign = BudgetPolicy(tenant_id=other.id, scope_type="tenant",
-                           period="monthly", limit_minor=1000, currency="USD",
-                           hard_stop=True)
+    policy = BudgetPolicy(
+        tenant_id=tenant.id,
+        scope_type="tenant",
+        period="monthly",
+        limit_minor=1000,
+        currency="USD",
+        hard_stop=True,
+    )
+    foreign = BudgetPolicy(
+        tenant_id=other.id,
+        scope_type="tenant",
+        period="monthly",
+        limit_minor=1000,
+        currency="USD",
+        hard_stop=True,
+    )
     db.add_all([policy, foreign])
     await db.flush()
     with pytest.raises(AppError) as e404u:
-        await update_budget(tenant.id, foreign.id,
-                            UpdateBudgetPolicyRequest(limit_minor=5),
-                            user=user, db=db)
+        await update_budget(
+            tenant.id, foreign.id, UpdateBudgetPolicyRequest(limit_minor=5), user=user, db=db
+        )
     assert e404u.value.status_code == 404
     with pytest.raises(AppError) as e422:
-        await update_budget(tenant.id, policy.id,
-                            UpdateBudgetPolicyRequest(limit_minor=None,
-                                                      hard_stop=False),
-                            user=user, db=db)
+        await update_budget(
+            tenant.id,
+            policy.id,
+            UpdateBudgetPolicyRequest(limit_minor=None, hard_stop=False),
+            user=user,
+            db=db,
+        )
     assert e422.value.status_code == 422
-    ok = await update_budget(tenant.id, policy.id,
-                             UpdateBudgetPolicyRequest(limit_minor=2222),
-                             user=user, db=db)
+    ok = await update_budget(
+        tenant.id, policy.id, UpdateBudgetPolicyRequest(limit_minor=2222), user=user, db=db
+    )
     assert ok.data["limit_minor"] == 2222
     with pytest.raises(AppError) as e404d:
         await delete_budget(tenant.id, foreign.id, user=user, db=db)
@@ -3335,29 +3615,53 @@ async def test_spent_minor_scope_and_usage_type_filters(db):
 
     def seed(amount: int, *, project_id, user_id, usage_type, occurred_at=None):
         eid = str(ULID())
-        db.add(UsageEvent(
-            id=eid, tenant_id=tenant.id, org_id=org, project_id=project_id,
-            user_id=user_id, usage_type=usage_type, quantity=1,
-            unit="images" if usage_type == "image_generation" else "seconds",
-            occurred_at=occurred_at or datetime.now(UTC), source="manual",
-        ))
-        db.add(RatedUsage(
-            usage_event_id=eid, tenant_id=tenant.id, org_id=org,
-            usage_type=usage_type, quantity=1, cost_rate_snapshot={},
-            internal_cost_minor=0, internal_cost_currency="USD",
-            sell_rate_snapshot={}, billable_amount_minor=amount,
-            billable_amount_exact=Decimal(amount), billable_currency="USD",
-            status="rated", rated_at=datetime.now(UTC),
-        ))
+        db.add(
+            UsageEvent(
+                id=eid,
+                tenant_id=tenant.id,
+                org_id=org,
+                project_id=project_id,
+                user_id=user_id,
+                usage_type=usage_type,
+                quantity=1,
+                unit="images" if usage_type == "image_generation" else "seconds",
+                occurred_at=occurred_at or datetime.now(UTC),
+                source="manual",
+            )
+        )
+        db.add(
+            RatedUsage(
+                usage_event_id=eid,
+                tenant_id=tenant.id,
+                org_id=org,
+                usage_type=usage_type,
+                quantity=1,
+                cost_rate_snapshot={},
+                internal_cost_minor=0,
+                internal_cost_currency="USD",
+                sell_rate_snapshot={},
+                billable_amount_minor=amount,
+                billable_amount_exact=Decimal(amount),
+                billable_currency="USD",
+                status="rated",
+                rated_at=datetime.now(UTC),
+            )
+        )
 
     seed(100, project_id=proj_a, user_id=user_a, usage_type="image_generation")
     seed(2000, project_id=proj_b, user_id=user_b, usage_type="video_generation_seconds")
     await db.flush()
 
     def pol(**over):
-        base = dict(tenant_id=tenant.id, scope_type="org", scope_id=org,
-                    period="monthly", limit_minor=10_000, currency="USD",
-                    hard_stop=True)
+        base = dict(
+            tenant_id=tenant.id,
+            scope_type="org",
+            scope_id=org,
+            period="monthly",
+            limit_minor=10_000,
+            currency="USD",
+            hard_stop=True,
+        )
         base.update(over)
         return BudgetPolicy(**base)
 
@@ -3366,13 +3670,10 @@ async def test_spent_minor_scope_and_usage_type_filters(db):
     # user scope counts ONLY that user's spend
     assert await _spent_minor(db, tenant, pol(scope_type="user", scope_id=user_a)) == 100
     # usage_type filter narrows within the scope
-    assert (
-        await _spent_minor(db, tenant, pol(usage_type="image_generation")) == 100
-    )
+    assert await _spent_minor(db, tenant, pol(usage_type="image_generation")) == 100
     assert await _spent_minor(db, tenant, pol()) == 2100  # unscoped org total
     # boundary: an event at EXACTLY the monthly period start is IN the window
     start = _period_start("monthly", tenant.timezone or "UTC")
-    seed(7, project_id=proj_a, user_id=user_a, usage_type="image_generation",
-         occurred_at=start)
+    seed(7, project_id=proj_a, user_id=user_a, usage_type="image_generation", occurred_at=start)
     await db.flush()
     assert await _spent_minor(db, tenant, pol(scope_type="project", scope_id=proj_a)) == 107

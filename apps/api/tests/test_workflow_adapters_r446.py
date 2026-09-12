@@ -31,7 +31,8 @@ async def test_mock_adapter_usage_mapping_r446():
     # each capability class maps to its deterministic usage rows
     assert await _usage("image_generation") == [{"usage_type": "image_generation", "quantity": 1}]
     assert await _usage("video_generation") == [
-        {"usage_type": "video_generation_seconds", "quantity": 10}]
+        {"usage_type": "video_generation_seconds", "quantity": 10}
+    ]
     assert await _usage("voice_clone") == [{"usage_type": "voice_generation", "quantity": 15}]
     assert await _usage("audio_transcribe") == [{"usage_type": "voice_generation", "quantity": 15}]
     # the else branch (e.g. text/llm) emits input+output token rows with the
@@ -48,11 +49,12 @@ async def test_mock_adapter_usage_mapping_r446():
     o3 = await m.execute("image_generation", "x", {"a": 2}, {}, None, "k")
     assert o3["result"] != o1["result"]
     # echo elision boundary: a value of len < 500 is kept, >= 500 is elided
-    o4 = await m.execute("image_generation", "x",
-                         {"keep": "y" * 499, "drop": "y" * 500, "n": 5}, {}, None, "k")
-    assert o4["echo"]["keep"] == "y" * 499   # 499 < 500 → kept
-    assert o4["echo"]["drop"] == "…"          # 500 not < 500 → elided
-    assert o4["echo"]["n"] == "…"             # non-string elided too
+    o4 = await m.execute(
+        "image_generation", "x", {"keep": "y" * 499, "drop": "y" * 500, "n": 5}, {}, None, "k"
+    )
+    assert o4["echo"]["keep"] == "y" * 499  # 499 < 500 → kept
+    assert o4["echo"]["drop"] == "…"  # 500 not < 500 → elided
+    assert o4["echo"]["n"] == "…"  # non-string elided too
 
 
 async def test_get_adapter_registry_r446():
@@ -85,9 +87,14 @@ async def test_anthropic_full_path_mocked_r446(monkeypatch):
 
     monkeypatch.setattr(llm_mod, "AnthropicClient", _FakeClient)
     a = AnthropicReviewAdapter()
-    out = await a.execute("multimodal_review", "claude-opus-5",
-                          {"prompt": "check this", "subject": "the asset"},
-                          {}, {"api_key": "sk-org"}, "idem")
+    out = await a.execute(
+        "multimodal_review",
+        "claude-opus-5",
+        {"prompt": "check this", "subject": "the asset"},
+        {},
+        {"api_key": "sk-org"},
+        "idem",
+    )
     # the org key + org-chosen (claude-) model are passed through
     assert captured["api_key"] == "sk-org"
     assert captured["model"] == "claude-opus-5"
@@ -102,12 +109,14 @@ async def test_anthropic_full_path_mocked_r446(monkeypatch):
     # a response with zero token counts → those usage rows are filtered out
     class _ZeroClient(_FakeClient):
         async def complete(self, **kwargs):
-            return SimpleNamespace(content="ok", model="m", provider="anthropic",
-                                   input_tokens=0, output_tokens=0)
+            return SimpleNamespace(
+                content="ok", model="m", provider="anthropic", input_tokens=0, output_tokens=0
+            )
 
     monkeypatch.setattr(llm_mod, "AnthropicClient", _ZeroClient)
-    out2 = await a.execute("multimodal_review", "claude-sonnet-5", {"prompt": "x"},
-                           {}, {"api_key": "sk-org"}, "idem")
+    out2 = await a.execute(
+        "multimodal_review", "claude-sonnet-5", {"prompt": "x"}, {}, {"api_key": "sk-org"}, "idem"
+    )
     assert out2["__usage__"] == []  # zero-quantity rows dropped
 
 

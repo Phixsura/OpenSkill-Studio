@@ -241,9 +241,7 @@ class StripeProvider(BillingProviderBase):
             created = event["created"]
         except (KeyError, TypeError):
             created = None
-        occurred_at = (
-            datetime.fromtimestamp(int(created), tz=UTC) if created is not None else None
-        )
+        occurred_at = datetime.fromtimestamp(int(created), tz=UTC) if created is not None else None
         return ParsedWebhookEvent(
             external_event_id=event["id"],
             event_type=event["type"],

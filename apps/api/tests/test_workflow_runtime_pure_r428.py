@@ -75,8 +75,10 @@ def test_template_ref_upstreams_and_deps_r428():
     assert _template_ref_upstreams(tmpl) == {"gen"}
 
     # whitespace/newline inside the moustache still matches (renderer sees raw)
-    tmpl2 = {"type": "prompt_template",
-             "config": {"nested": {"t": "{{\n steps.foo.outputs.out \n}}"}}}
+    tmpl2 = {
+        "type": "prompt_template",
+        "config": {"nested": {"t": "{{\n steps.foo.outputs.out \n}}"}},
+    }
     assert _template_ref_upstreams(tmpl2) == {"foo"}
 
     # _upstream_ids unions edge upstreams with template deps
@@ -93,8 +95,8 @@ def test_iter_strings_r428():
 
 
 def test_render_value_r428():
-    assert _render_value(None) == ""            # not "None"
-    assert _render_value(True) == "true"        # JSON bool, not "True"
+    assert _render_value(None) == ""  # not "None"
+    assert _render_value(True) == "true"  # JSON bool, not "True"
     assert _render_value(False) == "false"
     assert _render_value({"a": 1}) == '{"a": 1}'  # JSON, not repr
     assert _render_value([1, 2]) == "[1, 2]"
@@ -109,7 +111,8 @@ def test_render_template_r428():
     out = _render_template(
         "T={{ inputs.topic }} I={{ steps.gen.outputs.image }} "
         "N={{ inputs.empty }} U={{ steps.none.outputs.x }}",
-        run, step_runs,
+        run,
+        step_runs,
     )
     assert out == "T=cats I=IMG N= U="
     # a step ref whose step_run has no output → '' (not a crash)
@@ -144,8 +147,7 @@ def test_resolve_step_inputs_r428():
     edges_noout = [
         {"from_step": "s3", "from_port": "o", "to_step": "s2", "to_port": "in"},
     ]
-    assert _resolve_step_inputs(
-        step, run, edges_noout, {"s3": SimpleNamespace(output=None)}) == {}
+    assert _resolve_step_inputs(step, run, edges_noout, {"s3": SimpleNamespace(output=None)}) == {}
 
     # asset_input pulls its OUTPUT ports from run inputs by port name
     ai = {"id": "a", "type": "asset_input", "outputs": [{"port": "img"}, {"port": "missing"}]}
@@ -173,8 +175,7 @@ def test_run_transform_r428():
     assert _run_transform(sf, {}, step_sf) == {"r": None}
 
     # unknown op → pass-through first value + records operation/params
-    passthru = _run_transform({"operation": "crop", "params": {"w": 10}},
-                              {"a": "img"}, step_sf)
+    passthru = _run_transform({"operation": "crop", "params": {"w": 10}}, {"a": "img"}, step_sf)
     assert passthru == {"r": "img", "_operation": "crop", "_params": {"w": 10}}
 
 

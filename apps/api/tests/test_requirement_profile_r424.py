@@ -67,7 +67,9 @@ async def _cap(db, key):
 
     from app.models.capability import CapabilityTag
 
-    found = (await db.execute(_sel(CapabilityTag).where(CapabilityTag.key == key))).scalar_one_or_none()
+    found = (
+        await db.execute(_sel(CapabilityTag).where(CapabilityTag.key == key))
+    ).scalar_one_or_none()
     if found is None:
         db.add(CapabilityTag(key=key, name=key.replace("_", " ").title(), is_platform=True))
         await db.flush()
@@ -94,16 +96,23 @@ def test_build_match_requirement_r14_demotion_r424():
     # required_capabilities set by EXTRACTION → demoted to preferred (never a
     # hard S2 filter); an existing preferred set is unioned + sorted
     prof = _profile(
-        {"required_capabilities": ["image_generation", "video_generation"],
-         "preferred_capabilities": ["audio_generation"],
-         "output_type": "image", "difficulty": "advanced", "time_budget": 60,
-         "goal": "make art"},
+        {
+            "required_capabilities": ["image_generation", "video_generation"],
+            "preferred_capabilities": ["audio_generation"],
+            "output_type": "image",
+            "difficulty": "advanced",
+            "time_budget": 60,
+            "goal": "make art",
+        },
         {"goal": "user_entered"},  # everything else extracted
     )
     req = Rp.build_match_requirement(prof)
     assert "required_capabilities" not in req  # extracted → not a hard filter
     assert set(req["preferred_capabilities"]) == {
-        "audio_generation", "image_generation", "video_generation"}
+        "audio_generation",
+        "image_generation",
+        "video_generation",
+    }
     # extracted hard-filterable fields are moved to _soft_ variants
     assert "output_type" not in req and req["_soft_output_type"] == "image"
     assert "difficulty" not in req and req["_soft_difficulty"] == "advanced"
@@ -162,8 +171,7 @@ async def test_validate_structured_bounds_r424(db):
 
     async def _ok(structured):
         # create_from_form validates then persists
-        return await svc.create_from_form(
-            org.id, owner.id, "production", structured, owner.id)
+        return await svc.create_from_form(org.id, owner.id, "production", structured, owner.id)
 
     async def _bad(structured, code):
         # _validate_structured raises BEFORE any write, so no rollback needed —
@@ -186,7 +194,7 @@ async def test_validate_structured_bounds_r424(db):
     await _bad({"required_capabilities": ["made_up_cap"]}, "UNKNOWN_CAPABILITY")
     await _bad({"required_capabilities": [123]}, "INVALID_CAPABILITIES")
     # boundary ACCEPTS (each a successful create → its own flush)
-    p1 = await _ok({"time_budget": 1})       # lower bound inclusive
+    p1 = await _ok({"time_budget": 1})  # lower bound inclusive
     assert p1.structured_requirements["time_budget"] == 1
     pmax = await _ok({"time_budget": 100000})  # upper bound inclusive
     assert pmax.structured_requirements["time_budget"] == 100000
@@ -205,9 +213,9 @@ async def test_normalize_extracted_drops_unknowns_r424(db):
     extracted = ExtractedRequirements(
         required_capabilities=["image_generation", "made_up"],
         preferred_capabilities=["only_bogus"],
-        output_type="hologram",       # unknown enum → dropped
-        difficulty="expert",          # known enum → kept
-        time_budget=999999,           # out of range → dropped
+        output_type="hologram",  # unknown enum → dropped
+        difficulty="expert",  # known enum → kept
+        time_budget=999999,  # out of range → dropped
         goal="build a thing",
     )
     structured, unmatched = svc._normalize_extracted(extracted, keys)
@@ -225,15 +233,14 @@ async def test_normalize_extracted_drops_unknowns_r424(db):
 
     # lower-bound time_budget=1 is VALID and must be KEPT (kills the
     # `1 <= tb` boundary mutants in _normalize — a `<` or `2` would drop it)
-    kept, _ = svc._normalize_extracted(
-        ExtractedRequirements(time_budget=1), keys)
+    kept, _ = svc._normalize_extracted(ExtractedRequirements(time_budget=1), keys)
     assert kept["time_budget"] == 1
     dropped, un = svc._normalize_extracted(
-        ExtractedRequirements(time_budget=0), keys)  # 0 is out of range
+        ExtractedRequirements(time_budget=0), keys
+    )  # 0 is out of range
     assert "time_budget" not in dropped and "0" in un
     # upper-bound 100000 is VALID and kept (kills the  mutant)
-    kept_hi, _ = svc._normalize_extracted(
-        ExtractedRequirements(time_budget=100000), keys)
+    kept_hi, _ = svc._normalize_extracted(ExtractedRequirements(time_budget=100000), keys)
     assert kept_hi["time_budget"] == 100000
 
 
@@ -245,12 +252,10 @@ async def test_confirm_and_update_draft_only_r424(db):
     await _cap(db, "image_generation")
     svc = RequirementProfileService(db)
 
-    prof = await svc.create_from_form(
-        org.id, owner.id, "production", {"goal": "g"}, owner.id)
+    prof = await svc.create_from_form(org.id, owner.id, "production", {"goal": "g"}, owner.id)
 
     # an edit sets provenance to user_entered for the changed key
-    updated = await svc.update_profile(
-        prof.id, org.id, {"output_type": "image"}, owner.id)
+    updated = await svc.update_profile(prof.id, org.id, {"output_type": "image"}, owner.id)
     assert updated.extraction_meta["provenance"]["output_type"] == "user_entered"
 
     # confirm flips status; a second confirm 422s; edits after confirm 423
@@ -267,8 +272,7 @@ async def test_confirm_and_update_draft_only_r424(db):
     assert e_u.value.status_code in (422, 423)
 
     # a non-owner non-instructor cannot confirm/update someone else's draft
-    prof2 = await svc.create_from_form(
-        org.id, owner.id, "production", {"goal": "g"}, owner.id)
+    prof2 = await svc.create_from_form(org.id, owner.id, "production", {"goal": "g"}, owner.id)
     stranger = await _user(db, UserRole.STUDENT)
     with pytest.raises(AppError) as e_perm:
         await svc.update_profile(prof2.id, org.id, {"goal": "x"}, stranger.id)

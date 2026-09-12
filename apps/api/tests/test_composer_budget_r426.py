@@ -46,8 +46,7 @@ def test_propagate_budget_cuts_transitive_r426():
     # chain A -> B -> C (A prereq of B, B prereq of C). Cut A → B and C must
     # transitively become cut_for_budget; only D (independent, 30 min) remains.
     def _e(eid, status, mins):
-        return {"entity_id": eid, "status": status, "estimated_minutes": mins,
-                "reason_code": None}
+        return {"entity_id": eid, "status": status, "estimated_minutes": mins, "reason_code": None}
 
     entries = [
         _e("A", "cut_for_budget", 100),
@@ -75,16 +74,22 @@ def test_propagate_budget_cuts_transitive_r426():
 
     # a DANGLING edge (endpoint not in entries) must be SKIPPED, never crash —
     # kills the `prereq is None or dependent is None` -> `and` mutant
-    entries3 = [{"entity_id": "K", "status": "included", "estimated_minutes": 15,
-                 "reason_code": None}]
+    entries3 = [
+        {"entity_id": "K", "status": "included", "estimated_minutes": 15, "reason_code": None}
+    ]
     total3 = Lc._propagate_budget_cuts(entries3, [("MISSING", "K"), ("K", "ALSO_MISSING")])
     assert entries3[0]["status"] == "included"
     assert total3 == 15
 
 
 async def _user(db):
-    u = User(email=f"r426-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R426", role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r426-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R426",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -93,9 +98,12 @@ async def _user(db):
 async def _org(db, owner):
     from app.services.organization import OrgService
 
-    o = await OrgService(db).create(name=f"R426 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r426-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R426 {uuid.uuid4().hex[:5]}",
+        slug=f"r426-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o
 
@@ -104,10 +112,16 @@ async def _draft(db, org, items, status="draft"):
     from app.models.composer import SolutionDraft
 
     d = SolutionDraft(
-        org_id=org.id, draft_type="learning_path", engine_version="v1", status=status,
-        payload={"items": items,
-                 "estimated_total_minutes": sum(
-                     i["estimated_minutes"] for i in items if i["status"] == "included")},
+        org_id=org.id,
+        draft_type="learning_path",
+        engine_version="v1",
+        status=status,
+        payload={
+            "items": items,
+            "estimated_total_minutes": sum(
+                i["estimated_minutes"] for i in items if i["status"] == "included"
+            ),
+        },
     )
     db.add(d)
     await db.flush()
@@ -115,9 +129,16 @@ async def _draft(db, org, items, status="draft"):
 
 
 def _item(eid, slug, name, mins, prereq_ids=None, status="included"):
-    return {"entity_id": eid, "slug": slug, "name": name, "estimated_minutes": mins,
-            "status": status, "reason_code": None, "prereq_ids": prereq_ids or [],
-            "prereq_slugs": []}
+    return {
+        "entity_id": eid,
+        "slug": slug,
+        "name": name,
+        "estimated_minutes": mins,
+        "status": status,
+        "reason_code": None,
+        "prereq_ids": prereq_ids or [],
+        "prereq_slugs": [],
+    }
 
 
 async def test_update_draft_dependent_guard_r426(db):
@@ -156,8 +177,11 @@ async def test_update_draft_dependent_guard_r426(db):
     # P(prereq of Q), Q, R(independent). Remove R only → success, P & Q intact.
     # (kills the removed_ids `in remove AND included` -> `or` mutant, which
     # would sweep every included item into removed_ids and wrongly block Q.)
-    items3 = [_item("P", "p", "P", 40), _item("Q", "q", "Q", 30, prereq_ids=["P"]),
-              _item("R", "r", "R", 10)]
+    items3 = [
+        _item("P", "p", "P", 40),
+        _item("Q", "q", "Q", 30, prereq_ids=["P"]),
+        _item("R", "r", "R", 10),
+    ]
     d4 = await _draft(db, org, items3)
     up4 = await svc.update_draft(d4.id, org.id, ["R"])
     st4 = {i["entity_id"]: i["status"] for i in up4.payload["items"]}

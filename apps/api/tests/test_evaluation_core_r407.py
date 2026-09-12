@@ -78,9 +78,20 @@ async def _org_sub(db, user, *, enabled=True):
         await svc.update_eval_settings(org.id, {"enabled": True})
     proj_svc = ProjectService(db)
     proj = await proj_svc.create_project(
-        org.id, "R407P", None, "D", "I", "beginner", 100,
+        org.id,
+        "R407P",
+        None,
+        "D",
+        "I",
+        "beginner",
+        100,
         [{"criterion": "Q", "max_score": 100}],
-        None, None, 0, 0, None, user.id,
+        None,
+        None,
+        0,
+        0,
+        None,
+        user.id,
     )
     sub = await proj_svc.create_submission(org.id, proj.id, user.id)
     await proj_svc.submit_draft(sub.id, user.id)
@@ -129,8 +140,12 @@ async def test_prepay_zero_estimate_requires_balance_r407(db):
     # a COMPLETED task with cost 0.001 USD → avg 0.001 → 0.1 minor → 0
     db.add(
         EvaluationTask(
-            org_id=org.id, submission_id=sub.id, type="submission_review",
-            status=EvalStatus.COMPLETED, config={}, cost_usd=Decimal("0.001"),
+            org_id=org.id,
+            submission_id=sub.id,
+            type="submission_review",
+            status=EvalStatus.COMPLETED,
+            config={},
+            cost_usd=Decimal("0.001"),
         )
     )
     await db.flush()
@@ -147,8 +162,11 @@ async def test_prepay_zero_estimate_requires_balance_r407(db):
         # …and a FAILED task retried under the same zero estimate hits the
         # SAME arm (L635) — and the prepay gate cannot be skipped (L634)
         failed = EvaluationTask(
-            org_id=org.id, submission_id=sub.id, type="submission_review",
-            status=EvalStatus.FAILED, config={},
+            org_id=org.id,
+            submission_id=sub.id,
+            type="submission_review",
+            status=EvalStatus.FAILED,
+            config={},
         )
         db.add(failed)
         await db.flush()
@@ -168,16 +186,26 @@ async def test_retry_and_cancel_claims_r407(db):
     # decoys FIRST: one FAILED and one PENDING task — an inverted claim
     # predicate would match these instead of the target
     decoy_failed = EvaluationTask(
-        org_id=org.id, submission_id=sub.id, type="submission_review",
-        status=EvalStatus.FAILED, config={},
+        org_id=org.id,
+        submission_id=sub.id,
+        type="submission_review",
+        status=EvalStatus.FAILED,
+        config={},
     )
     decoy_pending = EvaluationTask(
-        org_id=org.id, submission_id=sub.id, type="submission_review",
-        status=EvalStatus.PENDING, config={},
+        org_id=org.id,
+        submission_id=sub.id,
+        type="submission_review",
+        status=EvalStatus.PENDING,
+        config={},
     )
     completed = EvaluationTask(
-        org_id=org.id, submission_id=sub.id, type="submission_review",
-        status=EvalStatus.COMPLETED, config={}, cost_usd=Decimal("0.05"),
+        org_id=org.id,
+        submission_id=sub.id,
+        type="submission_review",
+        status=EvalStatus.COMPLETED,
+        config={},
+        cost_usd=Decimal("0.05"),
     )
     db.add_all([decoy_failed, decoy_pending, completed])
     await db.flush()
@@ -220,12 +248,26 @@ async def test_estimate_scopes_and_fx_r407(db):
     org, sub = await _org_sub(db, user)
     svc = EvaluationService(db)
 
-    db.add_all([
-        EvaluationTask(org_id=org.id, submission_id=sub.id, type="submission_review",
-                       status=EvalStatus.COMPLETED, config={}, cost_usd=Decimal("7.77")),
-        EvaluationTask(org_id=org.id, submission_id=sub.id, type="submission_review",
-                       status=EvalStatus.FAILED, config={}, cost_usd=Decimal("99.99")),
-    ])
+    db.add_all(
+        [
+            EvaluationTask(
+                org_id=org.id,
+                submission_id=sub.id,
+                type="submission_review",
+                status=EvalStatus.COMPLETED,
+                config={},
+                cost_usd=Decimal("7.77"),
+            ),
+            EvaluationTask(
+                org_id=org.id,
+                submission_id=sub.id,
+                type="submission_review",
+                status=EvalStatus.FAILED,
+                config={},
+                cost_usd=Decimal("99.99"),
+            ),
+        ]
+    )
     await db.flush()
     assert await svc._estimate_eval_cost_minor(org.id) == 777
 
@@ -234,7 +276,9 @@ async def test_estimate_scopes_and_fx_r407(db):
     tenant.currency = "BND"
     db.add(
         FxRate(
-            base_currency="USD", quote_currency="BND", rate=Decimal("2"),
+            base_currency="USD",
+            quote_currency="BND",
+            rate=Decimal("2"),
             effective_from=datetime.now(UTC) - timedelta(days=1),
         )
     )
@@ -257,8 +301,10 @@ async def test_check_budget_legacy_and_cp_codes_r407(db):
     # read as $0 spent)
     db.add(
         EvalUsageMonthly(
-            org_id=org.id, month=_current_month_utc(),
-            total_tasks=1, total_cost_usd=Decimal("50"),
+            org_id=org.id,
+            month=_current_month_utc(),
+            total_tasks=1,
+            total_cost_usd=Decimal("50"),
         )
     )
     await db.flush()
@@ -266,9 +312,7 @@ async def test_check_budget_legacy_and_cp_codes_r407(db):
 
     # under budget → True
     row = (
-        await db.execute(
-            select(EvalUsageMonthly).where(EvalUsageMonthly.org_id == org.id)
-        )
+        await db.execute(select(EvalUsageMonthly).where(EvalUsageMonthly.org_id == org.id))
     ).scalar_one()
     row.total_cost_usd = Decimal("49.99")
     await db.flush()

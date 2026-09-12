@@ -86,8 +86,13 @@ async def _skill(db, org):
     cat = SkillCategory(org_id=org.id, name="C", slug=f"c-{uuid.uuid4().hex[:8]}")
     db.add(cat)
     await db.flush()
-    s = Skill(org_id=org.id, category_id=cat.id, name=f"S {uuid.uuid4().hex[:4]}",
-              slug=f"s-{uuid.uuid4().hex[:8]}", description="dddddddddd")
+    s = Skill(
+        org_id=org.id,
+        category_id=cat.id,
+        name=f"S {uuid.uuid4().hex[:4]}",
+        slug=f"s-{uuid.uuid4().hex[:8]}",
+        description="dddddddddd",
+    )
     db.add(s)
     await db.flush()
     return s
@@ -98,8 +103,20 @@ async def _project(db, org, owner, *, published=True):
     from app.services.project import ProjectService
 
     p = await ProjectService(db).create_project(
-        org.id, f"P {uuid.uuid4().hex[:4]}", None, "d", "i", "beginner", 100,
-        [], None, None, 0, 0, None, owner.id,
+        org.id,
+        f"P {uuid.uuid4().hex[:4]}",
+        None,
+        "d",
+        "i",
+        "beginner",
+        100,
+        [],
+        None,
+        None,
+        0,
+        0,
+        None,
+        owner.id,
     )
     if published:
         p.status = ContentStatus.PUBLISHED
@@ -110,16 +127,26 @@ async def _project(db, org, owner, *, published=True):
 async def _complete_skill(db, org, skill, user):
     from app.models.skill import ProgressStatus, SkillProgress
 
-    db.add(SkillProgress(org_id=org.id, skill_id=skill.id, user_id=user.id,
-                         status=ProgressStatus.COMPLETED))
+    db.add(
+        SkillProgress(
+            org_id=org.id, skill_id=skill.id, user_id=user.id, status=ProgressStatus.COMPLETED
+        )
+    )
     await db.flush()
 
 
 async def _approve_submission(db, org, project, user):
     from app.models.project import Submission, SubmissionStatus
 
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=user.id,
-                      version=1, status=SubmissionStatus.APPROVED))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=user.id,
+            version=1,
+            status=SubmissionStatus.APPROVED,
+        )
+    )
     await db.flush()
 
 
@@ -136,15 +163,34 @@ async def test_progress_done_detection_scoped_by_user_and_org_r421(db):
     sk = await _skill(db, org)
     pr = await _project(db, org, owner)
     # item order: section, skill (required), project (required)
-    db.add_all([
-        LearningPathItem(path_id=path.id, item_type=PathItemType.SECTION,
-                         section_title="Intro", sort_order=0, required=False,
-                         unlock_rule="immediate"),
-        LearningPathItem(path_id=path.id, item_type=PathItemType.SKILL, skill_id=sk.id,
-                         sort_order=1, required=True, unlock_rule="immediate"),
-        LearningPathItem(path_id=path.id, item_type=PathItemType.PROJECT, project_id=pr.id,
-                         sort_order=2, required=True, unlock_rule="immediate"),
-    ])
+    db.add_all(
+        [
+            LearningPathItem(
+                path_id=path.id,
+                item_type=PathItemType.SECTION,
+                section_title="Intro",
+                sort_order=0,
+                required=False,
+                unlock_rule="immediate",
+            ),
+            LearningPathItem(
+                path_id=path.id,
+                item_type=PathItemType.SKILL,
+                skill_id=sk.id,
+                sort_order=1,
+                required=True,
+                unlock_rule="immediate",
+            ),
+            LearningPathItem(
+                path_id=path.id,
+                item_type=PathItemType.PROJECT,
+                project_id=pr.id,
+                sort_order=2,
+                required=True,
+                unlock_rule="immediate",
+            ),
+        ]
+    )
     await db.flush()
 
     # ANOTHER user's completion must NOT count for the learner (L655/L688 scope)
@@ -167,9 +213,16 @@ async def test_progress_done_detection_scoped_by_user_and_org_r421(db):
     # threshold is completed >= total_required with total_required > 0, not
     # >= 0 (which would cert an all-optional path at "0/0")
     opt_path = await svc.create_path(org.id, owner.id, name="Opt")
-    db.add(LearningPathItem(path_id=opt_path.id, item_type=PathItemType.SKILL,
-                            skill_id=sk.id, sort_order=0, required=False,
-                            unlock_rule="immediate"))
+    db.add(
+        LearningPathItem(
+            path_id=opt_path.id,
+            item_type=PathItemType.SKILL,
+            skill_id=sk.id,
+            sort_order=0,
+            required=False,
+            unlock_rule="immediate",
+        )
+    )
     await db.flush()
     opt_prog = await svc.get_path_progress(opt_path.id, learner.id, org.id)
     assert opt_prog["total_required"] == 0
@@ -203,25 +256,49 @@ async def test_progress_wf_pack_done_and_org_scope_r421(db):
     pack = WorkflowPack(owner_org_id=org.id, name="WF", slug=f"wf-{uuid.uuid4().hex[:8]}")
     db.add(pack)
     await db.flush()
-    db.add(WorkflowPackInstallation(org_id=org.id, pack_id=pack.id,
-                                    installed_version="1.0.0", status=InstallStatus.ACTIVE))
+    db.add(
+        WorkflowPackInstallation(
+            org_id=org.id, pack_id=pack.id, installed_version="1.0.0", status=InstallStatus.ACTIVE
+        )
+    )
     path = await svc.create_path(org.id, owner.id, name="WFP")
-    db.add(LearningPathItem(path_id=path.id, item_type=PathItemType.WORKFLOW_PACK,
-                            workflow_pack_id=pack.id, sort_order=0, required=True,
-                            unlock_rule="immediate"))
+    db.add(
+        LearningPathItem(
+            path_id=path.id,
+            item_type=PathItemType.WORKFLOW_PACK,
+            workflow_pack_id=pack.id,
+            sort_order=0,
+            required=True,
+            unlock_rule="immediate",
+        )
+    )
     await db.flush()
 
     # a COMPLETED run in a DIFFERENT org must not count (L697 org scope)
-    db.add(WorkflowRun(org_id=other_org.id, pack_id=pack.id, started_by=learner.id,
-                       definition_snapshot={"steps": [], "edges": []}, inputs={},
-                       status=RunStatus.COMPLETED))
+    db.add(
+        WorkflowRun(
+            org_id=other_org.id,
+            pack_id=pack.id,
+            started_by=learner.id,
+            definition_snapshot={"steps": [], "edges": []},
+            inputs={},
+            status=RunStatus.COMPLETED,
+        )
+    )
     await db.flush()
     assert (await svc.get_path_progress(path.id, learner.id, org.id))["completed"] == 0
 
     # a completed run in THIS org by the learner counts
-    db.add(WorkflowRun(org_id=org.id, pack_id=pack.id, started_by=learner.id,
-                       definition_snapshot={"steps": [], "edges": []}, inputs={},
-                       status=RunStatus.COMPLETED))
+    db.add(
+        WorkflowRun(
+            org_id=org.id,
+            pack_id=pack.id,
+            started_by=learner.id,
+            definition_snapshot={"steps": [], "edges": []},
+            inputs={},
+            status=RunStatus.COMPLETED,
+        )
+    )
     await db.flush()
     assert (await svc.get_path_progress(path.id, learner.id, org.id))["completed"] == 1
 
@@ -239,12 +316,26 @@ async def test_progress_unlock_and_drip_r421(db):
     path = await svc.create_path(org.id, owner.id, name="Unlock")
     s1, s2 = await _skill(db, org), await _skill(db, org)
     # s1 required previous_required (default gate); s2 previous_required too
-    db.add_all([
-        LearningPathItem(path_id=path.id, item_type=PathItemType.SKILL, skill_id=s1.id,
-                         sort_order=0, required=True, unlock_rule="previous_required"),
-        LearningPathItem(path_id=path.id, item_type=PathItemType.SKILL, skill_id=s2.id,
-                         sort_order=1, required=True, unlock_rule="previous_required"),
-    ])
+    db.add_all(
+        [
+            LearningPathItem(
+                path_id=path.id,
+                item_type=PathItemType.SKILL,
+                skill_id=s1.id,
+                sort_order=0,
+                required=True,
+                unlock_rule="previous_required",
+            ),
+            LearningPathItem(
+                path_id=path.id,
+                item_type=PathItemType.SKILL,
+                skill_id=s2.id,
+                sort_order=1,
+                required=True,
+                unlock_rule="previous_required",
+            ),
+        ]
+    )
     await db.flush()
 
     prog = await svc.get_path_progress(path.id, learner.id, org.id)
@@ -260,17 +351,27 @@ async def test_progress_unlock_and_drip_r421(db):
 
     # drip: a future available_after_days puts the item in 'scheduled' when a
     # cohort assignment date exists (both conditions required — L759 and-gate)
-    cohort = Cohort(org_id=org.id, name="D", slug=f"d-{uuid.uuid4().hex[:8]}",
-                    created_by=owner.id)
+    cohort = Cohort(org_id=org.id, name="D", slug=f"d-{uuid.uuid4().hex[:8]}", created_by=owner.id)
     db.add(cohort)
     await db.flush()
-    db.add(CohortMember(cohort_id=cohort.id, user_id=learner.id, role="learner",
-                        joined_at=datetime.now(UTC)))
+    db.add(
+        CohortMember(
+            cohort_id=cohort.id, user_id=learner.id, role="learner", joined_at=datetime.now(UTC)
+        )
+    )
     # add a dripped immediate item so unlock never masks the drip status
     s3 = await _skill(db, org)
-    db.add(LearningPathItem(path_id=path.id, item_type=PathItemType.SKILL, skill_id=s3.id,
-                            sort_order=2, required=False, unlock_rule="immediate",
-                            drip_schedule={"available_after_days": 7}))
+    db.add(
+        LearningPathItem(
+            path_id=path.id,
+            item_type=PathItemType.SKILL,
+            skill_id=s3.id,
+            sort_order=2,
+            required=False,
+            unlock_rule="immediate",
+            drip_schedule={"available_after_days": 7},
+        )
+    )
     await db.flush()
     prog3 = await svc.get_path_progress(path.id, learner.id, org.id, cohort_id=cohort.id)
     drip_row = next(r for r in prog3["items"] if r.get("skill_id") == s3.id)
@@ -320,44 +421,52 @@ async def test_effective_skills_union_and_cohort_scope_r421(db):
     org = await _org(db, owner)
     svc = LearningPathService(db)
 
-    cohort = Cohort(org_id=org.id, name="E", slug=f"e-{uuid.uuid4().hex[:8]}",
-                    created_by=owner.id)
-    other = Cohort(org_id=org.id, name="O", slug=f"o-{uuid.uuid4().hex[:8]}",
-                   created_by=owner.id)
+    cohort = Cohort(org_id=org.id, name="E", slug=f"e-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    other = Cohort(org_id=org.id, name="O", slug=f"o-{uuid.uuid4().hex[:8]}", created_by=owner.id)
     db.add_all([cohort, other])
     await db.flush()
 
     s_direct, s_shared, s_path_only, s_foreign = (
-        await _skill(db, org), await _skill(db, org),
-        await _skill(db, org), await _skill(db, org),
+        await _skill(db, org),
+        await _skill(db, org),
+        await _skill(db, org),
+        await _skill(db, org),
     )
     # direct assignments to OUR cohort: s_direct + s_shared
-    db.add_all([
-        CohortSkillAssignment(cohort_id=cohort.id, skill_id=s_direct.id, assigned_by=owner.id),
-        CohortSkillAssignment(cohort_id=cohort.id, skill_id=s_shared.id, assigned_by=owner.id),
-        # a DIFFERENT cohort's direct assignment must be invisible (L947 scope)
-        CohortSkillAssignment(cohort_id=other.id, skill_id=s_foreign.id, assigned_by=owner.id),
-    ])
+    db.add_all(
+        [
+            CohortSkillAssignment(cohort_id=cohort.id, skill_id=s_direct.id, assigned_by=owner.id),
+            CohortSkillAssignment(cohort_id=cohort.id, skill_id=s_shared.id, assigned_by=owner.id),
+            # a DIFFERENT cohort's direct assignment must be invisible (L947 scope)
+            CohortSkillAssignment(cohort_id=other.id, skill_id=s_foreign.id, assigned_by=owner.id),
+        ]
+    )
     # a path assigned to OUR cohort containing s_shared (dup) + s_path_only
     path = await svc.create_path(org.id, owner.id, name="EP")
-    db.add_all([
-        LearningPathItem(path_id=path.id, item_type=PathItemType.SKILL,
-                         skill_id=s_shared.id, sort_order=0),
-        LearningPathItem(path_id=path.id, item_type=PathItemType.SKILL,
-                         skill_id=s_path_only.id, sort_order=1),
-        LearningPathItem(path_id=path.id, item_type=PathItemType.SECTION,
-                         section_title="x", sort_order=2),
-    ])
+    db.add_all(
+        [
+            LearningPathItem(
+                path_id=path.id, item_type=PathItemType.SKILL, skill_id=s_shared.id, sort_order=0
+            ),
+            LearningPathItem(
+                path_id=path.id, item_type=PathItemType.SKILL, skill_id=s_path_only.id, sort_order=1
+            ),
+            LearningPathItem(
+                path_id=path.id, item_type=PathItemType.SECTION, section_title="x", sort_order=2
+            ),
+        ]
+    )
     await db.flush()
-    db.add(CohortLearningPathAssignment(cohort_id=cohort.id, path_id=path.id,
-                                        assigned_by=owner.id))
+    db.add(CohortLearningPathAssignment(cohort_id=cohort.id, path_id=path.id, assigned_by=owner.id))
     # a path assigned to the OTHER cohort must not leak (L955 scope)
     path2 = await svc.create_path(org.id, owner.id, name="EP2")
-    db.add(LearningPathItem(path_id=path2.id, item_type=PathItemType.SKILL,
-                            skill_id=s_foreign.id, sort_order=0))
+    db.add(
+        LearningPathItem(
+            path_id=path2.id, item_type=PathItemType.SKILL, skill_id=s_foreign.id, sort_order=0
+        )
+    )
     await db.flush()
-    db.add(CohortLearningPathAssignment(cohort_id=other.id, path_id=path2.id,
-                                        assigned_by=owner.id))
+    db.add(CohortLearningPathAssignment(cohort_id=other.id, path_id=path2.id, assigned_by=owner.id))
     await db.flush()
 
     eff = set(await svc.get_effective_skills(cohort.id, org.id))
@@ -379,20 +488,24 @@ async def test_cohort_path_progress_learner_filter_r421(db):
     svc = LearningPathService(db)
     path = await svc.create_path(org.id, owner.id, name="CP")
 
-    cohort = Cohort(org_id=org.id, name="CP", slug=f"cp-{uuid.uuid4().hex[:8]}",
-                    created_by=owner.id)
+    cohort = Cohort(
+        org_id=org.id, name="CP", slug=f"cp-{uuid.uuid4().hex[:8]}", created_by=owner.id
+    )
     db.add(cohort)
     await db.flush()
     l1, l2, instr = (
-        await _user(db, UserRole.STUDENT), await _user(db, UserRole.STUDENT),
+        await _user(db, UserRole.STUDENT),
+        await _user(db, UserRole.STUDENT),
         await _user(db, UserRole.INSTRUCTOR),
     )
-    db.add_all([
-        CohortMember(cohort_id=cohort.id, user_id=l1.id, role="learner"),
-        CohortMember(cohort_id=cohort.id, user_id=l2.id, role="learner"),
-        # an INSTRUCTOR member must be excluded (L994 role filter)
-        CohortMember(cohort_id=cohort.id, user_id=instr.id, role="instructor"),
-    ])
+    db.add_all(
+        [
+            CohortMember(cohort_id=cohort.id, user_id=l1.id, role="learner"),
+            CohortMember(cohort_id=cohort.id, user_id=l2.id, role="learner"),
+            # an INSTRUCTOR member must be excluded (L994 role filter)
+            CohortMember(cohort_id=cohort.id, user_id=instr.id, role="instructor"),
+        ]
+    )
     await db.flush()
 
     rows = await svc.get_cohort_path_progress(path.id, cohort.id, org.id)
@@ -438,8 +551,7 @@ async def test_add_item_validation_and_remove_r421(db):
 
     # a valid skill item, then remove: unknown id 404, wrong path 404
     sk = await _skill(db, org)
-    item = await svc.add_item(path.id, org.id, "skill", skill_id=sk.id,
-                              unlock_rule="immediate")
+    item = await svc.add_item(path.id, org.id, "skill", skill_id=sk.id, unlock_rule="immediate")
     with pytest.raises(AppError) as e_rm:
         await svc.remove_item(str(uuid.uuid4()), path.id, org.id)
     assert e_rm.value.status_code == 404

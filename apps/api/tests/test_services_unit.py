@@ -735,7 +735,9 @@ def test_prompt_injection_delimiter_breakout_neutralized():
     assert "</submission>" not in body
     svc = EvaluationService.__new__(EvaluationService)
     project = Project(
-        title="P", description="d", instructions="i",
+        title="P",
+        description="d",
+        instructions="i",
         rubric=[{"criterion": "Q", "max_score": 100}],
     )
     hostile_prompt = svc._build_user_prompt(project, items)
@@ -744,5 +746,9 @@ def test_prompt_injection_delimiter_breakout_neutralized():
     # The payload must introduce ZERO extra delimiter tags vs a clean
     # submission — the builder's own opener/closer/guard-reference are the
     # only occurrences either way.
-    assert hostile_prompt.count("<submission>") == clean_prompt.count("<submission>"), hostile_prompt
-    assert hostile_prompt.count("</submission>") == clean_prompt.count("</submission>"), hostile_prompt
+    assert hostile_prompt.count("<submission>") == clean_prompt.count("<submission>"), (
+        hostile_prompt
+    )
+    assert hostile_prompt.count("</submission>") == clean_prompt.count("</submission>"), (
+        hostile_prompt
+    )

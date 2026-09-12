@@ -136,7 +136,9 @@ class SkillPackService:
         total = total_r.scalar_one()
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(SkillPack.created_at.desc(), SkillPack.id.desc()).offset(offset).limit(per_page)
+            base.order_by(SkillPack.created_at.desc(), SkillPack.id.desc())
+            .offset(offset)
+            .limit(per_page)
         )
         return list(result.scalars().all()), total
 

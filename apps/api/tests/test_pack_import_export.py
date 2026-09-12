@@ -1305,35 +1305,73 @@ async def test_deep_roundtrip_preserves_content(c):
         "categories": [{"logical_id": "c1", "name": "Cat One", "slug": "cat-one", "sort_order": 2}],
         "skills": [
             {
-                "logical_id": "s-base", "category_logical_id": "c1",
-                "name": "Base Skill", "slug": "s-base", "description": "base d",
-                "learning_content": "# lesson\nbody", "difficulty": "beginner",
-                "estimated_minutes": 30, "tags": ["t1", "t2"], "sort_order": 0,
+                "logical_id": "s-base",
+                "category_logical_id": "c1",
+                "name": "Base Skill",
+                "slug": "s-base",
+                "description": "base d",
+                "learning_content": "# lesson\nbody",
+                "difficulty": "beginner",
+                "estimated_minutes": 30,
+                "tags": ["t1", "t2"],
+                "sort_order": 0,
                 "exercises": [
-                    {"logical_id": "s-base/mcq", "title": "MCQ", "description": "pick",
-                     "type": "multiple_choice",
-                     "config": {"options": ["x", "y", "z"], "correct": [1], "explanation": "y is right"},
-                     "max_score": 50, "sort_order": 0},
-                    {"logical_id": "s-base/txt", "title": "Text", "description": "write",
-                     "type": "text_answer", "config": {}, "max_score": 100, "sort_order": 1},
+                    {
+                        "logical_id": "s-base/mcq",
+                        "title": "MCQ",
+                        "description": "pick",
+                        "type": "multiple_choice",
+                        "config": {
+                            "options": ["x", "y", "z"],
+                            "correct": [1],
+                            "explanation": "y is right",
+                        },
+                        "max_score": 50,
+                        "sort_order": 0,
+                    },
+                    {
+                        "logical_id": "s-base/txt",
+                        "title": "Text",
+                        "description": "write",
+                        "type": "text_answer",
+                        "config": {},
+                        "max_score": 100,
+                        "sort_order": 1,
+                    },
                 ],
                 "prerequisites": [],
             },
             {
-                "logical_id": "s-adv", "category_logical_id": "c1",
-                "name": "Adv Skill", "slug": "s-adv", "description": "adv d",
-                "difficulty": "advanced", "estimated_minutes": 90, "tags": [], "sort_order": 1,
+                "logical_id": "s-adv",
+                "category_logical_id": "c1",
+                "name": "Adv Skill",
+                "slug": "s-adv",
+                "description": "adv d",
+                "difficulty": "advanced",
+                "estimated_minutes": 90,
+                "tags": [],
+                "sort_order": 1,
                 "exercises": [],
                 "prerequisites": ["s-base"],  # edge must survive
             },
         ],
         "project_templates": [
-            {"logical_id": "tmpl-1", "name": "Cap Template", "description": "desc",
-             "instructions": "do the thing", "project_type": "ai_visual",
-             "difficulty": "intermediate", "max_score": 100,
-             "rubric": [{"criterion": "Craft", "max_score": 60}, {"criterion": "Concept", "max_score": 40}],
-             "deliverables": [{"name": "Final", "type": "image", "required": True}],
-             "skill_names": ["Base Skill"], "sort_order": 0},
+            {
+                "logical_id": "tmpl-1",
+                "name": "Cap Template",
+                "description": "desc",
+                "instructions": "do the thing",
+                "project_type": "ai_visual",
+                "difficulty": "intermediate",
+                "max_score": 100,
+                "rubric": [
+                    {"criterion": "Craft", "max_score": 60},
+                    {"criterion": "Concept", "max_score": 40},
+                ],
+                "deliverables": [{"name": "Final", "type": "image", "required": True}],
+                "skill_names": ["Base Skill"],
+                "sort_order": 0,
+            },
         ],
     }
 
@@ -1354,7 +1392,9 @@ async def test_deep_roundtrip_preserves_content(c):
     )
     # Import defaults the version — discover it if not 1.0.0
     if exp.status_code == 404:
-        rels = (await c.get(f"/api/v1/orgs/{oid}/packs/{imported_pack_id}/releases", headers=h)).json()["data"]
+        rels = (
+            await c.get(f"/api/v1/orgs/{oid}/packs/{imported_pack_id}/releases", headers=h)
+        ).json()["data"]
         version = rels[0]["version"]
         exp = await c.get(
             f"/api/v1/orgs/{oid}/packs/{imported_pack_id}/releases/{version}/export", headers=h

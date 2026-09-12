@@ -46,15 +46,30 @@ def test_add_interval_calendar_edges():
 
 
 @_FUZZ
-@given(_dt, st.integers(min_value=1, max_value=400), st.integers(min_value=-5, max_value=450),
-       _money, _money, _seats, _seats, _money)
-def test_proration_total_and_bounded(start, plen, at_off, old_amt, new_amt, old_seats, new_seats, seat_price):
+@given(
+    _dt,
+    st.integers(min_value=1, max_value=400),
+    st.integers(min_value=-5, max_value=450),
+    _money,
+    _money,
+    _seats,
+    _seats,
+    _money,
+)
+def test_proration_total_and_bounded(
+    start, plen, at_off, old_amt, new_amt, old_seats, new_seats, seat_price
+):
     end = start + timedelta(days=plen)
     at = start + timedelta(days=at_off)  # may fall before/after the period
     p = proration_preview(
-        period_start=start, period_end=end, at=at,
-        old_amount_minor=old_amt, new_amount_minor=new_amt,
-        old_seats=old_seats, new_seats=new_seats, seat_price_minor=seat_price,
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=old_amt,
+        new_amount_minor=new_amt,
+        old_seats=old_seats,
+        new_seats=new_seats,
+        seat_price_minor=seat_price,
     )
     assert 0 <= p["days_left"] <= p["total_days"]
     assert p["credit_unused_old_minor"] >= 0
@@ -75,9 +90,14 @@ def test_proration_identity_change_is_free(start, plen, amt, seats, seat_price):
     end = start + timedelta(days=plen)
     for at in (start, start + timedelta(days=plen // 2), end):
         p = proration_preview(
-            period_start=start, period_end=end, at=at,
-            old_amount_minor=amt, new_amount_minor=amt,
-            old_seats=seats, new_seats=seats, seat_price_minor=seat_price,
+            period_start=start,
+            period_end=end,
+            at=at,
+            old_amount_minor=amt,
+            new_amount_minor=amt,
+            old_seats=seats,
+            new_seats=seats,
+            seat_price_minor=seat_price,
         )
         assert p["net_minor"] == 0
 
@@ -87,10 +107,20 @@ def test_proration_identity_change_is_free(start, plen, amt, seats, seat_price):
 def test_proration_monotone_in_time(start, plen, old_amt, new_amt):
     """Later change instant → less unused-old credit and less new-plan charge."""
     end = start + timedelta(days=plen)
-    early = proration_preview(period_start=start, period_end=end, at=start,
-                              old_amount_minor=old_amt, new_amount_minor=new_amt)
-    late = proration_preview(period_start=start, period_end=end, at=end,
-                             old_amount_minor=old_amt, new_amount_minor=new_amt)
+    early = proration_preview(
+        period_start=start,
+        period_end=end,
+        at=start,
+        old_amount_minor=old_amt,
+        new_amount_minor=new_amt,
+    )
+    late = proration_preview(
+        period_start=start,
+        period_end=end,
+        at=end,
+        old_amount_minor=old_amt,
+        new_amount_minor=new_amt,
+    )
     assert late["credit_unused_old_minor"] <= early["credit_unused_old_minor"]
     assert late["charge_new_remaining_minor"] <= early["charge_new_remaining_minor"]
     assert late["days_left"] == 0 and late["credit_unused_old_minor"] == 0
@@ -115,8 +145,34 @@ def test_month_len_exact_table():
     length, both leap and non-leap."""
     from app.controlplane.services.billing import _month_len
 
-    assert [_month_len(2023, m) for m in range(1, 13)] == [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    assert [_month_len(2024, m) for m in range(1, 13)] == [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    assert [_month_len(2023, m) for m in range(1, 13)] == [
+        31,
+        28,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ]
+    assert [_month_len(2024, m) for m in range(1, 13)] == [
+        31,
+        29,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ]
 
 
 def test_add_interval_exact_dates():
@@ -126,9 +182,15 @@ def test_add_interval_exact_dates():
 
     from app.controlplane.services.billing import _add_interval
 
-    assert _add_interval(datetime(2025, 3, 15, tzinfo=UTC), "year") == datetime(2026, 3, 15, tzinfo=UTC)
-    assert _add_interval(datetime(2025, 3, 15, tzinfo=UTC), "month") == datetime(2025, 4, 15, tzinfo=UTC)
-    assert _add_interval(datetime(2023, 2, 28, tzinfo=UTC), "year") == datetime(2024, 2, 28, tzinfo=UTC)
+    assert _add_interval(datetime(2025, 3, 15, tzinfo=UTC), "year") == datetime(
+        2026, 3, 15, tzinfo=UTC
+    )
+    assert _add_interval(datetime(2025, 3, 15, tzinfo=UTC), "month") == datetime(
+        2025, 4, 15, tzinfo=UTC
+    )
+    assert _add_interval(datetime(2023, 2, 28, tzinfo=UTC), "year") == datetime(
+        2024, 2, 28, tzinfo=UTC
+    )
 
 
 def test_proration_exact_numbers():
@@ -140,20 +202,23 @@ def test_proration_exact_numbers():
 
     start, end = datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 31, tzinfo=UTC)
     mid = datetime(2026, 1, 16, tzinfo=UTC)  # 15/30 days used
-    p = proration_preview(period_start=start, period_end=end, at=mid,
-                          old_amount_minor=3000, new_amount_minor=6000)
+    p = proration_preview(
+        period_start=start, period_end=end, at=mid, old_amount_minor=3000, new_amount_minor=6000
+    )
     assert p["total_days"] == 30 and p["days_left"] == 15
-    assert p["credit_unused_old_minor"] == 1500   # 3000/30*15
+    assert p["credit_unused_old_minor"] == 1500  # 3000/30*15
     assert p["charge_new_remaining_minor"] == 3000  # 6000/30*15
     assert p["net_minor"] == 1500 and p["mode"] == "immediate"
 
-    down = proration_preview(period_start=start, period_end=end, at=mid,
-                             old_amount_minor=6000, new_amount_minor=3000)
+    down = proration_preview(
+        period_start=start, period_end=end, at=mid, old_amount_minor=6000, new_amount_minor=3000
+    )
     assert down["net_minor"] == -1500 and down["mode"] == "next_period_default"
 
     # net == 0 must be "immediate" (>= not >) — kills L149 GtE→Gt
-    same = proration_preview(period_start=start, period_end=end, at=mid,
-                             old_amount_minor=3000, new_amount_minor=3000)
+    same = proration_preview(
+        period_start=start, period_end=end, at=mid, old_amount_minor=3000, new_amount_minor=3000
+    )
     assert same["net_minor"] == 0 and same["mode"] == "immediate"
 
 
@@ -170,10 +235,17 @@ def test_proration_seat_band_exact():
     # covered = (10-2)*100 = 800; correct = (max(10,10)-5)*100 = 500
     # seat component = (500-800)/30 * 15 = -150
     p = proration_preview(
-        period_start=start, period_end=end, at=mid,
-        old_amount_minor=0, new_amount_minor=0,
-        old_seats=10, new_seats=10, seat_price_minor=100,
-        billable_seats=10, old_included_seats=2, new_included_seats=5,
+        period_start=start,
+        period_end=end,
+        at=mid,
+        old_amount_minor=0,
+        new_amount_minor=0,
+        old_seats=10,
+        new_seats=10,
+        seat_price_minor=100,
+        billable_seats=10,
+        old_included_seats=2,
+        new_included_seats=5,
     )
     assert p["seat_proration_minor"] == -150, p
 
@@ -181,10 +253,17 @@ def test_proration_seat_band_exact():
     # floor — new_seats=4 below band 10 must NOT produce a refund beyond the
     # included-seat delta (band holds at 10).
     q = proration_preview(
-        period_start=start, period_end=end, at=mid,
-        old_amount_minor=0, new_amount_minor=0,
-        old_seats=10, new_seats=4, seat_price_minor=100,
-        billable_seats=10, old_included_seats=0, new_included_seats=0,
+        period_start=start,
+        period_end=end,
+        at=mid,
+        old_amount_minor=0,
+        new_amount_minor=0,
+        old_seats=10,
+        new_seats=4,
+        seat_price_minor=100,
+        billable_seats=10,
+        old_included_seats=0,
+        new_included_seats=0,
     )
     # covered = 10*100 = 1000; correct = max(4,10)*100 = 1000 → 0
     assert q["seat_proration_minor"] == 0, q
@@ -198,8 +277,12 @@ def test_add_interval_march31_into_leap_year():
 
     from app.controlplane.services.billing import _add_interval
 
-    assert _add_interval(datetime(2027, 3, 31, tzinfo=UTC), "year") == datetime(2028, 3, 31, tzinfo=UTC)
-    assert _add_interval(datetime(2027, 1, 31, tzinfo=UTC), "year") == datetime(2028, 1, 31, tzinfo=UTC)
+    assert _add_interval(datetime(2027, 3, 31, tzinfo=UTC), "year") == datetime(
+        2028, 3, 31, tzinfo=UTC
+    )
+    assert _add_interval(datetime(2027, 1, 31, tzinfo=UTC), "year") == datetime(
+        2028, 1, 31, tzinfo=UTC
+    )
 
 
 def test_proration_degenerate_denominators():
@@ -211,8 +294,9 @@ def test_proration_degenerate_denominators():
     from app.controlplane.services.billing import proration_preview
 
     t = datetime(2026, 5, 1, tzinfo=UTC)
-    p = proration_preview(period_start=t, period_end=t, at=t,
-                          old_amount_minor=3000, new_amount_minor=3000)
+    p = proration_preview(
+        period_start=t, period_end=t, at=t, old_amount_minor=3000, new_amount_minor=3000
+    )
     assert p["total_days"] == 1 and p["days_left"] == 1 - max(min(0, 1), 0)
     assert p["net_minor"] == 0
 
@@ -220,9 +304,14 @@ def test_proration_degenerate_denominators():
     # explicit 0 to the period length (0 is falsy) — so natural_days=0
     # behaves exactly like None. This makes the max(...,1)-floor mutant
     # EQUIVALENT (documented, not chased); assert the collapse itself.
-    q = proration_preview(period_start=t, period_end=t.replace(day=11), at=t,
-                          old_amount_minor=1000, new_amount_minor=2000,
-                          natural_days=0)
+    q = proration_preview(
+        period_start=t,
+        period_end=t.replace(day=11),
+        at=t,
+        old_amount_minor=1000,
+        new_amount_minor=2000,
+        natural_days=0,
+    )
     assert q["credit_unused_old_minor"] == 1000
     assert q["charge_new_remaining_minor"] == 2000
 
@@ -241,10 +330,13 @@ def test_one_day_period_full_refund_exact():
     start = datetime(2026, 3, 1, tzinfo=UTC)
     end = start + timedelta(days=1)
     p = proration_preview(
-        period_start=start, period_end=end, at=start,
-        old_amount_minor=3000, new_amount_minor=5000,
+        period_start=start,
+        period_end=end,
+        at=start,
+        old_amount_minor=3000,
+        new_amount_minor=5000,
     )
     assert p["total_days"] == 1 and p["days_left"] == 1
-    assert p["credit_unused_old_minor"] == 3000   # full unused credit
+    assert p["credit_unused_old_minor"] == 3000  # full unused credit
     assert p["charge_new_remaining_minor"] == 5000
     assert p["net_minor"] == 2000

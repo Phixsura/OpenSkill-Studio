@@ -1,6 +1,7 @@
 """R206b: CrossHair contracts — semver total-order + proration conservation.
 Run: crosshair check /tmp/crosshair_contracts2.py --per_condition_timeout=20
 """
+
 from datetime import UTC, datetime, timedelta
 
 from app.controlplane.services.billing import proration_preview
@@ -43,8 +44,13 @@ def proration_net_is_component_sum(old_amt: int, new_amt: int, offset: int) -> b
     start = datetime(2026, 1, 1, tzinfo=UTC)
     end = start + timedelta(days=30)
     at = start + timedelta(days=offset)
-    p = proration_preview(period_start=start, period_end=end, at=at,
-                          old_amount_minor=old_amt, new_amount_minor=new_amt)
+    p = proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=old_amt,
+        new_amount_minor=new_amt,
+    )
     return p["net_minor"] == (
         p["charge_new_remaining_minor"] - p["credit_unused_old_minor"] + p["seat_proration_minor"]
     )
@@ -58,6 +64,7 @@ def proration_days_left_bounded(offset: int) -> bool:
     start = datetime(2026, 1, 1, tzinfo=UTC)
     end = start + timedelta(days=30)
     at = start + timedelta(days=offset)
-    p = proration_preview(period_start=start, period_end=end, at=at,
-                          old_amount_minor=1000, new_amount_minor=2000)
+    p = proration_preview(
+        period_start=start, period_end=end, at=at, old_amount_minor=1000, new_amount_minor=2000
+    )
     return 0 <= p["days_left"] <= p["total_days"]

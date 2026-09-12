@@ -404,8 +404,9 @@ async def test_outbox_requeue_and_ops_list_endpoints(db):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             hdr = {"Authorization": f"Bearer {token}"}
 
-            r = await c.get("/api/v1/platform/outbox/failed",
-                            params={"topic": "period.close_due"}, headers=hdr)
+            r = await c.get(
+                "/api/v1/platform/outbox/failed", params={"topic": "period.close_due"}, headers=hdr
+            )
             assert r.status_code == 200, r.text
             assert any(m["id"] == dead_id for m in r.json()["data"])
 
@@ -413,7 +414,7 @@ async def test_outbox_requeue_and_ops_list_endpoints(db):
             assert r.status_code == 404
 
             r = await c.post(f"/api/v1/platform/outbox/{done_id}/requeue", headers=hdr)
-            assert r.status_code == 409                    # done rows stay done
+            assert r.status_code == 409  # done rows stay done
             assert r.json()["error"]["code"] == "OUTBOX_NOT_FAILED"
 
             r = await c.post(f"/api/v1/platform/outbox/{dead_id}/requeue", headers=hdr)
@@ -422,8 +423,7 @@ async def test_outbox_requeue_and_ops_list_endpoints(db):
 
             r = await c.get("/api/v1/platform/invoices", headers=hdr)
             assert r.status_code == 200 and "meta" in r.json()
-            r = await c.get("/api/v1/platform/settlements",
-                            params={"status": "draft"}, headers=hdr)
+            r = await c.get("/api/v1/platform/settlements", params={"status": "draft"}, headers=hdr)
             assert r.status_code == 200 and "data" in r.json()
     finally:
         app.router.lifespan_context = orig
@@ -431,7 +431,7 @@ async def test_outbox_requeue_and_ops_list_endpoints(db):
     async with AsyncSessionLocal() as check:
         row = await check.get(OutboxMessage, dead_id)
         assert row.status == "pending" and row.attempts == 0
-        assert row.last_error is None                      # fully reset
+        assert row.last_error is None  # fully reset
         # cleanup the committed test rows
         for mid in (dead_id, done_id):
             m = await check.get(OutboxMessage, mid)
@@ -462,26 +462,56 @@ async def test_settlement_entry_trace_resolves_all_source_shapes(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     invoice = Invoice(
-        tenant_id=tenant.id, currency="USD", status="open",
-        subtotal_minor=10000, total_minor=10000, amount_due_minor=10000)
+        tenant_id=tenant.id,
+        currency="USD",
+        status="open",
+        subtotal_minor=10000,
+        total_minor=10000,
+        amount_due_minor=10000,
+    )
     db.add(invoice)
     await db.flush()
     note = CreditNote(
-        invoice_id=invoice.id, tenant_id=tenant.id, amount_minor=1000,
-        currency="USD", reason="adj", created_by=user.id)
+        invoice_id=invoice.id,
+        tenant_id=tenant.id,
+        amount_minor=1000,
+        currency="USD",
+        reason="adj",
+        created_by=user.id,
+    )
     db.add(note)
     await db.flush()
 
     e_inv = await _insert_entry(
-        db, beneficiary_type="partner", partner_id=None, beneficiary_org_id=None,
-        source_type="invoice", source_id=invoice.id, rule_id=None,
-        rule_snapshot={}, revenue_base_minor=10000, share_amount_minor=1000,
-        currency="USD", period="2026-09", status="accrued")
+        db,
+        beneficiary_type="partner",
+        partner_id=None,
+        beneficiary_org_id=None,
+        source_type="invoice",
+        source_id=invoice.id,
+        rule_id=None,
+        rule_snapshot={},
+        revenue_base_minor=10000,
+        share_amount_minor=1000,
+        currency="USD",
+        period="2026-09",
+        status="accrued",
+    )
     e_note = await _insert_entry(
-        db, beneficiary_type="partner", partner_id=None, beneficiary_org_id=None,
-        source_type="invoice_line", source_id=note.id, rule_id=None,
-        rule_snapshot={}, revenue_base_minor=-1000, share_amount_minor=-100,
-        currency="USD", period="2026-09", status="accrued")
+        db,
+        beneficiary_type="partner",
+        partner_id=None,
+        beneficiary_org_id=None,
+        source_type="invoice_line",
+        source_id=note.id,
+        rule_id=None,
+        rule_snapshot={},
+        revenue_base_minor=-1000,
+        share_amount_minor=-100,
+        currency="USD",
+        period="2026-09",
+        status="accrued",
+    )
     await db.commit()
     token = create_access_token(admin.id, admin.email, admin.role.value)
     ids = dict(inv=e_inv.id, note=e_note.id, invoice=invoice.id)
@@ -495,19 +525,16 @@ async def test_settlement_entry_trace_resolves_all_source_shapes(db):
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             hdr = {"Authorization": f"Bearer {token}"}
-            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{str(ULID())}",
-                            headers=hdr)
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{str(ULID())}", headers=hdr)
             assert r.status_code == 404
 
-            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{ids['inv']}",
-                            headers=hdr)
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{ids['inv']}", headers=hdr)
             assert r.status_code == 200, r.text
             src = r.json()["data"]["source"]
             assert src["type"] == "invoice" and src["invoice_id"] == ids["invoice"]
 
             # R48[34]: credit-note natural key resolves through the note
-            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{ids['note']}",
-                            headers=hdr)
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{ids['note']}", headers=hdr)
             assert r.status_code == 200, r.text
             src = r.json()["data"]["source"]
             assert src is not None, "credit-note-sourced entry traced to null"
@@ -536,10 +563,18 @@ async def test_resolve_reconciliation_report(db):
     admin = await _mk_user(db)
     db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
     report = ReconciliationReport(
-        provider="acme", usage_type="image_generation", period="2026-09",
-        provider_reported_quantity=Decimal(100), provider_reported_cost_minor=5000,
-        currency="USD", platform_quantity=Decimal(98), platform_cost_minor=4900,
-        delta_quantity=Decimal(2), delta_cost_minor=100, status="open")
+        provider="acme",
+        usage_type="image_generation",
+        period="2026-09",
+        provider_reported_quantity=Decimal(100),
+        provider_reported_cost_minor=5000,
+        currency="USD",
+        platform_quantity=Decimal(98),
+        platform_cost_minor=4900,
+        delta_quantity=Decimal(2),
+        delta_cost_minor=100,
+        status="open",
+    )
     db.add(report)
     await db.commit()
     token = create_access_token(admin.id, admin.email, admin.role.value)
@@ -554,18 +589,27 @@ async def test_resolve_reconciliation_report(db):
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             hdr = {"Authorization": f"Bearer {token}"}
-            r = await c.patch(f"/api/v1/platform/reconciliation/reports/{str(ULID())}",
-                              headers=hdr, json={"reason": "unknown report probe"})
+            r = await c.patch(
+                f"/api/v1/platform/reconciliation/reports/{str(ULID())}",
+                headers=hdr,
+                json={"reason": "unknown report probe"},
+            )
             assert r.status_code == 404
 
-            r = await c.patch(f"/api/v1/platform/reconciliation/reports/{rid}",
-                              headers=hdr, json={"reason": "provider re-billed the 2 missing"})
+            r = await c.patch(
+                f"/api/v1/platform/reconciliation/reports/{rid}",
+                headers=hdr,
+                json={"reason": "provider re-billed the 2 missing"},
+            )
             assert r.status_code == 200, r.text
             assert r.json()["data"]["status"] == "resolved"
 
             # re-resolve is idempotent (no conflict)
-            r = await c.patch(f"/api/v1/platform/reconciliation/reports/{rid}",
-                              headers=hdr, json={"reason": "confirmed"})
+            r = await c.patch(
+                f"/api/v1/platform/reconciliation/reports/{rid}",
+                headers=hdr,
+                json={"reason": "confirmed"},
+            )
             assert r.status_code == 200
     finally:
         app.router.lifespan_context = orig
@@ -590,25 +634,47 @@ async def test_trace_settlement_entry_purchase_source(db):
 
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
-    lst = MarketplaceListing(product_type="skill_pack", product_id=str(ULID()),
-                             seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
-                             offer_type="paid", price_minor=100, currency="USD",
-                             platform_commission_pct=Decimal("20"), status="active",
-                             created_by=user.id)
+    lst = MarketplaceListing(
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        seller_org_id=str(ULID()),
+        seller_tenant_id=str(ULID()),
+        offer_type="paid",
+        price_minor=100,
+        currency="USD",
+        platform_commission_pct=Decimal("20"),
+        status="active",
+        created_by=user.id,
+    )
     db.add(lst)
     await db.flush()
     pur = MarketplacePurchase(
-        listing_id=lst.id, buyer_tenant_id=tenant.id, buyer_org_id=str(ULID()),
-        purchaser_user_id=user.id, status="paid", amount_minor=100,
-        currency="USD", platform_fee_minor=20, seller_share_minor=80,
-        partner_share_minor=0, economics_snapshot={})
+        listing_id=lst.id,
+        buyer_tenant_id=tenant.id,
+        buyer_org_id=str(ULID()),
+        purchaser_user_id=user.id,
+        status="paid",
+        amount_minor=100,
+        currency="USD",
+        platform_fee_minor=20,
+        seller_share_minor=80,
+        partner_share_minor=0,
+        economics_snapshot={},
+    )
     db.add(pur)
     await db.flush()
     entry = RevenueShareEntry(
-        beneficiary_type="seller_org", beneficiary_org_id=lst.seller_org_id,
-        source_type="marketplace_purchase", source_id=pur.id,
-        rule_snapshot={}, revenue_base_minor=100, share_amount_minor=80,
-        currency="USD", period="2026-09", status="accrued")
+        beneficiary_type="seller_org",
+        beneficiary_org_id=lst.seller_org_id,
+        source_type="marketplace_purchase",
+        source_id=pur.id,
+        rule_snapshot={},
+        revenue_base_minor=100,
+        share_amount_minor=80,
+        currency="USD",
+        period="2026-09",
+        status="accrued",
+    )
     db.add(entry)
     await db.flush()
     data = (await ops.trace_settlement_entry(entry.id, _user=user, db=db))["data"]

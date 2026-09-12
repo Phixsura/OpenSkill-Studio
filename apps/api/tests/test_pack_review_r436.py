@@ -31,8 +31,13 @@ async def db():
 
 
 async def _user(db):
-    u = User(email=f"r436-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R436", role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r436-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R436",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -41,16 +46,25 @@ async def _user(db):
 async def _org(db, owner):
     from app.services.organization import OrgService
 
-    o = await OrgService(db).create(name=f"R436 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r436-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R436 {uuid.uuid4().hex[:5]}",
+        slug=f"r436-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o
 
 
 async def _pack(db, org, creator, *, status=PackStatus.PUBLISHED, vis=PackVisibility.PUBLIC):
-    p = SkillPack(owner_org_id=org.id, name="P", slug=f"p-{uuid.uuid4().hex[:10]}",
-                  created_by=creator.id, status=status, visibility=vis)
+    p = SkillPack(
+        owner_org_id=org.id,
+        name="P",
+        slug=f"p-{uuid.uuid4().hex[:10]}",
+        created_by=creator.id,
+        status=status,
+        visibility=vis,
+    )
     db.add(p)
     await db.flush()
     return p
@@ -64,6 +78,7 @@ async def test_create_review_gates_and_stats_r436(db):
     svc = PackReviewService(db)
     creator = await _user(db)
     from app.services.organization import OrgService
+
     await OrgService(db).add_member(org.id, creator.id, OrgRole.STUDENT)
     pack = await _pack(db, org, creator)
 
@@ -169,8 +184,8 @@ async def test_distribution_and_helpful_and_delete_r436(db):
 
     from app.models.pack_review import PackReview
 
-    a_review = (await db.execute(
-        select(PackReview).where(PackReview.pack_id == pack.id).limit(1))
+    a_review = (
+        await db.execute(select(PackReview).where(PackReview.pack_id == pack.id).limit(1))
     ).scalar_one()
     voter = await _user(db)
     v1 = await svc.toggle_helpful(a_review.id, voter.id)
@@ -185,8 +200,8 @@ async def test_distribution_and_helpful_and_delete_r436(db):
     assert after == before - 1
 
     # deleting someone else's review → 403
-    other_review = (await db.execute(
-        select(PackReview).where(PackReview.pack_id == pack.id).limit(1))
+    other_review = (
+        await db.execute(select(PackReview).where(PackReview.pack_id == pack.id).limit(1))
     ).scalar_one()
     intruder = await _user(db)
     with pytest.raises(AppError) as e_del:

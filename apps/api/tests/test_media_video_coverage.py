@@ -131,8 +131,11 @@ async def test_fetch_image_rejects_unsupported_media_type():
         mock_body.read = AsyncMock(return_value=fake_body)
         mock_client = AsyncMock()
         mock_client.get_object = AsyncMock(
-            return_value={"ContentType": hostile_ct, "ContentLength": len(fake_body),
-                          "Body": mock_body}
+            return_value={
+                "ContentType": hostile_ct,
+                "ContentLength": len(fake_body),
+                "Body": mock_body,
+            }
         )
 
         async def fake_get_s3(_c=mock_client):

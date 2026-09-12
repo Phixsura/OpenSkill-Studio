@@ -30,8 +30,12 @@ _cost = st.decimals(min_value="0.000001", max_value="100", places=6)
 
 
 @_FUZZ
-@given(st.integers(min_value=0, max_value=10**9), _cur, _cur,
-       st.decimals(min_value="0.01", max_value="1000", places=8))
+@given(
+    st.integers(min_value=0, max_value=10**9),
+    _cur,
+    _cur,
+    st.decimals(min_value="0.01", max_value="1000", places=8),
+)
 def test_fx_scaling_relation(amount, a, b, rate):
     """MR-1 (linearity): converting 2x the amount converts to ~2x the result
     (within 1 minor unit of rounding). A dropped minor_multiplier or a
@@ -42,15 +46,22 @@ def test_fx_scaling_relation(amount, a, b, rate):
 
 
 @_FUZZ
-@given(st.integers(min_value=0, max_value=10**7), _cur, _cur,
-       st.decimals(min_value="0.1", max_value="10", places=6))
+@given(
+    st.integers(min_value=0, max_value=10**7),
+    _cur,
+    _cur,
+    st.decimals(min_value="0.1", max_value="10", places=6),
+)
 def test_fx_exact_is_unrounded_superset(amount, a, b, rate):
     """MR-2 (exact≥rounded consistency): convert_exact then round == convert_minor
     (the invoice-rounds-the-sum-once contract, R75). A divergence means the
     two converters drifted apart — double-billing risk at scale."""
     from decimal import ROUND_HALF_UP
+
     ex = convert_exact(Decimal(amount), rate, a, b)
-    assert int(ex.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) == convert_minor(amount, rate, a, b)
+    assert int(ex.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) == convert_minor(
+        amount, rate, a, b
+    )
 
 
 # ── Internal cost ────────────────────────────────────────────
@@ -92,15 +103,24 @@ def test_cost_min_fee_is_floor_not_ceiling(cost, qty):
 
 
 @_FUZZ
-@given(st.integers(min_value=1, max_value=10**8),
-       st.decimals(min_value="0", max_value="500", places=2))
+@given(
+    st.integers(min_value=1, max_value=10**8), st.decimals(min_value="0", max_value="500", places=2)
+)
 def test_cost_plus_percentage_monotone_in_markup(icost, pct):
     """MR-6: a higher markup % never bills less than a lower one on the same
     internal cost."""
-    lo = compute_billable_minor("cost_plus_percentage", {"percentage": float(pct)},
-                                internal_cost_minor=icost, quantity=Decimal(1))
-    hi = compute_billable_minor("cost_plus_percentage", {"percentage": float(pct) + 10},
-                                internal_cost_minor=icost, quantity=Decimal(1))
+    lo = compute_billable_minor(
+        "cost_plus_percentage",
+        {"percentage": float(pct)},
+        internal_cost_minor=icost,
+        quantity=Decimal(1),
+    )
+    hi = compute_billable_minor(
+        "cost_plus_percentage",
+        {"percentage": float(pct) + 10},
+        internal_cost_minor=icost,
+        quantity=Decimal(1),
+    )
     assert hi >= lo >= icost  # cost-plus never bills below cost for +markup
 
 
@@ -108,21 +128,34 @@ def test_cost_plus_percentage_monotone_in_markup(icost, pct):
 
 
 @_FUZZ
-@given(st.integers(min_value=1000, max_value=10**8),
-       st.integers(min_value=1000, max_value=10**8),
-       st.integers(min_value=2, max_value=180))
+@given(
+    st.integers(min_value=1000, max_value=10**8),
+    st.integers(min_value=1000, max_value=10**8),
+    st.integers(min_value=2, max_value=180),
+)
 def test_proration_fee_scaling(old_amt, new_amt, plen):
     """MR-7 (proration linearity): doubling BOTH plan fees doubles both
     prorated components (within rounding). A per-day denominator bug that
     scales one side breaks this even when a single point looks right."""
     from datetime import UTC, datetime, timedelta
+
     start = datetime(2026, 1, 1, tzinfo=UTC)
     end = start + timedelta(days=plen)
     at = start + timedelta(days=plen // 2)
-    base = proration_preview(period_start=start, period_end=end, at=at,
-                             old_amount_minor=old_amt, new_amount_minor=new_amt)
-    dbl = proration_preview(period_start=start, period_end=end, at=at,
-                            old_amount_minor=old_amt * 2, new_amount_minor=new_amt * 2)
+    base = proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=old_amt,
+        new_amount_minor=new_amt,
+    )
+    dbl = proration_preview(
+        period_start=start,
+        period_end=end,
+        at=at,
+        old_amount_minor=old_amt * 2,
+        new_amount_minor=new_amt * 2,
+    )
     assert abs(dbl["credit_unused_old_minor"] - 2 * base["credit_unused_old_minor"]) <= 1
     assert abs(dbl["charge_new_remaining_minor"] - 2 * base["charge_new_remaining_minor"]) <= 1
 
@@ -133,11 +166,17 @@ def test_proration_time_symmetry(amount, plen):
     """MR-8: for the SAME plan (no change), credit for unused == charge for
     remaining at every instant — the two halves of a no-op change mirror."""
     from datetime import UTC, datetime, timedelta
+
     start = datetime(2026, 1, 1, tzinfo=UTC)
     end = start + timedelta(days=plen)
     for frac in (1, 2, 3):
         at = start + timedelta(days=plen * frac // 4)
-        p = proration_preview(period_start=start, period_end=end, at=at,
-                              old_amount_minor=amount, new_amount_minor=amount)
+        p = proration_preview(
+            period_start=start,
+            period_end=end,
+            at=at,
+            old_amount_minor=amount,
+            new_amount_minor=amount,
+        )
         assert p["credit_unused_old_minor"] == p["charge_new_remaining_minor"]
         assert p["net_minor"] == 0

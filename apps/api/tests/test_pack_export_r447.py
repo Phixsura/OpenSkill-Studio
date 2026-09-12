@@ -32,21 +32,30 @@ async def db():
 async def _release(db, manifest, version="1.0.0"):
     from app.services.organization import OrgService
 
-    owner = User(email=f"r447-{uuid.uuid4().hex[:10]}@t.com",
-                 password_hash=hash_password("Test123!"), display_name="R447",
-                 role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    owner = User(
+        email=f"r447-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R447",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(owner)
     await db.flush()
-    org = await OrgService(db).create(name=f"R447 {uuid.uuid4().hex[:5]}",
-                                      slug=f"r447-{uuid.uuid4().hex[:10]}",
-                                      description=None, created_by=owner.id)
+    org = await OrgService(db).create(
+        name=f"R447 {uuid.uuid4().hex[:5]}",
+        slug=f"r447-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
-    pack = SkillPack(owner_org_id=org.id, name="P", slug=f"p-{uuid.uuid4().hex[:8]}",
-                     created_by=owner.id)
+    pack = SkillPack(
+        owner_org_id=org.id, name="P", slug=f"p-{uuid.uuid4().hex[:8]}", created_by=owner.id
+    )
     db.add(pack)
     await db.flush()
-    rel = SkillPackRelease(pack_id=pack.id, version=version, manifest=manifest,
-                           checksum="x" * 64, released_by=owner.id)
+    rel = SkillPackRelease(
+        pack_id=pack.id, version=version, manifest=manifest, checksum="x" * 64, released_by=owner.id
+    )
     db.add(rel)
     await db.flush()
     return pack, rel

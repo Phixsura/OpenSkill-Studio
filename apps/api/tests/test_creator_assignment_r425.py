@@ -69,8 +69,20 @@ async def _project(db, org, owner, *, published=True):
     from app.services.project import ProjectService
 
     p = await ProjectService(db).create_project(
-        org.id, f"P {uuid.uuid4().hex[:4]}", None, "d", "i", "beginner", 100,
-        [], None, None, 0, 0, None, owner.id,
+        org.id,
+        f"P {uuid.uuid4().hex[:4]}",
+        None,
+        "d",
+        "i",
+        "beginner",
+        100,
+        [],
+        None,
+        None,
+        0,
+        0,
+        None,
+        owner.id,
     )
     if published:
         p.status = ContentStatus.PUBLISHED
@@ -112,8 +124,9 @@ async def test_offer_cross_org_and_guards_r425(db):
 
     # a bogus match_run_id (loose ref) → 404
     with pytest.raises(AppError) as e_mr:
-        await svc.offer_assignment(org.id, proj.id, creator.id, owner.id,
-                                   match_run_id=str(uuid.uuid4()))
+        await svc.offer_assignment(
+            org.id, proj.id, creator.id, owner.id, match_run_id=str(uuid.uuid4())
+        )
     assert e_mr.value.code == "MATCH_RUN_NOT_FOUND"
 
 

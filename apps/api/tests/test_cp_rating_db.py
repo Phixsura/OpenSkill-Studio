@@ -1195,11 +1195,7 @@ async def test_concurrent_cost_rate_creates_cannot_overlap():
         assert outcomes == ["COST_RATE_OVERLAP"], outcomes
         async with AsyncSessionLocal() as s:
             rows = (
-                (
-                    await s.execute(
-                        select(ProviderCostRate).where(ProviderCostRate.provider == dims)
-                    )
-                )
+                (await s.execute(select(ProviderCostRate).where(ProviderCostRate.provider == dims)))
                 .scalars()
                 .all()
             )
@@ -1216,9 +1212,7 @@ def test_min_fee_not_applied_to_zero_cost():
     paths so a `> → >=` mutation is killed."""
     # zero quantity, min fee set → stays 0, never floored to 50
     assert rating.compute_internal_cost_minor(Decimal("0.018"), Decimal(0), "USD", 50) == 0
-    assert rating.compute_internal_cost_exact(
-        Decimal("0.018"), Decimal(0), "USD", 50
-    ) == Decimal(0)
+    assert rating.compute_internal_cost_exact(Decimal("0.018"), Decimal(0), "USD", 50) == Decimal(0)
     # zero unit cost, positive quantity, min fee → also 0 (no real charge)
     assert rating.compute_internal_cost_minor(Decimal("0"), Decimal(10), "USD", 50) == 0
     # a genuine positive charge below the floor IS raised to it (control)
@@ -1246,18 +1240,33 @@ def test_compute_billable_exact_mirrors_minor():
     matrix directly so its operators (pct, block ceiling, unit price, quota)
     are mutation-covered without a DB."""
     fe = rating.compute_billable_exact
-    assert fe("cost_plus_percentage", {"percentage": "50"},
-              internal_cost_exact=Decimal(100), quantity=Decimal(1)) == Decimal(150)
+    assert fe(
+        "cost_plus_percentage",
+        {"percentage": "50"},
+        internal_cost_exact=Decimal(100),
+        quantity=Decimal(1),
+    ) == Decimal(150)
     # unit price accumulates the sub-minor remainder (0.4), not rounded to 0
-    assert fe("fixed_unit_price", {"unit_price_minor": 1, "per_quantity": "1000000"},
-              internal_cost_exact=Decimal(0), quantity=Decimal(400000)) == Decimal("0.4")
+    assert fe(
+        "fixed_unit_price",
+        {"unit_price_minor": 1, "per_quantity": "1000000"},
+        internal_cost_exact=Decimal(0),
+        quantity=Decimal(400000),
+    ) == Decimal("0.4")
     # block markup: 1400/1000 → 2 blocks
-    assert fe("cost_plus_fixed", {"fixed_markup_minor": 500, "per_quantity": "1000"},
-              internal_cost_exact=Decimal(100), quantity=Decimal(1400)) == Decimal(100 + 1000)
+    assert fe(
+        "cost_plus_fixed",
+        {"fixed_markup_minor": 500, "per_quantity": "1000"},
+        internal_cost_exact=Decimal(100),
+        quantity=Decimal(1400),
+    ) == Decimal(100 + 1000)
     # quota overage: prior 0, included 100, qty 150 → 50 over × 2 = 100
-    assert fe("included_quota_then_overage",
-              {"included_quota": "100", "overage_unit_price_minor": 2},
-              internal_cost_exact=Decimal(0), quantity=Decimal(150)) == Decimal(100)
+    assert fe(
+        "included_quota_then_overage",
+        {"included_quota": "100", "overage_unit_price_minor": 2},
+        internal_cost_exact=Decimal(0),
+        quantity=Decimal(150),
+    ) == Decimal(100)
 
 
 # ── R244: pricing service reject-branch coverage ──
@@ -1271,32 +1280,39 @@ async def test_fx_and_cost_rate_validation_rejects(db):
     now = datetime.now(UTC)
 
     async def fx(**kw):
-        base = dict(base_currency="USD", quote_currency="EUR", rate=Decimal("0.9"),
-                    effective_from=now)
+        base = dict(
+            base_currency="USD", quote_currency="EUR", rate=Decimal("0.9"), effective_from=now
+        )
         base.update(kw)
         return await pricing_svc.create_fx_rate(db, actor=_actor(user), **base)
 
     with pytest.raises(AppError) as e:
-        await fx(quote_currency="USD")                       # base == quote
+        await fx(quote_currency="USD")  # base == quote
     assert e.value.code == "FX_RATE_INVALID"
     with pytest.raises(AppError) as e:
-        await fx(rate=Decimal("0"))                          # non-positive
+        await fx(rate=Decimal("0"))  # non-positive
     assert e.value.code == "FX_RATE_INVALID"
     with pytest.raises(AppError) as e:
-        await fx(rate=Decimal("NaN"))                        # non-finite
+        await fx(rate=Decimal("NaN"))  # non-finite
     assert e.value.code == "FX_RATE_INVALID"
 
     async def cost(**kw):
-        base = dict(provider="mock", model_or_service="m", usage_type="image_generation",
-                    currency="USD", unit_cost=Decimal("0.02"), effective_from=now)
+        base = dict(
+            provider="mock",
+            model_or_service="m",
+            usage_type="image_generation",
+            currency="USD",
+            unit_cost=Decimal("0.02"),
+            effective_from=now,
+        )
         base.update(kw)
         return await pricing_svc.create_cost_rate(db, actor=_actor(user), **base)
 
     with pytest.raises(AppError) as e:
-        await cost(usage_type="quantum_flux")                # unknown usage type
+        await cost(usage_type="quantum_flux")  # unknown usage type
     assert e.value.code == "UNKNOWN_USAGE_TYPE"
     with pytest.raises(AppError) as e:
-        await cost(unit="parsecs")                           # unit mismatch
+        await cost(unit="parsecs")  # unit mismatch
     assert e.value.code == "VALIDATION_ERROR"
 
     # supersede guards: window inversion, then double-supersede
@@ -1304,16 +1320,24 @@ async def test_fx_and_cost_rate_validation_rejects(db):
     succ = {"unit_cost": Decimal("0.03")}
     with pytest.raises(AppError) as e:
         await pricing_svc.supersede_cost_rate(
-            db, rate, effective_until=now - timedelta(days=1),
-            successor=dict(succ), actor=_actor(user))
+            db,
+            rate,
+            effective_until=now - timedelta(days=1),
+            successor=dict(succ),
+            actor=_actor(user),
+        )
     assert e.value.code == "VALIDATION_ERROR"
     await pricing_svc.supersede_cost_rate(
-        db, rate, effective_until=now + timedelta(days=1),
-        successor=dict(succ), actor=_actor(user))
+        db, rate, effective_until=now + timedelta(days=1), successor=dict(succ), actor=_actor(user)
+    )
     with pytest.raises(AppError) as e:
         await pricing_svc.supersede_cost_rate(
-            db, rate, effective_until=now + timedelta(days=2),
-            successor=dict(succ), actor=_actor(user))
+            db,
+            rate,
+            effective_until=now + timedelta(days=2),
+            successor=dict(succ),
+            actor=_actor(user),
+        )
     assert e.value.code == "COST_RATE_IMMUTABLE"
 
     # price policy: unknown usage type, multi-scope contradiction
@@ -1360,29 +1384,30 @@ async def test_overage_prior_quantity_accumulation(db):
 
     e2 = await _mk_event(db, tenant, quantity=30, occurred_at=t0 + timedelta(minutes=1))
     r2 = await rating.rate_event(db, e2.id)
-    assert r2.billable_amount_minor == 50                  # 10 over × 5
+    assert r2.billable_amount_minor == 50  # 10 over × 5
 
     e3 = await _mk_event(db, tenant, quantity=10, occurred_at=t0 + timedelta(minutes=2))
     r3 = await rating.rate_event(db, e3.id)
-    assert r3.billable_amount_minor == 50                  # all 10 over × 5
+    assert r3.billable_amount_minor == 50  # all 10 over × 5
 
     # R52[13]: void e1's rating — its 80 must stop consuming quota, so a
     # NEW event of 10 fits back inside the freed quota (prior = 30+10 = 40)
     await rating.void_rated(db, r1.id, reason="strike", actor=_actor(user))
     e4 = await _mk_event(db, tenant, quantity=10, occurred_at=t0 + timedelta(minutes=3))
     r4 = await rating.rate_event(db, e4.id)
-    assert r4.billable_amount_minor == 0                   # 40+10 ≤ 100
+    assert r4.billable_amount_minor == 0  # 40+10 ≤ 100
 
     # R52[10]: a reversal sharing the ORIGINAL's occurred_at must include the
     # original in its prior (created later → ordered after), netting to a
     # negative of what the original actually billed over quota.
     e5 = await _mk_event(db, tenant, quantity=60, occurred_at=t0 + timedelta(minutes=4))
     r5 = await rating.rate_event(db, e5.id)
-    assert r5.billable_amount_minor == 50                  # prior 50, 50→110: 10 over
-    e6 = await _mk_event(db, tenant, quantity=-60, source="adjustment",
-                         occurred_at=t0 + timedelta(minutes=4))  # same timestamp
+    assert r5.billable_amount_minor == 50  # prior 50, 50→110: 10 over
+    e6 = await _mk_event(
+        db, tenant, quantity=-60, source="adjustment", occurred_at=t0 + timedelta(minutes=4)
+    )  # same timestamp
     r6 = await rating.rate_event(db, e6.id)
-    assert r6.billable_amount_minor == -50                 # exact mirror, nets to 0
+    assert r6.billable_amount_minor == -50  # exact mirror, nets to 0
 
 
 @pytest.mark.asyncio
@@ -1406,19 +1431,36 @@ async def test_fx_sweep_cursor_advances_past_unfixable_rows(db, monkeypatch):
     events, rated = [], []
     for _ in range(501):
         eid = str(ULID())
-        events.append(UsageEvent(
-            id=eid, tenant_id=tenant.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
-            usage_type="image_generation", quantity=1, unit="images",
-            occurred_at=occurred, source="manual"))
-        rated.append(RatedUsage(
-            usage_event_id=eid, tenant_id=tenant.id,
-            org_id="01JFAKEORGFAKEORGFAKEORGFA", usage_type="image_generation",
-            quantity=1, cost_rate_snapshot={}, internal_cost_minor=0,
-            internal_cost_currency="ZAR",
-            sell_rate_snapshot={"fx_gaps": ["ZAR->USD"]},
-            billable_amount_minor=0, billable_amount_exact=Decimal(0),
-            billable_currency="ZAR", status="blocked",
-            rated_at=datetime.now(UTC)))
+        events.append(
+            UsageEvent(
+                id=eid,
+                tenant_id=tenant.id,
+                org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                usage_type="image_generation",
+                quantity=1,
+                unit="images",
+                occurred_at=occurred,
+                source="manual",
+            )
+        )
+        rated.append(
+            RatedUsage(
+                usage_event_id=eid,
+                tenant_id=tenant.id,
+                org_id="01JFAKEORGFAKEORGFAKEORGFA",
+                usage_type="image_generation",
+                quantity=1,
+                cost_rate_snapshot={},
+                internal_cost_minor=0,
+                internal_cost_currency="ZAR",
+                sell_rate_snapshot={"fx_gaps": ["ZAR->USD"]},
+                billable_amount_minor=0,
+                billable_amount_exact=Decimal(0),
+                billable_currency="ZAR",
+                status="blocked",
+                rated_at=datetime.now(UTC),
+            )
+        )
     db.add_all(events)
     await db.flush()
     db.add_all(rated)
@@ -1426,12 +1468,17 @@ async def test_fx_sweep_cursor_advances_past_unfixable_rows(db, monkeypatch):
 
     # the new rate does NOT cover occurred_at → every row stays unfixable
     rate = await pricing_svc.create_fx_rate(
-        db, actor=_actor(user), base_currency="ZAR", quote_currency="USD",
-        rate=Decimal("0.05"), effective_from=datetime.now(UTC))
+        db,
+        actor=_actor(user),
+        base_currency="ZAR",
+        quote_currency="USD",
+        rate=Decimal("0.05"),
+        effective_from=datetime.now(UTC),
+    )
 
     from app.controlplane.services import rating as rating_mod
 
-    async def unfixable(db_, event_id):                    # rate stays blocked
+    async def unfixable(db_, event_id):  # rate stays blocked
         return None
 
     monkeypatch.setattr(rating_mod, "rate_event", unfixable)
@@ -1441,25 +1488,29 @@ async def test_fx_sweep_cursor_advances_past_unfixable_rows(db, monkeypatch):
             select(OutboxMessage).where(
                 OutboxMessage.topic == "fx.rate_created",
                 OutboxMessage.payload["fx_rate_id"].astext == rate.id,
-                OutboxMessage.payload["after_id"].astext.isnot(None)))
+                OutboxMessage.payload["after_id"].astext.isnot(None),
+            )
+        )
 
     await _handle_fx_created(db, {"fx_rate_id": rate.id})
     msgs = (await cursor_msgs()).scalars().all()
-    assert len(msgs) == 1                                  # cursor re-enqueue
+    assert len(msgs) == 1  # cursor re-enqueue
     cursor = msgs[0].payload["after_id"]
-    assert cursor                                          # keyset carried
+    assert cursor  # keyset carried
 
-    await _handle_fx_created(db, msgs[0].payload)          # second page: 1 row
+    await _handle_fx_created(db, msgs[0].payload)  # second page: 1 row
     msgs2 = (await cursor_msgs()).scalars().all()
-    assert len(msgs2) == 1                                 # no further enqueue
+    assert len(msgs2) == 1  # no further enqueue
     from sqlalchemy import func as _f
 
     still_blocked = (
         await db.execute(
             select(_f.count(RatedUsage.id)).where(
-                RatedUsage.tenant_id == tenant.id, RatedUsage.status == "blocked"))
+                RatedUsage.tenant_id == tenant.id, RatedUsage.status == "blocked"
+            )
+        )
     ).scalar_one()
-    assert still_blocked == 501                            # unfixable stay blocked
+    assert still_blocked == 501  # unfixable stay blocked
 
 
 @pytest.mark.asyncio
@@ -1477,19 +1528,35 @@ async def test_unvoid_blocked_row_restores_to_blocked_and_redrives(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     eid = str(ULID())
-    db.add(UsageEvent(
-        id=eid, tenant_id=tenant.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
-        usage_type="image_generation", quantity=1, unit="images",
-        occurred_at=datetime.now(UTC), source="manual"))
+    db.add(
+        UsageEvent(
+            id=eid,
+            tenant_id=tenant.id,
+            org_id="01JFAKEORGFAKEORGFAKEORGFA",
+            usage_type="image_generation",
+            quantity=1,
+            unit="images",
+            occurred_at=datetime.now(UTC),
+            source="manual",
+        )
+    )
     await db.flush()
     row = RatedUsage(
-        usage_event_id=eid, tenant_id=tenant.id,
-        org_id="01JFAKEORGFAKEORGFAKEORGFA", usage_type="image_generation",
-        quantity=1, cost_rate_snapshot={}, internal_cost_minor=0,
+        usage_event_id=eid,
+        tenant_id=tenant.id,
+        org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        usage_type="image_generation",
+        quantity=1,
+        cost_rate_snapshot={},
+        internal_cost_minor=0,
         internal_cost_currency="ZAR",
         sell_rate_snapshot={"fx_gaps": ["ZAR->USD"]},
-        billable_amount_minor=0, billable_amount_exact=Decimal(0),
-        billable_currency="ZAR", status="blocked", rated_at=datetime.now(UTC))
+        billable_amount_minor=0,
+        billable_amount_exact=Decimal(0),
+        billable_currency="ZAR",
+        status="blocked",
+        rated_at=datetime.now(UTC),
+    )
     db.add(row)
     await db.flush()
 
@@ -1498,15 +1565,20 @@ async def test_unvoid_blocked_row_restores_to_blocked_and_redrives(db):
     assert row.status == "voided"
 
     restored = await unvoid_rated(db, row.id, reason="restore", actor=_actor(user))
-    assert restored.status == "blocked"                    # NOT 'rated' (R132[F5])
+    assert restored.status == "blocked"  # NOT 'rated' (R132[F5])
     redrives = (
-        (await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.topic == "usage.recorded",
-                OutboxMessage.payload["usage_event_id"].astext == eid)))
-        .scalars().all()
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.topic == "usage.recorded",
+                    OutboxMessage.payload["usage_event_id"].astext == eid,
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    assert len(redrives) == 1                              # R133[F9] re-drive
+    assert len(redrives) == 1  # R133[F9] re-drive
 
 
 @pytest.mark.asyncio
@@ -1532,40 +1604,62 @@ async def test_offering_cost_fallback_for_workflow_events(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     org = Organization(
-        name="OffOrg", slug=f"off-{str(ULID()).lower()}", status=OrgStatus.ACTIVE,
-        tenant_id=tenant.id, created_by=user.id)
+        name="OffOrg",
+        slug=f"off-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
     db.add(org)
     await db.flush()
-    db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.OWNER,
-                     status=MemberStatus.ACTIVE))
+    db.add(
+        OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.OWNER, status=MemberStatus.ACTIVE)
+    )
     adapter = ProviderAdapter(key=f"off-{str(ULID()).lower()}", name="Off")
     db.add(adapter)
     await db.flush()
-    conn = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="c",
-                              created_by=user.id)
+    conn = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="c", created_by=user.id)
     db.add(conn)
     await db.flush()
-    db.add(ProviderModelOffering(
-        connection_id=conn.id, capability_key="text_generation",
-        model_name="off-model", is_active=True, cost_per_call_usd=Decimal("2")))
+    db.add(
+        ProviderModelOffering(
+            connection_id=conn.id,
+            capability_key="text_generation",
+            model_name="off-model",
+            is_active=True,
+            cost_per_call_usd=Decimal("2"),
+        )
+    )
     run = WorkflowRun(
-        org_id=org.id, pack_id=None, release_id=None, installation_id=None,
-        definition_snapshot={"steps": [], "edges": []}, inputs={},
-        started_by=user.id, status=RunStatus.COMPLETED)
+        org_id=org.id,
+        pack_id=None,
+        release_id=None,
+        installation_id=None,
+        definition_snapshot={"steps": [], "edges": []},
+        inputs={},
+        started_by=user.id,
+        status=RunStatus.COMPLETED,
+    )
     db.add(run)
     await db.flush()
 
     # unique provider + voice_generation: no committed cost rate can match
     event = await _mk_event(
-        db, tenant, org_id=org.id, usage_type="voice_generation", quantity=1,
+        db,
+        tenant,
+        org_id=org.id,
+        usage_type="voice_generation",
+        quantity=1,
         provider=f"prov-{str(ULID()).lower()[:8]}",
-        workflow_run_id=run.id, provider_connection_id=conn.id,
-        model_or_service="off-model")
+        workflow_run_id=run.id,
+        provider_connection_id=conn.id,
+        model_or_service="off-model",
+    )
     rated = await rating.rate_event(db, event.id)
     assert rated is not None
     snap = rated.cost_rate_snapshot or {}
     assert snap.get("fallback") == "offering"
-    assert rated.internal_cost_minor == 200                # $2 → 200 US cents
+    assert rated.internal_cost_minor == 200  # $2 → 200 US cents
 
 
 @pytest.mark.asyncio
@@ -1582,10 +1676,17 @@ async def test_sell_policy_tiebreaks_typed_beats_wildcard_then_priority(db):
 
     async def policy(price, *, usage_type, priority=0):
         return await pricing_svc.create_price_policy(
-            db, actor=_actor(user), name=f"p{price}-{ULID()}",
-            policy_type="fixed_unit_price", usage_type=usage_type, currency="USD",
-            params={"unit_price_minor": price}, effective_from=now,
-            tenant_id=tenant.id, priority=priority)
+            db,
+            actor=_actor(user),
+            name=f"p{price}-{ULID()}",
+            policy_type="fixed_unit_price",
+            usage_type=usage_type,
+            currency="USD",
+            params={"unit_price_minor": price},
+            effective_from=now,
+            tenant_id=tenant.id,
+            priority=priority,
+        )
 
     # tenant-scope wildcard @ 3/unit with a HIGH priority, and a tenant-scope
     # image_generation-specific policy @ 7/unit with LOW priority. type_rank
@@ -1596,7 +1697,7 @@ async def test_sell_policy_tiebreaks_typed_beats_wildcard_then_priority(db):
     await policy(7, usage_type="image_generation", priority=0)
     ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=10)
     rated = await rating.rate_event(db, ev.id)
-    assert rated.billable_amount_minor == 70   # typed (7) beats higher-priority wildcard
+    assert rated.billable_amount_minor == 70  # typed (7) beats higher-priority wildcard
 
     # a DIFFERENT usage_type with no specific policy falls to the wildcard
     ev2 = await _mk_event(db, tenant, usage_type="image_editing", quantity=10)
@@ -1609,13 +1710,20 @@ async def test_sell_policy_tiebreaks_typed_beats_wildcard_then_priority(db):
 
     async def policy2(price, priority):
         return await pricing_svc.create_price_policy(
-            db, actor=_actor(user2), name=f"q{price}-{ULID()}",
-            policy_type="fixed_unit_price", usage_type="image_generation",
-            currency="USD", params={"unit_price_minor": price}, effective_from=now,
-            tenant_id=tenant2.id, priority=priority)
+            db,
+            actor=_actor(user2),
+            name=f"q{price}-{ULID()}",
+            policy_type="fixed_unit_price",
+            usage_type="image_generation",
+            currency="USD",
+            params={"unit_price_minor": price},
+            effective_from=now,
+            tenant_id=tenant2.id,
+            priority=priority,
+        )
 
     await policy2(11, priority=1)
-    await policy2(99, priority=5)   # higher priority
+    await policy2(99, priority=5)  # higher priority
     ev3 = await _mk_event(db, tenant2, usage_type="image_generation", quantity=1)
     rated3 = await rating.rate_event(db, ev3.id)
     assert rated3.billable_amount_minor == 99
@@ -1635,17 +1743,28 @@ async def test_cost_ladder_exact_beats_wildcard(db):
     t0 = datetime.now(UTC) - timedelta(days=2)
 
     async def cost(**kw):
-        base = dict(actor=_actor(user), provider="acme",
-                    usage_type="image_generation", currency="USD", effective_from=t0)
+        base = dict(
+            actor=_actor(user),
+            provider="acme",
+            usage_type="image_generation",
+            currency="USD",
+            effective_from=t0,
+        )
         base.update(kw)
         return await pricing_svc.create_cost_rate(db, **base)
 
-    await cost(model_or_service="acme-img", unit_cost=Decimal("0.02"))   # exact
-    await cost(model_or_service=None, unit_cost=Decimal("0.05"))         # provider wildcard
+    await cost(model_or_service="acme-img", unit_cost=Decimal("0.02"))  # exact
+    await cost(model_or_service=None, unit_cost=Decimal("0.05"))  # provider wildcard
 
     async def rate_one():
-        ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
-                             provider="acme", model_or_service="acme-img")
+        ev = await _mk_event(
+            db,
+            tenant,
+            usage_type="image_generation",
+            quantity=1,
+            provider="acme",
+            model_or_service="acme-img",
+        )
         return await rating.rate_event(db, ev.id)
 
     r = await rate_one()
@@ -1653,10 +1772,11 @@ async def test_cost_ladder_exact_beats_wildcard(db):
     assert r.internal_cost_minor == 2
 
     exact_row = (
-        await db.execute(select(ProviderCostRate).where(
-            ProviderCostRate.model_or_service == "acme-img"))
+        await db.execute(
+            select(ProviderCostRate).where(ProviderCostRate.model_or_service == "acme-img")
+        )
     ).scalar_one()
-    exact_row.effective_until = t0 + timedelta(seconds=1)   # retire before events
+    exact_row.effective_until = t0 + timedelta(seconds=1)  # retire before events
     await db.flush()
     r = await rate_one()
     assert r.cost_rate_snapshot["resolution"] == "provider_wildcard"
@@ -1680,11 +1800,24 @@ async def test_capability_rung_distinct_and_below_wildcard(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     await pricing_svc.create_cost_rate(
-        db, actor=_actor(user), provider="acme", model_or_service=None,
-        capability_key="image_generation", usage_type="image_generation",
-        currency="USD", unit_cost=Decimal("0.09"), effective_from=t0)
-    ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
-                         provider="acme", model_or_service="acme-img")
+        db,
+        actor=_actor(user),
+        provider="acme",
+        model_or_service=None,
+        capability_key="image_generation",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.09"),
+        effective_from=t0,
+    )
+    ev = await _mk_event(
+        db,
+        tenant,
+        usage_type="image_generation",
+        quantity=1,
+        provider="acme",
+        model_or_service="acme-img",
+    )
     r = await rating.rate_event(db, ev.id)
     assert r.cost_rate_snapshot["resolution"] == "capability"
     assert r.internal_cost_minor == 9
@@ -1693,19 +1826,37 @@ async def test_capability_rung_distinct_and_below_wildcard(db):
     user2 = await _mk_user(db)
     tenant2 = await _mk_tenant(db, user2)
     await pricing_svc.create_cost_rate(
-        db, actor=_actor(user2), provider="bolt", model_or_service=None,
-        usage_type="image_generation", currency="USD",
-        unit_cost=Decimal("0.05"), effective_from=t0)
+        db,
+        actor=_actor(user2),
+        provider="bolt",
+        model_or_service=None,
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.05"),
+        effective_from=t0,
+    )
     await pricing_svc.create_cost_rate(
-        db, actor=_actor(user2), provider="bolt", model_or_service=None,
-        capability_key="image_generation", usage_type="image_generation",
-        currency="USD", unit_cost=Decimal("0.09"),
-        effective_from=t0 + timedelta(days=1))  # newer, but lower rung
-    ev2 = await _mk_event(db, tenant2, usage_type="image_generation", quantity=1,
-                          provider="bolt", model_or_service="bolt-img")
+        db,
+        actor=_actor(user2),
+        provider="bolt",
+        model_or_service=None,
+        capability_key="image_generation",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.09"),
+        effective_from=t0 + timedelta(days=1),
+    )  # newer, but lower rung
+    ev2 = await _mk_event(
+        db,
+        tenant2,
+        usage_type="image_generation",
+        quantity=1,
+        provider="bolt",
+        model_or_service="bolt-img",
+    )
     r2 = await rating.rate_event(db, ev2.id)
     assert r2.cost_rate_snapshot["resolution"] == "provider_wildcard"
-    assert r2.internal_cost_minor == 5   # wildcard rung beats the newer capability rate
+    assert r2.internal_cost_minor == 5  # wildcard rung beats the newer capability rate
 
 
 @pytest.mark.asyncio
@@ -1724,73 +1875,145 @@ async def test_cost_resolver_window_boundary_and_race_determinism(db):
 
     # (1) half-open window: effective_until == occurred_at → expired
     prov = f"hb-{str(ULID()).lower()[:8]}"
-    db.add(ProviderCostRate(
-        provider=prov, model_or_service="m", usage_type="image_generation", unit="images",
-        unit_cost=Decimal("0.10"), currency="USD",
-        effective_from=t0, effective_until=now, created_by=user.id))
+    db.add(
+        ProviderCostRate(
+            provider=prov,
+            model_or_service="m",
+            usage_type="image_generation",
+            unit="images",
+            unit_cost=Decimal("0.10"),
+            currency="USD",
+            effective_from=t0,
+            effective_until=now,
+            created_by=user.id,
+        )
+    )
     await db.flush()
-    ev = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
-                         provider=prov, model_or_service="m", occurred_at=now)
+    ev = await _mk_event(
+        db,
+        tenant,
+        usage_type="image_generation",
+        quantity=1,
+        provider=prov,
+        model_or_service="m",
+        occurred_at=now,
+    )
     r = await rating.rate_event(db, ev.id)
     assert (r.cost_rate_snapshot or {}).get("resolution") != "exact", (
-        "a rate expiring exactly at occurred_at must not match (half-open window)")
+        "a rate expiring exactly at occurred_at must not match (half-open window)"
+    )
 
     # (2) two overlapping EXACT rows (simulated race residue, R147) — the
     # newer effective_from wins deterministically
     prov2 = f"race-{str(ULID()).lower()[:8]}"
-    db.add_all([
-        ProviderCostRate(
-            provider=prov2, model_or_service="m", usage_type="image_generation", unit="images",
-            unit_cost=Decimal("0.30"), currency="USD",
-            effective_from=t0, created_by=user.id),
-        ProviderCostRate(
-            provider=prov2, model_or_service="m", usage_type="image_generation", unit="images",
-            unit_cost=Decimal("0.20"), currency="USD",
-            effective_from=t0 + timedelta(hours=1), created_by=user.id),
-    ])
+    db.add_all(
+        [
+            ProviderCostRate(
+                provider=prov2,
+                model_or_service="m",
+                usage_type="image_generation",
+                unit="images",
+                unit_cost=Decimal("0.30"),
+                currency="USD",
+                effective_from=t0,
+                created_by=user.id,
+            ),
+            ProviderCostRate(
+                provider=prov2,
+                model_or_service="m",
+                usage_type="image_generation",
+                unit="images",
+                unit_cost=Decimal("0.20"),
+                currency="USD",
+                effective_from=t0 + timedelta(hours=1),
+                created_by=user.id,
+            ),
+        ]
+    )
     await db.flush()
-    ev2 = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
-                          provider=prov2, model_or_service="m")
+    ev2 = await _mk_event(
+        db, tenant, usage_type="image_generation", quantity=1, provider=prov2, model_or_service="m"
+    )
     r2 = await rating.rate_event(db, ev2.id)
     assert (r2.cost_rate_snapshot or {}).get("resolution") == "exact"
-    assert r2.internal_cost_minor == 20                     # newer row (0.20) wins
+    assert r2.internal_cost_minor == 20  # newer row (0.20) wins
 
     # same determinism on the WILDCARD and CAPABILITY rungs
     prov3 = f"racew-{str(ULID()).lower()[:8]}"
-    db.add_all([
-        ProviderCostRate(
-            provider=prov3, model_or_service=None, usage_type="image_generation", unit="images",
-            unit_cost=Decimal("0.50"), currency="USD",
-            effective_from=t0, created_by=user.id),
-        ProviderCostRate(
-            provider=prov3, model_or_service=None, usage_type="image_generation", unit="images",
-            unit_cost=Decimal("0.40"), currency="USD",
-            effective_from=t0 + timedelta(hours=1), created_by=user.id),
-    ])
+    db.add_all(
+        [
+            ProviderCostRate(
+                provider=prov3,
+                model_or_service=None,
+                usage_type="image_generation",
+                unit="images",
+                unit_cost=Decimal("0.50"),
+                currency="USD",
+                effective_from=t0,
+                created_by=user.id,
+            ),
+            ProviderCostRate(
+                provider=prov3,
+                model_or_service=None,
+                usage_type="image_generation",
+                unit="images",
+                unit_cost=Decimal("0.40"),
+                currency="USD",
+                effective_from=t0 + timedelta(hours=1),
+                created_by=user.id,
+            ),
+        ]
+    )
     await db.flush()
-    ev3 = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
-                          provider=prov3, model_or_service="unpriced-model")
+    ev3 = await _mk_event(
+        db,
+        tenant,
+        usage_type="image_generation",
+        quantity=1,
+        provider=prov3,
+        model_or_service="unpriced-model",
+    )
     r3 = await rating.rate_event(db, ev3.id)
     assert (r3.cost_rate_snapshot or {}).get("resolution") == "provider_wildcard"
     assert r3.internal_cost_minor == 40
 
     # capability rung: two overlapping capability rates → newest wins
     prov4 = f"racec-{str(ULID()).lower()[:8]}"
-    db.add_all([
-        ProviderCostRate(
-            provider=prov4, model_or_service=None, capability_key="image_generation",
-            usage_type="image_generation", unit="images",
-            unit_cost=Decimal("0.70"), currency="USD",
-            effective_from=t0, created_by=user.id),
-        ProviderCostRate(
-            provider=prov4, model_or_service=None, capability_key="image_generation",
-            usage_type="image_generation", unit="images",
-            unit_cost=Decimal("0.60"), currency="USD",
-            effective_from=t0 + timedelta(hours=1), created_by=user.id),
-    ])
+    db.add_all(
+        [
+            ProviderCostRate(
+                provider=prov4,
+                model_or_service=None,
+                capability_key="image_generation",
+                usage_type="image_generation",
+                unit="images",
+                unit_cost=Decimal("0.70"),
+                currency="USD",
+                effective_from=t0,
+                created_by=user.id,
+            ),
+            ProviderCostRate(
+                provider=prov4,
+                model_or_service=None,
+                capability_key="image_generation",
+                usage_type="image_generation",
+                unit="images",
+                unit_cost=Decimal("0.60"),
+                currency="USD",
+                effective_from=t0 + timedelta(hours=1),
+                created_by=user.id,
+            ),
+        ]
+    )
     await db.flush()
-    ev4 = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
-                          provider=prov4, model_or_service="unpriced-model")
+    ev4 = await _mk_event(
+        db,
+        tenant,
+        usage_type="image_generation",
+        quantity=1,
+        provider=prov4,
+        model_or_service="unpriced-model",
+    )
     r4 = await rating.rate_event(db, ev4.id)
     assert (r4.cost_rate_snapshot or {}).get("resolution") == "capability"
     assert r4.internal_cost_minor == 60
@@ -1798,8 +2021,9 @@ async def test_cost_resolver_window_boundary_and_race_determinism(db):
     # a MODEL-LESS event must resolve on the wildcard rung with that label —
     # entering the exact rung with model None turns the SQLAlchemy comparison
     # into IS NULL and mislabels the wildcard row as 'exact'
-    ev5 = await _mk_event(db, tenant, usage_type="image_generation", quantity=1,
-                          provider=prov3, model_or_service=None)
+    ev5 = await _mk_event(
+        db, tenant, usage_type="image_generation", quantity=1, provider=prov3, model_or_service=None
+    )
     r5 = await rating.rate_event(db, ev5.id)
     assert (r5.cost_rate_snapshot or {}).get("resolution") == "provider_wildcard"
     assert r5.internal_cost_minor == 40
@@ -1824,49 +2048,83 @@ async def test_offering_fallback_scoped_to_connection_and_model(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     org = Organization(
-        name="OffScope", slug=f"osc-{str(ULID()).lower()}", status=OrgStatus.ACTIVE,
-        tenant_id=tenant.id, created_by=user.id)
+        name="OffScope",
+        slug=f"osc-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
     db.add(org)
     await db.flush()
     adapter = ProviderAdapter(key=f"osc-{str(ULID()).lower()}", name="Osc")
     db.add(adapter)
     await db.flush()
-    conn_a = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="a",
-                                created_by=user.id)
-    conn_b = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="b",
-                                created_by=user.id)
+    conn_a = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="a", created_by=user.id)
+    conn_b = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="b", created_by=user.id)
     db.add_all([conn_a, conn_b])
     await db.flush()
-    db.add_all([
-        ProviderModelOffering(connection_id=conn_a.id, capability_key="text_generation",
-                              model_name="m1", is_active=True,
-                              cost_per_call_usd=Decimal("1")),
-        ProviderModelOffering(connection_id=conn_b.id, capability_key="text_generation",
-                              model_name="m1", is_active=True,
-                              cost_per_call_usd=Decimal("9.99")),   # other connection
-        ProviderModelOffering(connection_id=conn_a.id, capability_key="text_generation",
-                              model_name="m2", is_active=True,
-                              cost_per_call_usd=Decimal("5.55")),   # other model
-    ])
+    db.add_all(
+        [
+            ProviderModelOffering(
+                connection_id=conn_a.id,
+                capability_key="text_generation",
+                model_name="m1",
+                is_active=True,
+                cost_per_call_usd=Decimal("1"),
+            ),
+            ProviderModelOffering(
+                connection_id=conn_b.id,
+                capability_key="text_generation",
+                model_name="m1",
+                is_active=True,
+                cost_per_call_usd=Decimal("9.99"),
+            ),  # other connection
+            ProviderModelOffering(
+                connection_id=conn_a.id,
+                capability_key="text_generation",
+                model_name="m2",
+                is_active=True,
+                cost_per_call_usd=Decimal("5.55"),
+            ),  # other model
+        ]
+    )
     run = WorkflowRun(
-        org_id=org.id, pack_id=None, release_id=None, installation_id=None,
-        definition_snapshot={"steps": [], "edges": []}, inputs={},
-        started_by=user.id, status=RunStatus.COMPLETED)
+        org_id=org.id,
+        pack_id=None,
+        release_id=None,
+        installation_id=None,
+        definition_snapshot={"steps": [], "edges": []},
+        inputs={},
+        started_by=user.id,
+        status=RunStatus.COMPLETED,
+    )
     db.add(run)
     await db.flush()
 
     # a DUPLICATE (conn_a, m1) offering row (no unique constraint exists):
     # the resolver's .limit(1) must stay deterministic, not
     # MultipleResultsFound-500 on every rate_event
-    db.add(ProviderModelOffering(connection_id=conn_a.id, capability_key="text_generation",
-                                 model_name="m1", is_active=True,
-                                 cost_per_call_usd=Decimal("1")))
+    db.add(
+        ProviderModelOffering(
+            connection_id=conn_a.id,
+            capability_key="text_generation",
+            model_name="m1",
+            is_active=True,
+            cost_per_call_usd=Decimal("1"),
+        )
+    )
     await db.flush()
     ev = await _mk_event(
-        db, tenant, org_id=org.id, usage_type="voice_generation", quantity=1,
+        db,
+        tenant,
+        org_id=org.id,
+        usage_type="voice_generation",
+        quantity=1,
         provider=f"posc-{str(ULID()).lower()[:8]}",
-        workflow_run_id=run.id, provider_connection_id=conn_a.id,
-        model_or_service="m1")
+        workflow_run_id=run.id,
+        provider_connection_id=conn_a.id,
+        model_or_service="m1",
+    )
     r = await rating.rate_event(db, ev.id)
     snap = r.cost_rate_snapshot or {}
     assert snap.get("fallback") == "offering"
@@ -1874,10 +2132,16 @@ async def test_offering_fallback_scoped_to_connection_and_model(db):
 
     # no matching offering at all → clean no_rate, no crash
     ev2 = await _mk_event(
-        db, tenant, org_id=org.id, usage_type="voice_generation", quantity=1,
+        db,
+        tenant,
+        org_id=org.id,
+        usage_type="voice_generation",
+        quantity=1,
         provider=f"posc-{str(ULID()).lower()[:8]}",
-        workflow_run_id=run.id, provider_connection_id=conn_a.id,
-        model_or_service="no-such-model")
+        workflow_run_id=run.id,
+        provider_connection_id=conn_a.id,
+        model_or_service="no-such-model",
+    )
     r2 = await rating.rate_event(db, ev2.id)
     snap2 = r2.cost_rate_snapshot or {}
     assert snap2.get("fallback") != "offering"
@@ -1887,9 +2151,15 @@ async def test_offering_fallback_scoped_to_connection_and_model(db):
     # event WITHOUT a workflow_run_id (eval-path shape) must not be
     # offering-priced
     ev3 = await _mk_event(
-        db, tenant, org_id=org.id, usage_type="voice_generation", quantity=1,
+        db,
+        tenant,
+        org_id=org.id,
+        usage_type="voice_generation",
+        quantity=1,
         provider=f"posc-{str(ULID()).lower()[:8]}",
-        provider_connection_id=conn_a.id, model_or_service="m1")
+        provider_connection_id=conn_a.id,
+        model_or_service="m1",
+    )
     r3 = await rating.rate_event(db, ev3.id)
     assert (r3.cost_rate_snapshot or {}).get("fallback") != "offering"
     assert r3.internal_cost_minor == 0
@@ -1918,8 +2188,9 @@ async def test_plan_scope_policy_binds_own_tenants_subscription(db):
         plan = ProductPlan(key=f"{key}-{str(ULID()).lower()[:8]}", name=key)
         db.add(plan)
         await db.flush()
-        pv = PlanVersion(plan_id=plan.id, version=1, status="active",
-                         entitlements={}, activated_at=now)
+        pv = PlanVersion(
+            plan_id=plan.id, version=1, status="active", entitlements={}, activated_at=now
+        )
         db.add(pv)
         await db.flush()
         return pv
@@ -1929,11 +2200,17 @@ async def test_plan_scope_policy_binds_own_tenants_subscription(db):
 
     def _sub(tenant, pv):
         return Subscription(
-            tenant_id=tenant.id, plan_version_id=pv.id, status="active",
-            currency="USD", interval="month", seat_quantity=0,
+            tenant_id=tenant.id,
+            plan_version_id=pv.id,
+            status="active",
+            currency="USD",
+            interval="month",
+            seat_quantity=0,
             current_period_start=now - timedelta(days=5),
             current_period_end=now + timedelta(days=25),
-            provider="manual", created_by=user.id)
+            provider="manual",
+            created_by=user.id,
+        )
 
     # B first, so a tenant-blind lookup would find B's sub. (A duplicate-
     # active sub is impossible — uq_cp_sub_live partial unique index — which
@@ -1946,20 +2223,30 @@ async def test_plan_scope_policy_binds_own_tenants_subscription(db):
     # plan-scoped policy for V1, effective EXACTLY at the event instant
     occurred = now
     await pricing_svc.create_price_policy(
-        db, actor=_actor(user), name=f"plan-v1 {ULID()}",
-        policy_type="fixed_unit_price", usage_type="image_generation",
-        currency="USD", params={"unit_price_minor": 11},
-        effective_from=occurred,               # closed start boundary
-        plan_version_id=v1.id)
+        db,
+        actor=_actor(user),
+        name=f"plan-v1 {ULID()}",
+        policy_type="fixed_unit_price",
+        usage_type="image_generation",
+        currency="USD",
+        params={"unit_price_minor": 11},
+        effective_from=occurred,  # closed start boundary
+        plan_version_id=v1.id,
+    )
     # a tenant-scoped decoy that EXPIRED exactly at the event instant — the
     # open end boundary must exclude it (it would outrank the plan policy)
     await pricing_svc.create_price_policy(
-        db, actor=_actor(user), name=f"expired-tenant {ULID()}",
-        policy_type="fixed_unit_price", usage_type="image_generation",
-        currency="USD", params={"unit_price_minor": 99},
+        db,
+        actor=_actor(user),
+        name=f"expired-tenant {ULID()}",
+        policy_type="fixed_unit_price",
+        usage_type="image_generation",
+        currency="USD",
+        params={"unit_price_minor": 99},
         effective_from=occurred - timedelta(days=1),
-        effective_until=occurred,              # open end boundary
-        tenant_id=tenant_a.id)
+        effective_until=occurred,  # open end boundary
+        tenant_id=tenant_a.id,
+    )
 
     event = await _mk_event(db, tenant_a, quantity=10, occurred_at=occurred)
     rated = await rating.rate_event(db, event.id)
@@ -1984,119 +2271,213 @@ async def test_fx_and_supersede_boundaries(db):
 
     # (1) supersede boundary + double-supersede
     rate = await pricing_svc.create_cost_rate(
-        db, actor=_actor(user), provider=f"sb-{str(ULID()).lower()[:8]}",
-        model_or_service="m", usage_type="image_generation", currency="USD",
-        unit_cost=Decimal("0.10"), effective_from=t0)
-    succ = dict(provider=rate.provider, model_or_service="m",
-                usage_type="image_generation", currency="USD",
-                unit_cost="0.20", effective_from=t0 + timedelta(days=1))
+        db,
+        actor=_actor(user),
+        provider=f"sb-{str(ULID()).lower()[:8]}",
+        model_or_service="m",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.10"),
+        effective_from=t0,
+    )
+    succ = dict(
+        provider=rate.provider,
+        model_or_service="m",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost="0.20",
+        effective_from=t0 + timedelta(days=1),
+    )
     with pytest.raises(AppError) as e1:
         await pricing_svc.supersede_cost_rate(
-            db, rate, effective_until=t0, successor=succ, actor=_actor(user))
-    assert e1.value.status_code == 422   # equal-to-from close is invalid
+            db, rate, effective_until=t0, successor=succ, actor=_actor(user)
+        )
+    assert e1.value.status_code == 422  # equal-to-from close is invalid
     await pricing_svc.supersede_cost_rate(
-        db, rate, effective_until=t0 + timedelta(days=1),
-        successor=succ, actor=_actor(user))
+        db, rate, effective_until=t0 + timedelta(days=1), successor=succ, actor=_actor(user)
+    )
     with pytest.raises(AppError) as e2:
         await pricing_svc.supersede_cost_rate(
-            db, rate, effective_until=t0 + timedelta(days=2),
-            successor=succ, actor=_actor(user))
+            db, rate, effective_until=t0 + timedelta(days=2), successor=succ, actor=_actor(user)
+        )
     assert e2.value.code == "COST_RATE_IMMUTABLE" and e2.value.status_code == 409
 
     # (2) same-instant open-ended FX rate → overlap 409, not zero-width close
     pair = dict(base_currency="USD", quote_currency="NOK")
     first = await pricing_svc.create_fx_rate(
-        db, actor=_actor(user), rate=Decimal("10"), effective_from=t0, **pair)
+        db, actor=_actor(user), rate=Decimal("10"), effective_from=t0, **pair
+    )
     with pytest.raises(AppError) as e3:
         await pricing_svc.create_fx_rate(
-            db, actor=_actor(user), rate=Decimal("11"), effective_from=t0, **pair)
+            db, actor=_actor(user), rate=Decimal("11"), effective_from=t0, **pair
+        )
     assert e3.value.code == "FX_RATE_OVERLAP" and e3.value.status_code == 409
     await db.refresh(first)
-    assert first.effective_until is None   # untouched, no zero-width close
+    assert first.effective_until is None  # untouched, no zero-width close
 
     # (3) half-open adjacency: bounded new window ending exactly where a
     # bounded existing one starts is NOT an overlap
     pair2 = dict(base_currency="USD", quote_currency="DKK")
-    db.add(FxRate(base_currency="USD", quote_currency="DKK", rate=Decimal("7"),
-                  effective_from=t0, effective_until=t0 + timedelta(days=5),
-                  created_by=user.id))
+    db.add(
+        FxRate(
+            base_currency="USD",
+            quote_currency="DKK",
+            rate=Decimal("7"),
+            effective_from=t0,
+            effective_until=t0 + timedelta(days=5),
+            created_by=user.id,
+        )
+    )
     await db.flush()
     ok = await pricing_svc.create_fx_rate(
-        db, actor=_actor(user), rate=Decimal("6.9"),
-        effective_from=t0 - timedelta(days=5), effective_until=t0, **pair2)
+        db,
+        actor=_actor(user),
+        rate=Decimal("6.9"),
+        effective_from=t0 - timedelta(days=5),
+        effective_until=t0,
+        **pair2,
+    )
     assert ok.id is not None
 
     # (4) racy DUPLICATE open-ended rows (no DB constraint): a newer rate
     # auto-closes ONE (deterministic limit(1)) and 409s on the survivor —
     # never a MultipleResultsFound 500
     pair3 = dict(base_currency="USD", quote_currency="ISK")
-    db.add_all([
-        FxRate(base_currency="USD", quote_currency="ISK", rate=Decimal("140"),
-               effective_from=t0, created_by=user.id),
-        FxRate(base_currency="USD", quote_currency="ISK", rate=Decimal("141"),
-               effective_from=t0, created_by=user.id),
-    ])
+    db.add_all(
+        [
+            FxRate(
+                base_currency="USD",
+                quote_currency="ISK",
+                rate=Decimal("140"),
+                effective_from=t0,
+                created_by=user.id,
+            ),
+            FxRate(
+                base_currency="USD",
+                quote_currency="ISK",
+                rate=Decimal("141"),
+                effective_from=t0,
+                created_by=user.id,
+            ),
+        ]
+    )
     await db.flush()
     with pytest.raises(AppError) as e4:
         await pricing_svc.create_fx_rate(
-            db, actor=_actor(user), rate=Decimal("142"),
-            effective_from=t0 + timedelta(days=1), **pair3)
-    assert e4.value.code == "FX_RATE_OVERLAP"   # deterministic, not a 500
+            db,
+            actor=_actor(user),
+            rate=Decimal("142"),
+            effective_from=t0 + timedelta(days=1),
+            **pair3,
+        )
+    assert e4.value.code == "FX_RATE_OVERLAP"  # deterministic, not a 500
 
     # fx validation status codes
     with pytest.raises(AppError) as e5:
         await pricing_svc.create_fx_rate(
-            db, actor=_actor(user), rate=Decimal("1"), effective_from=t0,
-            base_currency="USD", quote_currency="USD")
+            db,
+            actor=_actor(user),
+            rate=Decimal("1"),
+            effective_from=t0,
+            base_currency="USD",
+            quote_currency="USD",
+        )
     assert e5.value.status_code == 422
     with pytest.raises(AppError) as e6:
         await pricing_svc.create_fx_rate(
-            db, actor=_actor(user), rate=Decimal("NaN"), effective_from=t0,
-            base_currency="USD", quote_currency="CZK")
+            db,
+            actor=_actor(user),
+            rate=Decimal("NaN"),
+            effective_from=t0,
+            base_currency="USD",
+            quote_currency="CZK",
+        )
     assert e6.value.status_code == 422
-    with pytest.raises(AppError) as e6z:   # ZERO is not a rate (<=, not <)
+    with pytest.raises(AppError) as e6z:  # ZERO is not a rate (<=, not <)
         await pricing_svc.create_fx_rate(
-            db, actor=_actor(user), rate=Decimal("0"), effective_from=t0,
-            base_currency="USD", quote_currency="CZK")
+            db,
+            actor=_actor(user),
+            rate=Decimal("0"),
+            effective_from=t0,
+            base_currency="USD",
+            quote_currency="CZK",
+        )
     assert e6z.value.code == "FX_RATE_INVALID"
 
     # overlap checking is CAPABILITY-scoped: same window, different
     # capability_key → no conflict; same capability_key → 409
     provc = f"cap-{str(ULID()).lower()[:8]}"
     await pricing_svc.create_cost_rate(
-        db, actor=_actor(user), provider=provc, model_or_service=None,
-        capability_key="image_generation", usage_type="image_generation",
-        currency="USD", unit_cost=Decimal("0.10"), effective_from=t0)
+        db,
+        actor=_actor(user),
+        provider=provc,
+        model_or_service=None,
+        capability_key="image_generation",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.10"),
+        effective_from=t0,
+    )
     ok3 = await pricing_svc.create_cost_rate(
-        db, actor=_actor(user), provider=provc, model_or_service=None,
-        capability_key="voice_generation", usage_type="image_generation",
-        currency="USD", unit_cost=Decimal("0.20"), effective_from=t0)
-    assert ok3.id is not None              # different capability: no overlap
+        db,
+        actor=_actor(user),
+        provider=provc,
+        model_or_service=None,
+        capability_key="voice_generation",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.20"),
+        effective_from=t0,
+    )
+    assert ok3.id is not None  # different capability: no overlap
     with pytest.raises(AppError) as e9:
         await pricing_svc.create_cost_rate(
-            db, actor=_actor(user), provider=provc, model_or_service=None,
-            capability_key="image_generation", usage_type="image_generation",
-            currency="USD", unit_cost=Decimal("0.30"), effective_from=t0)
+            db,
+            actor=_actor(user),
+            provider=provc,
+            model_or_service=None,
+            capability_key="image_generation",
+            usage_type="image_generation",
+            currency="USD",
+            unit_cost=Decimal("0.30"),
+            effective_from=t0,
+        )
     assert e9.value.code == "COST_RATE_OVERLAP"
 
     # TWO overlapping bounded FX rows already present (race residue): a third
     # overlapping create must 409 deterministically (probe limit(1)), not
     # MultipleResultsFound-500
-    db.add_all([
-        FxRate(base_currency="USD", quote_currency="HUF", rate=Decimal("350"),
-               effective_from=t0, effective_until=t0 + timedelta(days=9),
-               created_by=user.id),
-        FxRate(base_currency="USD", quote_currency="HUF", rate=Decimal("351"),
-               effective_from=t0, effective_until=t0 + timedelta(days=9),
-               created_by=user.id),
-    ])
+    db.add_all(
+        [
+            FxRate(
+                base_currency="USD",
+                quote_currency="HUF",
+                rate=Decimal("350"),
+                effective_from=t0,
+                effective_until=t0 + timedelta(days=9),
+                created_by=user.id,
+            ),
+            FxRate(
+                base_currency="USD",
+                quote_currency="HUF",
+                rate=Decimal("351"),
+                effective_from=t0,
+                effective_until=t0 + timedelta(days=9),
+                created_by=user.id,
+            ),
+        ]
+    )
     await db.flush()
     with pytest.raises(AppError) as e7:
         await pricing_svc.create_fx_rate(
-            db, actor=_actor(user), rate=Decimal("352"),
+            db,
+            actor=_actor(user),
+            rate=Decimal("352"),
             effective_from=t0 + timedelta(days=1),
             effective_until=t0 + timedelta(days=2),
-            base_currency="USD", quote_currency="HUF")
+            base_currency="USD",
+            quote_currency="HUF",
+        )
     assert e7.value.code == "FX_RATE_OVERLAP"
 
     # cost-rate bounded adjacency + duplicate-row determinism + 409 status:
@@ -2104,30 +2485,59 @@ async def test_fx_and_supersede_boundaries(db):
     provb = f"adj-{str(ULID()).lower()[:8]}"
     from app.controlplane.models.pricing import ProviderCostRate as PCRate
 
-    db.add_all([
-        PCRate(provider=provb, model_or_service="m", usage_type="image_generation",
-             unit="images", unit_cost=Decimal("0.10"), currency="USD",
-             effective_from=t0, effective_until=t0 + timedelta(days=5),
-             created_by=user.id),
-        PCRate(provider=provb, model_or_service="m", usage_type="image_generation",
-             unit="images", unit_cost=Decimal("0.11"), currency="USD",
-             effective_from=t0, effective_until=t0 + timedelta(days=5),
-             created_by=user.id),   # racy duplicate
-    ])
+    db.add_all(
+        [
+            PCRate(
+                provider=provb,
+                model_or_service="m",
+                usage_type="image_generation",
+                unit="images",
+                unit_cost=Decimal("0.10"),
+                currency="USD",
+                effective_from=t0,
+                effective_until=t0 + timedelta(days=5),
+                created_by=user.id,
+            ),
+            PCRate(
+                provider=provb,
+                model_or_service="m",
+                usage_type="image_generation",
+                unit="images",
+                unit_cost=Decimal("0.11"),
+                currency="USD",
+                effective_from=t0,
+                effective_until=t0 + timedelta(days=5),
+                created_by=user.id,
+            ),  # racy duplicate
+        ]
+    )
     await db.flush()
     ok2 = await pricing_svc.create_cost_rate(
-        db, actor=_actor(user), provider=provb, model_or_service="m",
-        usage_type="image_generation", currency="USD", unit_cost=Decimal("0.09"),
-        effective_from=t0 - timedelta(days=5), effective_until=t0)
-    assert ok2.id is not None                      # half-open adjacency allowed
+        db,
+        actor=_actor(user),
+        provider=provb,
+        model_or_service="m",
+        usage_type="image_generation",
+        currency="USD",
+        unit_cost=Decimal("0.09"),
+        effective_from=t0 - timedelta(days=5),
+        effective_until=t0,
+    )
+    assert ok2.id is not None  # half-open adjacency allowed
     # … but one that CROSSES t0 overlaps (against duplicate rows: still a
     # clean 409, never MultipleResultsFound)
     with pytest.raises(AppError) as e8:
         await pricing_svc.create_cost_rate(
-            db, actor=_actor(user), provider=provb, model_or_service="m",
-            usage_type="image_generation", currency="USD", unit_cost=Decimal("0.09"),
+            db,
+            actor=_actor(user),
+            provider=provb,
+            model_or_service="m",
+            usage_type="image_generation",
+            currency="USD",
+            unit_cost=Decimal("0.09"),
             effective_from=t0 - timedelta(days=5),
-            effective_until=t0 + timedelta(seconds=1))
+            effective_until=t0 + timedelta(seconds=1),
+        )
     assert e8.value.code == "COST_RATE_OVERLAP" and e8.value.status_code == 409
 
 
@@ -2152,28 +2562,41 @@ async def test_rating_body_boundaries(db):
     from app.controlplane.models.pricing import FxRate, ProviderCostRate, RatedUsage
 
     user = await _mk_user(db)
-    tenant = await _mk_tenant(db, user)     # USD
+    tenant = await _mk_tenant(db, user)  # USD
     other = await _mk_tenant(db, user)
     a = _actor(user)
 
     # tenant-scoped COST-PLUS policy (needs the cost→policy FX bridge, so a
     # missing BND→USD rate genuinely BLOCKS): cost + 100%
     await pricing_svc.create_price_policy(
-        db, actor=a, name=f"r364 {ULID()}", policy_type="cost_plus_percentage",
-        usage_type="image_generation", currency="USD",
+        db,
+        actor=a,
+        name=f"r364 {ULID()}",
+        policy_type="cost_plus_percentage",
+        usage_type="image_generation",
+        currency="USD",
         params={"percentage": "100"},
-        effective_from=datetime.now(UTC) - timedelta(days=1), tenant_id=tenant.id)
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        tenant_id=tenant.id,
+    )
     # cost rate in BND (no FX anywhere in the shared DB) → blocked row
     prov = f"r364-{str(ULID()).lower()[:8]}"
-    db.add(ProviderCostRate(
-        provider=prov, model_or_service="m", usage_type="image_generation",
-        unit="images", unit_cost=Decimal("0.10"), currency="BND",
-        effective_from=datetime.now(UTC) - timedelta(days=2), created_by=user.id))
+    db.add(
+        ProviderCostRate(
+            provider=prov,
+            model_or_service="m",
+            usage_type="image_generation",
+            unit="images",
+            unit_cost=Decimal("0.10"),
+            currency="BND",
+            effective_from=datetime.now(UTC) - timedelta(days=2),
+            created_by=user.id,
+        )
+    )
     await db.flush()
 
-    ev_blocked = await _mk_event(db, tenant, quantity=1,
-                                 provider=prov, model_or_service="m")
-    await _mk_event(db, tenant, quantity=2)   # the countable, rateable one
+    ev_blocked = await _mk_event(db, tenant, quantity=1, provider=prov, model_or_service="m")
+    await _mk_event(db, tenant, quantity=2)  # the countable, rateable one
     ev_other = await _mk_event(db, other, quantity=1)
 
     # (1) tenant-scoped rate_pending: rates tenant's 2 events; counts ONLY the
@@ -2181,22 +2604,26 @@ async def test_rating_body_boundaries(db):
     n = await rating.rate_pending(db, tenant_id=tenant.id)
     assert n == 1, f"only the successfully-rated row counts, got {n}"
     other_rated = (
-        await db.execute(
-            select(RatedUsage).where(RatedUsage.usage_event_id == ev_other.id))
+        await db.execute(select(RatedUsage).where(RatedUsage.usage_event_id == ev_other.id))
     ).scalar_one_or_none()
-    assert other_rated is None            # tenant scope held
+    assert other_rated is None  # tenant scope held
 
     blocked_row = (
-        await db.execute(
-            select(RatedUsage).where(RatedUsage.usage_event_id == ev_blocked.id))
+        await db.execute(select(RatedUsage).where(RatedUsage.usage_event_id == ev_blocked.id))
     ).scalar_one()
     assert blocked_row.status == "blocked"
     assert blocked_row.rating_version == 1
 
     # (4) FX lands → retry re-rates; version bumps to exactly 2; margin math
-    db.add(FxRate(base_currency="BND", quote_currency="USD", rate=Decimal("2"),
-                  effective_from=datetime.now(UTC) - timedelta(days=3),
-                  created_by=user.id))
+    db.add(
+        FxRate(
+            base_currency="BND",
+            quote_currency="USD",
+            rate=Decimal("2"),
+            effective_from=datetime.now(UTC) - timedelta(days=3),
+            created_by=user.id,
+        )
+    )
     await db.flush()
     n2 = await rating.rate_pending(db, tenant_id=tenant.id)
     assert n2 == 1
@@ -2205,7 +2632,7 @@ async def test_rating_body_boundaries(db):
     assert blocked_row.rating_version == 2
     # (3) cost 0.10 BND ×1 = 10 BND-minor → $0.20 at rate 2; +100% → billable
     # $0.40; margin = billable − cost in platform currency = 40 − 20 = 20
-    assert blocked_row.internal_cost_minor == 10   # BND minor (cost currency)
+    assert blocked_row.internal_cost_minor == 10  # BND minor (cost currency)
     assert blocked_row.billable_amount_minor == 40
     assert blocked_row.margin_minor == 20
 
@@ -2217,7 +2644,7 @@ async def test_rating_body_boundaries(db):
         await rating.unvoid_rated(db, str(ULID()), reason="x", actor=a)
     assert e404b.value.status_code == 404
     with pytest.raises(AppError) as e409:
-        await rating.unvoid_rated(db, blocked_row.id, reason="x", actor=a)   # not voided
+        await rating.unvoid_rated(db, blocked_row.id, reason="x", actor=a)  # not voided
     assert e409.value.status_code == 409
     voided = await rating.void_rated(db, blocked_row.id, reason="strike", actor=a)
     assert voided.status == "voided"
@@ -2225,7 +2652,7 @@ async def test_rating_body_boundaries(db):
         await rating.void_rated(db, blocked_row.id, reason="again", actor=a)
     assert e409b.value.status_code == 409
     restored = await rating.unvoid_rated(db, blocked_row.id, reason="restore", actor=a)
-    assert restored.status == "rated"     # non-blocked row restores to rated
+    assert restored.status == "rated"  # non-blocked row restores to rated
 
     # (6) the void double-correct gate keys on adjustments OF THIS EVENT —
     # a DECOY adjustment pointing at a different original must not 409 the
@@ -2237,16 +2664,16 @@ async def test_rating_body_boundaries(db):
     r_target = await rating.rate_event(db, ev_target.id)
     await rating.rate_event(db, ev_decoy_orig.id)
     await _metering.ingest_adjustment(
-        db, original_event_id=ev_decoy_orig.id, delta_quantity=-1,
-        reason="decoy", actor=a)
+        db, original_event_id=ev_decoy_orig.id, delta_quantity=-1, reason="decoy", actor=a
+    )
     # decoy adjustment (of the OTHER event) → this void succeeds
     v_ok = await rating.void_rated(db, r_target.id, reason="ok", actor=a)
     assert v_ok.status == "voided"
     await rating.unvoid_rated(db, r_target.id, reason="undo", actor=a)
     # real adjustment of THIS event → 409 with status
     await _metering.ingest_adjustment(
-        db, original_event_id=ev_target.id, delta_quantity=-1,
-        reason="real", actor=a)
+        db, original_event_id=ev_target.id, delta_quantity=-1, reason="real", actor=a
+    )
     with pytest.raises(AppError) as e_dc:
         await rating.void_rated(db, r_target.id, reason="dc", actor=a)
     assert e_dc.value.status_code == 409
@@ -2261,20 +2688,26 @@ async def test_rating_body_boundaries(db):
     # exclusively for blocked-restored rows — the Or-mutant floods the outbox
     # with spurious usage.recorded messages on every unvoid)
     before_msgs = (
-        await db.execute(
-            select(OutboxMessage).where(OutboxMessage.topic == "usage.recorded"))
-    ).scalars().all()
-    before_n = sum(1 for m in before_msgs
-                   if m.payload.get("usage_event_id") == blocked_row.usage_event_id
-                   and m.status == "pending")
+        (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == "usage.recorded")))
+        .scalars()
+        .all()
+    )
+    before_n = sum(
+        1
+        for m in before_msgs
+        if m.payload.get("usage_event_id") == blocked_row.usage_event_id and m.status == "pending"
+    )
     await rating.unvoid_rated(db, blocked_row.id, reason="undo2", actor=a)
     after_msgs = (
-        await db.execute(
-            select(OutboxMessage).where(OutboxMessage.topic == "usage.recorded"))
-    ).scalars().all()
-    after_n = sum(1 for m in after_msgs
-                  if m.payload.get("usage_event_id") == blocked_row.usage_event_id
-                  and m.status == "pending")
+        (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == "usage.recorded")))
+        .scalars()
+        .all()
+    )
+    after_n = sum(
+        1
+        for m in after_msgs
+        if m.payload.get("usage_event_id") == blocked_row.usage_event_id and m.status == "pending"
+    )
     assert after_n == before_n, "rated-restore must not re-enqueue a rating retry"
 
 
@@ -2287,41 +2720,47 @@ async def test_quota_month_window_boundaries_and_failed_exclusion(db):
     from datetime import datetime as dt
 
     user = await _mk_user(db)
-    tenant = await _mk_tenant(db, user)   # USD, UTC tz
+    tenant = await _mk_tenant(db, user)  # USD, UTC tz
     a = _actor(user)
     await pricing_svc.create_price_policy(
-        db, actor=a, name=f"r364q {ULID()}",
+        db,
+        actor=a,
+        name=f"r364q {ULID()}",
         policy_type="included_quota_then_overage",
-        usage_type="image_generation", currency="USD",
-        params={"included_quota": "100", "overage_unit_price_minor": 5,
-                "exclude_failed": True},
-        effective_from=dt(2026, 1, 1, tzinfo=UTC), tenant_id=tenant.id)
+        usage_type="image_generation",
+        currency="USD",
+        params={"included_quota": "100", "overage_unit_price_minor": 5, "exclude_failed": True},
+        effective_from=dt(2026, 1, 1, tzinfo=UTC),
+        tenant_id=tenant.id,
+    )
 
     m_start = dt(2026, 6, 1, 0, 0, tzinfo=UTC)
     # previous-month bulk: must NOT count toward June
-    e_prev = await _mk_event(db, tenant, quantity=95,
-                             occurred_at=m_start - timedelta(minutes=1))
+    e_prev = await _mk_event(db, tenant, quantity=95, occurred_at=m_start - timedelta(minutes=1))
     await rating.rate_event(db, e_prev.id)
     # exactly AT month start: counts (>= boundary)
     e_at = await _mk_event(db, tenant, quantity=60, occurred_at=m_start)
     r_at = await rating.rate_event(db, e_at.id)
-    assert r_at.billable_amount_minor == 0            # 60 ≤ 100, May's 95 excluded
+    assert r_at.billable_amount_minor == 0  # 60 ≤ 100, May's 95 excluded
     # a FAILED event mid-June: excluded from quota accumulation
-    e_failed = await _mk_event(db, tenant, quantity=50,
-                               occurred_at=m_start + timedelta(days=1),
-                               metadata={"status": "failed"})
+    e_failed = await _mk_event(
+        db,
+        tenant,
+        quantity=50,
+        occurred_at=m_start + timedelta(days=1),
+        metadata={"status": "failed"},
+    )
     await rating.rate_event(db, e_failed.id)
     # next real event: prior = 60 (not 110) → 30 within quota, 0 overage…
-    e_next = await _mk_event(db, tenant, quantity=30,
-                             occurred_at=m_start + timedelta(days=2))
+    e_next = await _mk_event(db, tenant, quantity=30, occurred_at=m_start + timedelta(days=2))
     r_next = await rating.rate_event(db, e_next.id)
     assert r_next.billable_amount_minor == 0, (
-        "failed events must not consume quota (prior must be 60, not 110)")
+        "failed events must not consume quota (prior must be 60, not 110)"
+    )
     # …and one more pushes past 100 by exactly 10 → 50 minor
-    e_over = await _mk_event(db, tenant, quantity=20,
-                             occurred_at=m_start + timedelta(days=3))
+    e_over = await _mk_event(db, tenant, quantity=20, occurred_at=m_start + timedelta(days=3))
     r_over = await rating.rate_event(db, e_over.id)
-    assert r_over.billable_amount_minor == 50         # (60+30+20)-100=10 × 5
+    assert r_over.billable_amount_minor == 50  # (60+30+20)-100=10 × 5
 
 
 @pytest.mark.asyncio
@@ -2339,28 +2778,36 @@ async def test_tenant_rated_usage_handler_scope_and_whitelist(db):
     tenant = await _mk_tenant(db, user)
     other = await _mk_tenant(db, user)
     await pricing_svc.create_price_policy(
-        db, actor=_actor(user), name=f"r389 {ULID()}",
-        policy_type="fixed_unit_price", usage_type="image_generation",
-        currency="USD", params={"unit_price_minor": 10},
+        db,
+        actor=_actor(user),
+        name=f"r389 {ULID()}",
+        policy_type="fixed_unit_price",
+        usage_type="image_generation",
+        currency="USD",
+        params={"unit_price_minor": 10},
         effective_from=datetime.now(UTC) - timedelta(days=1),
-        tenant_id=tenant.id)
-    for t, utype, n in ((tenant, "image_generation", 3),
-                        (tenant, "workflow_run", 1),
-                        (other, "image_generation", 2)):
+        tenant_id=tenant.id,
+    )
+    for t, utype, n in (
+        (tenant, "image_generation", 3),
+        (tenant, "workflow_run", 1),
+        (other, "image_generation", 2),
+    ):
         for _ in range(n):
             ev = await _mk_event(db, t, usage_type=utype, quantity=1)
             await rating.rate_event(db, ev.id)
 
-    resp = await tenant_rated_usage(tenant.id, usage_type=None, page=1,
-                                    per_page=3, user=user, db=db)
-    assert resp.meta.total == 4                      # other tenant's 2 excluded
+    resp = await tenant_rated_usage(
+        tenant.id, usage_type=None, page=1, per_page=3, user=user, db=db
+    )
+    assert resp.meta.total == 4  # other tenant's 2 excluded
     assert len(resp.data) == 3 and resp.meta.has_more is True
     for row in resp.data:
         assert set(row.keys()) == set(TENANT_RATED_FIELDS), row.keys()
         assert "internal_cost_minor" not in row and "margin_minor" not in row
-    p2 = await tenant_rated_usage(tenant.id, usage_type=None, page=2,
-                                  per_page=3, user=user, db=db)
+    p2 = await tenant_rated_usage(tenant.id, usage_type=None, page=2, per_page=3, user=user, db=db)
     assert len(p2.data) == 1 and p2.meta.has_more is False
-    filt = await tenant_rated_usage(tenant.id, usage_type="workflow_run",
-                                    page=1, per_page=50, user=user, db=db)
+    filt = await tenant_rated_usage(
+        tenant.id, usage_type="workflow_run", page=1, per_page=50, user=user, db=db
+    )
     assert filt.meta.total == 1

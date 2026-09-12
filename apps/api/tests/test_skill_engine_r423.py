@@ -79,16 +79,30 @@ async def _org(db, owner):
 
 async def _skill(db, svc, org, owner, cat, prereqs=None):
     return await svc.create_skill(
-        org.id, cat.id, f"S {uuid.uuid4().hex[:5]}", None, "d", "# c",
-        "beginner", 30, ["ai"], prereqs, owner.id,
+        org.id,
+        cat.id,
+        f"S {uuid.uuid4().hex[:5]}",
+        None,
+        "d",
+        "# c",
+        "beginner",
+        30,
+        ["ai"],
+        prereqs,
+        owner.id,
     )
 
 
 async def _mcq(db, svc, org, skill, owner, correct):
     return await svc.create_exercise(
-        org.id, skill.id, "Q", "pick", "multiple_choice",
+        org.id,
+        skill.id,
+        "Q",
+        "pick",
+        "multiple_choice",
         {"correct": correct, "options": [{"id": "a", "text": "A"}, {"id": "b", "text": "B"}]},
-        100, owner.id,
+        100,
+        owner.id,
     )
 
 
@@ -114,8 +128,14 @@ async def test_mcq_autograde_and_lock_r423(db):
 
     # multi-select is order-insensitive (sorted compare)
     ex2 = await svc.create_exercise(
-        org.id, skill.id, "Q2", "pick", "multiple_choice",
-        {"correct": ["a", "b"]}, 100, owner.id,
+        org.id,
+        skill.id,
+        "Q2",
+        "pick",
+        "multiple_choice",
+        {"correct": ["a", "b"]},
+        100,
+        owner.id,
     )
     m_ok = await svc.submit_attempt(org.id, ex2.id, learner.id, {"selected": ["b", "a"]})
     assert m_ok.is_correct is True
@@ -123,7 +143,14 @@ async def test_mcq_autograde_and_lock_r423(db):
     # MALFORMED config: correct == [] must NEVER auto-grade a blank answer to
     # full marks (an unanswerable MCQ is never "correct")
     ex_bad = await svc.create_exercise(
-        org.id, skill.id, "Q3", "pick", "multiple_choice", {"correct": []}, 100, owner.id,
+        org.id,
+        skill.id,
+        "Q3",
+        "pick",
+        "multiple_choice",
+        {"correct": []},
+        100,
+        owner.id,
     )
     blank = await svc.submit_attempt(org.id, ex_bad.id, learner.id, {"selected": []})
     assert blank.is_correct is False and blank.score == 0
@@ -148,7 +175,14 @@ async def test_grade_attempt_self_grade_and_threshold_r423(db):
 
     skill = await _skill(db, svc, org, owner, cat)
     ex = await svc.create_exercise(
-        org.id, skill.id, "T", "answer", "text_answer", {}, 100, owner.id,
+        org.id,
+        skill.id,
+        "T",
+        "answer",
+        "text_answer",
+        {},
+        100,
+        owner.id,
     )
     attempt = await svc.submit_attempt(org.id, ex.id, learner.id, {"text": "hi"})
 
@@ -203,8 +237,11 @@ async def test_is_skill_unlocked_r423(db):
     await db.flush()
     assert await svc.is_skill_unlocked(dependent.id, learner.id) is False
     # complete `base` → now unlocked (archived prereq ignored)
-    db.add(SkillProgress(org_id=org.id, skill_id=base.id, user_id=learner.id,
-                         status=ProgressStatus.COMPLETED))
+    db.add(
+        SkillProgress(
+            org_id=org.id, skill_id=base.id, user_id=learner.id, status=ProgressStatus.COMPLETED
+        )
+    )
     await db.flush()
     assert await svc.is_skill_unlocked(dependent.id, learner.id) is True
 
@@ -245,13 +282,15 @@ async def test_update_skill_progress_completion_r423(db):
     from app.models.gamification import PointsLedger
 
     async def _pts():
-        return (await db.execute(
-            _sel(_f.count(PointsLedger.id)).where(
-                PointsLedger.user_id == learner.id,
-                PointsLedger.reason == "skill_completion",
-                PointsLedger.reference_id == skill.id,
+        return (
+            await db.execute(
+                _sel(_f.count(PointsLedger.id)).where(
+                    PointsLedger.user_id == learner.id,
+                    PointsLedger.reason == "skill_completion",
+                    PointsLedger.reference_id == skill.id,
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
 
     # NO completion award yet — the award gate fires only on the transition to
     # COMPLETED, never on IN_PROGRESS (kills `status != COMPLETED` mutants)
@@ -285,15 +324,32 @@ async def test_get_user_progress_excludes_archived_r423(db):
     s_done = await _skill(db, svc, org, owner, cat)
     s_prog = await _skill(db, svc, org, owner, cat)
     s_arch = await _skill(db, svc, org, owner, cat)
-    db.add_all([
-        SkillProgress(org_id=org.id, skill_id=s_done.id, user_id=learner.id,
-                      status=ProgressStatus.COMPLETED, exercises_done=3),
-        SkillProgress(org_id=org.id, skill_id=s_prog.id, user_id=learner.id,
-                      status=ProgressStatus.IN_PROGRESS, exercises_done=1),
-        # progress on an ARCHIVED skill must not be counted anywhere
-        SkillProgress(org_id=org.id, skill_id=s_arch.id, user_id=learner.id,
-                      status=ProgressStatus.COMPLETED, exercises_done=9),
-    ])
+    db.add_all(
+        [
+            SkillProgress(
+                org_id=org.id,
+                skill_id=s_done.id,
+                user_id=learner.id,
+                status=ProgressStatus.COMPLETED,
+                exercises_done=3,
+            ),
+            SkillProgress(
+                org_id=org.id,
+                skill_id=s_prog.id,
+                user_id=learner.id,
+                status=ProgressStatus.IN_PROGRESS,
+                exercises_done=1,
+            ),
+            # progress on an ARCHIVED skill must not be counted anywhere
+            SkillProgress(
+                org_id=org.id,
+                skill_id=s_arch.id,
+                user_id=learner.id,
+                status=ProgressStatus.COMPLETED,
+                exercises_done=9,
+            ),
+        ]
+    )
     s_arch.status = ContentStatus.ARCHIVED
     await db.flush()
 
@@ -301,7 +357,8 @@ async def test_get_user_progress_excludes_archived_r423(db):
     await svc.create_exercise(org.id, s_done.id, "E1", "d", "text_answer", {}, 100, owner.id)
     await svc.create_exercise(org.id, s_prog.id, "E2", "d", "text_answer", {}, 100, owner.id)
     ex_arch = await svc.create_exercise(
-        org.id, s_done.id, "E3", "d", "text_answer", {}, 100, owner.id)
+        org.id, s_done.id, "E3", "d", "text_answer", {}, 100, owner.id
+    )
     ex_arch.status = ContentStatus.ARCHIVED
     await db.flush()
 

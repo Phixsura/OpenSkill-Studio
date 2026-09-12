@@ -311,26 +311,31 @@ async def test_cohort_slug_collision_retry_no_session_poison():
             org_id = org.id
 
         # All these names collapse to the same base slug via _generate_slug.
-        names = ["team alpha", "team!alpha", "team@@@alpha", "TEAM  ALPHA", "team.alpha"]  # all → base slug "team-alpha"
+        names = [
+            "team alpha",
+            "team!alpha",
+            "team@@@alpha",
+            "TEAM  ALPHA",
+            "team.alpha",
+        ]  # all → base slug "team-alpha"
         async with AsyncSessionLocal() as s:
             svc = CohortService(s)
             made = []
             for nm in names:
-                cohort = await svc.create_cohort(org_id, name=nm, description=None,
-                                                 created_by=user.id)
+                cohort = await svc.create_cohort(
+                    org_id, name=nm, description=None, created_by=user.id
+                )
                 made.append(cohort.id)
             await s.commit()
             # a normal op AFTER the retries must work (session not poisoned)
-            await svc.create_cohort(org_id, name="normal cohort", description=None,
-                                            created_by=user.id)
+            await svc.create_cohort(
+                org_id, name="normal cohort", description=None, created_by=user.id
+            )
             await s.commit()
         async with AsyncSessionLocal() as s:
-            rows = (
-                (await s.execute(select(Cohort).where(Cohort.org_id == org_id)))
-                .scalars().all()
-            )
+            rows = (await s.execute(select(Cohort).where(Cohort.org_id == org_id))).scalars().all()
             slugs = [r.slug for r in rows]
-            assert len(rows) == len(names) + 1, f"{len(rows)} cohorts (expected {len(names)+1})"
+            assert len(rows) == len(names) + 1, f"{len(rows)} cohorts (expected {len(names) + 1})"
             assert len(set(slugs)) == len(slugs), f"duplicate slugs: {slugs}"
     finally:
         await engine.dispose()
@@ -383,10 +388,10 @@ async def test_double_start_assessment_allocates_once():
         assert outcomes == ["INVALID_PHASE"], outcomes
         async with AsyncSessionLocal() as s:
             n = (
-                await s.execute(
-                    select(PeerAssessment).where(PeerAssessment.round_id == round_id)
-                )
-            ).scalars().all()
+                (await s.execute(select(PeerAssessment).where(PeerAssessment.round_id == round_id)))
+                .scalars()
+                .all()
+            )
             assert len(n) == count_a, f"expected single allocation ({count_a}), got {len(n)}"
     finally:
         await engine.dispose()
@@ -540,24 +545,40 @@ async def test_concurrent_set_override_no_500():
         sb = AsyncSessionLocal()
         try:
             ta = await sa.get(
-                __import__("app.controlplane.models.tenant", fromlist=["TenantAccount"]).TenantAccount,
+                __import__(
+                    "app.controlplane.models.tenant", fromlist=["TenantAccount"]
+                ).TenantAccount,
                 tenant_id,
             )
             tb = await sb.get(
-                __import__("app.controlplane.models.tenant", fromlist=["TenantAccount"]).TenantAccount,
+                __import__(
+                    "app.controlplane.models.tenant", fromlist=["TenantAccount"]
+                ).TenantAccount,
                 tenant_id,
             )
             # A inserts and HOLDS (uncommitted) — B's insert will block on the
             # unique index until A commits, then hit IntegrityError.
             await set_override(
-                sa, ta.id, "max_organizations", value=5, enforcement="hard",
-                expires_at=None, reason="A", actor=actor,
+                sa,
+                ta.id,
+                "max_organizations",
+                value=5,
+                enforcement="hard",
+                expires_at=None,
+                reason="A",
+                actor=actor,
             )
 
             async def b_set():
                 await set_override(
-                    sb, tb.id, "max_organizations", value=9, enforcement="hard",
-                    expires_at=None, reason="B", actor=actor,
+                    sb,
+                    tb.id,
+                    "max_organizations",
+                    value=9,
+                    enforcement="hard",
+                    expires_at=None,
+                    reason="B",
+                    actor=actor,
                 )
                 await sb.commit()
 
@@ -695,16 +716,27 @@ async def test_concurrent_extension_grants_no_500():
             student = await _mk_user(setup)
             setup.add(
                 OrgMember(
-                    org_id=org.id, user_id=student.id,
-                    role=OrgRole.STUDENT, status=MemberStatus.ACTIVE,
+                    org_id=org.id,
+                    user_id=student.id,
+                    role=OrgRole.STUDENT,
+                    status=MemberStatus.ACTIVE,
                 )
             )
             project = await ProjectService(setup).create_project(
-                org_id=org.id, title=f"Ext {ULID()}", slug=None, description="d",
-                instructions="i", difficulty="beginner", max_score=100,
-                rubric=[{"criterion": "Q", "max_score": 100}], deadline=None,
-                late_deadline=None, late_penalty_pct=0, max_submissions=0,
-                skill_ids=None, created_by=instructor.id,
+                org_id=org.id,
+                title=f"Ext {ULID()}",
+                slug=None,
+                description="d",
+                instructions="i",
+                difficulty="beginner",
+                max_score=100,
+                rubric=[{"criterion": "Q", "max_score": 100}],
+                deadline=None,
+                late_deadline=None,
+                late_penalty_pct=0,
+                max_submissions=0,
+                skill_ids=None,
+                created_by=instructor.id,
             )
             await setup.commit()
             pid, sid, iid = project.id, student.id, instructor.id

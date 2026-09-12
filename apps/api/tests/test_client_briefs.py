@@ -516,9 +516,7 @@ async def test_brief_slug_retry_does_not_wipe_transaction(c):
 
     async with AsyncSessionLocal() as s:
         rows = (
-            (await s.execute(select(ClientBrief).where(ClientBrief.org_id == oid)))
-            .scalars()
-            .all()
+            (await s.execute(select(ClientBrief).where(ClientBrief.org_id == oid))).scalars().all()
         )
         ids = {r.id for r in rows}
         assert a_id in ids, "retry wiped the earlier uncommitted brief from the transaction"

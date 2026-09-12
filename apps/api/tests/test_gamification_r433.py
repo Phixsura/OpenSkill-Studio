@@ -37,8 +37,13 @@ async def db():
 
 
 async def _user(db, name="U"):
-    u = User(email=f"r433-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name=name, role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r433-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name=name,
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -47,9 +52,12 @@ async def _user(db, name="U"):
 async def _org(db, owner):
     from app.services.organization import OrgService
 
-    o = await OrgService(db).create(name=f"R433 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r433-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R433 {uuid.uuid4().hex[:5]}",
+        slug=f"r433-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o
 

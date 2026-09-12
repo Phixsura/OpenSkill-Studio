@@ -699,8 +699,7 @@ async def test_reap_stuck_full_semantics(db):
     now = _now()
 
     def _msg(status, *, locked_min_ago=None, attempts=0, processed_days_ago=None):
-        m = OutboxMessage(
-            topic="test.reap", payload={}, status=status, attempts=attempts)
+        m = OutboxMessage(topic="test.reap", payload={}, status=status, attempts=attempts)
         if locked_min_ago is not None:
             m.locked_by = "w1"
             m.locked_at = now - timedelta(minutes=locked_min_ago)
@@ -709,16 +708,14 @@ async def test_reap_stuck_full_semantics(db):
         return m
 
     stuck = _msg("processing", locked_min_ago=20, attempts=0)
-    doomed = _msg("processing", locked_min_ago=20,
-                  attempts=_settings.outbox_max_attempts - 1)
+    doomed = _msg("processing", locked_min_ago=20, attempts=_settings.outbox_max_attempts - 1)
     # attempts == max-2 sits UNDER the dead-letter threshold → rescued
-    almost = _msg("processing", locked_min_ago=20,
-                  attempts=_settings.outbox_max_attempts - 2)
+    almost = _msg("processing", locked_min_ago=20, attempts=_settings.outbox_max_attempts - 2)
     fresh = _msg("processing", locked_min_ago=1, attempts=0)
     # 10.5 min old: past the DEFAULT 10-minute cutoff (pins the default arg)
     edge_lease = _msg("processing", locked_min_ago=10.5, attempts=0)
     old_done = _msg("done", processed_days_ago=40)
-    edge_done = _msg("done", processed_days_ago=30.5)   # inside the 30d purge
+    edge_done = _msg("done", processed_days_ago=30.5)  # inside the 30d purge
     new_done = _msg("done", processed_days_ago=5)
     db.add_all([stuck, doomed, almost, fresh, edge_lease, old_done, edge_done, new_done])
     await db.flush()
@@ -726,24 +723,24 @@ async def test_reap_stuck_full_semantics(db):
 
     # default cutoff is 10 minutes — call WITHOUT the kwarg
     n = await reap_stuck(db)
-    assert n == 4                                # stuck + almost + doomed + edge_lease
+    assert n == 4  # stuck + almost + doomed + edge_lease
 
     await db.refresh(stuck)
-    assert stuck.status == "pending"             # rescued …
-    assert stuck.attempts == 1                   # … with the attempt counted
+    assert stuck.status == "pending"  # rescued …
+    assert stuck.attempts == 1  # … with the attempt counted
     assert stuck.locked_by is None and stuck.locked_at is None
     await db.refresh(doomed)
-    assert doomed.status == "failed"             # dead-lettered at threshold
+    assert doomed.status == "failed"  # dead-lettered at threshold
     assert doomed.attempts == _settings.outbox_max_attempts
     assert "lease expired" in (doomed.last_error or "")
     await db.refresh(fresh)
-    assert fresh.status == "processing"          # live lease untouched
+    assert fresh.status == "processing"  # live lease untouched
     assert fresh.attempts == 0
 
     await db.refresh(edge_lease)
-    assert edge_lease.status == "pending"        # default 10-min cutoff reaps it
+    assert edge_lease.status == "pending"  # default 10-min cutoff reaps it
     await db.refresh(almost)
-    assert almost.status == "pending"            # below threshold → rescued
+    assert almost.status == "pending"  # below threshold → rescued
     assert almost.attempts == _settings.outbox_max_attempts - 1
 
     gone = await db.get(OutboxMessage, old_done.id)

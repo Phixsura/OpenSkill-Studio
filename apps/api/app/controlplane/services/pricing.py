@@ -148,9 +148,7 @@ async def create_cost_rate(db: AsyncSession, *, actor: Actor, **fields) -> Provi
         f"cost_rate:{fields['provider']}:{fields.get('model_or_service')}"
         f":{usage_type}:{fields.get('capability_key')}"
     )
-    await db.execute(
-        _text("SELECT pg_advisory_xact_lock(hashtext(:k))").bindparams(k=_dims)
-    )
+    await db.execute(_text("SELECT pg_advisory_xact_lock(hashtext(:k))").bindparams(k=_dims))
     await _check_cost_rate_overlap(
         db,
         provider=fields["provider"],

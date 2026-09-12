@@ -197,9 +197,7 @@ async def test_visibility_gate_matrix_r403(db):
     from app.models.project import ProjectCreatorAssignment
 
     p2 = await _project(db, org, owner)
-    db.add(
-        ProjectCreatorAssignment(project_id=p2.id, user_id=solo.id, assigned_by=owner.id)
-    )
+    db.add(ProjectCreatorAssignment(project_id=p2.id, user_id=solo.id, assigned_by=owner.id))
     await db.flush()
     sub_solo = await svc.create_submission(org.id, p2.id, solo.id)
     assert sub_solo.id
@@ -244,9 +242,7 @@ async def test_submit_draft_gates_and_versioning_r403(db):
     with pytest.raises(MissingDeliverablesError):
         await svc.submit_draft(sub.id, stu.id)
     db.add(
-        SubmissionItem(
-            submission_id=sub.id, deliverable_id=d.id, type=ItemType.TEXT, content="   "
-        )
+        SubmissionItem(submission_id=sub.id, deliverable_id=d.id, type=ItemType.TEXT, content="   ")
     )
     await db.flush()
     with pytest.raises(MissingDeliverablesError):
@@ -336,7 +332,9 @@ async def test_timing_precedence_and_extensions_r403(db):
 
     # past deadline, open late window → late
     p_late = await _project(
-        db, org, owner,
+        db,
+        org,
+        owner,
         deadline=now - timedelta(hours=2),
         late_deadline=now + timedelta(hours=2),
     )
@@ -349,25 +347,33 @@ async def test_timing_precedence_and_extensions_r403(db):
     c2 = Cohort(org_id=org.id, name="c2", slug=f"c2-{uuid.uuid4().hex[:8]}", created_by=owner.id)
     db.add_all([c1, c2])
     await db.flush()
-    db.add_all([
-        CohortMember(cohort_id=c1.id, user_id=stu.id, role="learner"),
-        CohortMember(cohort_id=c2.id, user_id=stu.id, role="learner"),
-    ])
+    db.add_all(
+        [
+            CohortMember(cohort_id=c1.id, user_id=stu.id, role="learner"),
+            CohortMember(cohort_id=c2.id, user_id=stu.id, role="learner"),
+        ]
+    )
     # c1: NO overrides (must not crash / must not null the deadline);
     # c2: deadline_override in the future → student is on_time
-    db.add_all([
-        CohortProjectAssignment(cohort_id=c1.id, project_id=p_closed.id, assigned_by=owner.id),
-        CohortProjectAssignment(
-            assigned_by=owner.id, cohort_id=c2.id, project_id=p_closed.id,
-            deadline_override=now + timedelta(hours=3),
-        ),
-    ])
+    db.add_all(
+        [
+            CohortProjectAssignment(cohort_id=c1.id, project_id=p_closed.id, assigned_by=owner.id),
+            CohortProjectAssignment(
+                assigned_by=owner.id,
+                cohort_id=c2.id,
+                project_id=p_closed.id,
+                deadline_override=now + timedelta(hours=3),
+            ),
+        ]
+    )
     await db.flush()
     assert await svc.get_submission_timing(p_closed, stu.id) == "on_time"
 
     # late_deadline_override extends the LATE window (project late passed)
     p_l2 = await _project(
-        db, org, owner,
+        db,
+        org,
+        owner,
         deadline=now - timedelta(hours=4),
         late_deadline=now - timedelta(hours=2),
     )
@@ -378,7 +384,9 @@ async def test_timing_precedence_and_extensions_r403(db):
     db.add(CohortMember(cohort_id=c3.id, user_id=stu.id, role="learner"))
     db.add(
         CohortProjectAssignment(
-            assigned_by=owner.id, cohort_id=c3.id, project_id=p_l2.id,
+            assigned_by=owner.id,
+            cohort_id=c3.id,
+            project_id=p_l2.id,
             late_deadline_override=now + timedelta(hours=2),
         )
     )
@@ -397,7 +405,9 @@ async def test_timing_precedence_and_extensions_r403(db):
     db.add(CohortMember(cohort_id=c4.id, user_id=lone.id, role="learner"))
     db.add(
         CohortProjectAssignment(
-            assigned_by=owner.id, cohort_id=c4.id, project_id=p_solo.id,
+            assigned_by=owner.id,
+            cohort_id=c4.id,
+            project_id=p_solo.id,
             deadline_override=now + timedelta(hours=3),
         )
     )
@@ -408,15 +418,13 @@ async def test_timing_precedence_and_extensions_r403(db):
     # leaves the effective late deadline alone (None overrides are skipped,
     # never compared) — still 'late', never a TypeError
     p_win = await _project(
-        db, org, owner,
+        db,
+        org,
+        owner,
         deadline=now - timedelta(hours=4),
         late_deadline=now + timedelta(hours=2),
     )
-    db.add(
-        CohortProjectAssignment(
-            assigned_by=owner.id, cohort_id=c4.id, project_id=p_win.id
-        )
-    )
+    db.add(CohortProjectAssignment(assigned_by=owner.id, cohort_id=c4.id, project_id=p_win.id))
     await db.flush()
     assert await svc.get_submission_timing(p_win, lone.id) == "late"
 

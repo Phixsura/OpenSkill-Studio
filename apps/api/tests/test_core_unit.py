@@ -362,7 +362,7 @@ def test_compute_level_thresholds():
     assert _compute_level(99) == 1
     assert _compute_level(100) == 2
     assert _compute_level(250) == 3
-    assert _compute_level(-50) == 1          # never below level 1
+    assert _compute_level(-50) == 1  # never below level 1
     # monotonic non-decreasing
     prev = 0
     for pts in range(0, 2000, 37):
@@ -380,7 +380,7 @@ def test_duplicate_slug_and_name_survive_max_length():
     long_slug = "s" * 250
     dup = _dup_slug(long_slug)
     assert len(dup) <= 200
-    assert "-copy-" in dup                       # suffix survived the trim
+    assert "-copy-" in dup  # suffix survived the trim
     # re-duplicating strips the prior -copy- marker (no unbounded growth)
     again = _dup_slug(dup)
     assert len(again) <= 200 and again.count("-copy-") == 1
@@ -419,7 +419,7 @@ def test_comfyui_infinity_field_does_not_discard_whole_result():
     }
     out = parse_comfyui_prompt(json.dumps(wf))  # serializes as Infinity
     assert out is not None
-    assert "steps" not in out                    # hostile field skipped
+    assert "steps" not in out  # hostile field skipped
     assert out["cfg_scale"] == 7.5 and out["seed"] == 42 and out["sampler"] == "euler"
 
 
@@ -479,9 +479,10 @@ def test_comfyui_exact_extraction():
     from app.core.genmeta import MAX_COMFY_JSON, parse_comfyui_prompt
 
     wf = {
-        "1": {"class_type": "KSampler",
-              "inputs": {"seed": 2**63 - 1, "steps": 25, "cfg": 7.0,
-                          "sampler_name": "x" * 300}},
+        "1": {
+            "class_type": "KSampler",
+            "inputs": {"seed": 2**63 - 1, "steps": 25, "cfg": 7.0, "sampler_name": "x" * 300},
+        },
         "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "hero shot"}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "ugly"}},
     }
@@ -605,15 +606,15 @@ def test_max_json_depth_boundary_and_hostile_short_circuit():
             v = [v]
         return v
 
-    assert max_json_depth(nest(3)) == 4                    # 3 lists + scalar level
-    reject_deep_json(nest(63), "f", limit=64)              # at limit → ok
+    assert max_json_depth(nest(3)) == 4  # 3 lists + scalar level
+    reject_deep_json(nest(63), "f", limit=64)  # at limit → ok
     try:
-        reject_deep_json(nest(64), "f", limit=64)          # one past → rejected
+        reject_deep_json(nest(64), "f", limit=64)  # one past → rejected
         raise AssertionError("expected ValueError")
     except ValueError:
         pass
 
-    hostile = nest(100_000)                                # no RecursionError
+    hostile = nest(100_000)  # no RecursionError
     t0 = time.perf_counter()
     assert max_json_depth(hostile, limit=64) > 64
-    assert time.perf_counter() - t0 < 0.5                  # short-circuited
+    assert time.perf_counter() - t0 < 0.5  # short-circuited

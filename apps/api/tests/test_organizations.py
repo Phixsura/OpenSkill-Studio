@@ -222,32 +222,58 @@ async def test_org_member_matrix_and_seat_quota_r402():
         InsufficientOrgPermissionError,
         OrgService,
     )
+
     _session_cm = AsyncSessionLocal()
     db = await _session_cm.__aenter__()
     try:
 
         async def _user(tag):
-            u = User(email=f"{tag}-{str(_ULID()).lower()[:8]}@x.com",
-                     display_name=tag, password_hash="x")
+            u = User(
+                email=f"{tag}-{str(_ULID()).lower()[:8]}@x.com", display_name=tag, password_hash="x"
+            )
             db.add(u)
             await db.flush()
             return u
 
         owner = await _user("owner")
         svc = OrgService(db)
-        org = await svc.create(name=f"R402 {_ULID()}", slug=f"r402-{str(_ULID()).lower()}",
-                               description=None, created_by=owner.id)
-        org2 = await svc.create(name=f"R402b {_ULID()}", slug=f"r402b-{str(_ULID()).lower()}",
-                                description=None, created_by=owner.id)
+        org = await svc.create(
+            name=f"R402 {_ULID()}",
+            slug=f"r402-{str(_ULID()).lower()}",
+            description=None,
+            created_by=owner.id,
+        )
+        org2 = await svc.create(
+            name=f"R402b {_ULID()}",
+            slug=f"r402b-{str(_ULID()).lower()}",
+            description=None,
+            created_by=owner.id,
+        )
         # same tenant for both orgs
         o2 = await db.get(Organization, org2.id)
         o2.tenant_id = org.tenant_id
         await db.flush()
         actor = _Actor(user_id=owner.id, type="platform")
-        await set_override(db, org.tenant_id, "max_active_learners", value=2,
-                           enforcement="hard", expires_at=None, reason="r402", actor=actor)
-        await set_override(db, org.tenant_id, "max_instructors", value=2,
-                           enforcement="hard", expires_at=None, reason="r402", actor=actor)
+        await set_override(
+            db,
+            org.tenant_id,
+            "max_active_learners",
+            value=2,
+            enforcement="hard",
+            expires_at=None,
+            reason="r402",
+            actor=actor,
+        )
+        await set_override(
+            db,
+            org.tenant_id,
+            "max_instructors",
+            value=2,
+            enforcement="hard",
+            expires_at=None,
+            reason="r402",
+            actor=actor,
+        )
         await invalidate_cache(org.tenant_id)
 
         # (4) unknown user id → 404
@@ -286,9 +312,11 @@ async def test_org_member_matrix_and_seat_quota_r402():
             await svc.remove_member(org.id, s2.id, s1.id)
         # self-removal is allowed (leave)
         await svc.remove_member(org.id, s2.id, s2.id)
-        m_left = (await db.execute(
-            _sel(OrgMember).where(OrgMember.org_id == org.id,
-                                  OrgMember.user_id == s2.id))).scalar_one()
+        m_left = (
+            await db.execute(
+                _sel(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == s2.id)
+            )
+        ).scalar_one()
         assert m_left.status == MemberStatus.ARCHIVED
 
         # LAST owner cannot be demoted; with a second owner it becomes legal
@@ -297,8 +325,16 @@ async def test_org_member_matrix_and_seat_quota_r402():
         assert e_last.value.status_code == 400
         # (seat note: owner2 already holds a staff seat via org? no — new user;
         # staff cap is 2 with owner+i1 → bump the cap first)
-        await set_override(db, org.tenant_id, "max_instructors", value=3,
-                           enforcement="hard", expires_at=None, reason="r402b", actor=actor)
+        await set_override(
+            db,
+            org.tenant_id,
+            "max_instructors",
+            value=3,
+            enforcement="hard",
+            expires_at=None,
+            reason="r402b",
+            actor=actor,
+        )
         await invalidate_cache(org.tenant_id)
         owner2 = await _user("owner2")
         await svc.add_member(org.id, owner2.id, OrgRole.OWNER)
@@ -331,9 +367,12 @@ async def test_org_member_matrix_and_seat_quota_r402():
         # "already counted" (the join is Organization.id == member.org_id
         # scoped to THIS tenant), so at our full learner cap sx is rejected
         owner3, sx = await _user("owner3"), await _user("sx")
-        org3 = await svc.create(name=f"R402c {_ULID()}",
-                                slug=f"r402c-{str(_ULID()).lower()}",
-                                description=None, created_by=owner3.id)
+        org3 = await svc.create(
+            name=f"R402c {_ULID()}",
+            slug=f"r402c-{str(_ULID()).lower()}",
+            description=None,
+            created_by=owner3.id,
+        )
         assert (await db.get(Organization, org3.id)).tenant_id != org.tenant_id
         await svc.add_member(org3.id, sx.id, OrgRole.STUDENT)
         with pytest.raises(Exception) as e_xt:
@@ -344,8 +383,16 @@ async def test_org_member_matrix_and_seat_quota_r402():
         # OVER a lowered cap (3 active vs cap 2) and learners AT cap, an
         # instructor→admin change must still succeed (neither the staff-quota
         # branch nor the student-quota branch may fire on staff→staff)…
-        await set_override(db, org.tenant_id, "max_instructors", value=2,
-                           enforcement="hard", expires_at=None, reason="r402c", actor=actor)
+        await set_override(
+            db,
+            org.tenant_id,
+            "max_instructors",
+            value=2,
+            enforcement="hard",
+            expires_at=None,
+            reason="r402c",
+            actor=actor,
+        )
         await invalidate_cache(org.tenant_id)
         lat = await svc.update_member_role(org.id, i1.id, OrgRole.ADMIN, owner2.id)
         assert lat.role == OrgRole.ADMIN
@@ -359,54 +406,68 @@ async def test_org_member_matrix_and_seat_quota_r402():
         # DIFFERENT org — removal deletes only this org's cohort membership
         from app.models.cohort import Cohort, CohortMember
 
-        c_in = Cohort(org_id=org.id, name="In", slug=f"in-{str(_ULID()).lower()}",
-                      created_by=owner2.id)
-        c_out = Cohort(org_id=org2.id, name="Out", slug=f"out-{str(_ULID()).lower()}",
-                       created_by=owner2.id)
+        c_in = Cohort(
+            org_id=org.id, name="In", slug=f"in-{str(_ULID()).lower()}", created_by=owner2.id
+        )
+        c_out = Cohort(
+            org_id=org2.id, name="Out", slug=f"out-{str(_ULID()).lower()}", created_by=owner2.id
+        )
         db.add_all([c_in, c_out])
         await db.flush()
-        db.add_all([
-            CohortMember(cohort_id=c_in.id, user_id=s2.id, role="learner"),
-            CohortMember(cohort_id=c_out.id, user_id=s2.id, role="learner"),
-        ])
+        db.add_all(
+            [
+                CohortMember(cohort_id=c_in.id, user_id=s2.id, role="learner"),
+                CohortMember(cohort_id=c_out.id, user_id=s2.id, role="learner"),
+            ]
+        )
         await db.flush()
         await svc.remove_member(org.id, s2.id, owner2.id)
-        remaining = (await db.execute(
-            _sel(CohortMember).where(CohortMember.user_id == s2.id))
-        ).scalars().all()
+        remaining = (
+            (await db.execute(_sel(CohortMember).where(CohortMember.user_id == s2.id)))
+            .scalars()
+            .all()
+        )
         assert [cm.cohort_id for cm in remaining] == [c_out.id], (
-            "removal cascades ONLY this org's cohort memberships")
+            "removal cascades ONLY this org's cohort memberships"
+        )
 
         # delete_org: only an OWNER; archives member rows (freeing seats) and
         # the org's packs
         with pytest.raises(InsufficientOrgPermissionError):
-            await svc.delete_org(org2.id, s1.id)     # s1 is a student there
+            await svc.delete_org(org2.id, s1.id)  # s1 is a student there
         # delete_org archives the org's packs in BOTH registries — and ONLY
         # that org's (a sibling org's packs must not be collateral)
         from app.models.skill_pack import PackStatus, SkillPack
         from app.models.workflow_pack import WorkflowPack
 
-        sp2 = SkillPack(owner_org_id=org2.id, name="P2",
-                        slug=f"p2-{str(_ULID()).lower()}", created_by=owner.id)
-        wf2 = WorkflowPack(owner_org_id=org2.id, name="W2",
-                           slug=f"w2-{str(_ULID()).lower()}", created_by=owner.id)
-        sp1 = SkillPack(owner_org_id=org.id, name="P1",
-                        slug=f"p1-{str(_ULID()).lower()}", created_by=owner.id)
+        sp2 = SkillPack(
+            owner_org_id=org2.id, name="P2", slug=f"p2-{str(_ULID()).lower()}", created_by=owner.id
+        )
+        wf2 = WorkflowPack(
+            owner_org_id=org2.id, name="W2", slug=f"w2-{str(_ULID()).lower()}", created_by=owner.id
+        )
+        sp1 = SkillPack(
+            owner_org_id=org.id, name="P1", slug=f"p1-{str(_ULID()).lower()}", created_by=owner.id
+        )
         db.add_all([sp2, wf2, sp1])
         await db.flush()
         await svc.delete_org(org2.id, owner.id)
         o2_after = await db.get(Organization, org2.id)
         assert o2_after.status.value == "archived"
-        sib_row = (await db.execute(
-            _sel(OrgMember).where(OrgMember.org_id == org2.id,
-                                  OrgMember.user_id == s1.id))).scalar_one()
+        sib_row = (
+            await db.execute(
+                _sel(OrgMember).where(OrgMember.org_id == org2.id, OrgMember.user_id == s1.id)
+            )
+        ).scalar_one()
         assert sib_row.status == MemberStatus.ARCHIVED
         await db.refresh(sp2)
         await db.refresh(wf2)
         await db.refresh(sp1)
         assert sp2.status == PackStatus.ARCHIVED, "org2's skill pack archived"
-        assert str(wf2.status) in (str(PackStatus.ARCHIVED), "PackStatus.ARCHIVED", "archived") \
+        assert (
+            str(wf2.status) in (str(PackStatus.ARCHIVED), "PackStatus.ARCHIVED", "archived")
             or getattr(wf2.status, "value", wf2.status) == "archived"
+        )
         assert sp1.status != PackStatus.ARCHIVED, "sibling org's pack untouched"
     finally:
         await db.rollback()

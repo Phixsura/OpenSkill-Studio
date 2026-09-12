@@ -39,8 +39,13 @@ async def db():
 
 
 async def _user(db):
-    u = User(email=f"r435-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R435", role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r435-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R435",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -51,19 +56,30 @@ async def _setup(db, *, published=True, deadline=None, n_authors=3):
     from app.services.project import ProjectService
 
     owner = await _user(db)
-    org = await OrgService(db).create(name=f"R435 {uuid.uuid4().hex[:5]}",
-                                      slug=f"r435-{uuid.uuid4().hex[:10]}",
-                                      description=None, created_by=owner.id)
+    org = await OrgService(db).create(
+        name=f"R435 {uuid.uuid4().hex[:5]}",
+        slug=f"r435-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     proj = await ProjectService(db).create_project(
-        org.id, "P", None, "d", "i", "beginner", 100, [], None, None, 0, 0, None, owner.id)
+        org.id, "P", None, "d", "i", "beginner", 100, [], None, None, 0, 0, None, owner.id
+    )
     if published:
         proj.status = ContentStatus.PUBLISHED
         await db.flush()
     authors = [await _user(db) for _ in range(n_authors)]
     for a in authors:
-        db.add(Submission(org_id=org.id, project_id=proj.id, user_id=a.id, version=1,
-                          status=SubmissionStatus.SUBMITTED))
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=proj.id,
+                user_id=a.id,
+                version=1,
+                status=SubmissionStatus.SUBMITTED,
+            )
+        )
     await db.flush()
     return owner, org, proj, authors
 
@@ -115,8 +131,10 @@ async def test_start_assessment_and_guards_r435(db):
 
     from app.models.project import PeerAssessment
 
-    actual = (await db.execute(
-        select(func.count(PeerAssessment.id)).where(PeerAssessment.round_id == rnd.id))
+    actual = (
+        await db.execute(
+            select(func.count(PeerAssessment.id)).where(PeerAssessment.round_id == rnd.id)
+        )
     ).scalar_one()
     assert count == actual == 3 * 2  # 3 authors x num_reviews 2
 
@@ -144,10 +162,13 @@ async def test_start_assessment_and_guards_r435(db):
     # self-review-loop `count += 1` -> += 2)
     o4, org4, proj4, a4 = await _setup(db, n_authors=3)
     selfr = await PeerReviewService(db).create_round(
-        org4.id, proj4.id, o4.id, name="SR", num_reviews=1, include_self_review=True)
+        org4.id, proj4.id, o4.id, name="SR", num_reviews=1, include_self_review=True
+    )
     _, self_count = await PeerReviewService(db).start_assessment(selfr.id, org4.id)
-    actual_self = (await db.execute(
-        select(func.count(PeerAssessment.id)).where(PeerAssessment.round_id == selfr.id))
+    actual_self = (
+        await db.execute(
+            select(func.count(PeerAssessment.id)).where(PeerAssessment.round_id == selfr.id)
+        )
     ).scalar_one()
     assert self_count == actual_self == 3 * 1 + 3  # 3 peer + 3 self
 
@@ -163,32 +184,36 @@ async def test_submit_assessment_guards_r435(db):
     rnd = await svc.create_round(org.id, proj.id, owner.id, name="R", num_reviews=2)
     await svc.start_assessment(rnd.id, org.id)
 
-    a1 = (await db.execute(
-        select(PeerAssessment).where(PeerAssessment.round_id == rnd.id).limit(1))
+    a1 = (
+        await db.execute(select(PeerAssessment).where(PeerAssessment.round_id == rnd.id).limit(1))
     ).scalar_one()
 
     # not the assigned reviewer → 403
     intruder = await _user(db)
     with pytest.raises(AppError) as e_own:
-        await svc.submit_assessment(a1.id, intruder.id, org.id, score=50,
-                                    score_breakdown=None, feedback=None)
+        await svc.submit_assessment(
+            a1.id, intruder.id, org.id, score=50, score_breakdown=None, feedback=None
+        )
     assert e_own.value.status_code == 403
 
     # a score above the project max → SCORE_EXCEEDS_MAX (kills `> max` -> `>= max`
     # would also reject max; here max+1 must reject and exactly max must pass)
     with pytest.raises(AppError) as e_over:
-        await svc.submit_assessment(a1.id, a1.reviewer_id, org.id, score=101,
-                                    score_breakdown=None, feedback=None)
+        await svc.submit_assessment(
+            a1.id, a1.reviewer_id, org.id, score=101, score_breakdown=None, feedback=None
+        )
     assert e_over.value.code == "SCORE_EXCEEDS_MAX"
-    ok = await svc.submit_assessment(a1.id, a1.reviewer_id, org.id, score=100,
-                                     score_breakdown=None, feedback=None)
+    ok = await svc.submit_assessment(
+        a1.id, a1.reviewer_id, org.id, score=100, score_breakdown=None, feedback=None
+    )
     assert ok.status == PeerAssessmentStatus.SUBMITTED
     assert ok.score == 100
 
     # re-submitting the same assessment → ALREADY_SUBMITTED
     with pytest.raises(AppError) as e_dup:
-        await svc.submit_assessment(a1.id, a1.reviewer_id, org.id, score=80,
-                                    score_breakdown=None, feedback=None)
+        await svc.submit_assessment(
+            a1.id, a1.reviewer_id, org.id, score=80, score_breakdown=None, feedback=None
+        )
     assert e_dup.value.code == "ALREADY_SUBMITTED"
 
 
@@ -198,33 +223,50 @@ async def test_deadline_and_results_r435(db):
     from app.models.project import PeerAssessment
     from app.services.peer_review import PeerReviewService
 
-    owner, org, proj, authors = await _setup(db, n_authors=2,
-                                             deadline=datetime.now(UTC) - timedelta(hours=1))
+    owner, org, proj, authors = await _setup(
+        db, n_authors=2, deadline=datetime.now(UTC) - timedelta(hours=1)
+    )
     svc = PeerReviewService(db)
     # deadline in the PAST → submissions blocked once past it
-    rnd = await svc.create_round(org.id, proj.id, owner.id, name="R", num_reviews=1,
-                                 deadline=datetime.now(UTC) - timedelta(hours=1))
+    rnd = await svc.create_round(
+        org.id,
+        proj.id,
+        owner.id,
+        name="R",
+        num_reviews=1,
+        deadline=datetime.now(UTC) - timedelta(hours=1),
+    )
     await svc.start_assessment(rnd.id, org.id)
-    a = (await db.execute(
-        select(PeerAssessment).where(PeerAssessment.round_id == rnd.id).limit(1))
+    a = (
+        await db.execute(select(PeerAssessment).where(PeerAssessment.round_id == rnd.id).limit(1))
     ).scalar_one()
     with pytest.raises(AppError) as e_dl:
-        await svc.submit_assessment(a.id, a.reviewer_id, org.id, score=50,
-                                    score_breakdown=None, feedback=None)
+        await svc.submit_assessment(
+            a.id, a.reviewer_id, org.id, score=50, score_breakdown=None, feedback=None
+        )
     assert e_dl.value.code == "DEADLINE_PASSED"
 
     # a future-deadline round aggregates submitted scores (mean per submission)
     owner2, org2, proj2, authors2 = await _setup(db, n_authors=2)
-    rnd2 = await svc.create_round(org2.id, proj2.id, owner2.id, name="R2", num_reviews=1,
-                                  deadline=datetime.now(UTC) + timedelta(days=1))
+    rnd2 = await svc.create_round(
+        org2.id,
+        proj2.id,
+        owner2.id,
+        name="R2",
+        num_reviews=1,
+        deadline=datetime.now(UTC) + timedelta(days=1),
+    )
     await svc.start_assessment(rnd2.id, org2.id)
-    assessments = (await db.execute(
-        select(PeerAssessment).where(PeerAssessment.round_id == rnd2.id))
-    ).scalars().all()
+    assessments = (
+        (await db.execute(select(PeerAssessment).where(PeerAssessment.round_id == rnd2.id)))
+        .scalars()
+        .all()
+    )
     # submit distinct scores; group them per submission for the mean
     for i, a in enumerate(assessments):
-        await svc.submit_assessment(a.id, a.reviewer_id, org2.id, score=40 + i * 20,
-                                    score_breakdown=None, feedback=None)
+        await svc.submit_assessment(
+            a.id, a.reviewer_id, org2.id, score=40 + i * 20, score_breakdown=None, feedback=None
+        )
     results = await svc.round_results(rnd2.id, org2.id)
     assert len(results) == len({a.submission_id for a in assessments})
     for r in results:

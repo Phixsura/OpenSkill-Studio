@@ -136,7 +136,17 @@ async def test_credit_ledger_invariants_sequential_fuzz(db, seed):
 
     for i in range(150):
         op = rng.choice(
-            ["top_up", "adjust+", "adjust-", "reserve", "settle", "release", "refund", "promo", "expire"]
+            [
+                "top_up",
+                "adjust+",
+                "adjust-",
+                "reserve",
+                "settle",
+                "release",
+                "refund",
+                "promo",
+                "expire",
+            ]
         )
         try:
             if op == "top_up":
@@ -164,8 +174,12 @@ async def test_credit_ledger_invariants_sequential_fuzz(db, seed):
                 amt = rng.randint(1, 2000)
                 try:
                     h = await credit_svc.reserve(
-                        db, tenant.id, "USD", amt,
-                        reference_type="workflow_run", reference_id=str(ULID()),
+                        db,
+                        tenant.id,
+                        "USD",
+                        amt,
+                        reference_type="workflow_run",
+                        reference_id=str(ULID()),
                     )
                     holds.append(h)
                 except AppError as ex:
@@ -193,9 +207,15 @@ async def test_credit_ledger_invariants_sequential_fuzz(db, seed):
             elif op == "refund":
                 amt = rng.randint(1, 1500)
                 e = await credit_svc.refund(
-                    db, tenant.id, "USD", amt,
-                    reference_type="purchase", reference_id=str(ULID()),
-                    reason="f", actor=a, idempotency_key=f"r{seed}-{i}",
+                    db,
+                    tenant.id,
+                    "USD",
+                    amt,
+                    reference_type="purchase",
+                    reference_id=str(ULID()),
+                    reason="f",
+                    actor=a,
+                    idempotency_key=f"r{seed}-{i}",
                 )
                 if e is not None:
                     running += amt
@@ -204,7 +224,13 @@ async def test_credit_ledger_invariants_sequential_fuzz(db, seed):
                 amt = rng.randint(1, 2000)
                 expires = datetime.now(UTC) + timedelta(days=rng.choice([-1, 30]))
                 e = await credit_svc.grant_promotional(
-                    db, tenant.id, "USD", amt, expires_at=expires, reason="f", actor=a,
+                    db,
+                    tenant.id,
+                    "USD",
+                    amt,
+                    expires_at=expires,
+                    reason="f",
+                    actor=a,
                     idempotency_key=f"p{seed}-{i}",
                 )
                 if e is not None:
@@ -240,7 +266,11 @@ async def test_credit_ledger_invariants_concurrent_fuzz(seed):
             tenant = await _mk_tenant(setup, user)
             # seed capital so debits mostly succeed
             await credit_svc.top_up(
-                setup, tenant.id, "USD", 500_000, actor=Actor(user_id=user.id, type="platform"),
+                setup,
+                tenant.id,
+                "USD",
+                500_000,
+                actor=Actor(user_id=user.id, type="platform"),
                 idempotency_key=f"seedcap-{seed}",
             )
             await setup.commit()
@@ -253,11 +283,17 @@ async def test_credit_ledger_invariants_concurrent_fuzz(seed):
                 a = Actor(user_id=u.id, type="platform")
                 my_holds = []
                 for j in range(40):
-                    op = wrng.choice(["top_up", "adjust-", "reserve", "settle", "release", "refund"])
+                    op = wrng.choice(
+                        ["top_up", "adjust-", "reserve", "settle", "release", "refund"]
+                    )
                     try:
                         if op == "top_up":
                             await credit_svc.top_up(
-                                s, tenant_id, "USD", wrng.randint(1, 2000), actor=a,
+                                s,
+                                tenant_id,
+                                "USD",
+                                wrng.randint(1, 2000),
+                                actor=a,
                                 idempotency_key=f"c{seed}-{widx}-{j}",
                             )
                         elif op == "adjust-":
@@ -267,8 +303,12 @@ async def test_credit_ledger_invariants_concurrent_fuzz(seed):
                         elif op == "reserve":
                             my_holds.append(
                                 await credit_svc.reserve(
-                                    s, tenant_id, "USD", wrng.randint(1, 1000),
-                                    reference_type="workflow_run", reference_id=str(ULID()),
+                                    s,
+                                    tenant_id,
+                                    "USD",
+                                    wrng.randint(1, 1000),
+                                    reference_type="workflow_run",
+                                    reference_id=str(ULID()),
                                 )
                             )
                         elif op == "settle" and my_holds:
@@ -279,9 +319,15 @@ async def test_credit_ledger_invariants_concurrent_fuzz(seed):
                             await credit_svc.release(s, h.id)
                         elif op == "refund":
                             await credit_svc.refund(
-                                s, tenant_id, "USD", wrng.randint(1, 800),
-                                reference_type="purchase", reference_id=str(ULID()),
-                                reason="c", actor=a, idempotency_key=f"cr{seed}-{widx}-{j}",
+                                s,
+                                tenant_id,
+                                "USD",
+                                wrng.randint(1, 800),
+                                reference_type="purchase",
+                                reference_id=str(ULID()),
+                                reason="c",
+                                actor=a,
+                                idempotency_key=f"cr{seed}-{widx}-{j}",
                             )
                         await s.commit()
                     except AppError:
@@ -326,8 +372,13 @@ async def test_void_reclose_reproduces_invoice_fuzz(db, seed):
     a = Actor(user_id=user.id, type="platform")
     start_seats = rng.choice([0, 150, 250, 400])
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=start_seats,
-        provider="manual", actor=a,
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=start_seats,
+        provider="manual",
+        actor=a,
     )
     # 0-3 mid-period immediate changes (plan flip and/or seat moves)
     n_changes = rng.randint(0, 3)
@@ -335,20 +386,35 @@ async def test_void_reclose_reproduces_invoice_fuzz(db, seed):
         if rng.random() < 0.4:
             target = "growth" if sub.plan_version_id and rng.random() < 0.5 else "school"
             await billing_svc.change_plan(
-                db, tenant, sub, plan_key=target, seats=None,
-                proration_mode="immediate", actor=a,
+                db,
+                tenant,
+                sub,
+                plan_key=target,
+                seats=None,
+                proration_mode="immediate",
+                actor=a,
             )
         else:
             await billing_svc.change_plan(
-                db, tenant, sub, plan_key=None, seats=rng.choice([0, 100, 220, 300, 500]),
-                proration_mode="immediate", actor=a,
+                db,
+                tenant,
+                sub,
+                plan_key=None,
+                seats=rng.choice([0, 100, 220, 300, 500]),
+                proration_mode="immediate",
+                actor=a,
             )
     # optional deferred (next_period) change — folded at rollover
     has_deferred = rng.random() < 0.5
     if has_deferred:
         await billing_svc.change_plan(
-            db, tenant, sub, plan_key=None, seats=rng.choice([50, 120]),
-            proration_mode="next_period", actor=a,
+            db,
+            tenant,
+            sub,
+            plan_key=None,
+            seats=rng.choice([50, 120]),
+            proration_mode="next_period",
+            actor=a,
         )
     # Backdate the whole period 40 days, staggering the changes inside it.
     period = (
@@ -434,13 +500,23 @@ async def test_reclose_lines_stable_even_with_forward_changes(db, seed):
     tenant = await _mk_tenant(db, user)
     a = Actor(user_id=user.id, type="platform")
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=rng.choice([0, 250]),
-        provider="manual", actor=a,
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=rng.choice([0, 250]),
+        provider="manual",
+        actor=a,
     )
     for _ in range(rng.randint(0, 2)):
         await billing_svc.change_plan(
-            db, tenant, sub, plan_key=None, seats=rng.choice([100, 300, 450]),
-            proration_mode="immediate", actor=a,
+            db,
+            tenant,
+            sub,
+            plan_key=None,
+            seats=rng.choice([100, 300, 450]),
+            proration_mode="immediate",
+            actor=a,
         )
     if rng.random() < 0.6:
         await billing_svc.change_plan(
@@ -490,8 +566,13 @@ async def test_reclose_lines_stable_even_with_forward_changes(db, seed):
     # FORWARD changes in the reopened gap window (effective now > period_end)
     for _ in range(rng.randint(1, 2)):
         await billing_svc.change_plan(
-            db, tenant, sub, plan_key=None, seats=rng.choice([80, 200, 350]),
-            proration_mode="immediate", actor=a,
+            db,
+            tenant,
+            sub,
+            plan_key=None,
+            seats=rng.choice([80, 200, 350]),
+            proration_mode="immediate",
+            actor=a,
         )
     inv2 = await billing_svc.close_period_and_invoice(db, period.id)
     assert inv2 is not None
@@ -548,27 +629,46 @@ async def test_long_horizon_saga_conservation(db, seed):
         tenant_id=tenant.id,
     )
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=rng.choice([0, 250]),
-        provider="manual", actor=a,
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=rng.choice([0, 250]),
+        provider="manual",
+        actor=a,
     )
     for cycle in range(10):
         # random credit so some invoices consume balance (exercises the
         # credit-applied leg of close + the void refund leg)
         if rng.random() < 0.3:
             await credit_svc.top_up(
-                db, tenant.id, "USD", rng.randint(500, 4000), actor=a,
+                db,
+                tenant.id,
+                "USD",
+                rng.randint(500, 4000),
+                actor=a,
                 idempotency_key=f"saga{seed}-{cycle}-{ULID()}",
             )
         # random changes while the period is current
         for _ in range(rng.randint(0, 2)):
             await billing_svc.change_plan(
-                db, tenant, sub, plan_key=None, seats=rng.choice([0, 120, 300, 450]),
-                proration_mode="immediate", actor=a,
+                db,
+                tenant,
+                sub,
+                plan_key=None,
+                seats=rng.choice([0, 120, 300, 450]),
+                proration_mode="immediate",
+                actor=a,
             )
         if rng.random() < 0.3:
             await billing_svc.change_plan(
-                db, tenant, sub, plan_key=None, seats=rng.choice([60, 200]),
-                proration_mode="next_period", actor=a,
+                db,
+                tenant,
+                sub,
+                plan_key=None,
+                seats=rng.choice([60, 200]),
+                proration_mode="next_period",
+                actor=a,
             )
         # backdate the open period so it is closable NOW; stagger the changes
         period = (
@@ -632,11 +732,7 @@ async def test_long_horizon_saga_conservation(db, seed):
 
     # ── conservation checks ─────────────────────────────────
     periods = (
-        (
-            await db.execute(
-                select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id)
-            )
-        )
+        (await db.execute(select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id)))
         .scalars()
         .all()
     )
@@ -656,9 +752,7 @@ async def test_long_horizon_saga_conservation(db, seed):
             .scalars()
             .all()
         )
-        assert len(live) == 1, (
-            f"seed {seed}: period {p.id} has {len(live)} live invoices (C1)"
-        )
+        assert len(live) == 1, f"seed {seed}: period {p.id} has {len(live)} live invoices (C1)"
     rated_rows = (
         (
             await db.execute(
@@ -678,9 +772,7 @@ async def test_long_horizon_saga_conservation(db, seed):
         if row.status == "invoiced":
             assert row.invoice_line_id is not None, f"seed {seed}: invoiced row w/o line (C2)"
             line = (
-                await db.execute(
-                    select(InvoiceLine).where(InvoiceLine.id == row.invoice_line_id)
-                )
+                await db.execute(select(InvoiceLine).where(InvoiceLine.id == row.invoice_line_id))
             ).scalar_one()
             inv = (
                 await db.execute(select(Invoice).where(Invoice.id == line.invoice_id))

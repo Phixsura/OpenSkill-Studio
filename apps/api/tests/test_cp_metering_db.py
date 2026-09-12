@@ -184,14 +184,19 @@ async def test_emit_usage_validation(db):
     assert e5.value.code == "INVALID_QUANTITY" and e5.value.status_code == 422
     with pytest.raises(AppError) as e6:  # negative overflow via adjustment source
         await metering.emit_usage(
-            db, usage_type="workflow_run", quantity=-10**13,
+            db,
+            usage_type="workflow_run",
+            quantity=-(10**13),
             **{**base, "source": "adjustment"},
         )
     assert e6.value.code == "INVALID_QUANTITY"
     # boundary: the exact column max is recordable
     ok_max = await metering.emit_usage(
-        db, usage_type="workflow_run", quantity="999999999999.999999",
-        idempotency_key=f"max-{ULID()}", **base
+        db,
+        usage_type="workflow_run",
+        quantity="999999999999.999999",
+        idempotency_key=f"max-{ULID()}",
+        **base,
     )
     assert ok_max is not None
     # R331 (mutation survivors): pin the remaining validation semantics.
@@ -204,14 +209,17 @@ async def test_emit_usage_validation(db):
     # zero quantity is legal for a non-adjustment source (only NEGATIVE
     # requires an adjustment) — adapters legitimately report 0-usage steps
     ok_zero = await metering.emit_usage(
-        db, usage_type="workflow_run", quantity=0,
-        idempotency_key=f"zero-{ULID()}", **base
+        db, usage_type="workflow_run", quantity=0, idempotency_key=f"zero-{ULID()}", **base
     )
     assert ok_zero is not None
     # metadata=None must store the empty dict, not jsonb null
     ok_meta = await metering.emit_usage(
-        db, usage_type="workflow_run", quantity=1, metadata=None,
-        idempotency_key=f"meta-{ULID()}", **base
+        db,
+        usage_type="workflow_run",
+        quantity=1,
+        metadata=None,
+        idempotency_key=f"meta-{ULID()}",
+        **base,
     )
     assert ok_meta is not None and ok_meta.metadata_ == {}
     ok_meta2 = await metering.emit_usage(  # keyless branch stores {} too
@@ -233,8 +241,12 @@ async def test_emit_usage_validation(db):
         assert exc.value.status_code == 422
     # positive control: a registered source persists
     ok = await metering.emit_usage(
-        db, usage_type="workflow_run", quantity=1, source="manual",
-        idempotency_key=f"src-ok-{ULID()}", **base_no_source
+        db,
+        usage_type="workflow_run",
+        quantity=1,
+        source="manual",
+        idempotency_key=f"src-ok-{ULID()}",
+        **base_no_source,
     )
     assert ok is not None
 
@@ -854,9 +866,7 @@ async def test_seat_sweep_isolates_one_bad_org(db, monkeypatch):
         rows = (
             (
                 await db.execute(
-                    select(UsageEvent).where(
-                        UsageEvent.idempotency_key == f"seats:{oid}:{month}"
-                    )
+                    select(UsageEvent).where(UsageEvent.idempotency_key == f"seats:{oid}:{month}")
                 )
             )
             .scalars()
@@ -867,7 +877,6 @@ async def test_seat_sweep_isolates_one_bad_org(db, monkeypatch):
         else:
             assert len(rows) == 1, "healthy org must still be seat-billed"
     assert emitted >= 1
-
 
 
 @pytest.mark.asyncio
@@ -885,18 +894,40 @@ async def test_storage_sweep_exact_gb_idempotent_and_poison_isolated(db, monkeyp
     owner = await _mk_user(db)
     svc = OrgService(db)
     org = await svc.create(
-        name=f"Stor {ULID()}", slug=f"stor-{str(ULID()).lower()}",
-        description=None, created_by=owner.id)
+        name=f"Stor {ULID()}",
+        slug=f"stor-{str(ULID()).lower()}",
+        description=None,
+        created_by=owner.id,
+    )
     project = await ProjectService(db).create_project(
-        org_id=org.id, title="Storage P", slug=None, description="d",
-        instructions="i", difficulty="beginner", max_score=100,
-        rubric=[{"criterion": "Q", "max_score": 100}], deadline=None,
-        late_deadline=None, late_penalty_pct=0, max_submissions=0,
-        skill_ids=None, created_by=owner.id)
-    db.add(ProjectAsset(
-        org_id=org.id, project_id=project.id, name="ref", description=None,
-        file_key=f"k/{ULID()}", file_name="ref.bin", file_size=1073741824,  # 1 GiB
-        mime_type="application/octet-stream", uploaded_by=owner.id))
+        org_id=org.id,
+        title="Storage P",
+        slug=None,
+        description="d",
+        instructions="i",
+        difficulty="beginner",
+        max_score=100,
+        rubric=[{"criterion": "Q", "max_score": 100}],
+        deadline=None,
+        late_deadline=None,
+        late_penalty_pct=0,
+        max_submissions=0,
+        skill_ids=None,
+        created_by=owner.id,
+    )
+    db.add(
+        ProjectAsset(
+            org_id=org.id,
+            project_id=project.id,
+            name="ref",
+            description=None,
+            file_key=f"k/{ULID()}",
+            file_name="ref.bin",
+            file_size=1073741824,  # 1 GiB
+            mime_type="application/octet-stream",
+            uploaded_by=owner.id,
+        )
+    )
     await db.flush()
 
     n1 = await metering.sweep_storage(db, org_ids=[org.id])
@@ -908,37 +939,54 @@ async def test_storage_sweep_exact_gb_idempotent_and_poison_isolated(db, monkeyp
         )
     ).scalar_one()
     assert ev.usage_type == "storage_gb_day"
-    assert Decimal(str(ev.quantity)) == Decimal("1")     # exactly 1 GiB → 1.000000
+    assert Decimal(str(ev.quantity)) == Decimal("1")  # exactly 1 GiB → 1.000000
 
     n2 = await metering.sweep_storage(db, org_ids=[org.id])  # idempotent rerun
     dup = (
-        (await db.execute(
-            select(UsageEvent).where(UsageEvent.idempotency_key == f"storage:{org.id}:{day}")
-        )).scalars().all()
+        (
+            await db.execute(
+                select(UsageEvent).where(UsageEvent.idempotency_key == f"storage:{org.id}:{day}")
+            )
+        )
+        .scalars()
+        .all()
     )
     assert len(dup) == 1 and n2 == 0
 
     # R169 poison isolation: an emit_usage that raises for one org must not
     # abort the sweep for the others
     org2 = await svc.create(
-        name=f"Stor2 {ULID()}", slug=f"stor2-{str(ULID()).lower()}",
-        description=None, created_by=owner.id)
-    db.add(ProjectAsset(
-        org_id=org2.id, project_id=project.id, name="x", description=None,
-        file_key=f"k/{ULID()}", file_name="x.bin", file_size=2147483648,  # 2 GiB
-        mime_type="application/octet-stream", uploaded_by=owner.id))
+        name=f"Stor2 {ULID()}",
+        slug=f"stor2-{str(ULID()).lower()}",
+        description=None,
+        created_by=owner.id,
+    )
+    db.add(
+        ProjectAsset(
+            org_id=org2.id,
+            project_id=project.id,
+            name="x",
+            description=None,
+            file_key=f"k/{ULID()}",
+            file_name="x.bin",
+            file_size=2147483648,  # 2 GiB
+            mime_type="application/octet-stream",
+            uploaded_by=owner.id,
+        )
+    )
     await db.flush()
     real_emit = metering.emit_usage
 
     async def poison_emit(db_, **kw):
-        if kw.get("org_id") == org.id:                   # first org poisoned
+        if kw.get("org_id") == org.id:  # first org poisoned
             raise RuntimeError("poison org")
         return await real_emit(db_, **kw)
 
     monkeypatch.setattr(metering, "emit_usage", poison_emit)
     n3 = await metering.sweep_storage(
-        db, for_date=datetime.now(UTC) + timedelta(days=1), org_ids=[org.id, org2.id])
-    assert n3 == 1                                       # org2 still swept
+        db, for_date=datetime.now(UTC) + timedelta(days=1), org_ids=[org.id, org2.id]
+    )
+    assert n3 == 1  # org2 still swept
     day2 = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
     ok2 = (
         await db.execute(
@@ -963,9 +1011,15 @@ async def test_adjustment_keyed_retry_semantics(db):
     actor = Actor(user_id=user.id, type="platform")
 
     def _emit_kw(t, key):
-        return dict(tenant_id=t.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
-                    usage_type="image_generation", quantity=10,
-                    occurred_at=_now(), source="manual", idempotency_key=key)
+        return dict(
+            tenant_id=t.id,
+            org_id="01JFAKEORGFAKEORGFAKEORGFA",
+            usage_type="image_generation",
+            quantity=10,
+            occurred_at=_now(),
+            source="manual",
+            idempotency_key=key,
+        )
 
     original = await metering.emit_usage(db, **_emit_kw(tenant, f"orig-{ULID()}"))
     adj_key = f"adj-{ULID()}"
@@ -974,38 +1028,62 @@ async def test_adjustment_keyed_retry_semantics(db):
     await metering.emit_usage(db, **_emit_kw(tenant_b, adj_key))
 
     adj = await metering.ingest_adjustment(
-        db, original_event_id=original.id, delta_quantity=-4,
-        reason="r341", actor=actor, idempotency_key=adj_key)
+        db,
+        original_event_id=original.id,
+        delta_quantity=-4,
+        reason="r341",
+        actor=actor,
+        idempotency_key=adj_key,
+    )
     # 1. same key + same delta → idempotent success, SAME row
     again = await metering.ingest_adjustment(
-        db, original_event_id=original.id, delta_quantity=-4,
-        reason="r341 retry", actor=actor, idempotency_key=adj_key)
+        db,
+        original_event_id=original.id,
+        delta_quantity=-4,
+        reason="r341 retry",
+        actor=actor,
+        idempotency_key=adj_key,
+    )
     assert again.id == adj.id
     # 2. same at the 6dp column scale (7th-decimal noise) → still idempotent
     again2 = await metering.ingest_adjustment(
-        db, original_event_id=original.id, delta_quantity="-4.0000004",
-        reason="r341 retry 6dp", actor=actor, idempotency_key=adj_key)
+        db,
+        original_event_id=original.id,
+        delta_quantity="-4.0000004",
+        reason="r341 retry 6dp",
+        actor=actor,
+        idempotency_key=adj_key,
+    )
     assert again2.id == adj.id
     # 3. same key, DIFFERENT delta → 409 (Stripe-style key semantics)
     with pytest.raises(AppError) as e409:
         await metering.ingest_adjustment(
-            db, original_event_id=original.id, delta_quantity=-5,
-            reason="r341 conflict", actor=actor, idempotency_key=adj_key)
+            db,
+            original_event_id=original.id,
+            delta_quantity=-5,
+            reason="r341 conflict",
+            actor=actor,
+            idempotency_key=adj_key,
+        )
     assert e409.value.status_code == 409
     assert "different delta_quantity" in e409.value.message
     # 4. a key already used by a NON-adjustment event → duplicate 409
     with pytest.raises(AppError) as e409b:
         await metering.ingest_adjustment(
-            db, original_event_id=original.id, delta_quantity=-1,
-            reason="r341 dup", actor=actor,
-            idempotency_key=original.idempotency_key)
+            db,
+            original_event_id=original.id,
+            delta_quantity=-1,
+            reason="r341 dup",
+            actor=actor,
+            idempotency_key=original.idempotency_key,
+        )
     assert e409b.value.status_code == 409
     assert "Duplicate adjustment idempotency key" in e409b.value.message
     # 5. missing original → 404
     with pytest.raises(AppError) as e404:
         await metering.ingest_adjustment(
-            db, original_event_id=str(ULID()), delta_quantity=-1,
-            reason="r341 gone", actor=actor)
+            db, original_event_id=str(ULID()), delta_quantity=-1, reason="r341 gone", actor=actor
+        )
     assert e404.value.status_code == 404 and e404.value.code == "USAGE_EVENT_NOT_FOUND"
 
     # 6. adjusting a VOIDED rating double-corrects → 409 (R130[37]) — fresh
@@ -1017,8 +1095,8 @@ async def test_adjustment_keyed_retry_semantics(db):
     await rating_svc.void_rated(db, rated2.id, reason="strike", actor=actor)
     with pytest.raises(AppError) as e409c:
         await metering.ingest_adjustment(
-            db, original_event_id=orig2.id, delta_quantity=-2,
-            reason="r341 voided", actor=actor)
+            db, original_event_id=orig2.id, delta_quantity=-2, reason="r341 voided", actor=actor
+        )
     assert e409c.value.status_code == 409 and "voided" in e409c.value.message
 
 
@@ -1042,54 +1120,79 @@ async def test_adjustment_open_period_warning_is_tenant_scoped(db, monkeypatch):
     plan = ProductPlan(key=f"r341-{str(ULID()).lower()[:8]}", name="R341")
     db.add(plan)
     await db.flush()
-    pv = PlanVersion(plan_id=plan.id, version=1, status="active",
-                     entitlements={}, activated_at=now)
+    pv = PlanVersion(plan_id=plan.id, version=1, status="active", entitlements={}, activated_at=now)
     db.add(pv)
     await db.flush()
 
     def _sub(status):
         return Subscription(
-            tenant_id=a.id, plan_version_id=pv.id, status=status,
-            currency="USD", interval="month", seat_quantity=0,
+            tenant_id=a.id,
+            plan_version_id=pv.id,
+            status=status,
+            currency="USD",
+            interval="month",
+            seat_quantity=0,
             current_period_start=now - timedelta(days=5),
             current_period_end=now + timedelta(days=25),
-            provider="manual", created_by=user.id)
+            provider="manual",
+            created_by=user.id,
+        )
 
     live, dead = _sub("active"), _sub("cancelled")
     db.add_all([live, dead])
     await db.flush()
     # TWO open periods for tenant A (live sub + a cancelled sub's residue)
-    db.add_all([
-        BillingPeriod(tenant_id=a.id, subscription_id=live.id, status="open",
-                      period_start=now - timedelta(days=5),
-                      period_end=now + timedelta(days=25)),
-        BillingPeriod(tenant_id=a.id, subscription_id=dead.id, status="open",
-                      period_start=now - timedelta(days=35),
-                      period_end=now - timedelta(days=5)),
-    ])
+    db.add_all(
+        [
+            BillingPeriod(
+                tenant_id=a.id,
+                subscription_id=live.id,
+                status="open",
+                period_start=now - timedelta(days=5),
+                period_end=now + timedelta(days=25),
+            ),
+            BillingPeriod(
+                tenant_id=a.id,
+                subscription_id=dead.id,
+                status="open",
+                period_start=now - timedelta(days=35),
+                period_end=now - timedelta(days=5),
+            ),
+        ]
+    )
     await db.flush()
 
     warnings: list = []
     real_warning = metering.log.warning
-    monkeypatch.setattr(metering.log, "warning",
-                        lambda *aa, **kw: warnings.append((aa, kw)) or real_warning(*aa, **kw))
+    monkeypatch.setattr(
+        metering.log,
+        "warning",
+        lambda *aa, **kw: warnings.append((aa, kw)) or real_warning(*aa, **kw),
+    )
 
     def _kw(t):
-        return dict(tenant_id=t.id, org_id="01JFAKEORGFAKEORGFAKEORGFA",
-                    usage_type="image_generation", quantity=5,
-                    occurred_at=now, source="manual",
-                    idempotency_key=f"w-{ULID()}")
+        return dict(
+            tenant_id=t.id,
+            org_id="01JFAKEORGFAKEORGFAKEORGFA",
+            usage_type="image_generation",
+            quantity=5,
+            occurred_at=now,
+            source="manual",
+            idempotency_key=f"w-{ULID()}",
+        )
 
     # A HAS open periods (two of them) → no warning, no 500
     orig_a = await metering.emit_usage(db, **_kw(a))
-    await metering.ingest_adjustment(db, original_event_id=orig_a.id,
-                                     delta_quantity=-1, reason="a", actor=actor)
+    await metering.ingest_adjustment(
+        db, original_event_id=orig_a.id, delta_quantity=-1, reason="a", actor=actor
+    )
     assert not any(x[0] and x[0][0] == "cp_adjustment_no_open_period" for x in warnings)
 
     # B has NONE → warning fires (A's period must not silence it)
     orig_b = await metering.emit_usage(db, **_kw(b))
-    await metering.ingest_adjustment(db, original_event_id=orig_b.id,
-                                     delta_quantity=-1, reason="b", actor=actor)
+    await metering.ingest_adjustment(
+        db, original_event_id=orig_b.id, delta_quantity=-1, reason="b", actor=actor
+    )
     assert any(x[0] and x[0][0] == "cp_adjustment_no_open_period" for x in warnings)
 
 
@@ -1109,15 +1212,27 @@ async def test_flush_boundaries_zero_buckets_and_org_attribution(db):
     from app.models.organization import Organization
 
     user = await _mk_user(db)
-    other_tenant = await _mk_tenant(db, user)   # decoy first (scan-order bait)
-    other_org = Organization(name=f"D {ULID()}", slug=f"do-{str(ULID()).lower()}",
-                             tenant_id=other_tenant.id, created_by=user.id)
+    other_tenant = await _mk_tenant(db, user)  # decoy first (scan-order bait)
+    other_org = Organization(
+        name=f"D {ULID()}",
+        slug=f"do-{str(ULID()).lower()}",
+        tenant_id=other_tenant.id,
+        created_by=user.id,
+    )
     db.add(other_org)
     tenant = await _mk_tenant(db, user)
-    org1 = Organization(name=f"A {ULID()}", slug=f"oa-{str(ULID()).lower()}",
-                        tenant_id=tenant.id, created_by=user.id)
-    org2 = Organization(name=f"B {ULID()}", slug=f"ob-{str(ULID()).lower()}",
-                        tenant_id=tenant.id, created_by=user.id)
+    org1 = Organization(
+        name=f"A {ULID()}",
+        slug=f"oa-{str(ULID()).lower()}",
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
+    org2 = Organization(
+        name=f"B {ULID()}",
+        slug=f"ob-{str(ULID()).lower()}",
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
     db.add_all([org1, org2])
     await db.flush()
     await db.commit()
@@ -1158,14 +1273,19 @@ async def test_flush_boundaries_zero_buckets_and_org_attribution(db):
         # (2) ancient zero bucket deleted without emitting an event
         assert await r.get(keys["zero"]) is None
         events = (
-            await db.execute(
-                select(UsageEvent).where(
-                    UsageEvent.tenant_id == tenant.id,
-                    UsageEvent.usage_type == "api_request"))
-        ).scalars().all()
+            (
+                await db.execute(
+                    select(UsageEvent).where(
+                        UsageEvent.tenant_id == tenant.id, UsageEvent.usage_type == "api_request"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
         quantities = sorted(int(e.quantity) for e in events)
-        assert 11 not in quantities          # current hour never landed
-        assert 0 not in quantities           # zero bucket emitted nothing
+        assert 11 not in quantities  # current hour never landed
+        assert 0 not in quantities  # zero bucket emitted nothing
         assert 13 in quantities and 17 in quantities and 19 in quantities
         # (4) attribution org belongs to THIS tenant (two orgs, no 500)
         assert {e.org_id for e in events} <= {org1.id, org2.id}
@@ -1199,67 +1319,108 @@ async def test_storage_sweep_combines_sources_and_skips_zero(db):
     svc = OrgService(db)
 
     async def _org_with_project(tag):
-        org = await svc.create(name=f"S{tag} {ULID()}",
-                               slug=f"s{tag}-{str(ULID()).lower()}",
-                               description=None, created_by=owner.id)
+        org = await svc.create(
+            name=f"S{tag} {ULID()}",
+            slug=f"s{tag}-{str(ULID()).lower()}",
+            description=None,
+            created_by=owner.id,
+        )
         project = await ProjectService(db).create_project(
-            org_id=org.id, title=f"P{tag}", slug=None, description="d",
-            instructions="i", difficulty="beginner", max_score=100,
-            rubric=[{"criterion": "Q", "max_score": 100}], deadline=None,
-            late_deadline=None, late_penalty_pct=0, max_submissions=0,
-            skill_ids=None, created_by=owner.id)
+            org_id=org.id,
+            title=f"P{tag}",
+            slug=None,
+            description="d",
+            instructions="i",
+            difficulty="beginner",
+            max_score=100,
+            rubric=[{"criterion": "Q", "max_score": 100}],
+            deadline=None,
+            late_deadline=None,
+            late_penalty_pct=0,
+            max_submissions=0,
+            skill_ids=None,
+            created_by=owner.id,
+        )
         return org, project
 
     async def _item(org, project, size):
-        sub = Submission(org_id=org.id, project_id=project.id, user_id=owner.id,
-                         version=1, status=SubmissionStatus.SUBMITTED,
-                         submitted_at=datetime.now(UTC))
+        sub = Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=owner.id,
+            version=1,
+            status=SubmissionStatus.SUBMITTED,
+            submitted_at=datetime.now(UTC),
+        )
         db.add(sub)
         await db.flush()
-        deliverable = ProjectDeliverable(project_id=project.id, name="D",
-                                         type=DeliverableType.TEXT)
+        deliverable = ProjectDeliverable(project_id=project.id, name="D", type=DeliverableType.TEXT)
         db.add(deliverable)
         await db.flush()
-        db.add(SubmissionItem(submission_id=sub.id, deliverable_id=deliverable.id,
-                              type=ItemType.TEXT, content="x", file_size=size,
-                              uploaded_by=owner.id))
+        db.add(
+            SubmissionItem(
+                submission_id=sub.id,
+                deliverable_id=deliverable.id,
+                type=ItemType.TEXT,
+                content="x",
+                file_size=size,
+                uploaded_by=owner.id,
+            )
+        )
         await db.flush()
 
     gib = 1073741824
     # org D: asset 1 GiB + submission item 0.5 GiB → 1.5 GB event
     org_d, proj_d = await _org_with_project("d")
-    db.add(ProjectAsset(org_id=org_d.id, project_id=proj_d.id, name="a",
-                        description=None, file_key=f"k/{ULID()}", file_name="a.bin",
-                        file_size=gib, mime_type="application/octet-stream",
-                        uploaded_by=owner.id))
+    db.add(
+        ProjectAsset(
+            org_id=org_d.id,
+            project_id=proj_d.id,
+            name="a",
+            description=None,
+            file_key=f"k/{ULID()}",
+            file_name="a.bin",
+            file_size=gib,
+            mime_type="application/octet-stream",
+            uploaded_by=owner.id,
+        )
+    )
     await _item(org_d, proj_d, gib // 2)
     # org E: its own item 0.25 GiB (join-flip bait: with != it would absorb D's)
     org_e, proj_e = await _org_with_project("e")
     await _item(org_e, proj_e, gib // 4)
     # org F: a zero-byte asset → NO event
     org_f, proj_f = await _org_with_project("f")
-    db.add(ProjectAsset(org_id=org_f.id, project_id=proj_f.id, name="z",
-                        description=None, file_key=f"k/{ULID()}", file_name="z.bin",
-                        file_size=0, mime_type="application/octet-stream",
-                        uploaded_by=owner.id))
+    db.add(
+        ProjectAsset(
+            org_id=org_f.id,
+            project_id=proj_f.id,
+            name="z",
+            description=None,
+            file_key=f"k/{ULID()}",
+            file_name="z.bin",
+            file_size=0,
+            mime_type="application/octet-stream",
+            uploaded_by=owner.id,
+        )
+    )
     await db.flush()
 
-    emitted = await metering.sweep_storage(
-        db, org_ids=[org_d.id, org_e.id, org_f.id])
-    assert emitted == 2                      # D and E; F (zero bytes) skipped
+    emitted = await metering.sweep_storage(db, org_ids=[org_d.id, org_e.id, org_f.id])
+    assert emitted == 2  # D and E; F (zero bytes) skipped
     day = datetime.now(UTC).date().isoformat()
 
     async def _qty(org):
         ev = (
             await db.execute(
-                select(UsageEvent).where(
-                    UsageEvent.idempotency_key == f"storage:{org.id}:{day}"))
+                select(UsageEvent).where(UsageEvent.idempotency_key == f"storage:{org.id}:{day}")
+            )
         ).scalar_one_or_none()
         return None if ev is None else Decimal(str(ev.quantity))
 
-    assert await _qty(org_d) == Decimal("1.5")     # asset + item summed
-    assert await _qty(org_e) == Decimal("0.25")    # only its own item
-    assert await _qty(org_f) is None               # zero bytes → no event
+    assert await _qty(org_d) == Decimal("1.5")  # asset + item summed
+    assert await _qty(org_e) == Decimal("0.25")  # only its own item
+    assert await _qty(org_f) is None  # zero bytes → no event
 
 
 @pytest.mark.asyncio
@@ -1274,7 +1435,7 @@ async def test_usage_aggregate_handler_windows_and_scope(db):
     from app.controlplane.api.usage import tenant_usage_aggregate
 
     user = await _mk_user(db)
-    tenant = await _mk_tenant(db, user)     # UTC tz
+    tenant = await _mk_tenant(db, user)  # UTC tz
     other = await _mk_tenant(db, user)
     org_a, org_b = str(ULID()), str(ULID())
     m_start = dt(2026, 5, 1, tzinfo=UTC)
@@ -1282,22 +1443,28 @@ async def test_usage_aggregate_handler_windows_and_scope(db):
 
     async def _ev(t, org, qty, at):
         await metering.emit_usage(
-            db, tenant_id=t.id, org_id=org, usage_type="image_generation",
-            quantity=qty, occurred_at=at, source="manual",
-            idempotency_key=f"agg-{ULID()}")
+            db,
+            tenant_id=t.id,
+            org_id=org,
+            usage_type="image_generation",
+            quantity=qty,
+            occurred_at=at,
+            source="manual",
+            idempotency_key=f"agg-{ULID()}",
+        )
 
-    await _ev(tenant, org_a, 5, m_start)                      # inclusive start
-    await _ev(tenant, org_a, 7, nxt - timedelta(seconds=1))   # inside
-    await _ev(tenant, org_a, 999, nxt)                        # EXCLUDED (next month)
-    await _ev(tenant, org_b, 11, m_start + timedelta(days=3)) # other org
-    await _ev(other, org_a, 555, m_start + timedelta(days=1)) # other tenant
+    await _ev(tenant, org_a, 5, m_start)  # inclusive start
+    await _ev(tenant, org_a, 7, nxt - timedelta(seconds=1))  # inside
+    await _ev(tenant, org_a, 999, nxt)  # EXCLUDED (next month)
+    await _ev(tenant, org_b, 11, m_start + timedelta(days=3))  # other org
+    await _ev(other, org_a, 555, m_start + timedelta(days=1))  # other tenant
 
-    resp = await tenant_usage_aggregate(tenant.id, period="2026-05",
-                                        org_id=None, user=user, db=db)
+    resp = await tenant_usage_aggregate(tenant.id, period="2026-05", org_id=None, user=user, db=db)
     rows = {r["usage_type"]: r for r in resp.data["usage"]}
-    assert float(rows["image_generation"]["quantity"]) == 23      # 5+7+11
+    assert float(rows["image_generation"]["quantity"]) == 23  # 5+7+11
     assert rows["image_generation"]["event_count"] == 3
-    resp_a = await tenant_usage_aggregate(tenant.id, period="2026-05",
-                                          org_id=org_a, user=user, db=db)
+    resp_a = await tenant_usage_aggregate(
+        tenant.id, period="2026-05", org_id=org_a, user=user, db=db
+    )
     rows_a = {r["usage_type"]: r for r in resp_a.data["usage"]}
-    assert float(rows_a["image_generation"]["quantity"]) == 12    # 5+7
+    assert float(rows_a["image_generation"]["quantity"]) == 12  # 5+7

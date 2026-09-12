@@ -40,8 +40,13 @@ async def db():
 
 
 async def _user(db, name="Hana"):
-    u = User(email=f"r431-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name=name, role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r431-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name=name,
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -51,13 +56,17 @@ async def _org_skill(db, owner):
     from app.services.organization import OrgService
     from app.services.skill import SkillService
 
-    org = await OrgService(db).create(name=f"R431 {uuid.uuid4().hex[:5]}",
-                                      slug=f"r431-{uuid.uuid4().hex[:10]}",
-                                      description=None, created_by=owner.id)
+    org = await OrgService(db).create(
+        name=f"R431 {uuid.uuid4().hex[:5]}",
+        slug=f"r431-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     cat = await SkillService(db).create_category(org.id, "AI", None, None, None, owner.id)
     sk = await SkillService(db).create_skill(
-        org.id, cat.id, "Prompting", None, "d", "# c", "beginner", 30, [], None, owner.id)
+        org.id, cat.id, "Prompting", None, "d", "# c", "beginner", 30, [], None, owner.id
+    )
     return org, sk
 
 
@@ -69,8 +78,14 @@ async def _profile(db, user, username, visibility=ProfileVisibility.PUBLIC):
 
 
 def _item(user_id, slug, vis, featured=False, order=0):
-    return PortfolioItem(user_id=user_id, title=slug.title(), slug=slug,
-                         visibility=vis, featured=featured, sort_order=order)
+    return PortfolioItem(
+        user_id=user_id,
+        title=slug.title(),
+        slug=slug,
+        visibility=vis,
+        featured=featured,
+        sort_order=order,
+    )
 
 
 async def test_get_public_profile_gating_r431(db):
@@ -83,10 +98,21 @@ async def test_get_public_profile_gating_r431(db):
 
     async def _mk_skill():
         cat2 = await SkillService(db).create_category(
-            org.id, f"C{uuid.uuid4().hex[:4]}", None, None, None, owner.id)
+            org.id, f"C{uuid.uuid4().hex[:4]}", None, None, None, owner.id
+        )
         return await SkillService(db).create_skill(
-            org.id, cat2.id, f"S{uuid.uuid4().hex[:4]}", None, "d", "# c",
-            "beginner", 30, [], None, owner.id)
+            org.id,
+            cat2.id,
+            f"S{uuid.uuid4().hex[:4]}",
+            None,
+            "d",
+            "# c",
+            "beginner",
+            30,
+            [],
+            None,
+            owner.id,
+        )
 
     sk2, sk3 = await _mk_skill(), await _mk_skill()
     u = await _user(db, "Public User")
@@ -96,24 +122,49 @@ async def test_get_public_profile_gating_r431(db):
 
     # badges: one shown+completed, one shown+incomplete, one HIDDEN (distinct
     # skills — unique on user+skill+org)
-    db.add_all([
-        SkillBadge(user_id=u.id, skill_id=sk.id, org_id=org.id, skill_name="Shown Done",
-                   category_name="AI", completion_pct=100, show_on_profile=True),
-        SkillBadge(user_id=u.id, skill_id=sk2.id, org_id=org.id, skill_name="Shown WIP",
-                   category_name="AI", completion_pct=99, show_on_profile=True),
-        SkillBadge(user_id=u.id, skill_id=sk3.id, org_id=org.id, skill_name="Hidden",
-                   category_name="AI", completion_pct=100, show_on_profile=False),
-    ])
+    db.add_all(
+        [
+            SkillBadge(
+                user_id=u.id,
+                skill_id=sk.id,
+                org_id=org.id,
+                skill_name="Shown Done",
+                category_name="AI",
+                completion_pct=100,
+                show_on_profile=True,
+            ),
+            SkillBadge(
+                user_id=u.id,
+                skill_id=sk2.id,
+                org_id=org.id,
+                skill_name="Shown WIP",
+                category_name="AI",
+                completion_pct=99,
+                show_on_profile=True,
+            ),
+            SkillBadge(
+                user_id=u.id,
+                skill_id=sk3.id,
+                org_id=org.id,
+                skill_name="Hidden",
+                category_name="AI",
+                completion_pct=100,
+                show_on_profile=False,
+            ),
+        ]
+    )
     # items: TWO PUBLIC featured + one PUBLIC non-featured (3 public), one
     # UNLISTED, one PRIVATE (2 non-public) — the counts differ so the
     # item_count `== PUBLIC` filter can't be flipped to `!=` unnoticed
-    db.add_all([
-        _item(u.id, "feat", ItemVisibility.PUBLIC, featured=True),
-        _item(u.id, "feat2", ItemVisibility.PUBLIC, featured=True),
-        _item(u.id, "pub", ItemVisibility.PUBLIC, featured=False),
-        _item(u.id, "unl", ItemVisibility.UNLISTED, featured=True),
-        _item(u.id, "priv", ItemVisibility.PRIVATE, featured=True),
-    ])
+    db.add_all(
+        [
+            _item(u.id, "feat", ItemVisibility.PUBLIC, featured=True),
+            _item(u.id, "feat2", ItemVisibility.PUBLIC, featured=True),
+            _item(u.id, "pub", ItemVisibility.PUBLIC, featured=False),
+            _item(u.id, "unl", ItemVisibility.UNLISTED, featured=True),
+            _item(u.id, "priv", ItemVisibility.PRIVATE, featured=True),
+        ]
+    )
     await db.flush()
 
     prof = await svc.get_public_profile("publicuser")
@@ -145,11 +196,13 @@ async def test_get_public_items_and_item_r431(db):
     svc = PortfolioService(db)
     u = await _user(db)
     await _profile(db, u, "itemsuser", ProfileVisibility.PUBLIC)
-    db.add_all([
-        _item(u.id, "a", ItemVisibility.PUBLIC, order=1),
-        _item(u.id, "b", ItemVisibility.UNLISTED, order=0),
-        _item(u.id, "c", ItemVisibility.PRIVATE, order=2),
-    ])
+    db.add_all(
+        [
+            _item(u.id, "a", ItemVisibility.PUBLIC, order=1),
+            _item(u.id, "b", ItemVisibility.UNLISTED, order=0),
+            _item(u.id, "c", ItemVisibility.PRIVATE, order=2),
+        ]
+    )
     await db.flush()
 
     # public items list: PUBLIC only (unlisted + private excluded)
@@ -160,7 +213,7 @@ async def test_get_public_items_and_item_r431(db):
     # and unknown are not
     assert (await svc.get_public_item("itemsuser", "a")).slug == "a"
     assert (await svc.get_public_item("itemsuser", "b")).slug == "b"  # unlisted direct-link OK
-    assert await svc.get_public_item("itemsuser", "c") is None       # private hidden
+    assert await svc.get_public_item("itemsuser", "c") is None  # private hidden
     assert await svc.get_public_item("itemsuser", "missing") is None
 
     # a PRIVATE profile hides even direct item links + the list
@@ -195,19 +248,29 @@ async def test_create_item_submission_gating_r431(db):
 
     svc = PortfolioService(db)
     owner = await _user(db)
-    org = await OrgService(db).create(name=f"R431p {uuid.uuid4().hex[:5]}",
-                                      slug=f"r431p-{uuid.uuid4().hex[:10]}",
-                                      description=None, created_by=owner.id)
+    org = await OrgService(db).create(
+        name=f"R431p {uuid.uuid4().hex[:5]}",
+        slug=f"r431p-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     proj = await ProjectService(db).create_project(
-        org.id, "P", None, "d", "i", "beginner", 100, [], None, None, 0, 0, None, owner.id)
+        org.id, "P", None, "d", "i", "beginner", 100, [], None, None, 0, 0, None, owner.id
+    )
     proj.status = ContentStatus.PUBLISHED
     await db.flush()
     u = await _user(db)
 
     # a submission that isn't the user's → 404
-    other_sub = Submission(org_id=org.id, project_id=proj.id, user_id=owner.id, version=1,
-                           status=SubmissionStatus.APPROVED, final_score=90)
+    other_sub = Submission(
+        org_id=org.id,
+        project_id=proj.id,
+        user_id=owner.id,
+        version=1,
+        status=SubmissionStatus.APPROVED,
+        final_score=90,
+    )
     db.add(other_sub)
     await db.flush()
     with pytest.raises(AppError) as e_own:
@@ -215,8 +278,13 @@ async def test_create_item_submission_gating_r431(db):
     assert e_own.value.code == "SUBMISSION_NOT_FOUND"
 
     # the user's own submission but NOT approved → 422
-    draft = Submission(org_id=org.id, project_id=proj.id, user_id=u.id, version=1,
-                       status=SubmissionStatus.SUBMITTED)
+    draft = Submission(
+        org_id=org.id,
+        project_id=proj.id,
+        user_id=u.id,
+        version=1,
+        status=SubmissionStatus.SUBMITTED,
+    )
     db.add(draft)
     await db.flush()
     with pytest.raises(AppError) as e_appr:
@@ -224,20 +292,28 @@ async def test_create_item_submission_gating_r431(db):
     assert e_appr.value.code == "SUBMISSION_NOT_APPROVED"
 
     # approved own submission → item carries the denormalized score + names
-    appr = Submission(org_id=org.id, project_id=proj.id, user_id=u.id, version=2,
-                      status=SubmissionStatus.APPROVED, final_score=88)
+    appr = Submission(
+        org_id=org.id,
+        project_id=proj.id,
+        user_id=u.id,
+        version=2,
+        status=SubmissionStatus.APPROVED,
+        final_score=88,
+    )
     db.add(appr)
     await db.flush()
-    item = await svc.create_item(u.id, "Great Work", None, appr.id, None, None, None,
-                                 "public", True)
+    item = await svc.create_item(
+        u.id, "Great Work", None, appr.id, None, None, None, "public", True
+    )
     assert item.score == 88
     assert item.source_project == "P"
     assert item.source_org_name == org.name
     assert item.visibility == ItemVisibility.PUBLIC
 
     # a bad visibility string falls back to PUBLIC
-    item2 = await svc.create_item(u.id, "Another", None, None, ["x", "y"], None, None,
-                                  "nonsense", False)
+    item2 = await svc.create_item(
+        u.id, "Another", None, None, ["x", "y"], None, None, "nonsense", False
+    )
     assert item2.visibility == ItemVisibility.PUBLIC
     assert item2.tags == ["x", "y"]  # a truthy tags list is preserved (not dropped to [])
 
@@ -250,8 +326,15 @@ async def test_toggle_badge_and_update_item_ownership_r431(db):
     org, sk = await _org_skill(db, owner)
     u, intruder = await _user(db), await _user(db)
 
-    badge = SkillBadge(user_id=u.id, skill_id=sk.id, org_id=org.id, skill_name="S",
-                       category_name="AI", completion_pct=100, show_on_profile=False)
+    badge = SkillBadge(
+        user_id=u.id,
+        skill_id=sk.id,
+        org_id=org.id,
+        skill_name="S",
+        category_name="AI",
+        completion_pct=100,
+        show_on_profile=False,
+    )
     db.add(badge)
     await db.flush()
 

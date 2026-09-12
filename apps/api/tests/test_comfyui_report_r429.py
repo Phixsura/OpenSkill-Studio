@@ -46,16 +46,16 @@ def test_parsed_has_nul_r429():
 
 def test_dependency_report_core_vs_custom_r429():
     nodes = [
-        _node("KSampler"),                 # core
-        _node("CheckpointLoaderSimple"),   # core + model loader
-        _node("MyCustomSampler"),          # custom
-        _node("MyCustomSampler"),          # custom (dup → count 2)
-        _node("AnotherCustom"),            # custom
+        _node("KSampler"),  # core
+        _node("CheckpointLoaderSimple"),  # core + model loader
+        _node("MyCustomSampler"),  # custom
+        _node("MyCustomSampler"),  # custom (dup → count 2)
+        _node("AnotherCustom"),  # custom
     ]
     r = Ci._build_dependency_report(nodes)
     assert r["total_nodes"] == 5
-    assert r["custom_node_count"] == 3       # 2 MyCustom + 1 Another
-    assert r["core_node_count"] == 2         # 5 - 3
+    assert r["custom_node_count"] == 3  # 2 MyCustom + 1 Another
+    assert r["core_node_count"] == 2  # 5 - 3
     assert r["custom_node_types_total"] == 2  # two distinct custom types
     cn = {c["class_type"]: c["count"] for c in r["custom_nodes"]}
     assert cn == {"AnotherCustom": 1, "MyCustomSampler": 2}
@@ -70,23 +70,23 @@ def test_dependency_report_fold_disguise_stays_custom_r429():
     assert disguised not in ("KSampler",)  # raw differs from the core name
     nodes = [_node("KSampler"), _node(disguised)]
     r = Ci._build_dependency_report(nodes)
-    assert r["custom_node_count"] == 1   # the disguised node stays custom
-    assert r["core_node_count"] == 1     # only the real KSampler is core
+    assert r["custom_node_count"] == 1  # the disguised node stays custom
+    assert r["core_node_count"] == 1  # only the real KSampler is core
     # the stored label IS sanitized (folded) for display…
     labels = [c["class_type"] for c in r["custom_nodes"]]
-    assert labels == ["KSampler"]        # display label folded, but still counted custom
+    assert labels == ["KSampler"]  # display label folded, but still counted custom
 
 
 def test_dependency_report_io_caps_models_r429():
     nodes = [
-        _node("LoadImage"),                        # input
-        _node("SaveImage"),                        # output
-        _node("KSampler"),                         # → image_generation capability
-        _node("LatentUpscale"),                    # → upscale capability
-        _node("CheckpointLoaderSimple",
-              widgets=["sd_xl.safetensors"]),      # whitelist model confidence
-        _node("SomeCustomLoader",
-              widgets=["hidden.ckpt", "notamodel"]),  # structural confidence
+        _node("LoadImage"),  # input
+        _node("SaveImage"),  # output
+        _node("KSampler"),  # → image_generation capability
+        _node("LatentUpscale"),  # → upscale capability
+        _node(
+            "CheckpointLoaderSimple", widgets=["sd_xl.safetensors"]
+        ),  # whitelist model confidence
+        _node("SomeCustomLoader", widgets=["hidden.ckpt", "notamodel"]),  # structural confidence
     ]
     r = Ci._build_dependency_report(nodes)
     assert r["input_nodes"] == ["LoadImage"]
@@ -94,7 +94,7 @@ def test_dependency_report_io_caps_models_r429():
     assert set(r["capabilities_detected"]) == {"image_generation", "upscale"}
     by_file = {m["filename"]: m for m in r["models"]}
     assert by_file["sd_xl.safetensors"]["confidence"] == "whitelist"  # core loader
-    assert by_file["hidden.ckpt"]["confidence"] == "structural"       # non-loader node
+    assert by_file["hidden.ckpt"]["confidence"] == "structural"  # non-loader node
     assert "notamodel" not in by_file  # non-model extension ignored
 
 

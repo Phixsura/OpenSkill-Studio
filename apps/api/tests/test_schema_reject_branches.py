@@ -21,7 +21,9 @@ def _rejects(model, base: dict, field: str, bad):
 # ── project.py ───────────────────────────────────────────────
 
 _PROJ = dict(
-    title="Valid Title", description="d", instructions="i",
+    title="Valid Title",
+    description="d",
+    instructions="i",
     rubric=[{"criterion": "Quality", "max_score": 100}],
 )
 
@@ -35,12 +37,12 @@ def test_create_project_rejects():
     _rejects(M, _PROJ, "difficulty", "wizard")
     _rejects(M, _PROJ, "max_score", 0)
     _rejects(M, _PROJ, "max_score", 10001)
-    _rejects(M, _PROJ, "title", "x")                    # <2 chars
-    _rejects(M, _PROJ, "title", "y" * 201)              # >200
-    _rejects(M, _PROJ, "rubric", [])                    # empty
-    _rejects(M, _PROJ, "rubric", [{}] * 21)             # >20
+    _rejects(M, _PROJ, "title", "x")  # <2 chars
+    _rejects(M, _PROJ, "title", "y" * 201)  # >200
+    _rejects(M, _PROJ, "rubric", [])  # empty
+    _rejects(M, _PROJ, "rubric", [{}] * 21)  # >20
     _rejects(M, _PROJ, "rubric", ["not-a-dict"])
-    _rejects(M, _PROJ, "rubric", [{"max_score": 5}])    # missing criterion
+    _rejects(M, _PROJ, "rubric", [{"max_score": 5}])  # missing criterion
     _rejects(M, _PROJ, "rubric", [{"criterion": "c"}])  # missing max_score
     _rejects(M, _PROJ, "rubric", [{"criterion": "c", "max_score": -1}])
     _rejects(M, _PROJ, "rubric", [{"criterion": "x" * 201, "max_score": 1}])
@@ -127,24 +129,26 @@ def test_create_workflow_pack_rejects():
     _rejects(M, _WF, "difficulty", "wizard")
     _rejects(M, _WF, "language", "not-a-language-code")
     _rejects(M, _WF, "tool_tags", ["t"] * 21)
-    _rejects(M, _WF, "tool_tags", ["  "])              # empty-after-strip
+    _rejects(M, _WF, "tool_tags", ["  "])  # empty-after-strip
     _rejects(M, _WF, "tool_tags", ["x" * 51])
     _rejects(M, _WF, "provenance", {"k": "v" * 20001})
 
 
 # ── client_brief.py ──────────────────────────────────────────
 
-_CB = dict(title="Valid Brief", client_name="Acme", project_type="ai_visual", objective="a valid objective")
+_CB = dict(
+    title="Valid Brief", client_name="Acme", project_type="ai_visual", objective="a valid objective"
+)
 
 
 def test_create_client_brief_rejects():
     from app.schemas.client_brief import CreateClientBriefRequest as M
 
     assert M(**_CB).client_name == "Acme"
-    _rejects(M, _CB, "title", "x")               # <2
-    _rejects(M, _CB, "title", "y" * 301)         # >300
-    _rejects(M, _CB, "client_name", "")          # <1
-    _rejects(M, _CB, "client_name", "y" * 201)   # >200
+    _rejects(M, _CB, "title", "x")  # <2
+    _rejects(M, _CB, "title", "y" * 301)  # >300
+    _rejects(M, _CB, "client_name", "")  # <1
+    _rejects(M, _CB, "client_name", "y" * 201)  # >200
     _rejects(M, _CB, "client_industry", "z" * 101)
 
 
@@ -165,7 +169,7 @@ def test_create_offering_rejects():
     _rejects(M, _OFF, "features", ["f"] * 21)
     _rejects(M, _OFF, "features", ["x" * 65])
     _rejects(M, _OFF, "cost_per_call_usd", float("nan"))
-    _rejects(M, _OFF, "cost_per_call_usd", 10000.0)   # rounds to >= 10000
+    _rejects(M, _OFF, "cost_per_call_usd", 10000.0)  # rounds to >= 10000
     _rejects(M, _OFF, "cost_per_call_usd", -1.0)
 
 
@@ -208,10 +212,10 @@ def test_portfolio_rejects():
     from app.schemas.portfolio import UsernameRequest as U
 
     assert U(username="valid-name").username == "valid-name"
-    _rejects(U, {}, "username", "admin")                  # reserved
-    _rejects(U, {}, "username", "abc")                   # <4 chars
-    _rejects(U, {}, "username", "x" * 41)                # >40
-    _rejects(U, {}, "username", "Bad_Underscore")        # illegal chars
+    _rejects(U, {}, "username", "admin")  # reserved
+    _rejects(U, {}, "username", "abc")  # <4 chars
+    _rejects(U, {}, "username", "x" * 41)  # >40
+    _rejects(U, {}, "username", "Bad_Underscore")  # illegal chars
     assert Item(title="Valid Item").visibility == "public"
     _rejects(Item, {}, "title", "x")
     _rejects(Item, {"title": "ok"}, "title", "y" * 201)
@@ -242,7 +246,7 @@ def test_matching_rejects():
     from app.schemas.matching import CreateProfileRequest as M
 
     assert M(context_type="production").context_type == "production"
-    _rejects(M, {}, "context_type", "telepathy")          # Literal mismatch
+    _rejects(M, {}, "context_type", "telepathy")  # Literal mismatch
     _rejects(M, {"context_type": "production"}, "raw_request", "r" * 4001)
 
 
@@ -267,10 +271,10 @@ def test_update_profile_rejects():
     from app.schemas.user import UpdateProfileRequest as M
 
     assert M(display_name="Valid").display_name == "Valid"
-    _rejects(M, {}, "display_name", "x")               # <2
-    _rejects(M, {}, "display_name", "y" * 101)         # >100
-    _rejects(M, {}, "avatar_url", "u" * 501)           # >500
-    _rejects(M, {}, "avatar_url", "ftp://bad")         # scheme
+    _rejects(M, {}, "display_name", "x")  # <2
+    _rejects(M, {}, "display_name", "y" * 101)  # >100
+    _rejects(M, {}, "avatar_url", "u" * 501)  # >500
+    _rejects(M, {}, "avatar_url", "ftp://bad")  # scheme
 
 
 # ── workflow_run.py ──────────────────────────────────────────
@@ -280,7 +284,7 @@ def test_workflow_run_rejects():
     from app.schemas.workflow_run import CreateRunRequest, DecideReviewRequest
 
     _rejects(CreateRunRequest, {}, "inputs", {"k": "v" * 50001})
-    _rejects(CreateRunRequest, {}, "idempotency_key", "  ")     # empty-after-strip
+    _rejects(CreateRunRequest, {}, "idempotency_key", "  ")  # empty-after-strip
     _rejects(CreateRunRequest, {}, "idempotency_key", "k" * 101)
     _rejects(DecideReviewRequest, {"decision": "approved"}, "decision", "maybe")
     _rejects(DecideReviewRequest, {"decision": "approved"}, "note", "n" * 2001)
@@ -312,11 +316,11 @@ def test_pack_review_rejects():
     from app.schemas.pack_review import CreateReviewRequest as M
 
     assert M(rating=5).rating == 5
-    _rejects(M, {}, "rating", 0)                 # ge=1
-    _rejects(M, {}, "rating", 6)                 # le=5
+    _rejects(M, {}, "rating", 0)  # ge=1
+    _rejects(M, {}, "rating", 6)  # le=5
     _rejects(M, {"rating": 5}, "title", "t" * 201)
     _rejects(M, {"rating": 5}, "body", "b" * 5001)
-    _rejects(M, {"rating": 5}, "title", "bad\x00nul")   # NUL control (R88e)
+    _rejects(M, {"rating": 5}, "title", "bad\x00nul")  # NUL control (R88e)
     # low rating requires a body (model validator)
     with pytest.raises(ValidationError):
         M(rating=1)
@@ -328,7 +332,7 @@ def test_pack_review_rejects():
 def test_update_project_rejects():
     from app.schemas.project import UpdateProjectRequest as M
 
-    assert M().title is None                        # empty update is valid
+    assert M().title is None  # empty update is valid
     _rejects(M, {}, "difficulty", "wizard")
     _rejects(M, {}, "title", "x")
     _rejects(M, {}, "title", "y" * 201)
@@ -336,7 +340,7 @@ def test_update_project_rejects():
     _rejects(M, {}, "late_penalty_pct", 101)
     _rejects(M, {}, "max_submissions", 1001)
     _rejects(M, {}, "rubric", [])
-    _rejects(M, {}, "rubric", [{"criterion": "c", "max_score": 0}])   # not positive
+    _rejects(M, {}, "rubric", [{"criterion": "c", "max_score": 0}])  # not positive
 
 
 def test_update_skill_rejects():
@@ -344,7 +348,7 @@ def test_update_skill_rejects():
 
     assert M().name is None
     _rejects(M, {}, "difficulty", "wizard")
-    _rejects(M, {}, "sandbox_url", "http://insecure")   # must be https
+    _rejects(M, {}, "sandbox_url", "http://insecure")  # must be https
     _rejects(M, {}, "sandbox_url", "https://" + "x" * 500)
 
 
@@ -380,4 +384,4 @@ def test_update_connection_rejects():
 
     assert M().name is None
     _rejects(M, {}, "name", "n" * 101)
-    _rejects(M, {}, "status", "frozen")   # must be active/disabled
+    _rejects(M, {}, "status", "frozen")  # must be active/disabled

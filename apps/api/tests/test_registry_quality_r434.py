@@ -38,14 +38,21 @@ async def db():
 async def _org(db):
     from app.services.organization import OrgService
 
-    owner = User(email=f"r434-{uuid.uuid4().hex[:10]}@t.com",
-                 password_hash=hash_password("Test123!"), display_name="R434",
-                 role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    owner = User(
+        email=f"r434-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R434",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(owner)
     await db.flush()
-    o = await OrgService(db).create(name=f"R434 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r434-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R434 {uuid.uuid4().hex[:5]}",
+        slug=f"r434-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o, owner
 
@@ -60,9 +67,14 @@ async def _pack(db, org, **fields):
 async def _release(db, pack, manifest, released_by):
     from datetime import UTC, datetime
 
-    r = SkillPackRelease(pack_id=pack.id, version=f"1.0.{uuid.uuid4().hex[:4]}",
-                         manifest=manifest, checksum="x" * 64, released_by=released_by,
-                         released_at=datetime.now(UTC))
+    r = SkillPackRelease(
+        pack_id=pack.id,
+        version=f"1.0.{uuid.uuid4().hex[:4]}",
+        manifest=manifest,
+        checksum="x" * 64,
+        released_by=released_by,
+        released_at=datetime.now(UTC),
+    )
     db.add(r)
     await db.flush()
     return r
@@ -105,31 +117,53 @@ async def test_quality_score_signals_r434(db):
     assert await svc.compute_quality_score(rel_pack) == 15  # release only
 
     ex_pack = await _pack(db, org)
-    await _release(db, ex_pack, {"skills": [{"exercises": [{"q": 1}]}],
-                                 "project_templates": []}, owner.id)
+    await _release(
+        db, ex_pack, {"skills": [{"exercises": [{"q": 1}]}], "project_templates": []}, owner.id
+    )
     assert await svc.compute_quality_score(ex_pack) == 30  # release 15 + exercises 15
 
     rubric_pack = await _pack(db, org)
-    await _release(db, rubric_pack,
-                   {"skills": [{"exercises": [{"q": 1}]}],
-                    "project_templates": [{"rubric": [{"criterion": "Q", "max_score": 100}]}]},
-                   owner.id)
+    await _release(
+        db,
+        rubric_pack,
+        {
+            "skills": [{"exercises": [{"q": 1}]}],
+            "project_templates": [{"rubric": [{"criterion": "Q", "max_score": 100}]}],
+        },
+        owner.id,
+    )
     assert await svc.compute_quality_score(rubric_pack) == 40  # 15 + 15 + 10
 
     # a release with NO exercises and empty-rubric templates: only the release
     # 15 counts (exercise + rubric guards must NOT fire)
     empty_rel = await _pack(db, org)
-    await _release(db, empty_rel, {"skills": [{"exercises": []}],
-                                   "project_templates": [{"rubric": []}]}, owner.id)
+    await _release(
+        db,
+        empty_rel,
+        {"skills": [{"exercises": []}], "project_templates": [{"rubric": []}]},
+        owner.id,
+    )
     assert await svc.compute_quality_score(empty_rel) == 15
 
     # a fully-loaded pack scores the maximum (10+10+15+15+15+10+10+15 = 100)
-    full = await _pack(db, org, description="d", summary="s",
-                       learning_outcomes=["o"], provenance={"p": 1}, review_count=5)
-    await _release(db, full,
-                   {"skills": [{"exercises": [{"q": 1}]}],
-                    "project_templates": [{"rubric": [{"criterion": "Q", "max_score": 100}]}]},
-                   owner.id)
+    full = await _pack(
+        db,
+        org,
+        description="d",
+        summary="s",
+        learning_outcomes=["o"],
+        provenance={"p": 1},
+        review_count=5,
+    )
+    await _release(
+        db,
+        full,
+        {
+            "skills": [{"exercises": [{"q": 1}]}],
+            "project_templates": [{"rubric": [{"criterion": "Q", "max_score": 100}]}],
+        },
+        owner.id,
+    )
     assert await svc.compute_quality_score(full) == 100
 
 

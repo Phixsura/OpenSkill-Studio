@@ -579,10 +579,14 @@ def _controlplane_routes():
     def walk(r):
         if isinstance(r, APIRoute):
             path = "/api/v1" + r.path
-            if path.startswith((
-                "/api/v1/platform", "/api/v1/tenants",
-                "/api/v1/client-portal", "/api/v1/billing",
-            )):
+            if path.startswith(
+                (
+                    "/api/v1/platform",
+                    "/api/v1/tenants",
+                    "/api/v1/client-portal",
+                    "/api/v1/billing",
+                )
+            ):
                 concrete = re.sub(r"\{[^}]+\}", "01JFAKEFAKEFAKEFAKEFAKEFAK", path)
                 for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
                     found.append((m, concrete))
@@ -635,15 +639,15 @@ def test_portal_comment_text_reject_arcs():
         return ClientCommentRequest.model_validate(base)
 
     with _pytest.raises(ValidationError):
-        mk(text="bad\x00nul")                        # NUL → 22P05-to-500 guard
+        mk(text="bad\x00nul")  # NUL → 22P05-to-500 guard
     with _pytest.raises(ValidationError):
-        mk(text="ctrl\x07bell")                      # other control char
+        mk(text="ctrl\x07bell")  # other control char
     with _pytest.raises(ValidationError):
-        mk(text="")                                   # empty
+        mk(text="")  # empty
     with _pytest.raises(ValidationError):
-        mk(text="x" * 5001)                           # over the column bound
+        mk(text="x" * 5001)  # over the column bound
     with _pytest.raises(ValidationError):
-        mk(anchor_type="time", timestamp_ms=86_400_001)   # past 24h
+        mk(anchor_type="time", timestamp_ms=86_400_001)  # past 24h
     with _pytest.raises(ValidationError):
         mk(anchor_type="time", timestamp_ms=-1)
     # boundary values accepted

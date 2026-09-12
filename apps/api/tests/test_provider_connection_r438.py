@@ -33,21 +33,32 @@ async def db():
 async def _org(db):
     from app.services.organization import OrgService
 
-    owner = User(email=f"r438-{uuid.uuid4().hex[:10]}@t.com",
-                 password_hash=hash_password("Test123!"), display_name="R438",
-                 role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    owner = User(
+        email=f"r438-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R438",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(owner)
     await db.flush()
-    o = await OrgService(db).create(name=f"R438 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r438-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R438 {uuid.uuid4().hex[:5]}",
+        slug=f"r438-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o, owner
 
 
 async def _adapter(db, credential_fields=None, is_active=True):
-    a = ProviderAdapter(key=f"mock-{uuid.uuid4().hex[:8]}", name="Mock",
-                        credential_fields=credential_fields or ["api_key"], is_active=is_active)
+    a = ProviderAdapter(
+        key=f"mock-{uuid.uuid4().hex[:8]}",
+        name="Mock",
+        credential_fields=credential_fields or ["api_key"],
+        is_active=is_active,
+    )
     db.add(a)
     await db.flush()
     return a
@@ -81,13 +92,15 @@ async def test_create_connection_guards_r438(db):
 
     # an unknown credential field → UNKNOWN_CREDENTIAL_FIELD
     with pytest.raises(AppError) as e_unk:
-        await svc.create_connection(org.id, adapter.id, "c", {},
-                                    {"api_key": "k", "wat": "x"}, owner.id)
+        await svc.create_connection(
+            org.id, adapter.id, "c", {}, {"api_key": "k", "wat": "x"}, owner.id
+        )
     assert e_unk.value.code == "UNKNOWN_CREDENTIAL_FIELD"
 
     # a valid connection WITH credentials creates a credential row
-    conn = await svc.create_connection(org.id, adapter.id, "Prod", {"region": "eu"},
-                                       {"api_key": "k"}, owner.id)
+    conn = await svc.create_connection(
+        org.id, adapter.id, "Prod", {"region": "eu"}, {"api_key": "k"}, owner.id
+    )
     assert conn.credential_id is not None
     # …and one WITHOUT credentials is allowed (credentials omitted, not {})
     conn2 = await svc.create_connection(org.id, adapter.id, "NoCred", {}, None, owner.id)
@@ -125,16 +138,18 @@ async def test_create_offering_guards_r438(db):
     assert e_cap.value.code == "UNKNOWN_CAPABILITY"
 
     # a known capability (seeded in the taxonomy) → offering created
-    off = await svc.create_offering(org.id, conn.id, "image_generation", "sdxl",
-                                    ["upscale"], {}, 0.01, "premium")
+    off = await svc.create_offering(
+        org.id, conn.id, "image_generation", "sdxl", ["upscale"], {}, 0.01, "premium"
+    )
     assert off.capability_key == "image_generation"
     assert off.features == ["upscale"]
 
     # a cross-org connection id → ownership check fails (not found)
     other_org, other_owner = await _org(db)
     with pytest.raises(AppError):
-        await svc.create_offering(other_org.id, conn.id, "image_generation", "m", [], {},
-                                  None, "standard")
+        await svc.create_offering(
+            other_org.id, conn.id, "image_generation", "m", [], {}, None, "standard"
+        )
 
 
 async def test_connection_and_offering_limits_r438(db):
@@ -160,12 +175,21 @@ async def test_connection_and_offering_limits_r438(db):
 
     # offering limit: one connection filled to MAX offerings, next rejected
     org2, owner2 = await _org(db)
-    conn = await ProviderService(db).create_connection(org2.id, adapter.id, "c", {}, None, owner2.id)
+    conn = await ProviderService(db).create_connection(
+        org2.id, adapter.id, "c", {}, None, owner2.id
+    )
     for _ in range(MAX_OFFERINGS_PER_CONNECTION):
-        db.add(ProviderModelOffering(connection_id=conn.id, capability_key="image_generation",
-                                     model_name="m", features=[]))
+        db.add(
+            ProviderModelOffering(
+                connection_id=conn.id,
+                capability_key="image_generation",
+                model_name="m",
+                features=[],
+            )
+        )
     await db.flush()
     with pytest.raises(AppError) as e_off:
-        await svc.create_offering(org2.id, conn.id, "image_generation", "m", [], {}, None,
-                                  "standard")
+        await svc.create_offering(
+            org2.id, conn.id, "image_generation", "m", [], {}, None, "standard"
+        )
     assert e_off.value.code == "OFFERING_LIMIT_REACHED"

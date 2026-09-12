@@ -32,8 +32,13 @@ async def db():
 
 
 async def _user(db):
-    u = User(email=f"r443-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R443", role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r443-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R443",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -43,17 +48,26 @@ async def _org(db):
     from app.services.organization import OrgService
 
     owner = await _user(db)
-    o = await OrgService(db).create(name=f"R443 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r443-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R443 {uuid.uuid4().hex[:5]}",
+        slug=f"r443-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o, owner
 
 
 async def _pack(db, org, creator, *, status=PackStatus.PUBLISHED, sharing=True):
-    p = SkillPack(owner_org_id=org.id, name="P", slug=f"p-{uuid.uuid4().hex[:10]}",
-                  created_by=creator.id, status=status, visibility=PackVisibility.PUBLIC,
-                  sharing_enabled=sharing)
+    p = SkillPack(
+        owner_org_id=org.id,
+        name="P",
+        slug=f"p-{uuid.uuid4().hex[:10]}",
+        created_by=creator.id,
+        status=status,
+        visibility=PackVisibility.PUBLIC,
+        sharing_enabled=sharing,
+    )
     db.add(p)
     await db.flush()
     return p

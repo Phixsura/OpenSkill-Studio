@@ -85,8 +85,13 @@ async def _skill(db, org):
     cat = SkillCategory(org_id=org.id, name="C", slug=f"c-{uuid.uuid4().hex[:8]}")
     db.add(cat)
     await db.flush()
-    s = Skill(org_id=org.id, category_id=cat.id, name=f"S {uuid.uuid4().hex[:4]}",
-              slug=f"s-{uuid.uuid4().hex[:8]}", description="dddddddddd")
+    s = Skill(
+        org_id=org.id,
+        category_id=cat.id,
+        name=f"S {uuid.uuid4().hex[:4]}",
+        slug=f"s-{uuid.uuid4().hex[:8]}",
+        description="dddddddddd",
+    )
     db.add(s)
     await db.flush()
     return s
@@ -97,8 +102,20 @@ async def _project(db, org, owner, *, published=True, deadline=None):
     from app.services.project import ProjectService
 
     p = await ProjectService(db).create_project(
-        org.id, f"P {uuid.uuid4().hex[:4]}", None, "d", "i", "beginner", 100,
-        [], deadline, None, 0, 0, None, owner.id,
+        org.id,
+        f"P {uuid.uuid4().hex[:4]}",
+        None,
+        "d",
+        "i",
+        "beginner",
+        100,
+        [],
+        deadline,
+        None,
+        0,
+        0,
+        None,
+        owner.id,
     )
     if published:
         p.status = ContentStatus.PUBLISHED
@@ -203,9 +220,11 @@ async def test_assign_skill_and_project_guards_r422(db):
         await svc.assign_project(cohort.id, foreign_proj.id, org.id, owner.id)
     assert e_xp.value.code == "PROJECT_NOT_FOUND"
     proj = await _project(db, org, owner)
-    a = await svc.assign_project(cohort.id, proj.id, org.id, owner.id,
-                                 participation_mode="not_a_mode")
+    a = await svc.assign_project(
+        cohort.id, proj.id, org.id, owner.id, participation_mode="not_a_mode"
+    )
     from app.models.cohort import ParticipationMode
+
     assert a.participation_mode == ParticipationMode.ASSIGNED  # bad mode → fallback
     with pytest.raises(AppError) as e_pdup:
         await svc.assign_project(cohort.id, proj.id, org.id, owner.id)
@@ -251,33 +270,68 @@ async def test_cohort_progress_math_r422(db):
     await svc.assign_skill(cohort.id, s1.id, org.id, owner.id)
     await svc.assign_skill(cohort.id, s2.id, org.id, owner.id)
     for uid, sid in [(la.id, s1.id), (la.id, s2.id), (lb.id, s1.id), (instr.id, s1.id)]:
-        db.add(SkillProgress(org_id=org.id, skill_id=sid, user_id=uid,
-                             status=ProgressStatus.COMPLETED))
+        db.add(
+            SkillProgress(org_id=org.id, skill_id=sid, user_id=uid, status=ProgressStatus.COMPLETED)
+        )
     await db.flush()
 
     # OVERDUE project (deadline past): one learner at each status. la has TWO
     # rows (draft + approved) so the best-status MAX must pick approved(4).
     proj = await _project(db, org, owner, deadline=now - timedelta(days=1))
     await svc.assign_project(cohort.id, proj.id, org.id, owner.id)
-    db.add_all([
-        Submission(org_id=org.id, project_id=proj.id, user_id=la.id, version=1,
-                   status=SubmissionStatus.DRAFT),
-        Submission(org_id=org.id, project_id=proj.id, user_id=la.id, version=2,
-                   status=SubmissionStatus.APPROVED),
-        Submission(org_id=org.id, project_id=proj.id, user_id=lb.id, version=1,
-                   status=SubmissionStatus.SUBMITTED),
-        Submission(org_id=org.id, project_id=proj.id, user_id=lc.id, version=1,
-                   status=SubmissionStatus.REVISION_REQUESTED),
-        Submission(org_id=org.id, project_id=proj.id, user_id=ld.id, version=1,
-                   status=SubmissionStatus.DRAFT,
-                   updated_at=now - timedelta(days=30)),  # stale → inactive
-    ])
+    db.add_all(
+        [
+            Submission(
+                org_id=org.id,
+                project_id=proj.id,
+                user_id=la.id,
+                version=1,
+                status=SubmissionStatus.DRAFT,
+            ),
+            Submission(
+                org_id=org.id,
+                project_id=proj.id,
+                user_id=la.id,
+                version=2,
+                status=SubmissionStatus.APPROVED,
+            ),
+            Submission(
+                org_id=org.id,
+                project_id=proj.id,
+                user_id=lb.id,
+                version=1,
+                status=SubmissionStatus.SUBMITTED,
+            ),
+            Submission(
+                org_id=org.id,
+                project_id=proj.id,
+                user_id=lc.id,
+                version=1,
+                status=SubmissionStatus.REVISION_REQUESTED,
+            ),
+            Submission(
+                org_id=org.id,
+                project_id=proj.id,
+                user_id=ld.id,
+                version=1,
+                status=SubmissionStatus.DRAFT,
+                updated_at=now - timedelta(days=30),
+            ),  # stale → inactive
+        ]
+    )
     # a SECOND project with NO deadline: overdue must be 0 (the `deadline and`
     # guard short-circuits — an `or` there would crash on `now > None`)
     proj2 = await _project(db, org, owner, deadline=None)
     await svc.assign_project(cohort.id, proj2.id, org.id, owner.id)
-    db.add(Submission(org_id=org.id, project_id=proj2.id, user_id=la.id, version=1,
-                      status=SubmissionStatus.SUBMITTED))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=proj2.id,
+            user_id=la.id,
+            version=1,
+            status=SubmissionStatus.SUBMITTED,
+        )
+    )
     await db.flush()
 
     prog = await svc.get_cohort_progress(cohort.id, org.id)
@@ -286,7 +340,7 @@ async def test_cohort_progress_math_r422(db):
     assert prog["avg_skill_completion_pct"] == 37.5  # 3/(2*4), instructor excluded
     by_id = {p["project_id"]: p for p in prog["projects"]}
     pj = by_id[proj.id]
-    assert pj["approved"] == 1   # best-status MAX picked approved over la's draft
+    assert pj["approved"] == 1  # best-status MAX picked approved over la's draft
     assert pj["submitted"] == 1
     assert pj["revision_requested"] == 1
     assert pj["not_started"] == 0  # all 4 learners have a submission row
@@ -322,8 +376,11 @@ async def test_cohort_progress_math_r422(db):
     fs1, fs2, fs3 = await _skill(db, org), await _skill(db, org), await _skill(db, org)
     for fs in (fs1, fs2, fs3):
         await svc.assign_skill(frac.id, fs.id, org.id, owner.id)
-    db.add(SkillProgress(org_id=org.id, skill_id=fs1.id, user_id=fl.id,
-                         status=ProgressStatus.COMPLETED))
+    db.add(
+        SkillProgress(
+            org_id=org.id, skill_id=fs1.id, user_id=fl.id, status=ProgressStatus.COMPLETED
+        )
+    )
     await db.flush()
     frac_prog = await svc.get_cohort_progress(frac.id, org.id)
     assert frac_prog["avg_skill_completion_pct"] == 33.3  # round(...,1), not 33.33
@@ -354,22 +411,50 @@ async def test_learner_drill_down_r422(db):
 
     sk = await _skill(db, org)
     await svc.assign_skill(cohort.id, sk.id, org.id, owner.id)
-    db.add(SkillProgress(org_id=org.id, skill_id=sk.id, user_id=la.id,
-                         status=ProgressStatus.IN_PROGRESS, exercises_done=2,
-                         exercises_total=5))
+    db.add(
+        SkillProgress(
+            org_id=org.id,
+            skill_id=sk.id,
+            user_id=la.id,
+            status=ProgressStatus.IN_PROGRESS,
+            exercises_done=2,
+            exercises_total=5,
+        )
+    )
     # a DIFFERENT user's progress on the same skill must not be reported here
-    db.add(SkillProgress(org_id=org.id, skill_id=sk.id, user_id=outsider.id,
-                         status=ProgressStatus.COMPLETED, exercises_done=5,
-                         exercises_total=5))
+    db.add(
+        SkillProgress(
+            org_id=org.id,
+            skill_id=sk.id,
+            user_id=outsider.id,
+            status=ProgressStatus.COMPLETED,
+            exercises_done=5,
+            exercises_total=5,
+        )
+    )
     await db.flush()
 
     proj = await _project(db, org, owner, deadline=datetime.now(UTC) - timedelta(days=1))
     await svc.assign_project(cohort.id, proj.id, org.id, owner.id)
     # a DRAFT past the deadline is overdue; the newest version is reported
-    db.add(Submission(org_id=org.id, project_id=proj.id, user_id=la.id, version=1,
-                      status=SubmissionStatus.SUBMITTED))
-    db.add(Submission(org_id=org.id, project_id=proj.id, user_id=la.id, version=2,
-                      status=SubmissionStatus.DRAFT))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=proj.id,
+            user_id=la.id,
+            version=1,
+            status=SubmissionStatus.SUBMITTED,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=proj.id,
+            user_id=la.id,
+            version=2,
+            status=SubmissionStatus.DRAFT,
+        )
+    )
     await db.flush()
 
     # a FUTURE-deadline project with a draft is NOT overdue — proves the
@@ -377,8 +462,15 @@ async def test_learner_drill_down_r422(db):
     # there would flag any set-deadline draft as overdue
     fut = await _project(db, org, owner, deadline=datetime.now(UTC) + timedelta(days=5))
     await svc.assign_project(cohort.id, fut.id, org.id, owner.id)
-    db.add(Submission(org_id=org.id, project_id=fut.id, user_id=la.id, version=1,
-                      status=SubmissionStatus.DRAFT))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=fut.id,
+            user_id=la.id,
+            version=1,
+            status=SubmissionStatus.DRAFT,
+        )
+    )
     await db.flush()
 
     dd = await svc.get_learner_drill_down(cohort.id, la.id, org.id)

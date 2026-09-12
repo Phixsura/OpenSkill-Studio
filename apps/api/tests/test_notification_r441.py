@@ -26,8 +26,13 @@ async def db():
 
 
 async def _user(db):
-    u = User(email=f"r441-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R441", role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r441-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R441",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u

@@ -28,8 +28,13 @@ async def db():
 
 
 async def _user(db):
-    u = User(email=f"r442-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R442", role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r442-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R442",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -39,12 +44,21 @@ async def _pack(db, *, status=PackStatus.PUBLISHED, vis=PackVisibility.PUBLIC):
     from app.services.organization import OrgService
 
     owner = await _user(db)
-    org = await OrgService(db).create(name=f"R442 {uuid.uuid4().hex[:5]}",
-                                      slug=f"r442-{uuid.uuid4().hex[:10]}",
-                                      description=None, created_by=owner.id)
+    org = await OrgService(db).create(
+        name=f"R442 {uuid.uuid4().hex[:5]}",
+        slug=f"r442-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
-    p = SkillPack(owner_org_id=org.id, name="P", slug=f"p-{uuid.uuid4().hex[:10]}",
-                  created_by=owner.id, status=status, visibility=vis)
+    p = SkillPack(
+        owner_org_id=org.id,
+        name="P",
+        slug=f"p-{uuid.uuid4().hex[:10]}",
+        created_by=owner.id,
+        status=status,
+        visibility=vis,
+    )
     db.add(p)
     await db.flush()
     return p

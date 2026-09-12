@@ -838,16 +838,17 @@ def test_stripe_webhook_signature_with_fake_secret(monkeypatch):
     # amount_total WITHOUT currency passes through un-normalized instead of
     # crashing the normalizer (`and`->`or` mutant calls it with currency=None)
     payload3 = json.dumps(
-        {"id": "evt_3", "type": "checkout.session.completed",
-         "data": {"object": {"amount_total": 5000}}}
+        {
+            "id": "evt_3",
+            "type": "checkout.session.completed",
+            "data": {"object": {"amount_total": 5000}},
+        }
     ).encode()
     ts3 = str(int(time.time()))
     sig3 = hmac_mod.new(
         b"whsec_test123", f"{ts3}.{payload3.decode()}".encode(), hashlib.sha256
     ).hexdigest()
-    parsed3 = StripeProvider().verify_webhook(
-        {"stripe-signature": f"t={ts3},v1={sig3}"}, payload3
-    )
+    parsed3 = StripeProvider().verify_webhook({"stripe-signature": f"t={ts3},v1={sig3}"}, payload3)
     assert parsed3.data["amount_total"] == 5000  # untouched
 
 
@@ -942,11 +943,16 @@ def test_stripe_checkout_and_subscription_mapping(monkeypatch):
         for bad in (None, 0, -100):
             with pytest.raises(AppError) as exc_amt:
                 await p.create_checkout_session(
-                    tenant=tenant, kind="credit_topup", amount_minor=bad,
-                    currency="USD", success_url="https://s", cancel_url="https://c")
+                    tenant=tenant,
+                    kind="credit_topup",
+                    amount_minor=bad,
+                    currency="USD",
+                    success_url="https://s",
+                    cancel_url="https://c",
+                )
             assert exc_amt.value.code == "VALIDATION_ERROR"
             assert exc_amt.value.status_code == 422
-        assert "checkout" not in calls          # guard fired before the SDK call
+        assert "checkout" not in calls  # guard fired before the SDK call
 
         # change reuses retrieved item id + disables Stripe-side proration
         await p.change_subscription("sub_1", "price_new", 5)
@@ -2636,18 +2642,20 @@ async def test_void_restores_rollover_applied_plan(db):
     # (R350: the flipped sub filter finds the decoy and skips the restore)
     t_d = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub_d, _ = await billing_svc.start_subscription(
-        db, t_d, plan_key="school", interval="month", seats=0, provider="manual", actor=a)
+        db, t_d, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
     # Deferred downgrade growth → school (next_period) WITH a seats axis
     # (0 → 4): the fold applies BOTH axes; the void must restore BOTH.
     await billing_svc.change_plan(
         db, tenant, sub, plan_key="school", seats=4, proration_mode="next_period", actor=a
     )
     await billing_svc.change_plan(
-        db, t_d, sub_d, plan_key="growth", seats=None, proration_mode="immediate", actor=a)
+        db, t_d, sub_d, plan_key="growth", seats=None, proration_mode="immediate", actor=a
+    )
     inv = await _force_close(db, sub)  # rollover: applies the downgrade
     assert inv is not None
     await db.refresh(sub)
-    assert sub.seat_quantity == 4                       # seats axis folded
+    assert sub.seat_quantity == 4  # seats axis folded
     growth_version = None  # capture post-void expectation via the change row
     from app.controlplane.models.billing import SubscriptionChange
 
@@ -2682,14 +2690,15 @@ async def test_void_restores_rollover_applied_plan(db):
     # R350 (L2003 boundary): the deferred change's effective_at sits EXACTLY
     # at the next period's start — voiding THAT period's invoice must
     # un-invoice it (>=, not >), or the re-close silently drops the change.
-    inv3 = await _force_close(db, sub)                  # close period 2
+    inv3 = await _force_close(db, sub)  # close period 2
     assert inv3 is not None
     await db.refresh(chg)
     assert chg.invoiced is True
     await billing_svc.void_invoice(db, inv3, reason="p2 dispute", actor=a)
     await db.refresh(chg)
     assert chg.invoiced is False, (
-        "a change effective exactly at the period start must be un-invoiced")
+        "a change effective exactly at the period start must be un-invoiced"
+    )
 
 
 @pytest.mark.asyncio
@@ -2735,9 +2744,11 @@ async def test_void_reclose_with_forward_immediate_upgrade(db):
     # change (R350)
     t_d2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub_d2, _ = await billing_svc.start_subscription(
-        db, t_d2, plan_key="school", interval="month", seats=0, provider="manual", actor=a)
+        db, t_d2, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
     await billing_svc.change_plan(
-        db, t_d2, sub_d2, plan_key="growth", seats=None, proration_mode="immediate", actor=a)
+        db, t_d2, sub_d2, plan_key="growth", seats=None, proration_mode="immediate", actor=a
+    )
     # Tenant IMMEDIATELY upgrades back school → growth inside period 2
     # (effective_at = now > P1.period_end).
     await billing_svc.change_plan(
@@ -3263,12 +3274,16 @@ async def test_gap_change_seat_basis_is_current_not_elapsed_period_start(db):
     sub.current_period_start = period.period_start
     sub.current_period_end = period.period_end
     prior = (
-        await db.execute(
-            select(SubscriptionChange)
-            .where(SubscriptionChange.subscription_id == sub.id)
-            .order_by(SubscriptionChange.id)
+        (
+            await db.execute(
+                select(SubscriptionChange)
+                .where(SubscriptionChange.subscription_id == sub.id)
+                .order_by(SubscriptionChange.id)
+            )
         )
-    ).scalars().all()[-1]
+        .scalars()
+        .all()[-1]
+    )
     prior.effective_at = datetime.now(UTC) - _td(days=20)
     await db.flush()
     gap_start = sub.current_period_end
@@ -3285,12 +3300,16 @@ async def test_gap_change_seat_basis_is_current_not_elapsed_period_start(db):
     )
     preview = res["proration"]
     gap_change = (
-        await db.execute(
-            select(SubscriptionChange)
-            .where(SubscriptionChange.subscription_id == sub.id)
-            .order_by(SubscriptionChange.id)
+        (
+            await db.execute(
+                select(SubscriptionChange)
+                .where(SubscriptionChange.subscription_id == sub.id)
+                .order_by(SubscriptionChange.id)
+            )
         )
-    ).scalars().all()[-1]
+        .scalars()
+        .all()[-1]
+    )
     at = gap_change.effective_at
     total_days = max((gap_end - gap_start).days, 1)
     seat_days = max(min((gap_end - at).days, total_days), 0)
@@ -3332,8 +3351,13 @@ async def test_stripe_webhook_out_of_order_status_events_ignored(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=_actor(user),
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
     )
     sub.provider = "stripe"
     sub.external_ref = f"sub_{ULID()}"
@@ -3342,7 +3366,7 @@ async def test_stripe_webhook_out_of_order_status_events_ignored(db):
 
     t1 = datetime.now(UTC) - _td(hours=2)  # OLD (cycle N)
     t2 = datetime.now(UTC) - _td(hours=1)  # NEWER (cycle N)
-    t3 = datetime.now(UTC)                 # NEWEST (cycle N+1)
+    t3 = datetime.now(UTC)  # NEWEST (cycle N+1)
 
     def _evt(etype, occurred):
         return ParsedWebhookEvent(
@@ -3385,9 +3409,7 @@ async def _seed_plan(db, user, key, *, amount, included, seat_price):
     from app.controlplane.models.plan import PlanPrice
     from app.controlplane.services import plans as plan_svc
 
-    plan = await plan_svc.create_plan(
-        db, key=key, name=key, description=None, actor=_actor(user)
-    )
+    plan = await plan_svc.create_plan(db, key=key, name=key, description=None, actor=_actor(user))
     draft = await plan_svc.create_draft_version(db, plan, created_by=user.id)
     draft.entitlements = {"max_active_learners": 1000, "max_instructors": 100}
     db.add(
@@ -3409,12 +3431,12 @@ async def _seed_plan(db, user, key, *, amount, included, seat_price):
 @pytest.mark.parametrize(
     "old_amt,new_amt,old_inc,new_inc,old_sp,new_sp,seats,day",
     [
-        (10000, 20000, 5, 5, 500, 500, 0, 15),    # pure plan upgrade, no seats
-        (20000, 10000, 5, 5, 500, 500, 0, 15),    # downgrade (immediate)
-        (10000, 8000, 10, 2, 500, 500, 10, 15),   # R123[C0]: shrink included, live seats
-        (10000, 20000, 5, 8, 300, 700, 12, 10),   # included + price both change
-        (15000, 15000, 3, 3, 400, 400, 7, 20),    # same fee, seat band only
-        (9999, 33333, 1, 9, 111, 999, 5, 3),      # odd numbers → rounding stress
+        (10000, 20000, 5, 5, 500, 500, 0, 15),  # pure plan upgrade, no seats
+        (20000, 10000, 5, 5, 500, 500, 0, 15),  # downgrade (immediate)
+        (10000, 8000, 10, 2, 500, 500, 10, 15),  # R123[C0]: shrink included, live seats
+        (10000, 20000, 5, 8, 300, 700, 12, 10),  # included + price both change
+        (15000, 15000, 3, 3, 400, 400, 7, 20),  # same fee, seat band only
+        (9999, 33333, 1, 9, 111, 999, 5, 3),  # odd numbers → rounding stress
     ],
 )
 async def test_preview_matches_invoice_proration(
@@ -3431,8 +3453,12 @@ async def test_preview_matches_invoice_proration(
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     a = _actor(user)
     uniq = str(ULID()).lower()[:8]
-    old_key = await _seed_plan(db, user, f"old-{uniq}", amount=old_amt, included=old_inc, seat_price=old_sp)
-    new_key = await _seed_plan(db, user, f"new-{uniq}", amount=new_amt, included=new_inc, seat_price=new_sp)
+    old_key = await _seed_plan(
+        db, user, f"old-{uniq}", amount=old_amt, included=old_inc, seat_price=old_sp
+    )
+    new_key = await _seed_plan(
+        db, user, f"new-{uniq}", amount=new_amt, included=new_inc, seat_price=new_sp
+    )
 
     # `seats` live STUDENT members in one org of the tenant → drives billable_seats
     org = Organization(tenant_id=tenant.id, name=f"o{uniq}", slug=f"o{uniq}", created_by=user.id)
@@ -3440,7 +3466,9 @@ async def test_preview_matches_invoice_proration(
     await db.flush()
     for _i in range(seats):
         m = await _mk_user(db)
-        db.add(OrgMember(org_id=org.id, user_id=m.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+        db.add(
+            OrgMember(org_id=org.id, user_id=m.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE)
+        )
     await db.flush()
 
     sub, _ = await billing_svc.start_subscription(
@@ -3479,9 +3507,7 @@ async def test_preview_matches_invoice_proration(
         .scalars()
         .all()
     )
-    invoiced_change_net = sum(
-        line.amount_minor for line in lines if line.line_type == "proration"
-    )
+    invoiced_change_net = sum(line.amount_minor for line in lines if line.line_type == "proration")
     assert invoiced_change_net == preview_net, (
         f"preview shown {preview_net} but invoice billed {invoiced_change_net} "
         f"[lines: {[(ln.line_type, ln.amount_minor) for ln in lines]}]"
@@ -3498,23 +3524,29 @@ async def test_scan_due_periods_dedups_live_close_messages(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=_actor(user))
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
     period = (
         await db.execute(
             select(BillingPeriod).where(
-                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"))
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
     ).scalar_one()
     period.period_end = datetime.now(UTC) - timedelta(hours=1)
     await db.flush()
 
     def count_msgs():
-        return (
-            db.execute(
-                select(OutboxMessage).where(
-                    OutboxMessage.topic == "period.close_due",
-                    OutboxMessage.payload["billing_period_id"].astext == period.id,
-                )
+        return db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.topic == "period.close_due",
+                OutboxMessage.payload["billing_period_id"].astext == period.id,
             )
         )
 
@@ -3522,16 +3554,16 @@ async def test_scan_due_periods_dedups_live_close_messages(db):
     msgs = (await count_msgs()).scalars().all()
     assert len(msgs) == 1
 
-    await billing_svc.scan_due_periods(db)               # re-scan: deduped
+    await billing_svc.scan_due_periods(db)  # re-scan: deduped
     msgs = (await count_msgs()).scalars().all()
     assert len(msgs) == 1
     assert n1 >= 1
 
-    msgs[0].status = "done"                              # processed → closes...
+    msgs[0].status = "done"  # processed → closes...
     await db.flush()
-    await billing_svc.scan_due_periods(db)               # ...but period still open
+    await billing_svc.scan_due_periods(db)  # ...but period still open
     msgs = (await count_msgs()).scalars().all()
-    assert len(msgs) == 2                                # re-enqueue is allowed again
+    assert len(msgs) == 2  # re-enqueue is allowed again
 
 
 @pytest.mark.asyncio
@@ -3550,45 +3582,60 @@ async def test_provider_initiated_cancel_webhook_branch(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=_actor(user))
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
     sub.external_ref = f"sub_ext_{ULID()}"
     await db.flush()
 
     # unknown external ref → unhandled, nothing changes
-    ghost = SimpleNamespace(event_type="customer.subscription.deleted",
-                            data={"id": "sub_ghost"})
+    ghost = SimpleNamespace(event_type="customer.subscription.deleted", data={"id": "sub_ghost"})
     assert await _apply_webhook_event(db, "stripe", ghost) is False
 
-    parsed = SimpleNamespace(event_type="customer.subscription.deleted",
-                             data={"id": sub.external_ref})
+    parsed = SimpleNamespace(
+        event_type="customer.subscription.deleted", data={"id": sub.external_ref}
+    )
     handled = await _apply_webhook_event(db, "stripe", parsed)
     assert handled is True
     await db.refresh(sub)
     assert sub.status == "cancelled" and sub.cancelled_at is not None
 
     period = (
-        await db.execute(
-            select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
+        await db.execute(select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
     ).scalar_one()
-    assert period.period_end <= datetime.now(UTC)          # truncated
+    assert period.period_end <= datetime.now(UTC)  # truncated
     close_msgs = (
-        (await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.topic == "period.close_due",
-                OutboxMessage.payload["billing_period_id"].astext == period.id)))
-        .scalars().all()
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.topic == "period.close_due",
+                    OutboxMessage.payload["billing_period_id"].astext == period.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    assert len(close_msgs) >= 1                            # final invoice enqueued
+    assert len(close_msgs) >= 1  # final invoice enqueued
 
     notes = (
-        (await db.execute(
-            select(Notification).where(
-                Notification.user_id == user.id,
-                Notification.type == "billing.subscription_cancelled")))
-        .scalars().all()
+        (
+            await db.execute(
+                select(Notification).where(
+                    Notification.user_id == user.id,
+                    Notification.type == "billing.subscription_cancelled",
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    assert len(notes) >= 1                                 # owner told (R113[M5])
+    assert len(notes) >= 1  # owner told (R113[M5])
 
     # replay: sub already cancelled → unhandled, no duplicate close
     assert await _apply_webhook_event(db, "stripe", parsed) is False
@@ -3608,8 +3655,14 @@ async def test_push_provider_handler_arcs(db, monkeypatch):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=_actor(user))
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
 
     # guards: unknown sub / manual provider / missing ref → silent no-ops
     await handle_subscription_push_provider(db, {"subscription_id": str(ULID())})
@@ -3622,16 +3675,21 @@ async def test_push_provider_handler_arcs(db, monkeypatch):
 
     calls: list[dict] = []
 
-    async def record(self, external_ref, new_price_ref, seat_quantity,
-                     cancel_at_period_end=False):
-        calls.append(dict(ref=external_ref, price=new_price_ref,
-                          seats=seat_quantity, cape=cancel_at_period_end))
+    async def record(self, external_ref, new_price_ref, seat_quantity, cancel_at_period_end=False):
+        calls.append(
+            dict(
+                ref=external_ref,
+                price=new_price_ref,
+                seats=seat_quantity,
+                cape=cancel_at_period_end,
+            )
+        )
 
     monkeypatch.setattr(MockProvider, "change_subscription", record)
     await handle_subscription_push_provider(db, {"subscription_id": sub.id})
     assert len(calls) == 1
     assert calls[0]["ref"] == sub.external_ref
-    assert calls[0]["cape"] is True                       # R113[C0]
+    assert calls[0]["cape"] is True  # R113[C0]
 
     # missing PlanPrice (unpriced currency) → logged, no crash, no push
     sub.currency = "XXX"
@@ -3649,7 +3707,7 @@ async def test_push_provider_handler_arcs(db, monkeypatch):
         raise InvalidRequestError("No such subscription: sub_x")
 
     monkeypatch.setattr(MockProvider, "change_subscription", dead)
-    with pytest.raises(InvalidRequestError):              # LIVE platform row → raise
+    with pytest.raises(InvalidRequestError):  # LIVE platform row → raise
         await handle_subscription_push_provider(db, {"subscription_id": sub.id})
 
     sub.status = "cancelled"
@@ -3669,8 +3727,14 @@ async def test_cancel_provider_handler_arcs(db, monkeypatch):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=_actor(user))
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
     sub.provider = "mock"
     sub.external_ref = f"mock_sub_{ULID()}"
     await db.flush()
@@ -3689,23 +3753,41 @@ async def test_cancel_provider_handler_arcs(db, monkeypatch):
 
     # R123[H6]: at_end cancel retried AFTER reactivation → skipped
     assert sub.status == "active" and not sub.cancel_at_period_end
-    await handle_subscription_cancel_provider(db, {
-        "provider": "mock", "external_ref": sub.external_ref,
-        "at_period_end": True, "subscription_id": sub.id})
-    assert calls == []                                     # obsolete cancel skipped
+    await handle_subscription_cancel_provider(
+        db,
+        {
+            "provider": "mock",
+            "external_ref": sub.external_ref,
+            "at_period_end": True,
+            "subscription_id": sub.id,
+        },
+    )
+    assert calls == []  # obsolete cancel skipped
 
     # pending cancellation → executes with the flag
     sub.cancel_at_period_end = True
     await db.flush()
-    await handle_subscription_cancel_provider(db, {
-        "provider": "mock", "external_ref": sub.external_ref,
-        "at_period_end": True, "subscription_id": sub.id})
+    await handle_subscription_cancel_provider(
+        db,
+        {
+            "provider": "mock",
+            "external_ref": sub.external_ref,
+            "at_period_end": True,
+            "subscription_id": sub.id,
+        },
+    )
     assert calls == [(sub.external_ref, True)]
 
     # immediate cancel executes regardless of platform state
-    await handle_subscription_cancel_provider(db, {
-        "provider": "mock", "external_ref": sub.external_ref,
-        "at_period_end": False, "subscription_id": sub.id})
+    await handle_subscription_cancel_provider(
+        db,
+        {
+            "provider": "mock",
+            "external_ref": sub.external_ref,
+            "at_period_end": False,
+            "subscription_id": sub.id,
+        },
+    )
     assert calls[-1] == (sub.external_ref, False)
 
     # R123[M12/M16]: provider already-terminal → success; transient → raise
@@ -3716,16 +3798,18 @@ async def test_cancel_provider_handler_arcs(db, monkeypatch):
         raise InvalidRequestError("No such subscription: sub_x")
 
     monkeypatch.setattr(MockProvider, "cancel_subscription", already_gone)
-    await handle_subscription_cancel_provider(db, {
-        "provider": "mock", "external_ref": sub.external_ref, "at_period_end": False})
+    await handle_subscription_cancel_provider(
+        db, {"provider": "mock", "external_ref": sub.external_ref, "at_period_end": False}
+    )
 
     async def transient(self, *a, **kw):
         raise RuntimeError("connection reset")
 
     monkeypatch.setattr(MockProvider, "cancel_subscription", transient)
     with pytest.raises(RuntimeError):
-        await handle_subscription_cancel_provider(db, {
-            "provider": "mock", "external_ref": sub.external_ref, "at_period_end": False})
+        await handle_subscription_cancel_provider(
+            db, {"provider": "mock", "external_ref": sub.external_ref, "at_period_end": False}
+        )
 
 
 @pytest.mark.asyncio
@@ -3740,10 +3824,10 @@ async def test_reactivate_subscription_arcs(db):
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     a = _actor(user)
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=a)
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
 
-    with pytest.raises(AppError) as e:                     # active sub → 409
+    with pytest.raises(AppError) as e:  # active sub → 409
         await billing_svc.reactivate_subscription(db, tenant, sub, actor=a)
     assert e.value.code == "SUBSCRIPTION_STATUS_CONFLICT" and e.value.status_code == 409
 
@@ -3757,21 +3841,31 @@ async def test_reactivate_subscription_arcs(db):
     sub = await billing_svc.reactivate_subscription(db, tenant, sub, actor=a)
     assert sub.status == "active" and sub.cancel_at_period_end is False
     chg = (
-        (await db.execute(
-            select(SubscriptionChange).where(
-                SubscriptionChange.subscription_id == sub.id,
-                SubscriptionChange.change_type == "reactivate")))
-        .scalars().all()
+        (
+            await db.execute(
+                select(SubscriptionChange).where(
+                    SubscriptionChange.subscription_id == sub.id,
+                    SubscriptionChange.change_type == "reactivate",
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
     assert len(chg) == 1
     pushes = (
-        (await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.topic == "subscription.push_provider",
-                OutboxMessage.payload["subscription_id"].astext == sub.id)))
-        .scalars().all()
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.topic == "subscription.push_provider",
+                    OutboxMessage.payload["subscription_id"].astext == sub.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    assert len(pushes) >= 1                                # R101[H17] via outbox
+    assert len(pushes) >= 1  # R101[H17] via outbox
 
     # immediate-cancelled sub can NOT be resurrected
     await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False, actor=a)
@@ -3803,23 +3897,23 @@ def test_billing_event_hwm_pure_boundaries():
 
     sub = SimpleNamespace(last_billing_event_at=None)
     ev = SimpleNamespace(occurred_at=None)
-    assert _is_stale_billing_event(sub, ev) is False       # unknown time never stale
+    assert _is_stale_billing_event(sub, ev) is False  # unknown time never stale
     _advance_billing_event_hwm(sub, ev)
-    assert sub.last_billing_event_at is None               # and never advances
+    assert sub.last_billing_event_at is None  # and never advances
 
     ev1 = SimpleNamespace(occurred_at=t1)
-    assert _is_stale_billing_event(sub, ev1) is False      # first event
+    assert _is_stale_billing_event(sub, ev1) is False  # first event
     _advance_billing_event_hwm(sub, ev1)
     assert sub.last_billing_event_at == t1
 
-    assert _is_stale_billing_event(sub, ev1) is False      # EQUAL time: not stale
+    assert _is_stale_billing_event(sub, ev1) is False  # EQUAL time: not stale
     _advance_billing_event_hwm(sub, ev1)
-    assert sub.last_billing_event_at == t1                 # equal does not re-advance
+    assert sub.last_billing_event_at == t1  # equal does not re-advance
 
     ev0 = SimpleNamespace(occurred_at=t1 - timedelta(seconds=1))
-    assert _is_stale_billing_event(sub, ev0) is True       # older → stale
+    assert _is_stale_billing_event(sub, ev0) is True  # older → stale
     _advance_billing_event_hwm(sub, ev0)
-    assert sub.last_billing_event_at == t1                 # never regresses
+    assert sub.last_billing_event_at == t1  # never regresses
 
     ev2 = SimpleNamespace(occurred_at=t2)
     assert _is_stale_billing_event(sub, ev2) is False
@@ -3858,9 +3952,11 @@ async def test_subscription_http_self_service_guards(db):
             hdr = {"Authorization": f"Bearer {token}"}
 
             # self-mint of a manual subscription → 409 (billing bypass guard)
-            r = await c.post(f"/api/v1/tenants/{tid}/subscription", headers=hdr,
-                             json={"plan_key": "school", "interval": "month",
-                                   "seats": 0, "provider": "manual"})
+            r = await c.post(
+                f"/api/v1/tenants/{tid}/subscription",
+                headers=hdr,
+                json={"plan_key": "school", "interval": "month", "seats": 0, "provider": "manual"},
+            )
             assert r.status_code == 409, r.text
             assert r.json()["error"]["code"] == "MANUAL_BILLING_MODE"
 
@@ -3878,16 +3974,21 @@ async def test_subscription_http_self_service_guards(db):
 
     # now give the tenant a live sub (service path) and test the empty-change arc
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=_actor(owner))
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(owner),
+    )
     await db.commit()
 
     app.router.lifespan_context = _noop
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             hdr = {"Authorization": f"Bearer {token}"}
-            r = await c.post(f"/api/v1/tenants/{tid}/subscription/change",
-                             headers=hdr, json={})
+            r = await c.post(f"/api/v1/tenants/{tid}/subscription/change", headers=hdr, json={})
             assert r.status_code == 422, r.text
             assert r.json()["error"]["code"] == "VALIDATION_ERROR"
     finally:
@@ -3939,7 +4040,9 @@ async def test_webhook_failed_handler_records_event_and_dedups_replay(db, monkey
         await db.execute(
             select(BillingWebhookEvent).where(
                 BillingWebhookEvent.provider == "mock",
-                BillingWebhookEvent.external_event_id == event_id))
+                BillingWebhookEvent.external_event_id == event_id,
+            )
+        )
     ).scalar_one()
     assert row.status == "failed" and row.error
 
@@ -3963,55 +4066,85 @@ async def test_bill_via_invoice_purchase_becomes_license_line_at_close(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=_actor(user))
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
 
     listing = MarketplaceListing(
-        product_type="skill_pack", product_id=str(ULID()),
-        seller_org_id="01JFAKEORGFAKEORGFAKEORGFA", seller_tenant_id=str(ULID()),
-        offer_type="paid", price_minor=7000, currency="USD",
-        license_scope="organization", platform_commission_pct=30,
-        bill_via_invoice=True, status="active", created_by=user.id)
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        seller_org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        seller_tenant_id=str(ULID()),
+        offer_type="paid",
+        price_minor=7000,
+        currency="USD",
+        license_scope="organization",
+        platform_commission_pct=30,
+        bill_via_invoice=True,
+        status="active",
+        created_by=user.id,
+    )
     db.add(listing)
     await db.flush()
 
     def mk_purchase(status, amount=7000):
         return MarketplacePurchase(
-            listing_id=listing.id, buyer_tenant_id=tenant.id,
-            buyer_org_id="01JFAKEORGFAKEORGFAKEORGFA", purchaser_user_id=user.id,
-            status=status, amount_minor=amount, currency="USD",
-            economics_snapshot={}, payment_method="invoice", invoice_id=None)
+            listing_id=listing.id,
+            buyer_tenant_id=tenant.id,
+            buyer_org_id="01JFAKEORGFAKEORGFAKEORGFA",
+            purchaser_user_id=user.id,
+            status=status,
+            amount_minor=amount,
+            currency="USD",
+            economics_snapshot={},
+            payment_method="invoice",
+            invoice_id=None,
+        )
 
     paid = mk_purchase("paid")
-    pending = mk_purchase("pending", amount=999)   # not yet paid → must be skipped
+    pending = mk_purchase("pending", amount=999)  # not yet paid → must be skipped
     db.add_all([paid, pending])
     await db.flush()
 
     inv = await _force_close(db, sub)
     assert inv is not None
     lic_lines = (
-        (await db.execute(
-            select(InvoiceLine).where(
-                InvoiceLine.invoice_id == inv.id, InvoiceLine.line_type == "license")))
-        .scalars().all()
+        (
+            await db.execute(
+                select(InvoiceLine).where(
+                    InvoiceLine.invoice_id == inv.id, InvoiceLine.line_type == "license"
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
     assert len(lic_lines) == 1
     assert lic_lines[0].amount_minor == 7000
     assert int(lic_lines[0].quantity) == 1  # R346: one license, one unit
     await db.refresh(paid)
     await db.refresh(pending)
-    assert paid.invoice_id == inv.id          # stamped
-    assert pending.invoice_id is None         # unpaid → not billed
+    assert paid.invoice_id == inv.id  # stamped
+    assert pending.invoice_id is None  # unpaid → not billed
 
     # a SECOND close must not re-bill the already-invoiced license
     inv2 = await _force_close(db, sub)
     if inv2 is not None:
         relic = (
-            (await db.execute(
-                select(InvoiceLine).where(
-                    InvoiceLine.invoice_id == inv2.id,
-                    InvoiceLine.line_type == "license")))
-            .scalars().all()
+            (
+                await db.execute(
+                    select(InvoiceLine).where(
+                        InvoiceLine.invoice_id == inv2.id, InvoiceLine.line_type == "license"
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
         assert relic == [], "already-invoiced license was re-billed on the next close"
 
@@ -4034,36 +4167,51 @@ async def test_plan_change_boundaries_and_provider_gates(db):
 
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
-    ka = await _seed_plan(db, user, f"r347a-{str(ULID()).lower()[:8]}",
-                          amount=10000, included=5, seat_price=500)
-    kb = await _seed_plan(db, user, f"r347b-{str(ULID()).lower()[:8]}",
-                          amount=10000, included=3, seat_price=300)   # EQUAL price
-    kc = await _seed_plan(db, user, f"r347c-{str(ULID()).lower()[:8]}",
-                          amount=4000, included=0, seat_price=None)   # NULL overage
+    ka = await _seed_plan(
+        db, user, f"r347a-{str(ULID()).lower()[:8]}", amount=10000, included=5, seat_price=500
+    )
+    kb = await _seed_plan(
+        db, user, f"r347b-{str(ULID()).lower()[:8]}", amount=10000, included=3, seat_price=300
+    )  # EQUAL price
+    kc = await _seed_plan(
+        db, user, f"r347c-{str(ULID()).lower()[:8]}", amount=4000, included=0, seat_price=None
+    )  # NULL overage
 
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key=ka, interval="month", seats=0,
-        provider="manual", actor=_actor(user))
+        db, tenant, plan_key=ka, interval="month", seats=0, provider="manual", actor=_actor(user)
+    )
     v_a = sub.plan_version_id
 
     # (5) unknown provider → 422
     t2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     with pytest.raises(AppError) as e422:
         await billing_svc.start_subscription(
-            db, t2, plan_key=ka, interval="month", seats=0,
-            provider="carrier_pigeon", actor=_actor(user))
+            db,
+            t2,
+            plan_key=ka,
+            interval="month",
+            seats=0,
+            provider="carrier_pigeon",
+            actor=_actor(user),
+        )
     assert e422.value.status_code == 422
     # duplicate sub → 409 with status
     with pytest.raises(AppError) as e409:
         await billing_svc.start_subscription(
-            db, tenant, plan_key=kb, interval="month", seats=0,
-            provider="manual", actor=_actor(user))
+            db,
+            tenant,
+            plan_key=kb,
+            interval="month",
+            seats=0,
+            provider="manual",
+            actor=_actor(user),
+        )
     assert e409.value.code == "SUBSCRIPTION_EXISTS" and e409.value.status_code == 409
 
     # (1) equal-price change → immediate (upgrade path), sub flips NOW
     res = await billing_svc.change_plan(
-        db, tenant, sub, plan_key=kb, seats=None, proration_mode=None,
-        actor=_actor(user))
+        db, tenant, sub, plan_key=kb, seats=None, proration_mode=None, actor=_actor(user)
+    )
     assert res["mode"] == "immediate"
     await db.refresh(sub)
     assert sub.plan_version_id != v_a
@@ -4073,32 +4221,44 @@ async def test_plan_change_boundaries_and_provider_gates(db):
 
     v_b = sub.plan_version_id
     res2 = await billing_svc.change_plan(
-        db, tenant, sub, plan_key=kc, seats=None, proration_mode="next_period",
-        actor=_actor(user))
+        db, tenant, sub, plan_key=kc, seats=None, proration_mode="next_period", actor=_actor(user)
+    )
     assert res2["mode"] == "next_period"
     await db.refresh(sub)
-    assert sub.plan_version_id == v_b                  # not flipped yet
+    assert sub.plan_version_id == v_b  # not flipped yet
     change = (
-        await db.execute(
-            select(SubscriptionChange)
-            .where(SubscriptionChange.subscription_id == sub.id,
-                   SubscriptionChange.proration_mode == "next_period")
-            .order_by(SubscriptionChange.created_at.desc()).limit(1))
-    ).scalars().first()
+        (
+            await db.execute(
+                select(SubscriptionChange)
+                .where(
+                    SubscriptionChange.subscription_id == sub.id,
+                    SubscriptionChange.proration_mode == "next_period",
+                )
+                .order_by(SubscriptionChange.created_at.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
     assert change.effective_at == sub.current_period_end
 
     # (3) NULL seat-overage target, immediate → no crash, seat price 0
     res3 = await billing_svc.change_plan(
-        db, tenant, sub, plan_key=kc, seats=None, proration_mode="immediate",
-        actor=_actor(user))
+        db, tenant, sub, plan_key=kc, seats=None, proration_mode="immediate", actor=_actor(user)
+    )
     assert res3["proration"]["seat_proration_minor"] == 0
 
     # (4) manual provider: NO provider-push outbox rows anywhere in the flow
     pushes = (
-        await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.topic == "subscription.push_provider"))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(OutboxMessage).where(OutboxMessage.topic == "subscription.push_provider")
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert all(m.payload.get("subscription_id") != sub.id for m in pushes)
 
     # provider-gate arcs (direct provider/ref flips on the same sub):
@@ -4107,33 +4267,41 @@ async def test_plan_change_boundaries_and_provider_gates(db):
     sub.external_ref = None
     await db.flush()
     await billing_svc.change_plan(
-        db, tenant, sub, plan_key=kb, seats=None, proration_mode="immediate",
-        actor=_actor(user))
+        db, tenant, sub, plan_key=kb, seats=None, proration_mode="immediate", actor=_actor(user)
+    )
     pushes = (
-        await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.topic == "subscription.push_provider"))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(OutboxMessage).where(OutboxMessage.topic == "subscription.push_provider")
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert all(m.payload.get("subscription_id") != sub.id for m in pushes)
     # … a MOCK sub WITH a ref pushes and is NOT stripe-price-gated …
     sub.external_ref = "mock-ref-1"
     await db.flush()
     await billing_svc.change_plan(
-        db, tenant, sub, plan_key=kc, seats=None, proration_mode="immediate",
-        actor=_actor(user))
+        db, tenant, sub, plan_key=kc, seats=None, proration_mode="immediate", actor=_actor(user)
+    )
     pushes = (
-        await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.topic == "subscription.push_provider"))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(OutboxMessage).where(OutboxMessage.topic == "subscription.push_provider")
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert any(m.payload.get("subscription_id") == sub.id for m in pushes)
     # … and a STRIPE sub changing to a plan with no Stripe price ref → 409
     sub.provider = "stripe"
     await db.flush()
     with pytest.raises(AppError) as e_sp:
         await billing_svc.change_plan(
-            db, tenant, sub, plan_key=ka, seats=None, proration_mode="immediate",
-            actor=_actor(user))
+            db, tenant, sub, plan_key=ka, seats=None, proration_mode="immediate", actor=_actor(user)
+        )
     assert e_sp.value.code == "PLAN_NOT_AVAILABLE" and e_sp.value.status_code == 409
     sub.provider = "manual"
     sub.external_ref = None
@@ -4146,14 +4314,14 @@ async def test_plan_change_boundaries_and_provider_gates(db):
 
     async def _topic_count(topic, sid):
         rows = (
-            await db.execute(
-                select(OutboxMessage).where(OutboxMessage.topic == topic))
-        ).scalars().all()
+            (await db.execute(select(OutboxMessage).where(OutboxMessage.topic == topic)))
+            .scalars()
+            .all()
+        )
         return sum(1 for m in rows if m.payload.get("subscription_id") == sid)
 
     before = await _topic_count("subscription.cancel_provider", sub.id)
-    await billing_svc.cancel_subscription(
-        db, tenant, sub, at_period_end=False, actor=_actor(user))
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False, actor=_actor(user))
     # mock-no-ref cancel notifies no provider
     assert await _topic_count("subscription.cancel_provider", sub.id) == before
 
@@ -4161,10 +4329,9 @@ async def test_plan_change_boundaries_and_provider_gates(db):
     # flip to mock-no-ref, reactivate → no provider push
     t3 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub3, _ = await billing_svc.start_subscription(
-        db, t3, plan_key=ka, interval="month", seats=0,
-        provider="manual", actor=_actor(user))
-    await billing_svc.cancel_subscription(
-        db, t3, sub3, at_period_end=True, actor=_actor(user))
+        db, t3, plan_key=ka, interval="month", seats=0, provider="manual", actor=_actor(user)
+    )
+    await billing_svc.cancel_subscription(db, t3, sub3, at_period_end=True, actor=_actor(user))
     sub3.provider = "mock"
     sub3.external_ref = None
     await db.flush()
@@ -4172,15 +4339,15 @@ async def test_plan_change_boundaries_and_provider_gates(db):
     await billing_svc.reactivate_subscription(db, t3, sub3, actor=_actor(user))
     assert await _topic_count("subscription.push_provider", sub3.id) == before3
     # with a ref, the un-cancel IS pushed
-    await billing_svc.cancel_subscription(
-        db, t3, sub3, at_period_end=True, actor=_actor(user))
+    await billing_svc.cancel_subscription(db, t3, sub3, at_period_end=True, actor=_actor(user))
     sub3.external_ref = "mock-ref-3"
     await db.flush()
     await billing_svc.reactivate_subscription(db, t3, sub3, actor=_actor(user))
     assert await _topic_count("subscription.push_provider", sub3.id) == before3 + 1
     with pytest.raises(AppError) as e409b:
         await billing_svc.cancel_subscription(
-            db, tenant, sub, at_period_end=False, actor=_actor(user))
+            db, tenant, sub, at_period_end=False, actor=_actor(user)
+        )
     assert e409b.value.status_code in (404, 409)
 
 
@@ -4200,31 +4367,41 @@ async def test_gap_window_change_prices_seats_off_own_plan(db):
 
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
-    org = Organization(name=f"Gap {ULID()}", slug=f"gap-{str(ULID()).lower()}",
-                       status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+    org = Organization(
+        name=f"Gap {ULID()}",
+        slug=f"gap-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
     db.add(org)
     await db.flush()
     for _ in range(4):
         stu = await _mk_user(db)
-        db.add(OrgMember(org_id=org.id, user_id=stu.id,
-                         role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+        db.add(
+            OrgMember(
+                org_id=org.id, user_id=stu.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+            )
+        )
     await db.flush()
 
-    ka = await _seed_plan(db, user, f"r348a-{str(ULID()).lower()[:8]}",
-                          amount=10000, included=2, seat_price=500)
-    kb = await _seed_plan(db, user, f"r348b-{str(ULID()).lower()[:8]}",
-                          amount=10000, included=0, seat_price=300)
+    ka = await _seed_plan(
+        db, user, f"r348a-{str(ULID()).lower()[:8]}", amount=10000, included=2, seat_price=500
+    )
+    kb = await _seed_plan(
+        db, user, f"r348b-{str(ULID()).lower()[:8]}", amount=10000, included=0, seat_price=300
+    )
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key=ka, interval="month", seats=0,
-        provider="manual", actor=_actor(user))
+        db, tenant, plan_key=ka, interval="month", seats=0, provider="manual", actor=_actor(user)
+    )
     # force the gap: the period elapsed an hour ago, close not yet run
     sub.current_period_start = billing_svc._now() - timedelta(days=30, hours=1)
     sub.current_period_end = billing_svc._now() - timedelta(hours=1)
     await db.flush()
 
     res = await billing_svc.change_plan(
-        db, tenant, sub, plan_key=kb, seats=None, proration_mode="immediate",
-        actor=_actor(user))
+        db, tenant, sub, plan_key=kb, seats=None, proration_mode="immediate", actor=_actor(user)
+    )
     # equal plan fee → plan-fee net 0; the whole net is the seat repricing,
     # computed against the OWN plan's gap price. Nominal +200 at factor 1;
     # the hour already elapsed shaves a sub-day fraction (observed ~193).
@@ -4250,8 +4427,14 @@ async def test_payment_finalize_void_boundary_family(db):
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
 
     def _inv(due):
-        return Invoice(tenant_id=tenant.id, currency="USD", status="draft",
-                       subtotal_minor=due, total_minor=due, amount_due_minor=due)
+        return Invoice(
+            tenant_id=tenant.id,
+            currency="USD",
+            status="draft",
+            subtotal_minor=due,
+            total_minor=due,
+            amount_due_minor=due,
+        )
 
     # zero-due draft → finalize auto-pays; second finalize 409
     z = _inv(0)
@@ -4269,42 +4452,71 @@ async def test_payment_finalize_void_boundary_family(db):
     await db.flush()
     with pytest.raises(AppError) as e_pay0:
         await billing_svc.record_payment(
-            db, inv, amount_minor=1000, method="manual_bank_transfer",
-            external_ref=None, reference_note=None, received_at=None,
-            actor=_actor(user))
+            db,
+            inv,
+            amount_minor=1000,
+            method="manual_bank_transfer",
+            external_ref=None,
+            reference_note=None,
+            received_at=None,
+            actor=_actor(user),
+        )
     assert e_pay0.value.code == "INVOICE_NOT_OPEN" and e_pay0.value.status_code == 409
     inv = await billing_svc.finalize_invoice(db, inv, actor=_actor(user))
     assert inv.status == "open"
 
     # partial payment keeps it open
     await billing_svc.record_payment(
-        db, inv, amount_minor=4000, method="manual_bank_transfer",
-        external_ref="WIRE-1", reference_note=None, received_at=None,
-        actor=_actor(user))
+        db,
+        inv,
+        amount_minor=4000,
+        method="manual_bank_transfer",
+        external_ref="WIRE-1",
+        reference_note=None,
+        received_at=None,
+        actor=_actor(user),
+    )
     await db.refresh(inv)
     assert inv.status == "open" and inv.paid_at is None
 
     # duplicate (ref, method) 409; same ref under another method is FINE
     with pytest.raises(AppError) as e_dup:
         await billing_svc.record_payment(
-            db, inv, amount_minor=1000, method="manual_bank_transfer",
-            external_ref="WIRE-1", reference_note=None, received_at=None,
-            actor=_actor(user))
+            db,
+            inv,
+            amount_minor=1000,
+            method="manual_bank_transfer",
+            external_ref="WIRE-1",
+            reference_note=None,
+            received_at=None,
+            actor=_actor(user),
+        )
     assert e_dup.value.code == "PAYMENT_INVALID" and e_dup.value.status_code == 409
     await billing_svc.record_payment(
-        db, inv, amount_minor=1000, method="other",
-        external_ref="WIRE-1", reference_note=None, received_at=None,
-        actor=_actor(user))
+        db,
+        inv,
+        amount_minor=1000,
+        method="other",
+        external_ref="WIRE-1",
+        reference_note=None,
+        received_at=None,
+        actor=_actor(user),
+    )
 
     # completing payment flips paid AND reactivates a past_due tenant
     from app.controlplane.services.tenants import transition_status
 
-    await transition_status(db, tenant, TenantStatus.PAST_DUE,
-                            actor=_actor(user), reason="dunning")
+    await transition_status(db, tenant, TenantStatus.PAST_DUE, actor=_actor(user), reason="dunning")
     await billing_svc.record_payment(
-        db, inv, amount_minor=5000, method="manual_bank_transfer",
-        external_ref="WIRE-2", reference_note=None, received_at=None,
-        actor=_actor(user))
+        db,
+        inv,
+        amount_minor=5000,
+        method="manual_bank_transfer",
+        external_ref="WIRE-2",
+        reference_note=None,
+        received_at=None,
+        actor=_actor(user),
+    )
     await db.refresh(inv)
     assert inv.status == "paid" and inv.paid_at is not None
     await db.refresh(tenant)
@@ -4321,25 +4533,33 @@ async def test_payment_finalize_void_boundary_family(db):
     await db.flush()
     inv2 = await billing_svc.finalize_invoice(db, inv2, actor=_actor(user))
     await billing_svc.record_payment(
-        db, inv2, amount_minor=3000, method="manual_bank_transfer",
-        external_ref="WIRE-3", reference_note=None, received_at=None,
-        actor=_actor(user))
+        db,
+        inv2,
+        amount_minor=3000,
+        method="manual_bank_transfer",
+        external_ref="WIRE-3",
+        reference_note=None,
+        received_at=None,
+        actor=_actor(user),
+    )
     bal_before = (
         await db.execute(
             select(TenantCreditBalance.balance_minor).where(
-                TenantCreditBalance.tenant_id == tenant.id,
-                TenantCreditBalance.currency == "USD"))
+                TenantCreditBalance.tenant_id == tenant.id, TenantCreditBalance.currency == "USD"
+            )
+        )
     ).scalar_one_or_none() or 0
     inv2 = await billing_svc.void_invoice(db, inv2, reason="mistake", actor=_actor(user))
     assert inv2.status == "void"
     bal_after = (
         await db.execute(
             select(TenantCreditBalance.balance_minor).where(
-                TenantCreditBalance.tenant_id == tenant.id,
-                TenantCreditBalance.currency == "USD"))
+                TenantCreditBalance.tenant_id == tenant.id, TenantCreditBalance.currency == "USD"
+            )
+        )
     ).scalar_one()
-    assert bal_after - bal_before == 3000        # collected cash → credit
-    with pytest.raises(AppError) as e_vv:         # double void 409
+    assert bal_after - bal_before == 3000  # collected cash → credit
+    with pytest.raises(AppError) as e_vv:  # double void 409
         await billing_svc.void_invoice(db, inv2, reason="again", actor=_actor(user))
     assert e_vv.value.status_code == 409
 
@@ -4357,8 +4577,15 @@ async def test_payment_finalize_void_boundary_family(db):
         billing_svc.require_mutable(a)
     assert e_mut.value.code == "INVOICE_FINALIZED" and e_mut.value.status_code == 409
     pay = await billing_svc.record_payment(
-        db, a, amount_minor=50, method="other", external_ref=None,
-        reference_note=None, received_at=None, actor=_actor(user))
+        db,
+        a,
+        amount_minor=50,
+        method="other",
+        external_ref=None,
+        reference_note=None,
+        received_at=None,
+        actor=_actor(user),
+    )
     assert pay.received_at is not None
 
 
@@ -4384,22 +4611,37 @@ async def test_void_scoping_usage_purchases_and_later_locked_decoys(db):
     a = _actor(user)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=a)
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
     # decoy tenant+sub with a later LOCKED period
     t2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub2, _ = await billing_svc.start_subscription(
-        db, t2, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=a)
-    inv2 = await _force_close(db, sub2)          # decoy: closed+invoiced period
+        db, t2, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    inv2 = await _force_close(db, sub2)  # decoy: closed+invoiced period
 
     def _usage_line(inv, tenant_id):
         eid = str(ULID())
-        db.add(UsageEvent(id=eid, tenant_id=tenant_id, org_id=str(ULID()),
-                          usage_type="image_generation", quantity=1, unit="images",
-                          occurred_at=billing_svc._now(), source="manual"))
-        line = InvoiceLine(invoice_id=inv.id, line_type="usage", description="u",
-                           quantity=1, unit_amount_minor=100, amount_minor=100)
+        db.add(
+            UsageEvent(
+                id=eid,
+                tenant_id=tenant_id,
+                org_id=str(ULID()),
+                usage_type="image_generation",
+                quantity=1,
+                unit="images",
+                occurred_at=billing_svc._now(),
+                source="manual",
+            )
+        )
+        line = InvoiceLine(
+            invoice_id=inv.id,
+            line_type="usage",
+            description="u",
+            quantity=1,
+            unit_amount_minor=100,
+            amount_minor=100,
+        )
         db.add(line)
         return eid, line
 
@@ -4410,32 +4652,58 @@ async def test_void_scoping_usage_purchases_and_later_locked_decoys(db):
     await db.flush()
 
     def _rated(eid, tenant_id, line):
-        return RatedUsage(usage_event_id=eid, tenant_id=tenant_id,
-                          org_id=str(ULID()), usage_type="image_generation",
-                          quantity=1, cost_rate_snapshot={}, internal_cost_minor=0,
-                          internal_cost_currency="USD", sell_rate_snapshot={},
-                          billable_amount_minor=100, billable_amount_exact=Decimal(100),
-                          billable_currency="USD", status="invoiced",
-                          rated_at=billing_svc._now(), invoice_line_id=line.id)
+        return RatedUsage(
+            usage_event_id=eid,
+            tenant_id=tenant_id,
+            org_id=str(ULID()),
+            usage_type="image_generation",
+            quantity=1,
+            cost_rate_snapshot={},
+            internal_cost_minor=0,
+            internal_cost_currency="USD",
+            sell_rate_snapshot={},
+            billable_amount_minor=100,
+            billable_amount_exact=Decimal(100),
+            billable_currency="USD",
+            status="invoiced",
+            rated_at=billing_svc._now(),
+            invoice_line_id=line.id,
+        )
 
     r1, r2 = _rated(eid1, tenant.id, line1), _rated(eid2, t2.id, line2)
     db.add_all([r1, r2])
     # a purchase attached to the OTHER invoice
     from app.controlplane.models.marketplace import MarketplaceListing
 
-    lst = MarketplaceListing(product_type="skill_pack", product_id=str(ULID()),
-                             seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
-                             offer_type="paid", price_minor=100, currency="USD",
-                             platform_commission_pct=Decimal("20"), status="active",
-                             created_by=user.id)
+    lst = MarketplaceListing(
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        seller_org_id=str(ULID()),
+        seller_tenant_id=str(ULID()),
+        offer_type="paid",
+        price_minor=100,
+        currency="USD",
+        platform_commission_pct=Decimal("20"),
+        status="active",
+        created_by=user.id,
+    )
     db.add(lst)
     await db.flush()
     other_purchase = MarketplacePurchase(
-        listing_id=lst.id, buyer_tenant_id=t2.id, buyer_org_id=str(ULID()),
-        purchaser_user_id=user.id, status="paid", amount_minor=100,
-        currency="USD", platform_fee_minor=20, seller_share_minor=80,
-        partner_share_minor=0, economics_snapshot={}, invoice_id=inv2.id,
-        payment_method="invoice")
+        listing_id=lst.id,
+        buyer_tenant_id=t2.id,
+        buyer_org_id=str(ULID()),
+        purchaser_user_id=user.id,
+        status="paid",
+        amount_minor=100,
+        currency="USD",
+        platform_fee_minor=20,
+        seller_share_minor=80,
+        partner_share_minor=0,
+        economics_snapshot={},
+        invoice_id=inv2.id,
+        payment_method="invoice",
+    )
     db.add(other_purchase)
     await db.flush()
 
@@ -4443,10 +4711,10 @@ async def test_void_scoping_usage_purchases_and_later_locked_decoys(db):
     assert voided.status == "void"
     await db.refresh(r1)
     await db.refresh(r2)
-    assert r1.status == "rated" and r1.invoice_line_id is None      # unbound
+    assert r1.status == "rated" and r1.invoice_line_id is None  # unbound
     assert r2.status == "invoiced" and r2.invoice_line_id == line2.id  # untouched
     await db.refresh(other_purchase)
-    assert other_purchase.invoice_id == inv2.id                     # link kept
+    assert other_purchase.invoice_id == inv2.id  # link kept
 
     # rewind DID happen for this sub (decoy's later period didn't block it):
     # the voided invoice's period is open again
@@ -4458,22 +4726,34 @@ async def test_void_scoping_usage_purchases_and_later_locked_decoys(db):
     period.status = "invoiced"
     sub.current_period_start = sub.current_period_end
     sub.current_period_end = sub.current_period_end + _td(days=30)
-    db.add(BillingPeriod(tenant_id=tenant.id, subscription_id=sub.id,
-                         status="open",
-                         period_start=sub.current_period_start,
-                         period_end=sub.current_period_end))
+    db.add(
+        BillingPeriod(
+            tenant_id=tenant.id,
+            subscription_id=sub.id,
+            status="open",
+            period_start=sub.current_period_start,
+            period_end=sub.current_period_end,
+        )
+    )
     await db.flush()
-    inv_b = Invoice(tenant_id=tenant.id, currency="USD", status="open",
-                    subtotal_minor=0, total_minor=0, amount_due_minor=0,
-                    billing_period_id=period.id, finalized_at=billing_svc._now())
+    inv_b = Invoice(
+        tenant_id=tenant.id,
+        currency="USD",
+        status="open",
+        subtotal_minor=0,
+        total_minor=0,
+        amount_due_minor=0,
+        billing_period_id=period.id,
+        finalized_at=billing_svc._now(),
+    )
     db.add(inv_b)
-    later = await _force_close(db, sub)          # later period → closed/invoiced
+    later = await _force_close(db, sub)  # later period → closed/invoiced
     assert later is not None
     await db.flush()
     voided_b = await billing_svc.void_invoice(db, inv_b, reason="older", actor=a)
     assert voided_b.status == "void"
     await db.refresh(period)
-    assert period.status == "invoiced"           # rewind suppressed (own later lock)
+    assert period.status == "invoiced"  # rewind suppressed (own later lock)
 
 
 def test_webhook_pure_boundaries():
@@ -4489,11 +4769,11 @@ def test_webhook_pure_boundaries():
     same = SimpleNamespace(occurred_at=now)
     older = SimpleNamespace(occurred_at=now - timedelta(seconds=1))
     newer = SimpleNamespace(occurred_at=now + timedelta(seconds=1))
-    assert billing_svc._is_stale_billing_event(sub, same) is False   # == not stale
+    assert billing_svc._is_stale_billing_event(sub, same) is False  # == not stale
     assert billing_svc._is_stale_billing_event(sub, older) is True
     assert billing_svc._is_stale_billing_event(sub, newer) is False
     billing_svc._advance_billing_event_hwm(sub, same)
-    assert sub.last_billing_event_at == now                          # == no advance
+    assert sub.last_billing_event_at == now  # == no advance
     billing_svc._advance_billing_event_hwm(sub, newer)
     assert sub.last_billing_event_at == newer.occurred_at
 
@@ -4501,10 +4781,18 @@ def test_webhook_pure_boundaries():
     assert billing_svc._subscription_ref({"parent": None}) is None
     assert billing_svc._subscription_ref({"parent": {"subscription_details": None}}) is None
     assert billing_svc._subscription_ref({"subscription": "sub_1"}) == "sub_1"
-    assert billing_svc._subscription_ref(
-        {"parent": {"subscription_details": {"subscription": "sub_2"}}}) == "sub_2"
-    assert billing_svc._subscription_ref(
-        {"parent": {"subscription_details": {"subscription": {"id": "sub_3"}}}}) == "sub_3"
+    assert (
+        billing_svc._subscription_ref(
+            {"parent": {"subscription_details": {"subscription": "sub_2"}}}
+        )
+        == "sub_2"
+    )
+    assert (
+        billing_svc._subscription_ref(
+            {"parent": {"subscription_details": {"subscription": {"id": "sub_3"}}}}
+        )
+        == "sub_3"
+    )
 
 
 @pytest.mark.asyncio
@@ -4522,26 +4810,34 @@ async def test_webhook_provider_gate_and_checkout_suspension_rescue(db):
     assert e_u.value.status_code == 401
 
     user = await _mk_user(db)
-    ka = await _seed_plan(db, user, f"r354-{str(ULID()).lower()[:8]}",
-                          amount=5000, included=0, seat_price=None)
+    ka = await _seed_plan(
+        db, user, f"r354-{str(ULID()).lower()[:8]}", amount=5000, included=0, seat_price=None
+    )
 
     async def _suspended_tenant(reason):
         t = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
         from app.controlplane.services.tenants import transition_status
-        await transition_status(db, t, TenantStatus.SUSPENDED,
-                                actor=_actor(user), reason=reason)
+
+        await transition_status(db, t, TenantStatus.SUSPENDED, actor=_actor(user), reason=reason)
         return t
 
     t_abuse = await _suspended_tenant("terms violation")
     t_trial = await _suspended_tenant("trial expired")
     for t, ref in ((t_abuse, f"cs-a-{ULID()}"), (t_trial, f"cs-t-{ULID()}")):
         await billing_svc.activate_subscription_from_checkout(
-            db, t, plan_key=ka, interval="month", seats=0,
-            provider="mock", external_customer_ref=None, external_ref=ref)
+            db,
+            t,
+            plan_key=ka,
+            interval="month",
+            seats=0,
+            provider="mock",
+            external_customer_ref=None,
+            external_ref=ref,
+        )
     await db.refresh(t_abuse)
     await db.refresh(t_trial)
-    assert t_abuse.status == TenantStatus.SUSPENDED    # payment ≠ un-suspend
-    assert t_trial.status == TenantStatus.ACTIVE       # cron's suspension rescued
+    assert t_abuse.status == TenantStatus.SUSPENDED  # payment ≠ un-suspend
+    assert t_trial.status == TenantStatus.ACTIVE  # cron's suspension rescued
 
     # duplicate-checkout orphan handling: a REDELIVERY (same external_ref)
     # must NOT cancel the live provider subscription; a genuinely different
@@ -4554,15 +4850,19 @@ async def test_webhook_provider_gate_and_checkout_suspension_rescue(db):
     def spying_get(provider):
         adapter = real_get(provider)
         if adapter is not None:
+
             class Spy:
                 def __getattr__(self, name):
                     attr = getattr(adapter, name)
                     if name == "cancel_subscription":
+
                         async def rec(*a, **kw):
                             cancels.append((a, kw))
                             return None
+
                         return rec
                     return attr
+
             return Spy()
         return adapter
 
@@ -4572,15 +4872,27 @@ async def test_webhook_provider_gate_and_checkout_suspension_rescue(db):
         sub_live = await billing_svc.get_live_subscription(db, t_trial.id)
         # redelivery: SAME ref as the live sub → no cancel
         await billing_svc.activate_subscription_from_checkout(
-            db, t_trial, plan_key=ka, interval="month", seats=0,
-            provider="mock", external_customer_ref=None,
-            external_ref=sub_live.external_ref)
+            db,
+            t_trial,
+            plan_key=ka,
+            interval="month",
+            seats=0,
+            provider="mock",
+            external_customer_ref=None,
+            external_ref=sub_live.external_ref,
+        )
         assert cancels == []
         # different ref (double-click second session) → orphan cancelled once
         await billing_svc.activate_subscription_from_checkout(
-            db, t_trial, plan_key=ka, interval="month", seats=0,
-            provider="mock", external_customer_ref=None,
-            external_ref=f"cs-orphan-{ULID()}")
+            db,
+            t_trial,
+            plan_key=ka,
+            interval="month",
+            seats=0,
+            provider="mock",
+            external_customer_ref=None,
+            external_ref=f"cs-orphan-{ULID()}",
+        )
         assert len(cancels) == 1
 
 
@@ -4599,16 +4911,19 @@ async def test_webhook_applier_dunning_and_checkout_edges(db):
 
     async def _send(payload):
         raw, sig = sign_mock_event(payload)
-        return await billing_svc.process_webhook(
-            db, "mock", {"x-mock-signature": sig}, raw)
+        return await billing_svc.process_webhook(db, "mock", {"x-mock-signature": sig}, raw)
 
     def _checkout(tenant, *, seats, subscription="auto", session=None):
         data = {
             "id": session or f"mock_sess_{ULID()}",
             "customer": f"mock_cus_{tenant.id}",
-            "metadata": {"tenant_id": tenant.id, "kind": "subscription",
-                         "plan_key": "school", "interval": "month",
-                         "seats": seats},
+            "metadata": {
+                "tenant_id": tenant.id,
+                "kind": "subscription",
+                "plan_key": "school",
+                "interval": "month",
+                "seats": seats,
+            },
         }
         if subscription == "auto":
             data["subscription"] = f"mock_sub_{ULID()}"
@@ -4624,17 +4939,20 @@ async def test_webhook_applier_dunning_and_checkout_edges(db):
     # (4) no subscription field → session id becomes the external ref
     t_nosub = await _mk_tenant(db, user, status=TenantStatus.TRIAL)
     session_id = f"mock_sess_{ULID()}"
-    r = await _send(_checkout(t_nosub, seats="0", subscription=None,
-                              session=session_id))
+    r = await _send(_checkout(t_nosub, seats="0", subscription=None, session=session_id))
     assert r["status"] == "processed"
     sub_n = await billing_svc.get_live_subscription(db, t_nosub.id)
     assert sub_n is not None and sub_n.external_ref == session_id
 
     # (1)+(2) dunning transitions keyed to the sub's external ref
     async def _pay_event(sub, etype):
-        return await _send({
-            "id": f"mevt_{ULID()}", "type": etype,
-            "data": {"id": f"in_{ULID()}", "subscription": sub.external_ref}})
+        return await _send(
+            {
+                "id": f"mevt_{ULID()}",
+                "type": etype,
+                "data": {"id": f"in_{ULID()}", "subscription": sub.external_ref},
+            }
+        )
 
     from app.controlplane.services.tenants import transition_status
 
@@ -4653,8 +4971,7 @@ async def test_webhook_applier_dunning_and_checkout_edges(db):
     assert t1.status == TenantStatus.ACTIVE
     # SUSPENDED: neither event moves it (no self-service un-suspension,
     # and payment_failed must not stack a suspension into past_due)
-    await transition_status(db, t1, TenantStatus.SUSPENDED,
-                            actor=_actor(user), reason="abuse")
+    await transition_status(db, t1, TenantStatus.SUSPENDED, actor=_actor(user), reason="abuse")
     r_paid = await _pay_event(sub1, "invoice.paid")
     await db.refresh(t1)
     assert t1.status == TenantStatus.SUSPENDED
@@ -4668,12 +4985,18 @@ async def test_webhook_applier_dunning_and_checkout_edges(db):
     # a TRIAL tenant is not dunned into past_due by a stray payment_failed
     t_trial2 = await _mk_tenant(db, user, status=TenantStatus.TRIAL)
     sub_t, _ = await billing_svc.start_subscription(
-        db, t_trial2, plan_key="school", interval="month", seats=0,
-        provider="manual", actor=_actor(user))
+        db,
+        t_trial2,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
     sub_t.provider = "mock"
     sub_t.external_ref = f"mock_sub_{ULID()}"
     sub_t.status = "trial"
-    t_trial2.status = TenantStatus.TRIAL     # start_subscription activated it
+    t_trial2.status = TenantStatus.TRIAL  # start_subscription activated it
     await db.flush()
     r_trial = await _pay_event(sub_t, "invoice.payment_failed")
     await db.refresh(t_trial2)
@@ -4686,26 +5009,46 @@ async def test_webhook_applier_dunning_and_checkout_edges(db):
 
     from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
 
-    lst = MarketplaceListing(product_type="skill_pack", product_id=str(ULID()),
-                             seller_org_id=str(ULID()), seller_tenant_id=str(ULID()),
-                             offer_type="paid", price_minor=100, currency="USD",
-                             platform_commission_pct=PDec("20"), status="active",
-                             created_by=user.id)
+    lst = MarketplaceListing(
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        seller_org_id=str(ULID()),
+        seller_tenant_id=str(ULID()),
+        offer_type="paid",
+        price_minor=100,
+        currency="USD",
+        platform_commission_pct=PDec("20"),
+        status="active",
+        created_by=user.id,
+    )
     db.add(lst)
     await db.flush()
     pur = MarketplacePurchase(
-        listing_id=lst.id, buyer_tenant_id=t1.id, buyer_org_id=str(ULID()),
-        purchaser_user_id=user.id, status="pending", amount_minor=100,
-        currency="USD", platform_fee_minor=20, seller_share_minor=80,
-        partner_share_minor=0, economics_snapshot={"seller_org_id": None},
-        payment_method="checkout")
+        listing_id=lst.id,
+        buyer_tenant_id=t1.id,
+        buyer_org_id=str(ULID()),
+        purchaser_user_id=user.id,
+        status="pending",
+        amount_minor=100,
+        currency="USD",
+        platform_fee_minor=20,
+        seller_share_minor=80,
+        partner_share_minor=0,
+        economics_snapshot={"seller_org_id": None},
+        payment_method="checkout",
+    )
     db.add(pur)
     await db.flush()
-    r = await _send({
-        "id": f"mevt_{ULID()}", "type": "checkout.completed",
-        "data": {"id": f"mock_sess_{ULID()}",
-                 "metadata": {"tenant_id": t1.id, "kind": "purchase",
-                              "purchase_id": pur.id}}})
+    r = await _send(
+        {
+            "id": f"mevt_{ULID()}",
+            "type": "checkout.completed",
+            "data": {
+                "id": f"mock_sess_{ULID()}",
+                "metadata": {"tenant_id": t1.id, "kind": "purchase", "purchase_id": pur.id},
+            },
+        }
+    )
     assert r["status"] == "processed"
     await db.refresh(pur)
     assert pur.status == "paid"
@@ -4745,12 +5088,18 @@ async def test_fold_restore_watermark_roundtrip_and_legacy_branches(db):
     async def _rollover_fixture(tag, *, seats_change=None):
         tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
         sub, _ = await billing_svc.start_subscription(
-            db, tenant, plan_key="growth", interval="month", seats=0,
-            provider="manual", actor=a)
+            db, tenant, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+        )
         await billing_svc.change_plan(
-            db, tenant, sub, plan_key="school", seats=seats_change,
-            proration_mode="next_period", actor=a)
-        inv = await _force_close(db, sub)      # rollover applies the fold
+            db,
+            tenant,
+            sub,
+            plan_key="school",
+            seats=seats_change,
+            proration_mode="next_period",
+            actor=a,
+        )
+        inv = await _force_close(db, sub)  # rollover applies the fold
         assert inv is not None
         await db.refresh(sub)
         return tenant, sub, inv
@@ -4763,20 +5112,25 @@ async def test_fold_restore_watermark_roundtrip_and_legacy_branches(db):
             select(SubscriptionChange.from_plan_version_id).where(
                 SubscriptionChange.subscription_id == sub1.id,
                 SubscriptionChange.change_type == "plan_change",
-                SubscriptionChange.proration_mode == "next_period"))
+                SubscriptionChange.proration_mode == "next_period",
+            )
+        )
     ).scalar_one()
     # forward round-trip in the NEW window: school→growth→school
-    await billing_svc.change_plan(db, tenant1, sub1, plan_key="growth",
-                                  seats=None, proration_mode="immediate", actor=a)
-    await billing_svc.change_plan(db, tenant1, sub1, plan_key="school",
-                                  seats=None, proration_mode="immediate", actor=a)
+    await billing_svc.change_plan(
+        db, tenant1, sub1, plan_key="growth", seats=None, proration_mode="immediate", actor=a
+    )
+    await billing_svc.change_plan(
+        db, tenant1, sub1, plan_key="school", seats=None, proration_mode="immediate", actor=a
+    )
     await db.refresh(sub1)
-    assert sub1.plan_version_id == school_version   # ends ON the post-fold value
+    assert sub1.plan_version_id == school_version  # ends ON the post-fold value
     await billing_svc.void_invoice(db, inv1, reason="wm dispute", actor=a)
     await db.refresh(sub1)
     assert sub1.plan_version_id == school_version, (
         "forward round-trip owns the axis — restore must NOT strand the sub "
-        "on pre-fold growth (R135)")
+        "on pre-fold growth (R135)"
+    )
     assert sub1.plan_version_id != growth_version
 
     # ── WATERMARK == a pre-close immediate change's id (the > boundary) ──
@@ -4788,30 +5142,35 @@ async def test_fold_restore_watermark_roundtrip_and_legacy_branches(db):
     tenant_wb, sub_wb, _ = await _rollover_fixture("wb-warmup")  # burn nothing
     tenant_w2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub_w2, _ = await billing_svc.start_subscription(
-        db, tenant_w2, plan_key="growth", interval="month", seats=0,
-        provider="manual", actor=a)
-    await billing_svc.change_plan(db, tenant_w2, sub_w2, plan_key="school",
-                                  seats=5, proration_mode="next_period", actor=a)
-    third_pre = await _seed_plan(db, user, f"r359w-{str(ULID()).lower()[:8]}",
-                                 amount=88800, included=2, seat_price=7)
-    await billing_svc.change_plan(db, tenant_w2, sub_w2, plan_key=third_pre,
-                                  seats=3, proration_mode="immediate", actor=a)
+        db, tenant_w2, plan_key="growth", interval="month", seats=0, provider="manual", actor=a
+    )
+    await billing_svc.change_plan(
+        db, tenant_w2, sub_w2, plan_key="school", seats=5, proration_mode="next_period", actor=a
+    )
+    third_pre = await _seed_plan(
+        db, user, f"r359w-{str(ULID()).lower()[:8]}", amount=88800, included=2, seat_price=7
+    )
+    await billing_svc.change_plan(
+        db, tenant_w2, sub_w2, plan_key=third_pre, seats=3, proration_mode="immediate", actor=a
+    )
     await db.refresh(sub_w2)
-    pre_fold_plan = sub_w2.plan_version_id           # third_pre (immediate applied)
-    inv_w2 = await _force_close(db, sub_w2)          # watermark = immediate's id
+    pre_fold_plan = sub_w2.plan_version_id  # third_pre (immediate applied)
+    inv_w2 = await _force_close(db, sub_w2)  # watermark = immediate's id
     assert inv_w2 is not None
     await db.refresh(sub_w2)
-    post_fold_plan = sub_w2.plan_version_id          # school (deferred folded)
+    post_fold_plan = sub_w2.plan_version_id  # school (deferred folded)
     assert post_fold_plan != pre_fold_plan
     assert inv_w2.close_snapshot["change_watermark"] is not None
     await billing_svc.void_invoice(db, inv_w2, reason="wb dispute", actor=a)
     await db.refresh(sub_w2)
     assert sub_w2.plan_version_id == pre_fold_plan, (
         "no true forward change exists — the restore must fire; the >= "
-        "mutant matches the watermark row itself and skips it")
+        "mutant matches the watermark row itself and skips it"
+    )
     assert sub_w2.seat_quantity == 3, (
         "seats axis restored to pre-fold 3 (the folded deferred took it to 5; "
-        "the >= mutant fakes forward ownership and leaves it there)")
+        "the >= mutant fakes forward ownership and leaves it there)"
+    )
 
     # ── LEGACY VALUE-EQUALITY branch (watermark key stripped) ──
     # flip BOTH axes to THIRD values (≠ pre_fold and ≠ post_fold): the guard
@@ -4820,20 +5179,21 @@ async def test_fold_restore_watermark_roundtrip_and_legacy_branches(db):
     tenant2, sub2, inv2 = await _rollover_fixture("lv", seats_change=4)
     snap2 = dict(inv2.close_snapshot or {})
     assert "change_watermark" in snap2
-    snap2.pop("change_watermark")                   # legacy-chain shape
+    snap2.pop("change_watermark")  # legacy-chain shape
     inv2.close_snapshot = snap2
-    third = await _seed_plan(db, user, f"r359-{str(ULID()).lower()[:8]}",
-                             amount=77700, included=1, seat_price=100)
-    await billing_svc.change_plan(db, tenant2, sub2, plan_key=third,
-                                  seats=9, proration_mode="immediate", actor=a)
+    third = await _seed_plan(
+        db, user, f"r359-{str(ULID()).lower()[:8]}", amount=77700, included=1, seat_price=100
+    )
+    await billing_svc.change_plan(
+        db, tenant2, sub2, plan_key=third, seats=9, proration_mode="immediate", actor=a
+    )
     await db.refresh(sub2)
     third_version = sub2.plan_version_id
-    assert third_version not in (snap2["pre_fold_version_id"],
-                                 snap2["post_fold_version_id"])
+    assert third_version not in (snap2["pre_fold_version_id"], snap2["post_fold_version_id"])
     assert sub2.seat_quantity == 9
     await billing_svc.void_invoice(db, inv2, reason="lv dispute", actor=a)
     await db.refresh(sub2)
-    assert sub2.plan_version_id == third_version    # both guards SKIPPED
+    assert sub2.plan_version_id == third_version  # both guards SKIPPED
     assert sub2.seat_quantity == 9
 
     # legacy value-equality POSITIVE side: axes still carrying post_fold DO
@@ -4855,9 +5215,11 @@ async def test_fold_restore_watermark_roundtrip_and_legacy_branches(db):
         await db.execute(
             select(SubscriptionChange).where(
                 SubscriptionChange.subscription_id == sub3.id,
-                SubscriptionChange.proration_mode == "next_period"))
+                SubscriptionChange.proration_mode == "next_period",
+            )
+        )
     ).scalar_one()
-    inv3.close_snapshot = None                       # pre-snapshot era invoice
+    inv3.close_snapshot = None  # pre-snapshot era invoice
     await db.flush()
     await billing_svc.void_invoice(db, inv3, reason="ln dispute", actor=a)
     await db.refresh(sub3)
@@ -4866,15 +5228,16 @@ async def test_fold_restore_watermark_roundtrip_and_legacy_branches(db):
 
     # no-snapshot NEGATIVE side: axes flipped to third values → guards skip
     tenant4, sub4, inv4 = await _rollover_fixture("ln2", seats_change=6)
-    await billing_svc.change_plan(db, tenant4, sub4, plan_key=third,
-                                  seats=11, proration_mode="immediate", actor=a)
+    await billing_svc.change_plan(
+        db, tenant4, sub4, plan_key=third, seats=11, proration_mode="immediate", actor=a
+    )
     await db.refresh(sub4)
     third4 = sub4.plan_version_id
     inv4.close_snapshot = None
     await db.flush()
     await billing_svc.void_invoice(db, inv4, reason="ln2 dispute", actor=a)
     await db.refresh(sub4)
-    assert sub4.plan_version_id == third4            # both guards SKIPPED
+    assert sub4.plan_version_id == third4  # both guards SKIPPED
     assert sub4.seat_quantity == 11
 
 
@@ -4890,20 +5253,21 @@ async def test_close_credit_available_respects_holds_and_due_date(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     a = _actor(user)
-    ka = await _seed_plan(db, user, f"r360-{str(ULID()).lower()[:8]}",
-                          amount=800, included=0, seat_price=None)
+    ka = await _seed_plan(
+        db, user, f"r360-{str(ULID()).lower()[:8]}", amount=800, included=0, seat_price=None
+    )
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key=ka, interval="month", seats=0,
-        provider="manual", actor=a)
+        db, tenant, plan_key=ka, interval="month", seats=0, provider="manual", actor=a
+    )
     await credit_svc.top_up(db, tenant.id, "USD", 1000, actor=a)
-    hold = await credit_svc.reserve(db, tenant.id, "USD", 600,
-                                    reference_type="workflow_run",
-                                    reference_id=str(ULID()))
+    hold = await credit_svc.reserve(
+        db, tenant.id, "USD", 600, reference_type="workflow_run", reference_id=str(ULID())
+    )
     inv = await _force_close(db, sub)
     assert inv is not None
     assert inv.credit_applied_minor == 400, (
-        "close must apply only AVAILABLE credit (1000 − 600 hold), "
-        f"got {inv.credit_applied_minor}")
+        f"close must apply only AVAILABLE credit (1000 − 600 hold), got {inv.credit_applied_minor}"
+    )
     assert inv.amount_due_minor == 400
     # the hold is untouched — settling it later still succeeds
     settled = await credit_svc.settle(db, hold.id, 600)
@@ -4924,33 +5288,45 @@ async def test_close_two_segment_proration_boundaries(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     a = _actor(user)
-    k1 = await _seed_plan(db, user, f"r360a-{str(ULID()).lower()[:8]}",
-                          amount=30000, included=0, seat_price=10000)
-    k2 = await _seed_plan(db, user, f"r360b-{str(ULID()).lower()[:8]}",
-                          amount=60000, included=0, seat_price=20000)
-    k3 = await _seed_plan(db, user, f"r360c-{str(ULID()).lower()[:8]}",
-                          amount=90000, included=0, seat_price=30000)
+    k1 = await _seed_plan(
+        db, user, f"r360a-{str(ULID()).lower()[:8]}", amount=30000, included=0, seat_price=10000
+    )
+    k2 = await _seed_plan(
+        db, user, f"r360b-{str(ULID()).lower()[:8]}", amount=60000, included=0, seat_price=20000
+    )
+    k3 = await _seed_plan(
+        db, user, f"r360c-{str(ULID()).lower()[:8]}", amount=90000, included=0, seat_price=30000
+    )
     # two live students → billable seats = 2 on every segment
     from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole, OrgStatus
 
-    org = Organization(name=f"Seg {ULID()}", slug=f"seg-{str(ULID()).lower()}",
-                       status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=user.id)
+    org = Organization(
+        name=f"Seg {ULID()}",
+        slug=f"seg-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=user.id,
+    )
     db.add(org)
     await db.flush()
     for _ in range(2):
         stu = await _mk_user(db)
-        db.add(OrgMember(org_id=org.id, user_id=stu.id,
-                         role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+        db.add(
+            OrgMember(
+                org_id=org.id, user_id=stu.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+            )
+        )
     await db.flush()
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key=k1, interval="month", seats=0,
-        provider="manual", actor=a)
+        db, tenant, plan_key=k1, interval="month", seats=0, provider="manual", actor=a
+    )
     # backdate: period started 30d ago, ends now
     p1 = (
         await db.execute(
             select(BillingPeriod).where(
-                BillingPeriod.subscription_id == sub.id,
-                BillingPeriod.status == "open"))
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
     ).scalar_one()
     now = billing_svc._now()
     p1.period_start = now - timedelta(days=30)
@@ -4968,33 +5344,49 @@ async def test_close_two_segment_proration_boundaries(db):
             await db.execute(
                 select(PlanVersion.id)
                 .join(ProductPlan, ProductPlan.id == PlanVersion.plan_id)
-                .where(ProductPlan.key == key, PlanVersion.status == "active"))
+                .where(ProductPlan.key == key, PlanVersion.status == "active")
+            )
         ).scalar_one()
 
-    k4 = await _seed_plan(db, user, f"r360d-{str(ULID()).lower()[:8]}",
-                          amount=120000, included=0, seat_price=40000)
+    k4 = await _seed_plan(
+        db, user, f"r360d-{str(ULID()).lower()[:8]}", amount=120000, included=0, seat_price=40000
+    )
     v1, v2, v3, v4 = [await _version_of(k) for k in (k1, k2, k3, k4)]
     # THREE stacked changes (a middle segment must exist: with only two,
     # idx−1 == idx+1 by Python negative indexing and the mutant is coincid-
     # entally equivalent): 7.5d each @300/600/900/1200
-    db.add_all([
-        SubscriptionChange(
-            subscription_id=sub.id, change_type="plan_change",
-            from_plan_version_id=v1, to_plan_version_id=v2,
-            effective_at=p1.period_start + timedelta(days=7, hours=12),
-            proration_mode="immediate", created_by=user.id),
-        SubscriptionChange(
-            subscription_id=sub.id, change_type="plan_change",
-            from_plan_version_id=v2, to_plan_version_id=v3,
-            effective_at=p1.period_start + timedelta(days=15),
-            proration_mode="immediate", created_by=user.id),
-        SubscriptionChange(
-            subscription_id=sub.id, change_type="plan_change",
-            from_plan_version_id=v3, to_plan_version_id=v4,
-            effective_at=p1.period_start + timedelta(days=22, hours=12),
-            proration_mode="immediate", created_by=user.id),
-    ])
-    sub.plan_version_id = v4            # sub already carries the final plan
+    db.add_all(
+        [
+            SubscriptionChange(
+                subscription_id=sub.id,
+                change_type="plan_change",
+                from_plan_version_id=v1,
+                to_plan_version_id=v2,
+                effective_at=p1.period_start + timedelta(days=7, hours=12),
+                proration_mode="immediate",
+                created_by=user.id,
+            ),
+            SubscriptionChange(
+                subscription_id=sub.id,
+                change_type="plan_change",
+                from_plan_version_id=v2,
+                to_plan_version_id=v3,
+                effective_at=p1.period_start + timedelta(days=15),
+                proration_mode="immediate",
+                created_by=user.id,
+            ),
+            SubscriptionChange(
+                subscription_id=sub.id,
+                change_type="plan_change",
+                from_plan_version_id=v3,
+                to_plan_version_id=v4,
+                effective_at=p1.period_start + timedelta(days=22, hours=12),
+                proration_mode="immediate",
+                created_by=user.id,
+            ),
+        ]
+    )
+    sub.plan_version_id = v4  # sub already carries the final plan
     await db.flush()
     inv = await billing_svc.close_period_and_invoice(db, p1.id)
     assert inv is not None
@@ -5006,7 +5398,8 @@ async def test_close_two_segment_proration_boundaries(db):
     # middle segment's days and drops ~9.7k
     assert abs(total - 119999) <= 1500, (
         f"four-segment walk total drifted: {total} "
-        f"({[(ln.line_type, ln.amount_minor) for ln in lines]})")
+        f"({[(ln.line_type, ln.amount_minor) for ln in lines]})"
+    )
 
 
 @pytest.mark.asyncio
@@ -5024,18 +5417,20 @@ async def test_month_end_anchor_restores_after_february(db):
     user = await _mk_user(db)
     a = _actor(user)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
-    ka = await _seed_plan(db, user, f"r361-{str(ULID()).lower()[:8]}",
-                          amount=1000, included=0, seat_price=None)
+    ka = await _seed_plan(
+        db, user, f"r361-{str(ULID()).lower()[:8]}", amount=1000, included=0, seat_price=None
+    )
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key=ka, interval="month", seats=0,
-        provider="manual", actor=a)
+        db, tenant, plan_key=ka, interval="month", seats=0, provider="manual", actor=a
+    )
     # pin the sub's lifetime anchor: created Jan 31
     sub.created_at = dt(2026, 1, 31, 12, 0, tzinfo=UTC)
     p1 = (
         await db.execute(
             select(BillingPeriod).where(
-                BillingPeriod.subscription_id == sub.id,
-                BillingPeriod.status == "open"))
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
     ).scalar_one()
     # current window: Jan 31 → Feb 28 (the natural add_interval clamp)
     p1.period_start = dt(2026, 1, 31, 12, 0, tzinfo=UTC)
@@ -5050,19 +5445,21 @@ async def test_month_end_anchor_restores_after_february(db):
     # the rollover window must restore the 31st: Feb 28 → Mar 31
     assert sub.current_period_start == dt(2026, 2, 28, 12, 0, tzinfo=UTC)
     assert sub.current_period_end == dt(2026, 3, 31, 12, 0, tzinfo=UTC), (
-        f"anchor day must restore to the 31st, got {sub.current_period_end}")
+        f"anchor day must restore to the 31st, got {sub.current_period_end}"
+    )
 
     # a mid-month anchor is untouched: created the 15th, window on the 15th
     tenant2 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub2, _ = await billing_svc.start_subscription(
-        db, tenant2, plan_key=ka, interval="month", seats=0,
-        provider="manual", actor=a)
+        db, tenant2, plan_key=ka, interval="month", seats=0, provider="manual", actor=a
+    )
     sub2.created_at = dt(2026, 1, 15, 9, 0, tzinfo=UTC)
     p2 = (
         await db.execute(
             select(BillingPeriod).where(
-                BillingPeriod.subscription_id == sub2.id,
-                BillingPeriod.status == "open"))
+                BillingPeriod.subscription_id == sub2.id, BillingPeriod.status == "open"
+            )
+        )
     ).scalar_one()
     p2.period_start = dt(2026, 1, 15, 9, 0, tzinfo=UTC)
     p2.period_end = dt(2026, 2, 15, 9, 0, tzinfo=UTC)
@@ -5079,16 +5476,17 @@ async def test_month_end_anchor_restores_after_february(db):
     # April's 30th)
     tenant3 = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
     sub3, _ = await billing_svc.start_subscription(
-        db, tenant3, plan_key=ka, interval="month", seats=0,
-        provider="manual", actor=a)
+        db, tenant3, plan_key=ka, interval="month", seats=0, provider="manual", actor=a
+    )
     sub3.created_at = dt(2026, 1, 30, 8, 0, tzinfo=UTC)
     p3 = (
         await db.execute(
             select(BillingPeriod).where(
-                BillingPeriod.subscription_id == sub3.id,
-                BillingPeriod.status == "open"))
+                BillingPeriod.subscription_id == sub3.id, BillingPeriod.status == "open"
+            )
+        )
     ).scalar_one()
-    p3.period_start = dt(2026, 2, 28, 8, 0, tzinfo=UTC)   # clamped Feb window
+    p3.period_start = dt(2026, 2, 28, 8, 0, tzinfo=UTC)  # clamped Feb window
     p3.period_end = dt(2026, 3, 28, 8, 0, tzinfo=UTC)
     sub3.current_period_start = p3.period_start
     sub3.current_period_end = p3.period_end
@@ -5097,7 +5495,8 @@ async def test_month_end_anchor_restores_after_february(db):
     assert inv3 is not None
     await db.refresh(sub3)
     assert sub3.current_period_end == dt(2026, 4, 30, 8, 0, tzinfo=UTC), (
-        f"anchor 30 must restore in April (30 == max_day), got {sub3.current_period_end}")
+        f"anchor 30 must restore in April (30 == max_day), got {sub3.current_period_end}"
+    )
 
 
 @pytest.mark.asyncio
@@ -5119,16 +5518,22 @@ async def test_truncated_close_ratio_and_live_seat_decoys(db):
     user = await _mk_user(db)
     a = _actor(user)
     tenant = await _mk_tenant(db, user, status=TenantStatus.ACTIVE)
-    ka = await _seed_plan(db, user, f"r371-{str(ULID()).lower()[:8]}",
-                          amount=30000, included=1, seat_price=600)
+    ka = await _seed_plan(
+        db, user, f"r371-{str(ULID()).lower()[:8]}", amount=30000, included=1, seat_price=600
+    )
     sub, _ = await billing_svc.start_subscription(
-        db, tenant, plan_key=ka, interval="month", seats=0,
-        provider="manual", actor=a)
+        db, tenant, plan_key=ka, interval="month", seats=0, provider="manual", actor=a
+    )
 
     # orgs: live one + archived one for THIS tenant; a foreign tenant's org
     def _org(t, status=OrgStatus.ACTIVE):
-        return Organization(name=f"O {ULID()}", slug=f"o-{str(ULID()).lower()}",
-                            status=status, tenant_id=t.id, created_by=user.id)
+        return Organization(
+            name=f"O {ULID()}",
+            slug=f"o-{str(ULID()).lower()}",
+            status=status,
+            tenant_id=t.id,
+            created_by=user.id,
+        )
 
     live_org = _org(tenant)
     dead_org = _org(tenant, OrgStatus.ARCHIVED)
@@ -5142,12 +5547,12 @@ async def test_truncated_close_ratio_and_live_seat_decoys(db):
         db.add(OrgMember(org_id=org.id, user_id=u.id, role=role, status=status))
 
     for _ in range(3):
-        await _member(live_org)                      # 3 real seats
-    await _member(live_org, role=OrgRole.OWNER)      # staff — not a seat
-    await _member(live_org, status=MemberStatus.ARCHIVED)   # archived member
-    await _member(dead_org)                          # archived ORG's student
+        await _member(live_org)  # 3 real seats
+    await _member(live_org, role=OrgRole.OWNER)  # staff — not a seat
+    await _member(live_org, status=MemberStatus.ARCHIVED)  # archived member
+    await _member(dead_org)  # archived ORG's student
     for _ in range(5):
-        await _member(foreign_org)                   # other tenant
+        await _member(foreign_org)  # other tenant
     await db.flush()
 
     # backdate to 1/3 through a 30-day period, then IMMEDIATE cancel: the
@@ -5155,8 +5560,9 @@ async def test_truncated_close_ratio_and_live_seat_decoys(db):
     p1 = (
         await db.execute(
             select(BillingPeriod).where(
-                BillingPeriod.subscription_id == sub.id,
-                BillingPeriod.status == "open"))
+                BillingPeriod.subscription_id == sub.id, BillingPeriod.status == "open"
+            )
+        )
     ).scalar_one()
     now = billing_svc._now()
     p1.period_start = now - timedelta(days=10)
@@ -5168,26 +5574,44 @@ async def test_truncated_close_ratio_and_live_seat_decoys(db):
     # usage INSIDE the truncated window vs AFTER the cancel instant
     async def _usage(offset, amount):
         eid = str(ULID())
-        db.add(UsageEvent(id=eid, tenant_id=tenant.id, org_id=live_org.id,
-                          usage_type="image_generation", quantity=1, unit="images",
-                          occurred_at=now + offset, source="manual"))
+        db.add(
+            UsageEvent(
+                id=eid,
+                tenant_id=tenant.id,
+                org_id=live_org.id,
+                usage_type="image_generation",
+                quantity=1,
+                unit="images",
+                occurred_at=now + offset,
+                source="manual",
+            )
+        )
         await db.flush()
-        db.add(RatedUsage(usage_event_id=eid, tenant_id=tenant.id,
-                          org_id=live_org.id, usage_type="image_generation",
-                          quantity=1, cost_rate_snapshot={}, internal_cost_minor=0,
-                          internal_cost_currency="USD", sell_rate_snapshot={},
-                          billable_amount_minor=amount,
-                          billable_amount_exact=Decimal(amount),
-                          billable_currency="USD", status="rated",
-                          rated_at=billing_svc._now()))
+        db.add(
+            RatedUsage(
+                usage_event_id=eid,
+                tenant_id=tenant.id,
+                org_id=live_org.id,
+                usage_type="image_generation",
+                quantity=1,
+                cost_rate_snapshot={},
+                internal_cost_minor=0,
+                internal_cost_currency="USD",
+                sell_rate_snapshot={},
+                billable_amount_minor=amount,
+                billable_amount_exact=Decimal(amount),
+                billable_currency="USD",
+                status="rated",
+                rated_at=billing_svc._now(),
+            )
+        )
         await db.flush()
 
-    await _usage(timedelta(days=-1), 111)            # inside → billed
-    await _usage(timedelta(days=-2), 89)             # second inside event
-    await _usage(timedelta(hours=2), 999)            # after the cancel → NOT
+    await _usage(timedelta(days=-1), 111)  # inside → billed
+    await _usage(timedelta(days=-2), 89)  # second inside event
+    await _usage(timedelta(hours=2), 999)  # after the cancel → NOT
 
-    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False,
-                                          actor=a)
+    await billing_svc.cancel_subscription(db, tenant, sub, at_period_end=False, actor=a)
     # an event at EXACTLY the truncated period end belongs to the NEXT
     # window (half-open) — the <= mutant pulls it into this invoice
     await db.refresh(p1)
@@ -5226,15 +5650,20 @@ async def test_credit_note_boundaries_and_debt_split(db):
     a = _actor(user)
 
     def _inv(due):
-        return Invoice(tenant_id=tenant.id, currency="USD", status="draft",
-                       subtotal_minor=due, total_minor=due, amount_due_minor=due)
+        return Invoice(
+            tenant_id=tenant.id,
+            currency="USD",
+            status="draft",
+            subtotal_minor=due,
+            total_minor=due,
+            amount_due_minor=due,
+        )
 
     draft = _inv(5000)
     db.add(draft)
     await db.flush()
     with pytest.raises(AppError) as e_draft:
-        await billing_svc.issue_credit_note(
-            db, draft, amount_minor=100, reason="x", actor=a)
+        await billing_svc.issue_credit_note(db, draft, amount_minor=100, reason="x", actor=a)
     assert e_draft.value.status_code == 409
 
     inv = _inv(10000)
@@ -5244,53 +5673,59 @@ async def test_credit_note_boundaries_and_debt_split(db):
 
     for bad in (0, -5, 10001):
         with pytest.raises(AppError) as e_amt:
-            await billing_svc.issue_credit_note(
-                db, inv, amount_minor=bad, reason="x", actor=a)
+            await billing_svc.issue_credit_note(db, inv, amount_minor=bad, reason="x", actor=a)
         assert e_amt.value.status_code == 422, bad
 
     # part-pay 4000 → outstanding 6000. A 7000 note: 6000 debt cut + 1000
     # refund to credit, never 7000 refund.
     await billing_svc.record_payment(
-        db, inv, amount_minor=4000, method="manual_bank_transfer",
-        external_ref=f"W-{ULID()}", reference_note=None, received_at=None,
-        actor=a)
+        db,
+        inv,
+        amount_minor=4000,
+        method="manual_bank_transfer",
+        external_ref=f"W-{ULID()}",
+        reference_note=None,
+        received_at=None,
+        actor=a,
+    )
     key = f"cn-{ULID()}"
     note = await billing_svc.issue_credit_note(
-        db, inv, amount_minor=7000, reason="partial refund", actor=a,
-        idempotency_key=key)
+        db, inv, amount_minor=7000, reason="partial refund", actor=a, idempotency_key=key
+    )
     await db.refresh(inv)
-    assert inv.amount_due_minor == 4000              # 10000 − 6000 debt cut
+    assert inv.amount_due_minor == 4000  # 10000 − 6000 debt cut
     bal = (
         await db.execute(
             select(TenantCreditBalance.balance_minor).where(
-                TenantCreditBalance.tenant_id == tenant.id,
-                TenantCreditBalance.currency == "USD"))
+                TenantCreditBalance.tenant_id == tenant.id, TenantCreditBalance.currency == "USD"
+            )
+        )
     ).scalar_one_or_none() or 0
     assert bal == 1000, f"only the over-debt remainder refunds, got {bal}"
 
     # keyed replay: same amount → same note back; different amount → 409
     replay = await billing_svc.issue_credit_note(
-        db, inv, amount_minor=7000, reason="retry", actor=a, idempotency_key=key)
+        db, inv, amount_minor=7000, reason="retry", actor=a, idempotency_key=key
+    )
     assert replay.id == note.id
     with pytest.raises(AppError) as e_key:
         await billing_svc.issue_credit_note(
-            db, inv, amount_minor=500, reason="conflict", actor=a,
-            idempotency_key=key)
+            db, inv, amount_minor=500, reason="conflict", actor=a, idempotency_key=key
+        )
     assert e_key.value.code == "IDEMPOTENCY_CONFLICT" and e_key.value.status_code == 409
 
     # cumulative cap: remaining headroom is 3000 (10000 − 7000): exactly
     # 3000 passes, one more 422s
-    await billing_svc.issue_credit_note(
-        db, inv, amount_minor=3000, reason="rest", actor=a)
+    await billing_svc.issue_credit_note(db, inv, amount_minor=3000, reason="rest", actor=a)
     with pytest.raises(AppError) as e_cum:
-        await billing_svc.issue_credit_note(
-            db, inv, amount_minor=1, reason="over", actor=a)
+        await billing_svc.issue_credit_note(db, inv, amount_minor=1, reason="over", actor=a)
     assert e_cum.value.status_code == 422
 
 
 class _Req384:
     class _State:
         request_id = "r384"
+
     state = _State()
 
 
@@ -5310,9 +5745,15 @@ async def test_billing_api_handlers_ownership_and_shape(db):
     req = _Req384()
 
     # foreign invoice → uniform 404
-    inv2 = Invoice(tenant_id=t2.id, currency="USD", status="open",
-                   subtotal_minor=500, total_minor=500, amount_due_minor=500,
-                   finalized_at=billing_svc._now())
+    inv2 = Invoice(
+        tenant_id=t2.id,
+        currency="USD",
+        status="open",
+        subtotal_minor=500,
+        total_minor=500,
+        amount_due_minor=500,
+        finalized_at=billing_svc._now(),
+    )
     db.add(inv2)
     await db.flush()
     with pytest.raises(AppError) as e404:
@@ -5330,32 +5771,65 @@ async def test_billing_api_handlers_ownership_and_shape(db):
     assert e_r.value.status_code == 404
 
     # own invoice: lines ordered by sort_order, payments embedded
-    inv1 = Invoice(tenant_id=t1.id, currency="USD", status="open",
-                   subtotal_minor=900, total_minor=900, amount_due_minor=900,
-                   finalized_at=billing_svc._now())
+    inv1 = Invoice(
+        tenant_id=t1.id,
+        currency="USD",
+        status="open",
+        subtotal_minor=900,
+        total_minor=900,
+        amount_due_minor=900,
+        finalized_at=billing_svc._now(),
+    )
     db.add(inv1)
     await db.flush()
-    db.add_all([
-        InvoiceLine(invoice_id=inv1.id, line_type="usage", description="b",
-                    quantity=1, amount_minor=300, sort_order=2),
-        InvoiceLine(invoice_id=inv1.id, line_type="plan", description="a",
-                    quantity=1, amount_minor=600, sort_order=1),
-    ])
+    db.add_all(
+        [
+            InvoiceLine(
+                invoice_id=inv1.id,
+                line_type="usage",
+                description="b",
+                quantity=1,
+                amount_minor=300,
+                sort_order=2,
+            ),
+            InvoiceLine(
+                invoice_id=inv1.id,
+                line_type="plan",
+                description="a",
+                quantity=1,
+                amount_minor=600,
+                sort_order=1,
+            ),
+        ]
+    )
     await db.flush()
     await billing_svc.record_payment(
-        db, inv1, amount_minor=100, method="other", external_ref=None,
-        reference_note=None, received_at=None, actor=_actor(user))
+        db,
+        inv1,
+        amount_minor=100,
+        method="other",
+        external_ref=None,
+        reference_note=None,
+        received_at=None,
+        actor=_actor(user),
+    )
     resp = await get_invoice(t1.id, inv1.id, user=user, db=db)
     kinds = [ln["line_type"] for ln in resp.data["lines"]]
-    assert kinds == ["plan", "usage"]                 # sort_order respected
+    assert kinds == ["plan", "usage"]  # sort_order respected
     assert resp.data["payments"][0]["amount_minor"] == 100
     assert resp.data["payments"][0]["status"] == "succeeded"
 
     # list pagination: 3 invoices for t1 (inv1 + 2 more), per_page 2
     for _ in range(2):
-        extra = Invoice(tenant_id=t1.id, currency="USD", status="open",
-                        subtotal_minor=1, total_minor=1, amount_due_minor=1,
-                        finalized_at=billing_svc._now())
+        extra = Invoice(
+            tenant_id=t1.id,
+            currency="USD",
+            status="open",
+            subtotal_minor=1,
+            total_minor=1,
+            amount_due_minor=1,
+            finalized_at=billing_svc._now(),
+        )
         db.add(extra)
     await db.flush()
     p1 = await list_invoices(t1.id, page=1, per_page=2, user=user, db=db)
@@ -5363,5 +5837,5 @@ async def test_billing_api_handlers_ownership_and_shape(db):
     assert p1.meta.total == 3 and len(p1.data) == 2 and len(p2.data) == 1
     assert p1.meta.has_more is True and p2.meta.has_more is False
     ids1 = {d["id"] for d in p1.data}
-    assert inv2.id not in ids1                       # foreign never listed
+    assert inv2.id not in ids1  # foreign never listed
     assert ids1.isdisjoint({d["id"] for d in p2.data})

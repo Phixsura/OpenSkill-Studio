@@ -107,14 +107,14 @@ def test_hostname_normalization_matrix():
     label63 = "a" * 63
     host253 = ".".join([label63, label63, label63, "a" * 57, "com"])
     assert len(host253) == 253
-    assert n(host253) == host253                     # 253 chars OK, 63-label OK
-    with pytest.raises(AppError):                    # 254 chars (valid labels)
+    assert n(host253) == host253  # 253 chars OK, 63-label OK
+    with pytest.raises(AppError):  # 254 chars (valid labels)
         n(("b." + host253)[:254].rstrip("."))
-    with pytest.raises(AppError):                    # 64-char label
+    with pytest.raises(AppError):  # 64-char label
         n("a" * 64 + ".com")
-    assert n("a.com") == "a.com"                     # exactly two labels OK
-    with pytest.raises(AppError) as exc:             # un-IDNA-encodable label
-        n("\u00ad.example.com")                      # soft hyphen → empty label
+    assert n("a.com") == "a.com"  # exactly two labels OK
+    with pytest.raises(AppError) as exc:  # un-IDNA-encodable label
+        n("\u00ad.example.com")  # soft hyphen → empty label
     assert exc.value.status_code == 422
 
 
@@ -232,8 +232,12 @@ async def test_domain_flow_verify_activate(db, monkeypatch):
     # R339: a SECOND (unrelated) domain must be untouched by activation —
     # the TLS-values UPDATE targets exactly the activated row
     other = TenantDomain(
-        tenant_id=domain.tenant_id, hostname=f"other-{str(ULID()).lower()[:8]}.example.com",
-        status="pending_verification", verification_token_hash="y", created_by=user.id)
+        tenant_id=domain.tenant_id,
+        hostname=f"other-{str(ULID()).lower()[:8]}.example.com",
+        status="pending_verification",
+        verification_token_hash="y",
+        created_by=user.id,
+    )
     db.add(other)
     await db.flush()
     from app.config import settings as _settings
@@ -303,9 +307,7 @@ async def test_domain_uniqueness_and_site_context(db):
     ctx = await domain_svc.resolve_site_context(db, host)
     assert ctx["tenant_id"] == tenant_a.id
     assert ctx["branding"]["theme_tokens"] == {"primary": "#112233"}
-    assert ctx["branding"]["legal_links"] == [
-        {"label": "Terms", "url": "https://a.example/terms"}
-    ]
+    assert ctx["branding"]["legal_links"] == [{"label": "Terms", "url": "https://a.example/terms"}]
     await domain_svc.disable_domain(db, domain, actor=_actor(user_a))
     ctx = await domain_svc.resolve_site_context(db, host)
     assert ctx["tenant_id"] is None
@@ -539,15 +541,11 @@ async def test_provision_pack_savepoint_rolls_back_partial_copy(db, monkeypatch)
 
     async def dying_install_pack(self, org_id, pack_id, version, installed_by):
         # flush half the pack's content, then fail mid-copy
-        self.db.add(
-            SkillCategory(org_id=org_id, name="R321 partial", slug=marker_slug)
-        )
+        self.db.add(SkillCategory(org_id=org_id, name="R321 partial", slug=marker_slug))
         await self.db.flush()
         raise AppError("PACK_CORRUPT", "manifest checksum mismatch", 422)
 
-    monkeypatch.setattr(
-        install_mod.InstallationService, "install_pack", dying_install_pack
-    )
+    monkeypatch.setattr(install_mod.InstallationService, "install_pack", dying_install_pack)
     await provision_svc.execute_provision_run(db, run.id)
     await db.refresh(run)
     assert run.status == "failed"
@@ -557,10 +555,10 @@ async def test_provision_pack_savepoint_rolls_back_partial_copy(db, monkeypatch)
 
     # the SAVEPOINT must have rolled the partial copy back
     leftover = (
-        await db.execute(
-            select(SkillCategory).where(SkillCategory.slug == marker_slug)
-        )
-    ).scalars().all()
+        (await db.execute(select(SkillCategory).where(SkillCategory.slug == marker_slug)))
+        .scalars()
+        .all()
+    )
     assert leftover == [], "partial pack content survived the failed install"
 
     # and the failure handler's own writes survived (session not aborted)
@@ -1001,8 +999,11 @@ async def test_verify_attempts_exhaustion_fails_domain(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     domain, raw = await domain_svc.create_domain(
-        db, tenant_id=tenant.id, hostname=f"x{str(ULID()).lower()[:8]}.example.com",
-        actor=_actor(user))
+        db,
+        tenant_id=tenant.id,
+        hostname=f"x{str(ULID()).lower()[:8]}.example.com",
+        actor=_actor(user),
+    )
     non_passing = "openskill-verify-nope"
     domain.verification_token_hash = _hl.sha256(non_passing.encode()).hexdigest()
     await db.flush()
@@ -1015,7 +1016,7 @@ async def test_verify_attempts_exhaustion_fails_domain(db):
     # 'failed' is still awaiting verification — the gate admits a retry
     with pytest.raises(AppError) as e:
         await domain_svc.verify_domain(db, domain, non_passing, actor=_actor(user))
-    assert e.value.code == "DOMAIN_VERIFY_FAILED"          # not STATUS_CONFLICT
+    assert e.value.code == "DOMAIN_VERIFY_FAILED"  # not STATUS_CONFLICT
 
 
 @pytest.mark.asyncio
@@ -1040,9 +1041,9 @@ async def test_dns_txt_verifier_lookup_logic(monkeypatch):
 
     monkeypatch.setattr(dns.resolver, "resolve", fake_resolve)
     v = DnsTxtVerifier()
-    assert await v.verify("shop.example.com", "tok-abc123") is True   # joined match
+    assert await v.verify("shop.example.com", "tok-abc123") is True  # joined match
     assert calls[0] == f"{VERIFY_RECORD_PREFIX}.shop.example.com"
-    assert await v.verify("shop.example.com", "tok-other") is False   # no match
+    assert await v.verify("shop.example.com", "tok-other") is False  # no match
 
     def nxdomain(name, rtype, lifetime=None):
         raise dns.resolver.NXDOMAIN()
@@ -1083,7 +1084,7 @@ def test_tls_provisioner_switch_and_punycode_warn():
     with patch.object(_settings, "tls_provisioner", "null"):
         assert isinstance(get_tls_provisioner(), NullTlsProvisioner)
 
-    check_reserved("xn--48s290a.example.com")              # warns, must not raise
+    check_reserved("xn--48s290a.example.com")  # warns, must not raise
 
 
 @pytest.mark.asyncio
@@ -1100,42 +1101,67 @@ async def test_provision_run_conflict_spoof_and_failed_retry(db):
     bp = TenantBlueprint(
         name=f"BP285 {ULID()}",
         config=provision_svc.validate_blueprint_config({"plan_key": "school"}),
-        created_by=user.id)
+        created_by=user.id,
+    )
     db.add(bp)
     await db.flush()
 
     key = f"r285-{ULID()}"
     run = await provision_svc.create_provision_run(
-        db, blueprint_id=bp.id, name="Acme", slug=f"r285-{str(ULID()).lower()[:8]}",
-        idempotency_key=key, partner_id=None, actor=_actor(user))
+        db,
+        blueprint_id=bp.id,
+        name="Acme",
+        slug=f"r285-{str(ULID()).lower()[:8]}",
+        idempotency_key=key,
+        partner_id=None,
+        actor=_actor(user),
+    )
 
     # same key, different name → 409 (R72[3])
     with pytest.raises(AppError) as e:
         await provision_svc.create_provision_run(
-            db, blueprint_id=bp.id, name="Evil", slug=run.requested_slug,
-            idempotency_key=key, partner_id=None, actor=_actor(user))
+            db,
+            blueprint_id=bp.id,
+            name="Evil",
+            slug=run.requested_slug,
+            idempotency_key=key,
+            partner_id=None,
+            actor=_actor(user),
+        )
     assert e.value.code == "PROVISION_CONFLICT" and e.value.status_code == 409
     # same key, different partner → 409 (cross-partner disclosure guard)
     with pytest.raises(AppError) as e:
         await provision_svc.create_provision_run(
-            db, blueprint_id=bp.id, name="Acme", slug=run.requested_slug,
-            idempotency_key=key, partner_id=str(ULID()), actor=_actor(user))
+            db,
+            blueprint_id=bp.id,
+            name="Acme",
+            slug=run.requested_slug,
+            idempotency_key=key,
+            partner_id=str(ULID()),
+            actor=_actor(user),
+        )
     assert e.value.code == "PROVISION_CONFLICT"
 
     # partner-scoped blueprint requested by another/no partner → uniform 404
     bp_partner = TenantBlueprint(
-        name=f"BPp {ULID()}", partner_id=str(ULID()),
+        name=f"BPp {ULID()}",
+        partner_id=str(ULID()),
         config=provision_svc.validate_blueprint_config({"plan_key": "school"}),
-        created_by=user.id)
+        created_by=user.id,
+    )
     db.add(bp_partner)
     await db.flush()
     for pid in (None, str(ULID())):
         with pytest.raises(AppError) as e:
             await provision_svc.create_provision_run(
-                db, blueprint_id=bp_partner.id, name="X",
+                db,
+                blueprint_id=bp_partner.id,
+                name="X",
                 slug=f"x-{str(ULID()).lower()[:8]}",
-                idempotency_key=f"r285b-{ULID()}", partner_id=pid,
-                actor=_actor(user))
+                idempotency_key=f"r285b-{ULID()}",
+                partner_id=pid,
+                actor=_actor(user),
+            )
         assert e.value.code == "BLUEPRINT_INVALID" and e.value.status_code == 404
 
     # inactive blueprint → 404
@@ -1143,8 +1169,14 @@ async def test_provision_run_conflict_spoof_and_failed_retry(db):
     await db.flush()
     with pytest.raises(AppError) as e:
         await provision_svc.create_provision_run(
-            db, blueprint_id=bp.id, name="Y", slug=f"y-{str(ULID()).lower()[:8]}",
-            idempotency_key=f"r285c-{ULID()}", partner_id=None, actor=_actor(user))
+            db,
+            blueprint_id=bp.id,
+            name="Y",
+            slug=f"y-{str(ULID()).lower()[:8]}",
+            idempotency_key=f"r285c-{ULID()}",
+            partner_id=None,
+            actor=_actor(user),
+        )
     assert e.value.code == "BLUEPRINT_INVALID"
     bp.is_active = True
     await db.flush()
@@ -1153,17 +1185,28 @@ async def test_provision_run_conflict_spoof_and_failed_retry(db):
     run.status = "failed"
     await db.flush()
     replay = await provision_svc.create_provision_run(
-        db, blueprint_id=bp.id, name="Acme", slug=run.requested_slug,
-        idempotency_key=key, partner_id=None, actor=_actor(user))
+        db,
+        blueprint_id=bp.id,
+        name="Acme",
+        slug=run.requested_slug,
+        idempotency_key=key,
+        partner_id=None,
+        actor=_actor(user),
+    )
     assert replay.id == run.id
     retries = (
-        (await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.topic == "provision.run",
-                OutboxMessage.payload["run_id"].astext == run.id)))
-        .scalars().all()
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.topic == "provision.run",
+                    OutboxMessage.payload["run_id"].astext == run.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    assert len(retries) >= 1                               # retry enqueued
+    assert len(retries) >= 1  # retry enqueued
 
 
 @pytest.mark.asyncio
@@ -1184,15 +1227,22 @@ async def test_export_marks_ledger_and_license_truncation(db, monkeypatch):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     actor = _actor(user)
-    for i in range(3):                                     # 3 ledger entries
+    for i in range(3):  # 3 ledger entries
         await credit_svc.top_up(
-            db, tenant.id, "USD", 100 + i, actor=actor,
-            idempotency_key=f"r286-{i}-{ULID()}")
-    for _ in range(3):                                     # 3 license grants
-        db.add(LicenseGrant(
-            product_type="skill_pack", product_id=str(ULID()),
-            tenant_id=tenant.id, org_id=None, scope="tenant",
-            status="active", source="manual"))
+            db, tenant.id, "USD", 100 + i, actor=actor, idempotency_key=f"r286-{i}-{ULID()}"
+        )
+    for _ in range(3):  # 3 license grants
+        db.add(
+            LicenseGrant(
+                product_type="skill_pack",
+                product_id=str(ULID()),
+                tenant_id=tenant.id,
+                org_id=None,
+                scope="tenant",
+                status="active",
+                source="manual",
+            )
+        )
     await db.flush()
 
     monkeypatch.setattr(prov, "EXPORT_MAX_ROWS", 2)
@@ -1217,7 +1267,7 @@ async def test_export_marks_ledger_and_license_truncation(db, monkeypatch):
     bundle = json.loads(captured["body"])
     assert "credit_ledger" in bundle["truncated_collections"]
     assert "licenses" in bundle["truncated_collections"]
-    assert len(bundle["credit_ledger"]) == 2               # capped, marked
+    assert len(bundle["credit_ledger"]) == 2  # capped, marked
     assert len(bundle["licenses"]) == 2
 
 
@@ -1239,14 +1289,22 @@ async def test_provision_run_resume_is_step_idempotent(db, monkeypatch):
     bp = TenantBlueprint(
         name=f"R320 {ULID()}",
         config=provision_svc.validate_blueprint_config(
-            {"plan_key": "school", "entitlement_overrides": {"max_organizations": 5}}),
-        created_by=user.id)
+            {"plan_key": "school", "entitlement_overrides": {"max_organizations": 5}}
+        ),
+        created_by=user.id,
+    )
     db.add(bp)
     await db.flush()
     slug = f"r320-{str(ULID()).lower()[:10]}"
     run = await provision_svc.create_provision_run(
-        db, blueprint_id=bp.id, name="Resume Co", slug=slug,
-        idempotency_key=f"r320-{ULID()}", partner_id=None, actor=_actor(user))
+        db,
+        blueprint_id=bp.id,
+        name="Resume Co",
+        slug=slug,
+        idempotency_key=f"r320-{ULID()}",
+        partner_id=None,
+        actor=_actor(user),
+    )
 
     # fail once at apply_entitlement_overrides
     real_set_override = _plans.set_override
@@ -1273,19 +1331,17 @@ async def test_provision_run_resume_is_step_idempotent(db, monkeypatch):
     await provision_svc.execute_provision_run(db, run.id)
     await db.refresh(run)
     assert run.status == "completed"
-    assert run.tenant_id == first_tenant_id          # SAME tenant, not re-created
+    assert run.tenant_id == first_tenant_id  # SAME tenant, not re-created
     n_tenants = (
-        await db.execute(
-            select(_f.count(TenantAccount.id)).where(TenantAccount.slug == slug))
+        await db.execute(select(_f.count(TenantAccount.id)).where(TenantAccount.slug == slug))
     ).scalar_one()
-    assert n_tenants == 1                             # resume did not double-create
+    assert n_tenants == 1  # resume did not double-create
     from app.models.organization import Organization as _Org355
 
     n_orgs = (
-        await db.execute(
-            select(_f.count(_Org355.id)).where(_Org355.tenant_id == first_tenant_id))
+        await db.execute(select(_f.count(_Org355.id)).where(_Org355.tenant_id == first_tenant_id))
     ).scalar_one()
-    assert n_orgs == 1                                # …nor a second org (R355)
+    assert n_orgs == 1  # …nor a second org (R355)
 
 
 @pytest.mark.asyncio
@@ -1307,8 +1363,7 @@ async def test_concurrent_first_branding_upserts_both_succeed():
 
     async def winner():
         async with AsyncSessionLocal() as s:
-            b = await branding_svc.upsert_branding(
-                s, tid, {"login_tagline": "winner"}, actor=actor)
+            b = await branding_svc.upsert_branding(s, tid, {"login_tagline": "winner"}, actor=actor)
             await asyncio.sleep(0.4)  # hold the uncommitted insert
             await s.commit()
             return b.id
@@ -1316,8 +1371,7 @@ async def test_concurrent_first_branding_upserts_both_succeed():
     async def loser():
         await asyncio.sleep(0.15)  # start while winner's insert is uncommitted
         async with AsyncSessionLocal() as s:
-            b = await branding_svc.upsert_branding(
-                s, tid, {"login_tagline": "loser"}, actor=actor)
+            b = await branding_svc.upsert_branding(s, tid, {"login_tagline": "loser"}, actor=actor)
             await s.commit()
             return b.id
 
@@ -1325,9 +1379,10 @@ async def test_concurrent_first_branding_upserts_both_succeed():
     assert id_a == id_b, "loser must adopt the winner's row, not 500"
     async with AsyncSessionLocal() as s:
         rows = (
-            await s.execute(
-                select(TenantBranding).where(TenantBranding.tenant_id == tid))
-        ).scalars().all()
+            (await s.execute(select(TenantBranding).where(TenantBranding.tenant_id == tid)))
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         # cleanup (module uses shared DB across tests)
         await s.delete(rows[0])
@@ -1348,15 +1403,19 @@ async def test_branding_explicit_null_clears_to_empty_not_jsonb_null(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     b = await branding_svc.upsert_branding(
-        db, tenant.id,
-        {"theme_tokens": {"primary": "#112233"},
-         "legal_links": [{"label": "ToS", "url": "https://x.example/tos"}]},
-        actor=_actor(user))
+        db,
+        tenant.id,
+        {
+            "theme_tokens": {"primary": "#112233"},
+            "legal_links": [{"label": "ToS", "url": "https://x.example/tos"}],
+        },
+        actor=_actor(user),
+    )
     assert b.theme_tokens and b.legal_links
     # explicit null clears BOTH to empty containers, never jsonb null
     b = await branding_svc.upsert_branding(
-        db, tenant.id, {"theme_tokens": None, "legal_links": None},
-        actor=_actor(user))
+        db, tenant.id, {"theme_tokens": None, "legal_links": None}, actor=_actor(user)
+    )
     assert b.theme_tokens == {}, "explicit null must clear to {}, not jsonb null"
     assert b.legal_links == [], "explicit null must clear to [], not jsonb null"
 
@@ -1368,11 +1427,16 @@ async def test_branding_explicit_null_clears_to_empty_not_jsonb_null(db):
     await db.execute(
         sa_update(TenantBranding)
         .where(TenantBranding.tenant_id == tenant.id)
-        .values(theme_tokens=None, legal_links=None))
+        .values(theme_tokens=None, legal_links=None)
+    )
     await db.flush()
     domain = TenantDomain(
-        tenant_id=tenant.id, hostname=f"r330-{str(ULID()).lower()[:8]}.example.com",
-        status="active", verification_token_hash="x", created_by=user.id)
+        tenant_id=tenant.id,
+        hostname=f"r330-{str(ULID()).lower()[:8]}.example.com",
+        status="active",
+        verification_token_hash="x",
+        created_by=user.id,
+    )
     db.add(domain)
     await db.flush()
     ctx = await domain_svc.resolve_site_context(db, domain.hostname)
@@ -1406,9 +1470,14 @@ async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
     partner_user = await _mk_user(db)
     from app.controlplane.models.partner import Partner
 
-    partner = Partner(name=f"P {ULID()}", slug=f"p-{str(ULID()).lower()[:10]}",
-                      currency="USD", status="active", partner_type="reseller",
-                      created_by=partner_user.id)
+    partner = Partner(
+        name=f"P {ULID()}",
+        slug=f"p-{str(ULID()).lower()[:10]}",
+        currency="USD",
+        status="active",
+        partner_type="reseller",
+        created_by=partner_user.id,
+    )
     db.add(partner)
     await db.flush()
 
@@ -1431,27 +1500,37 @@ async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
     # already-installed refs in both loops
     bp = TenantBlueprint(
         name=f"R355 {ULID()}",
-        config=provision_svc.validate_blueprint_config({
-            "skill_packs": [
-                {"pack_id": "01JPACKAAAAAAAAAAAAAAAAAAA"},                    # dup-tolerated
-                {"pack_id": "01JPACKBBBBBBBBBBBBBBBBBBB", "version": "1.2.3"},
-                {"pack_id": "01JPACKCCCCCCCCCCCCCCCCCCC", "version": "latest"},
-            ],
-            "workflow_packs": [
-                {"pack_id": "01JWPACKAAAAAAAAAAAAAAAAAA"[:26].ljust(26, "A")},  # dup-tolerated
-                {"pack_id": "01JWPACKBBBBBBBBBBBBBBBBBB"[:26].ljust(26, "B"), "version": "2.0.0"},
-            ],
-        }),
-        created_by=user.id)
+        config=provision_svc.validate_blueprint_config(
+            {
+                "skill_packs": [
+                    {"pack_id": "01JPACKAAAAAAAAAAAAAAAAAAA"},  # dup-tolerated
+                    {"pack_id": "01JPACKBBBBBBBBBBBBBBBBBBB", "version": "1.2.3"},
+                    {"pack_id": "01JPACKCCCCCCCCCCCCCCCCCCC", "version": "latest"},
+                ],
+                "workflow_packs": [
+                    {"pack_id": "01JWPACKAAAAAAAAAAAAAAAAAA"[:26].ljust(26, "A")},  # dup-tolerated
+                    {
+                        "pack_id": "01JWPACKBBBBBBBBBBBBBBBBBB"[:26].ljust(26, "B"),
+                        "version": "2.0.0",
+                    },
+                ],
+            }
+        ),
+        created_by=user.id,
+    )
     db.add(bp)
     await db.flush()
 
-    long_slug = ("r355-" + "x" * 100)[:100]              # (6) column-max slug
+    long_slug = ("r355-" + "x" * 100)[:100]  # (6) column-max slug
     run = await provision_svc.create_provision_run(
-        db, blueprint_id=bp.id, name="R355 Co", slug=long_slug,
+        db,
+        blueprint_id=bp.id,
+        name="R355 Co",
+        slug=long_slug,
         idempotency_key=f"r355-{ULID()}",
-        partner_id=partner.id,                            # partner ON a global bp
-        actor=_actor(partner_user))
+        partner_id=partner.id,  # partner ON a global bp
+        actor=_actor(partner_user),
+    )
     await provision_svc.execute_provision_run(db, run.id)
     await db.refresh(run)
     assert run.status == "completed", run.steps
@@ -1459,33 +1538,51 @@ async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
     # (4): version pass-through semantics
     by_pack = {e[1]: e[2] for e in installed if e[0] == "skill"}
     assert by_pack["01JPACKBBBBBBBBBBBBBBBBBBB"] == "1.2.3"
-    assert by_pack["01JPACKCCCCCCCCCCCCCCCCCCC"] is None            # latest → None
+    assert by_pack["01JPACKCCCCCCCCCCCCCCCCCCC"] is None  # latest → None
     assert ("workflow", "01JWPACKBBBBBBBBBBBBBBBBBB"[:26].ljust(26, "B"), "2.0.0") in installed
 
     # (6)+(7): org slug bounded; exactly one org for this run
     orgs = (
-        await db.execute(select(Organization).where(
-            Organization.tenant_id == run.tenant_id))
-    ).scalars().all()
+        (await db.execute(select(Organization).where(Organization.tenant_id == run.tenant_id)))
+        .scalars()
+        .all()
+    )
     assert len(orgs) == 1 and len(orgs[0].slug) <= 100
 
     # (1): replaying the COMPLETED run returns it WITHOUT re-enqueueing
     pending_before = (
-        await db.execute(select(OutboxMessage).where(
-            OutboxMessage.topic == "provision.run",
-            OutboxMessage.status == "pending"))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.topic == "provision.run", OutboxMessage.status == "pending"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     replay = await provision_svc.create_provision_run(
-        db, blueprint_id=bp.id, name="R355 Co", slug=long_slug,
-        idempotency_key=run.idempotency_key, partner_id=partner.id,
-        actor=_actor(partner_user))
+        db,
+        blueprint_id=bp.id,
+        name="R355 Co",
+        slug=long_slug,
+        idempotency_key=run.idempotency_key,
+        partner_id=partner.id,
+        actor=_actor(partner_user),
+    )
     assert replay.id == run.id
     pending_after = (
-        await db.execute(select(OutboxMessage).where(
-            OutboxMessage.topic == "provision.run",
-            OutboxMessage.status == "pending"))
-    ).scalars().all()
-    assert len(pending_after) == len(pending_before)     # completed: no enqueue
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.topic == "provision.run", OutboxMessage.status == "pending"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(pending_after) == len(pending_before)  # completed: no enqueue
 
     # (3): nonexistent run id → silent no-op
     await provision_svc.execute_provision_run(db, str(ULID()))
@@ -1496,30 +1593,44 @@ async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
     # config-validation boundaries: feature_settings nests to depth 4, one
     # deeper is a 422; a malformed config is a 422; a partner-blueprint spoof
     # is a uniform 404 (statuses pinned)
-    deep_ok = {"a": {"b": {"c": "d"}}}                    # 4 levels incl. root
+    deep_ok = {"a": {"b": {"c": "d"}}}  # 4 levels incl. root
     provision_svc.validate_blueprint_config({"feature_settings": deep_ok})
     with pytest.raises(AppError) as e_deep:
         provision_svc.validate_blueprint_config(
-            {"feature_settings": {"a": {"b": {"c": {"d": "e"}}}}})
+            {"feature_settings": {"a": {"b": {"c": {"d": "e"}}}}}
+        )
     assert e_deep.value.status_code == 422
     with pytest.raises(AppError) as e_bad:
         provision_svc.validate_blueprint_config({"skill_packs": [{"nope": 1}]})
     assert e_bad.value.status_code == 422
-    other_partner = Partner(name=f"P2 {ULID()}", slug=f"p2-{str(ULID()).lower()[:10]}",
-                            currency="USD", status="active", partner_type="reseller",
-                            created_by=partner_user.id)
+    other_partner = Partner(
+        name=f"P2 {ULID()}",
+        slug=f"p2-{str(ULID()).lower()[:10]}",
+        currency="USD",
+        status="active",
+        partner_type="reseller",
+        created_by=partner_user.id,
+    )
     db.add(other_partner)
     await db.flush()
     scoped_bp = TenantBlueprint(
-        name=f"R355s {ULID()}", partner_id=partner.id,
-        config=provision_svc.validate_blueprint_config({}), created_by=user.id)
+        name=f"R355s {ULID()}",
+        partner_id=partner.id,
+        config=provision_svc.validate_blueprint_config({}),
+        created_by=user.id,
+    )
     db.add(scoped_bp)
     await db.flush()
     with pytest.raises(AppError) as e_404:
         await provision_svc.create_provision_run(
-            db, blueprint_id=scoped_bp.id, name="Spoof", slug=f"sp-{str(ULID()).lower()[:8]}",
-            idempotency_key=f"sp-{ULID()}", partner_id=other_partner.id,
-            actor=_actor(partner_user))
+            db,
+            blueprint_id=scoped_bp.id,
+            name="Spoof",
+            slug=f"sp-{str(ULID()).lower()[:8]}",
+            idempotency_key=f"sp-{ULID()}",
+            partner_id=other_partner.id,
+            actor=_actor(partner_user),
+        )
     assert e_404.value.status_code == 404
 
     # a pack that raises a non-dup AppError fails the run with a 422-coded
@@ -1531,13 +1642,21 @@ async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
     bp2 = TenantBlueprint(
         name=f"R355c {ULID()}",
         config=provision_svc.validate_blueprint_config(
-            {"skill_packs": [{"pack_id": "01JPACKDDDDDDDDDDDDDDDDDDD"}]}),
-        created_by=user.id)
+            {"skill_packs": [{"pack_id": "01JPACKDDDDDDDDDDDDDDDDDDD"}]}
+        ),
+        created_by=user.id,
+    )
     db.add(bp2)
     await db.flush()
     run2 = await provision_svc.create_provision_run(
-        db, blueprint_id=bp2.id, name="Corrupt", slug=f"co-{str(ULID()).lower()[:8]}",
-        idempotency_key=f"co-{ULID()}", partner_id=None, actor=_actor(user))
+        db,
+        blueprint_id=bp2.id,
+        name="Corrupt",
+        slug=f"co-{str(ULID()).lower()[:8]}",
+        idempotency_key=f"co-{ULID()}",
+        partner_id=None,
+        actor=_actor(user),
+    )
     await provision_svc.execute_provision_run(db, run2.id)
     await db.refresh(run2)
     assert run2.status == "failed" and "not installable" in (run2.error or "")
@@ -1545,29 +1664,40 @@ async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
     # heal the pack step and RESUME with the real step ledger intact: the
     # install must run against the RECOVERED org id (create_org step payload),
     # never a None from a flipped step matcher
-    monkeypatch.setattr(install_mod.InstallationService, "install_pack",
-                        fake_skill_install)
+    monkeypatch.setattr(install_mod.InstallationService, "install_pack", fake_skill_install)
     installed.clear()
     await provision_svc.execute_provision_run(db, run2.id)
     await db.refresh(run2)
     assert run2.status == "completed"
-    run2_org = next(st.get("org_id") for st in run2.steps
-                    if st.get("step") == "create_org" and st.get("status") == "done")
+    run2_org = next(
+        st.get("org_id")
+        for st in run2.steps
+        if st.get("step") == "create_org" and st.get("status") == "done"
+    )
     assert installed and installed[0][3] == run2_org and run2_org is not None
 
     # R84[M5]: a FAILED snapshot_config residue (no 'config' key) plus a done
     # one — resume must match ONLY the done+config entry, never KeyError-wedge
     run3 = await provision_svc.create_provision_run(
-        db, blueprint_id=bp2.id, name="Craft", slug=f"cr-{str(ULID()).lower()[:8]}",
-        idempotency_key=f"cr-{ULID()}", partner_id=None, actor=_actor(user))
+        db,
+        blueprint_id=bp2.id,
+        name="Craft",
+        slug=f"cr-{str(ULID()).lower()[:8]}",
+        idempotency_key=f"cr-{ULID()}",
+        partner_id=None,
+        actor=_actor(user),
+    )
     run3.status = "failed"
     run3.steps = [
         {"step": "snapshot_config", "status": "failed"},
-        {"step": "snapshot_config", "status": "done",
-         "config": provision_svc.validate_blueprint_config({})},
+        {
+            "step": "snapshot_config",
+            "status": "done",
+            "config": provision_svc.validate_blueprint_config({}),
+        },
     ]
     await db.flush()
-    await provision_svc.execute_provision_run(db, run3.id)   # no KeyError wedge
+    await provision_svc.execute_provision_run(db, run3.id)  # no KeyError wedge
     await db.refresh(run3)
     assert run3.status == "completed"
 
@@ -1576,8 +1706,14 @@ async def test_provision_gates_versions_and_resume_org_reuse(db, monkeypatch):
     await db.flush()
     with pytest.raises(AppError) as e_inact:
         await provision_svc.create_provision_run(
-            db, blueprint_id=bp2.id, name="Inact", slug=f"in-{str(ULID()).lower()[:8]}",
-            idempotency_key=f"in-{ULID()}", partner_id=None, actor=_actor(user))
+            db,
+            blueprint_id=bp2.id,
+            name="Inact",
+            slug=f"in-{str(ULID()).lower()[:8]}",
+            idempotency_key=f"in-{ULID()}",
+            partner_id=None,
+            actor=_actor(user),
+        )
     assert e_inact.value.status_code == 404
 
 
@@ -1614,6 +1750,7 @@ async def test_fresh_pending_domain_claim_not_evictable(db):
 class _Req383:
     class _State:
         request_id = "r383"
+
     state = _State()
 
 
@@ -1641,26 +1778,44 @@ async def test_whitelabel_api_handlers_cross_tenant_404(db):
     t1 = await _mk_tenant(db, user)
     t2 = await _mk_tenant(db, user)
     req = _Req383()
-    await set_override(db, t1.id, "custom_domain", value=True,
-                       enforcement="hard", expires_at=None,
-                       reason="r383", actor=_actor(user))
-    await set_override(db, t1.id, "white_label", value=True,
-                       enforcement="hard", expires_at=None,
-                       reason="r383", actor=_actor(user))
+    await set_override(
+        db,
+        t1.id,
+        "custom_domain",
+        value=True,
+        enforcement="hard",
+        expires_at=None,
+        reason="r383",
+        actor=_actor(user),
+    )
+    await set_override(
+        db,
+        t1.id,
+        "white_label",
+        value=True,
+        enforcement="hard",
+        expires_at=None,
+        reason="r383",
+        actor=_actor(user),
+    )
     from app.controlplane.services.entitlements import invalidate_cache
+
     await invalidate_cache(t1.id)
 
     # a domain owned by TENANT 2
     foreign, _ = await domain_svc.create_domain(
-        db, tenant_id=t2.id, hostname=f"f383-{str(ULID()).lower()[:8]}.example.com",
-        actor=_actor(user))
+        db,
+        tenant_id=t2.id,
+        hostname=f"f383-{str(ULID()).lower()[:8]}.example.com",
+        actor=_actor(user),
+    )
 
     from app.controlplane.api.whitelabel import VerifyDomainRequest
 
     with pytest.raises(AppError) as e_v:
-        await verify_ep(t1.id, foreign.id,
-                        VerifyDomainRequest(token="tok-r383-aaaa"), req,
-                        user=user, db=db)
+        await verify_ep(
+            t1.id, foreign.id, VerifyDomainRequest(token="tok-r383-aaaa"), req, user=user, db=db
+        )
     assert e_v.value.status_code == 404 and e_v.value.code == "DOMAIN_INVALID"
     for ep in (activate_ep, disable_domain, delete_domain):
         with pytest.raises(AppError) as e404:
@@ -1670,8 +1825,8 @@ async def test_whitelabel_api_handlers_cross_tenant_404(db):
 
     # branding handler round-trip (tenant actor threading + response shape)
     resp = await update_branding(
-        t1.id, BrandingRequest(login_tagline="Hello R383"), req,
-        user=user, db=db)
+        t1.id, BrandingRequest(login_tagline="Hello R383"), req, user=user, db=db
+    )
     assert resp.data["login_tagline"] == "Hello R383"
     assert resp.data["theme_tokens"] == {}
 
@@ -1700,48 +1855,91 @@ async def test_export_sections_are_tenant_scoped(db, monkeypatch):
 
     async def seed(tenant_id: str, tag: str) -> dict:
         inv_total = 111001 if tag == "alpha" else 112002  # unique invoice markers
-        inv = Invoice(tenant_id=tenant_id, currency="USD", status="open",
-                      subtotal_minor=inv_total, total_minor=inv_total,
-                      amount_due_minor=inv_total, finalized_at=datetime.now(UTC))
+        inv = Invoice(
+            tenant_id=tenant_id,
+            currency="USD",
+            status="open",
+            subtotal_minor=inv_total,
+            total_minor=inv_total,
+            amount_due_minor=inv_total,
+            finalized_at=datetime.now(UTC),
+        )
         db.add(inv)
         await db.flush()
-        pay = PaymentRecord(tenant_id=tenant_id, invoice_id=inv.id, amount_minor=1000, currency="USD",
-                            method="manual", status="succeeded",
-                            received_at=datetime.now(UTC))
+        pay = PaymentRecord(
+            tenant_id=tenant_id,
+            invoice_id=inv.id,
+            amount_minor=1000,
+            currency="USD",
+            method="manual",
+            status="succeeded",
+            received_at=datetime.now(UTC),
+        )
         amount = 771001 if tag == "alpha" else 772002  # unique ledger markers
-        ledger = CreditLedgerEntry(tenant_id=tenant_id, currency="USD",
-                                   entry_type="manual_adjustment", amount_minor=amount,
-                                   balance_after_minor=amount, reason=f"seed-{tag}")
-        grant = LicenseGrant(tenant_id=tenant_id, product_type="skill_pack",
-                             product_id=str(ULID()), scope="tenant", status="active",
-                             source="manual_grant")
+        ledger = CreditLedgerEntry(
+            tenant_id=tenant_id,
+            currency="USD",
+            entry_type="manual_adjustment",
+            amount_minor=amount,
+            balance_after_minor=amount,
+            reason=f"seed-{tag}",
+        )
+        grant = LicenseGrant(
+            tenant_id=tenant_id,
+            product_type="skill_pack",
+            product_id=str(ULID()),
+            scope="tenant",
+            status="active",
+            source="manual_grant",
+        )
         # content_license is rare in the shared dev DB; the EXACT per-tenant
         # quantity is the marker — a tenant_id != mutant aggregates everyone
         # else's rows and can no longer produce exactly this sum.
         qty = 31 if tag == "alpha" else 37
-        usage = UsageEvent(tenant_id=tenant_id, org_id=str(ULID()),
-                           usage_type="content_license", quantity=_Dec(qty),
-                           unit="licenses", occurred_at=datetime.now(UTC),
-                           source="manual", metadata_={})
-        dom = TenantDomain(tenant_id=tenant_id, verification_token_hash="x" * 64,
-                           hostname=f"exp-{tag}-{str(ULID()).lower()[:8]}.example.com")
+        usage = UsageEvent(
+            tenant_id=tenant_id,
+            org_id=str(ULID()),
+            usage_type="content_license",
+            quantity=_Dec(qty),
+            unit="licenses",
+            occurred_at=datetime.now(UTC),
+            source="manual",
+            metadata_={},
+        )
+        dom = TenantDomain(
+            tenant_id=tenant_id,
+            verification_token_hash="x" * 64,
+            hostname=f"exp-{tag}-{str(ULID()).lower()[:8]}.example.com",
+        )
         db.add_all([pay, ledger, grant, usage, dom])
         await db.flush()
-        return {"invoice": inv.id, "payment": pay.id, "grant": grant.product_id,
-                "domain": dom.hostname, "ledger": str(amount), "inv_total": inv_total}
+        return {
+            "invoice": inv.id,
+            "payment": pay.id,
+            "grant": grant.product_id,
+            "domain": dom.hostname,
+            "ledger": str(amount),
+            "inv_total": inv_total,
+        }
+
     a = await seed(ten_a.id, "alpha")
     b = await seed(ten_b.id, "bravo")
     # a CANCELLED subscription for tenant A must be excluded (L529)
     from app.controlplane.models.plan import PlanVersion as _Pv
 
-    pv_id = (
-        await db.execute(select(_Pv.id).limit(1))
-    ).scalar_one_or_none()
+    pv_id = (await db.execute(select(_Pv.id).limit(1))).scalar_one_or_none()
     assert pv_id is not None, "dev DB has no plan versions seeded"
-    db.add(Subscription(tenant_id=ten_a.id, plan_version_id=pv_id,
-                        status="cancelled", currency="USD", interval="month",
-                        current_period_start=datetime.now(UTC),
-                        current_period_end=datetime.now(UTC) + timedelta(days=30)))
+    db.add(
+        Subscription(
+            tenant_id=ten_a.id,
+            plan_version_id=pv_id,
+            status="cancelled",
+            currency="USD",
+            interval="month",
+            current_period_start=datetime.now(UTC),
+            current_period_end=datetime.now(UTC) + timedelta(days=30),
+        )
+    )
     await db.flush()
 
     captured: dict = {}

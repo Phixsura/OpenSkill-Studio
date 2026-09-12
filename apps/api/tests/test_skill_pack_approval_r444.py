@@ -28,8 +28,13 @@ async def db():
 
 
 async def _user(db):
-    u = User(email=f"r444-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R444", role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r444-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R444",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -38,9 +43,12 @@ async def _user(db):
 async def _org(db, owner):
     from app.services.organization import OrgService
 
-    o = await OrgService(db).create(name=f"R444 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r444-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R444 {uuid.uuid4().hex[:5]}",
+        slug=f"r444-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o
 
@@ -112,8 +120,11 @@ async def test_approval_state_machine_r444(db):
 
     from app.models.notification import Notification
 
-    notifs = (await db.execute(
-        select(Notification).where(Notification.user_id == creator.id))).scalars().all()
+    notifs = (
+        (await db.execute(select(Notification).where(Notification.user_id == creator.id)))
+        .scalars()
+        .all()
+    )
     types = {n.type for n in notifs}
     assert "pack.approved" in types
     assert "pack.rejected" in types
@@ -132,9 +143,17 @@ async def test_no_self_notification_r444(db):
     pack = await svc.create_pack(org.id, owner.id, name="Self")
     await svc.submit_for_review(pack.id, org.id, owner.id)
     await svc.approve_pack(pack.id, org.id, owner.id)  # actor == creator
-    notifs = (await db.execute(
-        select(Notification).where(Notification.user_id == owner.id,
-                                   Notification.type == "pack.approved"))).scalars().all()
+    notifs = (
+        (
+            await db.execute(
+                select(Notification).where(
+                    Notification.user_id == owner.id, Notification.type == "pack.approved"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert notifs == []
 
     # a self-REJECT likewise creates no notification (kills the reject
@@ -143,7 +162,15 @@ async def test_no_self_notification_r444(db):
     pack2 = await svc.create_pack(org.id, owner.id, name="Self2")
     await svc.submit_for_review(pack2.id, org.id, owner.id)
     await svc.reject_pack(pack2.id, org.id, reason="nope", actor_id=owner.id)
-    rej = (await db.execute(
-        select(Notification).where(Notification.user_id == owner.id,
-                                   Notification.type == "pack.rejected"))).scalars().all()
+    rej = (
+        (
+            await db.execute(
+                select(Notification).where(
+                    Notification.user_id == owner.id, Notification.type == "pack.rejected"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert rej == []

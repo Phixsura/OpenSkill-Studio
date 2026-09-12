@@ -7,6 +7,7 @@ is strongest; Decimal-heavy paths are bounded via int proxies.
 
 Run: crosshair check /tmp/crosshair_contracts.py --per_condition_timeout=20
 """
+
 from decimal import Decimal
 
 from app.controlplane.services.billing import _is_leap, _month_len

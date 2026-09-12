@@ -171,10 +171,14 @@ async def test_legal_transition_matrix(db):
     from app.controlplane.models.audit import CommercialAuditEvent
 
     actions = (
-        await db.execute(
-            _sel(CommercialAuditEvent.action).where(
-                CommercialAuditEvent.tenant_id == tenant.id))
-    ).scalars().all()
+        (
+            await db.execute(
+                _sel(CommercialAuditEvent.action).where(CommercialAuditEvent.tenant_id == tenant.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert "tenant.suspended" in actions
     # EXACTLY one reactivation in the chain (suspended→active); the other
     # →ACTIVE transitions (trial→, past_due→) are plain status_changed
@@ -945,31 +949,37 @@ async def test_member_management_reject_arcs(db):
 
     with pytest.raises(AppError) as e:
         await tenant_svc.add_tenant_member(
-            db, tenant, user_id=owner.id, role="wizard", actor=_actor(owner))
+            db, tenant, user_id=owner.id, role="wizard", actor=_actor(owner)
+        )
     assert e.value.code == "VALIDATION_ERROR" and e.value.status_code == 422
 
     with pytest.raises(AppError) as e:
         await tenant_svc.add_tenant_member(
-            db, tenant, user_id=str(ULID()), role="billing_admin", actor=_actor(owner))
+            db, tenant, user_id=str(ULID()), role="billing_admin", actor=_actor(owner)
+        )
     assert e.value.status_code == 404
 
     member2 = await tenant_svc.add_tenant_member(
-        db, tenant, user_id=other_owner.id, role="billing_admin", actor=_actor(owner))
-    with pytest.raises(AppError) as e:                     # duplicate
+        db, tenant, user_id=other_owner.id, role="billing_admin", actor=_actor(owner)
+    )
+    with pytest.raises(AppError) as e:  # duplicate
         await tenant_svc.add_tenant_member(
-            db, tenant, user_id=other_owner.id, role="billing_admin", actor=_actor(owner))
+            db, tenant, user_id=other_owner.id, role="billing_admin", actor=_actor(owner)
+        )
     assert e.value.code == "TENANT_MEMBER_EXISTS" and e.value.status_code == 409
 
-    with pytest.raises(AppError) as e:                     # unknown member id
+    with pytest.raises(AppError) as e:  # unknown member id
         await tenant_svc.remove_tenant_member(db, tenant, str(ULID()), actor=_actor(owner))
     assert e.value.status_code == 404
 
     other_member = (
         await db.execute(
             select(tenant_svc.TenantMember).where(
-                tenant_svc.TenantMember.tenant_id == other_tenant.id))
+                tenant_svc.TenantMember.tenant_id == other_tenant.id
+            )
+        )
     ).scalar_one()
-    with pytest.raises(AppError) as e:                     # cross-tenant id → 404
+    with pytest.raises(AppError) as e:  # cross-tenant id → 404
         await tenant_svc.remove_tenant_member(db, tenant, other_member.id, actor=_actor(owner))
     assert e.value.status_code == 404
 
@@ -1012,18 +1022,21 @@ async def test_update_tenant_http_null_and_tz_ratelimit(db):
             assert r.json()["error"]["code"] == "VALIDATION_ERROR"
 
             # a same-value timezone round-trip must NOT consume the budget
-            same = await c.patch(f"/api/v1/tenants/{tid}", headers=hdr,
-                                 json={"timezone": tenant.timezone})
+            same = await c.patch(
+                f"/api/v1/tenants/{tid}", headers=hdr, json={"timezone": tenant.timezone}
+            )
             assert same.status_code == 200, same.text
 
             # first real change lands
-            r1 = await c.patch(f"/api/v1/tenants/{tid}", headers=hdr,
-                               json={"timezone": "America/New_York"})
+            r1 = await c.patch(
+                f"/api/v1/tenants/{tid}", headers=hdr, json={"timezone": "America/New_York"}
+            )
             assert r1.status_code == 200, r1.text
 
             # second change within 30 days → 422 (quota-window anchor guard)
-            r2 = await c.patch(f"/api/v1/tenants/{tid}", headers=hdr,
-                               json={"timezone": "Asia/Tokyo"})
+            r2 = await c.patch(
+                f"/api/v1/tenants/{tid}", headers=hdr, json={"timezone": "Asia/Tokyo"}
+            )
             assert r2.status_code == 422, r2.text
             assert "30 days" in r2.json()["error"]["message"]
     finally:
@@ -1056,13 +1069,21 @@ async def test_impersonation_grant_mint_is_creator_only_revoke_is_any_admin(db):
     admin_a = await _mk_user(db)
     admin_b = await _mk_user(db)
     target = await _mk_user(db)
-    db.add_all([
-        PlatformRoleAssignment(user_id=admin_a.id, role="platform_support"),
-        PlatformRoleAssignment(user_id=admin_b.id, role="platform_support"),
-    ])
+    db.add_all(
+        [
+            PlatformRoleAssignment(user_id=admin_a.id, role="platform_support"),
+            PlatformRoleAssignment(user_id=admin_b.id, role="platform_support"),
+        ]
+    )
     grant = await tenant_svc.create_impersonation_grant(
-        db, platform_user=admin_a, target_user_id=target.id, tenant_id=None,
-        reason="ticket", expires_in_minutes=30, actor=_actor(admin_a))
+        db,
+        platform_user=admin_a,
+        target_user_id=target.id,
+        tenant_id=None,
+        reason="ticket",
+        expires_in_minutes=30,
+        actor=_actor(admin_a),
+    )
     await db.commit()
     gid = grant.id
     tok_b = create_access_token(admin_b.id, admin_b.email, admin_b.role.value)
@@ -1083,16 +1104,20 @@ async def test_impersonation_grant_mint_is_creator_only_revoke_is_any_admin(db):
             # A's own mint works (proves the grant is live, not just absent
             # for B) — do this BEFORE B revokes, since revoke disables it
             tok_a = create_access_token(admin_a.id, admin_a.email, admin_a.role.value)
-            r = await c.post(f"/api/v1/platform/impersonation-grants/{gid}/token",
-                             headers={"Authorization": f"Bearer {tok_a}"})
+            r = await c.post(
+                f"/api/v1/platform/impersonation-grants/{gid}/token",
+                headers={"Authorization": f"Bearer {tok_a}"},
+            )
             assert r.status_code == 200, r.text
             # admin B CAN revoke A's grant → 200 (deliberate: defensive
             # incident-response capability; revoke only sets revoked_at)
             r = await c.post(f"/api/v1/platform/impersonation-grants/{gid}/revoke", headers=hb)
             assert r.status_code == 200, r.text
             # once revoked, even the creator can no longer mint from it
-            r = await c.post(f"/api/v1/platform/impersonation-grants/{gid}/token",
-                             headers={"Authorization": f"Bearer {tok_a}"})
+            r = await c.post(
+                f"/api/v1/platform/impersonation-grants/{gid}/token",
+                headers={"Authorization": f"Bearer {tok_a}"},
+            )
             assert r.status_code != 200, r.text
     finally:
         app.router.lifespan_context = orig
@@ -1111,8 +1136,13 @@ async def test_tenant_resolution_and_gate_status_codes(db):
     tenant_b = await _mk_tenant(db, user)
 
     def _org(t, tag):
-        return Organization(name=f"O{tag}", slug=f"o{tag}-{str(ULID()).lower()}",
-                            status=OrgStatus.ACTIVE, tenant_id=t.id, created_by=user.id)
+        return Organization(
+            name=f"O{tag}",
+            slug=f"o{tag}-{str(ULID()).lower()}",
+            status=OrgStatus.ACTIVE,
+            tenant_id=t.id,
+            created_by=user.id,
+        )
 
     org_a, org_b = _org(tenant_a, "a"), _org(tenant_b, "b")
     db.add_all([org_a, org_b])
@@ -1137,12 +1167,10 @@ async def test_tenant_resolution_and_gate_status_codes(db):
     # into the DB and defeat the guard we're testing)
     from types import SimpleNamespace
 
-    await tenant_svc.transition_status(
-        db, tenant_b, TenantStatus.ACTIVE, actor=_actor(user))
+    await tenant_svc.transition_status(db, tenant_b, TenantStatus.ACTIVE, actor=_actor(user))
     stale = SimpleNamespace(id=tenant_b.id, status=TenantStatus.TRIAL)
     with pytest.raises(AppError) as e409:
-        await tenant_svc.transition_status(
-            db, stale, TenantStatus.ACTIVE, actor=_actor(user))
+        await tenant_svc.transition_status(db, stale, TenantStatus.ACTIVE, actor=_actor(user))
     assert e409.value.status_code == 409
 
 
@@ -1163,52 +1191,63 @@ async def test_tenants_api_handlers_direct(db):
 
     user_a = await _mk_user(db)
     user_b = await _mk_user(db)
-    t1 = await _mk_tenant(db, user_a)                  # A owner
-    t2 = await _mk_tenant(db, user_b)                  # B's tenant — invisible to A
-    db.add(TenantMember(tenant_id=t2.id, user_id=user_a.id,
-                        role="billing_admin", created_by=user_b.id))
+    t1 = await _mk_tenant(db, user_a)  # A owner
+    t2 = await _mk_tenant(db, user_b)  # B's tenant — invisible to A
+    db.add(
+        TenantMember(tenant_id=t2.id, user_id=user_a.id, role="billing_admin", created_by=user_b.id)
+    )
     await db.flush()
 
     resp = await my_tenants(user=user_a, db=db)
     mine = {d["id"]: d["my_role"] for d in resp.data}
     assert mine[t1.id] == "owner"
-    assert mine[t2.id] == "billing_admin"              # A's OWN role on t2
+    assert mine[t2.id] == "billing_admin"  # A's OWN role on t2
     resp_b = await my_tenants(user=user_b, db=db)
     ids_b = {d["id"] for d in resp_b.data}
-    assert t1.id not in ids_b                          # B never sees A's tenant
+    assert t1.id not in ids_b  # B never sees A's tenant
 
     # audit feed: one visible + one platform-internal + one other-action
     for action in ("tenant.updated", "tenant.updated", "branding.updated"):
-        await record_audit(db, actor=_actor(user_a), action=action,
-                           target_type="tenant", target_id=t1.id,
-                           tenant_id=t1.id)
-    await record_audit(db, actor=_actor(user_a), action="pricing.cost_rate_created",
-                       target_type="cost_rate", target_id=str(ULID()),
-                       tenant_id=t1.id)               # platform-internal
+        await record_audit(
+            db,
+            actor=_actor(user_a),
+            action=action,
+            target_type="tenant",
+            target_id=t1.id,
+            tenant_id=t1.id,
+        )
+    await record_audit(
+        db,
+        actor=_actor(user_a),
+        action="pricing.cost_rate_created",
+        target_type="cost_rate",
+        target_id=str(ULID()),
+        tenant_id=t1.id,
+    )  # platform-internal
     await db.flush()
 
-    feed = await tenant_audit_events(t1.id, action=None, page=1, per_page=50,
-                                     user=user_a, db=db)
+    feed = await tenant_audit_events(t1.id, action=None, page=1, per_page=50, user=user_a, db=db)
     actions = [e.action for e in feed.data]
     assert "pricing.cost_rate_created" not in actions  # never tenant-visible
     assert actions.count("tenant.updated") >= 2
     # action filter narrows
-    feed_f = await tenant_audit_events(t1.id, action="branding.updated",
-                                       page=1, per_page=50, user=user_a, db=db)
+    feed_f = await tenant_audit_events(
+        t1.id, action="branding.updated", page=1, per_page=50, user=user_a, db=db
+    )
     assert {e.action for e in feed_f.data} == {"branding.updated"}
     # exact pagination: per_page 2 of >=4 visible rows → page 2 disjoint
-    p1 = await tenant_audit_events(t1.id, action=None, page=1, per_page=2,
-                                   user=user_a, db=db)
-    p2 = await tenant_audit_events(t1.id, action=None, page=2, per_page=2,
-                                   user=user_a, db=db)
+    p1 = await tenant_audit_events(t1.id, action=None, page=1, per_page=2, user=user_a, db=db)
+    p2 = await tenant_audit_events(t1.id, action=None, page=2, per_page=2, user=user_a, db=db)
     assert len(p1.data) == 2
     assert {e.id for e in p1.data}.isdisjoint({e.id for e in p2.data})
     assert p1.meta.has_more is True
     # exact boundary on the LAST page (total includes tenant.created etc.)
     import math
+
     last = math.ceil(p1.meta.total / 2)
-    p_last = await tenant_audit_events(t1.id, action=None, page=last, per_page=2,
-                                       user=user_a, db=db)
+    p_last = await tenant_audit_events(
+        t1.id, action=None, page=last, per_page=2, user=user_a, db=db
+    )
     assert p_last.meta.has_more is False
     assert len(p_last.data) >= 1
 
@@ -1226,21 +1265,44 @@ async def test_tenants_api_handlers_direct(db):
     from app.controlplane.services.plans import set_override
     from app.models.organization import Organization, OrgStatus
 
-    await set_override(db, t1.id, "max_organizations", value=1,
-                       enforcement="hard", expires_at=None,
-                       reason="r379", actor=_actor(user_a))
-    db.add_all([
-        Organization(name="Arch", slug=f"ar-{str(ULID()).lower()}",
-                     status=OrgStatus.ARCHIVED, tenant_id=t1.id, created_by=user_a.id),
-        Organization(name="Other", slug=f"ot-{str(ULID()).lower()}",
-                     status=OrgStatus.ACTIVE, tenant_id=t2.id, created_by=user_b.id),
-    ])
+    await set_override(
+        db,
+        t1.id,
+        "max_organizations",
+        value=1,
+        enforcement="hard",
+        expires_at=None,
+        reason="r379",
+        actor=_actor(user_a),
+    )
+    db.add_all(
+        [
+            Organization(
+                name="Arch",
+                slug=f"ar-{str(ULID()).lower()}",
+                status=OrgStatus.ARCHIVED,
+                tenant_id=t1.id,
+                created_by=user_a.id,
+            ),
+            Organization(
+                name="Other",
+                slug=f"ot-{str(ULID()).lower()}",
+                status=OrgStatus.ACTIVE,
+                tenant_id=t2.id,
+                created_by=user_b.id,
+            ),
+        ]
+    )
     await db.flush()
     from app.controlplane.services.entitlements import invalidate_cache
+
     await invalidate_cache(t1.id)
     ok = await create_org_under_tenant(
-        t1.id, CreateOrgUnderTenantRequest(name="First Real", slug=f"fr-{str(ULID()).lower()[:10]}"),
-        user=user_a, db=db)          # 0 live orgs counted → under the cap of 1
+        t1.id,
+        CreateOrgUnderTenantRequest(name="First Real", slug=f"fr-{str(ULID()).lower()[:10]}"),
+        user=user_a,
+        db=db,
+    )  # 0 live orgs counted → under the cap of 1
     ok_data = ok if isinstance(ok, dict) else ok.data
     assert (ok_data.get("data") or ok_data)["id"]
 
@@ -1257,9 +1319,6 @@ async def test_has_platform_role_with_multiple_matching_roles(db):
     db.add(PlatformRoleAssignment(user_id=user.id, role="platform_support"))
     db.add(PlatformRoleAssignment(user_id=user.id, role="billing_admin"))
     await db.flush()
-    assert (
-        await tenant_svc.has_platform_role(db, user, "platform_support", "billing_admin")
-        is True
-    )
+    assert await tenant_svc.has_platform_role(db, user, "platform_support", "billing_admin") is True
     # non-matching query still False for a multi-role user
     assert await tenant_svc.has_platform_role(db, user, "platform_admin") is False

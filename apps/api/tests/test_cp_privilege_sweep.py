@@ -89,23 +89,37 @@ async def test_every_tenant_route_rejects_foreign_tenant_owner():
     await engine.dispose(close=False)
     async with AsyncSessionLocal() as db:
         owner_a = User(
-            email=f"xta-{ULID()}@test.com", email_verified=True,
-            password_hash=hash_password("Test1234!"), display_name="A",
-            role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+            email=f"xta-{ULID()}@test.com",
+            email_verified=True,
+            password_hash=hash_password("Test1234!"),
+            display_name="A",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         owner_b = User(
-            email=f"xtb-{ULID()}@test.com", email_verified=True,
-            password_hash=hash_password("Test1234!"), display_name="B",
-            role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+            email=f"xtb-{ULID()}@test.com",
+            email_verified=True,
+            password_hash=hash_password("Test1234!"),
+            display_name="B",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add_all([owner_a, owner_b])
         await db.flush()
         await tenant_svc.create_tenant(
-            db, name=f"XT-A {ULID()}", slug=f"xta-{str(ULID()).lower()}",
+            db,
+            name=f"XT-A {ULID()}",
+            slug=f"xta-{str(ULID()).lower()}",
             actor=Actor(user_id=owner_a.id, type="platform"),
-            owner_user_id=owner_a.id)
+            owner_user_id=owner_a.id,
+        )
         tenant_b = await tenant_svc.create_tenant(
-            db, name=f"XT-B {ULID()}", slug=f"xtb-{str(ULID()).lower()}",
+            db,
+            name=f"XT-B {ULID()}",
+            slug=f"xtb-{str(ULID()).lower()}",
             actor=Actor(user_id=owner_b.id, type="platform"),
-            owner_user_id=owner_b.id)
+            owner_user_id=owner_b.id,
+        )
         await db.commit()
         token_a = create_access_token(owner_a.id, owner_a.email, "student")
         tenant_b_id = tenant_b.id
@@ -158,14 +172,20 @@ async def test_every_partner_route_rejects_foreign_partner_member():
     await engine.dispose(close=False)
     async with AsyncSessionLocal() as db:
         user_a = User(
-            email=f"pa-{ULID()}@test.com", email_verified=True,
-            password_hash=hash_password("Test1234!"), display_name="PA",
-            role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+            email=f"pa-{ULID()}@test.com",
+            email_verified=True,
+            password_hash=hash_password("Test1234!"),
+            display_name="PA",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(user_a)
-        partner_a = Partner(name="PA", slug=f"pa-{str(ULID()).lower()}",
-                            partner_type="reseller", currency="USD")
-        partner_b = Partner(name="PB", slug=f"pb-{str(ULID()).lower()}",
-                            partner_type="reseller", currency="USD")
+        partner_a = Partner(
+            name="PA", slug=f"pa-{str(ULID()).lower()}", partner_type="reseller", currency="USD"
+        )
+        partner_b = Partner(
+            name="PB", slug=f"pb-{str(ULID()).lower()}", partner_type="reseller", currency="USD"
+        )
         db.add_all([partner_a, partner_b])
         await db.flush()
         db.add(PartnerMember(partner_id=partner_a.id, user_id=user_a.id, role="admin"))

@@ -34,25 +34,40 @@ async def db():
 async def _org(db):
     from app.services.organization import OrgService
 
-    owner = User(email=f"r445-{uuid.uuid4().hex[:10]}@t.com",
-                 password_hash=hash_password("Test123!"), display_name="R445",
-                 role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    owner = User(
+        email=f"r445-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R445",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(owner)
     await db.flush()
-    o = await OrgService(db).create(name=f"R445 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r445-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R445 {uuid.uuid4().hex[:5]}",
+        slug=f"r445-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o
 
 
 async def _pack(db, org, name, **kw):
-    defaults = dict(status=PackStatus.PUBLISHED, visibility=PackVisibility.PUBLIC,
-                    review_status="approved", scenario_tags=[], tool_tags=[],
-                    capability_tags=[], workflow_type="production", install_count=0)
+    defaults = dict(
+        status=PackStatus.PUBLISHED,
+        visibility=PackVisibility.PUBLIC,
+        review_status="approved",
+        scenario_tags=[],
+        tool_tags=[],
+        capability_tags=[],
+        workflow_type="production",
+        install_count=0,
+    )
     defaults.update(kw)
-    p = WorkflowPack(owner_org_id=org.id, name=name, slug=f"{name.lower()}-{uuid.uuid4().hex[:8]}",
-                     **defaults)
+    p = WorkflowPack(
+        owner_org_id=org.id, name=name, slug=f"{name.lower()}-{uuid.uuid4().hex[:8]}", **defaults
+    )
     db.add(p)
     await db.flush()
     return p
@@ -84,10 +99,24 @@ async def test_filters_and_search_escape_r445(db):
     svc = WorkflowRegistryService(db)
     sc = f"sc-{uuid.uuid4().hex[:10]}"
     tl = f"tl-{uuid.uuid4().hex[:10]}"
-    await _pack(db, org, "Alpha", scenario_tags=[sc, "marketing"], tool_tags=["comfyui"],
-                capability_tags=["image_generation"], workflow_type="production")
-    await _pack(db, org, "Beta", scenario_tags=[sc, "research"], tool_tags=[tl],
-                capability_tags=["video_generation"], workflow_type="learning")
+    await _pack(
+        db,
+        org,
+        "Alpha",
+        scenario_tags=[sc, "marketing"],
+        tool_tags=["comfyui"],
+        capability_tags=["image_generation"],
+        workflow_type="production",
+    )
+    await _pack(
+        db,
+        org,
+        "Beta",
+        scenario_tags=[sc, "research"],
+        tool_tags=[tl],
+        capability_tags=["video_generation"],
+        workflow_type="learning",
+    )
 
     # scenario / tool / workflow_type filters (scoped to this test's tags)
     assert [p.name for p in (await svc.search_packs(scenario=sc, tool="comfyui"))[0]] == ["Alpha"]
@@ -111,12 +140,30 @@ async def test_input_output_type_filter_r445(db):
     svc = WorkflowRegistryService(db)
     tag = f"io-{uuid.uuid4().hex[:12]}"
     # img->vid, txt->img, and a pack with neither matching schema
-    await _pack(db, org, "ImgVid", scenario_tags=[tag],
-                input_schema=[{"type": "image"}], output_schema=[{"type": "video"}])
-    await _pack(db, org, "TxtImg", scenario_tags=[tag],
-                input_schema=[{"type": "text"}], output_schema=[{"type": "image"}])
-    await _pack(db, org, "AudAud", scenario_tags=[tag],
-                input_schema=[{"type": "audio"}], output_schema=[{"type": "audio"}])
+    await _pack(
+        db,
+        org,
+        "ImgVid",
+        scenario_tags=[tag],
+        input_schema=[{"type": "image"}],
+        output_schema=[{"type": "video"}],
+    )
+    await _pack(
+        db,
+        org,
+        "TxtImg",
+        scenario_tags=[tag],
+        input_schema=[{"type": "text"}],
+        output_schema=[{"type": "image"}],
+    )
+    await _pack(
+        db,
+        org,
+        "AudAud",
+        scenario_tags=[tag],
+        input_schema=[{"type": "audio"}],
+        output_schema=[{"type": "audio"}],
+    )
 
     # input_type filter: only packs consuming 'image'
     r_in = (await svc.search_packs(scenario=tag, input_type="image"))[0]
@@ -140,12 +187,20 @@ async def test_input_output_type_filter_r445(db):
     # image-in packs under a fresh tag, page 2 per_page 2 → the 3rd by name
     ptag = f"iop-{uuid.uuid4().hex[:12]}"
     for nm in ("Pa", "Pb", "Pc"):
-        await _pack(db, org, nm, scenario_tags=[ptag], input_schema=[{"type": "image"}],
-                    output_schema=[{"type": "image"}])
-    page1 = (await svc.search_packs(scenario=ptag, input_type="image", sort="name",
-                                    page=1, per_page=2))[0]
-    page2 = (await svc.search_packs(scenario=ptag, input_type="image", sort="name",
-                                    page=2, per_page=2))[0]
+        await _pack(
+            db,
+            org,
+            nm,
+            scenario_tags=[ptag],
+            input_schema=[{"type": "image"}],
+            output_schema=[{"type": "image"}],
+        )
+    page1 = (
+        await svc.search_packs(scenario=ptag, input_type="image", sort="name", page=1, per_page=2)
+    )[0]
+    page2 = (
+        await svc.search_packs(scenario=ptag, input_type="image", sort="name", page=2, per_page=2)
+    )[0]
     assert [p.name for p in page1] == ["Pa", "Pb"]
     assert [p.name for p in page2] == ["Pc"]
 

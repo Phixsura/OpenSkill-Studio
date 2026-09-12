@@ -2084,10 +2084,18 @@ async def test_create_listing_param_validation(db):
 
     def base(**kw):
         d = dict(
-            seller_org_id=seller_org.id, product_type="skill_pack", product_id=pack.id,
-            offer_type="paid", price_minor=1000, currency="USD",
-            license_scope="organization", seat_limit=None, upgrade_policy="all_versions",
-            included_plan_keys=[], bill_via_invoice=False, actor=a,
+            seller_org_id=seller_org.id,
+            product_type="skill_pack",
+            product_id=pack.id,
+            offer_type="paid",
+            price_minor=1000,
+            currency="USD",
+            license_scope="organization",
+            seat_limit=None,
+            upgrade_policy="all_versions",
+            included_plan_keys=[],
+            bill_via_invoice=False,
+            actor=a,
         )
         d.update(kw)
         return d
@@ -2100,8 +2108,8 @@ async def test_create_listing_param_validation(db):
     await rejects(product_type="quantum_pack")
     await rejects(offer_type="barter")
     await rejects(license_scope="galactic")
-    await rejects(offer_type="paid", price_minor=None)         # paid needs price
-    await rejects(offer_type="paid", currency=None)            # paid needs currency
+    await rejects(offer_type="paid", price_minor=None)  # paid needs price
+    await rejects(offer_type="paid", currency=None)  # paid needs currency
     await rejects(license_scope="seat_limited", seat_limit=None)  # seat_limited needs limit
     # R135: seat_limit on a non-seat_limited scope = silently-unlimited seats
     await rejects(license_scope="organization", seat_limit=10)
@@ -2127,25 +2135,36 @@ async def test_revoke_grant_arcs(db):
     assert e.value.code == "LICENSE_NOT_FOUND" and e.value.status_code == 404
 
     purchase = await market_svc.create_purchase(
-        db, listing_id=listing.id, buyer_org_id=buyer_org.id,
-        purchaser=_actor(buyer_user), payment_method="credit",
-        idempotency_key=f"rv-{ULID()}")
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="credit",
+        idempotency_key=f"rv-{ULID()}",
+    )
     await credit_svc.debit(
-        db, buyer_tenant.id, "USD", purchase.amount_minor,
-        reference_type="purchase", reference_id=purchase.id,
-        idempotency_key=f"purchase:{purchase.id}")
+        db,
+        buyer_tenant.id,
+        "USD",
+        purchase.amount_minor,
+        reference_type="purchase",
+        reference_id=purchase.id,
+        idempotency_key=f"purchase:{purchase.id}",
+    )
     purchase = await market_svc.mark_purchase_paid(
-        db, purchase_id=purchase.id, payment_ref=None, actor=_actor(buyer_user))
+        db, purchase_id=purchase.id, payment_ref=None, actor=_actor(buyer_user)
+    )
     grant = (
         await db.execute(select(LicenseGrant).where(LicenseGrant.purchase_id == purchase.id))
     ).scalar_one()
 
     revoked = await market_svc.revoke_grant(
-        db, grant.id, reason="chargeback", actor=_actor(seller_user))
+        db, grant.id, reason="chargeback", actor=_actor(seller_user)
+    )
     assert revoked.status == "revoked"
     assert revoked.revoked_at is not None and revoked.revoke_reason == "chargeback"
 
-    with pytest.raises(AppError) as e:                     # second revoke → 409
+    with pytest.raises(AppError) as e:  # second revoke → 409
         await market_svc.revoke_grant(db, grant.id, reason="again", actor=_actor(seller_user))
     assert e.value.code == "PURCHASE_STATUS_CONFLICT" and e.value.status_code == 409
 
@@ -2163,27 +2182,39 @@ async def test_purchase_cross_currency_arcs(db):
     buyer_user = await _mk_user(db)
     seller_org = await _mk_org(db, seller_user)
     buyer_org = await _mk_org(db, buyer_user)
-    listing = await _mk_listing(db, seller_org, seller_user, currency="EUR",
-                                price_minor=10000)
+    listing = await _mk_listing(db, seller_org, seller_user, currency="EUR", price_minor=10000)
     buyer_tenant = await db.get(TenantAccount, buyer_org.tenant_id)
     await credit_svc.top_up(db, buyer_tenant.id, "USD", 50000, actor=_actor(buyer_user))
 
-    with pytest.raises(AppError) as e:                     # no EUR→USD rate
+    with pytest.raises(AppError) as e:  # no EUR→USD rate
         await market_svc.create_purchase(
-            db, listing_id=listing.id, buyer_org_id=buyer_org.id,
-            purchaser=_actor(buyer_user), payment_method="credit",
-            idempotency_key=f"fx-{ULID()}")
+            db,
+            listing_id=listing.id,
+            buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user),
+            payment_method="credit",
+            idempotency_key=f"fx-{ULID()}",
+        )
     assert e.value.code == "LISTING_NOT_PURCHASABLE" and e.value.status_code == 409
 
     await pricing_svc.create_fx_rate(
-        db, actor=_actor(buyer_user), base_currency="EUR", quote_currency="USD",
-        rate=Decimal("2"), effective_from=datetime.now(UTC) - timedelta(days=1))
+        db,
+        actor=_actor(buyer_user),
+        base_currency="EUR",
+        quote_currency="USD",
+        rate=Decimal("2"),
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+    )
     purchase = await market_svc.create_purchase(
-        db, listing_id=listing.id, buyer_org_id=buyer_org.id,
-        purchaser=_actor(buyer_user), payment_method="credit",
-        idempotency_key=f"fx2-{ULID()}")
+        db,
+        listing_id=listing.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="credit",
+        idempotency_key=f"fx2-{ULID()}",
+    )
     assert purchase.currency == "USD"
-    assert purchase.amount_minor == 20000                  # €100.00 × 2
+    assert purchase.amount_minor == 20000  # €100.00 × 2
 
 
 @pytest.mark.asyncio
@@ -2197,13 +2228,20 @@ async def test_manual_grant_validation_arcs(db):
     org = await _mk_org(db, user)
     pack = await _mk_pack(db, org, user)
     other_user = await _mk_user(db)
-    other_org = await _mk_org(db, other_user)          # different tenant
+    other_org = await _mk_org(db, other_user)  # different tenant
     tenant_id = org.tenant_id
 
     async def grant(**kw):
-        base = dict(product_type="skill_pack", product_id=pack.id,
-                    tenant_id=tenant_id, org_id=None, scope="organization",
-                    expires_at=None, seat_limit=None, actor=_actor(user))
+        base = dict(
+            product_type="skill_pack",
+            product_id=pack.id,
+            tenant_id=tenant_id,
+            org_id=None,
+            scope="organization",
+            expires_at=None,
+            seat_limit=None,
+            actor=_actor(user),
+        )
         base.update(kw)
         return await market_svc.manual_grant(db, **base)
 
@@ -2213,7 +2251,7 @@ async def test_manual_grant_validation_arcs(db):
     with pytest.raises(AppError) as e:
         await grant(scope="galaxy")
     assert e.value.code == "LISTING_INVALID"
-    with pytest.raises(AppError) as e:                 # R44[20] both arms
+    with pytest.raises(AppError) as e:  # R44[20] both arms
         await grant(scope="seat_limited")
     assert e.value.code == "LISTING_INVALID"
     with pytest.raises(AppError) as e:
@@ -2222,7 +2260,7 @@ async def test_manual_grant_validation_arcs(db):
     with pytest.raises(AppError) as e:
         await grant(tenant_id=str(ULID()))
     assert e.value.code == "TENANT_NOT_FOUND" and e.value.status_code == 404
-    with pytest.raises(AppError) as e:                 # R123[L7]
+    with pytest.raises(AppError) as e:  # R123[L7]
         await grant(org_id=other_org.id)
     assert e.value.code == "LISTING_INVALID"
 
@@ -2249,9 +2287,13 @@ async def test_purchase_blocked_on_inactive_listing_and_delisted_product(db):
 
     async def buy():
         return await market_svc.create_purchase(
-            db, listing_id=listing.id, buyer_org_id=buyer_org.id,
-            purchaser=_actor(buyer_user), payment_method="credit",
-            idempotency_key=f"r314-{ULID()}")
+            db,
+            listing_id=listing.id,
+            buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user),
+            payment_method="credit",
+            idempotency_key=f"r314-{ULID()}",
+        )
 
     # draft listing → 409
     listing.status = "draft"
@@ -2316,7 +2358,9 @@ def test_grant_rank_ordering_and_equal_seat_width():
 
     ranked = sorted(
         [seat_5, org_exp, tenant_exp, seat_perp, org_perp, seat_9],
-        key=market_svc._grant_rank, reverse=True)
+        key=market_svc._grant_rank,
+        reverse=True,
+    )
     # tenant beats even a perpetual roomy org grant; org beats seat_limited
     # regardless of expiry; roomier seat cap wins inside the seat tier
     assert ranked[0] is tenant_exp
@@ -2325,12 +2369,11 @@ def test_grant_rank_ordering_and_equal_seat_width():
     assert ranked[4] is seat_9 and ranked[5] is seat_5
 
     # equal seat width COVERS; one seat short does not
-    listing = MarketplaceListing(license_scope="seat_limited", seat_limit=10,
-                                 upgrade_policy="all_versions")
-    assert market_svc.grant_covers_listing_width(
-        g("seat_limited", seats=10), listing) is True
-    assert market_svc.grant_covers_listing_width(
-        g("seat_limited", seats=9), listing) is False
+    listing = MarketplaceListing(
+        license_scope="seat_limited", seat_limit=10, upgrade_policy="all_versions"
+    )
+    assert market_svc.grant_covers_listing_width(g("seat_limited", seats=10), listing) is True
+    assert market_svc.grant_covers_listing_width(g("seat_limited", seats=9), listing) is False
 
 
 @pytest.mark.asyncio
@@ -2357,9 +2400,14 @@ async def test_seat_gate_counting_semantics(db):
 
     def _grant(scope, seats):
         return LicenseGrant(
-            product_type="skill_pack", product_id=str(ULID()),
-            tenant_id=org.tenant_id, org_id=org.id, scope=scope,
-            seat_limit=seats, status="active")
+            product_type="skill_pack",
+            product_id=str(ULID()),
+            tenant_id=org.tenant_id,
+            org_id=org.id,
+            scope=scope,
+            seat_limit=seats,
+            status="active",
+        )
 
     # cap == occupancy (2 active students) → allowed (only archived/staff
     # excluded keeps it at 2; counting them would blow the cap)
@@ -2377,33 +2425,54 @@ async def test_seat_gate_counting_semantics(db):
     # tenant adds its student; a foreign tenant's students never count
     from app.models.organization import Organization, OrgStatus
 
-    sibling = Organization(name=f"Sib {ULID()}", slug=f"sib-{str(ULID()).lower()}",
-                           status=OrgStatus.ACTIVE, tenant_id=org.tenant_id,
-                           created_by=user.id)
+    sibling = Organization(
+        name=f"Sib {ULID()}",
+        slug=f"sib-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=org.tenant_id,
+        created_by=user.id,
+    )
     db.add(sibling)
     await db.flush()
     sib_student = await _mk_user(db)
-    db.add(OrgMember(org_id=sibling.id, user_id=sib_student.id,
-                     role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+    db.add(
+        OrgMember(
+            org_id=sibling.id,
+            user_id=sib_student.id,
+            role=OrgRole.STUDENT,
+            status=MemberStatus.ACTIVE,
+        )
+    )
     foreign_user = await _mk_user(db)
-    foreign_org = await _mk_org(db, foreign_user)     # different tenant
+    foreign_org = await _mk_org(db, foreign_user)  # different tenant
     for _ in range(5):
         fu = await _mk_user(db)
-        db.add(OrgMember(org_id=foreign_org.id, user_id=fu.id,
-                         role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+        db.add(
+            OrgMember(
+                org_id=foreign_org.id,
+                user_id=fu.id,
+                role=OrgRole.STUDENT,
+                status=MemberStatus.ACTIVE,
+            )
+        )
     await db.flush()
 
     def _wide(seats):
         return LicenseGrant(
-            product_type="skill_pack", product_id=str(ULID()),
-            tenant_id=org.tenant_id, org_id=None, scope="seat_limited",
-            seat_limit=seats, status="active")
+            product_type="skill_pack",
+            product_id=str(ULID()),
+            tenant_id=org.tenant_id,
+            org_id=None,
+            scope="seat_limited",
+            seat_limit=seats,
+            status="active",
+        )
 
     # tenant occupancy = 2 (org) + 1 (sibling) = 3; foreign 5 never counted
     await market_svc.enforce_seat_limit(db, _wide(3), org.id)
     with pytest.raises(AppError) as e_wide:
         await market_svc.enforce_seat_limit(db, _wide(2), org.id)
-    assert "3" in e_wide.value.message                 # exact tenant-wide count
+    assert "3" in e_wide.value.message  # exact tenant-wide count
 
 
 @pytest.mark.asyncio
@@ -2425,9 +2494,13 @@ async def test_install_gate_boundaries_and_status_codes(db):
     with pytest.raises(AppError) as e404:
         await market_svc.check_install_license(db, "skill_pack", private.product_id, buyer_org)
     assert e404.value.code == "PACK_NOT_FOUND" and e404.value.status_code == 404
-    plan_gated = await _mk_listing(db, seller_org, seller_user,
-                                   offer_type="included_with_plan",
-                                   included_plan_keys=["enterprise"])
+    plan_gated = await _mk_listing(
+        db,
+        seller_org,
+        seller_user,
+        offer_type="included_with_plan",
+        included_plan_keys=["enterprise"],
+    )
     with pytest.raises(AppError) as e403a:
         await market_svc.check_install_license(db, "skill_pack", plan_gated.product_id, buyer_org)
     assert e403a.value.status_code == 403
@@ -2437,8 +2510,7 @@ async def test_install_gate_boundaries_and_status_codes(db):
     assert e403b.value.code == "LICENSE_REQUIRED" and e403b.value.status_code == 403
 
     # (2) included_with_plan with NULL keys → 403, not a 500
-    null_keys = await _mk_listing(db, seller_org, seller_user,
-                                  offer_type="included_with_plan")
+    null_keys = await _mk_listing(db, seller_org, seller_user, offer_type="included_with_plan")
     null_keys.included_plan_keys = None
     await db.flush()
     with pytest.raises(AppError) as e403c:
@@ -2451,35 +2523,56 @@ async def test_install_gate_boundaries_and_status_codes(db):
 
     # (3) major_locked boundaries
     locked = await _mk_listing(db, seller_org, seller_user, upgrade_policy="major_locked")
-    db.add(LicenseGrant(
-        listing_id=locked.id, product_type="skill_pack", product_id=locked.product_id,
-        tenant_id=buyer_org.tenant_id, org_id=buyer_org.id, scope="organization", source="purchase",
-        status="active", purchased_major=2))
+    db.add(
+        LicenseGrant(
+            listing_id=locked.id,
+            product_type="skill_pack",
+            product_id=locked.product_id,
+            tenant_id=buyer_org.tenant_id,
+            org_id=buyer_org.id,
+            scope="organization",
+            source="purchase",
+            status="active",
+            purchased_major=2,
+        )
+    )
     await db.flush()
     # exactly at the purchased major → allowed
     await market_svc.check_install_license(
-        db, "skill_pack", locked.product_id, buyer_org, target_version="2.9")
+        db, "skill_pack", locked.product_id, buyer_org, target_version="2.9"
+    )
     with pytest.raises(AppError) as e403d:
         await market_svc.check_install_license(
-            db, "skill_pack", locked.product_id, buyer_org, target_version="3.0")
+            db, "skill_pack", locked.product_id, buyer_org, target_version="3.0"
+        )
     assert e403d.value.code == "LICENSE_UPGRADE_REQUIRED" and e403d.value.status_code == 403
     # all_versions listing never major-gates
     open_lst = await _mk_listing(db, seller_org, seller_user)
-    db.add(LicenseGrant(
-        listing_id=open_lst.id, product_type="skill_pack", product_id=open_lst.product_id,
-        tenant_id=buyer_org.tenant_id, org_id=buyer_org.id, scope="organization", source="purchase",
-        status="active", purchased_major=1))
+    db.add(
+        LicenseGrant(
+            listing_id=open_lst.id,
+            product_type="skill_pack",
+            product_id=open_lst.product_id,
+            tenant_id=buyer_org.tenant_id,
+            org_id=buyer_org.id,
+            scope="organization",
+            source="purchase",
+            status="active",
+            purchased_major=1,
+        )
+    )
     await db.flush()
     await market_svc.check_install_license(
-        db, "skill_pack", open_lst.product_id, buyer_org, target_version="9.0")
+        db, "skill_pack", open_lst.product_id, buyer_org, target_version="9.0"
+    )
 
     # check_upgrade_license mirrors the boundary with the same 403
     with pytest.raises(AppError) as e403e:
         await market_svc.check_upgrade_license(
-            db, "skill_pack", locked.product_id, buyer_org, "3.1")
+            db, "skill_pack", locked.product_id, buyer_org, "3.1"
+        )
     assert e403e.value.code == "LICENSE_UPGRADE_REQUIRED" and e403e.value.status_code == 403
-    await market_svc.check_upgrade_license(
-        db, "skill_pack", locked.product_id, buyer_org, "2.5")
+    await market_svc.check_upgrade_license(db, "skill_pack", locked.product_id, buyer_org, "2.5")
 
 
 @pytest.mark.asyncio
@@ -2516,17 +2609,26 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
 
     async def _buy(listing, **kw):
         return await market_svc.create_purchase(
-            db, listing_id=listing.id, buyer_org_id=buyer_org.id,
-            purchaser=_actor(buyer_user), payment_method="credit",
-            idempotency_key=kw.pop("key", f"b-{ULID()}"), **kw)
+            db,
+            listing_id=listing.id,
+            buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user),
+            payment_method="credit",
+            idempotency_key=kw.pop("key", f"b-{ULID()}"),
+            **kw,
+        )
 
     # own product → 409
     own = await _mk_listing(db, seller_org, seller_user)
     with pytest.raises(AppError) as e_own:
         await market_svc.create_purchase(
-            db, listing_id=own.id, buyer_org_id=seller_org.id,
-            purchaser=_actor(seller_user), payment_method="credit",
-            idempotency_key=f"own-{ULID()}")
+            db,
+            listing_id=own.id,
+            buyer_org_id=seller_org.id,
+            purchaser=_actor(seller_user),
+            payment_method="credit",
+            idempotency_key=f"own-{ULID()}",
+        )
     assert e_own.value.code == "ALREADY_OWNED" and e_own.value.status_code == 409
 
     # non-active listing → 409
@@ -2541,9 +2643,14 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
     with pytest.raises(AppError) as e_po:
         await _buy(po)
     assert e_po.value.status_code == 409
-    partner = Partner(name=f"P {ULID()}", slug=f"pp-{str(ULID()).lower()[:10]}",
-                      currency="USD", status="suspended", partner_type="reseller",
-                      created_by=buyer_user.id)
+    partner = Partner(
+        name=f"P {ULID()}",
+        slug=f"pp-{str(ULID()).lower()[:10]}",
+        currency="USD",
+        status="suspended",
+        partner_type="reseller",
+        created_by=buyer_user.id,
+    )
     db.add(partner)
     await db.flush()
     buyer_tenant.partner_id = partner.id
@@ -2551,7 +2658,7 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
     with pytest.raises(AppError) as e_po2:
         await _buy(po)
     assert e_po2.value.status_code == 409
-    partner.status = "active"        # active partner → gate passes
+    partner.status = "active"  # active partner → gate passes
     await db.flush()
     ok_po = await _buy(po)
     assert ok_po.status == "pending"
@@ -2570,25 +2677,38 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
     # seller-scoped rule rebalances the split END-TO-END: 90% seller rule on
     # a 30%-commission listing → seller 90%, fee 10%, partner ≤ fee
     rule = RevenueShareRule(
-        beneficiary_type="seller_org", tenant_id=seller_org.tenant_id,
-        revenue_type="marketplace", rule_type="percentage_of_gross_revenue",
-        rate=Decimal("90"), version=1, status="active",
+        beneficiary_type="seller_org",
+        tenant_id=seller_org.tenant_id,
+        revenue_type="marketplace",
+        rule_type="percentage_of_gross_revenue",
+        rate=Decimal("90"),
+        version=1,
+        status="active",
         effective_from=datetime.now(UTC) - timedelta(days=1),
-        created_by=seller_user.id)
+        created_by=seller_user.id,
+    )
     db.add(rule)
     await db.flush()
     lst3 = await _mk_listing(db, seller_org, seller_user, price_minor=10000)
     pur = await _buy(lst3)
-    assert pur.seller_share_minor == 9000            # 90% of gross
-    assert pur.platform_fee_minor == 1000            # fee = remainder
+    assert pur.seller_share_minor == 9000  # 90% of gross
+    assert pur.platform_fee_minor == 1000  # fee = remainder
     assert pur.seller_share_minor + pur.platform_fee_minor == 10000
     assert pur.partner_share_minor <= pur.platform_fee_minor
 
     # ALREADY_LICENSED precheck 409s an all_versions repurchase
-    db.add(LicenseGrant(
-        listing_id=lst2.id, product_type="skill_pack", product_id=lst2.product_id,
-        tenant_id=buyer_tenant.id, org_id=None, scope="organization",
-        source="purchase", status="active"))
+    db.add(
+        LicenseGrant(
+            listing_id=lst2.id,
+            product_type="skill_pack",
+            product_id=lst2.product_id,
+            tenant_id=buyer_tenant.id,
+            org_id=None,
+            scope="organization",
+            source="purchase",
+            status="active",
+        )
+    )
     await db.flush()
     with pytest.raises(AppError) as e_lic:
         await _buy(lst2)
@@ -2596,17 +2716,22 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
 
     # a FREE listing is not purchasable (409); invoice billing on a listing
     # that doesn't support it (409); a dead/unpublished product 409s
-    free_lst = await _mk_listing(db, seller_org, seller_user, offer_type="free",
-                                 price_minor=None, currency=None)
+    free_lst = await _mk_listing(
+        db, seller_org, seller_user, offer_type="free", price_minor=None, currency=None
+    )
     with pytest.raises(AppError) as e_free:
         await _buy(free_lst)
     assert e_free.value.status_code == 409
-    no_inv = await _mk_listing(db, seller_org, seller_user)   # bill_via_invoice=False
+    no_inv = await _mk_listing(db, seller_org, seller_user)  # bill_via_invoice=False
     with pytest.raises(AppError) as e_inv:
         await market_svc.create_purchase(
-            db, listing_id=no_inv.id, buyer_org_id=buyer_org.id,
-            purchaser=_actor(buyer_user), payment_method="invoice",
-            idempotency_key=f"inv-{ULID()}")
+            db,
+            listing_id=no_inv.id,
+            buyer_org_id=buyer_org.id,
+            purchaser=_actor(buyer_user),
+            payment_method="invoice",
+            idempotency_key=f"inv-{ULID()}",
+        )
     assert e_inv.value.status_code == 409 and "invoice" in e_inv.value.message
     dead = await _mk_listing(db, seller_org, seller_user)
     from app.models.skill_pack import PackStatus as PStatus
@@ -2625,14 +2750,30 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
     from app.models.skill_pack import SkillPackRelease as _Rel
 
     up_lst = await _mk_listing(db, seller_org, seller_user, upgrade_policy="major_locked")
-    db.add(_Rel(pack_id=up_lst.product_id, version="2.0.0", manifest={},
-                checksum="c" * 64, released_by=seller_user.id))
-    db.add(LicenseGrant(
-        listing_id=up_lst.id, product_type="skill_pack", product_id=up_lst.product_id,
-        tenant_id=buyer_tenant.id, org_id=None, scope="organization",
-        source="purchase", status="active", purchased_major=1))
+    db.add(
+        _Rel(
+            pack_id=up_lst.product_id,
+            version="2.0.0",
+            manifest={},
+            checksum="c" * 64,
+            released_by=seller_user.id,
+        )
+    )
+    db.add(
+        LicenseGrant(
+            listing_id=up_lst.id,
+            product_type="skill_pack",
+            product_id=up_lst.product_id,
+            tenant_id=buyer_tenant.id,
+            org_id=None,
+            scope="organization",
+            source="purchase",
+            status="active",
+            purchased_major=1,
+        )
+    )
     await db.flush()
-    up_purchase = await _buy(up_lst)                 # upgrade purchase allowed
+    up_purchase = await _buy(up_lst)  # upgrade purchase allowed
     assert up_purchase.status == "pending"
 
     # product row GONE entirely (not just archived) → same uniform 409
@@ -2646,36 +2787,58 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
 
     # paying the upgrade purchase MINTS the new-major grant (the flipped
     # mint-side policy check re-covers it and skips the mint)
-    await credit_svc.top_up(db, buyer_tenant.id, "USD",
-                            up_purchase.amount_minor + 100000, actor=_actor(buyer_user))
-    await credit_svc.debit(db, buyer_tenant.id, "USD", up_purchase.amount_minor,
-                           reference_type="purchase", reference_id=up_purchase.id,
-                           idempotency_key=f"purchase:{up_purchase.id}")
+    await credit_svc.top_up(
+        db, buyer_tenant.id, "USD", up_purchase.amount_minor + 100000, actor=_actor(buyer_user)
+    )
+    await credit_svc.debit(
+        db,
+        buyer_tenant.id,
+        "USD",
+        up_purchase.amount_minor,
+        reference_type="purchase",
+        reference_id=up_purchase.id,
+        idempotency_key=f"purchase:{up_purchase.id}",
+    )
     paid_up = await market_svc.mark_purchase_paid(
-        db, purchase_id=up_purchase.id, payment_ref=None, actor=_actor(buyer_user))
+        db, purchase_id=up_purchase.id, payment_ref=None, actor=_actor(buyer_user)
+    )
     assert paid_up.status == "paid"
     majors = (
-        await db.execute(
-            select(LicenseGrant.purchased_major).where(
-                LicenseGrant.product_id == up_lst.product_id,
-                LicenseGrant.tenant_id == buyer_tenant.id))
-    ).scalars().all()
-    assert sorted(m for m in majors if m) == [1, 2]   # upgrade grant minted
+        (
+            await db.execute(
+                select(LicenseGrant.purchased_major).where(
+                    LicenseGrant.product_id == up_lst.product_id,
+                    LicenseGrant.tenant_id == buyer_tenant.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert sorted(m for m in majors if m) == [1, 2]  # upgrade grant minted
 
     # FAILED-purchase key rename: a retry after failure gets a FRESH purchase
     # and the dead row's key is renamed at exactly the 90-char truncation
     long_key = "k" * 95
     fail_lst = await _mk_listing(db, seller_org, seller_user)
     p_fail = await market_svc.create_purchase(
-        db, listing_id=fail_lst.id, buyer_org_id=buyer_org.id,
-        purchaser=_actor(buyer_user), payment_method="credit",
-        idempotency_key=long_key)
+        db,
+        listing_id=fail_lst.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="credit",
+        idempotency_key=long_key,
+    )
     p_fail.status = "failed"
     await db.flush()
     p_retry = await market_svc.create_purchase(
-        db, listing_id=fail_lst.id, buyer_org_id=buyer_org.id,
-        purchaser=_actor(buyer_user), payment_method="credit",
-        idempotency_key=long_key)
+        db,
+        listing_id=fail_lst.id,
+        buyer_org_id=buyer_org.id,
+        purchaser=_actor(buyer_user),
+        payment_method="credit",
+        idempotency_key=long_key,
+    )
     assert p_retry.id != p_fail.id
     await db.refresh(p_fail)
     assert p_fail.idempotency_key.startswith("k" * 90 + ":r:")
@@ -2683,7 +2846,9 @@ async def test_purchase_gate_statuses_and_seller_rule_split(db):
     # purchase 404 (mark-paid path) + refund's uniform 409 (missing or
     # non-paid both hit the guarded UPDATE — no existence oracle)
     with pytest.raises(AppError) as e_404:
-        await market_svc.mark_purchase_paid(db, purchase_id=str(ULID()), payment_ref=None, actor=_actor(buyer_user))
+        await market_svc.mark_purchase_paid(
+            db, purchase_id=str(ULID()), payment_ref=None, actor=_actor(buyer_user)
+        )
     assert e_404.value.code == "PURCHASE_NOT_FOUND" and e_404.value.status_code == 404
     with pytest.raises(AppError) as e_ref0:
         await market_svc.refund_purchase(db, str(ULID()), reason="x", actor=_actor(buyer_user))
@@ -2707,12 +2872,17 @@ async def test_purchase_idempotency_is_tenant_scoped(db):
 
     async def _buy(org, user):
         return await market_svc.create_purchase(
-            db, listing_id=listing.id, buyer_org_id=org.id,
-            purchaser=_actor(user), payment_method="credit", idempotency_key=key)
+            db,
+            listing_id=listing.id,
+            buyer_org_id=org.id,
+            purchaser=_actor(user),
+            payment_method="credit",
+            idempotency_key=key,
+        )
 
     pa = await _buy(org_a, a_user)
     pb = await _buy(org_b, b_user)
-    assert pa.id != pb.id                     # B never replays A's purchase
+    assert pa.id != pb.id  # B never replays A's purchase
     assert pb.buyer_tenant_id == org_b.tenant_id
     # replay WITHIN a tenant returns the same row
     pa2 = await _buy(org_a, a_user)
@@ -2743,9 +2913,13 @@ async def test_concurrent_create_purchase_same_key_replays_winner():
         await asyncio.sleep(delay)
         async with AsyncSessionLocal() as s:
             purchase = await market_svc.create_purchase(
-                db=s, listing_id=lid, buyer_org_id=oid,
-                purchaser=_actor(buyer_user), payment_method="credit",
-                idempotency_key=key)
+                db=s,
+                listing_id=lid,
+                buyer_org_id=oid,
+                purchaser=_actor(buyer_user),
+                payment_method="credit",
+                idempotency_key=key,
+            )
             await asyncio.sleep(hold)
             await s.commit()
             return purchase.id
@@ -2782,79 +2956,151 @@ async def test_relisting_gates_and_listing_statuses(db):
     # (3) status family first
     with pytest.raises(AppError) as e_t:
         await market_svc.create_listing(
-            db, seller_org_id=seller_org.id, product_type="mixtape",
-            product_id=str(ULID()), offer_type="paid", price_minor=100,
-            currency="USD", license_scope="organization", seat_limit=None,
-            upgrade_policy="all_versions", included_plan_keys=[],
-            bill_via_invoice=False, actor=_actor(seller_user))
+            db,
+            seller_org_id=seller_org.id,
+            product_type="mixtape",
+            product_id=str(ULID()),
+            offer_type="paid",
+            price_minor=100,
+            currency="USD",
+            license_scope="organization",
+            seat_limit=None,
+            upgrade_policy="all_versions",
+            included_plan_keys=[],
+            bill_via_invoice=False,
+            actor=_actor(seller_user),
+        )
     assert e_t.value.status_code == 422
     with pytest.raises(AppError) as e_404:
         await market_svc.create_listing(
-            db, seller_org_id=seller_org.id, product_type="learning_path",
-            product_id=str(ULID()), offer_type="paid", price_minor=100,
-            currency="USD", license_scope="organization", seat_limit=None,
-            upgrade_policy="all_versions", included_plan_keys=[],
-            bill_via_invoice=False, actor=_actor(seller_user))
+            db,
+            seller_org_id=seller_org.id,
+            product_type="learning_path",
+            product_id=str(ULID()),
+            offer_type="paid",
+            price_minor=100,
+            currency="USD",
+            license_scope="organization",
+            seat_limit=None,
+            upgrade_policy="all_versions",
+            included_plan_keys=[],
+            bill_via_invoice=False,
+            actor=_actor(seller_user),
+        )
     assert e_404.value.status_code == 404
     draft_path = await lp.create_path(seller_org.id, seller_user.id, name="Draft")
     with pytest.raises(AppError) as e_unpub:
         await market_svc.create_listing(
-            db, seller_org_id=seller_org.id, product_type="learning_path",
-            product_id=draft_path.id, offer_type="paid", price_minor=100,
-            currency="USD", license_scope="organization", seat_limit=None,
-            upgrade_policy="all_versions", included_plan_keys=[],
-            bill_via_invoice=False, actor=_actor(seller_user))
+            db,
+            seller_org_id=seller_org.id,
+            product_type="learning_path",
+            product_id=draft_path.id,
+            offer_type="paid",
+            price_minor=100,
+            currency="USD",
+            license_scope="organization",
+            seat_limit=None,
+            upgrade_policy="all_versions",
+            included_plan_keys=[],
+            bill_via_invoice=False,
+            actor=_actor(seller_user),
+        )
     assert e_unpub.value.status_code == 422
 
     # (1) paid-origin copy: buyer re-lists → 403; free-origin copy → allowed
     src_paid = await _published_path(seller_org, seller_user, "Paid Origin")
     paid_listing = await market_svc.create_listing(
-        db, seller_org_id=seller_org.id, product_type="learning_path",
-        product_id=src_paid.id, offer_type="paid", price_minor=9900,
-        currency="USD", license_scope="organization", seat_limit=None,
-        upgrade_policy="all_versions", included_plan_keys=[],
-        bill_via_invoice=False, actor=_actor(seller_user))
+        db,
+        seller_org_id=seller_org.id,
+        product_type="learning_path",
+        product_id=src_paid.id,
+        offer_type="paid",
+        price_minor=9900,
+        currency="USD",
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(seller_user),
+    )
     paid_listing.status = "active"
     copy_paid = await _published_path(buyer_org, buyer_user, "Copy of Paid")
     copy_paid.origin_listing_id = paid_listing.id
     await db.flush()
     with pytest.raises(AppError) as e_redis:
         await market_svc.create_listing(
-            db, seller_org_id=buyer_org.id, product_type="learning_path",
-            product_id=copy_paid.id, offer_type="paid", price_minor=100,
-            currency="USD", license_scope="organization", seat_limit=None,
-            upgrade_policy="all_versions", included_plan_keys=[],
-            bill_via_invoice=False, actor=_actor(buyer_user))
+            db,
+            seller_org_id=buyer_org.id,
+            product_type="learning_path",
+            product_id=copy_paid.id,
+            offer_type="paid",
+            price_minor=100,
+            currency="USD",
+            license_scope="organization",
+            seat_limit=None,
+            upgrade_policy="all_versions",
+            included_plan_keys=[],
+            bill_via_invoice=False,
+            actor=_actor(buyer_user),
+        )
     assert e_redis.value.code == "LICENSED_CONTENT_NOT_REDISTRIBUTABLE"
     assert e_redis.value.status_code == 403
     # ORIGINAL seller carrying its own origin ref may re-list (dup guard → 409
     # since the product ALREADY has a listing — pin the 409 here too)
     with pytest.raises(AppError) as e_dup:
         await market_svc.create_listing(
-            db, seller_org_id=seller_org.id, product_type="learning_path",
-            product_id=src_paid.id, offer_type="paid", price_minor=100,
-            currency="USD", license_scope="organization", seat_limit=None,
-            upgrade_policy="all_versions", included_plan_keys=[],
-            bill_via_invoice=False, actor=_actor(seller_user))
+            db,
+            seller_org_id=seller_org.id,
+            product_type="learning_path",
+            product_id=src_paid.id,
+            offer_type="paid",
+            price_minor=100,
+            currency="USD",
+            license_scope="organization",
+            seat_limit=None,
+            upgrade_policy="all_versions",
+            included_plan_keys=[],
+            bill_via_invoice=False,
+            actor=_actor(seller_user),
+        )
     assert e_dup.value.code == "LISTING_EXISTS" and e_dup.value.status_code == 409
     # free-origin copy: re-listable
     src_free = await _published_path(seller_org, seller_user, "Free Origin")
     free_listing = await market_svc.create_listing(
-        db, seller_org_id=seller_org.id, product_type="learning_path",
-        product_id=src_free.id, offer_type="free", price_minor=None,
-        currency=None, license_scope="organization", seat_limit=None,
-        upgrade_policy="all_versions", included_plan_keys=[],
-        bill_via_invoice=False, actor=_actor(seller_user))
+        db,
+        seller_org_id=seller_org.id,
+        product_type="learning_path",
+        product_id=src_free.id,
+        offer_type="free",
+        price_minor=None,
+        currency=None,
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(seller_user),
+    )
     free_listing.status = "active"
     copy_free = await _published_path(buyer_org, buyer_user, "Copy of Free")
     copy_free.origin_listing_id = free_listing.id
     await db.flush()
     ok_free = await market_svc.create_listing(
-        db, seller_org_id=buyer_org.id, product_type="learning_path",
-        product_id=copy_free.id, offer_type="paid", price_minor=100,
-        currency="USD", license_scope="organization", seat_limit=None,
-        upgrade_policy="all_versions", included_plan_keys=[],
-        bill_via_invoice=False, actor=_actor(buyer_user))
+        db,
+        seller_org_id=buyer_org.id,
+        product_type="learning_path",
+        product_id=copy_free.id,
+        offer_type="paid",
+        price_minor=100,
+        currency="USD",
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(buyer_user),
+    )
     assert ok_free.id is not None
 
     # (2) manual-grant copy (source-path ref only): other-org source → 403,
@@ -2865,37 +3111,64 @@ async def test_relisting_gates_and_listing_statuses(db):
     await db.flush()
     with pytest.raises(AppError) as e_grant:
         await market_svc.create_listing(
-            db, seller_org_id=buyer_org.id, product_type="learning_path",
-            product_id=copy_grant.id, offer_type="paid", price_minor=100,
-            currency="USD", license_scope="organization", seat_limit=None,
-            upgrade_policy="all_versions", included_plan_keys=[],
-            bill_via_invoice=False, actor=_actor(buyer_user))
+            db,
+            seller_org_id=buyer_org.id,
+            product_type="learning_path",
+            product_id=copy_grant.id,
+            offer_type="paid",
+            price_minor=100,
+            currency="USD",
+            license_scope="organization",
+            seat_limit=None,
+            upgrade_policy="all_versions",
+            included_plan_keys=[],
+            bill_via_invoice=False,
+            actor=_actor(buyer_user),
+        )
     assert e_grant.value.code == "LICENSED_CONTENT_NOT_REDISTRIBUTABLE"
     assert e_grant.value.status_code == 403
     own_reimport = await _published_path(seller_org, seller_user, "Own Reimport")
-    own_reimport.origin_source_path_id = src2.id       # own org's source
+    own_reimport.origin_source_path_id = src2.id  # own org's source
     await db.flush()
     ok_own = await market_svc.create_listing(
-        db, seller_org_id=seller_org.id, product_type="learning_path",
-        product_id=own_reimport.id, offer_type="paid", price_minor=100,
-        currency="USD", license_scope="organization", seat_limit=None,
-        upgrade_policy="all_versions", included_plan_keys=[],
-        bill_via_invoice=False, actor=_actor(seller_user))
+        db,
+        seller_org_id=seller_org.id,
+        product_type="learning_path",
+        product_id=own_reimport.id,
+        offer_type="paid",
+        price_minor=100,
+        currency="USD",
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(seller_user),
+    )
     assert ok_own.id is not None
 
     # (3b) the whole create_listing validation family carries 422
     base_kw = dict(
-        db=db, seller_org_id=seller_org.id, product_type="skill_pack",
-        product_id=str(ULID()), offer_type="paid", price_minor=100,
-        currency="USD", license_scope="organization", seat_limit=None,
-        upgrade_policy="all_versions", included_plan_keys=[],
-        bill_via_invoice=False, actor=_actor(seller_user))
+        db=db,
+        seller_org_id=seller_org.id,
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        offer_type="paid",
+        price_minor=100,
+        currency="USD",
+        license_scope="organization",
+        seat_limit=None,
+        upgrade_policy="all_versions",
+        included_plan_keys=[],
+        bill_via_invoice=False,
+        actor=_actor(seller_user),
+    )
     for bad_kw in (
         {"offer_type": "barter"},
         {"license_scope": "galaxy"},
-        {"price_minor": None},                      # paid without price
-        {"license_scope": "seat_limited"},          # seat scope without limit
-        {"seat_limit": 5},                          # limit on non-seat scope
+        {"price_minor": None},  # paid without price
+        {"license_scope": "seat_limited"},  # seat scope without limit
+        {"seat_limit": 5},  # limit on non-seat scope
     ):
         with pytest.raises(AppError) as e_v:
             await market_svc.create_listing(**{**base_kw, **bad_kw})
@@ -2904,17 +3177,29 @@ async def test_relisting_gates_and_listing_statuses(db):
     # (4) manual_grant guards with statuses
     with pytest.raises(AppError) as e_seat:
         await market_svc.manual_grant(
-            db, product_type="skill_pack", product_id=str(ULID()),
-            tenant_id=buyer_org.tenant_id, org_id=buyer_org.id,
-            scope="seat_limited", seat_limit=None, expires_at=None,
-            actor=_actor(seller_user))
+            db,
+            product_type="skill_pack",
+            product_id=str(ULID()),
+            tenant_id=buyer_org.tenant_id,
+            org_id=buyer_org.id,
+            scope="seat_limited",
+            seat_limit=None,
+            expires_at=None,
+            actor=_actor(seller_user),
+        )
     assert e_seat.value.status_code == 422
     with pytest.raises(AppError) as e_org:
         await market_svc.manual_grant(
-            db, product_type="skill_pack", product_id=str(ULID()),
-            tenant_id=buyer_org.tenant_id, org_id=seller_org.id,   # foreign org
-            scope="organization", seat_limit=None, expires_at=None,
-            actor=_actor(seller_user))
+            db,
+            product_type="skill_pack",
+            product_id=str(ULID()),
+            tenant_id=buyer_org.tenant_id,
+            org_id=seller_org.id,  # foreign org
+            scope="organization",
+            seat_limit=None,
+            expires_at=None,
+            actor=_actor(seller_user),
+        )
     assert e_org.value.status_code == 422
 
 
@@ -2941,20 +3226,19 @@ async def test_registry_listings_recheck_product_and_seller_liveness(db):
     pack_p.visibility = PackVisibility.PRIVATE
     await db.flush()
 
-    ids = ",".join([healthy.product_id, archived_pack.product_id,
-                    private_pack.product_id])
-    resp = await registry_listings(product_type="skill_pack",
-                                   product_ids=ids, db=db)
+    ids = ",".join([healthy.product_id, archived_pack.product_id, private_pack.product_id])
+    resp = await registry_listings(product_type="skill_pack", product_ids=ids, db=db)
     assert healthy.product_id in resp.data
     assert resp.data[healthy.product_id]["seller_org_name"] == seller_org.name
-    assert archived_pack.product_id not in resp.data     # dead product hidden
-    assert private_pack.product_id not in resp.data      # private hidden
+    assert archived_pack.product_id not in resp.data  # dead product hidden
+    assert private_pack.product_id not in resp.data  # private hidden
 
     # archived SELLER org hides its listings too
     seller_org.status = OrgStatus.ARCHIVED
     await db.flush()
-    resp2 = await registry_listings(product_type="skill_pack",
-                                    product_ids=healthy.product_id, db=db)
+    resp2 = await registry_listings(
+        product_type="skill_pack", product_ids=healthy.product_id, db=db
+    )
     assert resp2.data == {}
 
     # the id list truncates at 50 (the 51st id is never looked up)
@@ -2962,7 +3246,7 @@ async def test_registry_listings_recheck_product_and_seller_liveness(db):
     seller2 = await _mk_org(db, seller2_user)
     real = await _mk_listing(db, seller2, seller2_user)
     fillers = ",".join(str(ULID()) for _ in range(50))
-    resp3 = await registry_listings(product_type="skill_pack",
-                                    product_ids=f"{fillers},{real.product_id}",
-                                    db=db)
-    assert real.product_id not in resp3.data             # truncated away
+    resp3 = await registry_listings(
+        product_type="skill_pack", product_ids=f"{fillers},{real.product_id}", db=db
+    )
+    assert real.product_id not in resp3.data  # truncated away

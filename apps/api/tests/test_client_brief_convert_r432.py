@@ -33,8 +33,13 @@ async def db():
 
 
 async def _user(db):
-    u = User(email=f"r432-{uuid.uuid4().hex[:10]}@t.com", password_hash=hash_password("Test123!"),
-             display_name="R432", role=UserRole.ADMIN, status=UserStatus.ACTIVE)
+    u = User(
+        email=f"r432-{uuid.uuid4().hex[:10]}@t.com",
+        password_hash=hash_password("Test123!"),
+        display_name="R432",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
     db.add(u)
     await db.flush()
     return u
@@ -43,16 +48,24 @@ async def _user(db):
 async def _org(db, owner):
     from app.services.organization import OrgService
 
-    o = await OrgService(db).create(name=f"R432 {uuid.uuid4().hex[:5]}",
-                                    slug=f"r432-{uuid.uuid4().hex[:10]}",
-                                    description=None, created_by=owner.id)
+    o = await OrgService(db).create(
+        name=f"R432 {uuid.uuid4().hex[:5]}",
+        slug=f"r432-{uuid.uuid4().hex[:10]}",
+        description=None,
+        created_by=owner.id,
+    )
     await db.flush()
     return o
 
 
 async def _brief(db, svc, org, owner, **extra):
-    fields = dict(title="Brief", client_name="Acme", project_type="ai_visual",
-                  objective="Make art", deliverable_specs=[])
+    fields = dict(
+        title="Brief",
+        client_name="Acme",
+        project_type="ai_visual",
+        objective="Make art",
+        deliverable_specs=[],
+    )
     fields.update(extra)
     return await svc.create_brief(org.id, owner.id, **fields)
 
@@ -125,8 +138,9 @@ async def test_convert_to_project_r432(db):
 
     # cross-org cohort → INVALID_COHORT (kills the `is None or wrong-org`
     # -> `and` mutant)
-    foreign_cohort = Cohort(org_id=other_org.id, name="X",
-                            slug=f"x-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    foreign_cohort = Cohort(
+        org_id=other_org.id, name="X", slug=f"x-{uuid.uuid4().hex[:8]}", created_by=owner.id
+    )
     db.add(foreign_cohort)
     await db.flush()
     with pytest.raises(AppError) as e_coh:

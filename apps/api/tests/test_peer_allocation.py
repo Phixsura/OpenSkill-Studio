@@ -148,23 +148,34 @@ def test_characterization_snapshot():
         # 2 reviewers / 3 subs: one orphan always remains; all donors are
         # load-1 so repair must NOT fire (donor keeps >= 1 review).
         ("S1", seed): sorted(
-            allocate_reviews({"sa": "A", "sb": "B", "sc": "C"}, ["A", "B"], 1,
-                             rng=random.Random(seed)))
+            allocate_reviews(
+                {"sa": "A", "sb": "B", "sc": "C"}, ["A", "B"], 1, rng=random.Random(seed)
+            )
+        )
         for seed in range(10)
     }
-    cases.update({
-        # author-of-orphan among reviewers: repair path reachable
-        ("S2", seed): sorted(
-            allocate_reviews({"so": "C", "s1": "A", "s2": "B"}, ["A", "B", "C"], 1,
-                             rng=random.Random(seed)))
-        for seed in range(10)
-    })
+    cases.update(
+        {
+            # author-of-orphan among reviewers: repair path reachable
+            ("S2", seed): sorted(
+                allocate_reviews(
+                    {"so": "C", "s1": "A", "s2": "B"}, ["A", "B", "C"], 1, rng=random.Random(seed)
+                )
+            )
+            for seed in range(10)
+        }
+    )
     expected = {
-        ("S1", 0): [("A", "sc"), ("B", "sa")], ("S1", 1): [("A", "sc"), ("B", "sa")],
-        ("S1", 2): [("A", "sb"), ("B", "sa")], ("S1", 3): [("A", "sc"), ("B", "sa")],
-        ("S1", 4): [("A", "sb"), ("B", "sc")], ("S1", 5): [("A", "sc"), ("B", "sa")],
-        ("S1", 6): [("A", "sb"), ("B", "sc")], ("S1", 7): [("A", "sb"), ("B", "sc")],
-        ("S1", 8): [("A", "sb"), ("B", "sc")], ("S1", 9): [("A", "sc"), ("B", "sa")],
+        ("S1", 0): [("A", "sc"), ("B", "sa")],
+        ("S1", 1): [("A", "sc"), ("B", "sa")],
+        ("S1", 2): [("A", "sb"), ("B", "sa")],
+        ("S1", 3): [("A", "sc"), ("B", "sa")],
+        ("S1", 4): [("A", "sb"), ("B", "sc")],
+        ("S1", 5): [("A", "sc"), ("B", "sa")],
+        ("S1", 6): [("A", "sb"), ("B", "sc")],
+        ("S1", 7): [("A", "sb"), ("B", "sc")],
+        ("S1", 8): [("A", "sb"), ("B", "sc")],
+        ("S1", 9): [("A", "sc"), ("B", "sa")],
         ("S2", 0): [("A", "so"), ("B", "s1"), ("C", "s2")],
         ("S2", 1): [("A", "so"), ("B", "s1"), ("C", "s2")],
         ("S2", 2): [("A", "so"), ("B", "s1"), ("C", "s2")],
