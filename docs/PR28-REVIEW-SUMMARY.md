@@ -2336,6 +2336,32 @@ frontend theme). Web 536/115 green, tsc 0, eslint clean.
     = 395 checks; browser 19+60+42+31 = 152 checks. Zero failures,
     zero console errors, zero 500s.
 
+### R530–R532: PR consolidation — first-ever green CI (2026-09-12/13)
+
+Retargeting PR #28's base to main (its parent #22 had merged; the squash
+shadow was absorbed with a verified byte-identical `-s ours` merge)
+triggered the branch's FIRST-EVER CI run — which found real things:
+
+- `ruff format --check` was never in the local gate: 74 files aligned
+  (formatter-only, zero semantic change).
+- The backend CI job had never been runnable: no alembic step (ran the
+  full suite against an EMPTY database and hung ~2.5h), no job timeout,
+  no MinIO, no ffmpeg. Fixed across three iterations (bitnami's :latest
+  manifest is withdrawn; minio/minio is pull-denied on Docker Hub —
+  quay.io/minio/minio via a docker-run step with a health wait; bucket
+  pre-created because test_full_integration sorts before test_media_db).
+- **REAL FIX (R530)**: `list_approval_history` ordered by created_at
+  alone — second-granularity timestamps collapse the §38 newest-first
+  contract to arbitrary order whenever events land in the same instant
+  (exactly what CI's fast run did). ULID `id desc` tiebreak added.
+- Two CI-timing test corrections: the cross-demotion race's refusal leg
+  legitimately lands as 403 (loser already demoted at the gate) or 422
+  (last-admin guard); test_nextjs_typecheck skips when pnpm is absent.
+
+**Final CI: all five jobs green** — Lint (Backend/Frontend),
+Test (Backend: 2548+ passed, coverage 90.44% ≥ the authored 90% gate),
+Test (Frontend), Build. PR #28: base=main, MERGEABLE/CLEAN.
+
 **FINAL AUDIT LEDGER (R501–R529)**: ~450 mutants measured across 14
 backend services, facade, worker, two adapters and two frontend libs;
 **22 real test gaps found and killed**; 1 AC test gap closed (concurrent
