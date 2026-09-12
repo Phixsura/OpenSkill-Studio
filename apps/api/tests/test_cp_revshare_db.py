@@ -1535,3 +1535,104 @@ async def test_partner_attribution_handlers(db):
     with pytest.raises(AppError) as e_g:
         await require_partner_member(db, str(ULID()), outsider)
     assert e_g.value.code == "PARTNER_NOT_FOUND" and e_g.value.status_code == 404
+
+
+# ── R501: concurrent statement generation (AC "concurrent settlement") ──
+
+
+async def test_concurrent_generate_statement_single_row(db):
+    """Two racing generate_statement calls for the same (partner, period).
+
+    Create-create race: both transactions SELECT ... FOR UPDATE, find no row,
+    and INSERT — the uq_cp_statement unique index must make exactly one row
+    survive; the loser surfaces an error (IntegrityError/AppError) rather than
+    silently minting a duplicate statement. Regenerate-regenerate race: with a
+    draft already present, FOR UPDATE serializes both — the totals stay the
+    accrual sum (no double-collect of the same entries).
+    """
+    import asyncio
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.controlplane.models.partner import SettlementStatement
+
+    # committed fixtures so both racing sessions can see them
+    async with AsyncSessionLocal() as setup:
+        user = await _mk_user(setup)
+        partner = await _mk_partner(setup, user)
+        period = datetime.now(UTC).strftime("%Y-%m")
+        setup.add(
+            RevenueShareEntry(
+                beneficiary_type="partner",
+                partner_id=partner.id,
+                source_type="invoice_payment",
+                source_id=str(ULID()),
+                rule_snapshot={},
+                revenue_base_minor=100000,
+                share_amount_minor=10000,
+                currency="USD",
+                period=period,
+                status="accrued",
+            )
+        )
+        await setup.commit()
+        partner_id, user_id = partner.id, user.id
+
+    async def generate():
+        async with AsyncSessionLocal() as s:
+            try:
+                stmt = await revshare_svc.generate_statement(
+                    s,
+                    beneficiary_type="partner",
+                    partner_id=partner_id,
+                    beneficiary_org_id=None,
+                    period=period,
+                    actor=Actor(user_id=user_id, type="platform"),
+                )
+                await s.commit()
+                return ("ok", stmt.id)
+            except (IntegrityError, AppError) as e:
+                await s.rollback()
+                return ("err", type(e).__name__)
+
+    r1, r2 = await asyncio.gather(generate(), generate())
+    # AT LEAST one generation succeeds; a losing racer may error but must
+    # never mint a second statement row for the period.
+    assert "ok" in (r1[0], r2[0]), (r1, r2)
+
+    async with AsyncSessionLocal() as check:
+        rows = (
+            (
+                await check.execute(
+                    select(SettlementStatement).where(
+                        SettlementStatement.partner_id == partner_id,
+                        SettlementStatement.period == period,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1, f"duplicate statements minted: {[r.id for r in rows]}"
+        first_total = rows[0].share_total_minor
+        assert first_total == 10000
+
+    # regenerate-regenerate race against the existing draft: FOR UPDATE
+    # serializes; totals must remain the accrual sum (no double-collect).
+    r3, r4 = await asyncio.gather(generate(), generate())
+    assert "ok" in (r3[0], r4[0]), (r3, r4)
+    async with AsyncSessionLocal() as check:
+        rows = (
+            (
+                await check.execute(
+                    select(SettlementStatement).where(
+                        SettlementStatement.partner_id == partner_id,
+                        SettlementStatement.period == period,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].share_total_minor == 10000
