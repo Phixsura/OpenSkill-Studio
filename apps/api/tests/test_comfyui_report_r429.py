@@ -4,10 +4,19 @@ _build_dependency_report classifies on the RAW class_type (R86): a
 fold-disguised custom node (fullwidth 'ＫSampler' → NFKC 'KSampler') must
 NOT be mis-counted as a trusted core node and erased from the custom-node
 warning. _parsed_has_nul closes a JSONB 500 on NUL bytes. Both pure → fast.
+
+Documented EQUIVALENT mutants (adjudicated): L412/L427/L441/L444
+truncation/cap bounds (120-char class_type, 300-char filename, [:500]
+custom-node list, [:100] model list) ±1 are one-element/one-char bound
+changes on already-bounded output (true totals preserved separately); L413
+`class_counts[ct] += 1` accumulates a dict never returned in the report
+(core_count derives from custom_counts) — no observable effect.
 """
 
 from app.services.comfyui_import import (
     ComfyUIImportService as Ci,
+)
+from app.services.comfyui_import import (
     _parsed_has_nul,
 )
 
