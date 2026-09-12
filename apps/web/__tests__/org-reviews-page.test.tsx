@@ -71,9 +71,9 @@ describe("ReviewDashboardPage (R451)", () => {
     // avatar initial is the author name's first char
     expect(screen.getByText("A")).toBeTruthy(); // Ada -> A
     // review link points at the submission
-    expect(screen.getAllByText("Review →")[0].closest("a")?.getAttribute("href")).toBe(
-      "/dashboard/orgs/o-1/reviews/s-1",
-    );
+    expect(
+      (screen.getAllByText("Review →")[0] as HTMLElement).closest("a")?.getAttribute("href"),
+    ).toBe("/dashboard/orgs/o-1/reviews/s-1");
   });
 
   it("singular count copy and empty state", async () => {
