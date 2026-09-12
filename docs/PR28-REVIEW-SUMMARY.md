@@ -2076,6 +2076,22 @@ removed)", row-scoped modified chip).
 tsc + eslint clean. No production code changed since R422's cohort
 savepoint fix; branch still unmerged.
 
+**R471–R480 (web sweep, each guard-proved by source mutation)**:
+projects list (Math.ceil deadline ladder + cohort_id filter param),
+cohort members (enrolled-users filter + DELETE by user_id), cohort
+projects (published-only filter + blank-override omission), cohort
+skills (assigned filter), join-by-code (2s auth-hydration grace +
+ApiError verbatim), register (safeRedirect backslash rejection AND
+tab/newline strip — open-redirect guards), create-org (double-submit
+ref guard + auto-slug edge trim), create-project (rubric parser NaN→25
+
+- instructions trim fallback), public portfolio RSC (http(s) social
+  scheme filter in anchors AND JSON-LD sameAs + </script> escape),
+  client-portal access (sessionStorage-only guest JWT + 422 verbatim).
+
+**R480 checkpoint**: web **437 passed (90 files)**; tsc + eslint clean
+throughout. Still test-only since R422; branch unmerged.
+
 ---
 
 ## 5. Bottom line
