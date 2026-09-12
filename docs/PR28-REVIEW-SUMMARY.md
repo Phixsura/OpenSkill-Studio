@@ -2246,6 +2246,37 @@ must include EVERY suite that pins the target function — two batches of
 Wave-close regression: marketplace+whitelabel+billing+outbox 188 passed,
 repo ruff clean.
 
+### R521–R522: the two written exemptions closed + budgets (2026-09-12)
+
+- **R521a — execute_provision_run** (previously exempted as "covered by
+  E2E"): swept against the whitelabel provisioning tests; every survivor
+  proven equivalent (length caps, slug-collision retry count, a probe on
+  the globally-unique org slug, the 422 status swallowed into run.error,
+  error truncations) — documented in-module. The exemption is now a
+  measurement.
+- **R521b — StripeProvider.verify_webhook** (previously exempted as
+  "needs real keys"): sweepable with fake secrets after all. **4 real
+  gaps killed**: 401 status class on both invalid-signature paths, the
+  explicit missing-signature branch (an or->and mutant fell through to
+  the SDK), and the amount-normalizer currency guard (an and->or mutant
+  called it with currency=None). The signature test now also covers the
+  canonical-case header fallback and amount-without-currency passthrough.
+- **R522 — budgets.py (§17)**: 41/45 killed; all FOUR survivors were
+  real gaps, killed by one new test — the PROJECT and USER scope filters
+  (flips summed the whole tenant against a single project/user limit —
+  R322's false-BUDGET_EXCEEDED class alive on two more scopes), the
+  usage_type narrowing filter, and the period-window >= boundary (an
+  event at exactly the period start must count; occurred_at is caller
+  data, so this instant IS constructible, unlike the server-clock
+  family).
+
+Close-out regression: credits+billing+whitelabel 182 passed, ruff clean.
+Second-wave totals now: ~420 mutants measured across 13 services;
+**13 real test gaps found and killed** (6 export tenant-scoping, 2
+tenants, 2 branding-through-resolution, 1 license-usage quantity, 4
+stripe, 4 budgets — counting per assertion family), every other
+survivor dispositioned in-module. Branch unmerged.
+
 ---
 
 ## 5. Bottom line
