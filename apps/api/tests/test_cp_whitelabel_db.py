@@ -1630,3 +1630,107 @@ async def test_whitelabel_api_handlers_cross_tenant_404(db):
         user=user, db=db)
     assert resp.data["login_tagline"] == "Hello R383"
     assert resp.data["theme_tokens"] == {}
+
+
+async def test_export_sections_are_tenant_scoped(db, monkeypatch):
+    """R516 mutation kills: the provisioning sweep left `tenant_id ==` -> `!=`
+    ALIVE on six export sections (payments, credit notes, credit ledger,
+    licenses, usage, domains) — i.e. nothing asserted that another tenant's
+    rows are EXCLUDED, nor even that the exporting tenant's own rows appear.
+    Seed two tenants with distinguishable rows in every section and assert
+    both directions; also pin the cancelled-subscription exclusion (L529).
+    """
+    import json as _json
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal as _D
+
+    from app.controlplane.models.billing import Invoice, PaymentRecord, Subscription
+    from app.controlplane.models.branding import TenantDomain
+    from app.controlplane.models.credit import CreditLedgerEntry
+    from app.controlplane.models.marketplace import LicenseGrant
+    from app.controlplane.models.usage import UsageEvent
+
+    user = await _mk_user(db)
+    ten_a = await _mk_tenant(db, user)
+    ten_b = await _mk_tenant(db, user)
+
+    async def seed(tenant_id: str, tag: str) -> dict:
+        inv_total = 111001 if tag == "alpha" else 112002  # unique invoice markers
+        inv = Invoice(tenant_id=tenant_id, currency="USD", status="open",
+                      subtotal_minor=inv_total, total_minor=inv_total,
+                      amount_due_minor=inv_total, finalized_at=datetime.now(UTC))
+        db.add(inv)
+        await db.flush()
+        pay = PaymentRecord(tenant_id=tenant_id, invoice_id=inv.id, amount_minor=1000, currency="USD",
+                            method="manual", status="succeeded",
+                            received_at=datetime.now(UTC))
+        amount = 771001 if tag == "alpha" else 772002  # unique ledger markers
+        ledger = CreditLedgerEntry(tenant_id=tenant_id, currency="USD",
+                                   entry_type="manual_adjustment", amount_minor=amount,
+                                   balance_after_minor=amount, reason=f"seed-{tag}")
+        grant = LicenseGrant(tenant_id=tenant_id, product_type="skill_pack",
+                             product_id=str(ULID()), scope="tenant", status="active",
+                             source="manual_grant")
+        # content_license is rare in the shared dev DB; the EXACT per-tenant
+        # quantity is the marker — a tenant_id != mutant aggregates everyone
+        # else's rows and can no longer produce exactly this sum.
+        qty = 31 if tag == "alpha" else 37
+        usage = UsageEvent(tenant_id=tenant_id, org_id=str(ULID()),
+                           usage_type="content_license", quantity=_D(qty),
+                           unit="licenses", occurred_at=datetime.now(UTC),
+                           source="manual", metadata_={})
+        dom = TenantDomain(tenant_id=tenant_id, verification_token_hash="x" * 64,
+                           hostname=f"exp-{tag}-{str(ULID()).lower()[:8]}.example.com")
+        db.add_all([pay, ledger, grant, usage, dom])
+        await db.flush()
+        return {"invoice": inv.id, "payment": pay.id, "grant": grant.product_id,
+                "domain": dom.hostname, "ledger": str(amount), "inv_total": inv_total}
+    a = await seed(ten_a.id, "alpha")
+    b = await seed(ten_b.id, "bravo")
+    # a CANCELLED subscription for tenant A must be excluded (L529)
+    from app.controlplane.models.plan import PlanVersion as _PV
+
+    pv_id = (
+        await db.execute(select(_PV.id).limit(1))
+    ).scalar_one_or_none()
+    assert pv_id is not None, "dev DB has no plan versions seeded"
+    db.add(Subscription(tenant_id=ten_a.id, plan_version_id=pv_id,
+                        status="cancelled", currency="USD", interval="month",
+                        current_period_start=datetime.now(UTC),
+                        current_period_end=datetime.now(UTC) + timedelta(days=30)))
+    await db.flush()
+
+    captured: dict = {}
+
+    async def fake_s3():
+        class FakeClient:
+            async def head_bucket(self, **kw):
+                return {}
+
+            async def create_bucket(self, **kw):
+                return {}
+
+            async def put_object(self, **kw):
+                captured["body"] = kw["Body"].decode()
+
+        yield FakeClient()
+
+    monkeypatch.setattr("app.core.storage.get_s3_client", fake_s3)
+    export = await provision_svc.build_export(db, ten_a.id, actor=_actor(user))
+    assert export.status == "completed"
+    body = captured["body"]
+    bundle = _json.loads(body)
+
+    # own rows present in every section
+    assert a["payment"] in body
+    assert a["ledger"] in body  # ledger amount marker
+    assert a["grant"] in body  # license
+    assert a["domain"] in body
+    lic_rows = [u for u in bundle["usage_monthly"] if u["usage_type"] == "content_license"]
+    assert lic_rows and all(float(u["quantity"]) == 31.0 for u in lic_rows), lic_rows
+    assert any(i["total_minor"] == a["inv_total"] for i in bundle["invoices"])
+    # the OTHER tenant's rows are excluded from every section (§35 red line)
+    for marker in (b["payment"], b["ledger"], b["grant"], b["domain"], str(b["inv_total"])):
+        assert marker not in body, marker
+    # cancelled subscription excluded
+    assert bundle["subscription"] is None
