@@ -3313,3 +3313,66 @@ async def test_credits_api_handlers_direct(db):
     assert e404d.value.status_code == 404
     await delete_budget(tenant.id, policy.id, user=user, db=db)
     assert await db.get(BudgetPolicy, policy.id) is None
+
+
+async def test_spent_minor_scope_and_usage_type_filters(db):
+    """R522 mutation kills: _spent_minor's PROJECT and USER scope filters and
+    the usage_type filter were unasserted (Eq->NotEq survived on all three) —
+    a flipped filter sums the WHOLE tenant's spend against one project/user/
+    type limit, the exact false-BUDGET_EXCEEDED class R322 fixed for cohorts.
+    Also pins the window boundary: an event at EXACTLY the period start
+    counts (>= , not >) — occurred_at is caller data, so the instant is
+    constructible here unlike the server-clock equivalence family."""
+    from app.controlplane.models.pricing import RatedUsage
+    from app.controlplane.models.usage import UsageEvent
+    from app.controlplane.services.budgets import _period_start, _spent_minor
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)  # USD
+    org = f"01J522ORG{str(ULID())[9:]}"
+    proj_a, proj_b = str(ULID()), str(ULID())
+    user_a, user_b = str(ULID()), str(ULID())
+
+    def seed(amount: int, *, project_id, user_id, usage_type, occurred_at=None):
+        eid = str(ULID())
+        db.add(UsageEvent(
+            id=eid, tenant_id=tenant.id, org_id=org, project_id=project_id,
+            user_id=user_id, usage_type=usage_type, quantity=1,
+            unit="images" if usage_type == "image_generation" else "seconds",
+            occurred_at=occurred_at or datetime.now(UTC), source="manual",
+        ))
+        db.add(RatedUsage(
+            usage_event_id=eid, tenant_id=tenant.id, org_id=org,
+            usage_type=usage_type, quantity=1, cost_rate_snapshot={},
+            internal_cost_minor=0, internal_cost_currency="USD",
+            sell_rate_snapshot={}, billable_amount_minor=amount,
+            billable_amount_exact=Decimal(amount), billable_currency="USD",
+            status="rated", rated_at=datetime.now(UTC),
+        ))
+
+    seed(100, project_id=proj_a, user_id=user_a, usage_type="image_generation")
+    seed(2000, project_id=proj_b, user_id=user_b, usage_type="video_generation_seconds")
+    await db.flush()
+
+    def pol(**over):
+        base = dict(tenant_id=tenant.id, scope_type="org", scope_id=org,
+                    period="monthly", limit_minor=10_000, currency="USD",
+                    hard_stop=True)
+        base.update(over)
+        return BudgetPolicy(**base)
+
+    # project scope counts ONLY that project's spend
+    assert await _spent_minor(db, tenant, pol(scope_type="project", scope_id=proj_a)) == 100
+    # user scope counts ONLY that user's spend
+    assert await _spent_minor(db, tenant, pol(scope_type="user", scope_id=user_a)) == 100
+    # usage_type filter narrows within the scope
+    assert (
+        await _spent_minor(db, tenant, pol(usage_type="image_generation")) == 100
+    )
+    assert await _spent_minor(db, tenant, pol()) == 2100  # unscoped org total
+    # boundary: an event at EXACTLY the monthly period start is IN the window
+    start = _period_start("monthly", tenant.timezone or "UTC")
+    seed(7, project_id=proj_a, user_id=user_a, usage_type="image_generation",
+         occurred_at=start)
+    await db.flush()
+    assert await _spent_minor(db, tenant, pol(scope_type="project", scope_id=proj_a)) == 107
