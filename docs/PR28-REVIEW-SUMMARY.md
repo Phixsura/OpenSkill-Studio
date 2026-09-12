@@ -2229,6 +2229,23 @@ killed by existing tests, 3 new kill-tests, 16 survivors dispositioned
 (13 equivalents, 2 near-equivalents, 1 batch of accepted residuals in
 export member-filters/truncation-flag shapes). Branch unmerged.
 
+### R518–R520: sweep wave 2 closed — every cp service now measured
+
+| Service (funcs)                                                                | Killed    | Dispositions                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| marketplace create_purchase/mark_paid/refund/install-gate (77 mutants, 22 min) | 69/77     | 2 false survivors killed by the BILLING suite's R88[11] test (suite-selection artifact, hand-verified); 1 structural (uq_cp_listing_product); 3 already-documented R346 equivalents; **1 real gap killed** — the §9 content_license usage event's quantity was unasserted (a doubled per-sale meter passed); the credit-flow test now pins exactly one event with quantity 1 across webhook replay |
+| domains resolve_site_context + normalize (21)                                  | 19/21     | first pass produced 13 FALSE survivors from a -k filter that missed test_hostname_normalization_matrix — corrected sweep re-run; **2 real gaps killed**: the R330 `or {}`/`or []` branding coalesces flipped to `and` served empty branding for every tenant with real tokens/links; the site-context test now round-trips non-empty content                                                       |
+| billing record_payment/issue_credit_note                                       | all but 1 | 1 structural equivalent (uq_cp_payment_external)                                                                                                                                                                                                                                                                                                                                                   |
+| worker process_outbox_once/reap_stuck (31)                                     | 27/31     | 4 clock-instant equivalents                                                                                                                                                                                                                                                                                                                                                                        |
+| billing_providers/mock signer                                                  | 1/1       | —                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+Method lesson recorded twice this wave: a mutation sweep's test command
+must include EVERY suite that pins the target function — two batches of
+"survivors" were artifacts of -k filters that missed the killing tests
+(hostname matrix; the R88[11] refund gate living in the billing file).
+Wave-close regression: marketplace+whitelabel+billing+outbox 188 passed,
+repo ruff clean.
+
 ---
 
 ## 5. Bottom line
