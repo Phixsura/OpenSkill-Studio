@@ -55,9 +55,12 @@ via `site-context.ts`.
 
 These are decisions, not defects — the machine checks can't settle them:
 
-- **§33 self-service signup deferred** (ADR-014 known limitations): v1
-  provisions tenants via platform/partner admins only. Agree with the
-  rationale, or schedule the follow-up epic?
+- **§33 self-service signup — now BUILT (R535)**: the earlier "deferred"
+  note was wrong (standalone org creation always auto-minted a TRIAL
+  tenant); the abuse gates are now in the minting branch — kill-switch,
+  opt-in verified-email gate (default off; production should enable it,
+  see .env.example), per-user cap 20 with a FOR UPDATE race lock.
+  Decide: enable the email gate at launch? Is cap 20 right for you?
 - **v1 money policies** (all ADR-documented): non-credit refunds return as
   platform credit (no provider-side refund API yet); settle-over-hold floors
   at balance ≥ 0 with the shortfall logged, no debt rows; promo-credit
