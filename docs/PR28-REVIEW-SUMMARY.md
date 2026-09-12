@@ -2336,6 +2336,40 @@ frontend theme). Web 536/115 green, tsc 0, eslint clean.
     = 395 checks; browser 19+60+42+31 = 152 checks. Zero failures,
     zero console errors, zero 500s.
 
+### R535: §33 self-service signup — deferral corrected, gates shipped (2026-09-13)
+
+The audit's R507 "§33 deferred" note was WRONG: standalone org creation
+(POST /orgs) has always auto-minted a TRIAL tenant owned by the creator —
+the self-service path existed; only its abuse controls were missing. Built
+server-side in OrgService.create's minting branch (all four mutations
+killed post-commit):
+
+- `self_service_signup_enabled` kill-switch ("where enabled"; 403
+  SELF_SERVICE_DISABLED; tenant-scoped/platform/partner paths exempt);
+- opt-in verified-email gate (`self_service_require_verified_email`,
+  default OFF — production recommendation documented in .env.example;
+  403 EMAIL_NOT_VERIFIED when on);
+- per-user owned-tenant cap (default 20; 403 SELF_SERVICE_TENANT_LIMIT)
+  with a user-row FOR UPDATE serializing count+mint (gather race:
+  exactly one ok / one refusal).
+
+Three honest corrections along the way, all recorded in the commits:
+(1) the first guard-prove wiped the UNCOMMITTED implementation via git
+checkout — the documented R422 failure mode, re-learned; (2) a policy
+edit silently never applied (`cd apps/api &&` short-circuited its
+heredoc from inside apps/api) and was misread as applied — re-executed
+with the live settings values printed as proof; (3) CI failed 1039
+tests under the hard email-verification default (2558 EMAIL_NOT_VERIFIED
+hits) — reclassified as a launch decision, made opt-in; cap 2→20 (two
+was tripping legitimate multi-org users; the pre-change baseline was NO
+cap at all, so 20 remains a net tightening). The automated security
+review's "fail-open weakened default" flag was acknowledged with the
+baseline analysis and its valid kernel (production opt-in) documented.
+
+**With R535, all 39 issue sections are implemented — zero deferrals.**
+CI green on the final state; PR MERGEABLE/CLEAN; ADR-014, the review
+guide, the PR body and the issue thread all corrected.
+
 ### R530–R532: PR consolidation — first-ever green CI (2026-09-12/13)
 
 Retargeting PR #28's base to main (its parent #22 had merged; the squash
