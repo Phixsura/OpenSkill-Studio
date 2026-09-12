@@ -16,6 +16,13 @@ describe("themeTokensToCss (R366 — the white-label style-tag generator)", () =
     expect(themeTokensToCss({ muted: "#808080" })).toContain("--muted: 0 0% 50.2%;");
     expect(themeTokensToCss({ foreground: "#000000" })).toContain("--foreground: 0 0% 0%;");
     expect(themeTokensToCss({ border: "#ffffff" })).toContain("--border: 0 0% 100%;");
+    // R527 mutation kills: a LIGHT saturated color exercises the l>0.5
+    // saturation denominator (2-max-min) — the flat d/(max+min) mutant
+    // reports 33.2% instead of 100%...
+    expect(themeTokensToCss({ primary: "#ff8080" })).toContain("--primary: 0 100% 75.1%;");
+    // ...and a red-max, blue>green color exercises the hue wrap (+6):
+    // without it the hue goes negative instead of 330.
+    expect(themeTokensToCss({ primary: "#ff0080" })).toContain("--primary: 330 100% 50%;");
   });
 
   it("NEVER emits garbage into the style tag (injection guard)", () => {
@@ -28,6 +35,11 @@ describe("themeTokensToCss (R366 — the white-label style-tag generator)", () =
       "url(javascript:alert(1))",
       "#ff0000; } body { display:none",
     ]) {
+      expect(themeTokensToCss({ primary: bad })).toBe("");
+    }
+    // R527: the ^…$ anchors are load-bearing — an EMBEDDED valid hex
+    // ("x#ff0000; }") must not satisfy the pattern
+    for (const bad of ["x#ff0000", "#ff0000; } body { display:none", " #ff0000"]) {
       expect(themeTokensToCss({ primary: bad })).toBe("");
     }
   });
