@@ -280,6 +280,7 @@ async def test_last_owner_removal_blocked(db):
     with pytest.raises(AppError) as exc:
         await tenant_svc.remove_tenant_member(db, tenant, member.id, actor=_actor(owner))
     assert exc.value.code == "LAST_OWNER_REMOVAL"
+    assert exc.value.status_code == 409  # conflict class, not client-input
 
 
 # ── Impersonation ────────────────────────────────────────────
@@ -1233,3 +1234,23 @@ async def test_tenants_api_handlers_direct(db):
         user=user_a, db=db)          # 0 live orgs counted → under the cap of 1
     ok_data = ok if isinstance(ok, dict) else ok.data
     assert (ok_data.get("data") or ok_data)["id"]
+
+
+async def test_has_platform_role_with_multiple_matching_roles(db):
+    """R514 mutation kill: has_platform_role uses .limit(1) before
+    scalar_one_or_none — a user holding TWO of the queried roles must still
+    resolve True (a limit(2) mutant raises MultipleResultsFound here, i.e. a
+    500 on every platform endpoint for multi-role operators)."""
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.controlplane.services import tenants as tenant_svc
+
+    user = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=user.id, role="platform_support"))
+    db.add(PlatformRoleAssignment(user_id=user.id, role="billing_admin"))
+    await db.flush()
+    assert (
+        await tenant_svc.has_platform_role(db, user, "platform_support", "billing_admin")
+        is True
+    )
+    # non-matching query still False for a multi-role user
+    assert await tenant_svc.has_platform_role(db, user, "platform_admin") is False
