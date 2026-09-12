@@ -39,13 +39,18 @@ async def post_with_backoff(c: httpx.AsyncClient, path: str, **kw) -> httpx.Resp
     return r
 
 
-async def drain_outbox(max_rounds: int = 10) -> int:
+async def drain_outbox(max_rounds: int = 200) -> int:
     """Process outbox messages inline (worker-less E2E).
 
     R130: purge stale test.* topic rows first — test_cp_outbox_db commits
     unknown-topic rows into the shared dev DB; they fill the poll batch,
     count as handled=0 (no handler), and the handled==0 early-break then
-    strands real messages (provision.run sat pending forever)."""
+    strands real messages (provision.run sat pending forever).
+
+    R509: max_rounds raised 10 -> 200 — a long-lived dev DB accumulates
+    hundreds of stale pending usage.recorded rows from earlier test runs;
+    at batch size 50 the old 10-round cap burned itself on the backlog and
+    never reached the freshly enqueued event."""
     from sqlalchemy import text
 
     from app.controlplane.worker import process_outbox_once
