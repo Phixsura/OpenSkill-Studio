@@ -2197,6 +2197,38 @@ eslint + repo ruff clean, cp revshare suite 36 passed. Branch unmerged.
   (the worker loop in production is unbounded), but worth knowing when
   running the script on a long-lived dev DB.
 
+### R510–R517: control-plane mutation-sweep wave 2 (2026-09-12)
+
+The one dimension still open after the issue-detail audit: eight cp
+services had never been AST-mutation-swept. Results (harness inline,
+per-service kill-tests, equivalents documented in each test module):
+
+| Service (funcs)                               | Killed    | Survivors → disposition                                                                                                                              |
+| --------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| settlement_handlers.handle_run_terminal       | 13/15     | 2 equivalents (lease clock-instant; limit(1→2) both defer via outbox)                                                                                |
+| marketplace split_economics/_grant_rank/width | 20/22     | 2 equivalents (rank tuple only compared relatively)                                                                                                  |
+| metering emit_usage/ingest_adjustment         | **29/29** | none                                                                                                                                                 |
+| client_portal guest-token core (5 funcs)      | 40/44     | 4 equivalents (3 clock-instant, 1 token-entropy headroom)                                                                                            |
+| tenants lifecycle core (5 funcs)              | 21/25     | **2 REAL gaps killed by new tests** (multi-role has_platform_role limit(1) → MultipleResultsFound 500; LAST_OWNER_REMOVAL 409 class) + 2 equivalents |
+| provisioning/build_export (4 funcs)           | see below | **the audit's biggest find**                                                                                                                         |
+| plans immutability core (4 funcs)             | 19/21     | 2 near-equivalents (plan-lock row flip = coarser lock, correctness preserved)                                                                        |
+| entitlements engine (4 funcs)                 | 27/30     | 3 structural equivalents (schema unique indexes make limit(1) mutants unobservable; 1 clock-instant)                                                 |
+
+**R516 headline**: `tenant_id ==` → `!=` SURVIVED on six sections of
+the §35 tenant export (payments, credit notes, credit ledger, licenses,
+usage, domains) — the cross-tenant exclusion red line was entirely
+unasserted there, as was own-row inclusion. New two-tenant test asserts
+both directions on every section plus the cancelled-subscription gate;
+all seven flips verified failing (the aggregated usage section needed
+an exclusive usage_type + exact-quantity marker — the plain presence
+assert was itself mutant-surviving and was strengthened).
+
+**Post-wave checkpoint**: cp suites 302 passed (8 files, ~4.6 min),
+repo ruff clean. Cumulative sweep arithmetic for the wave: 188/207
+killed by existing tests, 3 new kill-tests, 16 survivors dispositioned
+(13 equivalents, 2 near-equivalents, 1 batch of accepted residuals in
+export member-filters/truncation-flag shapes). Branch unmerged.
+
 ---
 
 ## 5. Bottom line
