@@ -9,6 +9,16 @@ require_feature: 27/30 killed; 3 equivalents, all structurally proven:
   partial unique index gives the same single-row guarantee.
 - L170 `trial_ends_at > now` -> `>=`: clock-instant boundary (a trial ending
   at the exact evaluation instant reads the default plan one request early).
+
+R517 mutation sweep of plans.py _require_draft/activate_version/set_override/
+create_draft_version: 19/21 killed (immutability gates, override typing,
+version+1 math). 2 near-equivalent survivors, both the SAME shape: the
+R62/R134 plan-row lock selects (`ProductPlan.id == plan.id` -> `!=`) flip to
+locking every OTHER plan row — a coarser lock that still serializes the
+racing drafts/activations whenever at least one other plan exists (always
+true outside an empty DB), so correctness is preserved and only concurrency
+degrades; the existing gather races cannot distinguish it. Accepted with
+this note rather than asserting lock scope (unobservable from SQL results).
 """
 
 import asyncio
