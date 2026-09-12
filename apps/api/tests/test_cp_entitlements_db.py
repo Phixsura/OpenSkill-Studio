@@ -1,4 +1,15 @@
-"""P2 DB tests: plans, versions, entitlement engine, quota enforcement."""
+"""P2 DB tests: plans, versions, entitlement engine, quota enforcement.
+
+R515 mutation sweep of _compute_effective/_resolve_plan_version/check_quota/
+require_feature: 27/30 killed; 3 equivalents, all structurally proven:
+- L155 subscription .limit(1) -> limit(2): uq_cp_sub_live (partial unique on
+  tenant_id where status != 'cancelled') makes a second live subscription
+  impossible, so scalar_one_or_none can never see two rows.
+- L177 plan-version .limit(1) -> limit(2): the one-active-version-per-plan
+  partial unique index gives the same single-row guarantee.
+- L170 `trial_ends_at > now` -> `>=`: clock-instant boundary (a trial ending
+  at the exact evaluation instant reads the default plan one request early).
+"""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
