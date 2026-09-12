@@ -1,5 +1,20 @@
 """P10 DB tests: branding validation, domains, blueprints/provisioning,
-export whitelist, suspension surface."""
+export whitelist, suspension surface.
+R516 mutation sweep of validate_blueprint_config/_step_done/
+create_provision_run/build_export: the headline finding was six
+`tenant_id ==` -> `!=` survivors on export sections (now killed by
+test_export_sections_are_tenant_scoped, together with the L529
+cancelled-subscription gate). Remaining classified survivors:
+- L505 OrgMember.status == ACTIVE / L510 User.status != DELETED and
+  L552 invoice-line outerjoin shape: member-roster filter and join-shape
+  contracts inside the organizations/invoices sections — not privacy
+  boundaries (rows are still the exporting tenant's own), currently
+  unasserted; acceptable residuals.
+- L616/L642 truncation flags for payments/credit_notes: the truncation
+  MECHANISM is pinned for ledger/licenses/invoices (R138); these two
+  flags share the identical code shape.
+- L779 error-message truncation 2000 -> 2001: cosmetic bound.
+"""
 
 import pytest
 from sqlalchemy import func, select
