@@ -56,7 +56,6 @@ class TestConsentGate:
     def test_only_id_and_display_name_selected(self):
         """The candidate query must select ONLY id + display_name to
         structurally exclude protected attributes from the feature space."""
-        import re
 
         source = inspect.getsource(TalentMatchingService.match_candidates_for_opportunity)
         # Must reference User.id and User.display_name

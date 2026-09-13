@@ -1,8 +1,7 @@
 """OrgRole extension tests — employer roles (ADR-015 §16)."""
 
-import pytest
 
-from app.models.organization import OrgRole, ROLE_HIERARCHY
+from app.models.organization import ROLE_HIERARCHY, OrgRole
 
 
 class TestEmployerRoles:

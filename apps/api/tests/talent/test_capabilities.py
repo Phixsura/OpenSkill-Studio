@@ -23,7 +23,7 @@ class TestSlugify:
 class TestEdgeTypes:
     def test_all_types_present(self):
         expected = {"requires", "related_to", "specializes", "subsumes", "commonly_paired_with"}
-        assert EDGE_TYPES == expected
+        assert expected == EDGE_TYPES
 
 
 class TestMappingSourceTypes:
@@ -32,7 +32,7 @@ class TestMappingSourceTypes:
             "skill", "skill_pack", "project_template", "workflow_pack",
             "rubric_criterion", "assessment_blueprint", "commercial_project",
         }
-        assert MAPPING_SOURCE_TYPES == expected
+        assert expected == MAPPING_SOURCE_TYPES
 
 
 # ---- API tests ----

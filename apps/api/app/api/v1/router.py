@@ -36,7 +36,6 @@ from app.api.v1.endpoints import (
     workflow_registry,
     workflow_runs,
 )
-from app.talent.api import talent_router
 from app.controlplane.api import billing as cp_billing
 from app.controlplane.api import client_portal as cp_client_portal
 from app.controlplane.api import credits as cp_credits
@@ -49,6 +48,7 @@ from app.controlplane.api import pricing as cp_pricing
 from app.controlplane.api import tenants as cp_tenants
 from app.controlplane.api import usage as cp_usage
 from app.controlplane.api import whitelabel as cp_whitelabel
+from app.talent.api import talent_router
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(health.router)

@@ -42,7 +42,6 @@ async def post_with_backoff(c: httpx.AsyncClient, path: str, **kw) -> httpx.Resp
 
 def _db_exec(sql: str) -> None:
     """Run SQL in a separate process to avoid event-loop contention."""
-    import json as _json
     import tempfile
 
     # Write SQL to a temp file to avoid quoting issues

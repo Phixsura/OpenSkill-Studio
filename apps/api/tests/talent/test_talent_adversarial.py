@@ -4,16 +4,14 @@ These tests verify structural properties that MUST hold regardless of
 database state or user actions.
 """
 
-import inspect
 
-import pytest
 
 from app.talent.models.application import (
     APPLICATION_TRANSITIONS,
     Application,
     ApplicationEvent,
 )
-from app.talent.models.evidence import CapabilityEvidence, VERIFICATION_WEIGHTS
+from app.talent.models.evidence import VERIFICATION_WEIGHTS, CapabilityEvidence
 from app.talent.models.passport import SkillPassport
 from app.talent.services.scoring import SCORING_VERSION
 

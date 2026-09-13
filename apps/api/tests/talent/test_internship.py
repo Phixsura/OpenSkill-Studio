@@ -6,7 +6,6 @@ from app.talent.models.internship import (
     OUTCOME_EVENT_TYPES,
     CohortOpportunityExposure,
     InternshipSupervision,
-    OutcomeEvent,
 )
 
 

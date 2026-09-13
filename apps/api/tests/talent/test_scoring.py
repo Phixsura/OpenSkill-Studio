@@ -1,56 +1,53 @@
 """Capability scoring engine tests — pure logic, no DB needed."""
 
-from datetime import datetime, timezone, timedelta
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from app.talent.services.scoring import (
     SCORING_VERSION,
     compute_score_from_evidence,
     decay_factor,
     determine_level,
-    DEFAULT_LEVEL_THRESHOLDS,
 )
 
 
 class TestDecayFactor:
     def test_no_config_returns_1(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert decay_factor(now, now, None) == 1.0
 
     def test_no_half_life_key_returns_1(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert decay_factor(now, now, {"other": 100}) == 1.0
 
     def test_zero_age_returns_1(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert decay_factor(now, now, {"half_life_days": 365}) == 1.0
 
     def test_one_half_life_returns_half(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(days=365)
         result = decay_factor(past, now, {"half_life_days": 365})
         assert abs(result - 0.5) < 0.001
 
     def test_two_half_lives_returns_quarter(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(days=730)
         result = decay_factor(past, now, {"half_life_days": 365})
         assert abs(result - 0.25) < 0.001
 
     def test_fast_decay_90_days(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(days=90)
         result = decay_factor(past, now, {"half_life_days": 90})
         assert abs(result - 0.5) < 0.001
 
     def test_future_date_returns_1(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         future = now + timedelta(days=30)
         assert decay_factor(future, now, {"half_life_days": 365}) == 1.0
 
     def test_zero_half_life_returns_1(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(days=100)
         assert decay_factor(past, now, {"half_life_days": 0}) == 1.0
 
@@ -61,7 +58,7 @@ class TestComputeScore:
             "score_normalized": 0.8,
             "verification_level": "instructor_verified",
             "confidence": 1.0,
-            "occurred_at": datetime.now(timezone.utc),
+            "occurred_at": datetime.now(UTC),
             "status": "active",
             "expires_at": None,
         }
@@ -69,14 +66,14 @@ class TestComputeScore:
         return defaults
 
     def test_empty_evidence(self):
-        score, conf, sub = compute_score_from_evidence([], None, datetime.now(timezone.utc))
+        score, conf, sub = compute_score_from_evidence([], None, datetime.now(UTC))
         assert score == 0.0
         assert conf == 0.0
         assert sub == 0
 
     def test_single_evidence(self):
         ev = [self._make_evidence()]
-        score, conf, sub = compute_score_from_evidence(ev, None, datetime.now(timezone.utc))
+        score, conf, sub = compute_score_from_evidence(ev, None, datetime.now(UTC))
         # With k=3 shrinkage: (1/(1+3)) * (0.8*0.85*1.0*1.0) + (3/(1+3)) * 0.5
         # = 0.25 * 0.68 + 0.75 * 0.5 = 0.17 + 0.375 = 0.545
         assert 0.5 < score < 0.6
@@ -85,7 +82,7 @@ class TestComputeScore:
 
     def test_many_evidence_converges(self):
         evs = [self._make_evidence() for _ in range(20)]
-        score, conf, sub = compute_score_from_evidence(evs, None, datetime.now(timezone.utc))
+        score, conf, sub = compute_score_from_evidence(evs, None, datetime.now(UTC))
         # With 20 items, shrinkage effect is small
         # raw = 0.8 * 0.85 = 0.68
         # shrunk ≈ (20/23) * 0.68 + (3/23) * 0.5 ≈ 0.591 + 0.065 ≈ 0.656
@@ -99,32 +96,32 @@ class TestComputeScore:
             self._make_evidence(status="voided"),
             self._make_evidence(status="superseded"),
         ]
-        score, conf, sub = compute_score_from_evidence(evs, None, datetime.now(timezone.utc))
+        score, conf, sub = compute_score_from_evidence(evs, None, datetime.now(UTC))
         # Only 1 active
         assert conf == 0.25
 
     def test_filters_expired(self):
         evs = [
-            self._make_evidence(expires_at=datetime.now(timezone.utc) - timedelta(days=1)),
+            self._make_evidence(expires_at=datetime.now(UTC) - timedelta(days=1)),
         ]
-        score, conf, sub = compute_score_from_evidence(evs, None, datetime.now(timezone.utc))
+        score, conf, sub = compute_score_from_evidence(evs, None, datetime.now(UTC))
         assert score == 0.0
 
     def test_self_reported_low_weight(self):
         ev = [self._make_evidence(verification_level="self_reported")]
-        score, _, _ = compute_score_from_evidence(ev, None, datetime.now(timezone.utc))
+        score, _, _ = compute_score_from_evidence(ev, None, datetime.now(UTC))
         # 0.8 * 0.30 * 1.0 = 0.24 → shrunk lower
         assert score < 0.45
 
     def test_employer_verified_high_weight(self):
         ev = [self._make_evidence(verification_level="employer_verified")]
-        score, _, _ = compute_score_from_evidence(ev, None, datetime.now(timezone.utc))
+        score, _, _ = compute_score_from_evidence(ev, None, datetime.now(UTC))
         # 0.8 * 1.0 * 1.0 = 0.8 → shrunk: 0.25*0.8 + 0.75*0.5 = 0.575
         assert score > 0.55
 
     def test_null_score_uses_default(self):
         ev = [self._make_evidence(score_normalized=None)]
-        score, _, _ = compute_score_from_evidence(ev, None, datetime.now(timezone.utc))
+        score, _, _ = compute_score_from_evidence(ev, None, datetime.now(UTC))
         # Uses 0.8 default → same as explicit 0.8
         assert score > 0.0
 
@@ -134,19 +131,19 @@ class TestComputeScore:
             self._make_evidence(verification_level="self_reported"),
             self._make_evidence(verification_level="peer_verified"),
         ]
-        _, _, sub = compute_score_from_evidence(evs, None, datetime.now(timezone.utc))
+        _, _, sub = compute_score_from_evidence(evs, None, datetime.now(UTC))
         # employer_verified + peer_verified = 2 substantial
         assert sub == 2
 
     def test_decay_reduces_score(self):
-        old = datetime.now(timezone.utc) - timedelta(days=365)
+        old = datetime.now(UTC) - timedelta(days=365)
         ev = [self._make_evidence(occurred_at=old)]
         score_decayed, _, _ = compute_score_from_evidence(
-            ev, {"half_life_days": 365}, datetime.now(timezone.utc)
+            ev, {"half_life_days": 365}, datetime.now(UTC)
         )
         ev_fresh = [self._make_evidence()]
         score_fresh, _, _ = compute_score_from_evidence(
-            ev_fresh, {"half_life_days": 365}, datetime.now(timezone.utc)
+            ev_fresh, {"half_life_days": 365}, datetime.now(UTC)
         )
         assert score_decayed < score_fresh
 

@@ -1,6 +1,5 @@
 """Outcome event tests — types, visibility defaults, model structure."""
 
-import pytest
 
 from app.talent.models.internship import OUTCOME_EVENT_TYPES, OutcomeEvent
 

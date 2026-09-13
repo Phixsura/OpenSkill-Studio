@@ -485,7 +485,7 @@ class CredentialService:
 
         # Generate evidence for each capability in the credential
         ev_svc = EvidenceService(self.db)
-        for i, cap in enumerate(credential.capabilities):
+        for _i, cap in enumerate(credential.capabilities):
             await ev_svc.record_evidence(
                 user_id=user_id,
                 capability_id=cap["capability_id"],

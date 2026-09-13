@@ -5,7 +5,6 @@ import pytest
 from app.talent.services.workforce import (
     DEFAULT_MIN_COHORT_SIZE,
     GAP_SEVERITY_THRESHOLDS,
-    WorkforceIntelligenceService,
 )
 
 
