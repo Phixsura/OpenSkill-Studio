@@ -37,7 +37,7 @@ from app.talent.schemas.application import (
 router = APIRouter(prefix="/talent", tags=["Talent — Applications"])
 
 # Transitions that only the candidate (applicant) may perform
-_CANDIDATE_TRANSITIONS = frozenset({"withdrawn"})
+_CANDIDATE_TRANSITIONS = frozenset({"withdrawn", "accepted"})
 # Transitions that only the employer may perform
 _EMPLOYER_TRANSITIONS = frozenset(
     {"screening", "interview", "assessment", "offer", "rejected", "hired", "completed"}

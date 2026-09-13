@@ -230,9 +230,12 @@ class TalentMatchingService:
         profile_scores = await compute_capability_profile(self.db, user_id)
         profile = {s.capability_id: s for s in profile_scores}
 
-        # S1: all open opportunities
+        # S1: open opportunities (capped to avoid loading unbounded sets)
         opp_result = await self.db.execute(
-            select(Opportunity).where(Opportunity.status == "open")
+            select(Opportunity)
+            .where(Opportunity.status == "open")
+            .order_by(Opportunity.created_at.desc())
+            .limit(limit * 5)  # Load 5× limit to allow room for filtering
         )
         opportunities = list(opp_result.scalars().all())
 
@@ -402,6 +405,8 @@ class TalentMatchingService:
         now: datetime,
     ) -> dict[str, float]:
         """S3: compute all 5 scoring signals for a candidate."""
+        import math
+
         all_caps = required_caps + preferred_caps
         if not all_caps:
             return {k: 0.5 for k in TALENT_WEIGHTS}
@@ -429,29 +434,26 @@ class TalentMatchingService:
         )
 
         # 3. evidence_recency: freshness of most recent evidence per required cap
-        # Query for the most recent evidence per required capability
+        # Batch query — one round trip instead of N per-capability queries
         recency_scores = []
         if req_cap_ids:
-            for cap_id in req_cap_ids:
-                ev_q = (
-                    select(CapabilityEvidence.occurred_at)
-                    .where(
-                        CapabilityEvidence.user_id == user_id,
-                        CapabilityEvidence.capability_id == cap_id,
-                        CapabilityEvidence.status == "active",
-                    )
-                    .order_by(CapabilityEvidence.occurred_at.desc())
-                    .limit(1)
+            batch_q = (
+                select(
+                    CapabilityEvidence.capability_id,
+                    func.max(CapabilityEvidence.occurred_at).label("latest"),
                 )
-                ev_result = await self.db.execute(ev_q)
-                row = ev_result.scalar_one_or_none()
-                if row:
-                    # Gaussian decay over 180 days (6 months)
-                    import math
-
-                    age_days = (now - row).total_seconds() / 86400
-                    recency = math.exp(-0.5 * (age_days / 180) ** 2)
-                    recency_scores.append(recency)
+                .where(
+                    CapabilityEvidence.user_id == user_id,
+                    CapabilityEvidence.capability_id.in_(req_cap_ids),
+                    CapabilityEvidence.status == "active",
+                )
+                .group_by(CapabilityEvidence.capability_id)
+            )
+            batch_result = await self.db.execute(batch_q)
+            for row in batch_result.all():
+                age_days = (now - row.latest).total_seconds() / 86400
+                recency = math.exp(-0.5 * (age_days / 180) ** 2)
+                recency_scores.append(recency)
         evidence_recency = (
             sum(recency_scores) / len(recency_scores) if recency_scores else 0.0
         )
@@ -463,8 +465,6 @@ class TalentMatchingService:
         )
         placement_count = (await self.db.execute(placement_q)).scalar() or 0
         # log1p normalization capped at 1 (same pattern as ADR-012 popularity)
-        import math
-
         portfolio_relevance = min(math.log1p(placement_count) / math.log1p(5), 1.0)
 
         # 5. credential_match: fraction of required caps covered by active credentials

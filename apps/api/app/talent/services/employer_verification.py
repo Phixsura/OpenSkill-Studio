@@ -82,14 +82,14 @@ class EmployerVerificationService:
                     "employers can only rate capabilities observed in the placement"
                 )
             score = rating.get("score")
-            if score is not None and not (0 <= score <= 1):
+            if score is not None and not (0 <= score <= 5):
                 raise ValueError(
-                    f"Capability rating score must be in [0, 1], got {score}"
+                    f"Capability rating score must be in [0, 5], got {score}"
                 )
 
-        # --- Validate overall_rating ---
-        if overall_rating is not None and not (0 <= overall_rating <= 1):
-            raise ValueError("overall_rating must be in [0, 1]")
+        # --- Validate overall_rating (0-5 scale, matching schema) ---
+        if overall_rating is not None and not (0 <= overall_rating <= 5):
+            raise ValueError("overall_rating must be in [0, 5]")
 
         # --- Create the verification record ---
         now = datetime.now(UTC)
@@ -118,7 +118,8 @@ class EmployerVerificationService:
                 verification_level="employer_verified",
                 occurred_at=now,
                 org_id=employer_org_id,
-                score_normalized=score,
+                # Normalize 0-5 rating to [0,1] for evidence scoring
+                score_normalized=score / 5.0 if score is not None else None,
                 confidence=1.0,
                 metadata={
                     "placement_id": placement_id,

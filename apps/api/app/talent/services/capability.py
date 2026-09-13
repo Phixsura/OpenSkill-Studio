@@ -105,6 +105,23 @@ class CapabilityService:
         if not cap:
             return None
 
+        # If parent_id is changing, check for circular reference
+        new_parent = fields.get("parent_id")
+        if new_parent is not None and new_parent != cap.parent_id:
+            if new_parent == capability_id:
+                raise ValueError("A capability cannot be its own parent")
+            # Walk the parent chain from new_parent to detect cycle
+            visited: set[str] = {capability_id}
+            current = new_parent
+            depth = 0
+            while current and depth < MAX_TRAVERSAL_DEPTH:
+                if current in visited:
+                    raise ValueError("CYCLE_DETECTED: Setting this parent would create a circular reference")
+                visited.add(current)
+                parent_cap = await self.db.get(Capability, current)
+                current = parent_cap.parent_id if parent_cap else None
+                depth += 1
+
         for key, value in fields.items():
             if key == "canonical_name" and value is not None:
                 cap.slug = slugify(value)

@@ -24,9 +24,9 @@ class TestScopeEnforcement:
         )
 
     def test_service_validates_score_range(self):
-        """Rating scores must be in [0, 1]."""
+        """Rating scores must be in [0, 5] (employer rating scale)."""
         source = inspect.getsource(EmployerVerificationService.create_verification)
-        assert "0 <= score <= 1" in source or "score <= 1" in source
+        assert "0 <= score <= 5" in source or "score <= 5" in source
 
 
 class TestAutoEvidenceGeneration:
@@ -40,6 +40,11 @@ class TestAutoEvidenceGeneration:
         source = inspect.getsource(EmployerVerificationService.create_verification)
         assert "employer_verified" in source
         assert "record_evidence" in source
+
+    def test_service_normalizes_score_to_unit(self):
+        """Rating score (0-5) must be normalized to [0,1] for evidence."""
+        source = inspect.getsource(EmployerVerificationService.create_verification)
+        assert "/ 5.0" in source or "/ 5" in source
 
     def test_service_generates_outcome_event(self):
         """create_verification must create an OutcomeEvent."""

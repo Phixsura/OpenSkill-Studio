@@ -127,6 +127,7 @@ class CredentialResponse(BaseModel):
     expires_at: datetime | None
     revalidation_at: datetime | None
     revoked_at: datetime | None
+    revoked_reason: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

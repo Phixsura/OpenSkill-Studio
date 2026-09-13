@@ -41,6 +41,16 @@ class TestApplicationStateMachine:
             else:
                 assert "hired" not in targets
 
+    def test_offer_to_accepted(self):
+        """Candidates must be able to accept offers."""
+        assert "accepted" in APPLICATION_TRANSITIONS["offer"]
+
+    def test_accepted_is_candidate_transition(self):
+        """Only the candidate (not the employer) can accept an offer."""
+        from app.talent.api.applications import _CANDIDATE_TRANSITIONS
+
+        assert "accepted" in _CANDIDATE_TRANSITIONS
+
     def test_draft_to_submitted(self):
         assert "submitted" in APPLICATION_TRANSITIONS["draft"]
 

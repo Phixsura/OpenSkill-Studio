@@ -5,6 +5,8 @@ Authorization:
   - Candidate-side (see matching opportunities): any authenticated user (own matches)
 """
 
+import dataclasses
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +18,7 @@ from app.talent.models.employer import Opportunity
 router = APIRouter(prefix="/talent", tags=["Talent — Matching"])
 
 
-@router.post("/opportunities/{opp_id}/match", response_model=DataResponse[dict])
+@router.post("/opportunities/{opp_id}/match", response_model=DataResponse[list[dict]])
 async def match_candidates(
     opp_id: str,
     limit: int = Query(20, ge=1, le=100),
@@ -36,11 +38,10 @@ async def match_candidates(
     results = await svc.match_candidates_for_opportunity(
         opportunity_id=opp_id,
         employer_org_id=opp.employer_org_id,
-        user_id=user.id,
         limit=limit,
         explain=explain,
     )
-    return DataResponse(data=results)
+    return DataResponse(data=[dataclasses.asdict(r) for r in results])
 
 
 @router.get("/opportunities/matches", response_model=DataResponse[list[dict]])
@@ -57,4 +58,4 @@ async def match_opportunities_for_user(
         user_id=user.id,
         limit=limit,
     )
-    return DataResponse(data=results)
+    return DataResponse(data=[dataclasses.asdict(r) for r in results])
