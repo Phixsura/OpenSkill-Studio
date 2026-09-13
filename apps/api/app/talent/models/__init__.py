@@ -41,6 +41,10 @@ from app.talent.models.passport import (  # noqa: F401
     PassportSnapshot,
     SkillPassport,
 )
+from app.talent.models.scorecard import (  # noqa: F401
+    InterviewScorecard,
+    ScorecardTemplate,
+)
 from app.talent.models.scoring import (  # noqa: F401
     CapabilityScoreSnapshot,
 )
