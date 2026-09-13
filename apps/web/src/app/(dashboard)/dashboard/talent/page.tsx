@@ -53,6 +53,168 @@ function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
+/* ── Demand vs Supply Bar Chart ─────────────────────────── */
+
+function DemandSupplyChart({ gaps }: { gaps: GapItem[] }) {
+  if (gaps.length === 0) return null;
+
+  const maxValue = Math.max(...gaps.flatMap((g) => [g.demand_count, g.qualified_supply]), 1);
+  const barScale = (val: number) => Math.max((val / maxValue) * 100, 2);
+
+  const gapPercent = (g: GapItem) => {
+    if (g.demand_count === 0) return 0;
+    return Math.round((g.gap / g.demand_count) * 100);
+  };
+
+  const gapColor = (pct: number) => {
+    if (pct > 50) return "text-red-600 dark:text-red-400";
+    if (pct > 25) return "text-amber-600 dark:text-amber-400";
+    if (pct > 10) return "text-yellow-600 dark:text-yellow-400";
+    return "text-emerald-600 dark:text-emerald-400";
+  };
+
+  return (
+    <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
+      <h3 className="mb-4 text-lg font-semibold">Demand vs Supply</h3>
+
+      {/* Legend */}
+      <div className="mb-4 flex items-center gap-4 text-xs">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-500" />
+          Demand
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500" />
+          Supply
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        {gaps.map((g) => {
+          const pct = gapPercent(g);
+          return (
+            <div key={g.capability_id} className="grid grid-cols-[1fr_auto] items-center gap-3">
+              <div className="min-w-0">
+                <p className="mb-1 truncate text-sm font-medium">{g.capability_name}</p>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-3 rounded-sm bg-blue-500/80"
+                      style={{ width: `${barScale(g.demand_count)}%` }}
+                    />
+                    <span className="shrink-0 text-xs tabular-nums text-[hsl(var(--muted-foreground))]">
+                      {g.demand_count}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-3 rounded-sm bg-emerald-500/80"
+                      style={{ width: `${barScale(g.qualified_supply)}%` }}
+                    />
+                    <span className="shrink-0 text-xs tabular-nums text-[hsl(var(--muted-foreground))]">
+                      {g.qualified_supply}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className={cn("text-sm font-bold tabular-nums", gapColor(pct))}>
+                  {pct > 0 ? `-${pct}%` : "✓"}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ── Pipeline Funnel ────────────────────────────────────── */
+
+const FUNNEL_STAGES = [
+  { key: "submitted", label: "Applied", color: "bg-blue-500" },
+  { key: "screening", label: "Screening", color: "bg-yellow-500" },
+  { key: "interview", label: "Interview", color: "bg-purple-500" },
+  { key: "offer", label: "Offer", color: "bg-green-500" },
+  { key: "hired", label: "Hired", color: "bg-emerald-600" },
+];
+
+function PipelineFunnel({ placements }: { placements: PlacementAnalytics }) {
+  const statusMap = placements.applications_by_status;
+  const stages = FUNNEL_STAGES.map((s) => ({
+    ...s,
+    count: statusMap[s.key] ?? 0,
+  }));
+
+  const maxCount = Math.max(...stages.map((s) => s.count), 1);
+
+  return (
+    <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
+      <h3 className="mb-4 text-lg font-semibold">Placement Pipeline</h3>
+
+      <div className="space-y-2">
+        {stages.map((stage, i) => {
+          const widthPct = Math.max((stage.count / maxCount) * 100, 8);
+          const prev = i > 0 ? stages[i - 1] : undefined;
+          const prevCount = prev?.count ?? 0;
+          const conversionRate =
+            i > 0 && prevCount > 0 ? Math.round((stage.count / prevCount) * 100) : null;
+
+          return (
+            <div key={stage.key}>
+              {conversionRate !== null && (
+                <div className="mb-0.5 flex justify-end pr-2">
+                  <span className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                    {conversionRate}% →
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <span className="w-20 shrink-0 text-right text-xs font-medium">{stage.label}</span>
+                <div className="relative flex-1">
+                  <div
+                    className={cn("h-7 rounded-md transition-all", stage.color)}
+                    style={{
+                      width: `${widthPct}%`,
+                      opacity: 0.8 - i * 0.08,
+                    }}
+                  />
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs font-bold text-white drop-shadow-sm">
+                    {stage.count}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Summary stats */}
+      <div className="mt-4 grid grid-cols-3 gap-3 border-t pt-4 text-center text-xs">
+        <div>
+          <p className="font-medium text-[hsl(var(--muted-foreground))]">Total Apps</p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums">{placements.total_applications}</p>
+        </div>
+        <div>
+          <p className="font-medium text-[hsl(var(--muted-foreground))]">Placements</p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums">{placements.total_placements}</p>
+        </div>
+        <div>
+          <p className="font-medium text-[hsl(var(--muted-foreground))]">Hire Rate</p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums">
+            {placements.total_applications > 0
+              ? `${Math.round(
+                  (placements.total_placements / placements.total_applications) * 100,
+                )}%`
+              : "—"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Page ────────────────────────────────────────────────── */
 
 export default function TalentDashboardPage() {
@@ -122,6 +284,29 @@ export default function TalentDashboardPage() {
         </Link>
       </div>
 
+      {/* Charts row */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Demand vs Supply chart */}
+        {gapsLoading ? (
+          <div className="h-80 animate-pulse rounded-lg border bg-[hsl(var(--card))]" />
+        ) : (
+          <DemandSupplyChart gaps={gaps} />
+        )}
+
+        {/* Pipeline funnel */}
+        {placementsLoading ? (
+          <div className="h-80 animate-pulse rounded-lg border bg-[hsl(var(--card))]" />
+        ) : placements ? (
+          <PipelineFunnel placements={placements} />
+        ) : (
+          <div className="flex items-center justify-center rounded-lg border border-dashed p-8">
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">
+              No placement data available yet.
+            </p>
+          </div>
+        )}
+      </div>
+
       {/* Demand-supply gap table */}
       <section>
         <h2 className="mb-3 text-lg font-semibold">Demand-Supply Gaps</h2>
@@ -146,29 +331,49 @@ export default function TalentDashboardPage() {
                   <th className="sticky top-0 bg-[hsl(var(--muted))]/50 px-4 py-3 text-right font-medium">
                     Gap
                   </th>
+                  <th className="sticky top-0 bg-[hsl(var(--muted))]/50 px-4 py-3 text-right font-medium">
+                    Gap %
+                  </th>
                   <th className="sticky top-0 bg-[hsl(var(--muted))]/50 px-4 py-3 font-medium">
                     Severity
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {gaps.map((g, i) => (
-                  <tr
-                    key={g.capability_id}
-                    className={cn(
-                      "border-b last:border-0",
-                      i % 2 === 1 && "bg-[hsl(var(--muted))]/20",
-                    )}
-                  >
-                    <td className="px-4 py-3 font-medium">{g.capability_name}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{g.demand_count}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{g.qualified_supply}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{g.gap}</td>
-                    <td className="px-4 py-3">
-                      <SeverityBadge severity={g.gap_severity} />
-                    </td>
-                  </tr>
-                ))}
+                {gaps.map((g, i) => {
+                  const pct = g.demand_count > 0 ? Math.round((g.gap / g.demand_count) * 100) : 0;
+                  return (
+                    <tr
+                      key={g.capability_id}
+                      className={cn(
+                        "border-b last:border-0",
+                        i % 2 === 1 && "bg-[hsl(var(--muted))]/20",
+                      )}
+                    >
+                      <td className="px-4 py-3 font-medium">{g.capability_name}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{g.demand_count}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{g.qualified_supply}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{g.gap}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        <span
+                          className={cn(
+                            "font-medium",
+                            pct > 50
+                              ? "text-red-600 dark:text-red-400"
+                              : pct > 25
+                                ? "text-amber-600 dark:text-amber-400"
+                                : "text-emerald-600 dark:text-emerald-400",
+                          )}
+                        >
+                          {pct}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <SeverityBadge severity={g.gap_severity} />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -218,27 +423,6 @@ export default function TalentDashboardPage() {
                 </div>
               );
             })}
-          </div>
-        )}
-      </section>
-
-      {/* Placement funnel */}
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">Placement Funnel</h2>
-        {placementsLoading ? (
-          <Skeleton rows={2} />
-        ) : !placements ? (
-          <EmptyState message="No placement data available yet." />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Object.entries(placements.applications_by_status).map(([status, count]) => (
-              <div key={status} className="rounded-lg border p-4">
-                <p className="text-sm capitalize text-[hsl(var(--muted-foreground))]">
-                  {status.replace(/_/g, " ")}
-                </p>
-                <p className="mt-1 text-2xl font-bold tabular-nums">{count}</p>
-              </div>
-            ))}
           </div>
         )}
       </section>

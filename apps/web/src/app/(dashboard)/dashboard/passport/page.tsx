@@ -29,6 +29,10 @@ interface CapabilityScore {
   level: number;
   level_label: string;
   score: number;
+  depth?: number;
+  breadth?: number;
+  recency?: number;
+  velocity?: number;
   confidence: number;
   evidence_count: number;
   substantial_evidence_count: number;
@@ -104,6 +108,145 @@ const AVAILABILITY_OPTIONS = [
   { value: "not_looking", label: "Not looking" },
 ];
 
+/* ── Radar Chart ─────────────────────────────────────────── */
+
+function SkillRadarChart({ capabilities }: { capabilities: CapabilityScore[] }) {
+  const items = capabilities.slice(0, 8);
+  if (items.length < 3) return null;
+
+  const size = 280;
+  const cx = size / 2;
+  const cy = size / 2;
+  const radius = size * 0.36;
+  const labelRadius = radius + 24;
+  const n = items.length;
+
+  const angleFor = (i: number) => (2 * Math.PI * i) / n - Math.PI / 2;
+
+  const gridLevels = [0.2, 0.4, 0.6, 0.8, 1.0];
+
+  const scorePoints = items
+    .map((cap, i) => {
+      const a = angleFor(i);
+      const r = radius * Math.min(cap.score, 1);
+      return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+    })
+    .join(" ");
+
+  // Truncate labels to fit
+  const truncate = (s: string, max: number) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
+
+  return (
+    <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
+      <h2 className="mb-3 text-lg font-semibold">Skill Profile</h2>
+      <div className="flex justify-center">
+        <svg
+          viewBox={`0 0 ${size} ${size}`}
+          className="h-auto w-full max-w-[320px]"
+          role="img"
+          aria-label="Skill radar chart"
+        >
+          {/* Grid rings */}
+          {gridLevels.map((level) => {
+            const pts = Array.from({ length: n }, (_, i) => {
+              const a = angleFor(i);
+              const r = radius * level;
+              return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+            }).join(" ");
+            return (
+              <polygon
+                key={level}
+                points={pts}
+                fill="none"
+                stroke="currentColor"
+                className="text-[hsl(var(--border))]"
+                strokeWidth={level === 1.0 ? 1.5 : 0.5}
+              />
+            );
+          })}
+
+          {/* Axis lines */}
+          {items.map((_, i) => {
+            const a = angleFor(i);
+            return (
+              <line
+                key={i}
+                x1={cx}
+                y1={cy}
+                x2={cx + radius * Math.cos(a)}
+                y2={cy + radius * Math.sin(a)}
+                stroke="currentColor"
+                className="text-[hsl(var(--border))]"
+                strokeWidth={0.5}
+              />
+            );
+          })}
+
+          {/* Score polygon */}
+          <polygon
+            points={scorePoints}
+            className="fill-[hsl(var(--primary)/0.2)] stroke-[hsl(var(--primary))]"
+            strokeWidth={2}
+          />
+
+          {/* Score dots */}
+          {items.map((cap, i) => {
+            const a = angleFor(i);
+            const r = radius * Math.min(cap.score, 1);
+            return (
+              <circle
+                key={i}
+                cx={cx + r * Math.cos(a)}
+                cy={cy + r * Math.sin(a)}
+                r={3}
+                className="fill-[hsl(var(--primary))]"
+              />
+            );
+          })}
+
+          {/* Labels */}
+          {items.map((cap, i) => {
+            const a = angleFor(i);
+            const lx = cx + labelRadius * Math.cos(a);
+            const ly = cy + labelRadius * Math.sin(a);
+            const cos = Math.cos(a);
+            const anchor = Math.abs(cos) < 0.1 ? "middle" : cos > 0 ? "start" : "end";
+            return (
+              <text
+                key={i}
+                x={lx}
+                y={ly}
+                textAnchor={anchor}
+                dominantBaseline="central"
+                className="fill-[hsl(var(--foreground))] text-[9px]"
+              >
+                {truncate(cap.capability_name, 14)}
+              </text>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Dimension breakdown (if multi-dimensional scoring) */}
+      {items[0]?.depth !== undefined && (
+        <div className="mt-4 grid grid-cols-4 gap-2 text-center text-xs">
+          {(["depth", "breadth", "recency", "velocity"] as const).map((dim) => {
+            const avg = items.reduce((s, c) => s + (c[dim] ?? 0), 0) / items.length;
+            return (
+              <div key={dim} className="rounded-md bg-[hsl(var(--secondary))] px-2 py-1.5">
+                <p className="font-medium capitalize">{dim}</p>
+                <p className="mt-0.5 tabular-nums text-[hsl(var(--muted-foreground))]">
+                  {Math.round(avg * 100)}%
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Page ─────────────────────────────────────────────────── */
 
 export default function PassportPage() {
@@ -172,6 +315,9 @@ export default function PassportPage() {
 
       {/* Settings Card */}
       <SettingsCard passport={passport} onUpdate={(body) => updatePassport.mutate(body)} />
+
+      {/* Radar Chart */}
+      {capabilities.length >= 3 && <SkillRadarChart capabilities={capabilities} />}
 
       {/* Capabilities Grid */}
       <section>
@@ -330,6 +476,28 @@ function CapabilityCard({ cap }: { cap: CapabilityScore }) {
           />
         </div>
       </div>
+
+      {/* Multi-dimensional mini bars */}
+      {cap.depth !== undefined && (
+        <div className="mt-2 grid grid-cols-4 gap-1 text-[10px]">
+          {(["depth", "breadth", "recency", "velocity"] as const).map((dim) => {
+            const val = cap[dim] ?? 0;
+            return (
+              <div key={dim}>
+                <span className="capitalize text-[hsl(var(--muted-foreground))]">
+                  {dim.charAt(0).toUpperCase()}
+                </span>
+                <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-[hsl(var(--secondary))]">
+                  <div
+                    className="h-full rounded-full bg-[hsl(var(--primary)/0.6)]"
+                    style={{ width: `${Math.round(val * 100)}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Verification mix */}
       {verificationEntries.length > 0 && (

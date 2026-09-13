@@ -294,3 +294,71 @@ async def issue_credential(
 
     await db.refresh(cred)
     return DataResponse(data=CredentialResponse.model_validate(cred))
+
+
+# ── Open Badges 3.0 export ──
+
+@router.get("/credentials/{credential_id}/badge")
+async def export_credential_as_badge(
+    credential_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Export a credential as an Open Badges 3.0 OpenBadgeCredential (JSON-LD).
+
+    Only the credential owner can export.
+    """
+    from fastapi.responses import JSONResponse
+    from sqlalchemy import select
+
+    from app.talent.models.assessment import Credential
+    from app.talent.models.capability import Capability
+    from app.talent.services.credential_signing import SigningKeyService
+    from app.talent.services.openbadges import export_credential_as_ob3
+
+    cred = await db.get(Credential, credential_id)
+    if not cred or cred.user_id != user.id:
+        raise HTTPException(404, "Credential not found")
+
+    if cred.status != "active":
+        raise HTTPException(410, "Credential is no longer active")
+
+    org_id = cred.issuer_org_id
+    if not org_id:
+        raise HTTPException(
+            422,
+            "Credential has no issuing organization — cannot produce a badge",
+        )
+
+    key_svc = SigningKeyService(db)
+    signing_key = await key_svc.get_or_create_active_key(org_id)
+    await db.commit()
+    await db.refresh(signing_key)
+
+    # Load capability details for alignment
+    cap_ids = [c.get("capability_id") for c in (cred.capabilities or []) if c.get("capability_id")]
+    capability_details = []
+    if cap_ids:
+        result = await db.execute(select(Capability).where(Capability.id.in_(cap_ids)))
+        for cap in result.scalars().all():
+            capability_details.append({
+                "id": cap.id,
+                "canonical_name": cap.canonical_name,
+                "description": cap.description,
+                "external_ids": cap.external_ids or {},
+            })
+
+    ob3 = export_credential_as_ob3(
+        credential_id=cred.id,
+        credential_type=cred.credential_type,
+        user_id=cred.user_id,
+        issued_at=cred.issued_at,
+        expires_at=cred.expires_at,
+        capabilities=cred.capabilities or [],
+        org_id=org_id,
+        signing_key_id=signing_key.id,
+        private_key_pem=signing_key.private_key_encrypted,
+        capability_details=capability_details,
+    )
+
+    return JSONResponse(content=ob3, media_type="application/ld+json")

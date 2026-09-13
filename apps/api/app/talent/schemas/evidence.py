@@ -48,6 +48,10 @@ class EvidenceResponse(BaseModel):
     status: str
     metadata: dict = Field(validation_alias="extra")
     created_at: datetime | None = None
+    # Credential signing fields (Phase 2 — W3C VC / Open Badges 3.0)
+    signature: str | None = None
+    signing_key_id: str | None = None
+    issuer_did: str | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 

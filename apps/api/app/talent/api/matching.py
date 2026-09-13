@@ -77,6 +77,30 @@ async def match_opportunities_for_user(
     return DataResponse(data=[dataclasses.asdict(r) for r in results])
 
 
+@router.get("/career-paths", response_model=DataResponse[list[dict]])
+async def get_career_paths(
+    limit: int = Query(10, ge=1, le=50),
+    opportunity_type: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Predict reachable career paths for the current user.
+
+    Finds opportunities 1-3 capability-gaps away and suggests
+    specific learning actions to close each gap.
+    """
+    from app.talent.services.career_path import predict_career_paths
+
+    include_types = [opportunity_type] if opportunity_type else None
+    suggestions = await predict_career_paths(
+        db,
+        user.id,
+        max_results=limit,
+        include_types=include_types,
+    )
+    return DataResponse(data=[dataclasses.asdict(s) for s in suggestions])
+
+
 @router.post("/opportunities/{opp_id}/match/fairness", response_model=DataResponse[dict])
 async def get_match_fairness(
     opp_id: str,

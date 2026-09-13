@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -25,9 +25,9 @@ interface Opportunity {
   created_at: string;
 }
 
-interface PaginatedResponse {
+interface CursorResponse {
   data: Opportunity[];
-  meta: { total: number; page: number; per_page: number; has_more: boolean };
+  meta: { next_cursor: string | null; has_more: boolean };
 }
 
 const TYPE_OPTIONS = [
@@ -40,6 +40,18 @@ const TYPE_OPTIONS = [
   { value: "project_role", label: "Project role" },
   { value: "apprenticeship", label: "Apprenticeship" },
   { value: "campus_project", label: "Campus project" },
+];
+
+const LOCATION_OPTIONS = [
+  { value: "", label: "All locations" },
+  { value: "remote", label: "🌍 Remote" },
+  { value: "hybrid", label: "🔄 Hybrid" },
+  { value: "onsite", label: "🏢 On-site" },
+];
+
+const SORT_OPTIONS = [
+  { value: "newest", label: "Newest first" },
+  { value: "deadline", label: "Closing soon" },
 ];
 
 const TYPE_COLORS: Record<string, string> = {
@@ -61,19 +73,67 @@ const LOCATION_ICONS: Record<string, string> = {
 
 export default function OpportunitiesPage() {
   const [typeFilter, setTypeFilter] = useState("");
-  const [page, setPage] = useState(1);
+  const [locationFilter, setLocationFilter] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [cursorStack, setCursorStack] = useState<(string | null)[]>([]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["opportunities", typeFilter, page],
+    queryKey: ["opportunities", typeFilter, cursor],
     queryFn: () => {
-      const params = new URLSearchParams({ status: "open", page: String(page), per_page: "12" });
+      const params = new URLSearchParams({ status: "open", limit: "12" });
       if (typeFilter) params.set("opportunity_type", typeFilter);
-      return apiWithAuth<PaginatedResponse>(`/talent/opportunities?${params}`);
+      if (cursor) params.set("cursor", cursor);
+      return apiWithAuth<CursorResponse>(`/talent/opportunities?${params}`);
     },
   });
 
   const opportunities = data?.data ?? [];
   const meta = data?.meta;
+
+  // Client-side filtering for search, location, and sort
+  const filtered = useMemo(() => {
+    let result = [...opportunities];
+
+    // Search filter (client-side on title/description)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (opp) =>
+          opp.title.toLowerCase().includes(q) ||
+          (opp.description && opp.description.toLowerCase().includes(q)),
+      );
+    }
+
+    // Location filter
+    if (locationFilter) {
+      result = result.filter((opp) => opp.location_mode === locationFilter);
+    }
+
+    // Sort
+    if (sortBy === "deadline") {
+      result.sort((a, b) => {
+        if (!a.application_deadline) return 1;
+        if (!b.application_deadline) return -1;
+        return (
+          new Date(a.application_deadline).getTime() - new Date(b.application_deadline).getTime()
+        );
+      });
+    }
+    // "newest" is already the API default order
+
+    return result;
+  }, [opportunities, searchQuery, locationFilter, sortBy]);
+
+  const resetFilters = () => {
+    setTypeFilter("");
+    setLocationFilter("");
+    setSortBy("newest");
+    setSearchQuery("");
+    setCursor(null);
+    setCursorStack([]);
+  };
 
   return (
     <div className="space-y-6">
@@ -84,27 +144,77 @@ export default function OpportunitiesPage() {
         </p>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={typeFilter}
-          onChange={(e) => {
-            setTypeFilter(e.target.value);
-            setPage(1);
-          }}
-          className="rounded-md border bg-[hsl(var(--card))] px-3 py-2 text-sm"
-        >
-          {TYPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        {meta && (
-          <span className="text-sm text-[hsl(var(--muted-foreground))]">
-            {meta.total} opportunit{meta.total === 1 ? "y" : "ies"} found
+      {/* Search & Filters */}
+      <div className="space-y-3">
+        {/* Search input */}
+        <div className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]">
+            🔍
           </span>
-        )}
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by title or description…"
+            className="w-full rounded-md border bg-[hsl(var(--card))] py-2.5 pl-9 pr-3 text-sm placeholder:text-[hsl(var(--muted-foreground))]"
+          />
+        </div>
+
+        {/* Filter row */}
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={typeFilter}
+            onChange={(e) => {
+              setTypeFilter(e.target.value);
+              setCursor(null);
+              setCursorStack([]);
+            }}
+            className="rounded-md border bg-[hsl(var(--card))] px-3 py-2 text-sm"
+          >
+            {TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            className="rounded-md border bg-[hsl(var(--card))] px-3 py-2 text-sm"
+          >
+            {LOCATION_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="rounded-md border bg-[hsl(var(--card))] px-3 py-2 text-sm"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+
+          {(typeFilter || locationFilter || searchQuery) && (
+            <button
+              onClick={resetFilters}
+              className="text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+            >
+              Clear filters
+            </button>
+          )}
+
+          <span className="ml-auto text-sm text-[hsl(var(--muted-foreground))]">
+            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+          </span>
+        </div>
       </div>
 
       {/* Grid */}
@@ -114,39 +224,53 @@ export default function OpportunitiesPage() {
             <div key={i} className="h-52 animate-pulse rounded-lg border bg-[hsl(var(--card))]" />
           ))}
         </div>
-      ) : opportunities.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className="rounded-lg border bg-[hsl(var(--card))] p-12 text-center">
-          <p className="text-lg font-medium">No opportunities found</p>
+          <p className="text-4xl">🔍</p>
+          <p className="mt-3 text-lg font-medium">No opportunities found</p>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-            {typeFilter ? "Try adjusting your filters." : "Check back later for new openings."}
+            {typeFilter || locationFilter || searchQuery
+              ? "Try adjusting your search or filters."
+              : "Check back later for new openings."}
           </p>
+          {(typeFilter || locationFilter || searchQuery) && (
+            <Button variant="outline" className="mt-4" onClick={resetFilters}>
+              Clear all filters
+            </Button>
+          )}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {opportunities.map((opp) => (
+          {filtered.map((opp) => (
             <OpportunityCard key={opp.id} opportunity={opp} />
           ))}
         </div>
       )}
 
-      {/* Pagination */}
-      {meta && meta.total > meta.per_page && (
+      {/* Cursor Pagination */}
+      {meta && (
         <div className="flex items-center justify-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
+            onClick={() => {
+              const prev = cursorStack[cursorStack.length - 1] ?? null;
+              setCursor(prev);
+              setCursorStack((s) => s.slice(0, -1));
+            }}
+            disabled={cursorStack.length === 0 && cursor === null}
           >
             Previous
           </Button>
-          <span className="text-sm text-[hsl(var(--muted-foreground))]">
-            Page {page} of {Math.ceil(meta.total / meta.per_page)}
-          </span>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setPage((p) => p + 1)}
+            onClick={() => {
+              if (meta.next_cursor) {
+                setCursorStack((s) => [...s, cursor]);
+                setCursor(meta.next_cursor);
+              }
+            }}
             disabled={!meta.has_more}
           >
             Next

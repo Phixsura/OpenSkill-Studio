@@ -6,6 +6,7 @@ from app.talent.api.applications import router as applications_router
 from app.talent.api.assessments import router as assessments_router
 from app.talent.api.capabilities import router as capabilities_router
 from app.talent.api.dashboards import router as dashboards_router
+from app.talent.api.did import router as did_router
 from app.talent.api.employers import router as employers_router
 from app.talent.api.evidence import router as evidence_router
 from app.talent.api.intelligence import router as intelligence_router
@@ -28,3 +29,4 @@ talent_router.include_router(intelligence_router)
 talent_router.include_router(dashboards_router)
 talent_router.include_router(verifications_router)
 talent_router.include_router(pools_router)
+talent_router.include_router(did_router)

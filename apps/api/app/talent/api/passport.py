@@ -1,6 +1,7 @@
-"""Skill Passport API — own passport, snapshots, public verification."""
+"""Skill Passport API — own passport, snapshots, public verification, W3C VC export."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -124,3 +125,63 @@ async def verify_passport(
         raise HTTPException(410, "Snapshot has been revoked")
 
     return DataResponse(data=SnapshotVerifyResponse(**result))
+
+
+# ---- W3C Verifiable Credential export ----
+
+@router.get("/talent/passport/snapshots/{snapshot_id}/vc")
+async def export_snapshot_as_vc(
+    snapshot_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Export a passport snapshot as a W3C Verifiable Credential (JSON-LD).
+
+    Requires authentication — only the snapshot owner can export.
+    Returns application/ld+json content type.
+    """
+    from app.talent.models.passport import PassportSnapshot
+    from app.talent.services.credential_signing import SigningKeyService
+    from app.talent.services.vc_export import export_passport_as_vc
+
+    snapshot = await db.get(PassportSnapshot, snapshot_id)
+    if not snapshot or snapshot.user_id != user.id:
+        raise HTTPException(404, "Snapshot not found")
+
+    if snapshot.status != "active":
+        raise HTTPException(410, "Snapshot has been revoked")
+
+    # Get the passport's org — use the first org the user belongs to
+    from sqlalchemy import select
+
+    from app.models.organization import OrgMembership
+
+    org_result = await db.execute(
+        select(OrgMembership.org_id).where(OrgMembership.user_id == user.id).limit(1)
+    )
+    org_id = org_result.scalar_one_or_none()
+    if not org_id:
+        raise HTTPException(
+            422,
+            "No organization found — a VC requires an issuing organization",
+        )
+
+    key_svc = SigningKeyService(db)
+    signing_key = await key_svc.get_or_create_active_key(org_id)
+    await db.commit()
+    await db.refresh(signing_key)
+
+    vc = export_passport_as_vc(
+        snapshot_payload=snapshot.payload,
+        snapshot_id=snapshot.id,
+        user_id=user.id,
+        issued_at=snapshot.issued_at,
+        expires_at=snapshot.expires_at,
+        org_id=org_id,
+        signing_key_id=signing_key.id,
+        private_key_pem=signing_key.private_key_encrypted,
+        public_key_pem=signing_key.public_key,
+        checksum=snapshot.checksum,
+    )
+
+    return JSONResponse(content=vc, media_type="application/ld+json")
