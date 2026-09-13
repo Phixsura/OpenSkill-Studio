@@ -104,10 +104,21 @@ class PassportService:
         if passport.default_visibility == "private":
             return None
 
-        if passport.default_visibility == "organization_only" and not requesting_org_id:
-            return None
-            # Would need to check org membership — deferred to caller
-            # For now, trust the caller's org context
+        if passport.default_visibility == "organization_only":
+            if not requesting_org_id:
+                return None
+            # Verify the passport owner and the requestor share an org
+            from app.models.organization import OrgMember
+
+            owner_member = await self.db.execute(
+                select(OrgMember.org_id).where(
+                    OrgMember.user_id == user_id,
+                    OrgMember.org_id == requesting_org_id,
+                    OrgMember.status == "active",
+                ).limit(1)
+            )
+            if not owner_member.scalar_one_or_none():
+                return None
 
         # Build filtered passport based on visible_fields
         return await self._build_filtered_passport(user_id, passport)

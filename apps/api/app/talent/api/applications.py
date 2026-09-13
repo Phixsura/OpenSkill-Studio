@@ -113,6 +113,21 @@ async def apply_to_opportunity(
     )
     db.add(event)
     await db.commit()
+
+    # Webhook: application.submitted
+    from app.talent.services.webhook_events import emit_talent_event
+
+    await emit_talent_event(
+        db,
+        org_id=opp.employer_org_id,
+        event_type="application.submitted",
+        payload={
+            "application_id": app.id,
+            "opportunity_id": opp_id,
+            "user_id": user.id,
+        },
+    )
+
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
@@ -226,6 +241,29 @@ async def transition_application(
         db.add(placement)
 
     await db.commit()
+
+    # Webhook events for application transitions
+    from app.talent.services.webhook_events import emit_talent_event
+
+    event_type = "application.stage_changed"
+    if body.status == "offer":
+        event_type = "offer.created"
+    elif body.status == "hired":
+        event_type = "placement.started"
+
+    await emit_talent_event(
+        db,
+        org_id=opp.employer_org_id,
+        event_type=event_type,
+        payload={
+            "application_id": app.id,
+            "opportunity_id": app.opportunity_id,
+            "user_id": app.user_id,
+            "from_status": old_status,
+            "to_status": body.status,
+        },
+    )
+
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 

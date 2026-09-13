@@ -59,6 +59,27 @@ async def get_employer_profile(
     return DataResponse(data=EmployerProfileResponse.model_validate(profile))
 
 
+@router.patch("/employers/{org_id}", response_model=DataResponse[EmployerProfileResponse])
+async def update_employer_profile(
+    org_id: str,
+    body: CreateEmployerProfileRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Update an employer profile — admin+ only."""
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    profile = await db.get(EmployerProfile, org_id)
+    if not profile:
+        raise HTTPException(404, "Employer profile not found")
+    # Allowlist: only user-editable fields (not verification_status, verified_at)
+    editable = {"company_size", "industry", "website_url", "logo_url", "description"}
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if key in editable:
+            setattr(profile, key, value)
+    await db.commit()
+    return DataResponse(data=EmployerProfileResponse.model_validate(profile))
+
+
 # ---- Opportunities ----
 
 @router.post("/opportunities", response_model=DataResponse[OpportunityResponse], status_code=201)

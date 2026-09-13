@@ -93,7 +93,7 @@ class TalentMatchingService:
         S3: weighted scoring across 5 signals.
 
         Only user.id and user.display_name enter the feature space — no
-        protected attributes (race, gender, age, etc.) are ever queried.
+        protected/sensitive attributes are ever queried.
         """
         opp = await self.db.get(Opportunity, opportunity_id)
         if not opp:

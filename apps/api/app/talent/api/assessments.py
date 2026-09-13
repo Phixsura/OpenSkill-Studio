@@ -266,4 +266,20 @@ async def issue_credential(
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
+
+    # Webhook: credential.issued
+    if body.org_id:
+        from app.talent.services.webhook_events import emit_talent_event
+
+        await emit_talent_event(
+            db,
+            org_id=body.org_id,
+            event_type="credential.issued",
+            payload={
+                "credential_id": cred.id,
+                "credential_type": cred.credential_type,
+                "user_id": target_user_id,
+            },
+        )
+
     return DataResponse(data=CredentialResponse.model_validate(cred))

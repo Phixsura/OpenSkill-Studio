@@ -13,6 +13,15 @@ from app.talent.models.internship import (
     CohortOpportunityExposure,
     InternshipSupervision,
 )
+from app.talent.schemas.verification import (
+    CohortExposureResponse,
+    CreateSupervisionRequest,
+    CreateVerificationRequest,
+    ExposeOpportunityRequest,
+    SupervisionResponse,
+    UpdateSupervisionRequest,
+    VerificationResponse,
+)
 
 router = APIRouter(prefix="/talent", tags=["Talent — Verifications"])
 
@@ -21,14 +30,15 @@ _INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 # ── Employer Verification ──
 
+
 @router.post(
     "/placements/{placement_id}/verification",
-    response_model=DataResponse[dict],
+    response_model=DataResponse[VerificationResponse],
     status_code=201,
 )
 async def create_verification(
     placement_id: str,
-    body: dict,  # capability_ratings, overall_rating, overall_comment
+    body: CreateVerificationRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -47,43 +57,61 @@ async def create_verification(
             employer_org_id=placement.employer_org_id,
             verified_by=user.id,
             user_id=placement.user_id,
-            capability_ratings=body.get("capability_ratings", []),
-            overall_rating=body.get("overall_rating"),
-            overall_comment=body.get("overall_comment"),
+            capability_ratings=body.capability_ratings,
+            overall_rating=body.overall_rating,
+            overall_comment=body.overall_comment,
         )
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
-    return DataResponse(data={
-        "id": verification.id,
-        "placement_id": verification.placement_id,
-        "user_id": verification.user_id,
-        "capability_ratings": verification.capability_ratings,
-        "overall_rating": float(verification.overall_rating) if verification.overall_rating else None,
-        "created_at": verification.created_at.isoformat() if verification.created_at else None,
-    })
+
+    # Webhook: employer_verification.submitted + capability.verified
+    from app.talent.services.webhook_events import emit_talent_event
+
+    await emit_talent_event(
+        db,
+        org_id=placement.employer_org_id,
+        event_type="employer_verification.submitted",
+        payload={
+            "verification_id": verification.id,
+            "placement_id": placement_id,
+            "user_id": placement.user_id,
+        },
+    )
+    for rating in body.capability_ratings:
+        await emit_talent_event(
+            db,
+            org_id=placement.employer_org_id,
+            event_type="capability.verified",
+            payload={
+                "user_id": placement.user_id,
+                "capability_id": rating.get("capability_id"),
+                "verification_id": verification.id,
+                "verification_level": "employer_verified",
+            },
+        )
+
+    return DataResponse(data=VerificationResponse.model_validate(verification))
 
 
 # ── Internship Supervision ──
 
-@router.post("/supervisions", response_model=DataResponse[dict], status_code=201)
+
+@router.post(
+    "/supervisions",
+    response_model=DataResponse[SupervisionResponse],
+    status_code=201,
+)
 async def create_supervision(
-    body: dict,  # placement_id, school_org_id, supervisor_user_id, employer_mentor_name
+    body: CreateSupervisionRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Create internship supervision record — school instructor+ only."""
-    school_org_id = body.get("school_org_id")
-    if not school_org_id:
-        raise HTTPException(422, "school_org_id is required")
-    await require_org_member(school_org_id, user, db, *_INSTRUCTOR_ROLES)
-
-    placement_id = body.get("placement_id")
-    if not placement_id:
-        raise HTTPException(422, "placement_id is required")
+    await require_org_member(body.school_org_id, user, db, *_INSTRUCTOR_ROLES)
 
     # Validate placement exists
-    placement = await db.get(Placement, placement_id)
+    placement = await db.get(Placement, body.placement_id)
     if not placement:
         raise HTTPException(404, "Placement not found")
 
@@ -95,7 +123,7 @@ async def create_supervision(
         .join(Cohort, Cohort.id == CohortMember.cohort_id)
         .where(
             CohortMember.user_id == placement.user_id,
-            Cohort.org_id == school_org_id,
+            Cohort.org_id == body.school_org_id,
         )
         .limit(1)
     )
@@ -103,22 +131,17 @@ async def create_supervision(
         raise HTTPException(403, "Placement is not associated with this school")
 
     supervision = InternshipSupervision(
-        placement_id=placement_id,
-        school_org_id=school_org_id,
-        supervisor_user_id=body.get("supervisor_user_id"),
-        employer_mentor_name=body.get("employer_mentor_name"),
+        placement_id=body.placement_id,
+        school_org_id=body.school_org_id,
+        supervisor_user_id=body.supervisor_user_id,
+        employer_mentor_name=body.employer_mentor_name,
     )
     db.add(supervision)
     await db.commit()
-    return DataResponse(data={
-        "id": supervision.id,
-        "placement_id": supervision.placement_id,
-        "school_org_id": supervision.school_org_id,
-        "status": supervision.status,
-    })
+    return DataResponse(data=SupervisionResponse.model_validate(supervision))
 
 
-@router.get("/supervisions", response_model=ListResponse[dict])
+@router.get("/supervisions", response_model=ListResponse[SupervisionResponse])
 async def list_supervisions(
     school_org_id: str = Query(...),
     status: str | None = None,
@@ -129,35 +152,39 @@ async def list_supervisions(
 ):
     await require_org_member(school_org_id, user, db)
 
-    q = select(InternshipSupervision).where(InternshipSupervision.school_org_id == school_org_id)
+    q = select(InternshipSupervision).where(
+        InternshipSupervision.school_org_id == school_org_id
+    )
     if status:
         q = q.where(InternshipSupervision.status == status)
 
     count_q = select(func.count()).select_from(q.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
-    q = q.order_by(InternshipSupervision.created_at.desc()).limit(per_page).offset((page - 1) * per_page)
+    q = (
+        q.order_by(InternshipSupervision.created_at.desc())
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    )
     result = await db.execute(q)
-    items = [
-        {
-            "id": s.id,
-            "placement_id": s.placement_id,
-            "school_org_id": s.school_org_id,
-            "supervisor_user_id": s.supervisor_user_id,
-            "status": s.status,
-        }
-        for s in result.scalars().all()
-    ]
     return ListResponse(
-        data=items,
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+        data=[SupervisionResponse.model_validate(s) for s in result.scalars().all()],
+        meta=PaginationMeta(
+            total=total,
+            page=page,
+            per_page=per_page,
+            has_more=page * per_page < total,
+        ),
     )
 
 
-@router.patch("/supervisions/{supervision_id}", response_model=DataResponse[dict])
+@router.patch(
+    "/supervisions/{supervision_id}",
+    response_model=DataResponse[SupervisionResponse],
+)
 async def update_supervision(
     supervision_id: str,
-    body: dict,  # milestones, notes, status
+    body: UpdateSupervisionRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -166,25 +193,24 @@ async def update_supervision(
         raise HTTPException(404, "Supervision not found")
     await require_org_member(sup.school_org_id, user, db, *_INSTRUCTOR_ROLES)
 
-    for key in ("milestones", "notes", "status", "supervisor_user_id", "employer_mentor_name"):
-        if key in body:
-            setattr(sup, key, body[key])
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(sup, key, value)
 
     await db.commit()
-    return DataResponse(data={
-        "id": sup.id,
-        "placement_id": sup.placement_id,
-        "status": sup.status,
-        "milestones": sup.milestones,
-    })
+    return DataResponse(data=SupervisionResponse.model_validate(sup))
 
 
 # ── Cohort Exposure ──
 
-@router.post("/cohorts/{cohort_id}/expose", response_model=DataResponse[dict], status_code=201)
+
+@router.post(
+    "/cohorts/{cohort_id}/expose",
+    response_model=DataResponse[CohortExposureResponse],
+    status_code=201,
+)
 async def expose_opportunity(
     cohort_id: str,
-    body: dict,  # opportunity_id, note
+    body: ExposeOpportunityRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -192,7 +218,6 @@ async def expose_opportunity(
 
     This does NOT share student data — students must individually opt in.
     """
-    # Need to find the cohort's org to check membership
     from app.models.cohort import Cohort
 
     cohort = await db.get(Cohort, cohort_id)
@@ -200,26 +225,21 @@ async def expose_opportunity(
         raise HTTPException(404, "Cohort not found")
     await require_org_member(cohort.org_id, user, db, *_INSTRUCTOR_ROLES)
 
-    opportunity_id = body.get("opportunity_id")
-    if not opportunity_id:
-        raise HTTPException(422, "opportunity_id is required")
-
     exposure = CohortOpportunityExposure(
         cohort_id=cohort_id,
-        opportunity_id=opportunity_id,
+        opportunity_id=body.opportunity_id,
         exposed_by=user.id,
-        note=body.get("note"),
+        note=body.note,
     )
     db.add(exposure)
     await db.commit()
-    return DataResponse(data={
-        "id": exposure.id,
-        "cohort_id": exposure.cohort_id,
-        "opportunity_id": exposure.opportunity_id,
-    })
+    return DataResponse(data=CohortExposureResponse.model_validate(exposure))
 
 
-@router.get("/cohorts/{cohort_id}/opportunities", response_model=DataResponse[list[dict]])
+@router.get(
+    "/cohorts/{cohort_id}/opportunities",
+    response_model=DataResponse[list[CohortExposureResponse]],
+)
 async def list_cohort_opportunities(
     cohort_id: str,
     db: AsyncSession = Depends(get_db),
@@ -237,14 +257,6 @@ async def list_cohort_opportunities(
         .where(CohortOpportunityExposure.cohort_id == cohort_id)
         .order_by(CohortOpportunityExposure.created_at.desc())
     )
-    items = [
-        {
-            "id": e.id,
-            "cohort_id": e.cohort_id,
-            "opportunity_id": e.opportunity_id,
-            "exposed_by": e.exposed_by,
-            "note": e.note,
-        }
-        for e in result.scalars().all()
-    ]
-    return DataResponse(data=items)
+    return DataResponse(
+        data=[CohortExposureResponse.model_validate(e) for e in result.scalars().all()]
+    )

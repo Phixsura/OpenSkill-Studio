@@ -10,6 +10,7 @@ from app.talent.api.evidence import router as evidence_router
 from app.talent.api.intelligence import router as intelligence_router
 from app.talent.api.matching import router as matching_router
 from app.talent.api.passport import router as passport_router
+from app.talent.api.pools import router as pools_router
 from app.talent.api.verifications import router as verifications_router
 
 talent_router = APIRouter()
@@ -22,3 +23,4 @@ talent_router.include_router(assessments_router)
 talent_router.include_router(matching_router)
 talent_router.include_router(intelligence_router)
 talent_router.include_router(verifications_router)
+talent_router.include_router(pools_router)
