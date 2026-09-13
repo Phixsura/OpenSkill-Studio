@@ -26,6 +26,8 @@ from app.talent.api.notifications import router as notification_router
 from app.talent.api.passport import router as passport_router
 from app.talent.api.pools import router as pools_router
 from app.talent.api.rate_limit import rate_limit_talent
+from app.talent.api.saved_searches import router as saved_search_router
+from app.talent.api.scheduling import router as scheduling_router
 from app.talent.api.scorecards import router as scorecard_router
 from app.talent.api.verifications import router as verifications_router
 
@@ -56,3 +58,5 @@ talent_router.include_router(notification_router)
 talent_router.include_router(endorsements_router)
 talent_router.include_router(activity_router)
 talent_router.include_router(candidate_notes_router)
+talent_router.include_router(saved_search_router)
+talent_router.include_router(scheduling_router)

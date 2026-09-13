@@ -47,6 +47,10 @@ from app.talent.models.internship import (  # noqa: F401
     InternshipSupervision,
     OutcomeEvent,
 )
+from app.talent.models.interview_slot import (  # noqa: F401
+    SLOT_STATUSES,
+    InterviewSlot,
+)
 from app.talent.models.notification import (  # noqa: F401
     NOTIFICATION_EVENT_TYPES,
     NotificationPreference,
@@ -56,6 +60,11 @@ from app.talent.models.passport import (  # noqa: F401
     PASSPORT_SHAREABLE_FIELDS,
     PassportSnapshot,
     SkillPassport,
+)
+from app.talent.models.saved_search import (  # noqa: F401
+    NOTIFY_FREQUENCIES,
+    SEARCH_TYPES,
+    SavedSearch,
 )
 from app.talent.models.scorecard import (  # noqa: F401
     InterviewScorecard,

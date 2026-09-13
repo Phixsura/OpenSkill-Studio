@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    SmallInteger,
     String,
     Text,
     func,
@@ -110,6 +111,9 @@ class InterviewStage(Base):
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scheduled_timezone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    meeting_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    duration_minutes: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Employer-private — NEVER exposed to other employers or candidates
     evaluation_notes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
