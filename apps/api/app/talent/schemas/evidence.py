@@ -47,7 +47,7 @@ class EvidenceResponse(BaseModel):
     supersedes_id: str | None
     status: str
     metadata: dict = Field(validation_alias="extra")
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 

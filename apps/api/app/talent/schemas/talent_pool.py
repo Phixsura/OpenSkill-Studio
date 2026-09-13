@@ -49,8 +49,8 @@ class PoolResponse(BaseModel):
     rule_config: dict | None
     visibility: str
     created_by: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -76,7 +76,7 @@ class MembershipResponse(BaseModel):
     source: str
     consent_status: str
     added_by: str | None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -118,7 +118,7 @@ class OutreachResponse(BaseModel):
     sent_at: datetime
     responded_at: datetime | None
     expires_at: datetime | None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -158,6 +158,6 @@ class OutcomeEventResponse(BaseModel):
     visibility: str
     metadata: dict = Field(default_factory=dict, validation_alias="extra")
     occurred_at: datetime
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}

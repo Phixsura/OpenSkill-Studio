@@ -39,7 +39,7 @@ class SnapshotResponse(BaseModel):
     share_token: str
     checksum: str
     included_fields: list[str]
-    issued_at: datetime
+    issued_at: datetime | None = None
     expires_at: datetime | None
     status: str
 

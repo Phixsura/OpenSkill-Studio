@@ -47,8 +47,8 @@ class CapabilityResponse(BaseModel):
     level_definitions: dict | None
     decay_config: dict | None
     sort_order: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -66,7 +66,7 @@ class EdgeResponse(BaseModel):
     target_id: str
     edge_type: str
     metadata: dict | None = Field(None, validation_alias="extra")
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 
@@ -86,7 +86,7 @@ class MappingResponse(BaseModel):
     source_id: str
     contribution_weight: float
     evidence_type: str
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

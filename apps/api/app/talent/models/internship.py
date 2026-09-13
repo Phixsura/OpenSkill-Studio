@@ -41,7 +41,7 @@ class CohortOpportunityExposure(Base):
         String(26), ForeignKey("users.id", ondelete="CASCADE")
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
 
     __table_args__ = (
         Index("uq_cohort_exposure", "cohort_id", "opportunity_id", unique=True),
@@ -70,7 +70,7 @@ class InternshipSupervision(Base):
     notes: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     # pending | active | completed | terminated
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="'pending'")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -104,7 +104,7 @@ class EmployerVerification(Base):
     capability_ratings: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     overall_rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
     overall_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
 
     __table_args__ = (
         Index("ix_employer_verifications_placement", "placement_id"),
@@ -147,6 +147,6 @@ class OutcomeEvent(Base):
     visibility: Mapped[str] = mapped_column(String(20), default="private", server_default="'private'")
     extra: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default="{}")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
 
     __table_args__ = (Index("ix_outcome_events_user", "user_id", "event_type"),)

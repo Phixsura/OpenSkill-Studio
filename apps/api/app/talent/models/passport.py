@@ -4,7 +4,7 @@ Private by default. Users must explicitly opt in to discoverability and
 choose which fields to expose.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -60,7 +60,7 @@ class SkillPassport(Base):
     discoverable: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Scoped discoverability: NULL = all employers; list = specific employer org_ids
     discoverable_to: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -83,7 +83,7 @@ class PassportSnapshot(Base):
     checksum: Mapped[str] = mapped_column(String(64))
     # Which fields were included (user-selected subset)
     included_fields: Mapped[list] = mapped_column(JSONB)
-    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now())
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # active | revoked
     status: Mapped[str] = mapped_column(String(20), default="active", server_default="'active'")

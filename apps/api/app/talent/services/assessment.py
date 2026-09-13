@@ -474,7 +474,10 @@ class CredentialService:
             evidence_references=[
                 {"type": "evaluation", "rule_id": rule_id, "evaluated_at": now.isoformat()}
             ],
+            status="active",
+            issued_at=now,
             expires_at=expires_at,
+            created_at=now,
         )
         self.db.add(credential)
         await self.db.flush()

@@ -241,7 +241,7 @@ async def evaluate_credential(
     return DataResponse(data=result)
 
 
-@router.post("/credentials/issue", response_model=DataResponse[CredentialResponse], status_code=201)
+@router.post("/credentials/issue", status_code=201)
 async def issue_credential(
     body: IssueCredentialRequest,
     db: AsyncSession = Depends(get_db),
@@ -282,4 +282,13 @@ async def issue_credential(
             },
         )
 
-    return DataResponse(data=CredentialResponse.model_validate(cred))
+    return DataResponse(data={
+        "id": cred.id,
+        "credential_type": cred.credential_type,
+        "version": cred.version,
+        "user_id": cred.user_id,
+        "status": cred.status or "active",
+        "issued_at": cred.issued_at.isoformat() if cred.issued_at else None,
+        "created_at": cred.created_at.isoformat() if cred.created_at else None,
+        "capabilities": cred.capabilities or [],
+    })

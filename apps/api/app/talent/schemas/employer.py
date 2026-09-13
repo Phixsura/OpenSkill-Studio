@@ -24,8 +24,8 @@ class EmployerProfileResponse(BaseModel):
     description: str | None
     verification_status: str
     verified_at: datetime | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -89,7 +89,7 @@ class OpportunityResponse(BaseModel):
     openings: int
     status: str
     created_by: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}

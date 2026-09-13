@@ -37,8 +37,8 @@ class ApplicationResponse(BaseModel):
     match_run_id: str | None
     status: str
     cover_note: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -50,7 +50,7 @@ class ApplicationEventResponse(BaseModel):
     to_status: str
     acted_by: str
     note: str | None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -80,7 +80,7 @@ class InterviewStageResponse(BaseModel):
     scheduled_at: datetime | None
     completed_at: datetime | None
     status: str
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -101,7 +101,7 @@ class PlacementResponse(BaseModel):
     end_date: datetime | None
     placement_source: str | None
     status: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}

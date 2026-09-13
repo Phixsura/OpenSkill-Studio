@@ -46,8 +46,8 @@ class BlueprintResponse(BaseModel):
     version: int
     status: str
     created_by: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -81,7 +81,7 @@ class RunResponse(BaseModel):
     project_id: str | None
     reviewed_by: str | None
     reviewed_at: datetime | None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -108,7 +108,7 @@ class CredentialRuleResponse(BaseModel):
     org_id: str | None
     status: str
     activated_at: datetime | None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -123,12 +123,12 @@ class CredentialResponse(BaseModel):
     capabilities: list[dict]
     evidence_references: list[dict]
     status: str
-    issued_at: datetime
+    issued_at: datetime | None = None
     expires_at: datetime | None
     revalidation_at: datetime | None
     revoked_at: datetime | None
     revoked_reason: str | None = None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

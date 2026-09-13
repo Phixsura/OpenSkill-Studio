@@ -36,7 +36,7 @@ class VerificationResponse(BaseModel):
     capability_ratings: list[dict]
     overall_rating: float | None
     overall_comment: str | None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -83,8 +83,8 @@ class SupervisionResponse(BaseModel):
     milestones: list[dict]
     notes: list[dict]
     status: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -110,6 +110,6 @@ class CohortExposureResponse(BaseModel):
     opportunity_id: str
     exposed_by: str
     note: str | None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
