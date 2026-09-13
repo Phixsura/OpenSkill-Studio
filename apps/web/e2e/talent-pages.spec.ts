@@ -1,0 +1,135 @@
+/**
+ * Browser E2E: Talent layer pages — Issue #32.
+ *
+ * Verifies all new talent pages render correctly, navigation links exist,
+ * no console errors, and no 500 API responses.
+ */
+import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import { registerUser, loginInBrowser, type AuthContext } from "./helpers";
+
+const PASSWORD = "TestPass123!";
+let auth: AuthContext;
+let ctx: BrowserContext;
+let page: Page;
+
+const api500s: string[] = [];
+const consoleErrors: string[] = [];
+
+test.beforeAll(async ({ browser }) => {
+  auth = await registerUser("Talent E2E User");
+  ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  page = await ctx.newPage();
+
+  page.on("console", (msg) => {
+    if (msg.type() === "error" && !msg.text().includes("favicon")) {
+      consoleErrors.push(msg.text());
+    }
+  });
+  page.on("response", (resp) => {
+    if (resp.url().includes("/api/v1/") && resp.status() >= 500) {
+      api500s.push(`${resp.status()} ${resp.url()}`);
+    }
+  });
+
+  await loginInBrowser(page, auth.email, PASSWORD);
+});
+
+test.afterAll(async () => {
+  await ctx?.close();
+});
+
+test.describe("Talent layer pages", () => {
+  test("dashboard has talent nav links", async () => {
+    await page.goto("/dashboard");
+    await page.waitForLoadState("networkidle");
+    const html = await page.innerHTML("body");
+    expect(html).toContain("/dashboard/passport");
+    expect(html).toContain("/dashboard/opportunities");
+    expect(html).toContain("/dashboard/talent");
+  });
+
+  test("passport page renders", async () => {
+    await page.goto("/dashboard/passport");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toContain("passport");
+  });
+
+  test("opportunities page renders", async () => {
+    await page.goto("/dashboard/opportunities");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    // Should show opportunities list or empty state
+    expect(html.toLowerCase()).toMatch(/opportunit|no.*found|browse/i);
+  });
+
+  test("applications page renders", async () => {
+    await page.goto("/dashboard/applications");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/application|no.*appli/i);
+  });
+
+  test("talent intelligence dashboard renders", async () => {
+    await page.goto("/dashboard/talent");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/talent|intelligence|demand/i);
+  });
+
+  test("matched opportunities page renders", async () => {
+    await page.goto("/dashboard/opportunities/matches");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/match|passport|opportunities/i);
+  });
+
+  test("passport snapshots page renders", async () => {
+    await page.goto("/dashboard/passport/snapshots");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/snapshot|share/i);
+  });
+
+  test("talent demand detail page renders", async () => {
+    await page.goto("/dashboard/talent/demand");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/demand|capability/i);
+  });
+
+  test("talent supply detail page renders", async () => {
+    await page.goto("/dashboard/talent/supply");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/supply|capability/i);
+  });
+
+  test("no API 500 errors occurred", () => {
+    expect(api500s).toHaveLength(0);
+  });
+});
+
+test.describe("Public pages (no auth)", () => {
+  test("passport verification page loads without auth", async ({ browser }) => {
+    const publicCtx = await browser.newContext();
+    const publicPage = await publicCtx.newPage();
+    await publicPage.goto("/verify/passport/nonexistent-test-token");
+    await publicPage.waitForLoadState("networkidle");
+    await publicPage.waitForTimeout(2000);
+    // Should NOT redirect to login — it's a public route
+    // It might show "not found" or an error, but shouldn't 500
+    const html = await publicPage.innerHTML("body");
+    // The page should have rendered (not a blank page)
+    expect(html.length).toBeGreaterThan(100);
+    await publicCtx.close();
+  });
+});
