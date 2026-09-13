@@ -36,6 +36,7 @@ from app.api.v1.endpoints import (
     workflow_registry,
     workflow_runs,
 )
+from app.talent.api import talent_router
 from app.controlplane.api import billing as cp_billing
 from app.controlplane.api import client_portal as cp_client_portal
 from app.controlplane.api import credits as cp_credits
@@ -98,3 +99,6 @@ api_v1_router.include_router(cp_partners.router)
 api_v1_router.include_router(cp_marketplace.router)
 api_v1_router.include_router(cp_client_portal.router)
 api_v1_router.include_router(cp_whitelabel.router)
+
+# ── Talent layer (Issue #32) ──
+api_v1_router.include_router(talent_router)

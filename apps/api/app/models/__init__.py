@@ -136,6 +136,12 @@ from app.models.workflow_pack import (  # noqa: F401
     WorkflowPackInstallation,
     WorkflowPackRelease,
 )
+# ── Talent layer (Issue #32) ──
+# Talent models are imported via app.talent.models — they share the same
+# Base so Alembic discovers them, but we import the module (not names) to
+# avoid duplicate Table registration when product code also imports them.
+import app.talent.models as _talent_models  # noqa: F401
+
 from app.models.workflow_run import (  # noqa: F401
     RunStatus,
     StepRunStatus,
