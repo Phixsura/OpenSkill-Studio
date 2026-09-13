@@ -149,7 +149,7 @@ async def get_provenance(
 
 # ---- Derived capability profile ----
 
-@router.get("/users/{user_id}/profile", response_model=DataResponse[list[CapabilityScoreResponse]])
+@router.get("/users/{user_id}/profile")
 async def get_capability_profile(
     user_id: str,
     db: AsyncSession = Depends(get_db),
@@ -163,9 +163,11 @@ async def get_capability_profile(
     """
     # Own profile — always full access
     if user_id == user.id:
+        import dataclasses
+
         scores = await compute_capability_profile(db, user_id)
         return DataResponse(
-            data=[CapabilityScoreResponse(**s.__dict__) for s in scores]
+            data=[dataclasses.asdict(s) for s in scores]
         )
 
     # Other user — respect passport privacy settings
