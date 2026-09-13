@@ -12,6 +12,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.talent.models.application import Application, Placement
+from app.talent.models.assessment import AssessmentRun
 from app.talent.models.capability import Capability, CapabilityMapping
 from app.talent.models.employer import Opportunity
 from app.talent.models.evidence import CapabilityEvidence
@@ -298,3 +299,219 @@ class WorkforceIntelligenceService:
             "total_applications": sum(app_by_status.values()),
             "total_placements": sum(placements_by_status.values()),
         }
+
+    # ------------------------------------------------------------------
+    # §36 — Outcome-based curriculum analytics
+    # ------------------------------------------------------------------
+
+    async def get_outcome_analytics(
+        self,
+        *,
+        capability_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Connect learning content to downstream outcomes (§36).
+
+        Returns observed associations (not causal claims):
+        - Evidence source type → assessment pass rate
+        - Evidence source type → placement rate
+        - Evidence source type → employer verification rate
+
+        Only rows where evidence_count >= min_cohort_size are returned.
+        """
+        # Per capability × source_type: count distinct users with evidence
+        ev_base = (
+            select(
+                CapabilityEvidence.capability_id,
+                Capability.canonical_name.label("capability_name"),
+                CapabilityEvidence.source_type,
+                func.count(func.distinct(CapabilityEvidence.user_id)).label("evidence_count"),
+            )
+            .join(Capability, Capability.id == CapabilityEvidence.capability_id)
+            .where(
+                CapabilityEvidence.status == "active",
+                Capability.status == "active",
+            )
+        )
+        if capability_id:
+            ev_base = ev_base.where(CapabilityEvidence.capability_id == capability_id)
+        ev_base = (
+            ev_base.group_by(
+                CapabilityEvidence.capability_id,
+                Capability.canonical_name,
+                CapabilityEvidence.source_type,
+            )
+            .having(func.count(func.distinct(CapabilityEvidence.user_id)) >= self.min_cohort_size)
+        )
+
+        ev_result = await self.db.execute(ev_base)
+        groups = [
+            {
+                "capability_id": row.capability_id,
+                "capability_name": row.capability_name,
+                "source_type": row.source_type,
+                "evidence_count": row.evidence_count,
+            }
+            for row in ev_result.all()
+        ]
+
+        if not groups:
+            return []
+
+        # For each group, compute downstream rates
+        results = []
+        for g in groups:
+            cid = g["capability_id"]
+            stype = g["source_type"]
+            total_users = g["evidence_count"]
+
+            # Users with this evidence who ALSO passed an assessment for same cap
+            passed_q = (
+                select(func.count(func.distinct(AssessmentRun.user_id)))
+                .where(
+                    AssessmentRun.status == "passed",
+                    AssessmentRun.user_id.in_(
+                        select(CapabilityEvidence.user_id).where(
+                            CapabilityEvidence.capability_id == cid,
+                            CapabilityEvidence.source_type == stype,
+                            CapabilityEvidence.status == "active",
+                        )
+                    ),
+                )
+            )
+            passed_count = (await self.db.execute(passed_q)).scalar() or 0
+
+            # Users with this evidence who got placed
+            placed_q = (
+                select(func.count(func.distinct(Placement.user_id)))
+                .where(
+                    Placement.user_id.in_(
+                        select(CapabilityEvidence.user_id).where(
+                            CapabilityEvidence.capability_id == cid,
+                            CapabilityEvidence.source_type == stype,
+                            CapabilityEvidence.status == "active",
+                        )
+                    ),
+                )
+            )
+            placed_count = (await self.db.execute(placed_q)).scalar() or 0
+
+            # Users who received employer_verified evidence for same cap
+            emp_ver_q = (
+                select(func.count(func.distinct(CapabilityEvidence.user_id)))
+                .where(
+                    CapabilityEvidence.capability_id == cid,
+                    CapabilityEvidence.verification_level == "employer_verified",
+                    CapabilityEvidence.status == "active",
+                    CapabilityEvidence.user_id.in_(
+                        select(CapabilityEvidence.user_id).where(
+                            CapabilityEvidence.capability_id == cid,
+                            CapabilityEvidence.source_type == stype,
+                            CapabilityEvidence.status == "active",
+                        )
+                    ),
+                )
+            )
+            emp_ver_count = (await self.db.execute(emp_ver_q)).scalar() or 0
+
+            results.append({
+                "capability_id": cid,
+                "capability_name": g["capability_name"],
+                "source_type": stype,
+                "evidence_count": total_users,
+                "assessment_pass_rate": round(passed_count / total_users, 4) if total_users else 0,
+                "placement_rate": round(placed_count / total_users, 4) if total_users else 0,
+                "employer_verification_rate": round(emp_ver_count / total_users, 4) if total_users else 0,
+            })
+
+        results.sort(key=lambda r: -r["evidence_count"])
+        return results[:limit]
+
+    # ------------------------------------------------------------------
+    # §37 — Content improvement recommendations
+    # ------------------------------------------------------------------
+
+    async def get_recommendations(
+        self,
+        *,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Generate curriculum improvement recommendations (§37).
+
+        Recommendations are signals, not actions. All require human
+        confirmation before any content changes.
+        """
+        gaps = await self.get_gap_analysis(limit=100)
+        coverage_rows = await self.get_coverage_matrix(limit=200)
+        coverage_map = {c["capability_id"]: c.get("coverage_by_type", {}) for c in coverage_rows}
+
+        # Outcome analytics for employer verification rate (if available)
+        outcome_rows = await self.get_outcome_analytics(limit=200)
+        emp_ver_by_cap: dict[str, float] = {}
+        for o in outcome_rows:
+            cid = o["capability_id"]
+            rate = o["employer_verification_rate"]
+            # Keep worst rate per capability for recommendation trigger
+            if cid not in emp_ver_by_cap or rate < emp_ver_by_cap[cid]:
+                emp_ver_by_cap[cid] = rate
+
+        recommendations: list[dict] = []
+
+        for gap in gaps:
+            cid = gap.capability_id
+            cname = gap.capability_name
+            cov = coverage_map.get(cid, {})
+
+            # Missing assessment → recommend creating one
+            if not cov.get("assessment_blueprint"):
+                recommendations.append({
+                    "recommendation_type": "add_assessment",
+                    "capability_id": cid,
+                    "capability_name": cname,
+                    "reason": f"High demand ({gap.demand_count} opportunities) but no standardized assessment exists",
+                    "suggested_action": f"Create a practical assessment blueprint for {cname}",
+                    "confidence": "high" if gap.gap_severity == "high" else "medium",
+                    "requires_confirmation": True,
+                })
+
+            # Missing project template
+            if not cov.get("project_template"):
+                recommendations.append({
+                    "recommendation_type": "add_project_template",
+                    "capability_id": cid,
+                    "capability_name": cname,
+                    "reason": f"No project template maps to {cname}; learners lack hands-on practice",
+                    "suggested_action": f"Create an advanced project template for {cname}",
+                    "confidence": "medium",
+                    "requires_confirmation": True,
+                })
+
+            # High demand, low supply → increase capacity
+            if gap.gap_severity == "high":
+                recommendations.append({
+                    "recommendation_type": "increase_training_capacity",
+                    "capability_id": cid,
+                    "capability_name": cname,
+                    "reason": f"Supply-demand gap is severe: {gap.gap} unfilled out of {gap.demand_count} demand",
+                    "suggested_action": f"Add more Skill Packs or Learning Paths covering {cname}",
+                    "confidence": "high",
+                    "requires_confirmation": True,
+                })
+
+            # Low employer verification rate → improve practical alignment
+            emp_rate = emp_ver_by_cap.get(cid, 1.0)
+            if emp_rate < 0.3 and gap.demand_count > 0:
+                recommendations.append({
+                    "recommendation_type": "improve_practical_alignment",
+                    "capability_id": cid,
+                    "capability_name": cname,
+                    "reason": (
+                        f"Employer verification rate is low ({emp_rate:.0%}); "
+                        "training may not align with real-world expectations"
+                    ),
+                    "suggested_action": f"Review rubrics and project briefs for {cname} against employer feedback",
+                    "confidence": "medium",
+                    "requires_confirmation": True,
+                })
+
+        return recommendations[:limit]

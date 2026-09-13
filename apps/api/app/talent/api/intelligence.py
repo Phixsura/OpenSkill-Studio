@@ -108,3 +108,37 @@ async def get_placement_analytics(
     return DataResponse(
         data=await svc.get_placement_analytics(employer_org_id=employer_org_id)
     )
+
+
+@router.get("/outcomes", response_model=DataResponse[list[dict]])
+async def get_outcome_analytics(
+    capability_id: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Outcome-based curriculum analytics (§36).
+
+    Returns observed associations between learning content and downstream
+    outcomes: assessment pass rates, placement rates, employer verification
+    rates. These are correlations, not causal claims.
+    """
+    svc = WorkforceIntelligenceService(db)
+    return DataResponse(
+        data=await svc.get_outcome_analytics(capability_id=capability_id, limit=limit)
+    )
+
+
+@router.get("/recommendations", response_model=DataResponse[list[dict]])
+async def get_recommendations(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Content improvement recommendations (§37).
+
+    All recommendations require human confirmation before action.
+    The system never auto-publishes or auto-edits content.
+    """
+    svc = WorkforceIntelligenceService(db)
+    return DataResponse(data=await svc.get_recommendations(limit=limit))

@@ -207,7 +207,10 @@ async def transition_application(
         if app.user_id != user.id:
             raise HTTPException(404, "Application not found")
     elif body.status in _EMPLOYER_TRANSITIONS:
-        # Only employer org members can screen/interview/offer/hire/reject
+        # Only employer org members can screen/interview/offer/hire/reject.
+        # TODO: tighten to HIRING_MANAGER+ once employer role assignment
+        # UI is in place (OrgRole.HIRING_MANAGER, OrgRole.ADMIN, OrgRole.OWNER).
+        # Currently any org member can perform these transitions.
         await require_org_member(opp.employer_org_id, user, db)
     elif body.status in _EITHER_TRANSITIONS:
         # submitted: must be the applicant
