@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, field_validator
 
+from app.schemas.base import reject_header_str
+
 
 class CreateOrgRequest(BaseModel):
     name: str
@@ -17,7 +19,9 @@ class CreateOrgRequest(BaseModel):
             raise ValueError("Organization name must be at least 2 characters")
         if len(v) > 100:
             raise ValueError("Organization name must not exceed 100 characters")
-        return v
+        # R95[m8]: the org name is interpolated into invite email SUBJECT
+        # headers — interior CR/LF is header injection.
+        return reject_header_str(v, "name")
 
     @field_validator("slug")
     @classmethod
@@ -70,7 +74,7 @@ class UpdateOrgRequest(BaseModel):
             raise ValueError("Organization name must be at least 2 characters")
         if len(v) > 100:
             raise ValueError("Organization name must not exceed 100 characters")
-        return v
+        return reject_header_str(v, "name")  # R95[m8]
 
 
 class OrgResponse(BaseModel):
@@ -82,6 +86,10 @@ class OrgResponse(BaseModel):
     role: str | None = None  # Caller's role in this org
     member_count: int = 0
     created_at: datetime
+    # R130[32]: the tenant this org belongs to — multi-tenant users need it
+    # to target tenant-scoped actions (e.g. license installs) at an org of
+    # the RIGHT tenant; without it the FE picked an arbitrary admin org.
+    tenant_id: str | None = None
 
     model_config = {"from_attributes": True}
 

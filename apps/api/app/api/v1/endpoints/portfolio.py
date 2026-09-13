@@ -294,6 +294,27 @@ async def upload_cover_image(
     file_key = f"users/{user.id}/covers/{ULID()}_{safe_name}"
 
     async for client in get_s3_client():
+        # R49[37]: this endpoint wrote up to 10MB per call with no total bound
+        # and no DB record — no storage surface counts these objects, so a
+        # single user could grow the bucket without limit. Cap the per-user
+        # covers prefix (S3 is the source of truth since there is no DB row).
+        per_user_limit = 100 * 1024 * 1024  # 100 MB of covers per user
+        existing = 0
+        token = None
+        while True:
+            kwargs = {"Bucket": settings.s3_bucket, "Prefix": f"users/{user.id}/covers/"}
+            if token:
+                kwargs["ContinuationToken"] = token
+            page = await client.list_objects_v2(**kwargs)
+            existing += sum(o.get("Size", 0) for o in page.get("Contents", []))
+            if not page.get("IsTruncated"):
+                break
+            token = page.get("NextContinuationToken")
+        if existing + total > per_user_limit:
+            raise HTTPException(
+                status_code=413,
+                detail="Cover image storage limit reached (100MB per user)",
+            )
         await client.put_object(
             Bucket=settings.s3_bucket,
             Key=file_key,

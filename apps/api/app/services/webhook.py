@@ -37,6 +37,14 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("169.254.0.0/16"),  # link-local / cloud metadata
     ipaddress.ip_network("0.0.0.0/8"),
+    # R171: CGNAT shared address space (RFC 6598) — used by cloud-internal
+    # load balancers and Tailscale/WireGuard overlays. Python's is_private is
+    # False for it (neither private nor global), so without an explicit entry
+    # a webhook to 100.64.x.x reached overlay/means-internal services.
+    ipaddress.ip_network("100.64.0.0/10"),
+    # R171: NAT64 well-known prefix — 64:ff9b::<v4> routes to the embedded
+    # IPv4 through a NAT64 gateway, bypassing every IPv4 check above.
+    ipaddress.ip_network("64:ff9b::/96"),
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),  # IPv6 private
     ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
@@ -80,22 +88,41 @@ def _is_blocked_url(url: str) -> bool:
         # Resolve DNS and check all resulting IPs
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         for _family, _, _, _, sockaddr in infos:
-            ip = ipaddress.ip_address(sockaddr[0])
-            # Extract IPv4 from IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254)
-            if ip.version == 6 and ip.ipv4_mapped:
-                ip = ip.ipv4_mapped
-            # Defense-in-depth: catch any unspecified (::, 0.0.0.0), loopback,
-            # link-local, or private address regardless of CIDR list gaps
-            if ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_private:
+            if _ip_blocked(ipaddress.ip_address(sockaddr[0])):
                 return True
-            for network in _BLOCKED_NETWORKS:
-                if ip in network:
-                    return True
     except (socket.gaierror, ValueError):
         # If DNS resolution fails, block the URL
         return True
 
     return False
+
+
+def _ip_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Per-IP SSRF verdict. R251: extracted from _is_blocked_url so the
+    IPv4-mapped unwrap is directly testable — macOS getaddrinfo normalizes
+    mapped literals to plain v4 before this code runs, but Linux resolvers
+    and DNS64 environments hand us ::ffff:<v4> verbatim."""
+    # Extract IPv4 from IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254)
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    # Defense-in-depth: catch any unspecified (::, 0.0.0.0), loopback,
+    # link-local, or private address regardless of CIDR list gaps
+    if ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_private:
+        return True
+    return any(ip in network for network in _BLOCKED_NETWORKS)
+
+
+async def _is_blocked_url_async(url: str) -> bool:
+    """R171: run the blocking getaddrinfo off the event loop.
+
+    _is_blocked_url resolves DNS with socket.getaddrinfo — a SYNCHRONOUS
+    syscall. Called directly from async code it stalls the ENTIRE event loop
+    for the resolver timeout; an attacker registering a hostname whose
+    authoritative NS answers slowly (or not at all) froze every in-flight
+    request on the worker for up to ~30s per lookup, on both the create path
+    and every delivery.
+    """
+    return await asyncio.to_thread(_is_blocked_url, url)
 
 
 class WebhookService:
@@ -109,7 +136,8 @@ class WebhookService:
         events: list[str],
     ) -> WebhookSubscription:
         # SSRF: validate URL doesn't point to internal services
-        if _is_blocked_url(url):
+        # (R171: async wrapper — DNS resolution must not block the event loop)
+        if await _is_blocked_url_async(url):
             raise AppError(
                 "WEBHOOK_URL_BLOCKED",
                 "Webhook URL must not point to internal or private addresses",
@@ -175,6 +203,23 @@ class WebhookService:
             # Use a nested savepoint so any DB error (e.g. missing column
             # before migration runs) doesn't invalidate the caller's session.
             async with self.db.begin_nested():
+                # R77[2]: the 'webhooks' entitlement was enforced only at
+                # subscription CREATE — suspended/cancelled tenants (whose
+                # SUSPENSION_MASKED_KEYS turn webhooks off) and plan
+                # downgrades kept DELIVERING through pre-existing
+                # subscriptions forever. Gate the delivery path itself.
+                from app.controlplane import facade as cp_facade
+                from app.controlplane.services.entitlements import get_effective
+
+                tenant = await cp_facade.get_tenant_for_org(self.db, org_id)
+                eff = await get_effective(self.db, tenant)
+                if not eff.values.get("webhooks"):
+                    log.info(
+                        "webhook_delivery_blocked_entitlement",
+                        org_id=org_id,
+                        webhook_event=event_type,
+                    )
+                    return
                 result = await self.db.execute(
                     select(WebhookSubscription).where(
                         WebhookSubscription.org_id == org_id,
@@ -235,7 +280,8 @@ class WebhookService:
         import httpx
 
         # Re-validate URL at delivery time to catch DNS rebinding
-        if _is_blocked_url(url):
+        # (R171: async wrapper — DNS resolution must not block the event loop)
+        if await _is_blocked_url_async(url):
             log.warning(
                 "webhook_delivery_blocked_dns_rebind",
                 webhook_id=webhook_id,
@@ -264,7 +310,14 @@ class WebhookService:
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(
+                # R171: stream and discard the response — a plain .post()
+                # buffers the receiver's ENTIRE body into memory. The receiver
+                # is an org-controlled server: one returning multi-GB bodies
+                # across 25 subscriptions per org was an unbounded memory
+                # amplification against the API worker. We only care that the
+                # POST was accepted; never read the body.
+                async with client.stream(
+                    "POST",
                     url,
                     content=body,
                     headers={
@@ -272,7 +325,13 @@ class WebhookService:
                         "X-Webhook-Signature": signature,
                         "X-Webhook-Event": event_type,
                     },
-                )
+                ) as resp:
+                    log.info(
+                        "webhook_delivered",
+                        webhook_id=webhook_id,
+                        webhook_event=event_type,
+                        status=resp.status_code,
+                    )
         except Exception:
             log.warning(
                 "webhook_delivery_failed",

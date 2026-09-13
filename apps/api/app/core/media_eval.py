@@ -30,9 +30,9 @@ async def fetch_image_as_base64(file_key: str) -> tuple[str, str]:
     async for client in get_s3_client():
         response = await client.get_object(Bucket=settings.s3_bucket, Key=file_key)
         content_type = response.get("ContentType", "image/png")
-        content_length = response.get("ContentLength", 0)
+        content_length = response.get("ContentLength")
 
-        if content_length > MAX_IMAGE_SIZE:
+        if content_length is not None and content_length > MAX_IMAGE_SIZE:
             raise AppError(
                 "IMAGE_TOO_LARGE",
                 f"Image exceeds {MAX_IMAGE_SIZE // (1024 * 1024)}MB limit for evaluation",
@@ -40,6 +40,30 @@ async def fetch_image_as_base64(file_key: str) -> tuple[str, str]:
             )
 
         body = await response["Body"].read()
+        # R164: enforce the size cap on the ACTUAL bytes too — a missing/absent
+        # ContentLength (defaulted through the check above) or an under-reported
+        # one would otherwise let an oversized object through unbounded.
+        if len(body) > MAX_IMAGE_SIZE:
+            raise AppError(
+                "IMAGE_TOO_LARGE",
+                f"Image exceeds {MAX_IMAGE_SIZE // (1024 * 1024)}MB limit for evaluation",
+                422,
+            )
+        # R164: validate the S3-reported media type against the set the vision
+        # models actually accept. fetch reads ContentType straight from the
+        # object (independent of the DB mime the caller gated on) — a stored
+        # object whose ContentType is anything else (image/svg+xml, image/bmp,
+        # application/octet-stream, or S3's "image/png" default masking non-
+        # image bytes) would otherwise be embedded as media_type and make the
+        # PAID LLM call reject the ENTIRE multimodal evaluation. Raise instead:
+        # the caller wraps this in try/except and degrades to "[Image
+        # unavailable]" for the one item, preserving the rest of the eval.
+        if content_type not in IMAGE_MIMES:
+            raise AppError(
+                "IMAGE_MEDIA_TYPE_UNSUPPORTED",
+                f"Stored media type '{content_type}' is not an LLM-evaluatable image",
+                422,
+            )
         b64 = base64.b64encode(body).decode("ascii")
         log.info(
             "image_fetched_for_eval",

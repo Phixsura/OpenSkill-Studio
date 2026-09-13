@@ -80,7 +80,14 @@ let refreshPromise: Promise<string> | null = null;
 function redirectToLoginIfProtected(): void {
   if (typeof window === "undefined") return;
   const path = window.location.pathname;
-  if (path.startsWith("/dashboard")) {
+  // R101[M15]: /platform and /partner live OUTSIDE the /dashboard URL prefix
+  // (the (dashboard) route group is not part of the URL) — session expiry
+  // there stranded users on a blank pane instead of bouncing to login.
+  if (
+    path.startsWith("/dashboard") ||
+    path.startsWith("/platform") ||
+    path.startsWith("/partner")
+  ) {
     window.location.href = `/login?redirect=${encodeURIComponent(path)}`;
   }
 }
@@ -140,13 +147,28 @@ export function sharedRefresh(): Promise<string> {
   return refreshPromise;
 }
 
+/** R101[H11]: impersonation tokens carry an `imp` claim and have NO refresh
+ * token — the browser's refresh cookie belongs to the SUPPORT OPERATOR's own
+ * login. Auto-refreshing on 401 silently swapped the read-only impersonated
+ * session for the operator's fully-privileged one. Detect the claim (base64
+ * payload decode — no verification needed client-side) and end the session
+ * instead of refreshing. */
+function isImpersonationToken(token: string | null): boolean {
+  if (!token) return false;
+  try {
+    const part = token.split(".")[1];
+    if (!part) return false;
+    const payload = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+    return Boolean(payload?.imp);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Authenticated API client — attaches Bearer token, auto-refreshes on 401.
  */
-export async function apiWithAuth<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
+export async function apiWithAuth<T>(path: string, init?: RequestInit): Promise<T> {
   const { useAuthStore } = await import("@/stores/auth");
   let token = useAuthStore.getState().accessToken;
 
@@ -169,6 +191,14 @@ export async function apiWithAuth<T>(
   // here caused permanent 401s on deep links (queries fired before
   // AuthInitializer completed and never retried).
   if (res.status === 401) {
+    if (isImpersonationToken(token)) {
+      // R101[H11]: never refresh an expired impersonation session into the
+      // operator's own privileged token — the impersonation window is over.
+      const { useAuthStore: store } = await import("@/stores/auth");
+      store.getState().clearAuth();
+      redirectToLoginIfProtected();
+      throw new ApiError(401, "IMPERSONATION_EXPIRED", "Impersonation session ended");
+    }
     token = await sharedRefresh();
     res = await doFetch(token);
   }

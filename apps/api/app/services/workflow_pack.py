@@ -55,7 +55,16 @@ def _parse_semver(version: str) -> tuple:
             for ident in prerelease.split(".")
         )
         pre_key = (0, *identifiers)
-    return (int(parts[0]), int(parts[1]), int(parts[2]), pre_key)
+    # R194 (Hypothesis fuzz): total over malformed input — '' / '0' / '1.2'
+    # raised ValueError/IndexError. Every API path is schema-gated to full
+    # semver, but this helper also sorts STORED release versions on anonymous
+    # registry endpoints — one out-of-band-corrupted row would 500 the whole
+    # listing (the R87 "tolerant branches must be total" doctrine). Malformed
+    # versions sort lowest instead.
+    try:
+        return (int(parts[0]), int(parts[1]), int(parts[2]), pre_key)
+    except (ValueError, IndexError):
+        return (-1, -1, -1, (0,))
 
 
 class WorkflowPackService:

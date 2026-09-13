@@ -2,6 +2,7 @@
 
 import time
 
+import jwt as _jwt
 import structlog
 from fastapi import HTTPException, Request
 from redis.asyncio import Redis
@@ -10,6 +11,44 @@ from app.config import settings
 from app.core.redis import redis_pool
 
 log = structlog.get_logger()
+
+
+def client_identity(request: Request) -> str:
+    """Rate-limit principal (R78b, issue-18 addendum).
+
+    Priority: (1) the AUTHENTICATED user id when the request carries a valid
+    access token — behind NAT/proxies many users share one IP, and one
+    abuser's bucket must not starve everyone else's; (2) the real client IP
+    recovered from X-Forwarded-For when settings.trusted_proxy_hops > 0
+    (each trusted proxy appends its caller, so the client is the N-th entry
+    from the right); (3) the direct peer IP. Forwarded headers are IGNORED at
+    the default 0 hops — an untrusted client could otherwise spoof arbitrary
+    identities and mint unlimited buckets."""
+    auth = request.headers.get("authorization", "")
+    if not isinstance(auth, str):  # defensive: mocked/exotic header objects
+        auth = ""
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() == "bearer" and token.strip():
+        try:
+            from app.core.security import ALGORITHM
+
+            payload = _jwt.decode(token.strip(), settings.jwt_secret, algorithms=[ALGORITHM])
+            sub = payload.get("sub")
+            if sub:
+                return f"u:{sub}"
+        except Exception:  # noqa: BLE001 — invalid token → fall through to IP
+            pass
+    hops = settings.trusted_proxy_hops
+    if hops > 0:
+        xff = request.headers.get("x-forwarded-for", "")
+        if not isinstance(xff, str):
+            xff = ""
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            # Fewer entries than trusted hops = a trusted proxy connected
+            # directly (header shorter than the chain) — leftmost is best.
+            return "ip:" + (parts[-hops] if len(parts) >= hops else parts[0])
+    return "ip:" + (request.client.host if request.client else "unknown")
 
 
 async def check_rate_limit(key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
@@ -76,13 +115,13 @@ def rate_limit(limit: int, window: int):
         if settings.app_env == "test":
             return limit  # Skip rate limiting in tests
 
-        client_ip = request.client.host if request.client else "unknown"
+        identity = client_identity(request)
         # Route TEMPLATE, not the concrete URL — a path param must not shard the
         # bucket. Fall back to the concrete path only if the route is somehow
         # unresolved (defensive; every mounted route carries scope["route"]).
         route = request.scope.get("route")
         path_key = getattr(route, "path", None) or request.url.path
-        key = f"{request.method}:{path_key}:{client_ip}"
+        key = f"{request.method}:{path_key}:{identity}"
 
         allowed, remaining = await check_rate_limit(key, limit, window)
 

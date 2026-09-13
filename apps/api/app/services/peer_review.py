@@ -169,7 +169,17 @@ class PeerReviewService:
         the round's project. Reviewers = those same authors (a learner must
         have submitted to review — Moodle's musthavesubmission).
         """
-        rnd = await self.get_round(round_id, org_id)
+        # issue-18 debt (R173): lock the round row — the SETUP gate below
+        # otherwise races a concurrent start of the same round. Allocation is
+        # RANDOM, so two racing starts generate mostly-different (reviewer,
+        # submission) pairs: the unique index only stops identical pairs,
+        # leaving either doubled assessment workload for every reviewer or an
+        # IntegrityError → 500 at commit for the partial overlap.
+        rnd = await self.db.get(
+            PeerReviewRound, round_id, with_for_update=True, populate_existing=True
+        )
+        if rnd is None or rnd.org_id != org_id:
+            raise RoundNotFoundError()
         if rnd.phase != PeerReviewPhase.SETUP:
             raise AppError("INVALID_PHASE", "Round is not in setup phase", 422)
 
@@ -227,7 +237,12 @@ class PeerReviewService:
         return rnd, count
 
     async def close_round(self, round_id: str, org_id: str) -> PeerReviewRound:
-        rnd = await self.get_round(round_id, org_id)
+        # R173: same lock as start_assessment — phase transitions serialize.
+        rnd = await self.db.get(
+            PeerReviewRound, round_id, with_for_update=True, populate_existing=True
+        )
+        if rnd is None or rnd.org_id != org_id:
+            raise RoundNotFoundError()
         if rnd.phase != PeerReviewPhase.ASSESSMENT:
             raise AppError("INVALID_PHASE", "Round is not in assessment phase", 422)
         rnd.phase = PeerReviewPhase.CLOSED
@@ -265,7 +280,12 @@ class PeerReviewService:
         score_breakdown: list[dict] | None,
         feedback: str | None,
     ) -> PeerAssessment:
-        assessment = await self.db.get(PeerAssessment, assessment_id)
+        # issue-18 debt (R70 pattern): lock the assessment row — the
+        # ALREADY_SUBMITTED gate below otherwise raced a concurrent submit of
+        # the same assessment (double submit, last-wins score overwrite).
+        assessment = await self.db.get(
+            PeerAssessment, assessment_id, with_for_update=True, populate_existing=True
+        )
         if assessment is None:
             raise AssessmentNotFoundError()
         rnd = await self.get_round(assessment.round_id, org_id)

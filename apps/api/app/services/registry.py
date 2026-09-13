@@ -66,7 +66,11 @@ class RegistryService:
         Supports simultaneous faceted filters: scenario, tool, difficulty,
         category, min_rating. max_results caps the total returned (default 50).
         """
-        effective_per_page = min(per_page, max_results) if max_results else per_page
+        # issue-18 addendum (R71): the endpoint reports per_page as
+        # min(per_page, max_results or 50) — the service must apply the SAME
+        # default 50 cap for the actual LIMIT and the cache key, or
+        # ?per_page=100 returns 100 rows while meta says 50.
+        effective_per_page = min(per_page, max_results or 50)
         # ── Check cache ──
         # Canonical JSON key, not a raw ':'-join: a ':'-join collides when a
         # user-controlled value itself contains ':' (search='a:b' vs
@@ -186,13 +190,13 @@ class RegistryService:
 
         # Sort
         if sort in ("most_installed", "popular"):
-            base = base.order_by(SkillPack.install_count.desc())
+            base = base.order_by(SkillPack.install_count.desc(), SkillPack.id.desc())
         elif sort == "recently_updated":
-            base = base.order_by(SkillPack.updated_at.desc())
+            base = base.order_by(SkillPack.updated_at.desc(), SkillPack.id.desc())
         elif sort == "name":
-            base = base.order_by(SkillPack.name.asc())
+            base = base.order_by(SkillPack.name.asc(), SkillPack.id.asc())
         else:  # newest
-            base = base.order_by(SkillPack.created_at.desc())
+            base = base.order_by(SkillPack.created_at.desc(), SkillPack.id.desc())
 
         try:
             total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
@@ -214,7 +218,7 @@ class RegistryService:
                         ),
                         _ilike_fallback,
                     )
-                    .order_by(SkillPack.created_at.desc())
+                    .order_by(SkillPack.created_at.desc(), SkillPack.id.desc())
                 )
                 total_r = await self.db.execute(select(func.count()).select_from(base.subquery()))
                 total = total_r.scalar_one()
@@ -342,7 +346,7 @@ class RegistryService:
         latest_r = await self.db.execute(
             select(SkillPackRelease)
             .where(SkillPackRelease.pack_id == pack.id)
-            .order_by(SkillPackRelease.released_at.desc())
+            .order_by(SkillPackRelease.released_at.desc(), SkillPackRelease.id.desc())
             .limit(1)
         )
         latest = latest_r.scalar_one_or_none()
@@ -409,7 +413,7 @@ class RegistryService:
         result = await self.db.execute(
             select(SkillPackRelease)
             .where(SkillPackRelease.pack_id == pack_id)
-            .order_by(SkillPackRelease.released_at.desc())
+            .order_by(SkillPackRelease.released_at.desc(), SkillPackRelease.id.desc())
             .limit(1)
         )
         release = result.scalar_one_or_none()

@@ -652,3 +652,174 @@ async def test_revoke_session_kills_rotation_predecessor_within_grace(client):
     assert rb.status_code == 200, rb.text
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_auth_core_boundaries_r401(client):
+    """R401 (auth-core mutation survivors): (1) an INACTIVE user's valid
+    refresh token is rejected (the Or→And mutant lets a deactivated account
+    keep minting sessions forever); (2) a revoked token EXACTLY at the grace
+    boundary still succeeds (<=) while one second past it is a 401;
+    (3) logging in with an UNKNOWN email is a clean 401, never a 500 (the
+    dummy-bcrypt timing branch — the And-mutant AttributeErrors on None);
+    (4) after logout the just-rotated token is dead IMMEDIATELY (the grace
+    window must not revive an explicit logout). Remaining survivors are
+    equivalence classes: the grace-boundary float instants (request latency
+    makes an exact == age unconstructible), the logout backdate constants
+    (any value past the grace is final), the email-hash log truncation, and
+    the logout cleanup's Or (its except-Exception wrapper swallows the
+    mutant's AttributeError — same observable 200)."""
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select as _sel
+
+    from app.config import settings as _settings
+    from app.core.database import AsyncSessionLocal
+    from app.models.user import RefreshToken, User
+
+    # (3) unknown email → 401 not 500
+    r = await client.post(
+        "/api/v1/auth/login",
+        json={"email": f"ghost-{_uuid.uuid4().hex[:8]}@x.com", "password": "whatever123!"},
+    )
+    assert r.status_code == 401
+
+    email = f"r401-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "TestPass123!", "display_name": "R401"},
+    )
+    assert r.status_code == 201
+    cookie = r.cookies.get("refresh_token")
+
+    # (2) grace boundary: rotate, then backdate the revoked token's
+    # revoked_at to EXACTLY grace seconds ago → replay still succeeds;
+    # one second past → 401
+    client.cookies.set("refresh_token", cookie)
+    r1 = await client.post("/api/v1/auth/refresh")
+    assert r1.status_code == 200
+    grace = _settings.refresh_reuse_grace_seconds
+    async with AsyncSessionLocal() as dbs:
+        user_row = (await dbs.execute(_sel(User).where(User.email == email))).scalar_one()
+        revoked = (
+            (
+                await dbs.execute(
+                    _sel(RefreshToken).where(
+                        RefreshToken.user_id == user_row.id, RefreshToken.revoked_at.is_not(None)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert revoked
+        for t in revoked:
+            t.revoked_at = datetime.now(UTC) - timedelta(seconds=grace - 1)
+        await dbs.commit()
+        uid = user_row.id
+    client.cookies.set("refresh_token", cookie)
+    r2 = await client.post("/api/v1/auth/refresh")
+    assert r2.status_code == 200, "inside the grace window must still mint"
+    # push past the window (the new rotation re-revoked; backdate ALL again)
+    async with AsyncSessionLocal() as dbs:
+        revoked2 = (
+            (
+                await dbs.execute(
+                    _sel(RefreshToken).where(
+                        RefreshToken.user_id == uid, RefreshToken.revoked_at.is_not(None)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for t in revoked2:
+            t.revoked_at = datetime.now(UTC) - timedelta(seconds=grace + 2)
+        await dbs.commit()
+    client.cookies.set("refresh_token", cookie)
+    r3 = await client.post("/api/v1/auth/refresh")
+    assert r3.status_code == 401, "past the grace window the replay is dead"
+
+    # (1) INACTIVE user: a live refresh token stops working
+    email2 = f"r401b-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email2, "password": "TestPass123!", "display_name": "R401b"},
+    )
+    cookie2 = r.cookies.get("refresh_token")
+    async with AsyncSessionLocal() as dbs:
+        u2 = (await dbs.execute(_sel(User).where(User.email == email2))).scalar_one()
+        from app.models.user import UserStatus
+
+        u2.status = UserStatus.SUSPENDED
+        await dbs.commit()
+    client.cookies.set("refresh_token", cookie2)
+    r4 = await client.post("/api/v1/auth/refresh")
+    assert r4.status_code == 401, "a deactivated account must not refresh"
+
+    # (4) explicit logout is immediately final — no grace revival
+    email3 = f"r401c-{_uuid.uuid4().hex[:8]}@test.com"
+    r = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email3, "password": "TestPass123!", "display_name": "R401c"},
+    )
+    cookie3 = r.cookies.get("refresh_token")
+    client.cookies.set("refresh_token", cookie3)
+    r5 = await client.post("/api/v1/auth/logout")
+    assert r5.status_code in (200, 204)
+    client.cookies.set("refresh_token", cookie3)
+    r6 = await client.post("/api/v1/auth/refresh")
+    assert r6.status_code == 401, "logout must be final within the grace window"
+
+    # crafted tokens: (a) logout with an UNKNOWN jti is a silent success
+    # (the Or-mutant AttributeErrors on the missing record); (b) a refresh
+    # token with NO jti claim is a clean 401; (c) an OAuth-only (passwordless)
+    # user's change_password is a 4xx, never a crash on password_hash None
+    from datetime import UTC as _UTC2
+    from datetime import datetime as _dt2
+
+    import jwt as _jwt
+
+    now = _dt2.now(_UTC2)
+    ghost = _jwt.encode(
+        {
+            "sub": str(_uuid.uuid4()),
+            "type": "refresh",
+            "iat": now,
+            "exp": now + timedelta(days=1),
+            "jti": "01GHOSTJTIAAAAAAAAAAAAAAAA",
+        },
+        _settings.jwt_secret,
+        algorithm="HS256",
+    )
+    client.cookies.set("refresh_token", ghost)
+    r7 = await client.post("/api/v1/auth/logout")
+    assert r7.status_code in (200, 204)
+
+    no_jti = _jwt.encode(
+        {"sub": str(_uuid.uuid4()), "type": "refresh", "iat": now, "exp": now + timedelta(days=1)},
+        _settings.jwt_secret,
+        algorithm="HS256",
+    )
+    client.cookies.set("refresh_token", no_jti)
+    r8 = await client.post("/api/v1/auth/refresh")
+    assert r8.status_code == 401
+
+    from app.services.auth import AuthService
+
+    async with AsyncSessionLocal() as dbs:
+        pw_less = User(
+            email=f"oauth-{_uuid.uuid4().hex[:8]}@x.com",
+            display_name="OAuth Only",
+            password_hash=None,
+        )
+        dbs.add(pw_less)
+        await dbs.flush()
+        svc = AuthService(dbs)
+        with pytest.raises(Exception) as e_pw:
+            await svc.change_password(pw_less, "old", "NewPass123!")
+        assert not isinstance(e_pw.value, AttributeError), (
+            "passwordless change_password must raise a domain error, not crash"
+        )
+        await dbs.rollback()

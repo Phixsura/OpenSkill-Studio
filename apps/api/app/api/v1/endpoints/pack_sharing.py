@@ -79,6 +79,25 @@ async def list_shared_packs(
 
 
 @router.delete(
+    "/orgs/{org_id}/shared-with-me/{pack_id}",
+    status_code=204,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def remove_incoming_share(
+    org_id: str,
+    pack_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """R172: remove a share another org pointed at this org (opt-out of
+    unsolicited shared content and the installability it grants)."""
+    await require_org_member(org_id, user, db, *INSTRUCTOR_ROLES)
+    svc = PackSharingService(db)
+    await svc.remove_incoming_share(org_id, pack_id)
+    await db.commit()
+
+
+@router.delete(
     "/orgs/{org_id}/packs/{pack_id}/share/{target_org_id}",
     status_code=204,
     dependencies=[Depends(rate_limit(10, 60))],

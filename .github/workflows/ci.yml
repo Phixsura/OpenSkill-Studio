@@ -47,6 +47,7 @@ jobs:
   test-backend:
     name: Test (Backend)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16-alpine
@@ -71,13 +72,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      # MinIO for the real-storage media suite. GH service containers cannot
+      # pass a command to minio/minio, and bitnami's public :latest tag was
+      # withdrawn — run the official image directly instead.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 2
+          done
+      # test_multimodal_eval probes the real ffmpeg/ffprobe binaries
+      - run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
       - run: cd apps/api && uv sync --extra dev
+      # the DB suites run against a REAL migrated schema — same as local dev
+      # pre-create the S3 bucket: test_full_integration sorts BEFORE
+      # test_media_db and touches storage before anything else creates it
+      - name: Ensure MinIO bucket
+        run: |
+          cd apps/api && uv run python - <<'PY'
+          import asyncio
+          from app.core.storage import get_s3_client, ensure_bucket
+          async def main():
+              async for client in get_s3_client():
+                  await ensure_bucket(client)
+          asyncio.run(main())
+          PY
+        env:
+          APP_ENV: test
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+      - run: cd apps/api && uv run alembic upgrade head
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
       - run: >
           cd apps/api && APP_ENV=test PYTHONPATH=.
-          uv run pytest -v --timeout=60 --cov=app --cov-fail-under=90
+          uv run pytest -q --timeout=120 --cov=app --cov-fail-under=90
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
           REDIS_URL: redis://localhost:6379/0
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
 
   build:
     name: Build

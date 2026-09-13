@@ -1,5 +1,6 @@
 """Authentication service — register, login, refresh, logout, password reset, email verify."""
 
+import asyncio
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -30,6 +31,28 @@ from app.models.user import (
 )
 
 log = structlog.get_logger()
+
+# R181: strong refs for fire-and-forget email sends (see forgot_password) —
+# without them the task can be garbage-collected mid-send.
+_email_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+
+def _send_email_background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _email_tasks.add(task)
+    task.add_done_callback(_email_tasks.discard)
+
+
+async def drain_email_tasks(timeout: float = 10.0) -> None:
+    """Await in-flight reset emails on shutdown (same as drain_webhook_tasks)."""
+    if not _email_tasks:
+        return
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*_email_tasks, return_exceptions=True), timeout=timeout
+        )
+    except TimeoutError:
+        log.warning("email_drain_timeout", pending=len(_email_tasks))
 
 
 # ── Errors ────────────────────────────────────────────────────
@@ -332,11 +355,19 @@ class AuthService:
         from app.config import settings
 
         reset_url = f"{settings.frontend_url}/reset-password?token={html_mod.escape(raw_token)}"
-        await sender.send(
-            to=user.email,
-            subject="Reset your OpenSkill Studio password",
-            html=f'<p>Click <a href="{html_mod.escape(reset_url)}">here</a> to reset your password. '
-            f"This link expires in 1 hour.</p>",
+        # R181: fire-and-forget — the no-user path above returns in
+        # microseconds while this path awaited a full SMTP round-trip, so
+        # response latency was a reliable email-enumeration oracle DESPITE the
+        # dummy-work equalizer (which only covered token hashing, the
+        # sub-microsecond term). forgot_password always 200s by design, so a
+        # failed send loses nothing the user can't retry.
+        _send_email_background(
+            sender.send(
+                to=user.email,
+                subject="Reset your OpenSkill Studio password",
+                html=f'<p>Click <a href="{html_mod.escape(reset_url)}">here</a> to reset your password. '
+                f"This link expires in 1 hour.</p>",
+            )
         )
 
         log.info("auth_password_reset_requested", user_id=user.id)

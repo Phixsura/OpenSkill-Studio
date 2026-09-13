@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from ulid import ULID
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
@@ -263,7 +264,7 @@ async def test_project_file_operations(db):
 
     u = await _u(db)
     org_svc = OrgService(db)
-    org = await org_svc.create("FileOp", None, None, u.id)
+    org = await org_svc.create(f"FileOp {ULID()}", None, None, u.id)
     await db.flush()
     svc = ProjectService(db)
     proj = await svc.create_project(
@@ -317,7 +318,7 @@ async def test_project_extension_check(db):
 
     u = await _u(db)
     org_svc = OrgService(db)
-    org = await org_svc.create("ExtOrg", None, None, u.id)
+    org = await org_svc.create(f"ExtOrg {ULID()}", None, None, u.id)
     await db.flush()
     svc = ProjectService(db)
     proj = await svc.create_project(
@@ -368,7 +369,7 @@ async def test_eval_trigger_with_mock_llm(db):
 
     u = await _u(db)
     org_svc = OrgService(db)
-    org = await org_svc.create("EvalOrg", None, None, u.id)
+    org = await org_svc.create(f"EvalOrg {ULID()}", None, None, u.id)
     await db.flush()
 
     # Setup eval settings
@@ -430,7 +431,7 @@ async def test_eval_trigger_llm_parse_failure(db):
 
     u = await _u(db)
     org_svc = OrgService(db)
-    org = await org_svc.create("EvalFail", None, None, u.id)
+    org = await org_svc.create(f"EvalFail {ULID()}", None, None, u.id)
     eval_svc = EvaluationService(db)
     await eval_svc.update_eval_settings(org.id, {"enabled": True, "monthly_budget_usd": 100})
     await db.flush()
@@ -534,7 +535,7 @@ async def test_portfolio_badge_toggle(db):
 
     u = await _u(db)
     org_svc = OrgService(db)
-    org = await org_svc.create("BadgeOrg", None, None, u.id)
+    org = await org_svc.create(f"BadgeOrg {ULID()}", None, None, u.id)
     await db.flush()
 
     svc_s = SkillService(db)
@@ -572,7 +573,7 @@ async def test_skill_progress_complete(db):
 
     u = await _u(db)
     org_svc = OrgService(db)
-    org = await org_svc.create("ProgOrg", None, None, u.id)
+    org = await org_svc.create(f"ProgOrg {ULID()}", None, None, u.id)
     await db.flush()
 
     svc = SkillService(db)
@@ -664,6 +665,7 @@ async def test_rate_limit_dependency_denied():
     # os.environ changes after import don't affect it)
     with patch("app.core.rate_limit.settings") as mock_settings:
         mock_settings.app_env = "production"
+        mock_settings.trusted_proxy_hops = 0  # R78b: identity resolution reads it
 
         # First call should pass
         with patch(

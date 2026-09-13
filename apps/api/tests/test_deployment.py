@@ -5,6 +5,7 @@ Docker tests are skipped if Docker is not available.
 """
 
 import os
+import shutil
 import subprocess
 import uuid
 
@@ -144,6 +145,7 @@ async def test_all_routers_registered(c):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(shutil.which("pnpm") is None, reason="pnpm not on PATH (backend-only CI job)")
 async def test_nextjs_typecheck():
     """Next.js type-check passes."""
     web_dir = os.path.join(os.path.dirname(__file__), "..", "..", "web")

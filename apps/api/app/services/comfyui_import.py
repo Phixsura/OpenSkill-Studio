@@ -454,7 +454,7 @@ class ComfyUIImportService:
         result = await self.db.execute(
             select(ComfyUIImport)
             .where(ComfyUIImport.org_id == org_id)
-            .order_by(ComfyUIImport.created_at.desc())
+            .order_by(ComfyUIImport.created_at.desc(), ComfyUIImport.id.desc())
         )
         return list(result.scalars().all())
 

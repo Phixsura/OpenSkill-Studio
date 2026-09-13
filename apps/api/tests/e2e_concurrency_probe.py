@@ -133,7 +133,7 @@ async def make_pack(c: httpx.AsyncClient, h: dict, oid: str, definition: dict) -
 
 
 async def main() -> None:
-    async with httpx.AsyncClient(timeout=30) as c:
+    async with httpx.AsyncClient(timeout=30, trust_env=False) as c:
         h = await register(c)
         r = await c.post(
             f"{BASE}/orgs", json={"name": f"ConcOrg-{uuid.uuid4().hex[:6]}"}, headers=h

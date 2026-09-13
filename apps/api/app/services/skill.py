@@ -756,6 +756,46 @@ class SkillService:
                 queue.append(row)
 
     async def _update_skill_progress(self, skill_id: str, user_id: str, org_id: str) -> None:
+        # issue-18 debt (R70 pattern): serialize concurrent recomputes on the
+        # progress row BEFORE reading attempts — two attempts graded in
+        # parallel each recomputed from a snapshot missing the other's row and
+        # the last writer stamped an undercounted exercises_done/status (a
+        # completed skill flipping back to in_progress). The loser now blocks
+        # on the row lock and recomputes from the winner's committed attempts.
+        locked = (
+            await self.db.execute(
+                select(SkillProgress)
+                .where(SkillProgress.skill_id == skill_id, SkillProgress.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        progress = locked
+        if progress is None:
+            progress = SkillProgress(
+                org_id=org_id,
+                skill_id=skill_id,
+                user_id=user_id,
+            )
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(progress)
+                    await self.db.flush()
+            except IntegrityError:
+                # Concurrent insert — re-fetch the winner's row LOCKED so the
+                # compute below runs strictly after the winner commits.
+                result2 = await self.db.execute(
+                    select(SkillProgress)
+                    .where(
+                        SkillProgress.skill_id == skill_id,
+                        SkillProgress.user_id == user_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+                progress = result2.scalar_one()
+        # From here the progress row is HELD (our insert or the FOR UPDATE
+        # read), so the attempt reads below see every prior writer's commits.
         # TODO: Per-exercise attempt queries below are O(N) — batch-load in future
         exercises = await self.list_exercises(skill_id)
         total = len(exercises)
@@ -783,34 +823,6 @@ class SkillService:
             ex_scores = [a.score for a in attempts if a.score is not None]
             if ex_scores:
                 best_score = (best_score or 0) + max(ex_scores)
-
-        # Upsert progress
-        result = await self.db.execute(
-            select(SkillProgress).where(
-                SkillProgress.skill_id == skill_id, SkillProgress.user_id == user_id
-            )
-        )
-        progress = result.scalar_one_or_none()
-
-        if progress is None:
-            progress = SkillProgress(
-                org_id=org_id,
-                skill_id=skill_id,
-                user_id=user_id,
-            )
-            try:
-                async with self.db.begin_nested():
-                    self.db.add(progress)
-                    await self.db.flush()
-            except IntegrityError:
-                # Concurrent insert — re-fetch the existing row
-                result2 = await self.db.execute(
-                    select(SkillProgress).where(
-                        SkillProgress.skill_id == skill_id,
-                        SkillProgress.user_id == user_id,
-                    )
-                )
-                progress = result2.scalar_one()
 
         progress.exercises_total = total
         progress.exercises_done = done

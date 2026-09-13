@@ -338,9 +338,18 @@ class SubmissionComment(Base):
     item_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("submission_items.id", ondelete="CASCADE"), nullable=False
     )
-    author_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+    # Nullable since Issue #27: client-portal GUEST comments have no user row —
+    # they carry client_author_label instead.
+    author_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # Issue #27 client portal: internal comments default to hidden; the portal
+    # only ever queries client_visible=true. Client-created comments are
+    # forced visible; instructors may opt individual comments in.
+    client_visible: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    client_author_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
     parent_id: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("submission_comments.id", ondelete="CASCADE"), nullable=True
     )

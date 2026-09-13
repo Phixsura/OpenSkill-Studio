@@ -57,6 +57,11 @@ export function PeerReviewSection({
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // R183: double-click on "Create round" fired two POSTs and created two
+  // rounds (rounds are legal in multiples, so the backend can't dedupe);
+  // same for the phase transitions. Same isPending discipline as the
+  // marketplace purchase flow (R101).
+  const [busy, setBusy] = useState(false);
   const [name, setName] = useState("Peer Review");
   const [numReviews, setNumReviews] = useState("2");
   const [anonymous, setAnonymous] = useState(true);
@@ -97,6 +102,8 @@ export function PeerReviewSection({
   };
 
   const createRound = async () => {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     try {
       await apiWithAuth(`/orgs/${orgId}/peer-review-rounds`, {
@@ -113,10 +120,14 @@ export function PeerReviewSection({
       invalidate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create round");
+    } finally {
+      setBusy(false);
     }
   };
 
   const transition = async (roundId: string, action: "start" | "close") => {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     try {
       await apiWithAuth(`/orgs/${orgId}/peer-review-rounds/${roundId}/${action}`, {
@@ -125,6 +136,8 @@ export function PeerReviewSection({
       invalidate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : `Failed to ${action} round`);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -174,8 +187,8 @@ export function PeerReviewSection({
             </label>
           </div>
           <div className="flex gap-2">
-            <Button size="sm" onClick={createRound}>
-              Create round
+            <Button size="sm" onClick={createRound} disabled={busy}>
+              {busy ? "Creating…" : "Create round"}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setCreating(false)}>
               Cancel
@@ -199,7 +212,7 @@ export function PeerReviewSection({
               )}
             </div>
             {isInstructor && activeRound.phase === "setup" && (
-              <Button size="sm" onClick={() => transition(activeRound.id, "start")}>
+              <Button size="sm" onClick={() => transition(activeRound.id, "start")} disabled={busy}>
                 Allocate & start
               </Button>
             )}
@@ -208,6 +221,7 @@ export function PeerReviewSection({
                 variant="secondary"
                 size="sm"
                 onClick={() => transition(activeRound.id, "close")}
+                disabled={busy}
               >
                 Close round
               </Button>
@@ -218,8 +232,7 @@ export function PeerReviewSection({
           {activeRound.phase === "assessment" && myAssessments.length > 0 && (
             <div className="mt-3">
               <p className="text-sm font-medium">
-                Your reviews (
-                {myAssessments.filter((a) => a.status === "submitted").length}/
+                Your reviews ({myAssessments.filter((a) => a.status === "submitted").length}/
                 {myAssessments.length} done)
               </p>
               <ul className="mt-1.5 space-y-1">

@@ -1,0 +1,712 @@
+"""P11 DB tests: platform dashboard aggregates + both §37 trace chains
+(invoice line → rated usage → provider call; settlement entry → source →
+statement)."""
+
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+
+import pytest
+from sqlalchemy import select
+from ulid import ULID
+
+from app.controlplane.api import platform_dashboard as ops
+from app.controlplane.models.billing import BillingPeriod, InvoiceLine
+from app.controlplane.models.partner import Partner, RevenueShareEntry, RevenueShareRule
+from app.controlplane.models.tenant import TenantAccount, TenantStatus
+from app.controlplane.services import billing as billing_svc
+from app.controlplane.services import credits as credit_svc
+from app.controlplane.services import metering, rating
+from app.controlplane.services import pricing as pricing_svc
+from app.controlplane.services import revenue_share as revshare_svc
+from app.controlplane.services import tenants as tenant_svc
+from app.controlplane.services.audit import Actor
+from app.core.database import AsyncSessionLocal
+from app.core.security import hash_password
+from app.exceptions import AppError
+from app.models.user import User, UserRole, UserStatus
+
+
+@pytest.fixture
+async def db():
+    from app.core.database import engine
+
+    # R134 follow-up: a preceding file can leave pool connections bound to its
+    # (now closed) event loop — the first checkout here then dies with
+    # "Event loop is closed". Abandon any stale pool without touching the
+    # dead-loop connections (close=False), then open fresh ones on this loop.
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as session:
+        yield session
+        await session.rollback()
+    await engine.dispose()
+
+
+async def _mk_user(db) -> User:
+    user = User(
+        email=f"cp11-{ULID()}@test.com",
+        email_verified=True,
+        password_hash=hash_password("Test1234!"),
+        display_name="CP11",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+async def _mk_tenant(db, user) -> TenantAccount:
+    return await tenant_svc.create_tenant(
+        db,
+        name=f"O {ULID()}",
+        slug=f"o-{str(ULID()).lower()}",
+        actor=Actor(user_id=user.id, type="platform"),
+        owner_user_id=user.id,
+        status=TenantStatus.ACTIVE,
+        with_trial=False,
+    )
+
+
+def _actor(user):
+    return Actor(user_id=user.id, type="platform")
+
+
+async def _billed_usage_line(db, user, tenant) -> tuple:
+    """School sub + one rated image event + force-close period → usage line."""
+    a = _actor(user)
+    sub, _ = await billing_svc.start_subscription(
+        db, tenant, plan_key="school", interval="month", seats=0, provider="manual", actor=a
+    )
+    await pricing_svc.create_price_policy(
+        db,
+        actor=a,
+        name=f"ops {ULID()}",
+        policy_type="fixed_unit_price",
+        usage_type="image_generation",
+        currency="USD",
+        params={"unit_price_minor": 30},
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        tenant_id=tenant.id,
+    )
+    event = await metering.emit_usage(
+        db,
+        tenant_id=tenant.id,
+        org_id="01JFAKEORGFAKEORGFAKEORGFA",
+        usage_type="image_generation",
+        quantity=10,
+        occurred_at=datetime.now(UTC) - timedelta(minutes=5),
+        source="manual",
+        idempotency_key=f"ops-{ULID()}",
+        provider="mock",
+        model_or_service="mock-image-1",
+        workflow_run_id="01JFAKERUNFAKERUNFAKERUNFA",
+    )
+    await rating.rate_event(db, event.id)
+    period = (
+        await db.execute(select(BillingPeriod).where(BillingPeriod.subscription_id == sub.id))
+    ).scalar_one()
+    period.period_end = datetime.now(UTC) - timedelta(seconds=1)
+    await db.flush()
+    invoice = await billing_svc.close_period_and_invoice(db, period.id)
+    usage_line = (
+        await db.execute(
+            select(InvoiceLine).where(
+                InvoiceLine.invoice_id == invoice.id, InvoiceLine.line_type == "usage"
+            )
+        )
+    ).scalar_one()
+    return invoice, usage_line, event
+
+
+# ── Dashboard ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_dashboard_blocks(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    await credit_svc.top_up(db, tenant.id, "USD", 12345, actor=_actor(user))
+    invoice, _line, _event = await _billed_usage_line(db, user, tenant)
+
+    data = (await ops.platform_dashboard(period=None, _user=user, db=db))["data"]
+    assert data["tenants"]["by_status"]["active"] >= 1
+    assert data["tenants"]["total"] == sum(data["tenants"]["by_status"].values())
+    # School manual sub live → MRR includes 19900
+    assert data["mrr_minor"] >= 19900
+    # Our rated event contributes billable 300 + internal cost + margin fields
+    image_row = next(
+        (u for u in data["usage"]["by_type"] if u["usage_type"] == "image_generation"), None
+    )
+    assert image_row is not None and image_row["billable_minor"] >= 300
+    assert data["totals"]["billable_minor"] >= 300
+    assert "unrated_events" in data["totals"] and "blocked_rated" in data["totals"]
+    usd = next(c for c in data["credits_outstanding"] if c["currency"] == "USD")
+    assert usd["balance_minor"] >= 1  # credit partially consumed by the invoice
+    assert isinstance(data["marketplace_gmv_minor"], int)
+    assert set(data["attention"].keys()) == {
+        "past_due",
+        "suspended",
+        "failed_webhooks",
+        "dead_outbox",
+        # R132 ([F4]): paid purchases that delivered no grant — refund
+        # candidates from the duplicate-license skip branch.
+        "grantless_paid_purchases",
+    }
+
+
+@pytest.mark.asyncio
+async def test_dashboard_period_validation(db):
+    user = await _mk_user(db)
+    with pytest.raises(AppError) as exc:
+        await ops.platform_dashboard(period="2026-13", _user=user, db=db)
+    assert exc.value.status_code == 422
+
+
+# ── Trace: invoice line chain (issue §37) ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_trace_invoice_line_full_chain(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    invoice, usage_line, event = await _billed_usage_line(db, user, tenant)
+
+    data = (await ops.trace_invoice_line(usage_line.id, page=1, per_page=100, _user=user, db=db))[
+        "data"
+    ]
+    assert data["line"]["id"] == usage_line.id
+    assert data["invoice"]["id"] == invoice.id
+    assert data["invoice"]["number"].startswith("INV-")
+    assert data["counts"]["rated_rows"] == 1
+    rated = data["rated_usage"][0]
+    # Frozen snapshots present all the way down
+    assert rated["billable_amount_minor"] == 300
+    assert "internal_cost_minor" in rated and "margin_minor" in rated
+    assert rated["cost_rate_snapshot"] is not None
+    assert rated["sell_rate_snapshot"]["policy_type"] == "fixed_unit_price"
+    # ...down to the provider call refs
+    ue = rated["usage_event"]
+    assert ue["id"] == event.id
+    assert ue["refs"]["provider"] == "mock"
+    assert ue["refs"]["model_or_service"] == "mock-image-1"
+    assert ue["refs"]["workflow_run_id"] == "01JFAKERUNFAKERUNFAKERUNFA"
+
+
+@pytest.mark.asyncio
+async def test_trace_invoice_line_not_found(db):
+    user = await _mk_user(db)
+    with pytest.raises(AppError) as exc:
+        await ops.trace_invoice_line(str(ULID()), page=1, per_page=100, _user=user, db=db)
+    assert exc.value.status_code == 404
+
+
+# ── Trace: settlement entry chain (issue §37) ────────────────
+
+
+@pytest.mark.asyncio
+async def test_trace_settlement_entry_chain(db):
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    a = _actor(user)
+    partner = Partner(
+        name=f"P {ULID()}",
+        slug=f"p-{str(ULID()).lower()}",
+        partner_type="reseller",
+        currency="USD",
+        created_by=user.id,
+    )
+    db.add(partner)
+    await db.flush()
+    tenant.partner_id = partner.id
+    rule = RevenueShareRule(
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        revenue_type="all",
+        rule_type="percentage_of_gross_revenue",
+        rate=Decimal("10"),
+        version=1,
+        effective_from=datetime.now(UTC) - timedelta(days=30),
+        created_by=user.id,
+    )
+    db.add(rule)
+    await db.flush()
+    await revshare_svc.activate_rule(db, rule, actor=a)
+    invoice, _line, _event = await _billed_usage_line(db, user, tenant)
+    await revshare_svc.accrue_for_invoice(db, invoice.id)
+    entry = (
+        await db.execute(
+            select(RevenueShareEntry).where(RevenueShareEntry.partner_id == partner.id)
+        )
+    ).scalar_one()
+
+    data = (await ops.trace_settlement_entry(entry.id, _user=user, db=db))["data"]
+    assert data["entry"]["id"] == entry.id
+    assert data["entry"]["rule_snapshot"]["rule_type"] == "percentage_of_gross_revenue"
+    assert data["entry"]["partner_name"] == partner.name
+    assert data["source"]["type"] == "invoice"
+    assert data["source"]["invoice_id"] == invoice.id
+    assert data["statement"] is None  # not yet bound
+    # Bind to a statement → trace shows it
+    stmt = await revshare_svc.generate_statement(
+        db,
+        beneficiary_type="partner",
+        partner_id=partner.id,
+        beneficiary_org_id=None,
+        period=entry.period,
+        actor=a,
+    )
+    data = (await ops.trace_settlement_entry(entry.id, _user=user, db=db))["data"]
+    assert data["statement"]["id"] == stmt.id
+    assert data["statement"]["net_amount_minor"] == stmt.net_amount_minor
+
+
+# ── R48: finance-role gating + currency separation ────────────
+
+
+@pytest.mark.asyncio
+async def test_dashboard_and_traces_deny_platform_support(db):
+    """R48[30]: platform_support has operational read, NOT financial internals —
+    the dashboard economics and both trace endpoints must 403 for support."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    support = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=support.id, role="platform_support"))
+    await db.commit()
+    token = create_access_token(support.id, support.email, support.role.value)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            for path in (
+                "/api/v1/platform/dashboard",
+                "/api/v1/platform/trace/invoice-lines/01JFAKEFAKEFAKEFAKEFAKEFAK",
+                "/api/v1/platform/trace/settlement-entries/01JFAKEFAKEFAKEFAKEFAKEFAK",
+            ):
+                r = await c.get(path, headers=hdr)
+                assert r.status_code == 403, f"{path} → {r.status_code}"
+    finally:
+        app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_dashboard_reports_mrr_per_currency(db):
+    """R48[31]: MRR must never mix currencies into one number — a JPY sub and a
+    USD sub are reported separately."""
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    from app.controlplane.services import billing as billing_svc
+
+    await billing_svc.start_subscription(
+        db,
+        tenant,
+        plan_key="school",
+        interval="month",
+        seats=0,
+        provider="manual",
+        actor=_actor(user),
+    )
+    data = (await ops.platform_dashboard(period=None, _user=user, db=db))["data"]
+    assert "mrr_by_currency" in data
+    assert data["mrr_by_currency"].get("USD", 0) >= 19900
+    # The scalar is the platform-currency slice only.
+    assert data["mrr_minor"] == data["mrr_by_currency"].get("USD", 0)
+    # usage totals expose per-currency billable, never a mixed grand total.
+    assert "billable_by_currency" in data["totals"]
+
+
+@pytest.mark.asyncio
+async def test_extreme_datetime_filter_returns_422_not_500(db):
+    """R76[1]: asyncpg's timestamptz encoder OverflowErrors on extreme-but-
+    Pydantic-valid datetimes (year 1 at +14:00) and wraps it in DataError
+    with GENERIC sqlstate 22000 — which the DBAPIError backstop didn't map,
+    so every datetime filter param was a 500 vector. 22000/22008 now → 422."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.get(
+                "/api/v1/platform/usage-events",
+                params={"from": "0001-01-01T00:00:00+14:00"},
+                headers=hdr,
+            )
+            assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text[:200]}"
+            assert r.json()["error"]["code"] == "INVALID_VALUE"
+    finally:
+        app.router.lifespan_context = orig
+        await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_outbox_requeue_and_ops_list_endpoints(db):
+    """R287: the dead-letter recovery endpoint — the R98/R129 flows depend on
+    its semantics: only FAILED rows requeue (attempts reset, error cleared),
+    a done/pending row is a 409 (requeue must never steal a row the worker
+    owns), unknown id 404. Plus the /outbox/failed, /invoices and
+    /settlements ops lists respond with data+meta shapes."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.outbox import OutboxMessage, enqueue
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    dead = enqueue(db, "period.close_due", {"billing_period_id": str(ULID())})
+    dead.status = "failed"
+    dead.attempts = 5
+    dead.last_error = "boom"
+    done = enqueue(db, "period.close_due", {"billing_period_id": str(ULID())})
+    done.status = "done"
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+    dead_id, done_id = dead.id, done.id
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+
+            r = await c.get(
+                "/api/v1/platform/outbox/failed", params={"topic": "period.close_due"}, headers=hdr
+            )
+            assert r.status_code == 200, r.text
+            assert any(m["id"] == dead_id for m in r.json()["data"])
+
+            r = await c.post(f"/api/v1/platform/outbox/{str(ULID())}/requeue", headers=hdr)
+            assert r.status_code == 404
+
+            r = await c.post(f"/api/v1/platform/outbox/{done_id}/requeue", headers=hdr)
+            assert r.status_code == 409  # done rows stay done
+            assert r.json()["error"]["code"] == "OUTBOX_NOT_FAILED"
+
+            r = await c.post(f"/api/v1/platform/outbox/{dead_id}/requeue", headers=hdr)
+            assert r.status_code == 200, r.text
+            assert r.json()["data"]["status"] == "pending"
+
+            r = await c.get("/api/v1/platform/invoices", headers=hdr)
+            assert r.status_code == 200 and "meta" in r.json()
+            r = await c.get("/api/v1/platform/settlements", params={"status": "draft"}, headers=hdr)
+            assert r.status_code == 200 and "data" in r.json()
+    finally:
+        app.router.lifespan_context = orig
+
+    async with AsyncSessionLocal() as check:
+        row = await check.get(OutboxMessage, dead_id)
+        assert row.status == "pending" and row.attempts == 0
+        assert row.last_error is None  # fully reset
+        # cleanup the committed test rows
+        for mid in (dead_id, done_id):
+            m = await check.get(OutboxMessage, mid)
+            if m is not None:
+                await check.delete(m)
+        await check.commit()
+
+
+@pytest.mark.asyncio
+async def test_settlement_entry_trace_resolves_all_source_shapes(db):
+    """R288: the money-audit drill-down — an entry whose source_type is
+    'invoice_line' but whose source_id is a CREDIT NOTE id (the credit-note
+    adjustment natural key, R48[34]) must resolve to the note's invoice
+    (pre-fix it always yielded a null source); plain invoice and marketplace
+    purchase sources resolve to their blocks; unknown entry 404."""
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.billing import CreditNote, Invoice
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.controlplane.services.revenue_share import _insert_entry
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    invoice = Invoice(
+        tenant_id=tenant.id,
+        currency="USD",
+        status="open",
+        subtotal_minor=10000,
+        total_minor=10000,
+        amount_due_minor=10000,
+    )
+    db.add(invoice)
+    await db.flush()
+    note = CreditNote(
+        invoice_id=invoice.id,
+        tenant_id=tenant.id,
+        amount_minor=1000,
+        currency="USD",
+        reason="adj",
+        created_by=user.id,
+    )
+    db.add(note)
+    await db.flush()
+
+    e_inv = await _insert_entry(
+        db,
+        beneficiary_type="partner",
+        partner_id=None,
+        beneficiary_org_id=None,
+        source_type="invoice",
+        source_id=invoice.id,
+        rule_id=None,
+        rule_snapshot={},
+        revenue_base_minor=10000,
+        share_amount_minor=1000,
+        currency="USD",
+        period="2026-09",
+        status="accrued",
+    )
+    e_note = await _insert_entry(
+        db,
+        beneficiary_type="partner",
+        partner_id=None,
+        beneficiary_org_id=None,
+        source_type="invoice_line",
+        source_id=note.id,
+        rule_id=None,
+        rule_snapshot={},
+        revenue_base_minor=-1000,
+        share_amount_minor=-100,
+        currency="USD",
+        period="2026-09",
+        status="accrued",
+    )
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+    ids = dict(inv=e_inv.id, note=e_note.id, invoice=invoice.id)
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{str(ULID())}", headers=hdr)
+            assert r.status_code == 404
+
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{ids['inv']}", headers=hdr)
+            assert r.status_code == 200, r.text
+            src = r.json()["data"]["source"]
+            assert src["type"] == "invoice" and src["invoice_id"] == ids["invoice"]
+
+            # R48[34]: credit-note natural key resolves through the note
+            r = await c.get(f"/api/v1/platform/trace/settlement-entries/{ids['note']}", headers=hdr)
+            assert r.status_code == 200, r.text
+            src = r.json()["data"]["source"]
+            assert src is not None, "credit-note-sourced entry traced to null"
+            assert src["invoice_id"] == ids["invoice"]
+    finally:
+        app.router.lifespan_context = orig
+
+
+@pytest.mark.asyncio
+async def test_resolve_reconciliation_report(db):
+    """R317: the reconciliation-report resolve endpoint was entirely untested.
+    Resolving an open report stamps status=resolved + the resolved_note
+    (an audit field ops relies on to record how a provider-cost discrepancy
+    was cleared) + resolved_at; an unknown report is 404; a re-resolve is
+    idempotent (re-stamps, no error)."""
+    from contextlib import asynccontextmanager
+    from decimal import Decimal
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.controlplane.models.pricing import ReconciliationReport
+    from app.controlplane.models.tenant import PlatformRoleAssignment
+    from app.core.security import create_access_token
+    from app.main import app
+
+    admin = await _mk_user(db)
+    db.add(PlatformRoleAssignment(user_id=admin.id, role="billing_admin"))
+    report = ReconciliationReport(
+        provider="acme",
+        usage_type="image_generation",
+        period="2026-09",
+        provider_reported_quantity=Decimal(100),
+        provider_reported_cost_minor=5000,
+        currency="USD",
+        platform_quantity=Decimal(98),
+        platform_cost_minor=4900,
+        delta_quantity=Decimal(2),
+        delta_cost_minor=100,
+        status="open",
+    )
+    db.add(report)
+    await db.commit()
+    token = create_access_token(admin.id, admin.email, admin.role.value)
+    rid = report.id
+
+    @asynccontextmanager
+    async def _noop(a):
+        yield
+
+    orig = app.router.lifespan_context
+    app.router.lifespan_context = _noop
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            hdr = {"Authorization": f"Bearer {token}"}
+            r = await c.patch(
+                f"/api/v1/platform/reconciliation/reports/{str(ULID())}",
+                headers=hdr,
+                json={"reason": "unknown report probe"},
+            )
+            assert r.status_code == 404
+
+            r = await c.patch(
+                f"/api/v1/platform/reconciliation/reports/{rid}",
+                headers=hdr,
+                json={"reason": "provider re-billed the 2 missing"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["data"]["status"] == "resolved"
+
+            # re-resolve is idempotent (no conflict)
+            r = await c.patch(
+                f"/api/v1/platform/reconciliation/reports/{rid}",
+                headers=hdr,
+                json={"reason": "confirmed"},
+            )
+            assert r.status_code == 200
+    finally:
+        app.router.lifespan_context = orig
+
+    async with AsyncSessionLocal() as check:
+        row = await check.get(ReconciliationReport, rid)
+        assert row.status == "resolved"
+        assert row.resolved_note == "confirmed" and row.resolved_at is not None
+        await check.delete(row)
+        await check.commit()
+
+
+@pytest.mark.asyncio
+async def test_trace_settlement_entry_purchase_source(db):
+    """R374: the trace's MARKETPLACE branch — a purchase-sourced entry
+    resolves the purchase as its source (the flipped dispatch falls through
+    to no source)."""
+    from decimal import Decimal
+
+    from app.controlplane.models.marketplace import MarketplaceListing, MarketplacePurchase
+    from app.controlplane.models.partner import RevenueShareEntry
+
+    user = await _mk_user(db)
+    tenant = await _mk_tenant(db, user)
+    lst = MarketplaceListing(
+        product_type="skill_pack",
+        product_id=str(ULID()),
+        seller_org_id=str(ULID()),
+        seller_tenant_id=str(ULID()),
+        offer_type="paid",
+        price_minor=100,
+        currency="USD",
+        platform_commission_pct=Decimal("20"),
+        status="active",
+        created_by=user.id,
+    )
+    db.add(lst)
+    await db.flush()
+    pur = MarketplacePurchase(
+        listing_id=lst.id,
+        buyer_tenant_id=tenant.id,
+        buyer_org_id=str(ULID()),
+        purchaser_user_id=user.id,
+        status="paid",
+        amount_minor=100,
+        currency="USD",
+        platform_fee_minor=20,
+        seller_share_minor=80,
+        partner_share_minor=0,
+        economics_snapshot={},
+    )
+    db.add(pur)
+    await db.flush()
+    entry = RevenueShareEntry(
+        beneficiary_type="seller_org",
+        beneficiary_org_id=lst.seller_org_id,
+        source_type="marketplace_purchase",
+        source_id=pur.id,
+        rule_snapshot={},
+        revenue_base_minor=100,
+        share_amount_minor=80,
+        currency="USD",
+        period="2026-09",
+        status="accrued",
+    )
+    db.add(entry)
+    await db.flush()
+    data = (await ops.trace_settlement_entry(entry.id, _user=user, db=db))["data"]
+    assert data["source"]["type"] == "marketplace_purchase"
+    assert data["source"]["purchase_id" if "purchase_id" in data["source"] else "id"] == pur.id
+
+
+def test_period_bounds_pure():
+    """R374: _period_bounds was untested — exact month window math including
+    the DECEMBER year rollover, the default current-month path, and the
+    format 422."""
+    from datetime import UTC, datetime
+
+    import pytest as _pytest
+
+    from app.controlplane.api.platform_dashboard import _period_bounds
+    from app.exceptions import AppError as _AppError
+
+    period, start, end = _period_bounds("2026-03")
+    assert period == "2026-03"
+    assert start == datetime(2026, 3, 1, tzinfo=UTC)
+    assert end == datetime(2026, 4, 1, tzinfo=UTC)
+    # December rolls the YEAR
+    _, start12, end12 = _period_bounds("2025-12")
+    assert start12 == datetime(2025, 12, 1, tzinfo=UTC)
+    assert end12 == datetime(2026, 1, 1, tzinfo=UTC)
+    # default = the current UTC month
+    now = datetime.now(UTC)
+    dperiod, dstart, _ = _period_bounds(None)
+    assert dperiod == f"{now.year:04d}-{now.month:02d}"
+    assert dstart.month == now.month and dstart.day == 1
+    for bad in ("2026-3", "2026/03", "26-03", "2026-13", "garbage"):
+        with _pytest.raises(_AppError) as e:
+            _period_bounds(bad)
+        assert e.value.status_code == 422

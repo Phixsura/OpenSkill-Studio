@@ -1,0 +1,221 @@
+"use client";
+
+import { useParams } from "next/navigation";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { QueryError } from "@/components/cp-list";
+import { apiWithAuth, ApiError } from "@/lib/api";
+import { formatMinor, majorToMinor } from "@/lib/cp";
+
+interface BudgetPolicy {
+  id: string;
+  scope_type: string;
+  scope_id: string | null;
+  period: string;
+  capability_key: string | null;
+  usage_type: string | null;
+  limit_minor: number;
+  currency: string;
+  warning_threshold_pct: number;
+  hard_stop: boolean;
+  is_active: boolean;
+}
+
+export default function TenantBudgetsPage() {
+  const { tenantId } = useParams<{ tenantId: string }>();
+  const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [scopeType, setScopeType] = useState("tenant");
+  const [scopeId, setScopeId] = useState("");
+  const [period, setPeriod] = useState("monthly");
+  const [limitMajor, setLimitMajor] = useState("");
+  const [hardStop, setHardStop] = useState(true);
+
+  const budgetsQuery = useQuery({
+    queryKey: ["tenant-budgets", tenantId],
+    queryFn: () => apiWithAuth<{ data: BudgetPolicy[] }>(`/tenants/${tenantId}/budgets`),
+  });
+  const budgets = budgetsQuery.data?.data ?? [];
+
+  // R101[H8]: budgets must be created in the TENANT's currency — hardcoded
+  // "USD" made the feature 422 on every attempt for non-USD tenants, and the
+  // hardcoded *100 was 100x off for zero-decimal currencies.
+  const tenantQuery = useQuery({
+    queryKey: ["tenant", tenantId],
+    queryFn: () => apiWithAuth<{ data: { currency: string } }>(`/tenants/${tenantId}`),
+  });
+  const currency = tenantQuery.data?.data?.currency ?? "USD";
+  // R113[M26]: if the tenant fetch failed, the form silently fell back to USD
+  // — on a non-USD tenant that budget 422s at best or, for zero-decimal
+  // currencies, is created 100x off. Block Create until the currency is known.
+  const currencyUnknown = tenantQuery.data?.data?.currency == null;
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/tenants/${tenantId}/budgets`, {
+        method: "POST",
+        body: JSON.stringify({
+          scope_type: scopeType,
+          scope_id: scopeType === "tenant" ? null : scopeId || null,
+          period,
+          limit_minor: majorToMinor(limitMajor, currency),
+          currency,
+          hard_stop: hardStop,
+        }),
+      }),
+    onSuccess: () => {
+      toast.success("Budget created");
+      setShowForm(false);
+      setLimitMajor("");
+      queryClient.invalidateQueries({ queryKey: ["tenant-budgets", tenantId] });
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Create failed"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth(`/tenants/${tenantId}/budgets/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Budget removed");
+      queryClient.invalidateQueries({ queryKey: ["tenant-budgets", tenantId] });
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Delete failed"),
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">AI spend budgets</h2>
+        <Button onClick={() => setShowForm(!showForm)}>{showForm ? "Close" : "New budget"}</Button>
+      </div>
+
+      {showForm && (
+        <div className="space-y-3 rounded-lg border p-4">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <select
+              className="rounded-md border bg-transparent px-3 py-2 text-sm"
+              value={scopeType}
+              onChange={(e) => setScopeType(e.target.value)}
+            >
+              <option value="tenant">Tenant-wide</option>
+              <option value="org">Organization</option>
+              <option value="project">Project</option>
+              <option value="cohort">Cohort</option>
+              <option value="user">User</option>
+            </select>
+            {scopeType !== "tenant" && (
+              <div>
+                <Input
+                  placeholder={`${scopeType} ID`}
+                  value={scopeId}
+                  onChange={(e) => setScopeId(e.target.value)}
+                />
+                {/* R101[M36]: the backend can't cross-validate scope_id here, so a
+                    typo silently creates a policy that never matches any spend. */}
+                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+                  Must be an existing {scopeType} ID — a wrong ID creates a policy that never
+                  matches.
+                </p>
+              </div>
+            )}
+            <select
+              className="rounded-md border bg-transparent px-3 py-2 text-sm"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+            >
+              <option value="monthly">Monthly</option>
+              <option value="daily">Daily</option>
+            </select>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder={`Limit (${currency})`}
+              value={limitMajor}
+              onChange={(e) => setLimitMajor(e.target.value)}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={hardStop}
+              onChange={(e) => setHardStop(e.target.checked)}
+            />
+            Hard stop (block consumption when exceeded; unchecked = warn only)
+          </label>
+          <Button
+            onClick={() => createMutation.mutate()}
+            disabled={
+              // R113[M26]: don't create in a guessed currency (see above).
+              currencyUnknown ||
+              majorToMinor(limitMajor, currency) == null ||
+              (majorToMinor(limitMajor, currency) ?? 0) <= 0 ||
+              (scopeType !== "tenant" && !scopeId.trim()) ||
+              createMutation.isPending
+            }
+            title={currencyUnknown ? "Tenant currency could not be loaded" : undefined}
+          >
+            Create
+          </Button>
+        </div>
+      )}
+
+      {/* R113[M26]: a failed budgets fetch was masked as "No budget policies"
+          — an authoritative empty state on a tenant that may have hard-stop
+          budgets actively enforcing. */}
+      {budgetsQuery.isError && <QueryError error={budgetsQuery.error} what="budget policies" />}
+      {!budgetsQuery.isLoading && !budgetsQuery.isError && budgets.length === 0 && (
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">
+          No budget policies. Your plan&apos;s AI budget entitlement still applies as a tenant-wide
+          ceiling.
+        </p>
+      )}
+      {budgets.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-[hsl(var(--secondary))] text-left">
+              <tr>
+                <th className="px-4 py-2 font-medium">Scope</th>
+                <th className="px-4 py-2 font-medium">Period</th>
+                <th className="px-4 py-2 font-medium">Limit</th>
+                <th className="px-4 py-2 font-medium">Mode</th>
+                <th className="px-4 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {budgets.map((b) => (
+                <tr key={b.id} className="border-b last:border-0">
+                  <td className="px-4 py-2">
+                    {b.scope_type}
+                    {b.scope_id && (
+                      <span className="ml-1 font-mono text-xs text-[hsl(var(--muted-foreground))]">
+                        {b.scope_id.slice(0, 10)}…
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">{b.period}</td>
+                  <td className="px-4 py-2 font-mono">{formatMinor(b.limit_minor, b.currency)}</td>
+                  <td className="px-4 py-2">{b.hard_stop ? "hard stop" : "warn"}</td>
+                  <td className="px-4 py-2 text-right">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => deleteMutation.mutate(b.id)}
+                      disabled={deleteMutation.isPending}
+                    >
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -32,7 +32,13 @@ class ProviderAdapterBase(ABC):
         credentials: dict[str, str] | None,
         idempotency_key: str,
     ) -> dict:
-        """Execute one provider call. Returns a JSON-safe output dict (≤48KB)."""
+        """Execute one provider call. Returns a JSON-safe output dict (≤48KB).
+
+        Metering contract (Issue #27): the output MAY carry a reserved
+        "__usage__" key — a list of {"usage_type", "quantity"} dicts. The
+        runtime strips it before _complete_step (it never reaches step
+        output or the 48KB cap) and emits one UsageEvent per element.
+        """
 
 
 class MockAdapter(ProviderAdapterBase):
@@ -56,6 +62,18 @@ class MockAdapter(ProviderAdapterBase):
         digest = hashlib.sha256(
             json.dumps({"cap": capability, "in": inputs}, sort_keys=True).encode()
         ).hexdigest()[:26]
+        # Deterministic usage per capability so metering tests are exact.
+        if "image" in capability:
+            usage = [{"usage_type": "image_generation", "quantity": 1}]
+        elif "video" in capability:
+            usage = [{"usage_type": "video_generation_seconds", "quantity": 10}]
+        elif "voice" in capability or "audio" in capability:
+            usage = [{"usage_type": "voice_generation", "quantity": 15}]
+        else:
+            usage = [
+                {"usage_type": "llm_input_tokens", "quantity": 120},
+                {"usage_type": "llm_output_tokens", "quantity": 350},
+            ]
         return {
             "result": f"mock-asset-{digest}",
             "capability": capability,
@@ -63,6 +81,7 @@ class MockAdapter(ProviderAdapterBase):
             "echo": {
                 k: (v if isinstance(v, str) and len(v) < 500 else "…") for k, v in inputs.items()
             },
+            "__usage__": usage,
         }
 
 
@@ -122,10 +141,17 @@ class AnthropicReviewAdapter(ProviderAdapterBase):
             max_tokens=1024,
             temperature=0.0,
         )
+        # Token counts are metering hints, never a hard dependency — a client
+        # (or test double) without usage fields must not break the review.
+        usage = [
+            {"usage_type": "llm_input_tokens", "quantity": getattr(response, "input_tokens", 0)},
+            {"usage_type": "llm_output_tokens", "quantity": getattr(response, "output_tokens", 0)},
+        ]
         return {
             "result": response.content[:8000],
             "model": response.model,
             "provider": response.provider,
+            "__usage__": [u for u in usage if u["quantity"]],
         }
 
 

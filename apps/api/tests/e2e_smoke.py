@@ -11,6 +11,10 @@ import urllib.error
 import urllib.request
 import uuid
 
+# Never route localhost through a system proxy (the macOS proxy 502s/mangles
+# local API calls — same class as the httpx trust_env=False rule).
+urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler({})))
+
 BASE = "http://localhost:8000/api/v1"
 PASS = 0
 FAIL = 0
@@ -292,14 +296,39 @@ aid = r.get("data", {}).get("id", "")
 r = api("GET", f"/orgs/{oid}/grading/pending", headers=AUTH)
 check("pending grading list", len(r.get("data", [])) >= 1)
 
-# Manual grade
+# Manual grade — by a DISTINCT instructor: graders cannot grade their own
+# attempts (SELF_GRADING_FORBIDDEN, the R88-91 no-self-grading gate).
+grader_email = f"smoke-grader-{uuid.uuid4().hex[:10]}@example.com"
+gr = api(
+    "POST",
+    "/auth/register",
+    {"email": grader_email, "password": "Smoke123!", "display_name": "Smoke Grader"},
+    expect=201,
+)
+GRADER_AUTH = {"Authorization": f"Bearer {gr.get('access_token', '')}"}
+api(
+    "POST",
+    f"/orgs/{oid}/members",
+    {"user_id": gr["user"]["id"], "role": "instructor"},
+    headers=AUTH,
+    expect=201,
+)
 r = api(
     "POST",
     f"/orgs/{oid}/grading/attempts/{aid}",
     {"score": 85, "feedback": "Good explanation!"},
-    headers=AUTH,
+    headers=GRADER_AUTH,
 )
 check("manual grade", r.get("data", {}).get("score") == 85)
+# The self-grading gate itself: the attempt's own author must be 403'd.
+r = api(
+    "POST",
+    f"/orgs/{oid}/grading/attempts/{aid}",
+    {"score": 99, "feedback": "self"},
+    headers=AUTH,
+    expect=403,
+)
+check("self-grading forbidden", r.get("error", {}).get("code") == "SELF_GRADING_FORBIDDEN")
 
 # Progress
 r = api("GET", f"/orgs/{oid}/progress/me", headers=AUTH)

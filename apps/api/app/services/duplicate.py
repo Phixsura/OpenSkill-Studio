@@ -66,6 +66,15 @@ class DuplicateService:
             sort_order=skill.sort_order,
             status=ContentStatus.DRAFT,
             created_by=user_id,
+            # R135 (high): duplication must NOT sever provenance — a copy of
+            # licensed-in content is still licensed-in content. Dropping
+            # origin_pack_id made duplicate a two-click laundering primitive:
+            # the R91[H1] resale gate keys on it, so a provenance-free copy of
+            # a paid pack's skill was freely repackagable and resellable
+            # (fork already preserves it for exactly this reason, R101[H20]).
+            origin_pack_id=skill.origin_pack_id,
+            origin_release_id=skill.origin_release_id,
+            origin_component_id=skill.origin_component_id,
         )
         self.db.add(new_skill)
         await self.db.flush()
@@ -88,6 +97,10 @@ class DuplicateService:
                 max_score=ex.max_score,
                 status=ContentStatus.DRAFT,
                 created_by=user_id,
+                # R135: provenance survives duplication (see skill copy above)
+                origin_pack_id=ex.origin_pack_id,
+                origin_release_id=ex.origin_release_id,
+                origin_component_id=ex.origin_component_id,
             )
             self.db.add(new_ex)
 

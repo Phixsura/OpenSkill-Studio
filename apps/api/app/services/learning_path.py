@@ -4,7 +4,7 @@ import re
 import secrets
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,7 +56,9 @@ class LearningPathService:
         total = total_r.scalar_one()
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(LearningPath.created_at.desc()).offset(offset).limit(per_page)
+            base.order_by(LearningPath.created_at.desc(), LearningPath.id.desc())
+            .offset(offset)
+            .limit(per_page)
         )
         return list(result.scalars().all()), total
 
@@ -74,6 +76,23 @@ class LearningPathService:
         for k, v in fields.items():
             if v is not None and hasattr(path, k):
                 setattr(path, k, v)
+        # R131 (cp19 audit): archiving via PUT status='archived' must apply the
+        # SAME cleanup as delete_path — leaving cohort assignments behind
+        # created permanently-orphaned rows (list filters them, unassign 404s
+        # on get_path) that still fed get_effective_skills, and that the cp19
+        # repair could then mis-classify as backfill collateral and re-point
+        # to a re-installed copy nobody assigned. One archive semantic.
+        if path.status == ContentStatus.ARCHIVED:
+            from sqlalchemy import delete as sa_delete
+
+            await self.db.execute(
+                sa_delete(LearningPathItem).where(LearningPathItem.path_id == path_id)
+            )
+            await self.db.execute(
+                sa_delete(CohortLearningPathAssignment).where(
+                    CohortLearningPathAssignment.path_id == path_id
+                )
+            )
         await self.db.flush()
         await self.db.refresh(path)
         return path
@@ -180,7 +199,15 @@ class LearningPathService:
         try:
             await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
+            # R57[1]: when running inside an outbox-handler SAVEPOINT
+            # (worker isolation, provisioning steps), session.rollback()
+            # rolls back the ROOT batch transaction — poisoning every
+            # sibling message and un-claiming rows mid-flight. Inside a
+            # nested transaction we only raise: the enclosing
+            # begin_nested() unwinds to the savepoint and the root stays
+            # usable. On the plain request path behavior is unchanged.
+            if not self.db.in_nested_transaction():
+                await self.db.rollback()
             raise AppError(
                 "REFERENCE_NOT_FOUND", "Referenced skill or project no longer exists", 404
             ) from None
@@ -201,6 +228,342 @@ class LearningPathService:
             .order_by(LearningPathItem.sort_order, LearningPathItem.id)
         )
         return list(result.scalars().all())
+
+    # ── Marketplace install (ADR-014 §8.5) ──
+
+    async def install_from_listing(
+        self, org_id: str, listing_id: str | None, user_id: str, product_id: str | None = None
+    ) -> LearningPath:
+        """Cross-org copy of a purchased learning path (R49[36]).
+
+        learning_path is a purchasable product type, but until now nothing
+        consumed the license — buyers paid and received a LicenseGrant with no
+        way to obtain the content. This is the §8.5 mechanism: license-gated
+        fork of the path + items into the buyer org. Copy = fork; later seller
+        edits don't sync (v1).
+        """
+        from app.controlplane import facade as cp_facade
+        from app.controlplane.models.marketplace import MarketplaceListing
+        from app.models.organization import Organization
+
+        org = await self.db.get(Organization, org_id)
+        if org is None:
+            raise AppError("ORG_NOT_FOUND", "Organization not found", 404)
+        # R123[H1]: manual license grants carry no listing_id — resolve the
+        # listing FROM the product when the caller only has product_id, so
+        # manually-granted paths are redeemable. A product with no listing at
+        # all still installs when the license gate passes (manual grant on an
+        # unlisted path).
+        listing = None
+        if listing_id is not None:
+            listing = await self.db.get(MarketplaceListing, listing_id)
+            if listing is None or listing.product_type != "learning_path":
+                raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+        else:
+            if product_id is None:
+                raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+            # R129[M3]: exclude DRAFT listings from the product→listing
+            # resolve — a draft is not a real sale surface, and picking one
+            # here made the downstream draft-404 strand a legit manual-grant
+            # redemption (the grant path below handles a listing-less product).
+            listing = (
+                await self.db.execute(
+                    select(MarketplaceListing)
+                    .where(
+                        MarketplaceListing.product_type == "learning_path",
+                        MarketplaceListing.product_id == product_id,
+                        MarketplaceListing.status != "draft",
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            # R129[C0] CRITICAL (fix of R123[H1]): a product_id with NO listing
+            # relies solely on check_install_license — but that gate FREE-PASSES
+            # products with no listing (marketplace.py "free/no-listing → pass").
+            # So any org could copy ANY tenant's published learning path by
+            # passing its product_id (cross-tenant content theft, no license,
+            # no ownership). The listing-less path is only legitimate for a
+            # MANUAL grant — require an active LicenseGrant covering this org
+            # before proceeding when no listing exists.
+            if listing is None:
+                # R130: delegate to _find_covering_grant — the ad-hoc R129
+                # query ignored expires_at (expired grants redeemed forever),
+                # grant org scope and seat limits (org B could redeem org A's
+                # grant). The canonical helper enforces all of them.
+                tenant_id = getattr(org, "tenant_id", None)
+                # R130: own-tenant bypass — a tenant installing its OWN
+                # unlisted path into a sibling org needs no grant (mirrors
+                # check_install_license's seller bypass, which is unreachable
+                # here because no listing exists).
+                source = await self.db.get(LearningPath, product_id)
+                own = False
+                if (
+                    source is not None
+                    # R131 CRITICAL: "own" means AUTHORED by this tenant — an
+                    # installed COPY of another tenant's paid content also
+                    # lives in an org of this tenant, and treating it as own
+                    # let the buyer fan the copy out to unlicensed sibling
+                    # orgs (and past refund revocation), defeating the
+                    # R113[H0] redistribution gate. Copies carry provenance
+                    # markers; only marker-free paths qualify.
+                    and source.origin_listing_id is None
+                    and source.origin_source_path_id is None
+                ):
+                    src_org = await self.db.get(Organization, source.org_id)
+                    own = src_org is not None and getattr(src_org, "tenant_id", None) == tenant_id
+                if not own:
+                    from app.controlplane.services.marketplace import (
+                        _covering_grants,
+                        enforce_seat_limit,
+                    )
+
+                    covering = await _covering_grants(
+                        self.db, "learning_path", product_id, tenant_id, org_id
+                    )
+                    if not covering:
+                        # uniform 404 — never reveal the path exists to a
+                        # non-licensee
+                        raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+                    # R130[5]: seat_limited caps bind on this path too —
+                    # check_install_license (which enforces them) is
+                    # unreachable for listing-less products. R134 ([F8]): pass
+                    # if ANY covering grant permits it (single-widest let a
+                    # roomier tenant-wide cap 403 an install the org grant
+                    # allows).
+                    seat_error: AppError | None = None
+                    for _g in covering:
+                        try:
+                            await enforce_seat_limit(self.db, _g, org_id)
+                            seat_error = None
+                            break
+                        except AppError as _e:
+                            seat_error = _e
+                    if seat_error is not None:
+                        raise seat_error
+        source_product_id = listing.product_id if listing is not None else product_id
+        assert source_product_id is not None  # by the request model's one-of rule
+
+        # R113[M1]: clients retry POST (double-click, network replay) and
+        # every call minted a full duplicate copy of the path + items.
+        # origin_listing_id records provenance (R113[H0]) — reuse it as the
+        # idempotency key: one live installed copy per (org, listing). An
+        # ARCHIVED copy (buyer deleted it) doesn't block a fresh install.
+        if listing is not None:
+            prior = (
+                await self.db.execute(
+                    select(LearningPath)
+                    .where(
+                        LearningPath.org_id == org_id,
+                        # R130: also match a prior MANUAL-GRANT copy of the
+                        # same source (origin_listing_id NULL, source stamped)
+                        # — the disjoint keys let a grant-install followed by
+                        # a listing purchase mint a duplicate live copy.
+                        or_(
+                            LearningPath.origin_listing_id == listing.id,
+                            and_(
+                                LearningPath.origin_listing_id.is_(None),
+                                LearningPath.origin_source_path_id == listing.product_id,
+                            ),
+                        ),
+                        LearningPath.status != ContentStatus.ARCHIVED,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if prior is not None:
+                return prior
+        else:
+            # R129[M2]: NO name-based dedupe for the listing-less (manual-grant)
+            # path — matching on name==source.name would false-positive on the
+            # org's OWN locally-authored same-named path (also origin=NULL,
+            # created_by set) and return the wrong path. Dedupe instead on the
+            # exact source linkage recorded in metadata (origin_source_path_id,
+            # stamped on the copy below), which cannot collide with local
+            # content. Manual grants are rare; a genuine double-click without
+            # this marker yet is accepted as a possible duplicate (documented).
+            prior = (
+                await self.db.execute(
+                    select(LearningPath)
+                    .where(
+                        LearningPath.org_id == org_id,
+                        LearningPath.origin_listing_id.is_(None),
+                        LearningPath.origin_source_path_id == source_product_id,
+                        LearningPath.status != ContentStatus.ARCHIVED,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if prior is not None:
+                return prior
+
+        # The license gate (covering grant / included plan / own product);
+        # uniform 404 for private listings, LICENSE_REQUIRED 403 otherwise.
+        # This runs BEFORE the active-listing check (R123[H5], reworking
+        # R113[M0]): a buyer holding a LIVE grant must stay able to redeem it
+        # after the seller delists/suspends — §8.4 revocation semantics say
+        # delisting blocks NEW purchases, never already-paid licenses. The
+        # gate raising (no grant) falls through to the uniform 404 below for
+        # inactive listings (anti-enumeration preserved for non-licensees).
+        # The gate itself covers every non-draft listing (R44[16]: delisting
+        # means "stop selling", never "give it away") — so a passing gate on
+        # an inactive listing can only mean a real covering grant / own
+        # product, and a failing gate maps to the uniform 404 to preserve
+        # anti-enumeration for non-licensees (R113[M0]).
+        try:
+            await cp_facade.check_install_license(self.db, "learning_path", source_product_id, org)
+        except AppError:
+            if listing is not None and listing.status != "active":
+                raise AppError("LISTING_NOT_FOUND", "Listing not found", 404) from None
+            raise
+        # Draft listings were never purchasable and carry no grants — the
+        # gate treats draft as no-listing (free pass), so keep the hard 404.
+        if listing is not None and listing.status == "draft":
+            raise AppError("LISTING_NOT_FOUND", "Listing not found", 404)
+
+        source = await self.db.get(LearningPath, source_product_id)
+        if source is None or source.status != ContentStatus.PUBLISHED:
+            raise AppError("PATH_NOT_AVAILABLE", "Learning path is not available", 404)
+
+        # Items referencing workflow packs the buyer hasn't installed are a
+        # hard 422 listing the gaps — a silently broken curriculum is worse.
+        items = await self.list_items(source.id)
+        from app.models.skill_pack import InstallStatus
+        from app.models.workflow_pack import WorkflowPackInstallation
+
+        needed = {i.workflow_pack_id for i in items if i.workflow_pack_id}
+        if needed:
+            installed = set(
+                (
+                    await self.db.execute(
+                        select(WorkflowPackInstallation.pack_id).where(
+                            WorkflowPackInstallation.org_id == org_id,
+                            WorkflowPackInstallation.pack_id.in_(needed),
+                            WorkflowPackInstallation.status != InstallStatus.REMOVED,
+                        )
+                    )
+                ).scalars()
+            )
+            missing = sorted(needed - installed)
+            if missing:
+                raise AppError(
+                    "PATH_DEPENDENCY_MISSING",
+                    f"Install these workflow packs first: {', '.join(missing)}",
+                    422,
+                )
+
+        copy = LearningPath(
+            org_id=org_id,
+            name=source.name,
+            slug=f"{source.slug[:190]}-{secrets.token_hex(3)}",
+            description=source.description,
+            status=ContentStatus.PUBLISHED,
+            estimated_minutes=source.estimated_minutes,
+            # R113[H0]: provenance — create_listing refuses to sell a copy
+            # installed from someone else's paid listing (H1 class for paths).
+            origin_listing_id=listing.id if listing is not None else None,
+            origin_source_path_id=source_product_id,  # R129[M2] dedupe key
+            created_by=user_id,
+        )
+        # R123[L6/L14]: the M1 idempotency pre-check is SELECT-only — two
+        # concurrent installs both pass it. The cp17 partial unique index
+        # (org_id, origin_listing_id) makes the loser fail here; return the
+        # winner's copy instead of a 500.
+        try:
+            async with self.db.begin_nested():
+                self.db.add(copy)
+                await self.db.flush()
+        except IntegrityError:
+            # R123[L6/L14] + R129[L6]: whichever unique index fired (listing
+            # copies → uq_paths_org_origin_live; manual-grant copies →
+            # uq_paths_org_source_live), return the concurrent winner's row.
+            if listing is not None:
+                winner_where = [
+                    LearningPath.org_id == org_id,
+                    LearningPath.origin_listing_id == listing.id,
+                    LearningPath.status != ContentStatus.ARCHIVED,
+                ]
+            else:
+                winner_where = [
+                    LearningPath.org_id == org_id,
+                    LearningPath.origin_listing_id.is_(None),
+                    LearningPath.origin_source_path_id == source_product_id,
+                    LearningPath.status != ContentStatus.ARCHIVED,
+                ]
+            winner = (
+                await self.db.execute(select(LearningPath).where(*winner_where).limit(1))
+            ).scalar_one_or_none()
+            if winner is not None:
+                return winner
+            raise
+        # R113[M2]: skill/project items carry no section_title (the CHECK
+        # constraint only demands the FK), so degraded copies collapsed to
+        # opaque "[skill]"/"[project]" headings — the buyer couldn't tell
+        # WHAT the seller's curriculum step was. Resolve the source entity
+        # names (seller-org rows we already read for the copy) and keep the
+        # bracket fallback only for unresolvable (deleted) refs.
+        src_skill_ids = [
+            i.skill_id for i in items if i.item_type == PathItemType.SKILL and i.skill_id
+        ]
+        src_project_ids = [
+            i.project_id for i in items if i.item_type == PathItemType.PROJECT and i.project_id
+        ]
+        skill_names: dict[str, str] = {}
+        project_names: dict[str, str] = {}
+        if src_skill_ids:
+            sk_r = await self.db.execute(
+                select(Skill.id, Skill.name).where(Skill.id.in_(src_skill_ids))
+            )
+            skill_names = {row[0]: row[1] for row in sk_r.all()}
+        if src_project_ids:
+            pj_r = await self.db.execute(
+                select(Project.id, Project.title).where(Project.id.in_(src_project_ids))
+            )
+            project_names = {row[0]: row[1] for row in pj_r.all()}
+        for item in items:
+            # skill/project refs are org-scoped rows that don't exist in the
+            # buyer org — degrade them to informational section headings (ADR)
+            # rather than carrying dangling foreign refs.
+            if item.item_type in (PathItemType.SKILL, PathItemType.PROJECT):
+                resolved = (
+                    skill_names.get(item.skill_id)
+                    if item.item_type == PathItemType.SKILL
+                    else project_names.get(item.project_id)
+                )
+                title = item.section_title or (
+                    f"{resolved} (from source org)" if resolved else f"[{item.item_type.value}]"
+                )
+                self.db.add(
+                    LearningPathItem(
+                        path_id=copy.id,
+                        item_type=PathItemType.SECTION,
+                        section_title=title[:200],
+                        sort_order=item.sort_order,
+                        required=False,
+                        unlock_rule=item.unlock_rule,
+                    )
+                )
+            else:
+                self.db.add(
+                    LearningPathItem(
+                        path_id=copy.id,
+                        item_type=item.item_type,
+                        section_title=item.section_title,
+                        workflow_pack_id=item.workflow_pack_id,
+                        sort_order=item.sort_order,
+                        required=item.required,
+                        unlock_rule=item.unlock_rule,
+                        drip_schedule=item.drip_schedule,
+                    )
+                )
+        await self.db.flush()
+        log.info(
+            "path_installed_from_listing",
+            path_id=copy.id,
+            source_path_id=source.id,
+            listing_id=listing_id,
+            org_id=org_id,
+        )
+        return copy
 
     # ── Cohort Assignment ──
 
@@ -229,7 +592,15 @@ class LearningPathService:
         try:
             await self.db.flush()
         except IntegrityError:
-            await self.db.rollback()
+            # R57[1]: when running inside an outbox-handler SAVEPOINT
+            # (worker isolation, provisioning steps), session.rollback()
+            # rolls back the ROOT batch transaction — poisoning every
+            # sibling message and un-claiming rows mid-flight. Inside a
+            # nested transaction we only raise: the enclosing
+            # begin_nested() unwinds to the savepoint and the root stays
+            # usable. On the plain request path behavior is unchanged.
+            if not self.db.in_nested_transaction():
+                await self.db.rollback()
             raise AppError(
                 "ALREADY_ASSIGNED", "Path already assigned to this cohort", 409
             ) from None

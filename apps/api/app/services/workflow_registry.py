@@ -223,6 +223,32 @@ class WorkflowRegistryService:
                 config.pop("pinned_offering_id", None)
                 config.pop("binding_mode", None)
         deps = manifest.get("dependencies") or {}
+        # R135 (high): a workflow pack's definition IS the product — serving
+        # every step's full config/prompt graph anonymously made every PAID
+        # pack's IP free (steal the definition → own-org pack → no listing →
+        # the install gate free-passes). For paid/partner_only-listed packs,
+        # redact to a STRUCTURAL preview: step names/types/capabilities only
+        # (mirrors the skill-pack registry, which serves names/counts and
+        # withholds learning_content). Free/unlisted packs keep full preview.
+        from app.controlplane.facade import has_paid_listing
+
+        if await has_paid_listing(self.db, "workflow_pack", pack_id):
+            definition = {
+                "steps": [
+                    {
+                        "id": s.get("id"),
+                        "name": s.get("name"),
+                        "type": s.get("type"),
+                        "capability": (s.get("config") or {}).get("capability")
+                        if isinstance(s.get("config"), dict)
+                        else None,
+                    }
+                    for s in definition.get("steps", []) or []
+                ],
+                "inputs": definition.get("inputs", []),
+                "outputs": definition.get("outputs", []),
+                "redacted": True,
+            }
         return {
             "version": latest.version,
             "definition": definition,

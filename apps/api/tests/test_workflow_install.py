@@ -1825,3 +1825,62 @@ def test_workflow_registry_search_all_sorts_have_id_tiebreak():
     assert "WorkflowPack.created_at.desc(), WorkflowPack.id.desc()" in src, (
         "newest sort lacks id tiebreak"
     )
+
+
+@pytest.mark.asyncio
+async def test_paid_listed_pack_preview_is_redacted(c):
+    """R135 (high): a workflow pack's definition IS the product — the
+    anonymous registry preview served every step's full config/prompt graph,
+    so any PAID pack's IP was free (steal the definition → own-org pack → no
+    listing → the install gate free-passes). Paid/partner_only-listed packs
+    must get a STRUCTURAL preview only; free/unlisted packs keep the full one."""
+    from decimal import Decimal
+
+    from app.controlplane.models.marketplace import MarketplaceListing
+    from app.core.database import AsyncSessionLocal
+
+    h, _ = await _auth(c)
+    oid = await _org(c, h)
+    pid = await _public_pack(c, h, oid)
+
+    # Unlisted: full definition, configs included.
+    r = await c.get(f"/api/v1/registry/workflow-packs/{pid}/preview")
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]["definition"]
+    assert d.get("redacted") is not True
+    assert any(s.get("config") for s in d["steps"]), "unlisted preview lost its configs"
+
+    # Draft paid listing: not sellable yet — still full.
+    async with AsyncSessionLocal() as s:
+        listing = MarketplaceListing(
+            product_type="workflow_pack",
+            product_id=pid,
+            seller_org_id=oid,
+            seller_tenant_id="01FAKESELLERTENANT00000000",
+            offer_type="paid",
+            price_minor=9900,
+            currency="USD",
+            platform_commission_pct=Decimal("30.00"),
+            status="draft",
+        )
+        s.add(listing)
+        await s.commit()
+        lid = listing.id
+    r2 = await c.get(f"/api/v1/registry/workflow-packs/{pid}/preview")
+    assert r2.json()["data"]["definition"].get("redacted") is not True
+
+    # Active paid listing: structural preview only — no config anywhere,
+    # names/types/capabilities and IO contracts preserved.
+    async with AsyncSessionLocal() as s:
+        li = await s.get(MarketplaceListing, lid)
+        li.status = "active"
+        await s.commit()
+    r3 = await c.get(f"/api/v1/registry/workflow-packs/{pid}/preview")
+    assert r3.status_code == 200, r3.text
+    d3 = r3.json()["data"]["definition"]
+    assert d3.get("redacted") is True, "paid-listed pack preview must be redacted"
+    assert all("config" not in s for s in d3["steps"])
+    assert {s["name"] for s in d3["steps"]} == {"Build prompt", "Generate"}
+    assert "image_generation" in {s.get("capability") for s in d3["steps"]}
+    assert d3["inputs"] and d3["outputs"], "IO contract must survive redaction"
+    assert "About {{inputs.topic}}" not in r3.text, "prompt template leaked"

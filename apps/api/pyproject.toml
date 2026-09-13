@@ -23,6 +23,8 @@ dependencies = [
     "openai>=1.50",
     "httpx>=0.28",
     "cryptography>=43.0",
+    "stripe>=11",
+    "dnspython>=2",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +45,9 @@ ignore = ["E501", "B008", "UP046", "UP042", "SIM117"]
 [tool.ruff.lint.per-file-ignores]
 "migrations/env.py" = ["E402"]
 "migrations/versions/*" = ["E501", "W291"]
+# R202: standalone dev tool (CLI mutation harness), not a test module —
+# compact multi-statement AST-dispatch style is intentional.
+"tests/tools_ast_mutate.py" = ["E701", "E702", "RUF001", "RUF003"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
@@ -54,6 +59,48 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.168.0",
+    "mutmut>=3.7.0",
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",
 ]
+
+# ── mutmut (R198 overnight systematic mutation run — money core) ──
+[tool.mutmut]
+source_paths = ["app"]
+# Smoke scope first; widened to the full money core before the night run.
+# R198 v3 (owner: faster path): full-backend mutation was a 12-30h job
+# (49,943 mutants). Replaced by branch-coverage gap analysis (finds every
+# untested line in one run) + TRUE mutation on the money core only (catches
+# weak assertions on top of coverage).
+only_mutate = [
+    "app/controlplane/services/billing.py",
+    "app/controlplane/services/credits.py",
+    "app/controlplane/services/rating.py",
+    "app/controlplane/services/revenue_share.py",
+    "app/controlplane/services/pricing.py",
+    "app/controlplane/services/metering.py",
+    "app/controlplane/services/entitlements.py",
+    "app/controlplane/services/budgets.py",
+    "app/controlplane/services/marketplace.py",
+]
+# Logging lines produce overwhelmingly equivalent-mutant noise.
+do_not_mutate_patterns = ["log.", "logger."]
+pytest_add_cli_args_test_selection = [
+    "tests/test_cp_billing_db.py",
+    "tests/test_cp_credits_db.py",
+    "tests/test_cp_rating_db.py",
+    "tests/test_cp_revshare_db.py",
+    "tests/test_cp_metering_db.py",
+    "tests/test_cp_entitlements_db.py",
+    "tests/test_cp_marketplace_db.py",
+    "tests/test_cp_outbox_db.py",
+    "tests/test_cp_tenants_db.py",
+    "tests/test_cp_adversarial.py",
+    "tests/test_cp_pure_logic.py",
+    "tests/test_cp_property_invariants.py",
+    "tests/test_billing_time_properties.py",
+    "tests/test_issue18_race_fixes.py",
+    "tests/test_cp_migration_backfill.py",
+]
+also_copy = [".env", "alembic.ini", "migrations"]

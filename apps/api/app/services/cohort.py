@@ -63,7 +63,30 @@ class CohortService:
         max_learners: int | None = None,
         created_by: str = "",
     ) -> Cohort:
-        slug = self._generate_slug(name)
+        base = self._generate_slug(name)
+        # R160 (schemathesis): weird names collapse to the same base slug
+        # (non-ASCII → e.g. "u-b"). Pick a FREE slug up front with a single
+        # SELECT, then insert once. The earlier retry-after-IntegrityError
+        # loop could not work: in this async stack a flush IntegrityError —
+        # even inside begin_nested — deactivates the session for any further
+        # statement (PendingRollbackError 500), so recovery-in-place is not
+        # possible. A genuine TOCTOU collision on the chosen slug is a clean
+        # 409 (the request's session is torn down on the AppError), matching
+        # the proven add_member pattern.
+        existing = set(
+            (
+                await self.db.execute(
+                    select(Cohort.slug).where(
+                        Cohort.org_id == org_id, Cohort.slug.like(f"{base[:190]}%")
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        slug = base
+        while slug in existing:
+            slug = f"{base[:190]}-{secrets.token_hex(4)}"
         cohort = Cohort(
             org_id=org_id,
             name=name,
@@ -76,13 +99,16 @@ class CohortService:
         )
         self.db.add(cohort)
         try:
-            async with self.db.begin_nested():
-                await self.db.flush()
-        except IntegrityError:
-            cohort.slug = f"{slug[:190]}-{secrets.token_hex(3)}"
-            self.db.add(cohort)
             await self.db.flush()
-
+        except IntegrityError:
+            # TOCTOU: a concurrent create took this slug between the SELECT
+            # and our flush. Clean 409 — the client retries (a fresh token
+            # suffix will be free). Do NOT attempt in-place recovery.
+            raise AppError(
+                "COHORT_SLUG_CONFLICT",
+                "Cohort name collided concurrently; please retry",
+                409,
+            ) from None
         log.info("cohort_created", cohort_id=cohort.id, org_id=org_id)
         return cohort
 
@@ -106,12 +132,19 @@ class CohortService:
         total = total_r.scalar_one()
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(Cohort.created_at.desc()).offset(offset).limit(per_page)
+            base.order_by(Cohort.created_at.desc(), Cohort.id.desc()).offset(offset).limit(per_page)
         )
         return list(result.scalars().all()), total
 
-    async def get_cohort(self, cohort_id: str, *, include_archived: bool = False) -> Cohort:
-        cohort = await self.db.get(Cohort, cohort_id)
+    async def get_cohort(
+        self, cohort_id: str, *, include_archived: bool = False, for_update: bool = False
+    ) -> Cohort:
+        # for_update (issue-18 debt, R70 pattern): transition callers lock the
+        # row so the status gate below cannot race a concurrent transition;
+        # populate_existing overwrites a stale identity-map copy.
+        cohort = await self.db.get(
+            Cohort, cohort_id, with_for_update=for_update or None, populate_existing=for_update
+        )
         if cohort is None:
             raise CohortNotFoundError()
         if cohort.status == CohortStatus.ARCHIVED and not include_archived:
@@ -126,7 +159,7 @@ class CohortService:
     }
 
     async def update_cohort(self, cohort_id: str, **fields) -> Cohort:
-        cohort = await self.get_cohort(cohort_id)
+        cohort = await self.get_cohort(cohort_id, for_update=True)
         if fields.get("status"):
             new_status = CohortStatus(fields.pop("status"))
             allowed = self._VALID_TRANSITIONS.get(cohort.status, set())
@@ -180,7 +213,7 @@ class CohortService:
         return cohort
 
     async def delete_cohort(self, cohort_id: str) -> None:
-        cohort = await self.get_cohort(cohort_id)
+        cohort = await self.get_cohort(cohort_id, for_update=True)
         if cohort.status != CohortStatus.DRAFT:
             raise AppError("INVALID_STATE", "Only draft cohorts can be deleted", 422)
         cohort.status = CohortStatus.ARCHIVED
@@ -249,9 +282,15 @@ class CohortService:
             user_id=user_id,
             role=role,
         )
-        self.db.add(member)
+        # R422: add INSIDE the savepoint (matching organization.add_member) so a
+        # duplicate-key rollback fully expunges the pending row. With the add
+        # outside, a caught AlreadyCohortMember left the ORM object in
+        # session.new, poisoning the NEXT flush with a re-attempted duplicate
+        # INSERT (PendingRollbackError) — harmless on the request path (session
+        # discarded after the 409) but a latent hazard for any in-session caller.
         try:
             async with self.db.begin_nested():
+                self.db.add(member)
                 await self.db.flush()
         except IntegrityError:
             raise AlreadyCohortMemberError() from None
@@ -302,7 +341,7 @@ class CohortService:
 
         offset = (page - 1) * per_page
         result = await self.db.execute(
-            base.order_by(CohortMember.joined_at).offset(offset).limit(per_page)
+            base.order_by(CohortMember.joined_at, CohortMember.id).offset(offset).limit(per_page)
         )
         return [(row[0], row[1], row[2]) for row in result.all()], total
 
@@ -333,9 +372,12 @@ class CohortService:
             skill_id=skill_id,
             assigned_by=assigned_by,
         )
-        self.db.add(assignment)
+        # R422: add inside the savepoint so a duplicate-key rollback expunges
+        # the pending row (see add_member) — an outside add poisons the next
+        # flush for any in-session caller that catches ALREADY_ASSIGNED.
         try:
             async with self.db.begin_nested():
+                self.db.add(assignment)
                 await self.db.flush()
         except IntegrityError:
             raise AppError(
@@ -415,9 +457,10 @@ class CohortService:
             participation_mode=mode,
             assigned_by=assigned_by,
         )
-        self.db.add(assignment)
+        # R422: add inside the savepoint (see add_member / assign_skill).
         try:
             async with self.db.begin_nested():
+                self.db.add(assignment)
                 await self.db.flush()
         except IntegrityError:
             raise AppError(

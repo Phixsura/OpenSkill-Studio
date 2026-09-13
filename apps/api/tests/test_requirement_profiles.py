@@ -877,3 +877,29 @@ async def test_profile_nonfinite_float_rejected_not_500(c):
         headers=h,
     )
     assert r4.status_code == 201, r4.text[:150]
+
+
+def test_normalize_extracted_bounds_time_budget():
+    """R178: the form path rejects time_budget outside 1..100000 but the
+    extraction path only type-checked it — a hallucinated negative/absurd
+    budget flowed into structured_requirements and skewed S3 scoring."""
+    from app.services.requirement_profile import (
+        ExtractedRequirements,
+        RequirementProfileService,
+    )
+
+    svc = RequirementProfileService.__new__(RequirementProfileService)
+
+    for bad in (-5, 0, 10**18):
+        structured, unmatched = svc._normalize_extracted(
+            ExtractedRequirements(goal="g", time_budget=bad), set()
+        )
+        assert "time_budget" not in structured, f"{bad} must not be stored"
+        assert str(bad) in unmatched
+
+    # In-range value still flows through
+    structured, unmatched = svc._normalize_extracted(
+        ExtractedRequirements(goal="g", time_budget=120), set()
+    )
+    assert structured["time_budget"] == 120
+    assert unmatched == []

@@ -718,7 +718,10 @@ async def test_eval_settings_and_usage(db):
 
     user = await _user(db)
     org_svc = OrgService(db)
-    org = await org_svc.create("EvalOrg", None, None, user.id)
+    # R133: randomized — the fixed "EvalOrg" name derives a deterministic slug
+    # that permanently collides with a leftover committed row in the shared
+    # dev DB after any crashed run (org creation COMMITS the auto-tenant).
+    org = await org_svc.create(f"EvalOrg-{uuid.uuid4().hex[:8]}", None, None, user.id)
     await db.flush()
 
     svc = EvaluationService(db)
