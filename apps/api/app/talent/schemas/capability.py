@@ -16,6 +16,10 @@ class CreateCapabilityRequest(BaseModel):
     level_definitions: dict | None = None
     decay_config: dict | None = None
     sort_order: int = 0
+    # Taxonomy interop (ESCO, O*NET, ISCED-F)
+    external_ids: dict | None = None
+    aliases: list[str] | None = None
+    translations: dict | None = None
 
     @field_validator("canonical_name")
     @classmethod
@@ -32,6 +36,9 @@ class UpdateCapabilityRequest(BaseModel):
     level_definitions: dict | None = None
     decay_config: dict | None = None
     sort_order: int | None = None
+    external_ids: dict | None = None
+    aliases: list[str] | None = None
+    translations: dict | None = None
 
 
 class CapabilityResponse(BaseModel):
@@ -46,6 +53,9 @@ class CapabilityResponse(BaseModel):
     capability_tag_id: str | None
     level_definitions: dict | None
     decay_config: dict | None
+    external_ids: dict = {}
+    aliases: list = []
+    translations: dict | None = None
     sort_order: int
     created_at: datetime | None = None
     updated_at: datetime | None = None

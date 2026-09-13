@@ -51,6 +51,9 @@ class CapabilityService:
         level_definitions: dict | None = None,
         decay_config: dict | None = None,
         sort_order: int = 0,
+        external_ids: dict | None = None,
+        aliases: list | None = None,
+        translations: dict | None = None,
     ) -> Capability:
         slug = slugify(canonical_name)
         cap = Capability(
@@ -63,6 +66,9 @@ class CapabilityService:
             level_definitions=level_definitions,
             decay_config=decay_config,
             sort_order=sort_order,
+            external_ids=external_ids or {},
+            aliases=aliases or [],
+            translations=translations,
         )
         self.db.add(cap)
         await self.db.flush()
@@ -77,8 +83,11 @@ class CapabilityService:
         category: str | None = None,
         status: str = "active",
         parent_id: str | None = ...,  # type: ignore[assignment]
+        esco_uri: str | None = None,
+        onet_code: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        cursor: str | None = None,
     ) -> tuple[list[Capability], int]:
         q = select(Capability).where(Capability.status == status)
         if category:
@@ -88,11 +97,18 @@ class CapabilityService:
                 q = q.where(Capability.parent_id.is_(None))
             else:
                 q = q.where(Capability.parent_id == parent_id)
+        # Taxonomy crosswalk filters
+        if esco_uri:
+            q = q.where(Capability.external_ids["esco_uri"].astext == esco_uri)
+        if onet_code:
+            q = q.where(Capability.external_ids["onet_code"].astext == onet_code)
 
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
 
-        q = q.order_by(Capability.sort_order, Capability.canonical_name).limit(limit).offset(offset)
+        if cursor:
+            q = q.where(Capability.id < cursor)
+        q = q.order_by(Capability.sort_order, Capability.canonical_name).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 

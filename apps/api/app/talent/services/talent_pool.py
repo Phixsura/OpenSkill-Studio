@@ -71,11 +71,12 @@ class TalentPoolService:
         *,
         limit: int = 50,
         offset: int = 0,
+        cursor: str | None = None,
     ) -> tuple[list[TalentPool], int]:
         q = select(TalentPool).where(TalentPool.org_id == org_id)
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
-        q = q.order_by(TalentPool.created_at.desc()).limit(limit).offset(offset)
+        q = q.order_by(TalentPool.created_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -147,13 +148,14 @@ class TalentPoolService:
         consent_status: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        cursor: str | None = None,
     ) -> tuple[list[TalentPoolMembership], int]:
         q = select(TalentPoolMembership).where(TalentPoolMembership.pool_id == pool_id)
         if consent_status:
             q = q.where(TalentPoolMembership.consent_status == consent_status)
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
-        q = q.order_by(TalentPoolMembership.created_at.desc()).limit(limit).offset(offset)
+        q = q.order_by(TalentPoolMembership.created_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -254,6 +256,7 @@ class OutreachService:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        cursor: str | None = None,
     ) -> tuple[list[TalentOutreach], int]:
         q = select(TalentOutreach)
         if org_id:
@@ -264,7 +267,7 @@ class OutreachService:
             q = q.where(TalentOutreach.status == status)
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
-        q = q.order_by(TalentOutreach.created_at.desc()).limit(limit).offset(offset)
+        q = q.order_by(TalentOutreach.created_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -315,6 +318,7 @@ class OutcomeEventService:
         visibility: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        cursor: str | None = None,
     ) -> tuple[list[OutcomeEvent], int]:
         q = select(OutcomeEvent).where(OutcomeEvent.user_id == user_id)
         if event_type:
@@ -323,7 +327,7 @@ class OutcomeEventService:
             q = q.where(OutcomeEvent.visibility == visibility)
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
-        q = q.order_by(OutcomeEvent.occurred_at.desc()).limit(limit).offset(offset)
+        q = q.order_by(OutcomeEvent.occurred_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 

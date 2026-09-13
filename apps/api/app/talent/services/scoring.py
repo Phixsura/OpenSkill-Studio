@@ -1,33 +1,43 @@
-"""Capability scoring engine — versioned, reproducible, decay-aware (ADR-015 D3).
+"""Capability scoring engine — versioned, reproducible, multi-dimensional (ADR-015 D3).
 
-Algorithm v1.0.0:
-  1. Filter active, non-expired evidence.
-  2. Per evidence: effective = base × verification_weight × confidence × freshness.
-  3. Aggregate: Bayesian-shrunk mean (k=3, prior=0.5).
-  4. Level = threshold lookup from capability definitions or platform default.
-  5. Confidence = 1 - (k / (n + k)).
+Algorithm v2.0.0 — four scoring dimensions:
+  depth    — Bayesian-shrunk expertise score from evidence quality × verification weight
+  breadth  — fraction of related capabilities (via CapabilityEdge) that also have evidence
+  recency  — freshness of the most recent evidence (Gaussian decay, 180-day half-width)
+  velocity — rate of evidence accumulation (last 90 days vs prior 90 days)
+
+  composite score = 0.4×depth + 0.2×breadth + 0.2×recency + 0.2×velocity
 """
 
 from __future__ import annotations
 
 import contextlib
+import math
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.talent.models.capability import Capability
+from app.talent.models.capability import Capability, CapabilityEdge
 from app.talent.models.evidence import (
     VERIFICATION_WEIGHTS,
     CapabilityEvidence,
 )
 
-SCORING_VERSION = "1.0.0"
+SCORING_VERSION = "2.0.0"
 
 # Bayesian shrinkage: k=3 balances single-data-point noise with prior
 SHRINKAGE_K = 3
 SHRINKAGE_PRIOR = 0.5
+
+# Composite weights
+DIMENSION_WEIGHTS = {
+    "depth": 0.40,
+    "breadth": 0.20,
+    "recency": 0.20,
+    "velocity": 0.20,
+}
 
 # Default level thresholds (overridable per capability family)
 DEFAULT_LEVEL_THRESHOLDS: dict[int, dict] = {
@@ -44,6 +54,11 @@ SUBSTANTIAL_VERIFICATION = frozenset(
     {"employer_verified", "client_verified", "assessment_verified", "instructor_verified", "peer_verified"}
 )
 
+# Adjacency edge types for breadth computation
+_BREADTH_EDGE_TYPES = frozenset(
+    {"related_to", "commonly_paired_with", "specializes", "subsumes"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CapabilityScore:
@@ -54,6 +69,11 @@ class CapabilityScore:
     level: int
     level_label: str
     score: float
+    # Multi-dimensional signals
+    depth: float
+    breadth: float
+    recency: float
+    velocity: float
     confidence: float
     evidence_count: int
     substantial_evidence_count: int
@@ -86,11 +106,9 @@ def compute_score_from_evidence(
     decay_config: dict | None,
     now: datetime,
 ) -> tuple[float, float, int]:
-    """Pure scoring computation.
+    """Pure depth scoring computation (backward compatible).
 
-    Returns (score, confidence, substantial_count).
-    evidence_rows: list of dicts with keys:
-        score_normalized, verification_level, confidence, occurred_at, status, expires_at
+    Returns (depth_score, confidence, substantial_count).
     """
     active = []
     for ev in evidence_rows:
@@ -127,6 +145,58 @@ def compute_score_from_evidence(
     )
 
     return round(shrunk, 4), round(model_confidence, 4), substantial
+
+
+def compute_recency(evidence_rows: list[dict], now: datetime) -> float:
+    """Recency signal: Gaussian decay on the most recent active evidence.
+
+    Returns 0-1 where 1 means evidence from today, 0.5 means ~180 days ago.
+    """
+    active_dates = [
+        ev["occurred_at"]
+        for ev in evidence_rows
+        if ev["status"] == "active" and ev.get("occurred_at")
+    ]
+    if not active_dates:
+        return 0.0
+    newest = max(active_dates)
+    age_days = (now - newest).total_seconds() / 86400
+    if age_days < 0:
+        return 1.0
+    # Gaussian decay with σ=180 days
+    return math.exp(-0.5 * (age_days / 180) ** 2)
+
+
+def compute_velocity(evidence_rows: list[dict], now: datetime) -> float:
+    """Velocity signal: evidence accumulation rate.
+
+    Compares evidence count in last 90 days vs prior 90 days.
+    Capped at 2.0, normalized to [0, 1].
+    """
+    cutoff_recent = now - timedelta(days=90)
+    cutoff_prior = now - timedelta(days=180)
+
+    recent_count = 0
+    prior_count = 0
+    for ev in evidence_rows:
+        if ev["status"] != "active":
+            continue
+        occ = ev.get("occurred_at")
+        if not occ:
+            continue
+        if occ >= cutoff_recent:
+            recent_count += 1
+        elif occ >= cutoff_prior:
+            prior_count += 1
+
+    if prior_count == 0 and recent_count == 0:
+        return 0.0
+    if prior_count == 0:
+        # New learner with only recent evidence — moderate velocity
+        return min(recent_count / 3.0, 1.0)
+    ratio = recent_count / prior_count
+    # Cap at 2.0, normalize to [0, 1]
+    return min(ratio / 2.0, 1.0)
 
 
 def determine_level(
@@ -202,17 +272,63 @@ async def compute_capability_profile(
     cap_result = await db.execute(cap_q)
     capabilities = {c.id: c for c in cap_result.scalars().all()}
 
+    # Pre-load adjacency edges for breadth computation
+    edge_q = (
+        select(CapabilityEdge.source_id, CapabilityEdge.target_id)
+        .where(
+            CapabilityEdge.edge_type.in_(_BREADTH_EDGE_TYPES),
+            or_(
+                CapabilityEdge.source_id.in_(cap_ids),
+                CapabilityEdge.target_id.in_(cap_ids),
+            ),
+        )
+    )
+    edge_result = await db.execute(edge_q)
+    # Build adjacency: cap_id → set of related cap_ids
+    adjacency: dict[str, set[str]] = {}
+    for src, tgt in edge_result.all():
+        adjacency.setdefault(src, set()).add(tgt)
+        adjacency.setdefault(tgt, set()).add(src)
+
+    # Set of all capability_ids the user has evidence for
+    user_cap_ids = set(by_cap.keys())
+
     scores: list[CapabilityScore] = []
     for cap_id, ev_list in by_cap.items():
         cap = capabilities.get(cap_id)
         if not cap or cap.status not in ("active", "deprecated"):
             continue
 
-        score, confidence, substantial = compute_score_from_evidence(
+        # Depth (backward compatible with v1)
+        depth, confidence, substantial = compute_score_from_evidence(
             ev_list, cap.decay_config, now
         )
+
+        # Breadth: fraction of related capabilities that also have evidence
+        related = adjacency.get(cap_id, set())
+        if related:
+            breadth_count = len(related & user_cap_ids)
+            breadth = breadth_count / len(related)
+        else:
+            breadth = 0.0
+
+        # Recency
+        recency = compute_recency(ev_list, now)
+
+        # Velocity
+        velocity = compute_velocity(ev_list, now)
+
+        # Composite score
+        composite = (
+            DIMENSION_WEIGHTS["depth"] * depth
+            + DIMENSION_WEIGHTS["breadth"] * breadth
+            + DIMENSION_WEIGHTS["recency"] * recency
+            + DIMENSION_WEIGHTS["velocity"] * velocity
+        )
+        composite = round(composite, 4)
+
         level, level_label = determine_level(
-            score, substantial, cap.level_definitions
+            composite, substantial, cap.level_definitions
         )
 
         # Verification mix
@@ -236,7 +352,11 @@ async def compute_capability_profile(
                 capability_name=cap.canonical_name,
                 level=level,
                 level_label=level_label,
-                score=score,
+                score=composite,
+                depth=round(depth, 4),
+                breadth=round(breadth, 4),
+                recency=round(recency, 4),
+                velocity=round(velocity, 4),
                 confidence=confidence,
                 evidence_count=len([e for e in ev_list if e["status"] == "active"]),
                 substantial_evidence_count=substantial,
@@ -247,6 +367,6 @@ async def compute_capability_profile(
             )
         )
 
-    # Sort by score descending
+    # Sort by composite score descending
     scores.sort(key=lambda s: s.score, reverse=True)
     return scores

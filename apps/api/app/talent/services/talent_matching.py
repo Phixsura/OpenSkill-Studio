@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User, UserStatus
 from app.talent.models.application import Placement
 from app.talent.models.assessment import Credential
+from app.talent.models.capability import CapabilityEdge
 from app.talent.models.employer import Opportunity
 from app.talent.models.evidence import (
     CapabilityEvidence,
@@ -32,6 +33,14 @@ from app.talent.models.passport import SkillPassport
 from app.talent.services.scoring import (
     compute_capability_profile,
 )
+
+# Edge types that indicate skill adjacency for partial-credit matching
+_ADJACENCY_EDGE_TYPES = frozenset(
+    {"related_to", "commonly_paired_with", "specializes", "subsumes"}
+)
+
+# Credit multiplier by graph distance (edges traversed)
+_ADJACENCY_CREDIT = {1: 0.5, 2: 0.25}
 
 log = structlog.get_logger()
 
@@ -137,13 +146,21 @@ class TalentMatchingService:
         # Pre-load all capability profiles for eligible users
         profiles = await self._bulk_capability_profiles(user_ids, now)
 
+        # Pre-load adjacency graph for all required+preferred capabilities
+        all_cap_ids = {
+            r.get("capability_id", "")
+            for r in required_caps + preferred_caps
+            if r.get("capability_id")
+        }
+        adjacency = await self._load_adjacency_graph(all_cap_ids)
+
         results: list[TalentMatchResult] = []
         for uid in user_ids:
             profile = profiles.get(uid, {})
 
-            # --- S2: hard constraints ---
+            # --- S2: hard constraints (with adjacent skill relaxation) ---
             hard_failures = self._check_hard_constraints(
-                profile, required_caps
+                profile, required_caps, adjacency=adjacency
             )
             if hard_failures:
                 results.append(
@@ -161,9 +178,10 @@ class TalentMatchingService:
                 )
                 continue
 
-            # --- S3: scoring ---
+            # --- S3: scoring (with partial credit for adjacent skills) ---
             signals = await self._score_candidate(
-                uid, profile, required_caps, preferred_caps, now
+                uid, profile, required_caps, preferred_caps, now,
+                adjacency=adjacency,
             )
             score = sum(
                 signals.get(k, 0.0) * w for k, w in TALENT_WEIGHTS.items()
@@ -171,7 +189,10 @@ class TalentMatchingService:
             score = round(score, 4)
 
             # Reasons and gaps from signal values
-            reasons, gaps = self._explain_signals(signals, required_caps, preferred_caps, profile)
+            reasons, gaps = self._explain_signals(
+                signals, required_caps, preferred_caps, profile,
+                adjacency=adjacency,
+            )
 
             tier = (
                 "great" if score >= 0.75
@@ -242,36 +263,51 @@ class TalentMatchingService:
         if not opportunities:
             return []
 
+        # Build profile dict for constraint checking
+        profile_dict = {
+            cap_id: {"level": s.level, "score": s.score, "confidence": s.confidence}
+            for cap_id, s in profile.items()
+        }
+
+        # Collect all capability IDs across all opportunities for adjacency loading
+        all_opp_cap_ids: set[str] = set()
+        for opp in opportunities:
+            for r in (opp.required_capabilities or []) + (opp.preferred_capabilities or []):
+                cid = r.get("capability_id")
+                if cid:
+                    all_opp_cap_ids.add(cid)
+        adjacency = await self._load_adjacency_graph(all_opp_cap_ids)
+
         results: list[TalentMatchResult] = []
         for opp in opportunities:
             required_caps = opp.required_capabilities or []
             preferred_caps = opp.preferred_capabilities or []
 
-            # S2: hard constraints — does user meet all required?
-            profile_dict = {
-                cap_id: {"level": s.level, "score": s.score, "confidence": s.confidence}
-                for cap_id, s in profile.items()
-            }
+            # S2: hard constraints (with adjacent skill relaxation)
             hard_failures = self._check_hard_constraints(
-                profile_dict, required_caps
+                profile_dict, required_caps, adjacency=adjacency
             )
             if hard_failures:
                 continue  # Don't show opportunities the user can't qualify for
 
-            # S3: score
+            # S3: score (with partial credit for adjacent skills)
             signals = await self._score_candidate(
                 user_id,
                 profile_dict,
                 required_caps,
                 preferred_caps,
                 now,
+                adjacency=adjacency,
             )
             score = sum(
                 signals.get(k, 0.0) * w for k, w in TALENT_WEIGHTS.items()
             )
             score = round(score, 4)
 
-            reasons, gaps = self._explain_signals(signals, required_caps, preferred_caps, profile_dict)
+            reasons, gaps = self._explain_signals(
+                signals, required_caps, preferred_caps, profile_dict,
+                adjacency=adjacency,
+            )
 
             tier = (
                 "great" if score >= 0.75
@@ -367,33 +403,101 @@ class TalentMatchingService:
 
         return profiles
 
+    async def _load_adjacency_graph(
+        self,
+        cap_ids: set[str],
+    ) -> dict[str, list[tuple[str, int]]]:
+        """Load adjacent capabilities up to 2 hops from the given cap IDs.
+
+        Returns {cap_id: [(adjacent_cap_id, distance), ...]} where distance
+        is 1 (directly connected) or 2 (connected through an intermediate).
+        Both directions of each edge are considered (graph is undirected for
+        adjacency purposes).
+        """
+        if not cap_ids:
+            return {}
+
+        # Load all adjacency edges in one batch query
+        edge_q = select(CapabilityEdge).where(
+            CapabilityEdge.edge_type.in_(_ADJACENCY_EDGE_TYPES),
+            or_(
+                CapabilityEdge.source_id.in_(cap_ids),
+                CapabilityEdge.target_id.in_(cap_ids),
+            ),
+        )
+        result = await self.db.execute(edge_q)
+        edges = result.scalars().all()
+
+        # Build undirected adjacency list
+        from collections import defaultdict
+
+        adj: dict[str, set[str]] = defaultdict(set)
+        for e in edges:
+            adj[e.source_id].add(e.target_id)
+            adj[e.target_id].add(e.source_id)
+
+        # For each target cap, find adjacent caps at distance 1 and 2
+        adjacency: dict[str, list[tuple[str, int]]] = {}
+        for cid in cap_ids:
+            neighbors: list[tuple[str, int]] = []
+            # Distance 1
+            for n1 in adj.get(cid, set()):
+                neighbors.append((n1, 1))
+                # Distance 2 (via n1)
+                for n2 in adj.get(n1, set()):
+                    if n2 != cid and n2 not in adj.get(cid, set()):
+                        neighbors.append((n2, 2))
+            adjacency[cid] = neighbors
+
+        return adjacency
+
     def _check_hard_constraints(
         self,
         profile: dict[str, dict],
         required_caps: list[dict],
+        adjacency: dict[str, list[tuple[str, int]]] | None = None,
     ) -> list[dict]:
-        """S2: check user meets all required capabilities at min_level."""
+        """S2: check user meets required capabilities at min_level.
+
+        With adjacency graph: if user lacks cap X but has related cap Y
+        (via CapabilityEdge), the constraint is relaxed — treated as a
+        partial match (no hard failure), but a gap is noted.
+        """
         failures = []
         for req in required_caps:
             cap_id = req.get("capability_id", "")
             min_level = req.get("min_level", 0)
             user_cap = profile.get(cap_id)
-            if not user_cap:
-                failures.append({
-                    "code": "CAPABILITY_BELOW_REQUIRED",
-                    "capability_id": cap_id,
-                    "required_level": min_level,
-                    "actual_level": 0,
-                    "message": f"No evidence for required capability (need L{min_level})",
-                })
-            elif user_cap["level"] < min_level:
-                failures.append({
-                    "code": "CAPABILITY_BELOW_REQUIRED",
-                    "capability_id": cap_id,
-                    "required_level": min_level,
-                    "actual_level": user_cap["level"],
-                    "message": f"Capability L{user_cap['level']} below required L{min_level}",
-                })
+
+            if user_cap and user_cap["level"] >= min_level:
+                continue  # Fully met
+
+            # Check adjacent skills if adjacency graph is provided
+            if adjacency and cap_id in adjacency:
+                has_adjacent = False
+                for adj_cap_id, _distance in adjacency[cap_id]:
+                    adj_cap = profile.get(adj_cap_id)
+                    if adj_cap and adj_cap["level"] >= min_level:
+                        has_adjacent = True
+                        break
+                if has_adjacent:
+                    # Adjacent skill meets the level — don't hard-fail,
+                    # but it will get partial credit in scoring
+                    continue
+
+            # No direct or adjacent match → hard failure
+            actual = user_cap["level"] if user_cap else 0
+            failures.append({
+                "code": "CAPABILITY_BELOW_REQUIRED",
+                "capability_id": cap_id,
+                "required_level": min_level,
+                "actual_level": actual,
+                "message": (
+                    f"No evidence for required capability (need L{min_level})"
+                    if not user_cap
+                    else f"Capability L{actual} below required L{min_level}"
+                ),
+            })
         return failures
 
     async def _score_candidate(
@@ -403,8 +507,13 @@ class TalentMatchingService:
         required_caps: list[dict],
         preferred_caps: list[dict],
         now: datetime,
+        adjacency: dict[str, list[tuple[str, int]]] | None = None,
     ) -> dict[str, float]:
-        """S3: compute all 5 scoring signals for a candidate."""
+        """S3: compute all 5 scoring signals for a candidate.
+
+        With adjacency graph: adjacent skills earn partial credit
+        (0.5× for distance 1, 0.25× for distance 2).
+        """
         import math
 
         all_caps = required_caps + preferred_caps
@@ -412,15 +521,25 @@ class TalentMatchingService:
             return {k: 0.5 for k in TALENT_WEIGHTS}
 
         # 1. capability_gap_score: fraction of required + preferred caps met at level
-        met_count = 0
+        #    with partial credit for adjacent skills
+        met_credit = 0.0
         total_count = len(all_caps)
         for cap_req in all_caps:
             cap_id = cap_req.get("capability_id", "")
             min_level = cap_req.get("min_level", 0)
             user_cap = profile.get(cap_id)
             if user_cap and user_cap["level"] >= min_level:
-                met_count += 1
-        capability_gap_score = met_count / total_count if total_count > 0 else 0.5
+                met_credit += 1.0  # Full credit
+            elif adjacency and cap_id in adjacency:
+                # Check adjacent skills for partial credit
+                best_credit = 0.0
+                for adj_cap_id, distance in adjacency[cap_id]:
+                    adj_cap = profile.get(adj_cap_id)
+                    if adj_cap and adj_cap["level"] >= min_level:
+                        credit = _ADJACENCY_CREDIT.get(distance, 0.0)
+                        best_credit = max(best_credit, credit)
+                met_credit += best_credit
+        capability_gap_score = met_credit / total_count if total_count > 0 else 0.5
 
         # 2. evidence_confidence: avg confidence across required capabilities
         req_cap_ids = {r.get("capability_id", "") for r in required_caps}
@@ -498,11 +617,13 @@ class TalentMatchingService:
         required_caps: list[dict],
         preferred_caps: list[dict],
         profile: dict[str, dict],
+        adjacency: dict[str, list[tuple[str, int]]] | None = None,
     ) -> tuple[list[dict], list[dict]]:
         """Generate reason chips and gap entries from signal values.
 
         Mirrors the ADR-012 pattern: reasons for values ≥ 0.7, gaps for
-        values < 0.4 with weight ≥ 0.10.
+        values < 0.4 with weight ≥ 0.10. Also generates ADJACENT_SKILL
+        reasons when a related skill earned partial credit.
         """
         reasons: list[dict] = []
         gaps: list[dict] = []
@@ -525,6 +646,28 @@ class TalentMatchingService:
                     "code": signal_name.upper(),
                     "label": label,
                 })
+
+        # Adjacent skill reasons: when a related skill gave partial credit
+        all_caps = required_caps + preferred_caps
+        if adjacency:
+            for cap_req in all_caps:
+                cap_id = cap_req.get("capability_id", "")
+                min_level = cap_req.get("min_level", 0)
+                user_cap = profile.get(cap_id)
+                if user_cap and user_cap.get("level", 0) >= min_level:
+                    continue  # Directly met — no adjacent reason needed
+                if cap_id in adjacency:
+                    for adj_cap_id, distance in adjacency[cap_id]:
+                        adj_cap = profile.get(adj_cap_id)
+                        if adj_cap and adj_cap.get("level", 0) >= min_level:
+                            reasons.append({
+                                "code": "ADJACENT_SKILL",
+                                "capability_id": cap_id,
+                                "adjacent_capability_id": adj_cap_id,
+                                "distance": distance,
+                                "label": f"Related skill at L{adj_cap['level']} (distance {distance})",
+                            })
+                            break  # Only report the best adjacent match
 
         # Capability-specific gaps: preferred caps not met
         for pref in preferred_caps:

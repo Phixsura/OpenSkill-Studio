@@ -57,6 +57,12 @@ class Capability(Base):
     level_definitions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Decay configuration: {"half_life_days": 365}  (NULL = no decay)
     decay_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # External taxonomy crosswalks: {"esco_uri": "http://...", "onet_code": "15-1252.00", "isced_f": "0613"}
+    external_ids: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    # Alternative names / synonyms for search and deduplication
+    aliases: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    # Multilingual names: {"zh": {"name": "...", "description": "..."}, "en": {...}}
+    translations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

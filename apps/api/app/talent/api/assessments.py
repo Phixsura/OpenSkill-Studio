@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.models.organization import OrgRole
 from app.models.user import User
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta
+from app.schemas.base import DataResponse
 from app.talent.schemas.assessment import (
     BlueprintResponse,
     CreateBlueprintRequest,
@@ -19,6 +19,7 @@ from app.talent.schemas.assessment import (
     RunResponse,
     SubmitRunRequest,
 )
+from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 
 router = APIRouter(prefix="/talent", tags=["Talent — Assessments"])
 
@@ -52,12 +53,12 @@ async def create_blueprint(
     return DataResponse(data=BlueprintResponse.model_validate(bp))
 
 
-@router.get("/assessments", response_model=ListResponse[BlueprintResponse])
+@router.get("/assessments", response_model=CursorListResponse[BlueprintResponse])
 async def list_blueprints(
     org_id: str = Query(...),
     status: str = "active",
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -65,10 +66,14 @@ async def list_blueprints(
     from app.talent.services.assessment import AssessmentService
 
     svc = AssessmentService(db)
-    items, total = await svc.list_blueprints(org_id, status=status, limit=per_page, offset=(page - 1) * per_page)
-    return ListResponse(
+    items, total = await svc.list_blueprints(org_id, status=status, limit=limit, cursor=cursor)
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = items[-1].id if has_more and items else None
+    return CursorListResponse(
         data=[BlueprintResponse.model_validate(b) for b in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 

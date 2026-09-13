@@ -65,6 +65,7 @@ class AssessmentService:
         status: str = "active",
         limit: int = 100,
         offset: int = 0,
+        cursor: str | None = None,
     ) -> tuple[list[AssessmentBlueprint], int]:
         q = select(AssessmentBlueprint).where(
             AssessmentBlueprint.org_id == org_id,
@@ -73,7 +74,9 @@ class AssessmentService:
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
 
-        q = q.order_by(AssessmentBlueprint.created_at.desc()).limit(limit).offset(offset)
+        if cursor:
+            q = q.where(AssessmentBlueprint.id < cursor)
+        q = q.order_by(AssessmentBlueprint.created_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 

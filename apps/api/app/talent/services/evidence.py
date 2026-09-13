@@ -116,6 +116,7 @@ class EvidenceService:
         status: str = "active",
         limit: int = 100,
         offset: int = 0,
+        cursor: str | None = None,
     ) -> tuple[list[CapabilityEvidence], int]:
         """List evidence for a user with pagination."""
         q = select(CapabilityEvidence).where(
@@ -130,7 +131,9 @@ class EvidenceService:
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
 
-        q = q.order_by(CapabilityEvidence.occurred_at.desc()).limit(limit).offset(offset)
+        if cursor:
+            q = q.where(CapabilityEvidence.id < cursor)
+        q = q.order_by(CapabilityEvidence.occurred_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 

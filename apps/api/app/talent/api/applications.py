@@ -9,12 +9,12 @@ Authorization rules:
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.models.user import User
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta
+from app.schemas.base import DataResponse
 from app.talent.models.application import (
     APPLICATION_TRANSITIONS,
     Application,
@@ -33,6 +33,7 @@ from app.talent.schemas.application import (
     TransitionApplicationRequest,
     UpdateInterviewRequest,
 )
+from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 
 router = APIRouter(prefix="/talent", tags=["Talent — Applications"])
 
@@ -132,11 +133,11 @@ async def apply_to_opportunity(
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
-@router.get("/applications", response_model=ListResponse[ApplicationResponse])
+@router.get("/applications", response_model=CursorListResponse[ApplicationResponse])
 async def list_applications(
     status: str | None = None,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -145,16 +146,21 @@ async def list_applications(
     if status:
         q = q.where(Application.status == status)
 
-    count_q = select(func.count()).select_from(q.subquery())
-    total = (await db.execute(count_q)).scalar() or 0
 
-    q = q.order_by(Application.created_at.desc()).limit(per_page).offset((page - 1) * per_page)
+    if cursor:
+        q = q.where(Application.id < cursor)
+    q = q.order_by(Application.created_at.desc()).limit(limit + 1)
     result = await db.execute(q)
     items = result.scalars().all()
 
-    return ListResponse(
-        data=[ApplicationResponse.model_validate(a) for a in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+    all_items = list(items) if not isinstance(items, list) else items
+    has_more = len(all_items) > limit
+    if has_more:
+        all_items = all_items[:limit]
+    next_cursor = all_items[-1].id if has_more and all_items else None
+    return CursorListResponse(
+        data=[ApplicationResponse.model_validate(a) for a in all_items],
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 
@@ -332,11 +338,11 @@ async def update_interview(
 
 # ---- Placements ----
 
-@router.get("/placements", response_model=ListResponse[PlacementResponse])
+@router.get("/placements", response_model=CursorListResponse[PlacementResponse])
 async def list_placements(
     status: str | None = None,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -345,14 +351,19 @@ async def list_placements(
     if status:
         q = q.where(Placement.status == status)
 
-    count_q = select(func.count()).select_from(q.subquery())
-    total = (await db.execute(count_q)).scalar() or 0
 
-    q = q.order_by(Placement.created_at.desc()).limit(per_page).offset((page - 1) * per_page)
+    if cursor:
+        q = q.where(Placement.id < cursor)
+    q = q.order_by(Placement.created_at.desc()).limit(limit + 1)
     result = await db.execute(q)
     items = result.scalars().all()
 
-    return ListResponse(
-        data=[PlacementResponse.model_validate(p) for p in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+    all_items = list(items) if not isinstance(items, list) else items
+    has_more = len(all_items) > limit
+    if has_more:
+        all_items = all_items[:limit]
+    next_cursor = all_items[-1].id if has_more and all_items else None
+    return CursorListResponse(
+        data=[PlacementResponse.model_validate(p) for p in all_items],
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )

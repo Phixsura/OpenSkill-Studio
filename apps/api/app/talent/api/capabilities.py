@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User, UserRole
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta
+from app.schemas.base import DataResponse
 from app.talent.schemas.capability import (
     CapabilityResponse,
     CreateCapabilityRequest,
@@ -22,6 +22,7 @@ from app.talent.schemas.capability import (
     MergeCapabilityRequest,
     UpdateCapabilityRequest,
 )
+from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 from app.talent.services.capability import CapabilityService
 
 router = APIRouter(prefix="/talent/capabilities", tags=["Talent — Capabilities"])
@@ -33,13 +34,15 @@ def _require_platform_admin(user: User) -> None:
         raise HTTPException(403, "Only platform admins can modify the capability ontology")
 
 
-@router.get("", response_model=ListResponse[CapabilityResponse])
+@router.get("", response_model=CursorListResponse[CapabilityResponse])
 async def list_capabilities(
     category: str | None = None,
     status: str = "active",
     parent_id: str | None = Query(None),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    esco_uri: str | None = Query(None, description="Filter by ESCO URI"),
+    onet_code: str | None = Query(None, description="Filter by O*NET code"),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -50,12 +53,19 @@ async def list_capabilities(
         category=category,
         status=status,
         parent_id=pid,
-        limit=per_page,
-        offset=(page - 1) * per_page,
+        esco_uri=esco_uri,
+        onet_code=onet_code,
+        limit=limit,
+        cursor=cursor,
     )
-    return ListResponse(
-        data=[CapabilityResponse.model_validate(c) for c in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+    all_items = list(items) if not isinstance(items, list) else items
+    has_more = len(all_items) > limit
+    if has_more:
+        all_items = all_items[:limit]
+    next_cursor = all_items[-1].id if has_more and all_items else None
+    return CursorListResponse(
+        data=[CapabilityResponse.model_validate(c) for c in all_items],
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 
@@ -76,6 +86,9 @@ async def create_capability(
         level_definitions=body.level_definitions,
         decay_config=body.decay_config,
         sort_order=body.sort_order,
+        external_ids=body.external_ids,
+        aliases=body.aliases,
+        translations=body.translations,
     )
     await db.commit()
     await db.refresh(cap)

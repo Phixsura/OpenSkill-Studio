@@ -177,4 +177,4 @@ class TestDetermineLevel:
         assert label == "Beginner"
 
     def test_scoring_version_is_set(self):
-        assert SCORING_VERSION == "1.0.0"
+        assert SCORING_VERSION == "2.0.0"

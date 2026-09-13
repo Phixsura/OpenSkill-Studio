@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.models.user import User
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta
+from app.schemas.base import DataResponse
+from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 from app.talent.schemas.talent_pool import (
     AddMemberRequest,
     CreatePoolRequest,
@@ -65,20 +66,24 @@ async def create_pool(
     return DataResponse(data=PoolResponse.model_validate(pool))
 
 
-@router.get("/pools", response_model=ListResponse[PoolResponse])
+@router.get("/pools", response_model=CursorListResponse[PoolResponse])
 async def list_pools(
     org_id: str = Query(...),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     await require_org_member(org_id, user, db)
     svc = TalentPoolService(db)
-    items, total = await svc.list_pools(org_id, limit=per_page, offset=(page - 1) * per_page)
-    return ListResponse(
+    items, total = await svc.list_pools(org_id, limit=limit, cursor=cursor)
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = items[-1].id if has_more and items else None
+    return CursorListResponse(
         data=[PoolResponse.model_validate(p) for p in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 
@@ -140,12 +145,12 @@ async def add_member(
     return DataResponse(data=MembershipResponse.model_validate(membership))
 
 
-@router.get("/pools/{pool_id}/members", response_model=ListResponse[MembershipResponse])
+@router.get("/pools/{pool_id}/members", response_model=CursorListResponse[MembershipResponse])
 async def list_members(
     pool_id: str,
     consent_status: str | None = None,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -155,11 +160,16 @@ async def list_members(
         raise HTTPException(404, "Pool not found")
     await require_org_member(pool.org_id, user, db)
     items, total = await svc.list_members(
-        pool_id, consent_status=consent_status, limit=per_page, offset=(page - 1) * per_page
+        pool_id, consent_status=consent_status, limit=limit, cursor=cursor
     )
-    return ListResponse(
-        data=[MembershipResponse.model_validate(m) for m in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+    all_items = list(items) if not isinstance(items, list) else items
+    has_more = len(all_items) > limit
+    if has_more:
+        all_items = all_items[:limit]
+    next_cursor = all_items[-1].id if has_more and all_items else None
+    return CursorListResponse(
+        data=[MembershipResponse.model_validate(m) for m in all_items],
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 
@@ -238,12 +248,12 @@ async def send_outreach(
     return DataResponse(data=OutreachResponse.model_validate(outreach))
 
 
-@router.get("/outreach", response_model=ListResponse[OutreachResponse])
+@router.get("/outreach", response_model=CursorListResponse[OutreachResponse])
 async def list_outreach(
     org_id: str | None = Query(None, description="Filter by sending org (sent view)"),
     status: str | None = None,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -256,12 +266,17 @@ async def list_outreach(
         org_id=org_id,
         user_id=None if org_id else user.id,
         status=status,
-        limit=per_page,
-        offset=(page - 1) * per_page,
+        limit=limit,
+        cursor=cursor,
     )
-    return ListResponse(
-        data=[OutreachResponse.model_validate(o) for o in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+    all_items = list(items) if not isinstance(items, list) else items
+    has_more = len(all_items) > limit
+    if has_more:
+        all_items = all_items[:limit]
+    next_cursor = all_items[-1].id if has_more and all_items else None
+    return CursorListResponse(
+        data=[OutreachResponse.model_validate(o) for o in all_items],
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 
@@ -290,12 +305,12 @@ async def respond_to_outreach(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@router.get("/outcomes", response_model=ListResponse[OutcomeEventResponse])
+@router.get("/outcomes", response_model=CursorListResponse[OutcomeEventResponse])
 async def list_outcomes(
     event_type: str | None = None,
     visibility: str | None = None,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -305,12 +320,17 @@ async def list_outcomes(
         user.id,
         event_type=event_type,
         visibility=visibility,
-        limit=per_page,
-        offset=(page - 1) * per_page,
+        limit=limit,
+        cursor=cursor,
     )
-    return ListResponse(
-        data=[OutcomeEventResponse.model_validate(e) for e in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+    all_items = list(items) if not isinstance(items, list) else items
+    has_more = len(all_items) > limit
+    if has_more:
+        all_items = all_items[:limit]
+    next_cursor = all_items[-1].id if has_more and all_items else None
+    return CursorListResponse(
+        data=[OutcomeEventResponse.model_validate(e) for e in all_items],
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 

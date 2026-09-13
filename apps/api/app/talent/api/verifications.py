@@ -1,18 +1,19 @@
 """Employer verification + internship supervision API endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.models.organization import OrgRole
 from app.models.user import User
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta
+from app.schemas.base import DataResponse
 from app.talent.models.application import Placement
 from app.talent.models.internship import (
     CohortOpportunityExposure,
     InternshipSupervision,
 )
+from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 from app.talent.schemas.verification import (
     CohortExposureResponse,
     CreateSupervisionRequest,
@@ -142,12 +143,12 @@ async def create_supervision(
     return DataResponse(data=SupervisionResponse.model_validate(supervision))
 
 
-@router.get("/supervisions", response_model=ListResponse[SupervisionResponse])
+@router.get("/supervisions", response_model=CursorListResponse[SupervisionResponse])
 async def list_supervisions(
     school_org_id: str = Query(...),
     status: str | None = None,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -159,23 +160,22 @@ async def list_supervisions(
     if status:
         q = q.where(InternshipSupervision.status == status)
 
-    count_q = select(func.count()).select_from(q.subquery())
-    total = (await db.execute(count_q)).scalar() or 0
 
+    if cursor:
+        q = q.where(InternshipSupervision.id < cursor)
     q = (
         q.order_by(InternshipSupervision.created_at.desc())
-        .limit(per_page)
-        .offset((page - 1) * per_page)
+        .limit(limit + 1)
     )
     result = await db.execute(q)
-    return ListResponse(
-        data=[SupervisionResponse.model_validate(s) for s in result.scalars().all()],
-        meta=PaginationMeta(
-            total=total,
-            page=page,
-            per_page=per_page,
-            has_more=page * per_page < total,
-        ),
+    all_items = list(result.scalars().all())
+    has_more = len(all_items) > limit
+    if has_more:
+        all_items = all_items[:limit]
+    next_cursor = all_items[-1].id if has_more and all_items else None
+    return CursorListResponse(
+        data=[SupervisionResponse.model_validate(s) for s in all_items],
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 

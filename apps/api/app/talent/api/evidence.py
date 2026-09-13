@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
-from app.schemas.base import DataResponse, ListResponse, PaginationMeta
+from app.schemas.base import DataResponse
+from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 from app.talent.schemas.evidence import (
     EvidenceResponse,
     ProvenanceResponse,
@@ -26,12 +27,12 @@ from app.talent.services.scoring import compute_capability_profile
 router = APIRouter(prefix="/talent", tags=["Talent — Evidence"])
 
 
-@router.get("/evidence", response_model=ListResponse[EvidenceResponse])
+@router.get("/evidence", response_model=CursorListResponse[EvidenceResponse])
 async def list_evidence(
     capability_id: str | None = None,
     status: str = "active",
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -41,12 +42,17 @@ async def list_evidence(
         user.id,
         capability_id=capability_id,
         status=status,
-        limit=per_page,
-        offset=(page - 1) * per_page,
+        limit=limit,
+        cursor=cursor,
     )
-    return ListResponse(
-        data=[EvidenceResponse.model_validate(e) for e in items],
-        meta=PaginationMeta(total=total, page=page, per_page=per_page, has_more=page * per_page < total),
+    all_items = list(items) if not isinstance(items, list) else items
+    has_more = len(all_items) > limit
+    if has_more:
+        all_items = all_items[:limit]
+    next_cursor = all_items[-1].id if has_more and all_items else None
+    return CursorListResponse(
+        data=[EvidenceResponse.model_validate(e) for e in all_items],
+        meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
 
