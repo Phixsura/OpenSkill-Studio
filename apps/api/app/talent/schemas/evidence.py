@@ -62,6 +62,11 @@ class CapabilityScoreResponse(BaseModel):
     level: int
     level_label: str
     score: float
+    # Multi-dimensional signals (v2.0.0+)
+    depth: float
+    breadth: float
+    recency: float
+    velocity: float
     confidence: float
     evidence_count: int
     substantial_evidence_count: int

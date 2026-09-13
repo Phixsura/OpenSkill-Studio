@@ -41,6 +41,9 @@ from app.talent.models.passport import (  # noqa: F401
     PassportSnapshot,
     SkillPassport,
 )
+from app.talent.models.scoring import (  # noqa: F401
+    CapabilityScoreSnapshot,
+)
 from app.talent.models.talent_pool import (  # noqa: F401
     TalentOutreach,
     TalentPool,

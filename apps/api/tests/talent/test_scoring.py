@@ -4,7 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 from app.talent.services.scoring import (
     SCORING_VERSION,
+    compute_recency,
     compute_score_from_evidence,
+    compute_velocity,
     decay_factor,
     determine_level,
 )
@@ -178,3 +180,140 @@ class TestDetermineLevel:
 
     def test_scoring_version_is_set(self):
         assert SCORING_VERSION == "2.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Multi-dimensional scoring tests (v2.0.0)
+# ---------------------------------------------------------------------------
+
+
+class TestRecency:
+    def _make_evidence(self, **overrides):
+        defaults = {
+            "score_normalized": 0.8,
+            "verification_level": "instructor_verified",
+            "confidence": 1.0,
+            "occurred_at": datetime.now(UTC),
+            "status": "active",
+            "expires_at": None,
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_no_evidence_returns_zero(self):
+        assert compute_recency([], datetime.now(UTC)) == 0.0
+
+    def test_today_evidence_returns_one(self):
+        now = datetime.now(UTC)
+        evs = [self._make_evidence(occurred_at=now)]
+        assert abs(compute_recency(evs, now) - 1.0) < 0.01
+
+    def test_old_evidence_decays(self):
+        now = datetime.now(UTC)
+        old = now - timedelta(days=360)
+        evs = [self._make_evidence(occurred_at=old)]
+        result = compute_recency(evs, now)
+        # 360 days / 180 σ → Gaussian decay ≈ exp(-0.5 * 4) ≈ 0.135
+        assert result < 0.2
+
+    def test_mixed_uses_most_recent(self):
+        now = datetime.now(UTC)
+        evs = [
+            self._make_evidence(occurred_at=now - timedelta(days=300)),
+            self._make_evidence(occurred_at=now - timedelta(days=10)),
+        ]
+        result = compute_recency(evs, now)
+        # Should use the 10-day-old evidence → high recency
+        assert result > 0.9
+
+    def test_inactive_evidence_excluded(self):
+        now = datetime.now(UTC)
+        evs = [
+            self._make_evidence(occurred_at=now, status="voided"),
+        ]
+        assert compute_recency(evs, now) == 0.0
+
+    def test_future_evidence_clamps_to_one(self):
+        now = datetime.now(UTC)
+        evs = [self._make_evidence(occurred_at=now + timedelta(days=5))]
+        assert compute_recency(evs, now) == 1.0
+
+
+class TestVelocity:
+    def _make_evidence(self, **overrides):
+        defaults = {
+            "score_normalized": 0.8,
+            "verification_level": "instructor_verified",
+            "confidence": 1.0,
+            "occurred_at": datetime.now(UTC),
+            "status": "active",
+            "expires_at": None,
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_no_evidence_returns_zero(self):
+        assert compute_velocity([], datetime.now(UTC)) == 0.0
+
+    def test_only_recent_evidence_moderate_velocity(self):
+        now = datetime.now(UTC)
+        # 3 evidence in last 90 days, 0 in prior 90
+        evs = [
+            self._make_evidence(occurred_at=now - timedelta(days=10)),
+            self._make_evidence(occurred_at=now - timedelta(days=30)),
+            self._make_evidence(occurred_at=now - timedelta(days=60)),
+        ]
+        result = compute_velocity(evs, now)
+        # prior=0, recent=3 → min(3/3.0, 1.0) = 1.0
+        assert result == 1.0
+
+    def test_accelerating_learner(self):
+        now = datetime.now(UTC)
+        # 4 recent, 2 prior → ratio=2.0, normalized: 2.0/2.0 = 1.0
+        evs = [
+            self._make_evidence(occurred_at=now - timedelta(days=10)),
+            self._make_evidence(occurred_at=now - timedelta(days=30)),
+            self._make_evidence(occurred_at=now - timedelta(days=50)),
+            self._make_evidence(occurred_at=now - timedelta(days=70)),
+            self._make_evidence(occurred_at=now - timedelta(days=100)),
+            self._make_evidence(occurred_at=now - timedelta(days=150)),
+        ]
+        result = compute_velocity(evs, now)
+        assert result == 1.0
+
+    def test_decelerating_learner(self):
+        now = datetime.now(UTC)
+        # 1 recent, 4 prior → ratio=0.25, normalized: 0.125
+        evs = [
+            self._make_evidence(occurred_at=now - timedelta(days=30)),
+            self._make_evidence(occurred_at=now - timedelta(days=100)),
+            self._make_evidence(occurred_at=now - timedelta(days=120)),
+            self._make_evidence(occurred_at=now - timedelta(days=140)),
+            self._make_evidence(occurred_at=now - timedelta(days=160)),
+        ]
+        result = compute_velocity(evs, now)
+        assert result < 0.2
+
+    def test_inactive_excluded(self):
+        now = datetime.now(UTC)
+        evs = [
+            self._make_evidence(occurred_at=now - timedelta(days=10), status="voided"),
+        ]
+        assert compute_velocity(evs, now) == 0.0
+
+    def test_only_old_evidence_zero(self):
+        now = datetime.now(UTC)
+        # All evidence older than 180 days
+        evs = [
+            self._make_evidence(occurred_at=now - timedelta(days=200)),
+            self._make_evidence(occurred_at=now - timedelta(days=300)),
+        ]
+        result = compute_velocity(evs, now)
+        assert result == 0.0
+
+    def test_single_recent_evidence_moderate(self):
+        now = datetime.now(UTC)
+        evs = [self._make_evidence(occurred_at=now - timedelta(days=10))]
+        result = compute_velocity(evs, now)
+        # prior=0, recent=1 → min(1/3.0, 1.0) ≈ 0.333
+        assert abs(result - 1 / 3) < 0.01
