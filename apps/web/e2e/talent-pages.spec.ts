@@ -16,7 +16,15 @@ const api500s: string[] = [];
 const consoleErrors: string[] = [];
 
 test.beforeAll(async ({ browser }) => {
-  auth = await registerUser("Talent E2E User");
+  // Retry registration (may hit rate limits from prior runs)
+  for (let i = 0; i < 5; i++) {
+    try {
+      auth = await registerUser("Talent E2E User");
+      break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
   ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   page = await ctx.newPage();
 

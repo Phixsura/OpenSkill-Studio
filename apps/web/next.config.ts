@@ -31,7 +31,7 @@ const config: NextConfig = {
               "default-src 'self'",
               // Next.js App Router requires unsafe-inline for its runtime scripts;
               // nonce-based CSP would need a custom middleware generating per-request nonces.
-              "script-src 'self' 'unsafe-inline'",
+              `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' blob: data: https:",
               "font-src 'self' data:",
