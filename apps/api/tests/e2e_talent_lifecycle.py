@@ -454,7 +454,7 @@ async def main() -> bool:  # noqa: PLR0915
 
         other_email = f"e2e-other-{uid()}@test.com"
         await post_with_backoff(c, "/auth/register",
-                                json={"email": other_email, "password": "TestPass123!", "display_name": "O"})
+                                json={"email": other_email, "password": "TestPass123!", "display_name": "Other"})
         r = await post_with_backoff(c, "/auth/login",
                                     json={"email": other_email, "password": "TestPass123!"})
         ho = {"Authorization": f"Bearer {r.json()['access_token']}"}

@@ -18,10 +18,12 @@ talent_router = APIRouter()
 talent_router.include_router(capabilities_router)
 talent_router.include_router(evidence_router)
 talent_router.include_router(passport_router)
+# matching_router BEFORE employers_router: /opportunities/matches must
+# resolve before /opportunities/{opp_id} catches "matches" as an ID
+talent_router.include_router(matching_router)
 talent_router.include_router(employers_router)
 talent_router.include_router(applications_router)
 talent_router.include_router(assessments_router)
-talent_router.include_router(matching_router)
 talent_router.include_router(intelligence_router)
 talent_router.include_router(dashboards_router)
 talent_router.include_router(verifications_router)
