@@ -7,17 +7,22 @@ Wired features:
 
 from fastapi import APIRouter, Depends
 
+from app.talent.api.activity import router as activity_router
 from app.talent.api.applications import router as applications_router
 from app.talent.api.assessments import router as assessments_router
 from app.talent.api.bulk import router as bulk_router
+from app.talent.api.candidate_notes import router as candidate_notes_router
 from app.talent.api.capabilities import router as capabilities_router
 from app.talent.api.dashboards import router as dashboards_router
 from app.talent.api.did import router as did_router
 from app.talent.api.employers import router as employers_router
+from app.talent.api.endorsements import router as endorsements_router
 from app.talent.api.etag import ETagRoute
 from app.talent.api.evidence import router as evidence_router
+from app.talent.api.inference import router as inference_router
 from app.talent.api.intelligence import router as intelligence_router
 from app.talent.api.matching import router as matching_router
+from app.talent.api.notifications import router as notification_router
 from app.talent.api.passport import router as passport_router
 from app.talent.api.pools import router as pools_router
 from app.talent.api.rate_limit import rate_limit_talent
@@ -46,3 +51,8 @@ talent_router.include_router(pools_router)
 talent_router.include_router(did_router)
 talent_router.include_router(bulk_router)
 talent_router.include_router(scorecard_router)
+talent_router.include_router(inference_router)
+talent_router.include_router(notification_router)
+talent_router.include_router(endorsements_router)
+talent_router.include_router(activity_router)
+talent_router.include_router(candidate_notes_router)

@@ -1,3 +1,7 @@
+from app.talent.models.activity import (  # noqa: F401
+    ACTIVITY_ACTION_TYPES,
+    TalentActivityLog,
+)
 from app.talent.models.application import (  # noqa: F401
     APPLICATION_TRANSITIONS,
     TERMINAL_STATUSES,
@@ -12,6 +16,9 @@ from app.talent.models.assessment import (  # noqa: F401
     Credential,
     CredentialRule,
 )
+from app.talent.models.candidate_note import (  # noqa: F401
+    CandidateNote,
+)
 from app.talent.models.capability import (  # noqa: F401
     EDGE_TYPES,
     MAPPING_SOURCE_TYPES,
@@ -22,6 +29,10 @@ from app.talent.models.capability import (  # noqa: F401
 from app.talent.models.employer import (  # noqa: F401
     EmployerProfile,
     Opportunity,
+)
+from app.talent.models.endorsement import (  # noqa: F401
+    ENDORSEMENT_RELATIONSHIPS,
+    SkillEndorsement,
 )
 from app.talent.models.evidence import (  # noqa: F401
     EVIDENCE_SOURCE_TYPES,
@@ -35,6 +46,11 @@ from app.talent.models.internship import (  # noqa: F401
     EmployerVerification,
     InternshipSupervision,
     OutcomeEvent,
+)
+from app.talent.models.notification import (  # noqa: F401
+    NOTIFICATION_EVENT_TYPES,
+    NotificationPreference,
+    TalentNotification,
 )
 from app.talent.models.passport import (  # noqa: F401
     PASSPORT_SHAREABLE_FIELDS,

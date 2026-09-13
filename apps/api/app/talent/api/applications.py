@@ -276,6 +276,38 @@ async def transition_application(
         },
     )
 
+    # Notify the applicant about the status change
+    from app.talent.services.notifications import TalentNotificationService
+
+    notif_svc = TalentNotificationService(db)
+    status_messages = {
+        "screening": "Your application is being reviewed",
+        "interview": "You've been selected for an interview!",
+        "assessment": "You have an assessment to complete",
+        "offer": "Congratulations! You've received an offer!",
+        "rejected": "Your application was not selected this time",
+        "hired": "Welcome aboard! Your placement has been confirmed",
+    }
+    notif_message = status_messages.get(
+        body.status, f"Your application status changed to {body.status}"
+    )
+    try:
+        await notif_svc.send(
+            user_id=app.user_id,
+            event_type="application_status_changed",
+            title=f"Application Update: {opp.title}",
+            message=notif_message,
+            metadata={
+                "application_id": app.id,
+                "opportunity_id": app.opportunity_id,
+                "from_status": old_status,
+                "to_status": body.status,
+            },
+        )
+        await db.commit()
+    except Exception:
+        pass  # Notification failure must not block transition
+
     await db.refresh(app)
     return DataResponse(data=ApplicationResponse.model_validate(app))
 

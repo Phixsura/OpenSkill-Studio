@@ -1,7 +1,6 @@
-"""Employer / Opportunity API."""
+"""Employer / Opportunity API — includes public career page (I6)."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
@@ -123,32 +122,39 @@ async def create_opportunity(
 
 @router.get("/opportunities", response_model=CursorListResponse[OpportunityResponse])
 async def list_opportunities(
+    q: str | None = Query(None, description="Full-text search on title/description"),
     opportunity_type: str | None = None,
+    location_mode: str | None = Query(None, description="remote, hybrid, onsite"),
+    capabilities: str | None = Query(None, description="Comma-separated capability IDs"),
+    sort: str = Query("newest", description="newest, deadline, relevance"),
     status: str = "open",
     cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List open opportunities."""
-    q = select(Opportunity).where(Opportunity.status == status)
-    if opportunity_type:
-        q = q.where(Opportunity.opportunity_type == opportunity_type)
+    """Search and list open opportunities.
 
+    Supports full-text search (q), faceted filters (opportunity_type,
+    location_mode, capabilities), and sort (newest, deadline, relevance).
+    """
+    from app.talent.services.opportunity_search import OpportunitySearchService
 
-    if cursor:
-        q = q.where(Opportunity.id < cursor)
-    q = q.order_by(Opportunity.created_at.desc()).limit(limit + 1)
-    result = await db.execute(q)
-    items = result.scalars().all()
-
-    all_items = list(items) if not isinstance(items, list) else items
-    has_more = len(all_items) > limit
-    if has_more:
-        all_items = all_items[:limit]
-    next_cursor = all_items[-1].id if has_more and all_items else None
+    svc = OpportunitySearchService(db)
+    cap_ids = [c.strip() for c in capabilities.split(",") if c.strip()] if capabilities else None
+    items, has_more = await svc.search(
+        q=q,
+        capability_ids=cap_ids,
+        opportunity_type=opportunity_type,
+        location_mode=location_mode,
+        status=status,
+        sort=sort,
+        cursor=cursor,
+        limit=limit,
+    )
+    next_cursor = items[-1].id if has_more and items else None
     return CursorListResponse(
-        data=[OpportunityResponse.model_validate(o) for o in all_items],
+        data=[OpportunityResponse.model_validate(o) for o in items],
         meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
@@ -186,3 +192,52 @@ async def update_opportunity(
     await db.commit()
     await db.refresh(opp)
     return DataResponse(data=OpportunityResponse.model_validate(opp))
+
+
+# ---- Public Career Page (I6) ----
+
+
+@router.get("/employers/{org_id}/career-page", response_model=DataResponse[dict])
+async def get_career_page(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public career page — employer profile + open opportunities.
+
+    No authentication required. Returns employer branding and open positions.
+    """
+    from sqlalchemy import select as sa_select
+
+    profile = await db.get(EmployerProfile, org_id)
+    if not profile:
+        raise HTTPException(404, "Employer not found")
+
+    opp_q = (
+        sa_select(Opportunity)
+        .where(Opportunity.employer_org_id == org_id, Opportunity.status == "open")
+        .order_by(Opportunity.created_at.desc())
+        .limit(50)
+    )
+    opp_result = await db.execute(opp_q)
+    opportunities = opp_result.scalars().all()
+
+    return DataResponse(data={
+        "profile": {
+            "org_id": profile.org_id,
+            "company_size": profile.company_size,
+            "industry": profile.industry,
+            "website_url": profile.website_url,
+            "logo_url": profile.logo_url,
+            "description": profile.description,
+            "cover_image_url": getattr(profile, "cover_image_url", None),
+            "culture_text": getattr(profile, "culture_text", None),
+            "benefits": getattr(profile, "benefits", None) or [],
+            "values": getattr(profile, "values", None) or [],
+            "social_links": getattr(profile, "social_links", None) or {},
+            "verification_status": profile.verification_status,
+        },
+        "opportunities": [
+            OpportunityResponse.model_validate(o).model_dump()
+            for o in opportunities
+        ],
+    })

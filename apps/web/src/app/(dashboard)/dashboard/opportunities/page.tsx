@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -76,55 +76,40 @@ export default function OpportunitiesPage() {
   const [locationFilter, setLocationFilter] = useState("");
   const [sortBy, setSortBy] = useState("newest");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<(string | null)[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Debounce search query (300ms)
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+      setCursor(null);
+      setCursorStack([]);
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchQuery]);
+
+  // Server-side search: all filters go to the API
   const { data, isLoading } = useQuery({
-    queryKey: ["opportunities", typeFilter, cursor],
+    queryKey: ["opportunities", typeFilter, locationFilter, sortBy, debouncedQuery, cursor],
     queryFn: () => {
       const params = new URLSearchParams({ status: "open", limit: "12" });
       if (typeFilter) params.set("opportunity_type", typeFilter);
+      if (locationFilter) params.set("location_mode", locationFilter);
+      if (sortBy) params.set("sort", sortBy);
+      if (debouncedQuery.trim()) params.set("q", debouncedQuery.trim());
       if (cursor) params.set("cursor", cursor);
       return apiWithAuth<CursorResponse>(`/talent/opportunities?${params}`);
     },
   });
 
-  const opportunities = data?.data ?? [];
+  const filtered = data?.data ?? [];
   const meta = data?.meta;
-
-  // Client-side filtering for search, location, and sort
-  const filtered = useMemo(() => {
-    let result = [...opportunities];
-
-    // Search filter (client-side on title/description)
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(
-        (opp) =>
-          opp.title.toLowerCase().includes(q) ||
-          (opp.description && opp.description.toLowerCase().includes(q)),
-      );
-    }
-
-    // Location filter
-    if (locationFilter) {
-      result = result.filter((opp) => opp.location_mode === locationFilter);
-    }
-
-    // Sort
-    if (sortBy === "deadline") {
-      result.sort((a, b) => {
-        if (!a.application_deadline) return 1;
-        if (!b.application_deadline) return -1;
-        return (
-          new Date(a.application_deadline).getTime() - new Date(b.application_deadline).getTime()
-        );
-      });
-    }
-    // "newest" is already the API default order
-
-    return result;
-  }, [opportunities, searchQuery, locationFilter, sortBy]);
 
   const resetFilters = () => {
     setTypeFilter("");

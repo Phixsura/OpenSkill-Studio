@@ -34,6 +34,12 @@ class EmployerProfile(Base):
     website_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Employer branding fields (I6)
+    cover_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    culture_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    benefits: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    values: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    social_links: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # verified | pending | unverified
     verification_status: Mapped[str] = mapped_column(
         String(20), default="unverified", server_default="'unverified'"

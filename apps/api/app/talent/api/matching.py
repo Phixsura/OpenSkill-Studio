@@ -101,6 +101,27 @@ async def get_career_paths(
     return DataResponse(data=[dataclasses.asdict(s) for s in suggestions])
 
 
+@router.get("/learning-plan", response_model=DataResponse[list[dict]])
+async def get_learning_plan(
+    opportunity_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Generate a personalized learning plan based on skill gaps.
+
+    If opportunity_id is provided, gaps are derived from that opportunity's
+    requirements. Otherwise, uses career path suggestions.
+    """
+    from app.talent.services.learning_plan import LearningPlanService
+
+    svc = LearningPlanService(db)
+    recommendations = await svc.generate_plan(
+        user.id,
+        target_opportunity_id=opportunity_id,
+    )
+    return DataResponse(data=[dataclasses.asdict(r) for r in recommendations])
+
+
 @router.post("/opportunities/{opp_id}/match/fairness", response_model=DataResponse[dict])
 async def get_match_fairness(
     opp_id: str,
