@@ -169,7 +169,7 @@ async def get_application(
     # Candidate sees own application
     if app.user_id == user.id:
         await db.refresh(app)
-    return DataResponse(data=ApplicationResponse.model_validate(app))
+        return DataResponse(data=ApplicationResponse.model_validate(app))
 
     # Employer org members can see applications to their opportunities
     await require_org_member(opp.employer_org_id, user, db)
