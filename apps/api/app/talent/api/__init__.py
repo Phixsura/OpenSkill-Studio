@@ -1,6 +1,11 @@
-"""Talent API router — aggregates all talent sub-routers."""
+"""Talent API router — aggregates all talent sub-routers.
 
-from fastapi import APIRouter
+Wired features:
+  - ETagRoute on GET-heavy routers (capabilities, evidence, passport)
+  - Rate limiting dependency on the aggregate router (100 req/min per user)
+"""
+
+from fastapi import APIRouter, Depends
 
 from app.talent.api.applications import router as applications_router
 from app.talent.api.assessments import router as assessments_router
@@ -9,15 +14,22 @@ from app.talent.api.capabilities import router as capabilities_router
 from app.talent.api.dashboards import router as dashboards_router
 from app.talent.api.did import router as did_router
 from app.talent.api.employers import router as employers_router
+from app.talent.api.etag import ETagRoute
 from app.talent.api.evidence import router as evidence_router
 from app.talent.api.intelligence import router as intelligence_router
 from app.talent.api.matching import router as matching_router
 from app.talent.api.passport import router as passport_router
 from app.talent.api.pools import router as pools_router
+from app.talent.api.rate_limit import rate_limit_talent
 from app.talent.api.scorecards import router as scorecard_router
 from app.talent.api.verifications import router as verifications_router
 
-talent_router = APIRouter()
+# Apply ETagRoute on GET-heavy routers for conditional request support
+capabilities_router.route_class = ETagRoute
+evidence_router.route_class = ETagRoute
+passport_router.route_class = ETagRoute
+
+talent_router = APIRouter(dependencies=[Depends(rate_limit_talent)])
 talent_router.include_router(capabilities_router)
 talent_router.include_router(evidence_router)
 talent_router.include_router(passport_router)

@@ -2,7 +2,15 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+PASSPORT_VISIBILITY_SCOPES = frozenset({
+    "private",
+    "organization_only",
+    "specific_employer",
+    "share_link",
+    "public_subset",
+})
 
 
 class UpdatePassportRequest(BaseModel):
@@ -13,6 +21,16 @@ class UpdatePassportRequest(BaseModel):
     availability_note: str | None = Field(None, max_length=500)
     discoverable: bool | None = None
     discoverable_to: list[str] | None = None
+
+    @field_validator("default_visibility")
+    @classmethod
+    def _validate_visibility(cls, v: str | None) -> str | None:
+        if v is not None and v not in PASSPORT_VISIBILITY_SCOPES:
+            raise ValueError(
+                f"Invalid visibility scope: {v}. "
+                f"Must be one of {sorted(PASSPORT_VISIBILITY_SCOPES)}"
+            )
+        return v
 
 
 class PassportResponse(BaseModel):
