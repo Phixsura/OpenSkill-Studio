@@ -77,7 +77,7 @@ class RunResponse(BaseModel):
     started_at: datetime | None
     submitted_at: datetime | None
     deadline_at: datetime | None
-    results: dict | None
+    results: dict | list | None = None
     project_id: str | None
     reviewed_by: str | None
     reviewed_at: datetime | None
