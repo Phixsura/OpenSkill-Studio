@@ -49,6 +49,7 @@ async def update_passport(
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
+    await db.refresh(passport)
     return DataResponse(data=PassportResponse.model_validate(passport))
 
 
@@ -71,6 +72,7 @@ async def create_snapshot(
         expires_at=body.expires_at,
     )
     await db.commit()
+    await db.refresh(snapshot)
     return DataResponse(data=SnapshotResponse.model_validate(snapshot))
 
 

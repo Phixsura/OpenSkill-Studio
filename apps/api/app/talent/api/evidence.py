@@ -83,6 +83,7 @@ async def record_evidence(
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
+    await db.refresh(evidence)
     return DataResponse(data=EvidenceResponse.model_validate(evidence))
 
 
@@ -123,6 +124,7 @@ async def void_evidence(
     if not result:
         raise HTTPException(409, "Evidence is not active")
     await db.commit()
+    await db.refresh(result)
     return DataResponse(data=EvidenceResponse.model_validate(result))
 
 

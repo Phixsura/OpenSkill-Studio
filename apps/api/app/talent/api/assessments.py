@@ -48,6 +48,7 @@ async def create_blueprint(
         created_by=user.id,
     )
     await db.commit()
+    await db.refresh(bp)
     return DataResponse(data=BlueprintResponse.model_validate(bp))
 
 
@@ -109,6 +110,7 @@ async def start_run(
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
     await db.commit()
+    await db.refresh(run)
     return DataResponse(data=RunResponse.model_validate(run))
 
 
@@ -130,6 +132,7 @@ async def submit_run(
     if not run:
         raise HTTPException(404, "Assessment run not found")
     await db.commit()
+    await db.refresh(run)
     return DataResponse(data=RunResponse.model_validate(run))
 
 
@@ -159,6 +162,7 @@ async def review_run(
     if not result:
         raise HTTPException(404, "Assessment run not found")
     await db.commit()
+    await db.refresh(result)
     return DataResponse(data=RunResponse.model_validate(result))
 
 
@@ -220,6 +224,7 @@ async def create_credential_rule(
         org_id=body.org_id,
     )
     await db.commit()
+    await db.refresh(rule)
     return DataResponse(data=CredentialRuleResponse.model_validate(rule))
 
 
@@ -241,7 +246,7 @@ async def evaluate_credential(
     return DataResponse(data=result)
 
 
-@router.post("/credentials/issue", status_code=201)
+@router.post("/credentials/issue", response_model=DataResponse[CredentialResponse], status_code=201)
 async def issue_credential(
     body: IssueCredentialRequest,
     db: AsyncSession = Depends(get_db),
@@ -262,7 +267,7 @@ async def issue_credential(
 
     svc = CredentialService(db)
     try:
-        cred = await svc.issue_credential(body.credential_type, target_user_id, body.org_id)
+        cred = await svc.issue_credential(body.credential_type, target_user_id, org_id=body.org_id)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
@@ -282,13 +287,5 @@ async def issue_credential(
             },
         )
 
-    return DataResponse(data={
-        "id": cred.id,
-        "credential_type": cred.credential_type,
-        "version": cred.version,
-        "user_id": cred.user_id,
-        "status": cred.status or "active",
-        "issued_at": cred.issued_at.isoformat() if cred.issued_at else None,
-        "created_at": cred.created_at.isoformat() if cred.created_at else None,
-        "capabilities": cred.capabilities or [],
-    })
+    await db.refresh(cred)
+    return DataResponse(data=CredentialResponse.model_validate(cred))

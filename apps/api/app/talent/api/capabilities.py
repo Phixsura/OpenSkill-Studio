@@ -78,6 +78,7 @@ async def create_capability(
         sort_order=body.sort_order,
     )
     await db.commit()
+    await db.refresh(cap)
     return DataResponse(data=CapabilityResponse.model_validate(cap))
 
 
@@ -108,6 +109,7 @@ async def update_capability(
     if not cap:
         raise HTTPException(404, "Capability not found")
     await db.commit()
+    await db.refresh(cap)
     return DataResponse(data=CapabilityResponse.model_validate(cap))
 
 
@@ -127,6 +129,7 @@ async def merge_capability(
     if not cap:
         raise HTTPException(404, "Capability not found")
     await db.commit()
+    await db.refresh(cap)
     return DataResponse(data=CapabilityResponse.model_validate(cap))
 
 
@@ -154,6 +157,7 @@ async def add_edge(
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
+    await db.refresh(edge)
     return DataResponse(data=EdgeResponse.model_validate(edge))
 
 
@@ -223,6 +227,7 @@ async def create_mapping(
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
+    await db.refresh(mapping)
     return DataResponse(data=MappingResponse.model_validate(mapping))
 
 

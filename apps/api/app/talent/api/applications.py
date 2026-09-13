@@ -128,6 +128,7 @@ async def apply_to_opportunity(
         },
     )
 
+    await db.refresh(app)
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
@@ -167,10 +168,12 @@ async def get_application(
 
     # Candidate sees own application
     if app.user_id == user.id:
-        return DataResponse(data=ApplicationResponse.model_validate(app))
+        await db.refresh(app)
+    return DataResponse(data=ApplicationResponse.model_validate(app))
 
     # Employer org members can see applications to their opportunities
     await require_org_member(opp.employer_org_id, user, db)
+    await db.refresh(app)
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
@@ -267,6 +270,7 @@ async def transition_application(
         },
     )
 
+    await db.refresh(app)
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
@@ -295,6 +299,7 @@ async def create_interview(
     )
     db.add(stage)
     await db.commit()
+    await db.refresh(stage)
     return DataResponse(data=InterviewStageResponse.model_validate(stage))
 
 
@@ -321,6 +326,7 @@ async def update_interview(
         setattr(stage, key, value)
 
     await db.commit()
+    await db.refresh(stage)
     return DataResponse(data=InterviewStageEmployerResponse.model_validate(stage))
 
 

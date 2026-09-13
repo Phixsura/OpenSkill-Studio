@@ -430,6 +430,7 @@ class CredentialService:
         Supersedes any existing active credential of the same type for the user.
         Generates CapabilityEvidence with source_type='credential'.
         """
+
         evaluation = await self.evaluate(credential_type, user_id)
         if not evaluation["eligible"]:
             raise ValueError(
@@ -484,7 +485,7 @@ class CredentialService:
 
         # Generate evidence for each capability in the credential
         ev_svc = EvidenceService(self.db)
-        for cap in credential.capabilities:
+        for i, cap in enumerate(credential.capabilities):
             await ev_svc.record_evidence(
                 user_id=user_id,
                 capability_id=cap["capability_id"],

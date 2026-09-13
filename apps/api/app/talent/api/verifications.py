@@ -138,6 +138,7 @@ async def create_supervision(
     )
     db.add(supervision)
     await db.commit()
+    await db.refresh(supervision)
     return DataResponse(data=SupervisionResponse.model_validate(supervision))
 
 
@@ -197,6 +198,7 @@ async def update_supervision(
         setattr(sup, key, value)
 
     await db.commit()
+    await db.refresh(sup)
     return DataResponse(data=SupervisionResponse.model_validate(sup))
 
 
@@ -233,6 +235,7 @@ async def expose_opportunity(
     )
     db.add(exposure)
     await db.commit()
+    await db.refresh(exposure)
     return DataResponse(data=CohortExposureResponse.model_validate(exposure))
 
 

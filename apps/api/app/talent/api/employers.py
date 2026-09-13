@@ -44,6 +44,7 @@ async def create_employer_profile(
     )
     db.add(profile)
     await db.commit()
+    await db.refresh(profile)
     return DataResponse(data=EmployerProfileResponse.model_validate(profile))
 
 
@@ -77,6 +78,7 @@ async def update_employer_profile(
         if key in editable:
             setattr(profile, key, value)
     await db.commit()
+    await db.refresh(profile)
     return DataResponse(data=EmployerProfileResponse.model_validate(profile))
 
 
@@ -114,6 +116,7 @@ async def create_opportunity(
     )
     db.add(opp)
     await db.commit()
+    await db.refresh(opp)
     return DataResponse(data=OpportunityResponse.model_validate(opp))
 
 
@@ -175,4 +178,5 @@ async def update_opportunity(
         setattr(opp, key, value)
 
     await db.commit()
+    await db.refresh(opp)
     return DataResponse(data=OpportunityResponse.model_validate(opp))

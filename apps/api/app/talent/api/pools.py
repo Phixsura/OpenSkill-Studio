@@ -61,6 +61,7 @@ async def create_pool(
         created_by=user.id,
     )
     await db.commit()
+    await db.refresh(pool)
     return DataResponse(data=PoolResponse.model_validate(pool))
 
 
@@ -111,6 +112,7 @@ async def update_pool(
     if not updated:
         raise HTTPException(404, "Pool not found")
     await db.commit()
+    await db.refresh(updated)
     return DataResponse(data=PoolResponse.model_validate(updated))
 
 
@@ -134,6 +136,7 @@ async def add_member(
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
+    await db.refresh(membership)
     return DataResponse(data=MembershipResponse.model_validate(membership))
 
 
@@ -180,6 +183,7 @@ async def respond_to_membership(
     if not membership:
         raise HTTPException(404, "Membership not found")
     await db.commit()
+    await db.refresh(membership)
     return DataResponse(data=MembershipResponse.model_validate(membership))
 
 
@@ -230,6 +234,7 @@ async def send_outreach(
             raise HTTPException(429, err_msg) from e
         raise HTTPException(422, err_msg) from e
     await db.commit()
+    await db.refresh(outreach)
     return DataResponse(data=OutreachResponse.model_validate(outreach))
 
 
@@ -276,6 +281,7 @@ async def respond_to_outreach(
     if not outreach:
         raise HTTPException(404, "Outreach not found")
     await db.commit()
+    await db.refresh(outreach)
     return DataResponse(data=OutreachResponse.model_validate(outreach))
 
 
@@ -329,6 +335,7 @@ async def record_outcome(
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await db.commit()
+    await db.refresh(event)
     return DataResponse(data=OutcomeEventResponse.model_validate(event))
 
 
@@ -348,4 +355,5 @@ async def update_outcome_visibility(
     if not event:
         raise HTTPException(404, "Outcome event not found")
     await db.commit()
+    await db.refresh(event)
     return DataResponse(data=OutcomeEventResponse.model_validate(event))
