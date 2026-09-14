@@ -28,10 +28,18 @@ async def get_passport(
     svc = PassportService(db)
     passport = await svc.get_visible_passport(user.id, requesting_user_id=user.id)
     if not passport:
-        # Lazy init
-        await svc.get_or_create_passport(user.id)
-        await db.commit()
-        passport = await svc.get_visible_passport(user.id, requesting_user_id=user.id)
+        # Return empty passport structure instead of INSERT in GET
+        # User should POST/PATCH to create their passport
+        return DataResponse(data={
+            "user_id": user.id,
+            "default_visibility": "private",
+            "discoverable": False,
+            "availability_status": None,
+            "availability_note": None,
+            "preferred_opportunity_types": [],
+            "visible_fields": [],
+            "capabilities": None,
+        })
     return DataResponse(data=passport)
 
 
