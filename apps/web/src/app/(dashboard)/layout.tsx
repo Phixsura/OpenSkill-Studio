@@ -163,6 +163,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         🏆 Credentials
       </NavLink>
       <NavLink
+        href="/dashboard/notifications"
+        active={pathname.startsWith("/dashboard/notifications")}
+        onClick={closeSidebar}
+      >
+        🔔 Notifications
+      </NavLink>
+      <NavLink
         href="/dashboard/settings"
         active={pathname === "/dashboard/settings"}
         onClick={closeSidebar}

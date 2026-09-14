@@ -9,6 +9,7 @@ Authorization rules:
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -514,3 +515,41 @@ async def update_feedback_visibility(
     await db.commit()
     await db.refresh(feedback)
     return DataResponse(data=FeedbackResponse.model_validate(feedback))
+
+
+# ---- Application Comparison (N16) ----
+
+
+class CompareRequest(BaseModel):
+    application_ids: list[str] = Field(..., min_length=2, max_length=10)
+
+
+@router.post(
+    "/opportunities/{opp_id}/compare",
+    response_model=DataResponse[list[dict]],
+)
+async def compare_applications(
+    opp_id: str,
+    body: CompareRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Compare candidates side-by-side — employer org members only."""
+    opp = await db.get(Opportunity, opp_id)
+    if not opp:
+        raise HTTPException(404, "Opportunity not found")
+    await require_org_member(opp.employer_org_id, user, db)
+
+    from app.talent.services.application_comparison import (
+        ApplicationComparisonService,
+    )
+
+    svc = ApplicationComparisonService(db)
+    try:
+        comparisons = await svc.compare(opp_id, body.application_ids)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+    import dataclasses
+
+    return DataResponse(data=[dataclasses.asdict(c) for c in comparisons])

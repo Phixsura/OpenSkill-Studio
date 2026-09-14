@@ -8,7 +8,7 @@ import csv
 import dataclasses
 import io
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -392,3 +392,76 @@ async def compare_team_vs_opportunity(
     svc = TeamAnalyticsService(db)
     comparison = await svc.compare_team_to_requirements(org_id, opportunity_id)
     return DataResponse(data=comparison)
+
+
+# ---- Data Retention & Consent (N20) ----
+
+
+@router.get("/retention/preview", response_model=DataResponse[list[dict]])
+async def preview_retention(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Preview data retention enforcement — what would be affected.
+
+    Admin only. Does NOT modify data. Shows counts per policy.
+    """
+    if not getattr(user, "is_superuser", False):
+        raise HTTPException(403, "Platform admin only")
+    from app.talent.services.data_retention import DataRetentionService
+
+    svc = DataRetentionService(db)
+    reports = await svc.preview_retention()
+    return DataResponse(data=[
+        {
+            "policy": r.policy,
+            "records_affected": r.records_affected,
+            "action": r.action,
+            "cutoff_date": r.cutoff_date.isoformat(),
+        }
+        for r in reports
+    ])
+
+
+@router.post("/retention/enforce", response_model=DataResponse[list[dict]])
+async def enforce_retention(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Enforce data retention policies — deletes/anonymizes old data.
+
+    Admin only. Destructive operation. Recommended to preview first.
+    """
+    if not getattr(user, "is_superuser", False):
+        raise HTTPException(403, "Platform admin only")
+    from app.talent.services.data_retention import DataRetentionService
+
+    svc = DataRetentionService(db)
+    reports = await svc.enforce_retention()
+    await db.commit()
+    return DataResponse(data=[
+        {
+            "policy": r.policy,
+            "records_affected": r.records_affected,
+            "action": r.action,
+            "cutoff_date": r.cutoff_date.isoformat(),
+        }
+        for r in reports
+    ])
+
+
+@router.get("/consent-history", response_model=DataResponse[list[dict]])
+async def get_consent_history(
+    consent_type: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get my consent audit trail — all consent changes I've made."""
+    from app.talent.services.data_retention import DataRetentionService
+
+    svc = DataRetentionService(db)
+    trail = await svc.get_consent_audit_trail(
+        user.id, consent_type=consent_type, limit=limit
+    )
+    return DataResponse(data=trail)

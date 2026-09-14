@@ -37,6 +37,11 @@ from app.talent.models.career_goal import (  # noqa: F401
     MAX_ACTIVE_GOALS,
     CareerGoal,
 )
+from app.talent.models.consent_log import (  # noqa: F401
+    CONSENT_ACTIONS,
+    CONSENT_TYPES,
+    ConsentLog,
+)
 from app.talent.models.credential_pathway import (  # noqa: F401
     PATHWAY_STATUSES,
     CredentialPathway,

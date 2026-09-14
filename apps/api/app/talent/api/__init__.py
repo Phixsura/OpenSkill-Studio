@@ -29,9 +29,12 @@ from app.talent.api.notifications import router as notification_router
 from app.talent.api.passport import router as passport_router
 from app.talent.api.pools import router as pools_router
 from app.talent.api.rate_limit import rate_limit_talent
+from app.talent.api.recommendations import router as recommendations_router
+from app.talent.api.resume import router as resume_router
 from app.talent.api.saved_searches import router as saved_search_router
 from app.talent.api.scheduling import router as scheduling_router
 from app.talent.api.scorecards import router as scorecard_router
+from app.talent.api.self_assessment import router as self_assessment_router
 from app.talent.api.verifications import router as verifications_router
 
 # Apply ETagRoute on GET-heavy routers for conditional request support
@@ -66,3 +69,6 @@ talent_router.include_router(scheduling_router)
 talent_router.include_router(credential_pathway_router)
 talent_router.include_router(career_goal_router)
 talent_router.include_router(bookmark_router)
+talent_router.include_router(self_assessment_router)
+talent_router.include_router(resume_router)
+talent_router.include_router(recommendations_router)
