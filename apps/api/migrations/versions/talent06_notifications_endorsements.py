@@ -102,7 +102,7 @@ def upgrade() -> None:
         sa.Column(
             "capability_id",
             sa.String(26),
-            sa.ForeignKey("talent_capabilities.id", ondelete="CASCADE"),
+            sa.ForeignKey("capabilities.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("relationship", sa.String(30), nullable=False),

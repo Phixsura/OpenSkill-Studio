@@ -36,7 +36,7 @@ def upgrade() -> None:
     op.create_table(
         "talent_offers",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("application_id", sa.String(26), sa.ForeignKey("talent_applications.id"), nullable=False),
+        sa.Column("application_id", sa.String(26), sa.ForeignKey("applications.id"), nullable=False),
         sa.Column("employer_org_id", sa.String(26), sa.ForeignKey("organizations.id"), nullable=False),
         sa.Column("role_title", sa.String(200), nullable=False),
         sa.Column("compensation_text", sa.String(500), nullable=True),
@@ -72,7 +72,7 @@ def upgrade() -> None:
     op.create_table(
         "talent_onboarding_checklists",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("placement_id", sa.String(26), sa.ForeignKey("talent_placements.id"), nullable=False),
+        sa.Column("placement_id", sa.String(26), sa.ForeignKey("placements.id"), nullable=False),
         sa.Column("template_id", sa.String(26), sa.ForeignKey("talent_onboarding_templates.id"), nullable=True),
         sa.Column("tasks", postgresql.JSONB, server_default="[]"),
         sa.Column("completion_percentage", sa.SmallInteger, server_default="0"),
@@ -87,7 +87,7 @@ def upgrade() -> None:
     op.create_table(
         "talent_application_messages",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("application_id", sa.String(26), sa.ForeignKey("talent_applications.id"), nullable=False),
+        sa.Column("application_id", sa.String(26), sa.ForeignKey("applications.id"), nullable=False),
         sa.Column("sender_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("sender_role", sa.String(20), nullable=False),
         sa.Column("message_type", sa.String(30), server_default="'text'"),
