@@ -20,17 +20,20 @@ def generate_passport_html(passport_data: dict) -> str:
     """Generate print-ready HTML for passport PDF export.
 
     This HTML can be converted to PDF via wkhtmltopdf or browser print.
+    All interpolated values are HTML-escaped to prevent XSS.
     """
+    from html import escape
+
     caps = passport_data.get("capabilities", [])
     cap_rows = ""
     for c in caps:
         cap_rows += f"""
         <tr>
-            <td>{c.get('capability_name', '')}</td>
-            <td>L{c.get('level', 0)}</td>
-            <td>{c.get('level_label', '')}</td>
-            <td>{round(c.get('score', 0) * 100)}%</td>
-            <td>{c.get('evidence_count', 0)}</td>
+            <td>{escape(str(c.get('capability_name', '')))}</td>
+            <td>L{int(c.get('level', 0) or 0)}</td>
+            <td>{escape(str(c.get('level_label', '')))}</td>
+            <td>{round(float(c.get('score', 0)) * 100)}%</td>
+            <td>{int(c.get('evidence_count', 0) or 0)}</td>
         </tr>"""
 
     return f"""<!DOCTYPE html>
@@ -214,8 +217,15 @@ def generate_embed_code(
     height: int = 300,
 ) -> dict:
     """Generate embeddable widget code for external sites."""
-    verify_url = f"{base_url}/verify/passport/{share_token}"
-    iframe = f'<iframe src="{verify_url}?embed=true" width="{width}" height="{height}" frameborder="0" style="border-radius:8px;border:1px solid #e5e7eb;"></iframe>'
+    import re
+    from html import escape
+
+    # Validate share_token charset to prevent injection
+    if not re.match(r"^[A-Za-z0-9_\-]{8,128}$", share_token):
+        raise ValueError("Invalid share token format")
+    safe_token = escape(share_token, quote=True)
+    verify_url = f"{base_url}/verify/passport/{safe_token}"
+    iframe = f'<iframe src="{escape(verify_url, quote=True)}?embed=true" width="{width}" height="{height}" frameborder="0" style="border-radius:8px;border:1px solid #e5e7eb;"></iframe>'
     return {
         "iframe_code": iframe,
         "url": verify_url,

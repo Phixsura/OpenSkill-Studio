@@ -591,7 +591,7 @@ async def get_evidence_quality(
     """Score individual evidence quality (gap #21)."""
     from app.talent.models.evidence import CapabilityEvidence
     ev = await db.get(CapabilityEvidence, evidence_id)
-    if not ev:
+    if not ev or ev.user_id != user.id:
         raise HTTPException(404, "Evidence not found")
     from app.talent.services.evidence_intelligence import compute_evidence_quality
     quality = compute_evidence_quality({

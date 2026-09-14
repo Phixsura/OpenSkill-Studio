@@ -113,13 +113,13 @@ class TestGranularConsent:
 # Gap #45: Embedding
 class TestEmbedding:
     def test_generates_iframe(self):
-        result = generate_embed_code("tok123")
+        result = generate_embed_code("abcdef12345678")
         assert "<iframe" in result["iframe_code"]
-        assert "tok123" in result["iframe_code"]
+        assert "abcdef12345678" in result["iframe_code"]
         assert result["width"] == 400
 
     def test_custom_dimensions(self):
-        result = generate_embed_code("tok", width=600, height=400)
+        result = generate_embed_code("valid-token-here", width=600, height=400)
         assert result["width"] == 600
 
 
