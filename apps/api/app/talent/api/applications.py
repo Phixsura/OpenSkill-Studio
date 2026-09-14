@@ -624,5 +624,10 @@ async def check_application_overdue(
     app = await db.get(Application, app_id)
     if not app:
         raise HTTPException(404, "Application not found")
+    if app.user_id != user.id:
+        opp = await db.get(Opportunity, app.opportunity_id)
+        if not opp:
+            raise HTTPException(404, "Application not found")
+        await require_org_member(opp.employer_org_id, user, db)
     result = check_stage_overdue(app.status, app.updated_at or app.created_at)
     return DataResponse(data=result)

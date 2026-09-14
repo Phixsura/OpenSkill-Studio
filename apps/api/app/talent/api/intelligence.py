@@ -871,9 +871,14 @@ async def evaluate_kpi_endpoint(
 @router.post("/integrations/api-keys/generate", response_model=DataResponse[dict])
 async def generate_api_key_endpoint(
     body: dict,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Generate an API key for external integration (gap #171)."""
+    """Generate an API key for external integration (gap #171). Requires org admin."""
+    org_id = body.get("org_id")
+    if not org_id:
+        raise HTTPException(422, "org_id is required")
+    await require_org_member(org_id, user, db)
     from app.talent.services.integration_intelligence import (
         generate_api_key,
         validate_api_key_scopes,

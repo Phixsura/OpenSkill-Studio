@@ -298,8 +298,20 @@ async def get_interview_reminders(
     """Get scheduled reminder times for an interview."""
     from sqlalchemy import select as sa_select
 
+    from app.talent.models.application import Application, InterviewStage
+    from app.talent.models.employer import Opportunity
     from app.talent.models.interview_slot import InterviewSlot
     from app.talent.services.interview_intelligence import compute_reminder_schedule
+
+    # Auth: verify user is candidate or employer org member
+    stage = await db.get(InterviewStage, interview_id)
+    if stage:
+        app = await db.get(Application, stage.application_id)
+        if app and app.user_id != user.id:
+            opp = await db.get(Opportunity, app.opportunity_id) if app else None
+            if opp:
+                await require_org_member(opp.employer_org_id, user, db)
+
     result = await db.execute(
         sa_select(InterviewSlot).where(InterviewSlot.interview_stage_id == interview_id, InterviewSlot.status == "accepted")
     )
@@ -322,7 +334,7 @@ async def check_credential_renewal(
     from app.talent.models.assessment import Credential
     from app.talent.services.interview_intelligence import check_renewal_eligibility
     cred = await db.get(Credential, credential_id)
-    if not cred:
+    if not cred or cred.user_id != user.id:
         raise HTTPException(404, "Credential not found")
     result = check_renewal_eligibility({
         "expires_at": cred.expires_at.isoformat() if cred.expires_at else None,
