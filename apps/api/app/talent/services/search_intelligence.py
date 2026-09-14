@@ -71,10 +71,10 @@ class SearchCache:
         entry = self._cache.get(key)
         if not entry:
             return None
-        if datetime.now(UTC) > entry["expires"]:
+        if datetime.now(UTC) > entry.get("expires", ""):
             del self._cache[key]
             return None
-        return entry["data"]
+        return entry.get("data", "")
 
     def set(self, key: str, data: list) -> None:
         self._cache[key] = {

@@ -32,9 +32,9 @@ def validate_question_bank_item(item: dict) -> list[str]:
     errors = []
     if not item.get("question_text") or len(item.get("question_text", "")) < 10:
         errors.append("Question text must be at least 10 characters")
-    if item.get("category") and item["category"] not in QUESTION_CATEGORIES:
+    if item.get("category") and item.get("category", "") not in QUESTION_CATEGORIES:
         errors.append(f"Invalid category. Must be one of: {sorted(QUESTION_CATEGORIES)}")
-    if item.get("difficulty") and item["difficulty"] not in ("easy", "medium", "hard"):
+    if item.get("difficulty") and item.get("difficulty", "") not in ("easy", "medium", "hard"):
         errors.append("Difficulty must be easy, medium, or hard")
     return errors
 

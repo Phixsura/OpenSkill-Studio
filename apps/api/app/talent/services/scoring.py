@@ -112,9 +112,9 @@ def compute_score_from_evidence(
     """
     active = []
     for ev in evidence_rows:
-        if ev["status"] != "active":
+        if ev.get("status", "") != "active":
             continue
-        if ev.get("expires_at") and ev["expires_at"] < now:
+        if ev.get("expires_at") and ev.get("expires_at", "") < now:
             continue
         active.append(ev)
 
@@ -123,10 +123,10 @@ def compute_score_from_evidence(
 
     effective_scores = []
     for ev in active:
-        base = ev["score_normalized"] if ev["score_normalized"] is not None else 0.8
-        ver_weight = VERIFICATION_WEIGHTS.get(ev["verification_level"], 0.5)
+        base = ev.get("score_normalized", "") if ev.get("score_normalized", "") is not None else 0.8
+        ver_weight = VERIFICATION_WEIGHTS.get(ev.get("verification_level", ""), 0.5)
         conf = float(ev.get("confidence", 1.0))
-        freshness = decay_factor(ev["occurred_at"], now, decay_config)
+        freshness = decay_factor(ev.get("occurred_at", ""), now, decay_config)
         effective = base * ver_weight * conf * freshness
         effective_scores.append(effective)
 
@@ -141,7 +141,7 @@ def compute_score_from_evidence(
     substantial = sum(
         1
         for ev in active
-        if ev["verification_level"] in SUBSTANTIAL_VERIFICATION
+        if ev.get("verification_level", "") in SUBSTANTIAL_VERIFICATION
     )
 
     return round(shrunk, 4), round(model_confidence, 4), substantial
@@ -153,7 +153,7 @@ def compute_recency(evidence_rows: list[dict], now: datetime) -> float:
     Returns 0-1 where 1 means evidence from today, 0.5 means ~180 days ago.
     """
     active_dates = [
-        ev["occurred_at"]
+        ev.get("occurred_at", "")
         for ev in evidence_rows
         if ev["status"] == "active" and ev.get("occurred_at")
     ]
@@ -179,7 +179,7 @@ def compute_velocity(evidence_rows: list[dict], now: datetime) -> float:
     recent_count = 0
     prior_count = 0
     for ev in evidence_rows:
-        if ev["status"] != "active":
+        if ev.get("status", "") != "active":
             continue
         occ = ev.get("occurred_at")
         if not occ:
@@ -335,14 +335,14 @@ async def compute_capability_profile(
         mix: dict[str, int] = {}
         for ev in ev_list:
             if ev["status"] == "active":
-                vl = ev["verification_level"]
+                vl = ev.get("verification_level", "")
                 mix[vl] = mix.get(vl, 0) + 1
 
         # Last verified
         active_dates = [
-            ev["occurred_at"]
+            ev.get("occurred_at", "")
             for ev in ev_list
-            if ev["status"] == "active" and ev["occurred_at"]
+            if ev["status"] == "active" and ev.get("occurred_at", "")
         ]
         last_verified = max(active_dates) if active_dates else None
 

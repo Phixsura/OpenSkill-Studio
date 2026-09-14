@@ -131,16 +131,16 @@ def compute_profile_completeness(
     missing: list[dict] = []
 
     for item in COMPLETENESS_ITEMS:
-        key = item["key"]
+        key = item.get("key", "")
         if checks.get(key, False):
-            score += item["weight"]
+            score += item.get("weight", "")
             completed.append(key)
         else:
             missing.append({
                 "key": key,
-                "label": item["label"],
-                "weight": item["weight"],
-                "action": item["action"],
+                "label": item.get("label", ""),
+                "weight": item.get("weight", ""),
+                "action": item.get("action", ""),
             })
 
     level = _determine_level(score)

@@ -77,9 +77,9 @@ class TeamAnalyticsService:
             for score in profile:
                 entry = cap_data[score.capability_id]
                 entry["name"] = score.capability_name
-                entry["levels"].append(score.level)
+                entry.get("levels", "").append(score.level)
                 entry["evidence_count"] += score.evidence_count
-                entry["member_ids"].add(user_id)
+                entry.get("member_ids", "").add(user_id)
 
         distribution: list[TeamSkillSummary] = []
         for cap_id, data in cap_data.items():
@@ -139,7 +139,7 @@ class TeamAnalyticsService:
             for score in profile:
                 entry = matrix[score.capability_id]
                 entry["capability_name"] = score.capability_name
-                entry["members"].append(
+                entry.get("members", "").append(
                     {
                         "user_id": user_id,
                         "level": score.level,

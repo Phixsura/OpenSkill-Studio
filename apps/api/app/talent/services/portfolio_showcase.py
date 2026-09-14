@@ -120,7 +120,7 @@ class PortfolioShowcaseService:
                 ordered.append(by_id[item_id])
         # Append any items not in new_order at the end
         for item in items:
-            if item["id"] not in set(new_order):
+            if item.get("id", "") not in set(new_order):
                 item["sort_order"] = len(ordered)
                 ordered.append(item)
         return ordered
