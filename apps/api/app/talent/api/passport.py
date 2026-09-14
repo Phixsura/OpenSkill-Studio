@@ -265,8 +265,14 @@ async def compare_snapshots(
     """Compare two passport snapshots (gap #49)."""
     from app.talent.models.passport import PassportSnapshot
     from app.talent.services.passport_intelligence import compare_passport_snapshots
-    snap_a = await db.get(PassportSnapshot, body.get("snapshot_a_id", ""))
-    snap_b = await db.get(PassportSnapshot, body.get("snapshot_b_id", ""))
+    snap_a_id = body.get("snapshot_a_id")
+    if not snap_a_id:
+        raise HTTPException(422, "snapshot_a_id is required")
+    snap_a = await db.get(PassportSnapshot, snap_a_id)
+    snap_b_id = body.get("snapshot_b_id")
+    if not snap_b_id:
+        raise HTTPException(422, "snapshot_b_id is required")
+    snap_b = await db.get(PassportSnapshot, snap_b_id)
     if not snap_a or not snap_b:
         raise HTTPException(404, "Snapshot not found")
     if snap_a.user_id != user.id or snap_b.user_id != user.id:

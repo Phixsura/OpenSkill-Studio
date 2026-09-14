@@ -39,7 +39,7 @@ async def register_webhook(org_id: str, body: dict, db: AsyncSession = Depends(g
     db.add(ep)
     await db.commit()
     await db.refresh(ep)
-    return DataResponse(data={"id": ep.id, "url": ep.url, "secret": ep.secret, "event_types": ep.event_types})
+    return DataResponse(data={"id": ep.id, "url": ep.url, "secret": ep.secret, "event_types": ep.event_types, "note": "Save this secret — it will not be shown again"})
 
 @router.get("/orgs/{org_id}/webhooks", response_model=CursorListResponse[dict])
 async def list_webhooks(org_id: str, cursor: str | None = Query(None), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
@@ -54,7 +54,7 @@ async def list_webhooks(org_id: str, cursor: str | None = Query(None), limit: in
     if has_more:
         items = items[:limit]
     nc = items[-1].id if has_more and items else None
-    return CursorListResponse(data=[{"id": e.id, "url": e.url, "active": e.active, "event_types": e.event_types} for e in items], meta=CursorMeta(next_cursor=nc, has_more=has_more))
+    return CursorListResponse(data=[{"id": e.id, "url": e.url, "active": e.active, "event_types": e.event_types, "secret_prefix": e.secret[:8] + "..." if e.secret else None} for e in items], meta=CursorMeta(next_cursor=nc, has_more=has_more))
 
 @router.delete("/webhooks/{endpoint_id}", response_model=DataResponse[dict])
 async def delete_webhook(endpoint_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):

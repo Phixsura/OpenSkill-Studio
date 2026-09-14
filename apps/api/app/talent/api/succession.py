@@ -41,7 +41,7 @@ async def nominate_successor(role_id: str, body: dict, db: AsyncSession = Depend
     if not kr:
         raise HTTPException(404, "Key role not found")
     await require_org_member(kr.org_id, user, db)
-    nom = SuccessorNomination(key_role_id=role_id, candidate_user_id=body.get("candidate_user_id", ""), readiness=body.get("readiness", "not_assessed"), nominated_by=user.id)
+    nom = SuccessorNomination(key_role_id=role_id, candidate_user_id=body.get("candidate_user_id") or "", readiness=body.get("readiness", "not_assessed"), nominated_by=user.id)
     db.add(nom)
     await db.commit()
     await db.refresh(nom)
