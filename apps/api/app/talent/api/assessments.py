@@ -113,7 +113,7 @@ async def start_run(
     try:
         run = await svc.start_run(blueprint_id, user.id, bp.org_id)
     except ValueError as e:
-        raise HTTPException(409, str(e)) from e
+        raise HTTPException(409, "Resource conflict") from e
     await db.commit()
     await db.refresh(run)
     return DataResponse(data=RunResponse.model_validate(run))

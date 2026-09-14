@@ -166,7 +166,13 @@ def check_renewal_eligibility(
 
     if isinstance(expires_at, str):
         try:
-            expires_at = datetime.fromisoformat(expires_at)
+            try:
+
+                expires_at = datetime.fromisoformat(expires_at)
+
+            except (ValueError, TypeError):
+
+                expires_at = None
         except (ValueError, TypeError):
             return {"eligible": False, "reason": "Invalid expiration date", "status": "not_eligible"}
 
