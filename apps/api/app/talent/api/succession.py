@@ -60,7 +60,7 @@ async def list_nominations(role_id: str, cursor: str | None = Query(None), limit
     q = select(SuccessorNomination).where(SuccessorNomination.key_role_id == role_id)
     if cursor:
         q = q.where(SuccessorNomination.id < cursor)
-    q = q.order_by(SuccessorNomination.created_at.desc()).limit(limit + 1)
+    q = q.order_by(SuccessorNomination.created_at.desc()).limit(min(limit + 1, 200))
     result = await db.execute(q)
     items = list(result.scalars().all())
     has_more = len(items) > limit
