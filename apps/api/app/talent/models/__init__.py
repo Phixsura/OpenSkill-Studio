@@ -71,16 +71,23 @@ from app.talent.models.interview_slot import (  # noqa: F401
     SLOT_STATUSES,
     InterviewSlot,
 )
+from app.talent.models.message import ApplicationMessage as TalentMessage  # noqa: F401
 from app.talent.models.notification import (  # noqa: F401
     NOTIFICATION_EVENT_TYPES,
     NotificationPreference,
     TalentNotification,
+)
+from app.talent.models.offer import Offer  # noqa: F401
+from app.talent.models.onboarding import (  # noqa: F401
+    OnboardingChecklist,
+    OnboardingTemplate,
 )
 from app.talent.models.passport import (  # noqa: F401
     PASSPORT_SHAREABLE_FIELDS,
     PassportSnapshot,
     SkillPassport,
 )
+from app.talent.models.portfolio import PortfolioItem  # noqa: F401
 from app.talent.models.saved_search import (  # noqa: F401
     NOTIFY_FREQUENCIES,
     SEARCH_TYPES,
@@ -96,8 +103,16 @@ from app.talent.models.scoring import (  # noqa: F401
 from app.talent.models.signing import (  # noqa: F401
     OrgSigningKey,
 )
+from app.talent.models.succession import (  # noqa: F401
+    KeyRole,
+    SuccessorNomination,
+)
 from app.talent.models.talent_pool import (  # noqa: F401
     TalentOutreach,
     TalentPool,
     TalentPoolMembership,
+)
+from app.talent.models.webhook_endpoint import (  # noqa: F401
+    WebhookDeliveryLog,
+    WebhookEndpointConfig,
 )

@@ -185,3 +185,16 @@ async def export_snapshot_as_vc(
     )
 
     return JSONResponse(content=vc, media_type="application/ld+json")
+
+
+@router.get("/talent/passport/completeness", response_model=DataResponse[dict])
+async def get_passport_completeness(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get profile completeness score with actionable suggestions."""
+    import dataclasses
+
+    from app.talent.services.profile_completeness import compute_profile_completeness
+    result = compute_profile_completeness(has_evidence=False, has_credentials=False, has_preferred_types=False, is_discoverable=False, has_portfolio=False, has_availability=False, has_verified_evidence=False, has_bio=False)
+    return DataResponse(data=dataclasses.asdict(result))

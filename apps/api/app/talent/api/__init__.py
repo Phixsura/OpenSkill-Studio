@@ -25,9 +25,13 @@ from app.talent.api.evidence import router as evidence_router
 from app.talent.api.inference import router as inference_router
 from app.talent.api.intelligence import router as intelligence_router
 from app.talent.api.matching import router as matching_router
+from app.talent.api.messages import router as messages_router
 from app.talent.api.notifications import router as notification_router
+from app.talent.api.offers import router as offers_router
+from app.talent.api.onboarding_api import router as onboarding_router
 from app.talent.api.passport import router as passport_router
 from app.talent.api.pools import router as pools_router
+from app.talent.api.portfolio import router as portfolio_router
 from app.talent.api.rate_limit import rate_limit_talent
 from app.talent.api.recommendations import router as recommendations_router
 from app.talent.api.resume import router as resume_router
@@ -35,7 +39,9 @@ from app.talent.api.saved_searches import router as saved_search_router
 from app.talent.api.scheduling import router as scheduling_router
 from app.talent.api.scorecards import router as scorecard_router
 from app.talent.api.self_assessment import router as self_assessment_router
+from app.talent.api.succession import router as succession_router
 from app.talent.api.verifications import router as verifications_router
+from app.talent.api.webhooks import router as webhooks_router
 
 # Apply ETagRoute on GET-heavy routers for conditional request support
 capabilities_router.route_class = ETagRoute
@@ -72,3 +78,9 @@ talent_router.include_router(bookmark_router)
 talent_router.include_router(self_assessment_router)
 talent_router.include_router(resume_router)
 talent_router.include_router(recommendations_router)
+talent_router.include_router(portfolio_router)
+talent_router.include_router(offers_router)
+talent_router.include_router(onboarding_router)
+talent_router.include_router(messages_router)
+talent_router.include_router(webhooks_router)
+talent_router.include_router(succession_router)

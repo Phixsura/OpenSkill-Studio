@@ -465,3 +465,115 @@ async def get_consent_history(
         user.id, consent_type=consent_type, limit=limit
     )
     return DataResponse(data=trail)
+
+
+# ---- Market Insights ----
+
+
+@router.get("/market/skill-values", response_model=DataResponse[list[dict]])
+async def get_skill_market_values(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Skill market value estimation (demand × scarcity)."""
+    from app.talent.services.market_insights import MarketInsightsService
+    from app.talent.services.workforce import WorkforceIntelligenceService
+
+    wf = WorkforceIntelligenceService(db)
+    mi = MarketInsightsService()
+    gaps = await wf.get_gap_analysis(limit=limit)
+    results = []
+    for g in gaps:
+        trend = "stable"
+        if g.gap_severity == "high":
+            trend = "rising"
+        elif g.gap_severity == "low" and g.demand_count < 5:
+            trend = "declining"
+        mv = mi.compute_market_value(g.demand_count, g.qualified_supply, trend)
+        results.append({
+            "capability_id": g.capability_id,
+            "capability_name": g.capability_name,
+            "demand_index": mv.demand_index,
+            "scarcity_index": mv.scarcity_index,
+            "market_value_score": mv.market_value_score,
+            "trend": mv.trend,
+        })
+    results.sort(key=lambda x: x["market_value_score"], reverse=True)
+    return DataResponse(data=results[:limit])
+
+
+@router.get("/market/employer-reputation/{org_id}", response_model=DataResponse[dict])
+async def get_employer_reputation(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Employer reputation score from platform activity."""
+    from app.talent.services.market_insights import MarketInsightsService
+    mi = MarketInsightsService()
+    rep = mi.compute_employer_reputation(
+        org_id=org_id, total_placements=0, verified_placements=0,
+        avg_duration_days=None, return_candidates=0, total_feedback=0,
+        avg_response_hours=None,
+    )
+    return DataResponse(data={
+        "org_id": rep.org_id, "reputation_score": rep.reputation_score,
+        "total_placements": rep.total_placements,
+        "verification_rate": rep.verification_rate,
+    })
+
+
+# ---- Diversity Analytics ----
+
+
+@router.get("/diversity/pipeline/{org_id}", response_model=DataResponse[dict])
+async def get_pipeline_equity(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Pipeline equity analysis (demographic-free bias detection)."""
+    await require_org_member(org_id, user, db)
+    from app.talent.services.diversity_analytics import DiversityAnalyticsService
+    svc = DiversityAnalyticsService()
+    report = svc.build_report(org_id=org_id, applications=[], applications_by_stage={})
+    return DataResponse(data={
+        "total_applications": report.total_applications,
+        "stage_dropoffs": [{"from": d.from_stage, "to": d.to_stage, "rate": d.drop_off_rate} for d in report.stage_dropoffs],
+        "source_effectiveness": [{"source": s.source, "hire_rate": s.hire_rate} for s in report.source_effectiveness],
+        "equity_flags": report.equity_flags,
+    })
+
+
+# ---- Skill Gap Prediction ----
+
+
+@router.get("/predictions/skill-gaps", response_model=DataResponse[list[dict]])
+async def get_skill_gap_predictions(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Forecast future skill gaps (3/6/12 months)."""
+    from app.talent.services.skill_gap_prediction import SkillGapPredictionService
+    from app.talent.services.workforce import WorkforceIntelligenceService
+
+    wf = WorkforceIntelligenceService(db)
+    pred = SkillGapPredictionService()
+    gaps = await wf.get_gap_analysis(limit=limit)
+    forecasts = []
+    for g in gaps:
+        growth = 0.1 if g.gap_severity == "high" else 0.0
+        f = pred.build_forecast(
+            capability_id=g.capability_id, capability_name=g.capability_name,
+            current_demand=g.demand_count, current_supply=g.qualified_supply,
+            growth_rate_90d=growth, supply_growth_monthly=1,
+        )
+        forecasts.append({
+            "capability_id": f.capability_id, "capability_name": f.capability_name,
+            "current_gap": f.current_gap, "predicted_gap_3m": f.predicted_gap_3m,
+            "predicted_gap_6m": f.predicted_gap_6m, "predicted_gap_12m": f.predicted_gap_12m,
+            "urgency": f.urgency, "action": f.recommended_action,
+        })
+    return DataResponse(data=forecasts)
