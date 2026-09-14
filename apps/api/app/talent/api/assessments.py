@@ -362,3 +362,31 @@ async def export_credential_as_badge(
     )
 
     return JSONResponse(content=ob3, media_type="application/ld+json")
+
+
+# ---- Public credential verification ----
+
+@router.get("/verify/credential/{credential_id}", response_model=DataResponse[dict])
+async def verify_credential_public(
+    credential_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public credential verification page data — no auth required."""
+    from app.talent.models.assessment import Credential
+    from app.talent.services.interview_intelligence import build_credential_verification_data
+    cred = await db.get(Credential, credential_id)
+    if not cred:
+        raise HTTPException(404, "Credential not found")
+    cap_data = None
+    if cred.capabilities:
+        cap_ids = [c.get("capability_id") for c in cred.capabilities if c.get("capability_id")]
+        if cap_ids:
+            from app.talent.models.capability import Capability
+            cap = await db.get(Capability, cap_ids[0])
+            if cap:
+                cap_data = {"canonical_name": cap.canonical_name}
+    data = build_credential_verification_data(
+        {"credential_type": cred.credential_type, "status": cred.status, "issued_at": cred.issued_at.isoformat() if cred.issued_at else None, "expires_at": cred.expires_at.isoformat() if cred.expires_at else None, "org_id": cred.org_id},
+        cap_data,
+    )
+    return DataResponse(data=data)
