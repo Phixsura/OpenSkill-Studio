@@ -129,7 +129,7 @@ async def create_supervision(
         .limit(1)
     )
     if linked.scalar_one_or_none() is None:
-        raise HTTPException(403, "Placement is not associated with this school")
+        raise HTTPException(404, "Placement not found")
 
     supervision = InternshipSupervision(
         placement_id=body.placement_id,

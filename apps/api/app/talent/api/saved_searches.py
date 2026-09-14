@@ -124,7 +124,7 @@ async def update_saved_search(
         raise HTTPException(404, "Saved search not found")
     await require_org_member(search.org_id, user, db)
     if search.created_by != user.id:
-        raise HTTPException(403, "Only the creator can update this search")
+        raise HTTPException(404, "Search not found")
 
     updated = await svc.update(
         search_id, **body.model_dump(exclude_unset=True)
@@ -149,7 +149,7 @@ async def delete_saved_search(
         raise HTTPException(404, "Saved search not found")
     await require_org_member(search.org_id, user, db)
     if search.created_by != user.id:
-        raise HTTPException(403, "Only the creator can delete this search")
+        raise HTTPException(404, "Search not found")
 
     await svc.delete_search(search_id)
     await db.commit()

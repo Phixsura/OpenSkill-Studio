@@ -132,7 +132,7 @@ async def accept_slot(
 
     # Only the applicant can accept
     if app.user_id != user.id:
-        raise HTTPException(403, "Only the applicant can accept interview slots")
+        raise HTTPException(404, "Interview slot not found")
 
     from app.talent.services.interview_scheduling import InterviewSchedulingService
 
@@ -159,7 +159,7 @@ async def decline_slot(
     slot, stage, app, opp = await _load_slot_context(db, slot_id)
 
     if app.user_id != user.id:
-        raise HTTPException(403, "Only the applicant can decline interview slots")
+        raise HTTPException(404, "Interview slot not found")
 
     from app.talent.services.interview_scheduling import InterviewSchedulingService
 

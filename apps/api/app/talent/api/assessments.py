@@ -245,7 +245,7 @@ async def evaluate_credential(
     target_user_id = body.user_id or user.id
     # Users can only evaluate themselves
     if target_user_id != user.id:
-        raise HTTPException(403, "Can only evaluate own credentials")
+        raise HTTPException(404, "Credential not found")
 
     result = await svc.evaluate(body.credential_type, target_user_id)
     return DataResponse(data=result)
@@ -265,7 +265,7 @@ async def issue_credential(
     # Authorization: issuing to another user requires admin/instructor role + org context
     if target_user_id != user.id:
         if not body.org_id:
-            raise HTTPException(403, "Cannot issue credential to another user without org context")
+            raise HTTPException(404, "Credential not found")
         await require_org_member(body.org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     if body.org_id and user.role != UserRole.ADMIN:
         await require_org_member(body.org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
