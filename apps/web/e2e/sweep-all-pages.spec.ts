@@ -25,31 +25,16 @@ let page: Page;
 const api500s: string[] = [];
 
 test.beforeAll(async ({ browser }) => {
-  // Flush redis rate-limit keys so prior spec files don't block us
-  try {
-    await fetch(`${API.replace("/api/v1", "")}/api/v1/auth/register`, { method: "OPTIONS" }).catch(
-      () => {},
-    );
-    // Direct redis flush via a quick script — silently ignore if unavailable
-    const { execSync } = await import("child_process");
-    execSync("redis-cli KEYS 'ratelimit:*' | xargs -r redis-cli DEL", {
-      stdio: "ignore",
-      timeout: 3000,
-    });
-  } catch {
-    // Redis may not be accessible — continue anyway with retries
-  }
-
-  // Retry registration with increasing backoff
-  for (let i = 0; i < 8; i++) {
+  // registerUser now flushes redis rate-limit keys automatically
+  for (let i = 0; i < 5; i++) {
     try {
       auth = await registerUser("Sweep E2E User");
       break;
     } catch {
-      await new Promise((r) => setTimeout(r, 3000 + i * 3000));
+      await new Promise((r) => setTimeout(r, 3000));
     }
   }
-  if (!auth) throw new Error("Failed to register user after 8 retries");
+  if (!auth) throw new Error("Failed to register user after 5 retries");
 
   // Create an org with unique name (slug collision from prior runs)
   const orgName = `Sweep Org ${Date.now()}`;

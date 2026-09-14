@@ -24,8 +24,43 @@ export interface AuthContext {
   headers: Record<string, string>;
 }
 
+/** Flush redis rate-limit keys (best-effort, silent on failure). */
+async function flushRateLimits(): Promise<void> {
+  try {
+    const { execFileSync } = await import("child_process");
+    // Redis runs in Docker — use docker exec
+    const containerId = execFileSync(
+      "docker",
+      ["ps", "-q", "--filter", "name=redis", "--filter", "status=running"],
+      { timeout: 3000 },
+    )
+      .toString()
+      .trim()
+      .split("\n")[0];
+    if (containerId) {
+      execFileSync(
+        "docker",
+        [
+          "exec",
+          containerId,
+          "redis-cli",
+          "EVAL",
+          "for _,k in ipairs(redis.call('keys','ratelimit:*')) do redis.call('del',k) end return 0",
+          "0",
+        ],
+        { stdio: "ignore", timeout: 5000 },
+      );
+    }
+  } catch {
+    // Redis/Docker may not be available
+  }
+}
+
 /** Register a user via API, return auth context. */
 export async function registerUser(name: string): Promise<AuthContext> {
+  // Flush rate limits so multiple spec files can each register a user
+  await flushRateLimits();
+
   const email = uniqueEmail();
   const res = await fetch(`${API}/auth/register`, {
     method: "POST",
@@ -126,14 +161,21 @@ export async function loginInBrowser(page: Page, email: string, password: string
   await page.goto("/login");
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => {
-    try { localStorage.clear(); } catch {}
-    try { sessionStorage.clear(); } catch {}
+    try {
+      localStorage.clear();
+    } catch {}
+    try {
+      sessionStorage.clear();
+    } catch {}
   });
   await page.reload();
   await page.waitForLoadState("networkidle");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: /sign|log/i }).first().click();
+  await page
+    .getByRole("button", { name: /sign|log/i })
+    .first()
+    .click();
   // Wait for redirect to dashboard
   await page.waitForURL("**/dashboard**", { timeout: 10_000 });
 }
