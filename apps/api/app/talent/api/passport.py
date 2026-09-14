@@ -1,6 +1,6 @@
 """Skill Passport API — own passport, snapshots, public verification, W3C VC export."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -198,3 +198,100 @@ async def get_passport_completeness(
     from app.talent.services.profile_completeness import compute_profile_completeness
     result = compute_profile_completeness(has_evidence=False, has_credentials=False, has_preferred_types=False, is_discoverable=False, has_portfolio=False, has_availability=False, has_verified_evidence=False, has_bio=False)
     return DataResponse(data=dataclasses.asdict(result))
+
+
+# ---- Gaps #36-50: Passport Intelligence ----
+
+
+@router.get("/talent/passport/export-html", response_model=DataResponse[dict])
+async def export_passport_html(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Export passport as print-ready HTML for PDF generation (gap #36)."""
+    import dataclasses
+
+    from app.talent.services.passport_intelligence import generate_passport_html
+    from app.talent.services.scoring import compute_capability_profile
+    profile = await compute_capability_profile(db, user.id)
+    caps = [dataclasses.asdict(s) for s in profile]
+    html = generate_passport_html({"capabilities": caps})
+    return DataResponse(data={"html": html, "format": "html"})
+
+
+@router.get("/talent/passport/qr/{share_token}", response_model=DataResponse[dict])
+async def get_passport_qr(
+    share_token: str,
+    user: User = Depends(get_current_user),
+):
+    """Generate QR code data for passport verification (gap #37)."""
+    from app.talent.services.passport_intelligence import generate_qr_data
+    return DataResponse(data=generate_qr_data(share_token))
+
+
+@router.get("/talent/passport/embed/{share_token}", response_model=DataResponse[dict])
+async def get_passport_embed_code(
+    share_token: str,
+    width: int = Query(400, ge=200, le=800),
+    height: int = Query(300, ge=200, le=600),
+    user: User = Depends(get_current_user),
+):
+    """Generate embeddable widget code (gap #45)."""
+    from app.talent.services.passport_intelligence import generate_embed_code
+    return DataResponse(data=generate_embed_code(share_token, width=width, height=height))
+
+
+@router.get("/talent/passport/badge", response_model=DataResponse[dict])
+async def get_verification_badge(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Generate 'Verified by OpenSkill' SVG badge (gap #46)."""
+    from app.talent.services.passport_intelligence import generate_verification_badge_svg
+    from app.talent.services.scoring import compute_capability_profile
+    profile = await compute_capability_profile(db, user.id)
+    cap_count = len(profile)
+    max_level = max((s.level for s in profile), default=0)
+    svg = generate_verification_badge_svg(cap_count, max_level)
+    return DataResponse(data={"svg": svg, "capability_count": cap_count, "highest_level": max_level})
+
+
+@router.post("/talent/passport/snapshots/compare", response_model=DataResponse[dict])
+async def compare_snapshots(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Compare two passport snapshots (gap #49)."""
+    from app.talent.models.passport import PassportSnapshot
+    from app.talent.services.passport_intelligence import compare_passport_snapshots
+    snap_a = await db.get(PassportSnapshot, body.get("snapshot_a_id", ""))
+    snap_b = await db.get(PassportSnapshot, body.get("snapshot_b_id", ""))
+    if not snap_a or not snap_b:
+        raise HTTPException(404, "Snapshot not found")
+    if snap_a.user_id != user.id or snap_b.user_id != user.id:
+        raise HTTPException(404, "Snapshot not found")
+    diff = compare_passport_snapshots(snap_a.payload or {}, snap_b.payload or {})
+    return DataResponse(data=diff)
+
+
+@router.get("/talent/passport/revisions", response_model=DataResponse[list[dict]])
+async def get_passport_revisions(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get passport revision history (gap #47)."""
+    from sqlalchemy import select
+
+    from app.talent.models.passport import PassportSnapshot
+    from app.talent.services.passport_intelligence import compute_revision_summary
+    q = select(PassportSnapshot).where(
+        PassportSnapshot.user_id == user.id
+    ).order_by(PassportSnapshot.created_at)
+    result = await db.execute(q)
+    snapshots = [
+        {"id": s.id, "issued_at": s.created_at.isoformat() if s.created_at else None, "payload": s.payload or {}}
+        for s in result.scalars().all()
+    ]
+    revisions = compute_revision_summary(snapshots)
+    return DataResponse(data=revisions)

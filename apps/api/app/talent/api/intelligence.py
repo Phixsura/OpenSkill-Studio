@@ -577,3 +577,85 @@ async def get_skill_gap_predictions(
             "urgency": f.urgency, "action": f.recommended_action,
         })
     return DataResponse(data=forecasts)
+
+
+# ---- Gaps #21-35: Evidence Intelligence ----
+
+
+@router.get("/evidence/quality/{evidence_id}", response_model=DataResponse[dict])
+async def get_evidence_quality(
+    evidence_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Score individual evidence quality (gap #21)."""
+    from app.talent.models.evidence import CapabilityEvidence
+    ev = await db.get(CapabilityEvidence, evidence_id)
+    if not ev:
+        raise HTTPException(404, "Evidence not found")
+    from app.talent.services.evidence_intelligence import compute_evidence_quality
+    quality = compute_evidence_quality({
+        "source_id": ev.source_id, "score_normalized": ev.score_normalized,
+        "verification_level": ev.verification_level, "occurred_at": ev.occurred_at,
+        "org_id": ev.org_id, "confidence": ev.confidence,
+    })
+    return DataResponse(data=quality)
+
+
+@router.get("/evidence/expiring", response_model=DataResponse[list[dict]])
+async def get_expiring_evidence(
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Find evidence expiring within N days (gap #22)."""
+    from app.talent.services.evidence_intelligence import find_expiring_evidence
+    results = await find_expiring_evidence(db, days_ahead=days, user_id=user.id)
+    return DataResponse(data=results)
+
+
+@router.post("/evidence/simulate", response_model=DataResponse[dict])
+async def simulate_evidence_impact(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Simulate how adding evidence would change a score (gap #26)."""
+    from app.talent.services.evidence_intelligence import simulate_score_change
+    result = simulate_score_change(
+        current_evidence=body.get("current_evidence", []),
+        hypothetical_evidence=body.get("new_evidence", {}),
+        decay_config=body.get("decay_config"),
+    )
+    return DataResponse(data=result)
+
+
+@router.get("/evidence/distribution", response_model=DataResponse[dict])
+async def get_evidence_distribution(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Evidence type distribution analytics (gap #32)."""
+    from app.talent.services.evidence_intelligence import compute_evidence_distribution
+    result = await compute_evidence_distribution(db, user_id=user.id)
+    return DataResponse(data=result)
+
+
+@router.get("/scoring/calibration", response_model=DataResponse[dict])
+async def get_scoring_calibration(
+    user: User = Depends(get_current_user),
+):
+    """Get current scoring calibration parameters (gap #28)."""
+    from app.talent.services.evidence_intelligence import DEFAULT_CALIBRATION
+    return DataResponse(data=DEFAULT_CALIBRATION)
+
+
+@router.post("/scoring/calibration/validate", response_model=DataResponse[dict])
+async def validate_scoring_calibration(
+    body: dict,
+    user: User = Depends(get_current_user),
+):
+    """Validate proposed scoring calibration changes (gap #28)."""
+    from app.talent.services.evidence_intelligence import validate_calibration
+    errors = validate_calibration(body)
+    return DataResponse(data={"valid": len(errors) == 0, "errors": errors})

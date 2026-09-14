@@ -21,6 +21,7 @@ class TestOB3ExportFunction:
 
     def test_function_signature(self):
         import inspect
+
         from app.talent.services.openbadges import export_credential_as_ob3
         sig = inspect.signature(export_credential_as_ob3)
         params = set(sig.parameters.keys())

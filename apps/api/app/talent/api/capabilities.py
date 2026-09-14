@@ -296,3 +296,107 @@ async def delete_mapping(
     if not await svc.delete_mapping(mapping_id):
         raise HTTPException(404, "Mapping not found")
     await db.commit()
+
+
+# ---- Gap #7: Autocomplete ----
+
+@router.get("/talent/capabilities/autocomplete", response_model=DataResponse[list[dict]])
+async def autocomplete_capabilities_endpoint(
+    q: str = Query(..., min_length=2, max_length=100),
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Typeahead autocomplete for capability names."""
+    from app.talent.services.skill_intelligence import autocomplete_capabilities
+    results = await autocomplete_capabilities(db, q, limit=limit)
+    return DataResponse(data=results)
+
+
+# ---- Gap #8: Skill frequency ----
+
+@router.get("/talent/capabilities/frequency", response_model=DataResponse[list[dict]])
+async def get_skill_frequency(
+    days: int = Query(90, ge=7, le=365),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Skill usage frequency analytics."""
+    from app.talent.services.skill_intelligence import compute_skill_frequency
+    results = await compute_skill_frequency(db, days=days, limit=limit)
+    return DataResponse(data=results)
+
+
+# ---- Gap #9: Co-occurrence ----
+
+@router.get("/talent/capabilities/cooccurrence", response_model=DataResponse[list[dict]])
+async def get_skill_cooccurrence(
+    min_users: int = Query(3, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Skill co-occurrence analysis — which skills appear together."""
+    from app.talent.services.skill_intelligence import compute_skill_cooccurrence
+    results = await compute_skill_cooccurrence(db, min_users=min_users, limit=limit)
+    return DataResponse(data=results)
+
+
+# ---- Gap #2: Taxonomy import ----
+
+@router.post("/talent/capabilities/import", response_model=DataResponse[dict])
+async def import_taxonomy(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Bulk import capabilities from ESCO/O*NET/custom format (dry-run validation)."""
+    import dataclasses
+
+    from app.talent.services.taxonomy_import import validate_import_batch
+    fmt = body.get("format", "custom_json")
+    rows = body.get("rows", [])
+    result = validate_import_batch(rows, fmt)
+    return DataResponse(data=dataclasses.asdict(result))
+
+
+# ---- Gap #11: Industry taxonomies ----
+
+@router.get("/talent/capabilities/industries", response_model=DataResponse[dict])
+async def list_industry_taxonomies(
+    user: User = Depends(get_current_user),
+):
+    """List available industry taxonomy presets."""
+    from app.talent.services.taxonomy_import import get_industry_taxonomy, list_available_industries
+    industries = list_available_industries()
+    return DataResponse(data={
+        "industries": industries,
+        "presets": {i: get_industry_taxonomy(i) for i in industries},
+    })
+
+
+# ---- Gap #17: API version info ----
+
+@router.get("/talent/capabilities/version", response_model=DataResponse[dict])
+async def get_taxonomy_version(
+    user: User = Depends(get_current_user),
+):
+    """Get taxonomy API version and metadata."""
+    from app.talent.services.taxonomy_import import TAXONOMY_VERSION_INFO
+    return DataResponse(data=TAXONOMY_VERSION_INFO)
+
+
+# ---- Gap #15: Edge strength ----
+
+@router.get("/talent/capabilities/edge-strength", response_model=DataResponse[dict])
+async def get_edge_strength(
+    source_id: str = Query(...),
+    target_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Compute relationship strength between two capabilities."""
+    from app.talent.services.skill_intelligence import compute_edge_strength
+    strength = await compute_edge_strength(db, source_id, target_id)
+    return DataResponse(data={"source_id": source_id, "target_id": target_id, "strength": strength})
