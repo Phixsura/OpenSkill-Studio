@@ -13,6 +13,8 @@ from app.talent.api.assessments import router as assessments_router
 from app.talent.api.bulk import router as bulk_router
 from app.talent.api.candidate_notes import router as candidate_notes_router
 from app.talent.api.capabilities import router as capabilities_router
+from app.talent.api.career_goals import router as career_goal_router
+from app.talent.api.credential_pathways import router as credential_pathway_router
 from app.talent.api.dashboards import router as dashboards_router
 from app.talent.api.did import router as did_router
 from app.talent.api.employers import router as employers_router
@@ -60,3 +62,5 @@ talent_router.include_router(activity_router)
 talent_router.include_router(candidate_notes_router)
 talent_router.include_router(saved_search_router)
 talent_router.include_router(scheduling_router)
+talent_router.include_router(credential_pathway_router)
+talent_router.include_router(career_goal_router)

@@ -26,6 +26,15 @@ from app.talent.models.capability import (  # noqa: F401
     CapabilityEdge,
     CapabilityMapping,
 )
+from app.talent.models.career_goal import (  # noqa: F401
+    GOAL_STATUSES,
+    MAX_ACTIVE_GOALS,
+    CareerGoal,
+)
+from app.talent.models.credential_pathway import (  # noqa: F401
+    PATHWAY_STATUSES,
+    CredentialPathway,
+)
 from app.talent.models.employer import (  # noqa: F401
     EmployerProfile,
     Opportunity,
