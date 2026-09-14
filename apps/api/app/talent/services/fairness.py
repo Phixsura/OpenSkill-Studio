@@ -119,7 +119,7 @@ class FairnessService:
         elif n >= 2:
             top_half = sorted_scores[n // 2:]
             bottom_half = sorted_scores[:n // 2]
-            top_mean = sum(top_half) / len(top_half)
+            top_mean = sum(top_half) / max(len(top_half), 1)
             bottom_mean = sum(bottom_half) / len(bottom_half) if bottom_half else 0
             metrics["score_spread"] = {
                 "top_half_mean": round(top_mean, 4),

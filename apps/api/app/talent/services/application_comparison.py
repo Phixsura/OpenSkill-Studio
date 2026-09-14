@@ -156,7 +156,7 @@ class ApplicationComparisonService:
         # Rank by composite quality: cap_scores avg + credential bonus + evidence bonus
         for comp in comparisons:
             avg_cap = (
-                sum(comp.capability_scores.values()) / len(comp.capability_scores)
+                sum(comp.capability_scores.values()) / max(len(comp.capability_scores), 1)
                 if comp.capability_scores
                 else 0
             )
