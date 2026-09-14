@@ -83,15 +83,15 @@ class ActivityLogService:
         Scoped to users who are members of the org to prevent cross-tenant
         data leakage.
         """
-        from app.models.organization import OrgMembership
+        from app.models.organization import OrgMember
 
         q = (
             select(TalentActivityLog)
             .join(
-                OrgMembership,
-                OrgMembership.user_id == TalentActivityLog.user_id,
+                OrgMember,
+                OrgMember.user_id == TalentActivityLog.user_id,
             )
-            .where(OrgMembership.org_id == org_id)
+            .where(OrgMember.org_id == org_id)
         )
         if action_type:
             q = q.where(TalentActivityLog.action_type == action_type)

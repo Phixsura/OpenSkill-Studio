@@ -90,6 +90,55 @@ class InterviewStageEmployerResponse(InterviewStageResponse):
     evaluation_notes: dict | None = None
 
 
+class CreateFeedbackRequest(BaseModel):
+    feedback_type: str
+    content: str = Field(..., min_length=1, max_length=5000)
+    visibility: str = "employer_only"
+
+    @field_validator("feedback_type")
+    @classmethod
+    def _validate_type(cls, v: str) -> str:
+        from app.talent.models.application import FEEDBACK_TYPES
+
+        if v not in FEEDBACK_TYPES:
+            raise ValueError(f"Invalid feedback_type: {v}. Must be one of {sorted(FEEDBACK_TYPES)}")
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def _validate_visibility(cls, v: str) -> str:
+        from app.talent.models.application import FEEDBACK_VISIBILITY
+
+        if v not in FEEDBACK_VISIBILITY:
+            raise ValueError(f"Invalid visibility: {v}. Must be one of {sorted(FEEDBACK_VISIBILITY)}")
+        return v
+
+
+class UpdateFeedbackVisibilityRequest(BaseModel):
+    visibility: str
+
+    @field_validator("visibility")
+    @classmethod
+    def _validate_visibility(cls, v: str) -> str:
+        from app.talent.models.application import FEEDBACK_VISIBILITY
+
+        if v not in FEEDBACK_VISIBILITY:
+            raise ValueError(f"Invalid visibility: {v}. Must be one of {sorted(FEEDBACK_VISIBILITY)}")
+        return v
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    application_id: str
+    feedback_type: str
+    content: str
+    visibility: str
+    author_id: str
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class PlacementResponse(BaseModel):
     id: str
     application_id: str

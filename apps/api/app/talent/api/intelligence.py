@@ -330,3 +330,65 @@ async def get_share_links(
         expires_at=cred.expires_at,
     )
     return DataResponse(data=dataclasses.asdict(links))
+
+
+# ---- Team Skill Analytics (N9) ----
+
+
+@router.get("/analytics/team/{org_id}", response_model=DataResponse[dict])
+async def get_team_analytics(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get team skill analytics for an organization — org member only."""
+    await require_org_member(org_id, user, db)
+
+    from app.talent.services.team_analytics import TeamAnalyticsService
+
+    svc = TeamAnalyticsService(db)
+    analytics = await svc.get_team_analytics(org_id)
+    return DataResponse(data={
+        "org_id": analytics.org_id,
+        "total_members": analytics.total_members,
+        "total_capabilities_covered": analytics.total_capabilities_covered,
+        "skill_distribution": [dataclasses.asdict(s) for s in analytics.skill_distribution],
+        "team_strengths": analytics.team_strengths,
+        "team_gaps": analytics.team_gaps,
+    })
+
+
+@router.get("/analytics/team/{org_id}/coverage", response_model=DataResponse[list[dict]])
+async def get_team_coverage(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get skill coverage matrix — who covers what capabilities."""
+    await require_org_member(org_id, user, db)
+
+    from app.talent.services.team_analytics import TeamAnalyticsService
+
+    svc = TeamAnalyticsService(db)
+    matrix = await svc.get_skill_coverage_matrix(org_id)
+    return DataResponse(data=matrix)
+
+
+@router.get(
+    "/analytics/team/{org_id}/vs/{opportunity_id}",
+    response_model=DataResponse[dict],
+)
+async def compare_team_vs_opportunity(
+    org_id: str,
+    opportunity_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Compare team capabilities against opportunity requirements."""
+    await require_org_member(org_id, user, db)
+
+    from app.talent.services.team_analytics import TeamAnalyticsService
+
+    svc = TeamAnalyticsService(db)
+    comparison = await svc.compare_team_to_requirements(org_id, opportunity_id)
+    return DataResponse(data=comparison)

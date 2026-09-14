@@ -160,3 +160,46 @@ class Placement(Base):
         Index("ix_placements_user", "user_id"),
         Index("ix_placements_employer", "employer_org_id", "status"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Application feedback (N8)
+# ---------------------------------------------------------------------------
+
+FEEDBACK_TYPES = frozenset({"rejection_reason", "interview_feedback", "general"})
+FEEDBACK_VISIBILITY = frozenset({"employer_only", "shared_with_candidate"})
+
+
+class ApplicationFeedback(Base):
+    """Structured feedback on an application — visibility controlled.
+
+    employer_only: visible only to the employer org members.
+    shared_with_candidate: visible to the applicant as well.
+    """
+
+    __tablename__ = "talent_application_feedback"
+
+    id: Mapped[str] = ulid_pk()
+    application_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("applications.id", ondelete="CASCADE")
+    )
+    feedback_type: Mapped[str] = mapped_column(String(30))
+    content: Mapped[str] = mapped_column(Text)
+    visibility: Mapped[str] = mapped_column(
+        String(30), default="employer_only", server_default="'employer_only'"
+    )
+    author_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(
+            __import__("datetime").UTC
+        ),
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_app_feedback_app", "application_id"),
+        Index("ix_app_feedback_author", "author_id"),
+    )

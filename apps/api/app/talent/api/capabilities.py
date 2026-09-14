@@ -261,6 +261,30 @@ async def list_mappings(
     return DataResponse(data=[MappingResponse.model_validate(m) for m in mappings])
 
 
+@router.post("/capabilities/resolve", response_model=DataResponse[dict])
+async def resolve_skill_names(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Resolve skill names to canonical capabilities.
+
+    Body: {"names": ["JS", "React.js", "ML"]}
+    Returns matches for each name with confidence and match type.
+    """
+    names = body.get("names", [])
+    if not names or not isinstance(names, list):
+        raise HTTPException(422, "Request must include a 'names' list")
+    if len(names) > 100:
+        raise HTTPException(422, "Maximum 100 names per request")
+
+    from app.talent.services.skill_synonyms import SkillSynonymService
+
+    svc = SkillSynonymService(db)
+    results = await svc.resolve_batch(names)
+    return DataResponse(data=results)
+
+
 @router.delete("/mappings/{mapping_id}", status_code=204)
 async def delete_mapping(
     mapping_id: str,

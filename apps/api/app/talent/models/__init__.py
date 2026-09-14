@@ -4,9 +4,12 @@ from app.talent.models.activity import (  # noqa: F401
 )
 from app.talent.models.application import (  # noqa: F401
     APPLICATION_TRANSITIONS,
+    FEEDBACK_TYPES,
+    FEEDBACK_VISIBILITY,
     TERMINAL_STATUSES,
     Application,
     ApplicationEvent,
+    ApplicationFeedback,
     InterviewStage,
     Placement,
 )

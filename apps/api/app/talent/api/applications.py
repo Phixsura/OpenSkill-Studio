@@ -26,11 +26,14 @@ from app.talent.models.employer import Opportunity
 from app.talent.schemas.application import (
     ApplicationResponse,
     CreateApplicationRequest,
+    CreateFeedbackRequest,
     CreateInterviewRequest,
+    FeedbackResponse,
     InterviewStageEmployerResponse,
     InterviewStageResponse,
     PlacementResponse,
     TransitionApplicationRequest,
+    UpdateFeedbackVisibilityRequest,
     UpdateInterviewRequest,
 )
 from app.talent.schemas.cursor import CursorListResponse, CursorMeta
@@ -399,3 +402,100 @@ async def list_placements(
         data=[PlacementResponse.model_validate(p) for p in all_items],
         meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
+
+
+# ---- Feedback ----
+
+
+@router.post(
+    "/applications/{app_id}/feedback",
+    response_model=DataResponse[FeedbackResponse],
+    status_code=201,
+)
+async def add_feedback(
+    app_id: str,
+    body: CreateFeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Add feedback to an application — employer org members only."""
+    app, opp = await _load_app_and_opp(db, app_id)
+    await require_org_member(opp.employer_org_id, user, db)
+
+    from app.talent.services.application_feedback import ApplicationFeedbackService
+
+    svc = ApplicationFeedbackService(db)
+    try:
+        feedback = await svc.add_feedback(
+            application_id=app_id,
+            feedback_type=body.feedback_type,
+            content=body.content,
+            visibility=body.visibility,
+            author_id=user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+    await db.commit()
+    await db.refresh(feedback)
+    return DataResponse(data=FeedbackResponse.model_validate(feedback))
+
+
+@router.get(
+    "/applications/{app_id}/feedback",
+    response_model=DataResponse[list[FeedbackResponse]],
+)
+async def list_feedback(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List feedback for an application.
+
+    Employer org members see all feedback.
+    Candidates see only 'shared_with_candidate' feedback.
+    """
+    app, opp = await _load_app_and_opp(db, app_id)
+
+    is_employer = False
+    if app.user_id != user.id:
+        # Not the candidate — must be employer org member
+        await require_org_member(opp.employer_org_id, user, db)
+        is_employer = True
+
+    from app.talent.services.application_feedback import ApplicationFeedbackService
+
+    svc = ApplicationFeedbackService(db)
+    items = await svc.list_feedback(
+        app_id, viewer_user_id=user.id, is_employer=is_employer
+    )
+    return DataResponse(data=[FeedbackResponse.model_validate(f) for f in items])
+
+
+@router.patch(
+    "/feedback/{feedback_id}/visibility",
+    response_model=DataResponse[FeedbackResponse],
+)
+async def update_feedback_visibility(
+    feedback_id: str,
+    body: UpdateFeedbackVisibilityRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Change feedback visibility — author only."""
+    from app.talent.services.application_feedback import ApplicationFeedbackService
+
+    svc = ApplicationFeedbackService(db)
+    try:
+        feedback = await svc.update_visibility(
+            feedback_id, body.visibility, user.id
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+    if not feedback:
+        raise HTTPException(404, "Feedback not found or not the author")
+
+    await db.commit()
+    await db.refresh(feedback)
+    return DataResponse(data=FeedbackResponse.model_validate(feedback))

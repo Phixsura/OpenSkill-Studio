@@ -142,6 +142,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         Passport
       </NavLink>
       <NavLink
+        href="/dashboard/career-goals"
+        active={pathname.startsWith("/dashboard/career-goals")}
+        onClick={closeSidebar}
+      >
+        🎯 Career Goals
+      </NavLink>
+      <NavLink
+        href="/dashboard/learning-plan"
+        active={pathname.startsWith("/dashboard/learning-plan")}
+        onClick={closeSidebar}
+      >
+        📚 Learning Plan
+      </NavLink>
+      <NavLink
+        href="/dashboard/credential-pathways"
+        active={pathname.startsWith("/dashboard/credential-pathways")}
+        onClick={closeSidebar}
+      >
+        🏆 Credentials
+      </NavLink>
+      <NavLink
         href="/dashboard/settings"
         active={pathname === "/dashboard/settings"}
         onClick={closeSidebar}
