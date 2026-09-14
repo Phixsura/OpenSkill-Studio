@@ -3,9 +3,11 @@
 Wired features:
   - ETagRoute on GET-heavy routers (capabilities, evidence, passport)
   - Rate limiting dependency on the aggregate router (100 req/min per user)
+  - Global ValueError→422 exception handler (prevents 500s from service validation)
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 
 from app.talent.api.activity import router as activity_router
 from app.talent.api.applications import router as applications_router
@@ -49,6 +51,21 @@ evidence_router.route_class = ETagRoute
 passport_router.route_class = ETagRoute
 
 talent_router = APIRouter(dependencies=[Depends(rate_limit_talent)])
+
+
+def register_talent_exception_handlers(app: object) -> None:
+    """Register exception handlers on the FastAPI app instance.
+
+    Call this from app startup (e.g., main.py) after mounting the talent router.
+    Converts service-layer ValueError to 422 (prevents 500s from 107 endpoints).
+    """
+    if hasattr(app, "exception_handler"):
+        @app.exception_handler(ValueError)  # type: ignore[arg-type]
+        async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+            return JSONResponse(
+                status_code=422,
+                content={"error": {"code": "VALIDATION_ERROR", "message": str(exc)}},
+            )
 talent_router.include_router(capabilities_router)
 talent_router.include_router(evidence_router)
 talent_router.include_router(passport_router)
