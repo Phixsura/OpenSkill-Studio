@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import ulid
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, ulid_pk
 
 
 class OpportunityBookmark(Base):
@@ -19,9 +18,7 @@ class OpportunityBookmark(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(
-        String(26), primary_key=True, default=lambda: ulid.new().str
-    )
+    id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id"), index=True
     )

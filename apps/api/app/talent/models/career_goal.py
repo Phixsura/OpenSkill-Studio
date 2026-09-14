@@ -8,12 +8,11 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-import ulid
 from sqlalchemy import Date, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, ulid_pk
 
 GOAL_STATUSES = frozenset({"active", "completed", "abandoned"})
 MAX_ACTIVE_GOALS = 5
@@ -22,9 +21,7 @@ MAX_ACTIVE_GOALS = 5
 class CareerGoal(Base):
     __tablename__ = "talent_career_goals"
 
-    id: Mapped[str] = mapped_column(
-        String(26), primary_key=True, default=lambda: ulid.new().str
-    )
+    id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id"), index=True
     )

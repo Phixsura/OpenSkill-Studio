@@ -2,18 +2,17 @@
 
 from datetime import datetime
 
-import ulid
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, ulid_pk
 
 
 class ApplicationMessage(Base):
     __tablename__ = "talent_application_messages"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: ulid.new().str)
+    id: Mapped[str] = ulid_pk()
     application_id: Mapped[str] = mapped_column(String(26), ForeignKey("talent_applications.id"), index=True)
     sender_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"))
     sender_role: Mapped[str] = mapped_column(String(20))  # candidate, employer

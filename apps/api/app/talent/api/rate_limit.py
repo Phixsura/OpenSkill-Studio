@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections import defaultdict
 from time import time
 
-from fastapi import HTTPException, Request, Response
+from fastapi import HTTPException, Request
 
 # Configurable limits
 WINDOW_SECONDS = 60
@@ -47,7 +47,6 @@ def _gc_stale_keys(now: float) -> None:
 
 async def rate_limit_talent(
     request: Request,
-    response: Response,
 ) -> None:
     """FastAPI dependency that enforces per-request rate limiting.
 
@@ -80,9 +79,9 @@ async def rate_limit_talent(
     remaining = MAX_REQUESTS - len(_counters[key])
     reset_at = int(now) + WINDOW_SECONDS
 
-    response.headers["X-RateLimit-Limit"] = str(MAX_REQUESTS)
-    response.headers["X-RateLimit-Remaining"] = str(max(0, remaining))
-    response.headers["X-RateLimit-Reset"] = str(reset_at)
+    # Headers set via middleware if needed — removed Response dependency
+    # to avoid blocking POST endpoints
+    pass  # rate limiting check only, headers omitted
 
     if remaining <= 0:
         raise HTTPException(

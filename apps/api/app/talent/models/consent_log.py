@@ -9,12 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import ulid
 from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, ulid_pk
 
 CONSENT_TYPES = frozenset({
     "passport_visibility",
@@ -33,9 +32,7 @@ CONSENT_ACTIONS = frozenset({"granted", "revoked", "updated"})
 class ConsentLog(Base):
     __tablename__ = "talent_consent_log"
 
-    id: Mapped[str] = mapped_column(
-        String(26), primary_key=True, default=lambda: ulid.new().str
-    )
+    id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id"), index=True
     )

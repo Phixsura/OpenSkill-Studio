@@ -2,12 +2,11 @@
 
 from datetime import datetime
 
-import ulid
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, ulid_pk
 
 PORTFOLIO_ITEM_TYPES = frozenset({
     "project", "case_study", "work_sample", "publication",
@@ -21,7 +20,7 @@ PORTFOLIO_VISIBILITY_OPTIONS = frozenset({"private", "passport_visible", "public
 class PortfolioItem(Base):
     __tablename__ = "talent_portfolio_items"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: ulid.new().str)
+    id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), index=True)
     item_type: Mapped[str] = mapped_column(String(30))
     title: Mapped[str] = mapped_column(String(200))

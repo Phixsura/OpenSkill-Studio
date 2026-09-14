@@ -9,12 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import ulid
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, ulid_pk
 
 PATHWAY_STATUSES = frozenset({"active", "archived"})
 
@@ -22,9 +21,7 @@ PATHWAY_STATUSES = frozenset({"active", "archived"})
 class CredentialPathway(Base):
     __tablename__ = "talent_credential_pathways"
 
-    id: Mapped[str] = mapped_column(
-        String(26), primary_key=True, default=lambda: ulid.new().str
-    )
+    id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id"), index=True
     )

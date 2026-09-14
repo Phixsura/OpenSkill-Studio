@@ -2,18 +2,17 @@
 
 from datetime import datetime
 
-import ulid
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, ulid_pk
 
 
 class KeyRole(Base):
     __tablename__ = "talent_key_roles"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: ulid.new().str)
+    id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(String(26), ForeignKey("organizations.id"), index=True)
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -29,7 +28,7 @@ class KeyRole(Base):
 class SuccessorNomination(Base):
     __tablename__ = "talent_successor_nominations"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=lambda: ulid.new().str)
+    id: Mapped[str] = ulid_pk()
     key_role_id: Mapped[str] = mapped_column(String(26), ForeignKey("talent_key_roles.id"), index=True)
     candidate_user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), index=True)
     readiness: Mapped[str] = mapped_column(String(30), default="not_assessed")
