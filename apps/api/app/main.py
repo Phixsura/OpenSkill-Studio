@@ -135,3 +135,7 @@ app.include_router(api_v1_router, prefix="/api/v1")
 from app.talent.api import register_talent_exception_handlers  # noqa: E402
 
 register_talent_exception_handlers(app)
+
+from app.talent.api import register_integrity_error_handler  # noqa: E402
+
+register_integrity_error_handler(app)

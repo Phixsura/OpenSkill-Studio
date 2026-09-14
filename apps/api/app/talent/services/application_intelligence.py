@@ -161,7 +161,10 @@ def build_application_timeline(events: list[dict]) -> list[TimelineEvent]:
         ts = ev.get("timestamp")
         if isinstance(ts, str):
             try:
-                ts = datetime.fromisoformat(ts)
+                try:
+                    ts = datetime.fromisoformat(ts)
+                except (ValueError, TypeError):
+                    ts = None
             except (ValueError, TypeError):
                 ts = None
 
