@@ -236,3 +236,96 @@ async def download_calendar_invite(
             "Content-Disposition": f'attachment; filename="interview-{slot_id}.ics"'
         },
     )
+
+
+# ---- Gap #51: Question bank ----
+
+@router.get("/talent/question-bank/templates", response_model=DataResponse[list[str]])
+async def list_rubric_template_names(
+    user: User = Depends(get_current_user),
+):
+    """List available rubric templates."""
+    from app.talent.services.interview_intelligence import list_rubric_templates
+    return DataResponse(data=list_rubric_templates())
+
+
+@router.get("/talent/question-bank/templates/{name}", response_model=DataResponse[dict])
+async def get_rubric_template_endpoint(
+    name: str,
+    user: User = Depends(get_current_user),
+):
+    """Get a rubric template by name."""
+    from app.talent.services.interview_intelligence import get_rubric_template
+    template = get_rubric_template(name)
+    if not template:
+        raise HTTPException(404, "Template not found")
+    return DataResponse(data=template)
+
+
+# ---- Gap #97: Availability validation ----
+
+@router.post("/talent/interviewer-availability/validate", response_model=DataResponse[dict])
+async def validate_availability_endpoint(
+    body: dict,
+    user: User = Depends(get_current_user),
+):
+    """Validate interviewer availability slots."""
+    from app.talent.services.interview_intelligence import validate_availability
+    errors = validate_availability(body.get("slots", []))
+    return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
+
+
+# ---- Gap #98: Booking link ----
+
+@router.get("/talent/interviews/{interview_id}/booking-link", response_model=DataResponse[dict])
+async def get_booking_link(
+    interview_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Generate a self-scheduling booking link for candidates."""
+    from app.talent.services.interview_intelligence import generate_booking_link
+    return DataResponse(data=generate_booking_link(interview_id))
+
+
+# ---- Gap #99: Reminders ----
+
+@router.get("/talent/interviews/{interview_id}/reminders", response_model=DataResponse[list[dict]])
+async def get_interview_reminders(
+    interview_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get scheduled reminder times for an interview."""
+    from sqlalchemy import select as sa_select
+
+    from app.talent.models.interview_slot import InterviewSlot
+    from app.talent.services.interview_intelligence import compute_reminder_schedule
+    result = await db.execute(
+        sa_select(InterviewSlot).where(InterviewSlot.interview_stage_id == interview_id, InterviewSlot.status == "accepted")
+    )
+    slot = result.scalar_one_or_none()
+    if not slot:
+        return DataResponse(data=[])
+    reminders = compute_reminder_schedule(slot.start_time)
+    return DataResponse(data=reminders)
+
+
+# ---- Gap #59: Credential renewal ----
+
+@router.get("/talent/credentials/{credential_id}/renewal-eligibility", response_model=DataResponse[dict])
+async def check_credential_renewal(
+    credential_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Check if a credential is eligible for renewal."""
+    from app.talent.models.assessment import Credential
+    from app.talent.services.interview_intelligence import check_renewal_eligibility
+    cred = await db.get(Credential, credential_id)
+    if not cred:
+        raise HTTPException(404, "Credential not found")
+    result = check_renewal_eligibility({
+        "expires_at": cred.expires_at.isoformat() if cred.expires_at else None,
+        "revalidation_at": cred.revalidation_at.isoformat() if cred.revalidation_at else None,
+    })
+    return DataResponse(data=result)

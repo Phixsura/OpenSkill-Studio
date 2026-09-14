@@ -400,3 +400,47 @@ async def get_edge_strength(
     from app.talent.services.skill_intelligence import compute_edge_strength
     strength = await compute_edge_strength(db, source_id, target_id)
     return DataResponse(data={"source_id": source_id, "target_id": target_id, "strength": strength})
+
+
+# ---- Gap #72: Search analytics ----
+
+@router.get("/talent/capabilities/search-analytics", response_model=DataResponse[dict])
+async def get_search_analytics_endpoint(
+    user: User = Depends(get_current_user),
+):
+    """Search analytics — popular queries, zero-result tracking."""
+    from app.talent.services.search_intelligence import get_search_analytics
+    store = get_search_analytics()
+    return DataResponse(data={
+        "stats": store.get_stats(),
+        "popular": store.get_popular_queries(20),
+        "zero_results": store.get_zero_result_queries(20),
+    })
+
+
+# ---- Gap #79: Boolean search ----
+
+@router.post("/talent/capabilities/boolean-search", response_model=DataResponse[dict])
+async def boolean_search(
+    body: dict,
+    user: User = Depends(get_current_user),
+):
+    """Parse a Boolean search query into structured form."""
+    from app.talent.services.search_intelligence import parse_boolean_query
+    parsed = parse_boolean_query(body.get("query", ""))
+    return DataResponse(data=parsed)
+
+
+# ---- Gap #75: Match feedback ----
+
+@router.post("/talent/match-feedback", response_model=DataResponse[dict])
+async def submit_match_feedback(
+    body: dict,
+    user: User = Depends(get_current_user),
+):
+    """Submit feedback on match quality."""
+    from app.talent.services.search_intelligence import validate_match_feedback
+    errors = validate_match_feedback(body.get("rating", ""))
+    if errors:
+        raise HTTPException(422, errors[0])
+    return DataResponse(data={"submitted": True, "rating": body["rating"]})

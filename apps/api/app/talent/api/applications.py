@@ -553,3 +553,76 @@ async def compare_applications(
     import dataclasses
 
     return DataResponse(data=[dataclasses.asdict(c) for c in comparisons])
+
+
+# ---- Gap #81: Custom questions validation ----
+
+@router.post("/talent/opportunities/{opp_id}/custom-questions/validate", response_model=DataResponse[dict])
+async def validate_custom_questions_endpoint(
+    opp_id: str, body: dict,
+    user: User = Depends(get_current_user),
+):
+    """Validate custom application questions for an opportunity."""
+    from app.talent.services.application_intelligence import validate_custom_questions
+    errors = validate_custom_questions(body.get("questions", []))
+    return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
+
+
+# ---- Gap #82: Auto-screening ----
+
+@router.post("/talent/applications/{app_id}/screen", response_model=DataResponse[dict])
+async def auto_screen_application(
+    app_id: str, body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Run auto-screening rules against a candidate's data."""
+    from app.talent.services.application_intelligence import evaluate_screening_rules
+    result = evaluate_screening_rules(body.get("rules", []), body.get("candidate_data", {}))
+    return DataResponse(data=result)
+
+
+# ---- Gap #86: Application timeline ----
+
+@router.get("/talent/applications/{app_id}/timeline", response_model=DataResponse[list[dict]])
+async def get_application_timeline(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get detailed application timeline with stage durations."""
+    import dataclasses
+
+    from app.talent.services.application_intelligence import build_application_timeline
+    app = await db.get(Application, app_id)
+    if not app or app.user_id != user.id:
+        opp = await db.get(Opportunity, app.opportunity_id) if app else None
+        if opp:
+            await require_org_member(opp.employer_org_id, user, db)
+        else:
+            raise HTTPException(404, "Application not found")
+    # Load events
+    from sqlalchemy import select as sa_select
+    result = await db.execute(
+        sa_select(ApplicationEvent).where(ApplicationEvent.application_id == app_id).order_by(ApplicationEvent.created_at)
+    )
+    events = [{"to_status": e.to_status, "timestamp": e.created_at.isoformat() if e.created_at else None, "acted_by": e.acted_by, "note": e.note} for e in result.scalars().all()]
+    timeline = build_application_timeline(events)
+    return DataResponse(data=[dataclasses.asdict(t) for t in timeline])
+
+
+# ---- Gap #92: Stage overdue check ----
+
+@router.get("/talent/applications/{app_id}/overdue", response_model=DataResponse[dict])
+async def check_application_overdue(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Check if application has exceeded stage time limit."""
+    from app.talent.services.application_intelligence import check_stage_overdue
+    app = await db.get(Application, app_id)
+    if not app:
+        raise HTTPException(404, "Application not found")
+    result = check_stage_overdue(app.status, app.updated_at or app.created_at)
+    return DataResponse(data=result)
