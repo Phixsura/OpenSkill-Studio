@@ -68,7 +68,7 @@ class OpportunitySearchService:
             cap_conditions = []
             for cap_id in capability_ids[:10]:  # limit to 10 capability filters
                 cap_conditions.append(
-                    cast(Opportunity.required_capabilities, String).like(f"%{cap_id}%")
+                    cast(Opportunity.required_capabilities, String).like(f"%{cap_id.replace(chr(37), "").replace("_", "")}%")
                 )
             if cap_conditions:
                 query = query.where(or_(*cap_conditions))

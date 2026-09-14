@@ -40,7 +40,7 @@ async def autocomplete_capabilities(
         select(Capability.id, Capability.canonical_name, Capability.category, Capability.slug)
         .where(Capability.status == status)
         .where(
-            Capability.canonical_name.ilike(f"%{q}%")
+            Capability.canonical_name.ilike(f"%{q.replace(chr(37), "").replace("_", "")}%")
         )
         .order_by(Capability.canonical_name)
         .limit(limit)
