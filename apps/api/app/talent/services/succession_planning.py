@@ -91,7 +91,7 @@ class SuccessionPlanningService:
             user_level = user_levels.get(cap_id, 0)
             if user_level >= min_level:
                 matches += 1
-        return matches / len(required)
+        return matches / max(len(required), 1)
 
     def identify_gaps(
         self,

@@ -78,8 +78,8 @@ class PortfolioShowcaseService:
         score = 0.0
         score += min(len(items) / 5.0, 1.0) * 25  # Up to 25 for 5+ items
         score += min(public / 3.0, 1.0) * 20  # Up to 20 for 3+ public
-        score += min(with_urls / len(items), 1.0) * 15  # 15 for all having URLs
-        score += min(with_images / len(items), 1.0) * 10  # 10 for all having images
+        score += min(with_urls / max(len(items), 1), 1.0) * 15  # 15 for all having URLs
+        score += min(with_images / max(len(items), 1), 1.0) * 10  # 10 for all having images
         score += min(len(all_caps) / 5.0, 1.0) * 15  # 15 for 5+ capabilities
         score += 10 if has_commercial else 0
         score += 5 if has_oss else 0

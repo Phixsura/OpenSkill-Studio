@@ -128,7 +128,7 @@ class WebhookDeliveryService:
             successful=successful,
             failed=failed,
             pending=pending,
-            success_rate=round(successful / len(deliveries), 3) if deliveries else 0.0,
+            success_rate=round(successful / max(len(deliveries), 1), 3) if deliveries else 0.0,
             avg_response_ms=None,
         )
 

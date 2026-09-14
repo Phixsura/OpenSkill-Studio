@@ -173,7 +173,7 @@ class CareerGoalService:
             })
             total_progress += progress_pct
 
-        overall = round(total_progress / len(target_caps), 1) if target_caps else 0.0
+        overall = round(total_progress / max(len(target_caps), 1), 1) if target_caps else 0.0
 
         return {
             "goal_id": goal.id,

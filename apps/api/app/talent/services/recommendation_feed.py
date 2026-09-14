@@ -140,7 +140,7 @@ class RecommendationFeedService:
                     min_level = req.get("min_level", 1)
                     if cap_id in user_cap_ids and user_cap_levels.get(cap_id, 0) >= min_level:
                         met += 1
-                cap_score = met / len(required_caps)
+                cap_score = met / max(len(required_caps), 1)
                 if cap_score >= 0.8:
                     reasons.append("Strong capability match")
                 elif cap_score >= 0.5:

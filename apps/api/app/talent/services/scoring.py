@@ -308,7 +308,7 @@ async def compute_capability_profile(
         related = adjacency.get(cap_id, set())
         if related:
             breadth_count = len(related & user_cap_ids)
-            breadth = breadth_count / len(related)
+            breadth = breadth_count / max(len(related), 1)
         else:
             breadth = 0.0
 

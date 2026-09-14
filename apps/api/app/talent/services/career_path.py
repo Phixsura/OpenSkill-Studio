@@ -151,7 +151,7 @@ async def predict_career_paths(
         # Bonus for having some capabilities already met
         met_count = len(required_caps) - len(gaps)
         if len(required_caps) > 0:
-            coverage_bonus = met_count / len(required_caps) * 0.2
+            coverage_bonus = met_count / max(len(required_caps), 1) * 0.2
             reachability = min(1.0, reachability + coverage_bonus)
 
         suggestions.append(CareerPathSuggestion(

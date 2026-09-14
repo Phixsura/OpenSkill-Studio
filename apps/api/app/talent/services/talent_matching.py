@@ -601,7 +601,7 @@ class TalentMatchingService:
                 if cid:
                     cred_cap_ids.add(cid)
         cred_overlap = len(all_cap_ids & cred_cap_ids)
-        credential_match = cred_overlap / len(all_cap_ids) if all_cap_ids else 0.0
+        credential_match = cred_overlap / max(len(all_cap_ids), 1) if all_cap_ids else 0.0
 
         return {
             "capability_gap_score": round(capability_gap_score, 4),

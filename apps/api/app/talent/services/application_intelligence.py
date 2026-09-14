@@ -111,7 +111,7 @@ def evaluate_screening_rules(
             "action": rule.get("action", "pass"),
         })
 
-    score = passed_count / len(rules) if rules else 1.0
+    score = passed_count / max(len(rules), 1) if rules else 1.0
     all_passed = all(
         r["passed"] or r["action"] == "flag_for_review"
         for r in results
