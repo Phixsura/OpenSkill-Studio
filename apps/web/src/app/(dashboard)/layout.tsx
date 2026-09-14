@@ -170,6 +170,41 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         🔔 Notifications
       </NavLink>
       <NavLink
+        href="/dashboard/endorsements"
+        active={pathname.startsWith("/dashboard/endorsements")}
+        onClick={closeSidebar}
+      >
+        👍 Endorsements
+      </NavLink>
+      <NavLink
+        href="/dashboard/bookmarks"
+        active={pathname.startsWith("/dashboard/bookmarks")}
+        onClick={closeSidebar}
+      >
+        🔖 Bookmarks
+      </NavLink>
+      <NavLink
+        href="/dashboard/offers"
+        active={pathname.startsWith("/dashboard/offers")}
+        onClick={closeSidebar}
+      >
+        📄 Offers
+      </NavLink>
+      <NavLink
+        href="/dashboard/activity"
+        active={pathname.startsWith("/dashboard/activity")}
+        onClick={closeSidebar}
+      >
+        📋 Activity
+      </NavLink>
+      <NavLink
+        href="/dashboard/capabilities"
+        active={pathname.startsWith("/dashboard/capabilities")}
+        onClick={closeSidebar}
+      >
+        🧠 Capabilities
+      </NavLink>
+      <NavLink
         href="/dashboard/settings"
         active={pathname === "/dashboard/settings"}
         onClick={closeSidebar}

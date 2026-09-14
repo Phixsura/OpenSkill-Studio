@@ -148,6 +148,46 @@ test.describe("Talent layer pages", () => {
     expect(html.toLowerCase()).toMatch(/credential|pathway|no.*pathway/i);
   });
 
+  test("capabilities admin page renders", async () => {
+    await page.goto("/dashboard/capabilities");
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/capabilit|taxonomy|no.*capabilit/i);
+  });
+
+  test("endorsements page renders", async () => {
+    await page.goto("/dashboard/endorsements");
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/endorsement|no.*endorsement/i);
+  });
+
+  test("bookmarks page renders", async () => {
+    await page.goto("/dashboard/bookmarks");
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/bookmark|saved|no.*bookmark/i);
+  });
+
+  test("activity log page renders", async () => {
+    await page.goto("/dashboard/activity");
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/activity|log|no.*activity/i);
+  });
+
+  test("offers page renders", async () => {
+    await page.goto("/dashboard/offers");
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/offer|no.*offer/i);
+  });
+
   test("no API 500 errors occurred", () => {
     expect(api500s).toHaveLength(0);
   });
@@ -169,6 +209,17 @@ test.describe("Public pages (no auth)", () => {
     const publicCtx = await browser.newContext();
     const publicPage = await publicCtx.newPage();
     await publicPage.goto("/employers/nonexistent-org-id");
+    await publicPage.waitForLoadState("domcontentloaded");
+    await publicPage.waitForTimeout(2000);
+    const html = await publicPage.innerHTML("body");
+    expect(html.length).toBeGreaterThan(50);
+    await publicCtx.close();
+  });
+
+  test("credential verification page loads without auth", async ({ browser }) => {
+    const publicCtx = await browser.newContext();
+    const publicPage = await publicCtx.newPage();
+    await publicPage.goto("/verify/credential/nonexistent-test-id");
     await publicPage.waitForLoadState("domcontentloaded");
     await publicPage.waitForTimeout(2000);
     const html = await publicPage.innerHTML("body");
