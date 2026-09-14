@@ -21,8 +21,20 @@ async def register_webhook(org_id: str, body: dict, db: AsyncSession = Depends(g
     parsed = urlparse(url)
     if parsed.scheme not in ("https",):
         raise HTTPException(422, "Webhook URL must use HTTPS")
-    if not parsed.hostname or parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
-        raise HTTPException(422, "Webhook URL must not point to localhost or private addresses")
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not host:
+        raise HTTPException(422, "Invalid webhook URL")
+    # Resolve hostname and reject private/loopback/link-local/reserved IPs
+    import ipaddress
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise HTTPException(422, "Cannot resolve webhook hostname")  # noqa: B904
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise HTTPException(422, "Webhook URL resolves to a disallowed address")
     ep = WebhookEndpointConfig(org_id=org_id, url=url, secret=secrets.token_urlsafe(32), event_types=body.get("event_types", []), created_by=user.id)
     db.add(ep)
     await db.commit()
