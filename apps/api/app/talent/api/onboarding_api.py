@@ -6,10 +6,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.models.user import User
 from app.schemas.base import DataResponse
+from app.talent.models.application import Placement
 from app.talent.models.onboarding import OnboardingChecklist, OnboardingTemplate
 from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 
 router = APIRouter(prefix="/talent", tags=["Talent — Onboarding"])
+
+
+async def _check_placement_access(
+    placement_id: str, user: User, db: AsyncSession,
+) -> Placement:
+    """Verify user is placement candidate or employer org member."""
+    placement = await db.get(Placement, placement_id)
+    if not placement:
+        raise HTTPException(404, "Placement not found")
+    if placement.user_id != user.id:
+        await require_org_member(placement.employer_org_id, user, db)
+    return placement
 
 @router.post("/orgs/{org_id}/onboarding-templates", response_model=DataResponse[dict], status_code=201)
 async def create_onboarding_template(org_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
@@ -37,6 +50,7 @@ async def list_onboarding_templates(org_id: str, cursor: str | None = Query(None
 
 @router.post("/placements/{placement_id}/onboarding", response_model=DataResponse[dict], status_code=201)
 async def create_onboarding_checklist(placement_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await _check_placement_access(placement_id, user, db)
     cl = OnboardingChecklist(placement_id=placement_id, template_id=body.get("template_id"), tasks=body.get("tasks", []))
     db.add(cl)
     await db.commit()
@@ -45,6 +59,7 @@ async def create_onboarding_checklist(placement_id: str, body: dict, db: AsyncSe
 
 @router.get("/placements/{placement_id}/onboarding", response_model=DataResponse[dict])
 async def get_onboarding_progress(placement_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await _check_placement_access(placement_id, user, db)
     q = select(OnboardingChecklist).where(OnboardingChecklist.placement_id == placement_id)
     result = await db.execute(q)
     cl = result.scalar_one_or_none()

@@ -1,5 +1,6 @@
 """Webhook endpoint management API."""
 import secrets
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -16,7 +17,13 @@ router = APIRouter(prefix="/talent", tags=["Talent — Webhooks"])
 @router.post("/orgs/{org_id}/webhooks", response_model=DataResponse[dict], status_code=201)
 async def register_webhook(org_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     await require_org_member(org_id, user, db)
-    ep = WebhookEndpointConfig(org_id=org_id, url=body.get("url", ""), secret=secrets.token_urlsafe(32), event_types=body.get("event_types", []), created_by=user.id)
+    url = body.get("url", "")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https",):
+        raise HTTPException(422, "Webhook URL must use HTTPS")
+    if not parsed.hostname or parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        raise HTTPException(422, "Webhook URL must not point to localhost or private addresses")
+    ep = WebhookEndpointConfig(org_id=org_id, url=url, secret=secrets.token_urlsafe(32), event_types=body.get("event_types", []), created_by=user.id)
     db.add(ep)
     await db.commit()
     await db.refresh(ep)
@@ -49,6 +56,11 @@ async def delete_webhook(endpoint_id: str, db: AsyncSession = Depends(get_db), u
 
 @router.get("/webhooks/{endpoint_id}/deliveries", response_model=CursorListResponse[dict])
 async def list_deliveries(endpoint_id: str, cursor: str | None = Query(None), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    # Authorization: must be org member of the webhook's org
+    ep = await db.get(WebhookEndpointConfig, endpoint_id)
+    if not ep:
+        raise HTTPException(404, "Webhook endpoint not found")
+    await require_org_member(ep.org_id, user, db)
     q = select(WebhookDeliveryLog).where(WebhookDeliveryLog.endpoint_id == endpoint_id)
     if cursor:
         q = q.where(WebhookDeliveryLog.id < cursor)
