@@ -19,6 +19,9 @@ from app.talent.models.assessment import (  # noqa: F401
     Credential,
     CredentialRule,
 )
+from app.talent.models.bookmark import (  # noqa: F401
+    OpportunityBookmark,
+)
 from app.talent.models.candidate_note import (  # noqa: F401
     CandidateNote,
 )

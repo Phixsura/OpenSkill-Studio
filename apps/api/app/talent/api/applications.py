@@ -136,6 +136,21 @@ async def apply_to_opportunity(
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
+@router.get("/applications/analytics", response_model=DataResponse[dict])
+async def get_application_analytics(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Candidate-side application analytics — success rate, response time, etc."""
+    import dataclasses
+
+    from app.talent.services.candidate_analytics import CandidateAnalyticsService
+
+    svc = CandidateAnalyticsService(db)
+    stats = await svc.get_stats(user.id)
+    return DataResponse(data=dataclasses.asdict(stats))
+
+
 @router.get("/applications", response_model=CursorListResponse[ApplicationResponse])
 async def list_applications(
     status: str | None = None,

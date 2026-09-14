@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from app.talent.api.activity import router as activity_router
 from app.talent.api.applications import router as applications_router
 from app.talent.api.assessments import router as assessments_router
+from app.talent.api.bookmarks import router as bookmark_router
 from app.talent.api.bulk import router as bulk_router
 from app.talent.api.candidate_notes import router as candidate_notes_router
 from app.talent.api.capabilities import router as capabilities_router
@@ -64,3 +65,4 @@ talent_router.include_router(saved_search_router)
 talent_router.include_router(scheduling_router)
 talent_router.include_router(credential_pathway_router)
 talent_router.include_router(career_goal_router)
+talent_router.include_router(bookmark_router)

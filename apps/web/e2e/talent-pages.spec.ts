@@ -124,6 +124,30 @@ test.describe("Talent layer pages", () => {
     expect(html.toLowerCase()).toMatch(/supply|capability/i);
   });
 
+  test("career goals page renders", async () => {
+    await page.goto("/dashboard/career-goals");
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/career|goal|no.*goal/i);
+  });
+
+  test("learning plan page renders", async () => {
+    await page.goto("/dashboard/learning-plan");
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/learning|plan|no.*gap/i);
+  });
+
+  test("credential pathways page renders", async () => {
+    await page.goto("/dashboard/credential-pathways");
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(2000);
+    const html = await page.innerHTML("body");
+    expect(html.toLowerCase()).toMatch(/credential|pathway|no.*pathway/i);
+  });
+
   test("no API 500 errors occurred", () => {
     expect(api500s).toHaveLength(0);
   });
@@ -134,13 +158,21 @@ test.describe("Public pages (no auth)", () => {
     const publicCtx = await browser.newContext();
     const publicPage = await publicCtx.newPage();
     await publicPage.goto("/verify/passport/nonexistent-test-token");
-    await publicPage.waitForLoadState("networkidle");
+    await publicPage.waitForLoadState("domcontentloaded");
     await publicPage.waitForTimeout(2000);
-    // Should NOT redirect to login — it's a public route
-    // It might show "not found" or an error, but shouldn't 500
     const html = await publicPage.innerHTML("body");
-    // The page should have rendered (not a blank page)
     expect(html.length).toBeGreaterThan(100);
+    await publicCtx.close();
+  });
+
+  test("employer career page handles nonexistent org", async ({ browser }) => {
+    const publicCtx = await browser.newContext();
+    const publicPage = await publicCtx.newPage();
+    await publicPage.goto("/employers/nonexistent-org-id");
+    await publicPage.waitForLoadState("domcontentloaded");
+    await publicPage.waitForTimeout(2000);
+    const html = await publicPage.innerHTML("body");
+    expect(html.length).toBeGreaterThan(50);
     await publicCtx.close();
   });
 });

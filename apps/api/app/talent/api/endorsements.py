@@ -115,6 +115,85 @@ async def get_endorsement_summary(
     return DataResponse(data=EndorsementSummaryResponse(**summary))
 
 
+# ---- Leaderboard (N12) ----
+
+
+@router.get("/endorsements/leaderboard/users", response_model=DataResponse[list[dict]])
+async def get_top_endorsed_users(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Top endorsed users (discoverable only)."""
+    from app.talent.services.endorsement_leaderboard import (
+        EndorsementLeaderboardService,
+    )
+
+    svc = EndorsementLeaderboardService(db)
+    entries = await svc.get_top_endorsed_users(limit=limit)
+    return DataResponse(
+        data=[
+            {
+                "user_id": e.user_id,
+                "total_endorsements": e.total_endorsements,
+                "unique_endorsers": e.unique_endorsers,
+            }
+            for e in entries
+        ]
+    )
+
+
+@router.get(
+    "/endorsements/leaderboard/capabilities",
+    response_model=DataResponse[list[dict]],
+)
+async def get_top_endorsed_capabilities(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Top capabilities by endorsement count."""
+    from app.talent.services.endorsement_leaderboard import (
+        EndorsementLeaderboardService,
+    )
+
+    svc = EndorsementLeaderboardService(db)
+    entries = await svc.get_top_endorsed_capabilities(limit=limit)
+    return DataResponse(
+        data=[
+            {
+                "capability_id": e.capability_id,
+                "capability_name": e.capability_name,
+                "endorsement_count": e.endorsement_count,
+                "unique_users": e.unique_users,
+            }
+            for e in entries
+        ]
+    )
+
+
+@router.get("/endorsements/stats", response_model=DataResponse[dict])
+async def get_endorsement_stats(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Platform-wide endorsement statistics."""
+    from app.talent.services.endorsement_leaderboard import (
+        EndorsementLeaderboardService,
+    )
+
+    svc = EndorsementLeaderboardService(db)
+    stats = await svc.get_endorsement_stats()
+    return DataResponse(
+        data={
+            "total_endorsements": stats.total_endorsements,
+            "total_endorsers": stats.total_endorsers,
+            "total_endorsed_users": stats.total_endorsed_users,
+            "avg_per_user": stats.avg_per_user,
+        }
+    )
+
+
 @router.get(
     "/users/{user_id}/endorsements",
     response_model=CursorListResponse[EndorsementResponse],
