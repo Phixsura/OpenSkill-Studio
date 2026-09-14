@@ -195,8 +195,41 @@ async def get_passport_completeness(
     """Get profile completeness score with actionable suggestions."""
     import dataclasses
 
+    from sqlalchemy import func, select
+
+    from app.talent.models.evidence import CapabilityEvidence
+    from app.talent.models.passport import SkillPassport
     from app.talent.services.profile_completeness import compute_profile_completeness
-    result = compute_profile_completeness(has_evidence=False, has_credentials=False, has_preferred_types=False, is_discoverable=False, has_portfolio=False, has_availability=False, has_verified_evidence=False, has_bio=False)
+
+    # Load passport
+    passport = await db.get(SkillPassport, user.id)
+    passport_dict = {
+        "discoverable": passport.discoverable if passport else False,
+        "availability_status": passport.availability_status if passport else None,
+        "preferred_opportunity_types": passport.preferred_opportunity_types if passport else [],
+        "availability_note": passport.availability_note if passport else None,
+    } if passport else None
+
+    # Count evidence
+    ev_count_q = select(func.count()).select_from(CapabilityEvidence).where(
+        CapabilityEvidence.user_id == user.id, CapabilityEvidence.status == "active"
+    )
+    evidence_count = (await db.execute(ev_count_q)).scalar() or 0
+
+    # Check verified evidence
+    ver_q = select(func.count()).select_from(CapabilityEvidence).where(
+        CapabilityEvidence.user_id == user.id,
+        CapabilityEvidence.status == "active",
+        CapabilityEvidence.verification_level.in_(["employer_verified", "client_verified", "instructor_verified", "assessment_verified"]),
+    )
+    has_verified = ((await db.execute(ver_q)).scalar() or 0) > 0
+
+    result = compute_profile_completeness(
+        passport=passport_dict,
+        evidence_count=evidence_count,
+        credential_count=0,  # TODO: count from credentials table
+        has_verified_evidence=has_verified,
+    )
     return DataResponse(data=dataclasses.asdict(result))
 
 

@@ -104,23 +104,10 @@ talent_router.include_router(succession_router)
 
 
 def register_integrity_error_handler(app: object) -> None:
-    """Register IntegrityError→409 handler to catch unique constraint violations.
+    """No-op: IntegrityError handling is done at the application level.
 
-    Prevents 500 errors when concurrent requests hit unique constraints
-    (TOCTOU race conditions on capability names, bookmarks, applications).
+    Individual endpoints that create unique-constrained records (applications,
+    bookmarks, capabilities) already have duplicate checks before db.commit().
+    The global DBAPIError backstop in app.exceptions catches the rest.
     """
-    if hasattr(app, "exception_handler"):
-        from fastapi import Request
-        from fastapi.responses import JSONResponse
-
-        @app.exception_handler(Exception)  # type: ignore[arg-type]
-        async def integrity_error_handler(request: Request, exc: Exception) -> JSONResponse:
-            # Check for SQLAlchemy IntegrityError (unique constraint violations)
-            exc_str = str(type(exc).__name__)
-            if "IntegrityError" in exc_str or "UniqueViolation" in exc_str:
-                return JSONResponse(
-                    status_code=409,
-                    content={"error": {"code": "CONFLICT", "message": "Resource already exists or conflicts with existing data"}},
-                )
-            # Re-raise all other exceptions
-            raise exc
+    pass  # Removed: the previous Exception handler broke all error handling
