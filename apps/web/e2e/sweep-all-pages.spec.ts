@@ -25,17 +25,43 @@ let page: Page;
 const api500s: string[] = [];
 
 test.beforeAll(async ({ browser }) => {
-  for (let i = 0; i < 5; i++) {
+  // Flush redis rate-limit keys so prior spec files don't block us
+  try {
+    await fetch(`${API.replace("/api/v1", "")}/api/v1/auth/register`, { method: "OPTIONS" }).catch(
+      () => {},
+    );
+    // Direct redis flush via a quick script — silently ignore if unavailable
+    const { execSync } = await import("child_process");
+    execSync("redis-cli KEYS 'ratelimit:*' | xargs -r redis-cli DEL", {
+      stdio: "ignore",
+      timeout: 3000,
+    });
+  } catch {
+    // Redis may not be accessible — continue anyway with retries
+  }
+
+  // Retry registration with increasing backoff
+  for (let i = 0; i < 8; i++) {
     try {
       auth = await registerUser("Sweep E2E User");
       break;
     } catch {
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, 3000 + i * 3000));
     }
   }
+  if (!auth) throw new Error("Failed to register user after 8 retries");
 
-  // Create an org for org-scoped tests
-  orgId = await createOrg(auth, "Sweep Test Org");
+  // Create an org with unique name (slug collision from prior runs)
+  const orgName = `Sweep Org ${Date.now()}`;
+  for (let i = 0; i < 5; i++) {
+    try {
+      orgId = await createOrg(auth, orgName);
+      if (orgId) break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  if (!orgId) throw new Error("Failed to create org after 5 retries");
 
   ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   page = await ctx.newPage();
