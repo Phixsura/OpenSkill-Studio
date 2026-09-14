@@ -7,6 +7,10 @@ Adds standard headers to every response:
 
 Returns 429 with Retry-After header when the limit is exceeded.
 
+Keys by authenticated user ID when available (from request.state.user),
+falls back to client IP. Does NOT enforce authentication itself — each
+endpoint handles its own auth via get_current_user dependency.
+
 This is an in-memory implementation suitable for single-process deployments.
 For multi-process or distributed setups, swap this for a Redis-backed limiter.
 """
@@ -16,10 +20,7 @@ from __future__ import annotations
 from collections import defaultdict
 from time import time
 
-from fastapi import Depends, HTTPException, Request, Response
-
-from app.api.deps import get_current_user
-from app.models.user import User
+from fastapi import HTTPException, Request, Response
 
 # Configurable limits
 WINDOW_SECONDS = 60
@@ -47,15 +48,23 @@ def _gc_stale_keys(now: float) -> None:
 async def rate_limit_talent(
     request: Request,
     response: Response,
-    user: User = Depends(get_current_user),
 ) -> None:
-    """FastAPI dependency that enforces per-user rate limiting.
+    """FastAPI dependency that enforces per-request rate limiting.
 
-    Add to a router via dependencies=[Depends(rate_limit_talent)].
+    Keys by user ID (if authenticated via middleware) or client IP.
+    Does NOT call get_current_user — avoids forcing auth on public routes.
     """
     global _request_count
 
-    key = user.id
+    # Use user ID if auth middleware has set it, otherwise client IP
+    user = getattr(request.state, "user", None)
+    if user and hasattr(user, "id"):
+        key = f"user:{user.id}"
+    elif request.client:
+        key = f"ip:{request.client.host}"
+    else:
+        key = "anonymous"
+
     now = time()
 
     # Periodic GC

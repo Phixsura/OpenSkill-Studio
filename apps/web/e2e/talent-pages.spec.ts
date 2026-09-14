@@ -7,6 +7,9 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { registerUser, loginInBrowser, type AuthContext } from "./helpers";
 
+// Increase timeout for cold dev server compilation
+test.setTimeout(120_000);
+
 const PASSWORD = "TestPass123!";
 let auth: AuthContext;
 let ctx: BrowserContext;
@@ -49,7 +52,7 @@ test.afterAll(async () => {
 test.describe("Talent layer pages", () => {
   test("dashboard has talent nav links", async () => {
     await page.goto("/dashboard");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const html = await page.innerHTML("body");
     expect(html).toContain("/dashboard/passport");
     expect(html).toContain("/dashboard/opportunities");
@@ -58,7 +61,7 @@ test.describe("Talent layer pages", () => {
 
   test("passport page renders", async () => {
     await page.goto("/dashboard/passport");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     const html = await page.innerHTML("body");
     expect(html.toLowerCase()).toContain("passport");
@@ -66,7 +69,7 @@ test.describe("Talent layer pages", () => {
 
   test("opportunities page renders", async () => {
     await page.goto("/dashboard/opportunities");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     const html = await page.innerHTML("body");
     // Should show opportunities list or empty state
@@ -75,7 +78,7 @@ test.describe("Talent layer pages", () => {
 
   test("applications page renders", async () => {
     await page.goto("/dashboard/applications");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     const html = await page.innerHTML("body");
     expect(html.toLowerCase()).toMatch(/application|no.*appli/i);
@@ -83,7 +86,7 @@ test.describe("Talent layer pages", () => {
 
   test("talent intelligence dashboard renders", async () => {
     await page.goto("/dashboard/talent");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     const html = await page.innerHTML("body");
     expect(html.toLowerCase()).toMatch(/talent|intelligence|demand/i);
@@ -91,7 +94,7 @@ test.describe("Talent layer pages", () => {
 
   test("matched opportunities page renders", async () => {
     await page.goto("/dashboard/opportunities/matches");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     const html = await page.innerHTML("body");
     expect(html.toLowerCase()).toMatch(/match|passport|opportunities/i);
@@ -99,7 +102,7 @@ test.describe("Talent layer pages", () => {
 
   test("passport snapshots page renders", async () => {
     await page.goto("/dashboard/passport/snapshots");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     const html = await page.innerHTML("body");
     expect(html.toLowerCase()).toMatch(/snapshot|share/i);
@@ -107,7 +110,7 @@ test.describe("Talent layer pages", () => {
 
   test("talent demand detail page renders", async () => {
     await page.goto("/dashboard/talent/demand");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     const html = await page.innerHTML("body");
     expect(html.toLowerCase()).toMatch(/demand|capability/i);
@@ -115,7 +118,7 @@ test.describe("Talent layer pages", () => {
 
   test("talent supply detail page renders", async () => {
     await page.goto("/dashboard/talent/supply");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     const html = await page.innerHTML("body");
     expect(html.toLowerCase()).toMatch(/supply|capability/i);
