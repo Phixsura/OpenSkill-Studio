@@ -59,6 +59,7 @@ class CareerGoalService:
         return goal
 
     async def get_goal(self, goal_id: str) -> CareerGoal | None:
+        """Execute get goal."""
         return await self.db.get(CareerGoal, goal_id)
 
     async def list_goals(

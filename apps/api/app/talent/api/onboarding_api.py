@@ -26,6 +26,7 @@ async def _check_placement_access(
 
 @router.post("/orgs/{org_id}/onboarding-templates", response_model=DataResponse[dict], status_code=201)
 async def create_onboarding_template(org_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Create onboarding template."""
     await require_org_member(org_id, user, db)
     t = OnboardingTemplate(org_id=org_id, name=body.get("name", "Untitled"), description=body.get("description"), tasks=body.get("tasks", []), created_by=user.id)
     db.add(t)
@@ -35,6 +36,7 @@ async def create_onboarding_template(org_id: str, body: dict, db: AsyncSession =
 
 @router.get("/orgs/{org_id}/onboarding-templates", response_model=CursorListResponse[dict])
 async def list_onboarding_templates(org_id: str, cursor: str | None = Query(None), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """List onboarding templates."""
     await require_org_member(org_id, user, db)
     q = select(OnboardingTemplate).where(OnboardingTemplate.org_id == org_id)
     if cursor:
@@ -50,6 +52,7 @@ async def list_onboarding_templates(org_id: str, cursor: str | None = Query(None
 
 @router.post("/placements/{placement_id}/onboarding", response_model=DataResponse[dict], status_code=201)
 async def create_onboarding_checklist(placement_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Create onboarding checklist."""
     await _check_placement_access(placement_id, user, db)
     cl = OnboardingChecklist(placement_id=placement_id, template_id=body.get("template_id"), tasks=body.get("tasks", []))
     db.add(cl)
@@ -59,6 +62,7 @@ async def create_onboarding_checklist(placement_id: str, body: dict, db: AsyncSe
 
 @router.get("/placements/{placement_id}/onboarding", response_model=DataResponse[dict])
 async def get_onboarding_progress(placement_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Get onboarding progress."""
     await _check_placement_access(placement_id, user, db)
     q = select(OnboardingChecklist).where(OnboardingChecklist.placement_id == placement_id)
     result = await db.execute(q)

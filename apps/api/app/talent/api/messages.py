@@ -35,6 +35,7 @@ async def _check_message_access(
 
 @router.post("/applications/{app_id}/messages", response_model=DataResponse[dict], status_code=201)
 async def send_message(app_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Send message."""
     app, is_candidate = await _check_message_access(app_id, user, db)
     msg = ApplicationMessage(
         application_id=app_id, sender_id=user.id,
@@ -50,6 +51,7 @@ async def send_message(app_id: str, body: dict, db: AsyncSession = Depends(get_d
 
 @router.get("/applications/{app_id}/messages", response_model=CursorListResponse[dict])
 async def list_messages(app_id: str, cursor: str | None = Query(None), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """List messages."""
     await _check_message_access(app_id, user, db)
     q = select(ApplicationMessage).where(ApplicationMessage.application_id == app_id)
     if cursor:
@@ -69,6 +71,7 @@ async def list_messages(app_id: str, cursor: str | None = Query(None), limit: in
 
 @router.patch("/messages/{msg_id}/read", response_model=DataResponse[dict])
 async def mark_message_read(msg_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Mark message read."""
     msg = await db.get(ApplicationMessage, msg_id)
     if not msg:
         raise HTTPException(404, "Message not found")

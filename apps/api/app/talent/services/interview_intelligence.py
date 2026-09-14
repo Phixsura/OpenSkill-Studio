@@ -29,6 +29,7 @@ class QuestionBankItem:
 
 
 def validate_question_bank_item(item: dict) -> list[str]:
+    """Execute validate question bank item."""
     errors = []
     if not item.get("question_text") or len(item.get("question_text", "")) < 10:
         errors.append("Question text must be at least 10 characters")
@@ -77,10 +78,12 @@ DEFAULT_RUBRIC_TEMPLATES = {
 
 
 def get_rubric_template(template_name: str) -> dict | None:
+    """Execute get rubric template."""
     return DEFAULT_RUBRIC_TEMPLATES.get(template_name)
 
 
 def list_rubric_templates() -> list[str]:
+    """Execute list rubric templates."""
     return sorted(DEFAULT_RUBRIC_TEMPLATES.keys())
 
 
@@ -101,6 +104,7 @@ class AssessmentAnalytics:
 
 
 def compute_assessment_difficulty(pass_rate: float) -> str:
+    """Execute compute assessment difficulty."""
     if pass_rate > 0.80:
         return "easy"
     if pass_rate > 0.40:
@@ -109,6 +113,7 @@ def compute_assessment_difficulty(pass_rate: float) -> str:
 
 
 def compute_score_distribution(scores: list[float]) -> dict[str, int]:
+    """Execute compute score distribution."""
     buckets = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
     for s in scores:
         pct = s * 100
@@ -195,6 +200,7 @@ class AvailabilitySlot:
 
 
 def validate_availability(slots: list[dict]) -> list[str]:
+    """Execute validate availability."""
     errors = []
     for i, s in enumerate(slots):
         day = s.get("day", "").lower()

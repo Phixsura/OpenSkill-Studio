@@ -53,6 +53,7 @@ def generate_api_key(org_id: str, name: str, scopes: list[str]) -> dict:
 
 
 def validate_api_key_scopes(scopes: list[str]) -> list[str]:
+    """Execute validate api key scopes."""
     errors = []
     invalid = set(scopes) - API_KEY_SCOPES
     if invalid:
@@ -146,6 +147,7 @@ class ATSConnectorConfig:
 
 
 def validate_ats_config(config: dict) -> list[str]:
+    """Execute validate ats config."""
     errors = []
     provider = config.get("provider", "")
     if provider not in SUPPORTED_ATS_PROVIDERS:
@@ -193,6 +195,7 @@ def build_slack_message(event_type: str, context: dict) -> dict | None:
 
 
 def list_slack_event_mappings() -> list[str]:
+    """Execute list slack event mappings."""
     return sorted(SLACK_EVENT_MAPPINGS.keys())
 
 

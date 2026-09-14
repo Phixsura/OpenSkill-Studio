@@ -56,6 +56,7 @@ class AssessmentService:
         return bp
 
     async def get_blueprint(self, blueprint_id: str) -> AssessmentBlueprint | None:
+        """Execute get blueprint."""
         return await self.db.get(AssessmentBlueprint, blueprint_id)
 
     async def list_blueprints(

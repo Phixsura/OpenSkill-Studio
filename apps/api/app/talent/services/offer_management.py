@@ -56,6 +56,7 @@ class OfferManagementService:
         self.db = db
 
     def validate_transition(self, current: str, target: str) -> bool:
+        """Execute validate transition."""
         return target in OFFER_TRANSITIONS.get(current, set())
 
     def create_offer_data(

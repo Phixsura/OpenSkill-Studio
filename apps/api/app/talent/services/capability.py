@@ -75,6 +75,7 @@ class CapabilityService:
         return cap
 
     async def get_capability(self, capability_id: str) -> Capability | None:
+        """Execute get capability."""
         return await self.db.get(Capability, capability_id)
 
     async def list_capabilities(
@@ -218,6 +219,7 @@ class CapabilityService:
         return edge
 
     async def remove_edge(self, edge_id: str) -> bool:
+        """Execute remove edge."""
         edge = await self.db.get(CapabilityEdge, edge_id)
         if not edge:
             return False
@@ -405,6 +407,7 @@ class CapabilityService:
         return list(result.scalars().all())
 
     async def delete_mapping(self, mapping_id: str) -> bool:
+        """Execute delete mapping."""
         mapping = await self.db.get(CapabilityMapping, mapping_id)
         if not mapping:
             return False

@@ -63,6 +63,7 @@ class TalentPoolService:
         return pool
 
     async def get_pool(self, pool_id: str) -> TalentPool | None:
+        """Execute get pool."""
         return await self.db.get(TalentPool, pool_id)
 
     async def list_pools(
@@ -81,6 +82,7 @@ class TalentPoolService:
         return list(result.scalars().all()), total
 
     async def update_pool(self, pool_id: str, **fields) -> TalentPool | None:
+        """Execute update pool."""
         pool = await self.db.get(TalentPool, pool_id)
         if not pool:
             return None
@@ -160,6 +162,7 @@ class TalentPoolService:
         return list(result.scalars().all()), total
 
     async def remove_member(self, pool_id: str, user_id: str) -> bool:
+        """Execute remove member."""
         result = await self.db.execute(
             delete(TalentPoolMembership).where(
                 TalentPoolMembership.pool_id == pool_id,

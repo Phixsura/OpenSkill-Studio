@@ -38,6 +38,7 @@ class ETagRoute(APIRoute):
         original_handler = super().get_route_handler()
 
         async def etag_handler(request: Request) -> StarletteResponse:
+            """Etag handler."""
             response = await original_handler(request)
 
             # Only add ETags to successful GET responses

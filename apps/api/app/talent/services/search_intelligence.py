@@ -23,6 +23,7 @@ class SearchAnalyticsStore:
     zero_result_queries: list[str] = field(default_factory=list)
 
     def record(self, query: str, result_count: int, filters: dict | None = None) -> None:
+        """Execute record."""
         self.queries.append({
             "query": query,
             "result_count": result_count,
@@ -33,14 +34,17 @@ class SearchAnalyticsStore:
             self.zero_result_queries.append(query)
 
     def get_popular_queries(self, limit: int = 20) -> list[dict]:
+        """Execute get popular queries."""
         counter = Counter(q["query"] for q in self.queries if q["query"])
         return [{"query": q, "count": c} for q, c in counter.most_common(limit)]
 
     def get_zero_result_queries(self, limit: int = 20) -> list[dict]:
+        """Execute get zero result queries."""
         counter = Counter(self.zero_result_queries)
         return [{"query": q, "count": c} for q, c in counter.most_common(limit)]
 
     def get_stats(self) -> dict:
+        """Execute get stats."""
         total = len(self.queries)
         zero = len(self.zero_result_queries)
         return {
@@ -54,6 +58,7 @@ _search_analytics = SearchAnalyticsStore()
 
 
 def get_search_analytics() -> SearchAnalyticsStore:
+    """Execute get search analytics."""
     return _search_analytics
 
 
@@ -68,6 +73,7 @@ class SearchCache:
     ttl_seconds: int = 60
 
     def get(self, key: str) -> list | None:
+        """Execute get."""
         entry = self._cache.get(key)
         if not entry:
             return None
@@ -77,19 +83,23 @@ class SearchCache:
         return entry.get("data", "")
 
     def set(self, key: str, data: list) -> None:
+        """Execute set."""
         self._cache[key] = {
             "data": data,
             "expires": datetime.now(UTC) + timedelta(seconds=self.ttl_seconds),
         }
 
     def invalidate(self, key: str) -> None:
+        """Execute invalidate."""
         self._cache.pop(key, None)
 
     def clear(self) -> None:
+        """Execute clear."""
         self._cache.clear()
 
     @property
     def size(self) -> int:
+        """Execute size."""
         return len(self._cache)
 
 
@@ -97,6 +107,7 @@ _search_cache = SearchCache()
 
 
 def get_search_cache() -> SearchCache:
+    """Execute get search cache."""
     return _search_cache
 
 
@@ -220,6 +231,7 @@ class MatchFeedback:
 
 
 def validate_match_feedback(rating: str) -> list[str]:
+    """Execute validate match feedback."""
     errors = []
     if rating not in MATCH_FEEDBACK_OPTIONS:
         errors.append(f"Invalid rating. Must be one of: {sorted(MATCH_FEEDBACK_OPTIONS)}")
@@ -239,6 +251,7 @@ MATCH_TIERS = {
 
 
 def classify_match_tier(score: float) -> str:
+    """Execute classify match tier."""
     if score >= 0.80:
         return "strong"
     if score >= 0.60:
@@ -249,6 +262,7 @@ def classify_match_tier(score: float) -> str:
 
 
 def filter_by_tier(matches: list[dict], tier: str) -> list[dict]:
+    """Execute filter by tier."""
     min_score = MATCH_TIERS.get(tier, {}).get("min_score", 0.0)
     return [m for m in matches if m.get("composite_score", 0) >= min_score]
 

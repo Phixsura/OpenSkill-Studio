@@ -48,6 +48,7 @@ def format_audit_entry_for_export(entry: dict) -> dict:
 
 
 def validate_audit_export_request(req: dict) -> list[str]:
+    """Execute validate audit export request."""
     errors = []
     fmt = req.get("format", "json")
     if fmt not in AUDIT_EXPORT_FORMATS:

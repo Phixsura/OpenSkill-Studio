@@ -132,6 +132,7 @@ WITHDRAWAL_REASONS = frozenset({
 
 
 def validate_withdrawal_reason(reason: str) -> bool:
+    """Execute validate withdrawal reason."""
     return reason in WITHDRAWAL_REASONS
 
 

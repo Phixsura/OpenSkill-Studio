@@ -158,9 +158,11 @@ class SigningKeyService:
         return key
 
     async def get_key(self, key_id: str) -> OrgSigningKey | None:
+        """Execute get key."""
         return await self.db.get(OrgSigningKey, key_id)
 
     async def get_active_key_for_org(self, org_id: str) -> OrgSigningKey | None:
+        """Execute get active key for org."""
         result = await self.db.execute(
             select(OrgSigningKey).where(
                 OrgSigningKey.org_id == org_id,
@@ -190,6 +192,7 @@ class SigningKeyService:
         return new_key
 
     async def revoke_key(self, key_id: str) -> OrgSigningKey | None:
+        """Execute revoke key."""
         key = await self.db.get(OrgSigningKey, key_id)
         if not key:
             return None

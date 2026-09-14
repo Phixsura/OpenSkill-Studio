@@ -62,6 +62,7 @@ class CredentialPathwayService:
         return pathway
 
     async def get_pathway(self, pathway_id: str) -> CredentialPathway | None:
+        """Execute get pathway."""
         return await self.db.get(CredentialPathway, pathway_id)
 
     async def list_pathways(

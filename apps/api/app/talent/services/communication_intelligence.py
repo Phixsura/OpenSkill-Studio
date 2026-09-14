@@ -63,6 +63,7 @@ def render_email_template(template_key: str, context: dict) -> dict | None:
 
 
 def list_email_templates() -> list[str]:
+    """Execute list email templates."""
     return sorted(EMAIL_TEMPLATES.keys())
 
 
@@ -132,10 +133,12 @@ MESSAGE_TEMPLATES: dict[str, dict] = {
 
 
 def get_message_template(key: str) -> dict | None:
+    """Execute get message template."""
     return MESSAGE_TEMPLATES.get(key)
 
 
 def list_message_templates() -> list[str]:
+    """Execute list message templates."""
     return sorted(MESSAGE_TEMPLATES.keys())
 
 

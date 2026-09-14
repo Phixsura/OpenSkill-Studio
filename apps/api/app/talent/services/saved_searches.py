@@ -55,6 +55,7 @@ class SavedSearchService:
         return search
 
     async def get(self, search_id: str) -> SavedSearch | None:
+        """Execute get."""
         return await self.db.get(SavedSearch, search_id)
 
     async def list_searches(
@@ -81,6 +82,7 @@ class SavedSearchService:
         return items, has_more
 
     async def update(self, search_id: str, **fields: object) -> SavedSearch | None:
+        """Execute update."""
         search = await self.db.get(SavedSearch, search_id)
         if not search:
             return None
@@ -91,6 +93,7 @@ class SavedSearchService:
         return search
 
     async def delete_search(self, search_id: str) -> bool:
+        """Execute delete search."""
         result = await self.db.execute(
             delete(SavedSearch).where(SavedSearch.id == search_id)
         )

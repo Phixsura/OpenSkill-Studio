@@ -29,6 +29,7 @@ class AvailabilityPreference:
 
 
 def validate_availability_preference(pref: dict) -> list[str]:
+    """Execute validate availability preference."""
     errors = []
     mode = pref.get("mode", "")
     if mode and mode not in AVAILABILITY_MODES:
@@ -59,6 +60,7 @@ class JobAlertPreference:
 
 
 def validate_job_alert(pref: dict) -> list[str]:
+    """Execute validate job alert."""
     errors = []
     freq = pref.get("frequency", "")
     if freq and freq not in ("instant", "daily", "weekly"):
@@ -87,6 +89,7 @@ class SalaryExpectation:
 
 
 def validate_salary_expectation(exp: dict) -> list[str]:
+    """Execute validate salary expectation."""
     errors = []
     currency = exp.get("currency", "USD")
     if currency not in CURRENCY_CODES:
@@ -249,6 +252,7 @@ def check_achievements(user_stats: dict) -> list[dict]:
 
 
 def compute_total_points(achievements: list[dict]) -> int:
+    """Execute compute total points."""
     return sum(a.get("points", 0) for a in achievements)
 
 
@@ -260,4 +264,5 @@ THEME_OPTIONS = frozenset({"system", "light", "dark"})
 
 
 def validate_theme_preference(theme: str) -> bool:
+    """Execute validate theme preference."""
     return theme in THEME_OPTIONS

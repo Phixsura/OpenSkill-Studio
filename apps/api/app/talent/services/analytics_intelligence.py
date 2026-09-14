@@ -86,6 +86,7 @@ class ReportConfig:
 
 
 def validate_report_config(config: dict) -> list[str]:
+    """Execute validate report config."""
     errors = []
     rt = config.get("report_type", "")
     if rt not in REPORT_TYPES:
@@ -199,6 +200,7 @@ INDUSTRY_BENCHMARKS = {
 
 
 def compare_to_benchmark(metric: str, value: float, industry: str = "average") -> dict:
+    """Execute compare to benchmark."""
     benchmarks = INDUSTRY_BENCHMARKS.get(metric, {})
     benchmark = benchmarks.get(industry, benchmarks.get("average"))
     if benchmark is None:
@@ -245,6 +247,7 @@ class KPIDefinition:
 
 
 def validate_kpi(kpi: dict) -> list[str]:
+    """Execute validate kpi."""
     errors = []
     if not kpi.get("name"):
         errors.append("KPI name is required")
@@ -287,6 +290,7 @@ ANNOTATION_TYPES = frozenset({"note", "milestone", "alert", "insight"})
 
 
 def validate_annotation(annotation: dict) -> list[str]:
+    """Execute validate annotation."""
     errors = []
     if not annotation.get("text") or len(annotation.get("text", "")) < 3:
         errors.append("Annotation text must be at least 3 characters")

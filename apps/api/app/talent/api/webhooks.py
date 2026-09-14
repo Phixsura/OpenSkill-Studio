@@ -16,6 +16,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Webhooks"])
 
 @router.post("/orgs/{org_id}/webhooks", response_model=DataResponse[dict], status_code=201)
 async def register_webhook(org_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Register webhook."""
     await require_org_member(org_id, user, db)
     url = body.get("url", "")
     parsed = urlparse(url)
@@ -43,6 +44,7 @@ async def register_webhook(org_id: str, body: dict, db: AsyncSession = Depends(g
 
 @router.get("/orgs/{org_id}/webhooks", response_model=CursorListResponse[dict])
 async def list_webhooks(org_id: str, cursor: str | None = Query(None), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """List webhooks."""
     await require_org_member(org_id, user, db)
     q = select(WebhookEndpointConfig).where(WebhookEndpointConfig.org_id == org_id)
     if cursor:
@@ -58,6 +60,7 @@ async def list_webhooks(org_id: str, cursor: str | None = Query(None), limit: in
 
 @router.delete("/webhooks/{endpoint_id}", response_model=DataResponse[dict])
 async def delete_webhook(endpoint_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Delete webhook."""
     ep = await db.get(WebhookEndpointConfig, endpoint_id)
     if not ep:
         raise HTTPException(404, "Webhook endpoint not found")
@@ -68,6 +71,7 @@ async def delete_webhook(endpoint_id: str, db: AsyncSession = Depends(get_db), u
 
 @router.get("/webhooks/{endpoint_id}/deliveries", response_model=CursorListResponse[dict])
 async def list_deliveries(endpoint_id: str, cursor: str | None = Query(None), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """List deliveries."""
     # Authorization: must be org member of the webhook's org
     ep = await db.get(WebhookEndpointConfig, endpoint_id)
     if not ep:
