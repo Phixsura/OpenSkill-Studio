@@ -26,22 +26,22 @@ test.describe("Cohort List Page", () => {
   test("shows empty state when no cohorts", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
-    await page.click("text=Cohorts");
-    await page.waitForLoadState("networkidle");
+    await page.click("text=Cohorts", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
     await expect(page.locator("text=No cohorts yet")).toBeVisible();
   });
 
   test("create cohort via inline form", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
-    await page.click("text=Cohorts");
-    await page.waitForLoadState("networkidle");
+    await page.click("text=Cohorts", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
 
     await page.click("text=+ New Cohort");
     await page.fill('input[placeholder*="Cohort name"]', "AI Commerce — Fall 2026");
     await page.fill('textarea[placeholder*="Description"]', "First commercial training cohort");
     await page.click("button:has-text('Create Cohort')");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=AI Commerce — Fall 2026")).toBeVisible();
   });
@@ -49,8 +49,8 @@ test.describe("Cohort List Page", () => {
   test("cohort card shows status badge and member count", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
-    await page.click("text=Cohorts");
-    await page.waitForLoadState("networkidle");
+    await page.click("text=Cohorts", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.getByText("draft").first()).toBeVisible();
     await expect(page.getByText("0 members")).toBeVisible();
@@ -59,10 +59,10 @@ test.describe("Cohort List Page", () => {
   test("clicking cohort card navigates to detail", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
-    await page.click("text=Cohorts");
-    await page.waitForLoadState("networkidle");
-    await page.click("text=AI Commerce — Fall 2026");
-    await page.waitForLoadState("networkidle");
+    await page.click("text=Cohorts", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
+    await page.click("text=AI Commerce — Fall 2026", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("h1:has-text('AI Commerce')")).toBeVisible();
   });
@@ -79,10 +79,10 @@ test.describe("Cohort Detail Page", () => {
   test("shows stats cards (Learners, Skills, Projects, Overdue)", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
-    await page.click("text=Cohorts");
-    await page.waitForLoadState("networkidle");
-    await page.click("text=AI Commerce — Fall 2026");
-    await page.waitForLoadState("networkidle");
+    await page.click("text=Cohorts", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
+    await page.click("text=AI Commerce — Fall 2026", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
 
     const main = page.locator("main");
     await expect(main.getByText("Learners", { exact: true })).toBeVisible();
@@ -93,10 +93,10 @@ test.describe("Cohort Detail Page", () => {
   test("has management links (Members, Skills, Projects)", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
-    await page.click("text=Cohorts");
-    await page.waitForLoadState("networkidle");
-    await page.click("text=AI Commerce — Fall 2026");
-    await page.waitForLoadState("networkidle");
+    await page.click("text=Cohorts", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
+    await page.click("text=AI Commerce — Fall 2026", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Manage Members")).toBeVisible();
     await expect(page.locator("text=Assign Skills")).toBeVisible();
@@ -106,10 +106,10 @@ test.describe("Cohort Detail Page", () => {
   test("sub-layout tabs are present", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
-    await page.click("text=Cohorts");
-    await page.waitForLoadState("networkidle");
-    await page.click("text=AI Commerce — Fall 2026");
-    await page.waitForLoadState("networkidle");
+    await page.click("text=Cohorts", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
+    await page.click("text=AI Commerce — Fall 2026", { timeout: 15_000 });
+    await page.waitForLoadState("domcontentloaded");
 
     // The cohort sub-layout renders tabs — look for them anywhere on page
     await expect(page.getByRole("link", { name: "Overview", exact: true })).toBeVisible();

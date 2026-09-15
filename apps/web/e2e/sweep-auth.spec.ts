@@ -224,7 +224,7 @@ test("settings: renders user info; display-name change persists after reload", a
 
   // Persists across a full reload (session restored via refresh cookie)
   await page.reload();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.locator("#displayName")).toHaveValue(newName, { timeout: 15_000 });
   await expect(page.locator("#email")).toHaveValue(uiEmail);
 });

@@ -95,7 +95,7 @@ test.beforeAll(async () => {
 test("1. Instructor: org overview with Cohorts + Briefs tabs", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/01-org-overview.png", fullPage: true });
   await expect(page.locator("main nav").first().getByText("Cohorts")).toBeVisible();
@@ -104,7 +104,7 @@ test("1. Instructor: org overview with Cohorts + Briefs tabs", async ({ page }) 
 test("2. Instructor: cohort list page", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/02-cohort-list.png", fullPage: true });
   await expect(page.getByText("AI Visual Commerce")).toBeVisible();
@@ -113,7 +113,7 @@ test("2. Instructor: cohort list page", async ({ page }) => {
 test("3. Instructor: cohort detail with stats", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
   await page.screenshot({ path: "e2e/screenshots/03-cohort-detail.png", fullPage: true });
   await expect(page.getByText("Learners", { exact: true }).first()).toBeVisible();
@@ -122,7 +122,7 @@ test("3. Instructor: cohort detail with stats", async ({ page }) => {
 test("4. Instructor: cohort members page", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/04-cohort-members.png", fullPage: true });
   await expect(page.locator("table tbody tr")).toHaveCount(2, { timeout: 10_000 });
@@ -131,7 +131,7 @@ test("4. Instructor: cohort members page", async ({ page }) => {
 test("5. Instructor: skill assignment page", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/skills`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/05-cohort-skills.png", fullPage: true });
   await expect(page.getByText("Prompt Engineering")).toBeVisible();
@@ -140,7 +140,7 @@ test("5. Instructor: skill assignment page", async ({ page }) => {
 test("6. Instructor: project assignment page", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/projects`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/06-cohort-projects.png", fullPage: true });
   await expect(page.getByText("AI Product Advertisement")).toBeVisible();
@@ -149,7 +149,7 @@ test("6. Instructor: project assignment page", async ({ page }) => {
 test("7. Instructor: progress learner list", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/07-progress-list.png", fullPage: true });
   await expect(page.getByText("Demo Alice")).toBeVisible();
@@ -158,7 +158,7 @@ test("7. Instructor: progress learner list", async ({ page }) => {
 test("8. Instructor: learner drill-down", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress/${learner.userId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/08-learner-drilldown.png", fullPage: true });
   await expect(page.getByText("Demo Alice")).toBeVisible();
@@ -168,7 +168,7 @@ test("8. Instructor: learner drill-down", async ({ page }) => {
 test("9. Instructor: create client brief", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/briefs`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.click("text=+ New Brief");
   await page.fill('input[placeholder*="Brief title"]', "Acme Q4 Product Campaign");
   await page.fill('input[placeholder*="Client name"]', "Acme Corporation");
@@ -178,7 +178,7 @@ test("9. Instructor: create client brief", async ({ page }) => {
   );
   await page.screenshot({ path: "e2e/screenshots/09-brief-create-form.png", fullPage: true });
   await page.click("button:has-text('Create Brief')");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/10-brief-list-after-create.png", fullPage: true });
   await expect(page.getByText("Acme Q4 Product Campaign")).toBeVisible();
@@ -187,9 +187,9 @@ test("9. Instructor: create client brief", async ({ page }) => {
 test("10. Instructor: brief detail + convert button", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/briefs`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.click("text=Acme Q4 Product Campaign");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/11-brief-detail.png", fullPage: true });
   await expect(page.getByText("Acme Corporation")).toBeVisible();
@@ -199,7 +199,7 @@ test("10. Instructor: brief detail + convert button", async ({ page }) => {
 test("11. Learner: my-dashboard view", async ({ page }) => {
   await loginInBrowser(page, learner.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/12-learner-dashboard.png", fullPage: true });
   await expect(page.getByText("AI Visual Commerce")).toBeVisible();
@@ -208,7 +208,7 @@ test("11. Learner: my-dashboard view", async ({ page }) => {
 test("12. Learner: projects page with cohort filter", async ({ page }) => {
   await loginInBrowser(page, learner.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
   await page.screenshot({ path: "e2e/screenshots/13-learner-projects.png", fullPage: true });
   await expect(page.getByText("AI Product Advertisement")).toBeVisible();
@@ -218,7 +218,7 @@ test("12. Learner: projects page with cohort filter", async ({ page }) => {
 test("13. Evaluation page shows multimodal type icons", async ({ page }) => {
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/evaluation`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: "e2e/screenshots/14-evaluation-page.png", fullPage: true });
   // Page should load without crash

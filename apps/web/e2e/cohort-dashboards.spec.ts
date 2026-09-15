@@ -56,7 +56,7 @@ test.describe("Instructor Progress Dashboard", () => {
   test("shows aggregate stats", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
     // Stats cards are inside the main content
@@ -67,7 +67,7 @@ test.describe("Instructor Progress Dashboard", () => {
   test("shows project progress table", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Project Progress")).toBeVisible();
     await expect(page.locator("text=Dashboard Project")).toBeVisible();
@@ -80,10 +80,10 @@ test.describe("Instructor Progress Dashboard", () => {
   test("student cannot access instructor dashboard (403)", async ({ page }) => {
     await loginInBrowser(page, learner.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // The page loads — should not crash even with 403 on progress
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
   });
 });
@@ -92,7 +92,7 @@ test.describe("Progress Learner List", () => {
   test("shows list of learners with drill-down links", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("h1:has-text('Learner Progress')")).toBeVisible();
     await expect(page.locator("text=DashTest Alice")).toBeVisible();
@@ -101,10 +101,10 @@ test.describe("Progress Learner List", () => {
   test("clicking a learner navigates to drill-down", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await page.click("text=DashTest Alice");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("h1:has-text('DashTest Alice')")).toBeVisible();
   });
@@ -114,7 +114,7 @@ test.describe("Learner Drill-Down Page", () => {
   test("shows learner's skill and project progress", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress/${learner.userId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("h1:has-text('DashTest Alice')")).toBeVisible();
     await expect(page.locator("h2:has-text('Projects')")).toBeVisible();
@@ -125,7 +125,7 @@ test.describe("Learner Drill-Down Page", () => {
   test("shows last active time", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress/${learner.userId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Last active")).toBeVisible();
   });
@@ -135,7 +135,7 @@ test.describe("Learner My-Dashboard", () => {
   test("shows cohort name and assigned content", async ({ page }) => {
     await loginInBrowser(page, learner.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("h1:has-text('Dashboard Test Cohort')")).toBeVisible();
   });
@@ -143,7 +143,7 @@ test.describe("Learner My-Dashboard", () => {
   test("shows assigned projects with status", async ({ page }) => {
     await loginInBrowser(page, learner.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("h2:has-text('Assigned Projects')")).toBeVisible();
     await expect(page.locator("text=Dashboard Project")).toBeVisible();

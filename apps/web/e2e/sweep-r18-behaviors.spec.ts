@@ -100,7 +100,7 @@ test("port rename through a sibling's exact name never misroutes edges", async (
   });
 
   await page.goto(`/dashboard/orgs/${orgId}/workflow-packs/${pid}/editor`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   // List view → select the sink step to open its config panel
   await page.getByRole("button", { name: "List", exact: true }).click();
   await page.getByRole("button", { name: /Sink Step/ }).first().click();
@@ -165,7 +165,7 @@ test("json-typed run input: textarea with parse validation", async () => {
   const instId = inst.data.id;
 
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations/${instId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // json input renders a TEXTAREA (R16 — was a text Input that always 422'd)
   const jsonField = page.locator("textarea").first();
@@ -199,7 +199,7 @@ test("providers page shows error state on API failure, not empty state", async (
     }),
   );
   await page.goto(`/dashboard/orgs/${orgId}/providers`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   // Error state visible; misleading empty state absent (R16)
   await expect(page.getByText(/failed|error|could not/i).first()).toBeVisible({
     timeout: 10_000,
@@ -250,6 +250,6 @@ test("editing an approved pack's card fields voids approval (unlisted detour clo
 
   // And the UI reflects it: detail page no longer shows the public badge
   await page.goto(`/dashboard/orgs/${orgId}/workflow-packs/${pid}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText("unlisted").first()).toBeVisible({ timeout: 10_000 });
 });
