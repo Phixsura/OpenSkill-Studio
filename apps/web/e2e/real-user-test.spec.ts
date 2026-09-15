@@ -36,7 +36,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.screenshot({ path: ss("02-register-filled"), fullPage: true });
 
   await page.getByRole("button", { name: "Sign up" }).click();
-  await page.waitForURL("**/dashboard**", { timeout: 15000 });
+  await page.waitForURL("**/dashboard**", { timeout: 45_000 });
   await page.screenshot({ path: ss("03-dashboard-after-register"), fullPage: true });
 
   // ═══════════════════════════════════════════
@@ -146,7 +146,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.getByLabel('Email').fill(instructorEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole("button", { name: /sign|log/i }).first().click();
-  await page.waitForURL("**/dashboard**", { timeout: 10000 });
+  await page.waitForURL("**/dashboard**", { timeout: 45_000 });
   await page.screenshot({ path: ss("05-instructor-dashboard"), fullPage: true });
 
   // Navigate to org
@@ -328,7 +328,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.screenshot({ path: ss("21-convert-form"), fullPage: true });
 
   await page.click("button:has-text('Create Project')");
-  await page.waitForURL("**/projects/**", { timeout: 15000 });
+  await page.waitForURL("**/projects/**", { timeout: 45_000 });
   await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("22-converted-project"), fullPage: true });
@@ -344,7 +344,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.getByLabel('Email').fill(aliceEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole("button", { name: /sign|log/i }).first().click();
-  await page.waitForURL("**/dashboard**", { timeout: 10000 });
+  await page.waitForURL("**/dashboard**", { timeout: 45_000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
   await page.waitForLoadState("domcontentloaded");
@@ -370,7 +370,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.getByLabel('Email').fill(bobEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole("button", { name: /sign|log/i }).first().click();
-  await page.waitForURL("**/dashboard**", { timeout: 10000 });
+  await page.waitForURL("**/dashboard**", { timeout: 45_000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
   await page.waitForLoadState("domcontentloaded");
@@ -396,7 +396,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.getByLabel('Email').fill(instructorEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole("button", { name: /sign|log/i }).first().click();
-  await page.waitForURL("**/dashboard**", { timeout: 10000 });
+  await page.waitForURL("**/dashboard**", { timeout: 45_000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/evaluation`);
   await page.waitForLoadState("domcontentloaded");

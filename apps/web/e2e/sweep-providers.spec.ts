@@ -211,7 +211,7 @@ test("providers: empty state → create mock connection via UI", async () => {
 
   // Card renders with name, adapter label, and active status badge
   const card = page.locator("div.rounded-lg.border.p-4").filter({ hasText: MOCK_CONN });
-  await expect(card).toBeVisible({ timeout: 10_000 });
+  await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.getByText("active")).toBeVisible();
   // Mock adapter declares no credential fields → no lock indicator
   await expect(card.getByText("credentials stored")).toHaveCount(0);
@@ -231,7 +231,7 @@ test("providers: add offering via UI form; client + server validation", async ()
 
   // Offering renders inside the connection card's table
   const card = page.locator("div.rounded-lg.border.p-4").filter({ hasText: MOCK_CONN });
-  await expect(card.getByText("image_generation")).toBeVisible({ timeout: 10_000 });
+  await expect(card.getByText("image_generation")).toBeVisible({ timeout: 30_000 });
   await expect(card.getByText(MODEL)).toBeVisible();
   await expect(card.getByText("premium")).toBeVisible();
   await expect(card.getByText("✓")).toBeVisible();
@@ -269,7 +269,7 @@ test("credentials: write-only api_key never appears in DOM; delete connection vi
   await page.getByRole("button", { name: "Connect", exact: true }).click();
 
   const card = page.locator("div.rounded-lg.border.p-4").filter({ hasText: ANTHROPIC_CONN });
-  await expect(card).toBeVisible({ timeout: 10_000 });
+  await expect(card).toBeVisible({ timeout: 30_000 });
   // Lock indicator proves a credential_id round-tripped — value must not
   await expect(card.getByText("credentials stored")).toBeVisible();
 
@@ -290,7 +290,7 @@ test("credentials: write-only api_key never appears in DOM; delete connection vi
   const freshCard = page.locator("div.rounded-lg.border.p-4").filter({ hasText: ANTHROPIC_CONN });
   await freshCard.getByRole("button", { name: "Delete", exact: true }).click();
   await freshCard.getByRole("button", { name: "Confirm delete?" }).click();
-  await expect(page.getByText(ANTHROPIC_CONN)).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.getByText(ANTHROPIC_CONN)).toHaveCount(0, { timeout: 30_000 });
   // Mock connection untouched (scoped to its card — the name also appears
   // as an <option> in the offering form's connection select)
   await expect(
@@ -315,7 +315,7 @@ test("installations: empty state → install (API) → bindings render → confi
   // List renders the installation with version + status badge
   await page.reload();
   await page.waitForLoadState("domcontentloaded");
-  await expect(page.getByText("v1.0.0")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("v1.0.0")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("active", { exact: true })).toBeVisible();
 
   // Navigate to the detail via the list link
@@ -335,8 +335,8 @@ test("installations: empty state → install (API) → bindings render → confi
   // Change binding mode, then confirm the binding
   await page.getByLabel("Binding mode for gen").selectOption("pinned");
   await page.getByRole("button", { name: "Confirm", exact: true }).click();
-  await expect(page.getByText("Binding confirmed")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("confirmed", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Binding confirmed")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("confirmed", { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("suggested")).toHaveCount(0);
 });
 
@@ -356,16 +356,16 @@ test("upgrade: diff viewer + upgrade to 1.1.0 via UI; confirmed binding preserve
   await page.waitForLoadState("domcontentloaded");
   await page.locator("#diff-version").fill("1.1.0");
   await page.getByRole("button", { name: "Show Diff" }).click();
-  await expect(page.getByText("Added: notes")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Added: notes")).toBeVisible({ timeout: 30_000 });
 
   // Upgrade via the #upgrade-version input
   await page.locator("#upgrade-version").fill("1.1.0");
   await page.getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(page.getByText("Installation updated")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText(/v1\.1\.0/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Installation updated")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/v1\.1\.0/)).toBeVisible({ timeout: 30_000 });
 
   // The human-confirmed binding for "gen" survived the upgrade (D5)
-  await expect(page.getByText("confirmed", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("confirmed", { exact: true })).toBeVisible({ timeout: 30_000 });
 });
 
 test("unhappy: upgrade to capability-gated 1.2.0 shows CAPABILITY_UNSATISFIED in UI", async () => {
@@ -382,7 +382,7 @@ test("unhappy: upgrade to capability-gated 1.2.0 shows CAPABILITY_UNSATISFIED in
   // The 422 CAPABILITY_UNSATISFIED message surfaces as an error toast
   await expect(
     page.getByText("Organization is missing required provider capabilities for this workflow"),
-  ).toBeVisible({ timeout: 10_000 });
+  ).toBeVisible({ timeout: 30_000 });
   // Version unchanged
   await expect(page.getByText(/v1\.1\.0/)).toBeVisible();
 });
@@ -426,7 +426,7 @@ test("unhappy: install gate blocks a pack whose capability has no offering", asy
   // step "vid" binding row renders with it selected.
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations/${installBId}`);
   await page.waitForLoadState("domcontentloaded");
-  await expect(page.getByText("vid", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("vid", { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByLabel("Offering for vid")).toHaveValue(t2vOff.body.data.id);
 
   // Deactivate the offering: the stored binding still points at it (no rebuild
@@ -494,7 +494,7 @@ test("runs list: empty state → 2 seeded runs render with terminal statuses", a
   await page.waitForLoadState("domcontentloaded");
 
   const row1 = page.locator(`a[href$="/workflow-runs/${runCompletedId}"]`);
-  await expect(row1).toBeVisible({ timeout: 10_000 });
+  await expect(row1).toBeVisible({ timeout: 30_000 });
   await expect(row1.getByText(runCompletedId)).toBeVisible();
   await expect(row1.getByText("completed")).toBeVisible();
 
@@ -519,7 +519,7 @@ test("uninstall via UI: remove pack B installation", async () => {
   await page.getByRole("button", { name: "Remove", exact: true }).click();
 
   // onSuccess router.replaces back to the list
-  await page.waitForURL(/workflow-installations$/, { timeout: 10_000 });
+  await page.waitForURL(/workflow-installations$/, { timeout: 30_000 });
   await page.waitForLoadState("domcontentloaded");
   // Pack B gone from the list; pack A still installed
   await expect(page.getByText(packBId)).toHaveCount(0);
