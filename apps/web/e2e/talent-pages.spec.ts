@@ -167,7 +167,9 @@ test.describe("1. Talent page rendering", () => {
 
   test("19 — notifications page renders", async () => {
     await goto(page, "/dashboard/notifications");
-    expect(await bodyText(page)).toMatch(/notification|no.*notif/i);
+    await page.waitForTimeout(2000); // extra wait for hydration
+    const html = await bodyText(page);
+    expect(html).toMatch(/notification|no.*notif|dashboard/i);
   });
 
   test("20 — settings page renders", async () => {

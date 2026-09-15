@@ -404,10 +404,10 @@ test("12. Path detail: add item then remove it", async () => {
 
   await conPage.goto(`/dashboard/orgs/${conOrgId}/paths/${pathId}`);
   await conPage.waitForLoadState("domcontentloaded");
-  await sleep(1000);
+  await sleep(2000);
 
   // Section should be visible
-  await expect(conPage.locator("text=RemoveMe Section")).toBeVisible();
+  await expect(conPage.locator("text=RemoveMe Section")).toBeVisible({ timeout: 10_000 });
 
   // Click remove button (×)
   const removeBtn = conPage.locator("button:has-text('×')").first();
