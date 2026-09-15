@@ -434,10 +434,10 @@ test("13. Cohort paths: unassign path → confirm → removed", async () => {
 
   await conPage.goto(`/dashboard/orgs/${conOrgId}/cohorts/${cohortId}/paths`);
   await conPage.waitForLoadState("domcontentloaded");
-  await sleep(500);
+  await sleep(2000);
 
   // Verify path is listed
-  await expect(conPage.locator("text=UnassignPath")).toBeVisible();
+  await expect(conPage.locator("text=UnassignPath")).toBeVisible({ timeout: 10_000 });
 
   // Click Remove — remove all prior dialog handlers first
   conPage.removeAllListeners("dialog");

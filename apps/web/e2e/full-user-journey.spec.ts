@@ -49,14 +49,14 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   await page.waitForTimeout(2000);
   await expect(page.getByText(orgName).first()).toBeVisible({ timeout: 15_000 });
 
-  // Get org ID from the link href
+  // Get org ID by clicking into the org and extracting from URL
   const orgLink = page.locator(`a:has-text("${orgName}")`).first();
-  const orgHref = await orgLink.getAttribute("href");
-  const orgId = orgHref?.match(/orgs\/([^/]+)/)?.[1];
-  expect(orgId).toBeTruthy();
-
-  // Click into the org
   await orgLink.click();
+  await page.waitForLoadState("domcontentloaded");
+  await page.waitForTimeout(2000);
+  const orgId = page.url().match(/orgs\/([^/]+)/)?.[1]
+    ?? (await orgLink.getAttribute("href"))?.match(/orgs\/([^/]+)/)?.[1];
+  expect(orgId).toBeTruthy();
   await page.waitForLoadState("domcontentloaded");
 
   // ═══════════════ Step 3: Create a project via UI ═══════════════

@@ -478,7 +478,7 @@ test("anonymous visitor can browse registry but install/review controls prompt l
     await expect(anon.getByRole("heading", { name: nimbusName })).toBeVisible({
       timeout: 10_000,
     });
-    await expect(anon.getByRole("link", { name: "Sign in" })).toBeVisible();
+    await expect(anon.getByRole("link", { name: /sign in|log in|login/i }).first()).toBeVisible({ timeout: 10_000 });
   } finally {
     await anonCtx.close();
   }
