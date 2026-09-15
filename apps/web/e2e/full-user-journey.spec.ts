@@ -50,14 +50,14 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   await expect(page.getByText(orgName).first()).toBeVisible({ timeout: 15_000 });
 
   // Get org ID via API (more reliable than URL parsing)
-  const loginRes = await fetch(`${API}/auth/login`, {
+  const orgLoginRes = await fetch(`${API}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: instructorEmail, password }),
   });
-  const loginData = await loginRes.json();
+  const orgLoginData = await orgLoginRes.json();
   const orgsRes = await fetch(`${API}/orgs`, {
-    headers: { Authorization: `Bearer ${loginData.access_token}` },
+    headers: { Authorization: `Bearer ${orgLoginData.access_token}` },
   });
   const orgsData = await orgsRes.json();
   const orgId = orgsData.data?.[0]?.id;
