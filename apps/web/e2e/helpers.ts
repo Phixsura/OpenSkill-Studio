@@ -56,31 +56,39 @@ async function flushRateLimits(): Promise<void> {
   }
 }
 
-/** Register a user via API, return auth context. */
+/** Register a user via API, return auth context. Retries on 429. */
 export async function registerUser(name: string): Promise<AuthContext> {
-  // Flush rate limits so multiple spec files can each register a user
   await flushRateLimits();
 
   const email = uniqueEmail();
-  const res = await fetch(`${API}/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password: "TestPass123!", display_name: name }),
-  });
-  if (!res.ok) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(`${API}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: "TestPass123!", display_name: name }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        token: data.access_token,
+        userId: data.user.id,
+        email,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${data.access_token}`,
+        },
+      };
+    }
+    if (res.status === 429) {
+      // Rate limited — flush and retry
+      await flushRateLimits();
+      await new Promise((r) => setTimeout(r, 1000));
+      continue;
+    }
     const text = await res.text();
     throw new Error(`registerUser failed (${res.status}): ${text}`);
   }
-  const data = await res.json();
-  return {
-    token: data.access_token,
-    userId: data.user.id,
-    email,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${data.access_token}`,
-    },
-  };
+  throw new Error("registerUser: exhausted retries (429)");
 }
 
 /** Create an org via API. */

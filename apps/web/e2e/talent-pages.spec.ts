@@ -57,11 +57,16 @@ test.afterAll(async () => {
   await ctx?.close();
 });
 
-// Helper: navigate and wait for load
+// Helper: navigate and wait for React hydration
 async function goto(p: Page, path: string) {
   await p.goto(path);
   await p.waitForLoadState("domcontentloaded");
-  await p.waitForTimeout(1500);
+  // Wait for React to hydrate — poll until body has real content (not just noscript shell)
+  for (let i = 0; i < 15; i++) {
+    const html = await p.innerHTML("body");
+    if (html.length > 500 && !html.startsWith('<div hidden=""><!--')) break;
+    await p.waitForTimeout(500);
+  }
 }
 
 // Helper: get page text content lowercased
