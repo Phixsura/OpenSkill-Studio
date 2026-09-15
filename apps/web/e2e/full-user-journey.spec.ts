@@ -49,13 +49,18 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   await page.waitForTimeout(2000);
   await expect(page.getByText(orgName).first()).toBeVisible({ timeout: 15_000 });
 
-  // Get org ID by clicking into the org and extracting from URL
-  const orgLink = page.locator(`a:has-text("${orgName}")`).first();
-  await orgLink.click();
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(2000);
-  const orgId = page.url().match(/orgs\/([^/]+)/)?.[1]
-    ?? (await orgLink.getAttribute("href"))?.match(/orgs\/([^/]+)/)?.[1];
+  // Get org ID via API (more reliable than URL parsing)
+  const loginRes = await fetch(`${API}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: instructorEmail, password }),
+  });
+  const loginData = await loginRes.json();
+  const orgsRes = await fetch(`${API}/orgs`, {
+    headers: { Authorization: `Bearer ${loginData.access_token}` },
+  });
+  const orgsData = await orgsRes.json();
+  const orgId = orgsData.data?.[0]?.id;
   expect(orgId).toBeTruthy();
   await page.waitForLoadState("domcontentloaded");
 

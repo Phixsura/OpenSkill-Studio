@@ -616,8 +616,8 @@ test.describe("6. Page content & structure", () => {
 
   test("82 — opportunities page has heading", async () => {
     await goto(page, "/dashboard/opportunities");
-    const heading = await page.$("h1, h2, [role='heading']");
-    expect(heading).not.toBeNull();
+    const html = await page.innerHTML("body");
+    expect(html).toMatch(/<h[1-3]/i);
   });
 
   test("83 — talent dashboard has structured content", async () => {
