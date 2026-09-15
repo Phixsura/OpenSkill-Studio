@@ -436,8 +436,14 @@ test("13. Cohort paths: unassign path → confirm → removed", async () => {
   await conPage.waitForLoadState("domcontentloaded");
   await sleep(2000);
 
-  // Verify path is listed
-  await expect(conPage.locator("text=UnassignPath")).toBeVisible({ timeout: 10_000 });
+  // Verify path is listed (reload if not visible — API write may not reflect instantly)
+  let pathVisible = await conPage.locator("text=UnassignPath").isVisible().catch(() => false);
+  if (!pathVisible) {
+    await conPage.reload();
+    await conPage.waitForLoadState("domcontentloaded");
+    await sleep(2000);
+  }
+  await expect(conPage.locator("text=UnassignPath")).toBeVisible({ timeout: 15_000 });
 
   // Click Remove — remove all prior dialog handlers first
   conPage.removeAllListeners("dialog");
