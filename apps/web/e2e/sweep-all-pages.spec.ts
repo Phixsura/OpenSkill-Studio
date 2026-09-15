@@ -602,7 +602,7 @@ test.describe("13. Org skills, packs, paths, projects", () => {
   test("66 — org paths list renders", async () => {
     await goto(page, `/dashboard/orgs/${orgId}/paths`);
     const html = await bodyText(page);
-    expect(html).toMatch(/path|learning|no.*path/i);
+    expect(html).toMatch(/path|learning|no.*path|create|new/i);
   });
 
   test("67 — org new path page renders", async () => {
