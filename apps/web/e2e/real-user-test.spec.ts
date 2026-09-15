@@ -94,9 +94,19 @@ test("Complete manual user flow", async ({ page }) => {
   aliceEmail = `alice-${Date.now()}@test.com`;
   bobEmail = `bob-${Date.now()}@test.com`;
 
+  // Flush between each registration to avoid rate limit
+  const flushRL = async () => {
+    try {
+      const cid2 = execFileSync("docker", ["ps", "-q", "--filter", "name=redis", "--filter", "status=running"], { timeout: 3000 }).toString().trim().split("\n")[0];
+      if (cid2) execFileSync("docker", ["exec", cid2, "redis-cli", "EVAL", "for _,k in ipairs(redis.call('keys','ratelimit:*')) do redis.call('del',k) end return 0", "0"], { stdio: "ignore", timeout: 5000 });
+    } catch {}
+  };
   const adminData = await register(`admin2-${Date.now()}@test.com`, "Admin Wang");
+  await flushRL();
   const instData = await register(instructorEmail, "Instructor Li");
+  await flushRL();
   const aliceData = await register(aliceEmail, "Alice Chen");
+  await flushRL();
   const bobData = await register(bobEmail, "Bob Zhang");
 
   const adminAuth = {
