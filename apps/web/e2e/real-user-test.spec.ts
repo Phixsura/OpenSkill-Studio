@@ -27,7 +27,7 @@ test("Complete manual user flow", async ({ page }) => {
   // ═══════════════════════════════════════════
   adminEmail = `admin-${Date.now()}@test.com`;
   await page.goto("/register");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.screenshot({ path: ss("01-register-page"), fullPage: true });
 
   await page.getByLabel("Name").fill("Admin Wang");
@@ -43,13 +43,13 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 2: Create organization
   // ═══════════════════════════════════════════
   await page.click("text=Organizations");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // Look for new org button/link
   const newOrgLink = page.locator("text=New Organization, a[href*='new'], button:has-text('New')").first();
   if (await newOrgLink.isVisible()) {
     await newOrgLink.click();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
   }
   await page.screenshot({ path: ss("04-orgs-page"), fullPage: true });
 
@@ -62,13 +62,31 @@ test("Complete manual user flow", async ({ page }) => {
   // Need auth token - get it from the page
   // Actually, let's register via API for speed and use browser for navigation
 
-  // Register all users via API
+  // Register all users via API (flush rate limits first)
+  const { execFileSync } = await import("child_process");
+  try {
+    const cid = execFileSync("docker", ["ps", "-q", "--filter", "name=redis", "--filter", "status=running"], { timeout: 3000 }).toString().trim().split("\n")[0];
+    if (cid) execFileSync("docker", ["exec", cid, "redis-cli", "EVAL", "for _,k in ipairs(redis.call('keys','ratelimit:*')) do redis.call('del',k) end return 0", "0"], { stdio: "ignore", timeout: 5000 });
+  } catch {}
+
   const register = async (email: string, name: string) => {
     const res = await fetch(`${API}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, display_name: name }),
     });
+    if (!res.ok) {
+      // If rate limited, wait and retry
+      if (res.status === 429) {
+        await new Promise(r => setTimeout(r, 3000));
+        const r2 = await fetch(`${API}/auth/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, display_name: name }),
+        });
+        return r2.json();
+      }
+    }
     return res.json();
   };
 
@@ -114,7 +132,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.context().clearCookies();
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.goto("/login");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.getByLabel('Email').fill(instructorEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole("button", { name: /sign|log/i }).first().click();
@@ -123,7 +141,7 @@ test("Complete manual user flow", async ({ page }) => {
 
   // Navigate to org
   await page.goto(`/dashboard/orgs/${orgId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("06-org-overview"), fullPage: true });
 
@@ -131,7 +149,7 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 4: Create cohort
   // ═══════════════════════════════════════════
   await page.click("text=Cohorts");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(500);
   await page.screenshot({ path: ss("07-cohorts-empty"), fullPage: true });
 
@@ -141,7 +159,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.screenshot({ path: ss("08-cohort-form-filled"), fullPage: true });
 
   await page.click("button:has-text('Create Cohort')");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(500);
   await page.screenshot({ path: ss("09-cohort-created"), fullPage: true });
 
@@ -160,7 +178,7 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 5: Click into cohort detail
   // ═══════════════════════════════════════════
   await page.click(`text=AI 视觉商务`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("10-cohort-detail"), fullPage: true });
 
@@ -180,7 +198,7 @@ test("Complete manual user flow", async ({ page }) => {
   });
 
   await page.click("text=Members");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("11-cohort-members"), fullPage: true });
 
@@ -207,7 +225,7 @@ test("Complete manual user flow", async ({ page }) => {
   });
 
   await page.click("text=Skills");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("12-cohort-skills"), fullPage: true });
 
@@ -238,7 +256,7 @@ test("Complete manual user flow", async ({ page }) => {
   });
 
   await page.click("text=Projects");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("13-cohort-projects"), fullPage: true });
 
@@ -246,7 +264,7 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 9: Check progress dashboard
   // ═══════════════════════════════════════════
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
   await page.screenshot({ path: ss("14-cohort-progress-dashboard"), fullPage: true });
 
@@ -254,14 +272,14 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 10: Check progress drill-down
   // ═══════════════════════════════════════════
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("15-progress-list"), fullPage: true });
 
   // Click Alice
   if (await page.getByText("Alice Chen").isVisible()) {
     await page.click("text=Alice Chen");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
     await page.screenshot({ path: ss("16-alice-drilldown"), fullPage: true });
   }
@@ -270,7 +288,7 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 11: Create client brief
   // ═══════════════════════════════════════════
   await page.goto(`/dashboard/orgs/${orgId}/briefs`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.screenshot({ path: ss("17-briefs-empty"), fullPage: true });
 
   await page.click("text=+ New Brief");
@@ -280,7 +298,7 @@ test("Complete manual user flow", async ({ page }) => {
   await page.screenshot({ path: ss("18-brief-form"), fullPage: true });
 
   await page.click("button:has-text('Create Brief')");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(500);
   await page.screenshot({ path: ss("19-brief-created"), fullPage: true });
 
@@ -288,7 +306,7 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 12: Brief detail
   // ═══════════════════════════════════════════
   await page.click("text=Acme Q4");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(500);
   await page.screenshot({ path: ss("20-brief-detail"), fullPage: true });
 
@@ -301,7 +319,7 @@ test("Complete manual user flow", async ({ page }) => {
 
   await page.click("button:has-text('Create Project')");
   await page.waitForURL("**/projects/**", { timeout: 15000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("22-converted-project"), fullPage: true });
 
@@ -312,14 +330,14 @@ test("Complete manual user flow", async ({ page }) => {
   await page.context().clearCookies();
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.goto("/login");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.getByLabel('Email').fill(aliceEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole("button", { name: /sign|log/i }).first().click();
   await page.waitForURL("**/dashboard**", { timeout: 10000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
   await page.screenshot({ path: ss("23-alice-projects"), fullPage: true });
 
@@ -327,7 +345,7 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 15: Alice's my-dashboard
   // ═══════════════════════════════════════════
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("24-alice-my-dashboard"), fullPage: true });
 
@@ -338,14 +356,14 @@ test("Complete manual user flow", async ({ page }) => {
   await page.context().clearCookies();
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.goto("/login");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.getByLabel('Email').fill(bobEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole("button", { name: /sign|log/i }).first().click();
   await page.waitForURL("**/dashboard**", { timeout: 10000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
   await page.screenshot({ path: ss("25-bob-projects-no-cohort"), fullPage: true });
 
@@ -353,7 +371,7 @@ test("Complete manual user flow", async ({ page }) => {
   // STEP 17: Bob tries to access briefs (RBAC)
   // ═══════════════════════════════════════════
   await page.goto(`/dashboard/orgs/${orgId}/briefs`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("26-bob-briefs-forbidden"), fullPage: true });
 
@@ -364,14 +382,14 @@ test("Complete manual user flow", async ({ page }) => {
   await page.context().clearCookies();
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.goto("/login");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.getByLabel('Email').fill(instructorEmail);
   await page.getByLabel('Password').fill(password);
   await page.getByRole("button", { name: /sign|log/i }).first().click();
   await page.waitForURL("**/dashboard**", { timeout: 10000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/evaluation`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await page.screenshot({ path: ss("27-evaluation-page"), fullPage: true });
 

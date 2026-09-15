@@ -52,11 +52,11 @@ test("multi-cohort: alice in 2 cohorts sees both dashboards", async ({ page }) =
 
   // Visit each dashboard
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${c1}/my-dashboard`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText("Cohort Alpha")).toBeVisible({ timeout: 10_000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${c2}/my-dashboard`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText("Cohort Beta")).toBeVisible({ timeout: 10_000 });
 });
 
@@ -73,14 +73,14 @@ test("org-wide project (no cohort) visible to all members", async ({ page }) => 
   // Bob (not in any cohort) can see it
   await loginInBrowser(page, bob.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
   await expect(page.getByText("Org Wide Visible")).toBeVisible({ timeout: 10_000 });
 
   // Alice can also see it
   await loginInBrowser(page, alice.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
   await expect(page.getByText("Org Wide Visible")).toBeVisible({ timeout: 10_000 });
 });
@@ -119,7 +119,7 @@ test("cohort deadline override allows submission past project deadline", async (
   // Verify in browser
   await loginInBrowser(page, alice.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/projects/${proj.data.id}/submissions/${sub2.data.id}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await expect(page.getByText("submitted").first()).toBeVisible({ timeout: 10_000 });
 });
@@ -199,7 +199,7 @@ test("multimodal eval types: image/video/prompt/commercial all accepted", async 
   // Verify eval page loads without crash
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/evaluation`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   // Page should load — multimodal types may 500 without actual media files
   // The API acceptance is verified above (not 422 = schema accepts them)
@@ -241,7 +241,7 @@ test("budget exhausted blocks eval trigger", async ({ page }) => {
 test("existing skills page still works", async ({ page }) => {
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/skills`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   // Should not crash
   await expect(page.getByText("Skills").first()).toBeVisible({ timeout: 10_000 });
@@ -250,7 +250,7 @@ test("existing skills page still works", async ({ page }) => {
 test("existing reviews page still works", async ({ page }) => {
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/reviews`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await expect(page.locator("body")).not.toBeEmpty();
 });
@@ -258,7 +258,7 @@ test("existing reviews page still works", async ({ page }) => {
 test("existing settings page still works", async ({ page }) => {
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/settings`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await expect(page.locator("body")).not.toBeEmpty();
 });
@@ -266,7 +266,7 @@ test("existing settings page still works", async ({ page }) => {
 test("existing progress page still works", async ({ page }) => {
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/progress`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await expect(page.locator("body")).not.toBeEmpty();
 });
@@ -274,7 +274,7 @@ test("existing progress page still works", async ({ page }) => {
 test("existing members page still works", async ({ page }) => {
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/members`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
   await expect(page.locator("body")).not.toBeEmpty();
 });

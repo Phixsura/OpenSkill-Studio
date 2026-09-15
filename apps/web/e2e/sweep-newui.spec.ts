@@ -68,7 +68,7 @@ test("project detail: draft badge + publish button flips status; unpublish resto
   const projectId = proj.data.id;
 
   await page.goto(`/dashboard/orgs/${orgId}/projects/${projectId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // Draft state: badge + hint + Publish button
   await expect(page.getByText("draft", { exact: true })).toBeVisible({ timeout: 15_000 });
@@ -93,7 +93,7 @@ test("providers: offering created with cost renders it; per-offering Remove work
   const connId = conn.data.id;
 
   await page.goto(`/dashboard/orgs/${orgId}/providers`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // Add an offering THROUGH THE FORM including the new cost field
   await page.getByLabel("Connection", { exact: true }).selectOption(connId);
@@ -120,7 +120,7 @@ test("portfolio: change username via UI; public profile renders at the new URL",
   const newUsername = `newui-${ts.toString(36)}`;
 
   await page.goto("/dashboard/portfolio/profile");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.locator("#username").fill(newUsername);
   await page.getByRole("button", { name: "Change", exact: true }).click();
   await expect(page.getByText("Username updated.")).toBeVisible({ timeout: 10_000 });
@@ -147,7 +147,7 @@ test("portfolio: username collision shows the API error, value unchanged", async
   expect(res.ok).toBeTruthy();
 
   await page.goto("/dashboard/portfolio/profile");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.locator("#username").fill(taken);
   await page.getByRole("button", { name: "Change", exact: true }).click();
   await expect(page.getByText(/taken|unavailable|already/i).first()).toBeVisible({
@@ -180,7 +180,7 @@ test("portfolio: badge toggle hides the badge from the public profile", async ()
 
   // Badge appears on the portfolio dashboard with its toggle
   await page.goto("/dashboard/portfolio");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText("Skill Badges")).toBeVisible({ timeout: 15_000 });
   const toggle = page.getByLabel(`Show NewUI Badge Skill ${ts} badge on profile`);
   await expect(toggle).toBeChecked(); // default show_on_profile=true

@@ -88,7 +88,7 @@ test.beforeAll(async () => {
 
 async function assertPageLoads(page: import("@playwright/test").Page, url: string) {
   await page.goto(url);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
   const body = await page.locator("body").innerText();
   expect(body.length).toBeGreaterThan(10);
@@ -98,7 +98,7 @@ async function assertPageLoads(page: import("@playwright/test").Page, url: strin
 
 test("forgot-password page loads", async ({ page }) => {
   await page.goto("/forgot-password");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.locator("body")).not.toBeEmpty();
   // Should show email input
   const hasInput = await page.locator("input").count();
@@ -107,7 +107,7 @@ test("forgot-password page loads", async ({ page }) => {
 
 test("reset-password page loads", async ({ page }) => {
   await page.goto("/reset-password?token=fake");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.locator("body")).not.toBeEmpty();
 });
 
@@ -193,13 +193,13 @@ test("evaluation settings page loads", async ({ page }) => {
 
 test("health page loads", async ({ page }) => {
   await page.goto("/health");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.locator("body")).not.toBeEmpty();
 });
 
 test("public profile page handles nonexistent user", async ({ page }) => {
   await page.goto("/u/nonexistent-user-xyz");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   // Should show 404 or "not found", not crash
   const status = page.url().includes("404") || (await page.locator("body").innerText()).length > 0;
   expect(status).toBeTruthy();

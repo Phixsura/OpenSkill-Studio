@@ -199,7 +199,7 @@ test.afterAll(async () => {
 
 test("providers: empty state → create mock connection via UI", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/providers`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // Empty state before any connection exists
   await expect(page.getByText("No provider connections yet.")).toBeVisible();
@@ -279,7 +279,7 @@ test("credentials: write-only api_key never appears in DOM; delete connection vi
 
   // ... nor after a full reload (fresh GETs for connections/adapters)
   await page.reload();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(
     page.locator("div.rounded-lg.border.p-4").filter({ hasText: ANTHROPIC_CONN }),
   ).toBeVisible();
@@ -301,7 +301,7 @@ test("credentials: write-only api_key never appears in DOM; delete connection vi
 test("installations: empty state → install (API) → bindings render → confirm via UI", async () => {
   // Empty state before anything is installed
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText("No workflow packs installed yet.")).toBeVisible();
 
   // Seed the install via API (capability gate satisfied by the UI-made offering)
@@ -314,7 +314,7 @@ test("installations: empty state → install (API) → bindings render → confi
 
   // List renders the installation with version + status badge
   await page.reload();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText("v1.0.0")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("active", { exact: true })).toBeVisible();
 
@@ -323,7 +323,7 @@ test("installations: empty state → install (API) → bindings render → confi
   await page.waitForURL(new RegExp(`workflow-installations/${installAId}$`), {
     timeout: 10_000,
   });
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // Bindings section: one provider_action step "gen", auto-suggested offering
   await expect(page.getByText("Provider Bindings")).toBeVisible();
@@ -353,7 +353,7 @@ test("upgrade: diff viewer + upgrade to 1.1.0 via UI; confirmed binding preserve
 
   // Diff viewer: compare current 1.0.0 with 1.1.0
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations/${installAId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.locator("#diff-version").fill("1.1.0");
   await page.getByRole("button", { name: "Show Diff" }).click();
   await expect(page.getByText("Added: notes")).toBeVisible({ timeout: 10_000 });
@@ -425,7 +425,7 @@ test("unhappy: install gate blocks a pack whose capability has no offering", asy
   // The install-time binding auto-suggested the (then-active) offering, so the
   // step "vid" binding row renders with it selected.
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations/${installBId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText("vid", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByLabel("Offering for vid")).toHaveValue(t2vOff.body.data.id);
 
@@ -451,7 +451,7 @@ test("runs list: empty state → 2 seeded runs render with terminal statuses", a
 
   // Empty state before any run exists
   await page.goto(`/dashboard/orgs/${orgId}/workflow-runs`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(
     page.getByText("No workflow runs yet. Start one from an installation."),
   ).toBeVisible();
@@ -491,7 +491,7 @@ test("runs list: empty state → 2 seeded runs render with terminal statuses", a
     .toBe("failed");
 
   await page.reload();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   const row1 = page.locator(`a[href$="/workflow-runs/${runCompletedId}"]`);
   await expect(row1).toBeVisible({ timeout: 10_000 });
@@ -512,7 +512,7 @@ test("runs list: empty state → 2 seeded runs render with terminal statuses", a
 
 test("uninstall via UI: remove pack B installation", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations/${installBId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
 
   page.once("dialog", (d) => d.accept());
@@ -520,7 +520,7 @@ test("uninstall via UI: remove pack B installation", async () => {
 
   // onSuccess router.replaces back to the list
   await page.waitForURL(/workflow-installations$/, { timeout: 10_000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   // Pack B gone from the list; pack A still installed
   await expect(page.getByText(packBId)).toHaveCount(0);
   await expect(page.locator(`a[href$="/workflow-installations/${installAId}"]`)).toBeVisible();
@@ -528,7 +528,7 @@ test("uninstall via UI: remove pack B installation", async () => {
 
 test("providers: delete mock connection via UI cascades offerings", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/providers`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   const card = page.locator("div.rounded-lg.border.p-4").filter({ hasText: MOCK_CONN });
   await expect(card).toBeVisible();
@@ -556,7 +556,7 @@ test("unhappy: student role cannot create provider connection (403 shown in UI)"
   // Log in AS the student in the same browser context
   await loginInBrowser(page, student.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/providers`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // Student can read the page (member) but the create must be denied
   await expect(page.getByText("No provider connections yet.")).toBeVisible();

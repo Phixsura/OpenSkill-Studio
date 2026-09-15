@@ -68,7 +68,7 @@ test("production flow: create → edit steps → publish → approve → registr
 
   // ── Create the pack via the form ──
   await page.goto(`/dashboard/orgs/${orgId}/workflow-packs/new`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.locator("#name").fill(packName);
   await page.locator("#summary").fill("E-commerce hero image production");
   await page.locator("#description").fill("Generates brand-consistent hero images.");
@@ -84,7 +84,7 @@ test("production flow: create → edit steps → publish → approve → registr
   // ── Build the workflow in the LIST editor view (canvas is flaky headless) ──
   await page.getByRole("button", { name: "Open Editor" }).click();
   await page.waitForURL(/\/editor$/, { timeout: 15_000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.getByRole("button", { name: "List", exact: true }).click();
 
   // Step 1: prompt template (default output port "prompt")
@@ -107,7 +107,7 @@ test("production flow: create → edit steps → publish → approve → registr
 
   // ── Publish a release from the detail page ──
   await page.goto(packUrl);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   // Version input inside "Publish New Release" section
   const versionInput = page.getByPlaceholder(/1\.0\.0|x\.y\.z/i).first();
   await versionInput.fill("1.0.0");
@@ -125,13 +125,13 @@ test("production flow: create → edit steps → publish → approve → registr
 
   // ── Public registry shows it ──
   await page.goto("/registry/workflows");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.getByPlaceholder(/search/i).fill(packName);
   await expect(page.getByText(packName)).toBeVisible({ timeout: 10_000 });
 
   // ── Provider setup via UI ──
   await page.goto(`/dashboard/orgs/${orgId}/providers`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   // Create a mock connection (no credentials needed)
   const adapterSelect = page.locator("select").first();
   await adapterSelect.selectOption({ label: /Mock/i as unknown as string }).catch(async () => {
@@ -162,7 +162,7 @@ test("production flow: create → edit steps → publish → approve → registr
   expect(install.data?.id).toBeTruthy();
 
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText(/1\.0\.0/).first()).toBeVisible({ timeout: 10_000 });
 });
 
@@ -198,7 +198,7 @@ test("learning flow: intake → confirm → compose → confirm draft → path c
 
   // ── Guided intake ──
   await page.goto(`/dashboard/orgs/${orgId}/requirements/new`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.locator("#context").selectOption("learning");
   await page.locator("#goal").fill("Learn AI e-commerce visual production");
   // Tick one required capability chip if the catalog rendered
@@ -219,7 +219,7 @@ test("learning flow: intake → confirm → compose → confirm draft → path c
   // ── Compose learning path ──
   await page.getByRole("button", { name: /Compose Learning Path/i }).click();
   await page.waitForURL(/compose\/learning/, { timeout: 15_000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // Recommendations (informational)
   await page.getByRole("button", { name: /Get Recommendations/i }).click();
@@ -287,7 +287,7 @@ test("run flow: start from install form → review gate → decide in UI → com
 
   // ── Start the run from the INSTALLATION DETAIL form (input_schema path) ──
   await page.goto(`/dashboard/orgs/${orgId}/workflow-installations/${installId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   const briefInput = page.locator("#run-brief");
   await expect(briefInput).toBeVisible({ timeout: 10_000 });
   await briefInput.fill("Launch banner for spring sale");
@@ -339,7 +339,7 @@ test("comfyui import: upload JSON → dependency report → draft pack", async (
   const packId = packRes.data.id;
 
   await page.goto(`/dashboard/orgs/${orgId}/workflow-packs/${packId}/import-comfyui`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // Never-executed banner is part of the red-line contract
   await expect(page.getByText(/never executed/i)).toBeVisible();
@@ -379,7 +379,7 @@ test("comfyui import: upload JSON → dependency report → draft pack", async (
   await page.locator("#draft-name").fill(`Comfy Draft ${Date.now()}`);
   await page.getByRole("button", { name: /Create Draft Pack/i }).click();
   await page.waitForURL(/workflow-packs\/[^/]+$/, { timeout: 15_000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   // Draft pack detail shows mapped steps (KSampler → image_generation)
   await expect(page.getByText(/draft/i).first()).toBeVisible({ timeout: 10_000 });
 });

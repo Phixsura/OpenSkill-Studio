@@ -35,7 +35,7 @@ test("cohort status: draft → activate → complete via UI buttons", async ({ p
 
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
 
   // Should see "Activate" button (cohort is draft)
@@ -75,7 +75,7 @@ test("student applies to brief, admin sees application", async ({ page }) => {
   // Student views brief and applies
   await loginInBrowser(page, student.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/briefs/${briefId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
 
   // Should see "Apply" section
@@ -96,7 +96,7 @@ test("student applies to brief, admin sees application", async ({ page }) => {
   // Admin sees the application
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/briefs/${briefId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
 
   // Should see applications section with student's application
@@ -110,7 +110,7 @@ test("cohort edit: change name and description", async ({ page }) => {
 
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
 
   // Click Edit button
@@ -140,7 +140,7 @@ test("cohort edit: change name and description", async ({ page }) => {
 test("brief create form has all fields", async ({ page }) => {
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/briefs`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   await page.getByText("+ New Brief").click();
   await page.waitForTimeout(500);
@@ -165,7 +165,7 @@ test("brief create form has all fields", async ({ page }) => {
 test("cohort create form has date and capacity fields", async ({ page }) => {
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   await page.getByText("+ New Cohort").click();
   await page.waitForTimeout(500);
@@ -204,7 +204,7 @@ test("opportunities page shows open briefs", async ({ page }) => {
   // Student visits opportunities page
   await loginInBrowser(page, student.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/opportunities`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   await expect(page.getByText("Commercial Opportunities")).toBeVisible({ timeout: 5_000 });
@@ -220,7 +220,7 @@ test("progress page shows aggregate stats", async ({ page }) => {
 
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   // Should show stats cards

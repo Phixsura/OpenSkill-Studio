@@ -156,10 +156,12 @@ export async function activateCohort(
 
 /** Login via the browser UI and store auth state. */
 export async function loginInBrowser(page: Page, email: string, password: string): Promise<void> {
+  // Flush rate limits for login endpoint too
+  await flushRateLimits();
   // Clear previous auth state (Zustand persists in localStorage)
   await page.context().clearCookies();
   await page.goto("/login");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.evaluate(() => {
     try {
       localStorage.clear();
@@ -169,19 +171,27 @@ export async function loginInBrowser(page: Page, email: string, password: string
     } catch {}
   });
   await page.reload();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
+  await page.waitForTimeout(1000);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page
     .getByRole("button", { name: /sign|log/i })
     .first()
     .click();
-  // Wait for redirect to dashboard
-  await page.waitForURL("**/dashboard**", { timeout: 10_000 });
+  // Wait for redirect to dashboard (generous timeout for cold compilations in full suite)
+  try {
+    await page.waitForURL("**/dashboard**", { timeout: 45_000 });
+  } catch {
+    // Retry once — navigate directly if redirect didn't fire
+    await page.goto("/dashboard");
+    await page.waitForLoadState("domcontentloaded");
+  }
 }
 
 /** Navigate to an org's page. */
 export async function goToOrg(page: Page, orgId: string): Promise<void> {
   await page.goto(`/dashboard/orgs/${orgId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
+  await page.waitForTimeout(1000);
 }

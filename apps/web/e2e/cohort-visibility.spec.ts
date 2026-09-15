@@ -78,7 +78,7 @@ test.describe("Project Visibility", () => {
   test("cohort member sees org-wide + cohort project", async ({ page }) => {
     await loginInBrowser(page, learnerInCohort.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000); // wait for react-query
 
     await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 15_000 });
@@ -88,7 +88,7 @@ test.describe("Project Visibility", () => {
   test("outside learner sees only org-wide, not cohort project", async ({ page }) => {
     await loginInBrowser(page, learnerOutside.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
     await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 15_000 });
@@ -98,7 +98,7 @@ test.describe("Project Visibility", () => {
   test("admin sees all projects regardless", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
     await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 15_000 });
@@ -110,7 +110,7 @@ test.describe("Cohort Filter on Projects", () => {
   test("cohort filter dropdown is visible for cohort members", async ({ page }) => {
     await loginInBrowser(page, learnerInCohort.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
     await expect(page.getByText("Filter by cohort")).toBeVisible({ timeout: 10_000 });
@@ -119,7 +119,7 @@ test.describe("Cohort Filter on Projects", () => {
   test("my-cohorts endpoint populates the filter", async ({ page }) => {
     await loginInBrowser(page, learnerInCohort.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
     // The filter should have at least "All projects" + cohort name
