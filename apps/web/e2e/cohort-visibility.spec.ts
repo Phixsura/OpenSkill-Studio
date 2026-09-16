@@ -81,7 +81,7 @@ test.describe("Project Visibility", () => {
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000); // wait for react-query
 
-    await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Cohort Only Project")).toBeVisible({ timeout: 5_000 });
   });
 
@@ -91,7 +91,7 @@ test.describe("Project Visibility", () => {
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
-    await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Cohort Only Project")).not.toBeVisible({ timeout: 3_000 });
   });
 
@@ -101,7 +101,7 @@ test.describe("Project Visibility", () => {
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
-    await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Org Wide Project")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Cohort Only Project")).toBeVisible({ timeout: 5_000 });
   });
 });

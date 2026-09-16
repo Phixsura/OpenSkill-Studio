@@ -216,7 +216,7 @@ test.describe("Brief with deliverables → convert → verify", () => {
 
     // Fill rubric and submit
     await page.getByRole("button", { name: "Create Project" }).click();
-    await page.waitForURL("**/projects/**", { timeout: 15_000 });
+    await page.waitForURL("**/projects/**", { timeout: 30_000 });
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 

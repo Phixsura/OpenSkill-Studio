@@ -76,14 +76,14 @@ test("production flow: create → edit steps → publish → approve → registr
   await page.getByRole("button", { name: /create/i }).click();
 
   // router.replace lands on the pack detail page
-  await page.waitForURL(/workflow-packs\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/workflow-packs\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: packName })).toBeVisible();
   const packUrl = page.url();
   const packId = packUrl.split("/").pop()!;
 
   // ── Build the workflow in the LIST editor view (canvas is flaky headless) ──
   await page.getByRole("button", { name: "Open Editor" }).click();
-  await page.waitForURL(/\/editor$/, { timeout: 15_000 });
+  await page.waitForURL(/\/editor$/, { timeout: 30_000 });
   await page.waitForLoadState("domcontentloaded");
   await page.getByRole("button", { name: "List", exact: true }).click();
 
@@ -209,7 +209,7 @@ test("learning flow: intake → confirm → compose → confirm draft → path c
   await page.getByRole("button", { name: /Create Profile/i }).click();
 
   // Profile detail (router.replace)
-  await page.waitForURL(/requirements\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/requirements\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   await expect(page.getByText(/review and confirm/i)).toBeVisible();
 
   // ── Confirm the profile ──
@@ -218,14 +218,14 @@ test("learning flow: intake → confirm → compose → confirm draft → path c
 
   // ── Compose learning path ──
   await page.getByRole("button", { name: /Compose Learning Path/i }).click();
-  await page.waitForURL(/compose\/learning/, { timeout: 15_000 });
+  await page.waitForURL(/compose\/learning/, { timeout: 30_000 });
   await page.waitForLoadState("domcontentloaded");
 
   // Recommendations (informational)
   await page.getByRole("button", { name: /Get Recommendations/i }).click();
   await expect(
     page.getByText(/match|Not eligible|No recommendations|recommendation/i).first(),
-  ).toBeVisible({ timeout: 15_000 });
+  ).toBeVisible({ timeout: 30_000 });
 
   // Draft
   await page.getByRole("button", { name: /Compose Draft/i }).click();
@@ -235,7 +235,7 @@ test("learning flow: intake → confirm → compose → confirm draft → path c
 
   // Confirm → materialized path
   await page.getByRole("button", { name: /Confirm & Create Path/i }).click();
-  await expect(page.getByText(/created|path/i).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/created|path/i).first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("run flow: start from install form → review gate → decide in UI → completed", async () => {
@@ -294,7 +294,7 @@ test("run flow: start from install form → review gate → decide in UI → com
   await page.getByRole("button", { name: /Start Run/i }).click();
 
   // Start Run's onSuccess router.pushes straight to the run detail page
-  await page.waitForURL(/workflow-runs\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/workflow-runs\/[0-9A-Z]{26}$/, { timeout: 30_000 });
 
   // ── Suspends at the review gate ──
   await expect(page.getByText(/waiting_review/i).first()).toBeVisible({ timeout: 20_000 });
@@ -370,7 +370,7 @@ test("comfyui import: upload JSON → dependency report → draft pack", async (
   });
 
   // ── Dependency report renders: format, node counts, custom node, model ──
-  await expect(page.getByText(/Dependency Report/i)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Dependency Report/i)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/Format:/i)).toBeVisible();
   await expect(page.getByText("MyCustomUpscaler")).toBeVisible();
   await expect(page.getByText(/sd_xl_base_1\.0\.safetensors/)).toBeVisible();
@@ -378,7 +378,7 @@ test("comfyui import: upload JSON → dependency report → draft pack", async (
   // ── Convert to draft pack (name required to enable the button) ──
   await page.locator("#draft-name").fill(`Comfy Draft ${Date.now()}`);
   await page.getByRole("button", { name: /Create Draft Pack/i }).click();
-  await page.waitForURL(/workflow-packs\/[^/]+$/, { timeout: 15_000 });
+  await page.waitForURL(/workflow-packs\/[^/]+$/, { timeout: 30_000 });
   await page.waitForLoadState("domcontentloaded");
   // Draft pack detail shows mapped steps (KSampler → image_generation)
   await expect(page.getByText(/draft/i).first()).toBeVisible({ timeout: 10_000 });

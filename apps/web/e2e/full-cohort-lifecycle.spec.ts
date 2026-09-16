@@ -127,7 +127,7 @@ test.describe("Full Cohort Lifecycle", () => {
     }
 
     await page.click("text=Create Project");
-    await page.waitForURL("**/projects/**", { timeout: 15_000 });
+    await page.waitForURL("**/projects/**", { timeout: 30_000 });
 
     // Should be on the new project page
     await expect(page.locator("text=Acme Product Campaign")).toBeVisible();

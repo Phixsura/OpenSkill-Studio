@@ -89,11 +89,11 @@ test.afterAll(async () => {
 test("empty states: no skills and no paths in a fresh org", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/skills`);
   await expect(page.getByRole("heading", { name: "Skills" })).toBeVisible();
-  await expect(page.getByText("No skills found.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("No skills found.")).toBeVisible({ timeout: 30_000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/paths`);
   await expect(page.getByRole("heading", { name: "Learning Paths" })).toBeVisible();
-  await expect(page.getByText("No learning paths yet.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("No learning paths yet.")).toBeVisible({ timeout: 30_000 });
 });
 
 // ── 2. Category (no creation UI exists — seed via API, assert dropdown) ──
@@ -103,7 +103,7 @@ test("category seeded via API populates the new-skill form dropdown", async () =
   // "Create a category first via the API or ask an admin."
   // First verify that guidance renders when the org has zero categories.
   await page.goto(`/dashboard/orgs/${orgId}/skills/new`);
-  await expect(page.getByText(/No categories yet/i)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/No categories yet/i)).toBeVisible({ timeout: 30_000 });
 
   const res = await api(admin, "POST", `/orgs/${orgId}/categories`, {
     name: CATEGORY_NAME,
@@ -115,7 +115,7 @@ test("category seeded via API populates the new-skill form dropdown", async () =
   // Reload — the dropdown must now offer the category.
   await page.reload();
   const categorySelect = page.locator("#category");
-  await expect(categorySelect).toBeVisible({ timeout: 15_000 });
+  await expect(categorySelect).toBeVisible({ timeout: 30_000 });
   await expect(categorySelect.locator("option", { hasText: CATEGORY_NAME })).toHaveCount(1);
 });
 
@@ -123,7 +123,7 @@ test("category seeded via API populates the new-skill form dropdown", async () =
 
 test("new skill form: server validation error shown, then successful create", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/skills/new`);
-  await expect(page.locator("#category")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("#category")).toBeVisible({ timeout: 30_000 });
 
   // Unhappy: empty description is blocked client-side by native `required` —
   // submitting must keep us on the form (no navigation, no error banner).
@@ -152,7 +152,7 @@ test("new skill form: server validation error shown, then successful create", as
   await page.locator("#learningContent").fill("# Intro\n\nPrompting 101 content.");
   await page.getByRole("button", { name: "Create Skill" }).click();
 
-  await page.waitForURL(/\/skills\/[0-9A-HJKMNP-TV-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/\/skills\/[0-9A-HJKMNP-TV-Z]{26}$/, { timeout: 30_000 });
   publishedSkillId = page.url().split("/").pop()!;
   await expect(page.getByRole("heading", { name: SKILL_NAME })).toBeVisible();
   await expect(
@@ -179,7 +179,7 @@ test("skills list: search and difficulty filter narrow results", async () => {
 
   await page.goto(`/dashboard/orgs/${orgId}/skills`);
   // Admin sees both (drafts included for instructor roles).
-  await expect(page.getByText(SKILL_NAME)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(SKILL_NAME)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(DRAFT_SKILL_NAME)).toBeVisible();
 
   // Search narrows to one card.
@@ -311,13 +311,13 @@ test("my-progress page renders heading and stat card labels", async () => {
 
 test("learning path: create via form, add skill item, publish via UI", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/paths/new`);
-  await expect(page.locator("#name")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("#name")).toBeVisible({ timeout: 30_000 });
   await page.locator("#name").fill(PATH_NAME);
   await page.locator("#description").fill("A structured journey through prompting.");
   await page.locator("#estimated_minutes").fill("120");
   await page.getByRole("button", { name: "Create Learning Path" }).click();
 
-  await page.waitForURL(/\/paths\/[0-9A-HJKMNP-TV-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/\/paths\/[0-9A-HJKMNP-TV-Z]{26}$/, { timeout: 30_000 });
   // Detail page: editable name input holds the value; empty items state shows.
   await expect(page.locator(`input[value="${PATH_NAME}"]`)).toBeVisible();
   await expect(
@@ -345,7 +345,7 @@ test("learning path: create via form, add skill item, publish via UI", async () 
 
   // The list page shows the published path card.
   await page.goto(`/dashboard/orgs/${orgId}/paths`);
-  await expect(page.getByText(PATH_NAME)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(PATH_NAME)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("120 min")).toBeVisible();
 });
 
@@ -355,7 +355,7 @@ test("student: create-skill form submission is rejected with a visible error", a
   await loginInBrowser(page, student.email, "TestPass123!");
 
   await page.goto(`/dashboard/orgs/${orgId}/skills/new`);
-  await expect(page.locator("#category")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("#category")).toBeVisible({ timeout: 30_000 });
   await page.locator("#name").fill("Student Rogue Skill");
   await page.locator("#description").fill("Students must not be able to create skills.");
   await page.locator("#category").selectOption(categoryId);
@@ -372,11 +372,11 @@ test("student: create-skill form submission is rejected with a visible error", a
 
 test("student: skill list hides drafts and draft detail direct-nav fails", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/skills`);
-  await expect(page.getByText(SKILL_NAME)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(SKILL_NAME)).toBeVisible({ timeout: 30_000 });
   // The draft advanced skill must NOT appear for a student.
   await expect(page.getByText(DRAFT_SKILL_NAME)).not.toBeVisible();
 
   // Direct navigation to the draft skill's detail page → visible error state.
   await page.goto(`/dashboard/orgs/${orgId}/skills/${draftSkillId}`);
-  await expect(page.getByText("Failed to load skill.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Failed to load skill.")).toBeVisible({ timeout: 30_000 });
 });

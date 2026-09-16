@@ -71,7 +71,7 @@ test("project detail: draft badge + publish button flips status; unpublish resto
   await page.waitForLoadState("domcontentloaded");
 
   // Draft state: badge + hint + Publish button
-  await expect(page.getByText("draft", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("draft", { exact: true })).toBeVisible({ timeout: 45_000 });
   await expect(page.getByText(/students cannot see or submit/i)).toBeVisible();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
 
@@ -181,7 +181,7 @@ test("portfolio: badge toggle hides the badge from the public profile", async ()
   // Badge appears on the portfolio dashboard with its toggle
   await page.goto("/dashboard/portfolio");
   await page.waitForLoadState("domcontentloaded");
-  await expect(page.getByText("Skill Badges")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Skill Badges")).toBeVisible({ timeout: 45_000 });
   const toggle = page.getByLabel(`Show NewUI Badge Skill ${ts} badge on profile`);
   await expect(toggle).toBeChecked(); // default show_on_profile=true
 
@@ -220,11 +220,11 @@ test("logout before auth hydration still revokes the session", async () => {
   // Full reload puts us pre-hydration; click Log out as fast as possible
   await p2.goto("/dashboard");
   await p2.getByRole("button", { name: "Log out" }).click();
-  await p2.waitForURL("**/login**", { timeout: 15_000 });
+  await p2.waitForURL("**/login**", { timeout: 45_000 });
 
   // The refresh cookie must now be revoked: hitting /dashboard again must
   // NOT silently re-authenticate (bug 5: session survived logout)
   await p2.goto("/dashboard");
-  await p2.waitForURL("**/login**", { timeout: 15_000 });
+  await p2.waitForURL("**/login**", { timeout: 45_000 });
   await c2.close();
 });

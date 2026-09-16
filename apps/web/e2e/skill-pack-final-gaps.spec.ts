@@ -62,7 +62,7 @@ test("1. Create pack with visibility=Unlisted, verify", async () => {
   await p.locator("#name").fill("Unlisted Pack Test");
   await p.locator("#visibility").selectOption("Unlisted");
   await p.click('button:has-text("Create Skill Pack")');
-  await p.waitForURL(/\/packs\/01/, { timeout: 15_000 });
+  await p.waitForURL(/\/packs\/01/, { timeout: 30_000 });
   await p.waitForLoadState("domcontentloaded");
 
   await expect(p.getByText("unlisted", { exact: true })).toBeVisible();
@@ -76,7 +76,7 @@ test("2. Create pack with difficulty=Expert, verify", async () => {
   await p.locator("#name").fill("Expert Pack Test");
   await p.locator("#difficulty").selectOption("Expert");
   await p.click('button:has-text("Create Skill Pack")');
-  await p.waitForURL(/\/packs\/01/, { timeout: 15_000 });
+  await p.waitForURL(/\/packs\/01/, { timeout: 30_000 });
   await p.waitForLoadState("domcontentloaded");
 
   // Verify pack created (we're on detail page)

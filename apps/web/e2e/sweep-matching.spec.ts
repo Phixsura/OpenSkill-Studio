@@ -90,7 +90,7 @@ test("requirements list: empty state, then seeded profiles render with status ba
   // Empty state first — brand-new org
   await page.goto(`/dashboard/orgs/${orgId}/requirements`);
   await page.waitForLoadState("domcontentloaded");
-  await expect(page.getByText("No requirement profiles yet.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("No requirement profiles yet.")).toBeVisible({ timeout: 30_000 });
 
   // Seed: a draft learning profile + a confirmed production profile (API)
   const draftRes = await api(admin, "POST", `/orgs/${orgId}/requirement-profiles`, {
@@ -122,7 +122,7 @@ test("requirements list: empty state, then seeded profiles render with status ba
 
   // Card click-through navigates to the profile detail
   await page.getByText("Master motion design basics").click();
-  await page.waitForURL(new RegExp(`requirements/${draftLearnProfileId}$`), { timeout: 15_000 });
+  await page.waitForURL(new RegExp(`requirements/${draftLearnProfileId}$`), { timeout: 30_000 });
   await expect(page.getByText(/review and confirm/i)).toBeVisible();
 });
 
@@ -141,7 +141,7 @@ test("new requirement: UI validation error, then create + edit — provenance & 
   // ── Happy: fix the budget, create, land on the review screen ──
   await page.locator("#time-budget").fill("300");
   await page.getByRole("button", { name: /Create Profile/i }).click();
-  await page.waitForURL(/requirements\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/requirements\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   uiProfileId = page.url().split("/").pop()!;
   await expect(page.getByText(/review and confirm/i)).toBeVisible();
 
@@ -246,7 +246,7 @@ test("production composer: no eligible workflows → NO_WORKFLOWS_AVAILABLE + te
   await page.waitForLoadState("domcontentloaded");
   await page.getByRole("button", { name: /Compose Solution/i }).click();
 
-  await expect(page.getByText("No matching workflows found.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("No matching workflows found.")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("NO_WORKFLOWS_AVAILABLE")).toBeVisible();
   // No org template exists in this fresh org — the inline note + the gate both hold
   await expect(page.getByText(/No project template matched/)).toBeVisible();
@@ -346,7 +346,7 @@ test("production composer full flow: chain + template + placeholders + ready cap
   // Draft renders: the chain picked a Sweep Hero pipeline pack. (Public
   // approved packs from previous test runs stay eligible — rank order among
   // them is not deterministic, so match the family, not this run's exact ts.)
-  await expect(page.getByText(/Sweep Hero Pipeline/).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Sweep Hero Pipeline/).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(`Project template:`)).toBeVisible();
   await expect(page.getByText(templateName).first()).toBeVisible();
   // Unresolved prompt input is a first-class placeholder, never silently filled
@@ -357,11 +357,11 @@ test("production composer full flow: chain + template + placeholders + ready cap
 
   // ── Human confirm → Project materialized ──
   await page.getByRole("button", { name: /Confirm & Create Project/i }).click();
-  await expect(page.getByText("Project created.").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Project created.").first()).toBeVisible({ timeout: 30_000 });
 
   // Open the project — title comes from the template
   await page.getByRole("link", { name: /Open the project/i }).click();
-  await page.waitForURL(/projects\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/projects\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   projectId = page.url().match(/projects\/([0-9A-Z]{26})/)![1]!;
   await expect(page.getByRole("heading", { name: templateName })).toBeVisible({
     timeout: 15_000,

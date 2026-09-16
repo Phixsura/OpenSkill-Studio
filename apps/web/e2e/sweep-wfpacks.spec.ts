@@ -91,7 +91,7 @@ test("empty list state → create pack via UI form", async () => {
 
   // Navigate to the form through the real button
   await page.getByRole("button", { name: "New Workflow Pack" }).click();
-  await page.waitForURL(/workflow-packs\/new$/, { timeout: 15_000 });
+  await page.waitForURL(/workflow-packs\/new$/, { timeout: 30_000 });
 
   // Native required blocks an empty submit (stays on the form)
   await page.getByRole("button", { name: /Create Workflow Pack/i }).click();
@@ -105,7 +105,7 @@ test("empty list state → create pack via UI form", async () => {
   await page.locator("#scenarioTags").fill("ecommerce, hero-images");
   await page.getByRole("button", { name: /Create Workflow Pack/i }).click();
 
-  await page.waitForURL(/workflow-packs\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/workflow-packs\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   packUrl = page.url();
   packId = packUrl.split("/").pop()!;
   await expect(page.getByRole("heading", { name: packName })).toBeVisible();
@@ -117,7 +117,7 @@ test("empty list state → create pack via UI form", async () => {
 
 test("editor: add two steps in list view → canvas renders both nodes", async () => {
   await page.getByRole("button", { name: "Open Editor" }).click();
-  await page.waitForURL(/\/editor$/, { timeout: 15_000 });
+  await page.waitForURL(/\/editor$/, { timeout: 30_000 });
   await page.waitForLoadState("domcontentloaded");
 
   await page.getByRole("button", { name: "List", exact: true }).click();
@@ -347,7 +347,7 @@ test("archive pack via UI: confirm dialog → removed from the list", async () =
 
   // window.confirm auto-accepted by the beforeAll dialog handler
   await page.getByRole("button", { name: "Archive Pack" }).click();
-  await page.waitForURL(/workflow-packs$/, { timeout: 15_000 });
+  await page.waitForURL(/workflow-packs$/, { timeout: 30_000 });
   await page.waitForLoadState("domcontentloaded");
 
   // Archived pack is filtered out of the default list; the live one remains

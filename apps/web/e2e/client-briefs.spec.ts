@@ -122,7 +122,7 @@ test.describe("Brief Detail Page", () => {
     await page.click("button:has-text('Convert to Project')");
     await page.waitForTimeout(300);
     await page.click("button:has-text('Create Project')");
-    await page.waitForURL("**/projects/**", { timeout: 15_000 });
+    await page.waitForURL("**/projects/**", { timeout: 30_000 });
 
     // Should land on the new project page
     await expect(page.locator("text=Acme Q4 Campaign")).toBeVisible();

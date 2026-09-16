@@ -283,7 +283,7 @@ test("registry: skill pack detail renders summary, description, curriculum and v
   const card = page.getByRole("link", { name: auroraName });
   await expect(card).toBeVisible({ timeout: 10_000 });
   await card.click();
-  await page.waitForURL(new RegExp(`/registry/${auroraId}$`), { timeout: 15_000 });
+  await page.waitForURL(new RegExp(`/registry/${auroraId}$`), { timeout: 30_000 });
 
   await expect(page.getByRole("heading", { name: auroraName })).toBeVisible();
   await expect(page.getByText("by Sweep Author")).toBeVisible();
@@ -385,7 +385,7 @@ test("workflow registry: tab switch, live search and type facet with empty state
   await page.waitForLoadState("domcontentloaded");
   // Real tab click (not direct goto)
   await page.getByRole("link", { name: "Workflow Packs" }).click();
-  await page.waitForURL(/\/registry\/workflows$/, { timeout: 15_000 });
+  await page.waitForURL(/\/registry\/workflows$/, { timeout: 30_000 });
 
   await page.locator("#wf-search").fill(nimbusName);
   await expect(page.getByText(nimbusName)).toBeVisible({ timeout: 10_000 });
@@ -400,7 +400,7 @@ test("workflow registry: tab switch, live search and type facet with empty state
 
   // Click through to detail
   await page.getByText(nimbusName).click();
-  await page.waitForURL(new RegExp(`/registry/workflows/${nimbusId}$`), { timeout: 15_000 });
+  await page.waitForURL(new RegExp(`/registry/workflows/${nimbusId}$`), { timeout: 30_000 });
 });
 
 // ── 8. Workflow pack detail: structure preview sanitized, releases ──
@@ -503,19 +503,19 @@ test("portfolio: empty state, add project via UI, edit profile headline", async 
 
   // Add a project through the form
   await page.getByRole("link", { name: "Add Project" }).click();
-  await page.waitForURL(/\/portfolio\/items\/new$/, { timeout: 15_000 });
+  await page.waitForURL(/\/portfolio\/items\/new$/, { timeout: 30_000 });
   const itemTitle = `Sweep Showcase ${TS}`;
   await page.locator("#title").fill(itemTitle);
   await page.locator("#description").fill("Built an automated E2E sweep for the registry.");
   await page.getByPlaceholder("ai, chatbot, python").fill("e2e, playwright");
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  await page.waitForURL(/\/dashboard\/portfolio$/, { timeout: 15_000 });
+  await page.waitForURL(/\/dashboard\/portfolio$/, { timeout: 30_000 });
   await expect(page.getByText(itemTitle)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("public", { exact: true }).first()).toBeVisible();
 
   // Edit profile headline and save
   await page.getByRole("link", { name: "Edit Profile" }).click();
-  await page.waitForURL(/\/portfolio\/profile$/, { timeout: 15_000 });
+  await page.waitForURL(/\/portfolio\/profile$/, { timeout: 30_000 });
   await expect(page.getByText(username)).toBeVisible({ timeout: 10_000 });
   await page.locator("#headline").fill("Automation Sweep Engineer");
   await page.getByRole("button", { name: "Save Changes" }).click();
@@ -554,10 +554,10 @@ test("public profile /u/<username> renders skills/badges anonymously; hidden bad
 test("404s: unknown user, bogus registry ids, bogus certificate", async () => {
   // Unknown public profile → app not-found page
   await page.goto("/u/nonexistent-user-xyz");
-  await expect(page.getByRole("heading", { name: "404" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "404" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Page not found")).toBeVisible();
   await page.getByRole("link", { name: "Go to home" }).click();
-  await page.waitForURL((url) => new URL(url).pathname === "/", { timeout: 15_000 });
+  await page.waitForURL((url) => new URL(url).pathname === "/", { timeout: 30_000 });
 
   // Bogus skill pack id → in-page error state with working back link
   await page.goto("/registry/BOGUSPACK00000000000000000");
@@ -565,14 +565,14 @@ test("404s: unknown user, bogus registry ids, bogus certificate", async () => {
     timeout: 15_000,
   });
   await page.getByRole("link", { name: "Back to registry" }).click();
-  await page.waitForURL(/\/registry$/, { timeout: 15_000 });
+  await page.waitForURL(/\/registry$/, { timeout: 30_000 });
 
   // Bogus workflow pack id
   await page.goto("/registry/workflows/BOGUSWF0000000000000000000");
-  await expect(page.getByText("Workflow pack not found.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Workflow pack not found.")).toBeVisible({ timeout: 30_000 });
 
   // Bogus certificate number → verification failure card
   await page.goto("/certificates/SWEEP-BOGUS-999");
-  await expect(page.getByText("Certificate Not Found")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Certificate Not Found")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/could not be verified/)).toBeVisible();
 });

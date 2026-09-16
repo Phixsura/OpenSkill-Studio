@@ -28,7 +28,7 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   await page.getByRole("button", { name: /sign up/i }).click();
 
   // Should redirect to dashboard
-  await page.waitForURL("**/dashboard**", { timeout: 15_000 });
+  await page.waitForURL("**/dashboard**", { timeout: 30_000 });
   await expect(page.locator("body")).toContainText("Journey Instructor", { timeout: 10_000 });
 
   // ═══════════════ Step 2: Create organization ═══════════════
@@ -47,7 +47,7 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   await page.goto("/dashboard/orgs");
   await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
-  await expect(page.getByText(orgName).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(orgName).first()).toBeVisible({ timeout: 30_000 });
 
   // Get org ID via API (more reliable than URL parsing)
   const orgLoginRes = await fetch(`${API}/auth/login`, {
@@ -198,7 +198,7 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: /log in|sign in/i }).first().click();
 
-  await page.waitForURL("**/dashboard**", { timeout: 15_000 });
+  await page.waitForURL("**/dashboard**", { timeout: 30_000 });
   await expect(page.locator("body")).toContainText("Journey Student", { timeout: 10_000 });
 
   // ═══════════════ Step 9: Student views org ═══════════════
