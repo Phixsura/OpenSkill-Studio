@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
-
-def _run(coro):
-    """Run an async function synchronously for testing."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+import pytest
 
 
 # ── Module-level import tests ──
@@ -50,44 +46,48 @@ def test_user_match_cache_key_format():
 # ── Cache operation tests ──
 
 
-def test_get_cached_returns_parsed_json():
+@pytest.mark.asyncio
+async def test_get_cached_returns_parsed_json():
     from app.talent.services.cache import get_cached
 
     mock_redis = AsyncMock()
     mock_redis.get = AsyncMock(return_value=json.dumps({"score": 0.85}))
 
     with patch("app.talent.services.cache._redis", return_value=mock_redis):
-        result = _run(get_cached("talent:profile:U1"))
+        result = await get_cached("talent:profile:U1")
         assert result == {"score": 0.85}
 
 
-def test_get_cached_returns_none_on_miss():
+@pytest.mark.asyncio
+async def test_get_cached_returns_none_on_miss():
     from app.talent.services.cache import get_cached
 
     mock_redis = AsyncMock()
     mock_redis.get = AsyncMock(return_value=None)
 
     with patch("app.talent.services.cache._redis", return_value=mock_redis):
-        result = _run(get_cached("talent:profile:NONEXISTENT"))
+        result = await get_cached("talent:profile:NONEXISTENT")
         assert result is None
 
 
-def test_get_cached_returns_none_on_error():
+@pytest.mark.asyncio
+async def test_get_cached_returns_none_on_error():
     from app.talent.services.cache import get_cached
 
     with patch("app.talent.services.cache._redis", side_effect=ConnectionError("down")):
-        result = _run(get_cached("talent:profile:U1"))
+        result = await get_cached("talent:profile:U1")
         assert result is None
 
 
-def test_set_cached_writes_with_ttl():
+@pytest.mark.asyncio
+async def test_set_cached_writes_with_ttl():
     from app.talent.services.cache import set_cached
 
     mock_redis = AsyncMock()
     mock_redis.set = AsyncMock()
 
     with patch("app.talent.services.cache._redis", return_value=mock_redis):
-        _run(set_cached("talent:profile:U1", {"score": 0.9}, ttl=120))
+        await set_cached("talent:profile:U1", {"score": 0.9}, ttl=120)
         mock_redis.set.assert_called_once()
         call_args = mock_redis.set.call_args
         assert call_args[0][0] == "talent:profile:U1"
@@ -95,21 +95,24 @@ def test_set_cached_writes_with_ttl():
         assert call_args[1]["ex"] == 120
 
 
-def test_set_cached_graceful_on_error():
+@pytest.mark.asyncio
+async def test_set_cached_graceful_on_error():
     from app.talent.services.cache import set_cached
 
     with patch("app.talent.services.cache._redis", side_effect=ConnectionError("down")):
-        _run(set_cached("key", {"data": 1}))  # Should not raise
+        await set_cached("key", {"data": 1})  # Should not raise
 
 
-def test_invalidate_graceful_on_no_redis():
+@pytest.mark.asyncio
+async def test_invalidate_graceful_on_no_redis():
     from app.talent.services.cache import invalidate
 
     with patch("app.talent.services.cache._redis", side_effect=ConnectionError("down")):
-        _run(invalidate("talent:profile:*"))  # Should not raise
+        await invalidate("talent:profile:*")  # Should not raise
 
 
-def test_invalidate_deletes_matching_keys():
+@pytest.mark.asyncio
+async def test_invalidate_deletes_matching_keys():
     from app.talent.services.cache import invalidate
 
     mock_redis = AsyncMock()
@@ -119,7 +122,7 @@ def test_invalidate_deletes_matching_keys():
     mock_redis.delete = AsyncMock()
 
     with patch("app.talent.services.cache._redis", return_value=mock_redis):
-        _run(invalidate("talent:profile:*"))
+        await invalidate("talent:profile:*")
         mock_redis.delete.assert_called_once_with(
             "talent:profile:U1", "talent:profile:U2"
         )
