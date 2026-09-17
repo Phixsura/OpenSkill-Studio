@@ -44,6 +44,7 @@ from app.talent.api.self_assessment import router as self_assessment_router
 from app.talent.api.succession import router as succession_router
 from app.talent.api.verifications import router as verifications_router
 from app.talent.api.webhooks import router as webhooks_router
+from app.talent.api.outreach import router as outreach_router
 
 # Apply ETagRoute on GET-heavy routers for conditional request support
 capabilities_router.route_class = ETagRoute
@@ -101,6 +102,7 @@ talent_router.include_router(onboarding_router)
 talent_router.include_router(messages_router)
 talent_router.include_router(webhooks_router)
 talent_router.include_router(succession_router)
+talent_router.include_router(outreach_router)
 
 
 def register_integrity_error_handler(app: object) -> None:

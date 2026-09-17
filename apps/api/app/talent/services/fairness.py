@@ -140,9 +140,33 @@ class FairnessService:
             "monotonicity": round(1 - rank_violations / max(n - 1, 1), 4),
         }
 
+        # 5. Adverse impact ratio (EEOC four-fifths rule)
+        # Without demographic data, we use score-quintile proxy:
+        # compare selection rate of bottom-quintile vs top-quintile scores
+        if n >= 10:
+            threshold = sorted_scores[int(n * 0.8)]  # top 20% threshold
+            top_group = [s for s in scores if s >= threshold]
+            bottom_group = [s for s in scores if s < sorted_scores[int(n * 0.2)]]
+            if top_group and bottom_group:
+                top_pass_rate = len([s for s in top_group if s >= threshold]) / len(top_group)
+                bottom_pass_rate = len([s for s in bottom_group if s >= threshold]) / max(len(bottom_group), 1)
+                adverse_impact_ratio = bottom_pass_rate / top_pass_rate if top_pass_rate > 0 else 0
+                metrics["adverse_impact"] = {
+                    "ratio": round(adverse_impact_ratio, 4),
+                    "four_fifths_compliant": adverse_impact_ratio >= 0.8,
+                    "alert": adverse_impact_ratio < 0.8,
+                    "top_quintile_pass_rate": round(top_pass_rate, 4),
+                    "bottom_quintile_pass_rate": round(bottom_pass_rate, 4),
+                    "interpretation": (
+                        "compliant" if adverse_impact_ratio >= 0.8
+                        else "potential_adverse_impact"
+                    ),
+                }
+
         return {
             "status": "computed",
             "result_count": n,
             "excluded_count": sum(1 for r in match_results if r.get("tier") == "excluded"),
             "metrics": metrics,
+            "four_fifths_alert": metrics.get("adverse_impact", {}).get("alert", False),
         }

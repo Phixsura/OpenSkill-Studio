@@ -60,6 +60,8 @@ class SkillPassport(Base):
     discoverable: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Scoped discoverability: NULL = all employers; list = specific employer org_ids
     discoverable_to: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Alumni mode (§31): graduated learners retain read-only passport + credential access
+    alumni_mode: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
