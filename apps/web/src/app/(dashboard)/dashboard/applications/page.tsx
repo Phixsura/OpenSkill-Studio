@@ -300,6 +300,14 @@ function ApplicationCard({
   onWithdraw: () => void;
 }) {
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  // Fetch detail data when expanded
+  const { data: detailData } = useQuery({
+    queryKey: ["application-detail", app.id],
+    queryFn: () => apiWithAuth<{ data: { messages: Array<{ id: string; content: string; sender_role: string; created_at: string }>; evidence_bundle: Record<string, unknown>; timeline: Array<{ status: string; changed_at: string }> } }>(`/talent/applications/${app.id}`),
+    enabled: expanded,
+  });
 
   const withdrawMutation = useMutation({
     mutationFn: () =>
@@ -401,6 +409,91 @@ function ApplicationCard({
             >
               Withdraw application
             </button>
+          )}
+        </div>
+      )}
+
+      {/* Expand toggle */}
+      <div className="mt-3 border-t pt-2">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs text-[hsl(var(--primary))] hover:underline"
+        >
+          {expanded ? "▲ Hide details" : "▼ Show details"}
+        </button>
+      </div>
+
+      {/* Expandable detail panel */}
+      {expanded && (
+        <div className="mt-3 space-y-4 rounded-md bg-[hsl(var(--secondary)/0.3)] p-4 text-sm">
+          {/* Cover note */}
+          {app.cover_note && (
+            <div>
+              <h4 className="mb-1 text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
+                Cover Note
+              </h4>
+              <p className="whitespace-pre-wrap text-[hsl(var(--foreground))]">{app.cover_note}</p>
+            </div>
+          )}
+
+          {/* Timeline */}
+          {detailData?.data?.timeline && detailData.data.timeline.length > 0 && (
+            <div>
+              <h4 className="mb-2 text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
+                Timeline
+              </h4>
+              <div className="space-y-1.5">
+                {detailData.data.timeline.map((event, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <span className="w-2 h-2 rounded-full bg-[hsl(var(--primary))]" />
+                    <span className="capitalize font-medium">{event.status.replace(/_/g, " ")}</span>
+                    <span className="text-[hsl(var(--muted-foreground))]">
+                      {new Date(event.changed_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Messages */}
+          {detailData?.data?.messages && detailData.data.messages.length > 0 && (
+            <div>
+              <h4 className="mb-2 text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
+                Messages ({detailData.data.messages.length})
+              </h4>
+              <div className="space-y-2">
+                {detailData.data.messages.slice(0, 5).map((msg) => (
+                  <div key={msg.id} className="rounded-md border bg-[hsl(var(--card))] p-2.5">
+                    <div className="mb-1 flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
+                      <span className="capitalize font-medium">{msg.sender_role}</span>
+                      <span>·</span>
+                      <span>{new Date(msg.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <p className="text-xs">{msg.content}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Evidence bundle */}
+          {detailData?.data?.evidence_bundle && Object.keys(detailData.data.evidence_bundle).length > 0 && (
+            <div>
+              <h4 className="mb-1 text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
+                Evidence Bundle
+              </h4>
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                {Object.keys(detailData.data.evidence_bundle).length} items attached
+              </p>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!detailData?.data?.timeline?.length && !detailData?.data?.messages?.length && !app.cover_note && (
+            <p className="text-xs text-[hsl(var(--muted-foreground))]">
+              No additional details available yet.
+            </p>
           )}
         </div>
       )}

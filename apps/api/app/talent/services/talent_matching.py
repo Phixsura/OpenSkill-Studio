@@ -154,6 +154,12 @@ class TalentMatchingService:
         }
         adjacency = await self._load_adjacency_graph(all_cap_ids)
 
+        # Batch-load scoring data for ALL eligible users (fixes N+1)
+        req_cap_ids = list(all_cap_ids)
+        bulk_recency = await self._bulk_evidence_recency(user_ids, req_cap_ids, now)
+        bulk_placements = await self._bulk_placement_counts(user_ids)
+        bulk_credentials = await self._bulk_credential_caps(user_ids)
+
         results: list[TalentMatchResult] = []
         for uid in user_ids:
             profile = profiles.get(uid, {})
@@ -182,6 +188,9 @@ class TalentMatchingService:
             signals = await self._score_candidate(
                 uid, profile, required_caps, preferred_caps, now,
                 adjacency=adjacency,
+                preloaded_recency=bulk_recency.get(uid),
+                preloaded_placements=bulk_placements.get(uid, 0),
+                preloaded_cred_caps=bulk_credentials.get(uid, set()),
             )
             score = sum(
                 signals.get(k, 0.0) * w for k, w in TALENT_WEIGHTS.items()
@@ -508,11 +517,17 @@ class TalentMatchingService:
         preferred_caps: list[dict],
         now: datetime,
         adjacency: dict[str, list[tuple[str, int]]] | None = None,
+        preloaded_recency: list[float] | None = None,
+        preloaded_placements: int | None = None,
+        preloaded_cred_caps: set[str] | None = None,
     ) -> dict[str, float]:
         """S3: compute all 5 scoring signals for a candidate.
 
         With adjacency graph: adjacent skills earn partial credit
         (0.5× for distance 1, 0.25× for distance 2).
+
+        When preloaded_* args are provided (from batch queries), skips
+        the per-user DB queries — eliminates N+1.
         """
         import math
 
@@ -553,9 +568,11 @@ class TalentMatchingService:
         )
 
         # 3. evidence_recency: freshness of most recent evidence per required cap
-        # Batch query — one round trip instead of N per-capability queries
-        recency_scores = []
-        if req_cap_ids:
+        # Use preloaded batch data when available (N+1 fix)
+        if preloaded_recency is not None:
+            recency_scores = preloaded_recency
+        elif req_cap_ids:
+            recency_scores = []
             batch_q = (
                 select(
                     CapabilityEvidence.capability_id,
@@ -578,28 +595,34 @@ class TalentMatchingService:
         )
 
         # 4. portfolio_relevance: count of approved placements / max expected
-        placement_q = select(func.count()).where(
-            Placement.user_id == user_id,
-            Placement.status.in_(["active", "completed"]),
-        )
-        placement_count = (await self.db.execute(placement_q)).scalar() or 0
+        if preloaded_placements is not None:
+            placement_count = preloaded_placements
+        else:
+            placement_q = select(func.count()).where(
+                Placement.user_id == user_id,
+                Placement.status.in_(["active", "completed"]),
+            )
+            placement_count = (await self.db.execute(placement_q)).scalar() or 0
         # log1p normalization capped at 1 (same pattern as ADR-012 popularity)
         portfolio_relevance = min(math.log1p(placement_count) / math.log1p(5), 1.0)
 
         # 5. credential_match: fraction of required caps covered by active credentials
         all_cap_ids = {r.get("capability_id", "") for r in all_caps}
-        cred_q = select(Credential).where(
-            Credential.user_id == user_id,
-            Credential.status == "active",
-        )
-        cred_result = await self.db.execute(cred_q)
-        creds = cred_result.scalars().all()
-        cred_cap_ids: set[str] = set()
-        for cred in creds:
-            for cap_entry in (cred.capabilities or []):
-                cid = cap_entry.get("capability_id", "")
-                if cid:
-                    cred_cap_ids.add(cid)
+        if preloaded_cred_caps is not None:
+            cred_cap_ids = preloaded_cred_caps
+        else:
+            cred_q = select(Credential).where(
+                Credential.user_id == user_id,
+                Credential.status == "active",
+            )
+            cred_result = await self.db.execute(cred_q)
+            creds = cred_result.scalars().all()
+            cred_cap_ids: set[str] = set()
+            for cred in creds:
+                for cap_entry in (cred.capabilities or []):
+                    cid = cap_entry.get("capability_id", "")
+                    if cid:
+                        cred_cap_ids.add(cid)
         cred_overlap = len(all_cap_ids & cred_cap_ids)
         credential_match = cred_overlap / max(len(all_cap_ids), 1) if all_cap_ids else 0.0
 
@@ -683,3 +706,76 @@ class TalentMatchingService:
                 })
 
         return reasons, gaps
+
+    # ── Batch loaders (N+1 fix) ──────────────────────────────
+
+    async def _bulk_evidence_recency(
+        self, user_ids: list[str], cap_ids: list[str], now: datetime,
+    ) -> dict[str, list[float]]:
+        """Batch-load evidence recency scores for all users at once."""
+        import math
+
+        if not user_ids or not cap_ids:
+            return {}
+
+        q = (
+            select(
+                CapabilityEvidence.user_id,
+                CapabilityEvidence.capability_id,
+                func.max(CapabilityEvidence.occurred_at).label("latest"),
+            )
+            .where(
+                CapabilityEvidence.user_id.in_(user_ids),
+                CapabilityEvidence.capability_id.in_(cap_ids),
+                CapabilityEvidence.status == "active",
+            )
+            .group_by(CapabilityEvidence.user_id, CapabilityEvidence.capability_id)
+        )
+        result = await self.db.execute(q)
+        out: dict[str, list[float]] = {}
+        for row in result.all():
+            age_days = (now - row.latest).total_seconds() / 86400
+            recency = math.exp(-0.5 * (age_days / 180) ** 2)
+            out.setdefault(row.user_id, []).append(recency)
+        return out
+
+    async def _bulk_placement_counts(
+        self, user_ids: list[str],
+    ) -> dict[str, int]:
+        """Batch-load placement counts for all users at once."""
+        if not user_ids:
+            return {}
+
+        q = (
+            select(Placement.user_id, func.count().label("cnt"))
+            .where(
+                Placement.user_id.in_(user_ids),
+                Placement.status.in_(["active", "completed"]),
+            )
+            .group_by(Placement.user_id)
+        )
+        result = await self.db.execute(q)
+        return {row.user_id: row.cnt for row in result.all()}
+
+    async def _bulk_credential_caps(
+        self, user_ids: list[str],
+    ) -> dict[str, set[str]]:
+        """Batch-load credential capability IDs for all users at once."""
+        if not user_ids:
+            return {}
+
+        q = select(Credential).where(
+            Credential.user_id.in_(user_ids),
+            Credential.status == "active",
+        )
+        result = await self.db.execute(q)
+        out: dict[str, set[str]] = {}
+        for cred in result.scalars().all():
+            caps = set()
+            for cap_entry in (cred.capabilities or []):
+                cid = cap_entry.get("capability_id", "")
+                if cid:
+                    caps.add(cid)
+            if caps:
+                out.setdefault(cred.user_id, set()).update(caps)
+        return out
