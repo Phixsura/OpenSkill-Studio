@@ -1,6 +1,6 @@
 # ADR-015: Verified Talent Graph, Skill Passport, Employment Marketplace & Workforce Intelligence
 
-**Status**: Proposed
+**Status**: Accepted (implemented in PR #33)
 **Issue**: [#32 — Verified Talent Graph, Skill Passport, Employment Marketplace and Workforce Intelligence](https://github.com/Phixsura/OpenSkill-Studio/issues/32)
 **Depends on**: ADR-002 (auth), ADR-003 (orgs), ADR-004 (skills), ADR-005 (projects), ADR-006 (eval), ADR-007 (portfolio), ADR-008 (cohorts), ADR-009 (packs), ADR-010 (workflows), ADR-011 (providers), ADR-012 (matching), ADR-013 (composers/talent), ADR-014 (SaaS control plane)
 
@@ -1805,3 +1805,61 @@ test_talent_adversarial.py    — cross-tenant IDOR, protected-attribute exclusi
   frontend, zero console errors, zero API 500s.
 - Ruff + type-check pass on all new code.
 - All existing tests continue to pass (no regressions).
+
+---
+
+## Implementation Record (PR #33)
+
+**Implemented**: September 2026
+**Branch**: `feature/talent-graph-passport-marketplace`
+**Commits**: 90+
+
+### Deliverables
+
+| Category | Count |
+|----------|-------|
+| Backend models | 27 files, 48 classes |
+| Backend services | 64 files |
+| API routers | 37 files, 270+ endpoints |
+| Frontend pages | 29 talent pages |
+| Migrations | 15 (talent01–talent15) |
+| pytest | 2,748 passing |
+| Playwright | 497 passing (501 total, 4 skipped) |
+| 1-hour marathon | 49,404 HTTP requests, 0 failures |
+
+### Architecture
+
+```
+app/talent/
+├── models/     27 SQLAlchemy models (ULID PKs, JSONB fields)
+├── schemas/    Pydantic v2 schemas (from_attributes=True)
+├── services/   64 service modules (pure business logic)
+├── api/        37 FastAPI routers (270+ endpoints)
+└── facade.py   Service locator for cross-module access
+```
+
+### Key Technical Decisions Validated
+
+1. **4-dimensional scoring** (depth/breadth/recency/velocity) — SCORING_VERSION "2.0.0"
+2. **Ed25519 credential signing** — W3C Verifiable Credentials + Open Badges 3.0
+3. **EEOC four-fifths rule** — adverse impact ratio in fairness metrics
+4. **Cursor-based pagination** — ULID-ordered, no offset skip
+5. **Redis caching** — scoring profiles (5min TTL), graceful degradation
+6. **N+1 fix** — batch loading for matching (3 queries vs 3×N)
+7. **In-memory rate limiter** — sliding window, no auth dependency on public routes
+
+### Production Enhancements (post-core)
+
+- **Recharts** — interactive RadarChart, BarChart, LineChart with tooltips
+- **Full CRUD** — career goals edit/delete, portfolio reorder, opportunity bookmark/apply
+- **Redis cache module** — `app/talent/services/cache.py`
+- **Performance indexes** — 3 composite/single indexes on hot query paths
+- **API documentation** — summary/description on 78 route decorators
+- **Outreach API** — send/list/respond with access control
+- **Alumni mode** — passport field for graduated learners
+
+### CI Integration
+
+- `test-talent` job: runs 2,748 talent unit tests (no DB, ~6 min)
+- `test-playwright` job: runs 200 E2E browser tests (talent + sweep)
+- `test-backend` job: runs full suite with DB, Redis, MinIO
