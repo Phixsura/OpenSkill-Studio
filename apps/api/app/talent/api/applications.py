@@ -137,7 +137,10 @@ async def apply_to_opportunity(
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
-@router.get("/applications/analytics", response_model=DataResponse[dict])
+@router.get("/applications/analytics", response_model=DataResponse[dict],
+    summary="Get application analytics",
+    description="Aggregated analytics including conversion rates and status breakdown.",
+)
 async def get_application_analytics(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -152,7 +155,10 @@ async def get_application_analytics(
     return DataResponse(data=dataclasses.asdict(stats))
 
 
-@router.get("/applications", response_model=CursorListResponse[ApplicationResponse])
+@router.get("/applications", response_model=CursorListResponse[ApplicationResponse],
+    summary="List applications",
+    description="Paginated list of user job applications with status.",
+)
 async def list_applications(
     status: str | None = None,
     cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
@@ -183,7 +189,10 @@ async def list_applications(
     )
 
 
-@router.get("/applications/{app_id}", response_model=DataResponse[ApplicationResponse])
+@router.get("/applications/{app_id}", response_model=DataResponse[ApplicationResponse],
+    summary="Get application detail",
+    description="Full application details including evidence bundle and messages.",
+)
 async def get_application(
     app_id: str,
     db: AsyncSession = Depends(get_db),
@@ -389,7 +398,10 @@ async def update_interview(
 
 # ---- Placements ----
 
-@router.get("/placements", response_model=CursorListResponse[PlacementResponse])
+@router.get("/placements", response_model=CursorListResponse[PlacementResponse],
+    summary="List placements",
+    description="Paginated list of confirmed placements.",
+)
 async def list_placements(
     status: str | None = None,
     cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
@@ -557,7 +569,10 @@ async def compare_applications(
 
 # ---- Gap #81: Custom questions validation ----
 
-@router.post("/talent/opportunities/{opp_id}/custom-questions/validate", response_model=DataResponse[dict])
+@router.post("/talent/opportunities/{opp_id}/custom-questions/validate", response_model=DataResponse[dict],
+    summary="Validate custom questions",
+    description="Validate answers to custom application questions.",
+)
 async def validate_custom_questions_endpoint(
     opp_id: str, body: dict,
     user: User = Depends(get_current_user),
@@ -570,7 +585,10 @@ async def validate_custom_questions_endpoint(
 
 # ---- Gap #82: Auto-screening ----
 
-@router.post("/talent/applications/{app_id}/screen", response_model=DataResponse[dict])
+@router.post("/talent/applications/{app_id}/screen", response_model=DataResponse[dict],
+    summary="Screen application",
+    description="Run automated screening against opportunity requirements.",
+)
 async def auto_screen_application(
     app_id: str, body: dict,
     db: AsyncSession = Depends(get_db),
@@ -584,7 +602,10 @@ async def auto_screen_application(
 
 # ---- Gap #86: Application timeline ----
 
-@router.get("/talent/applications/{app_id}/timeline", response_model=DataResponse[list[dict]])
+@router.get("/talent/applications/{app_id}/timeline", response_model=DataResponse[list[dict]],
+    summary="Get application timeline",
+    description="Full timeline of status changes for an application.",
+)
 async def get_application_timeline(
     app_id: str,
     db: AsyncSession = Depends(get_db),
@@ -613,7 +634,10 @@ async def get_application_timeline(
 
 # ---- Gap #92: Stage overdue check ----
 
-@router.get("/talent/applications/{app_id}/overdue", response_model=DataResponse[dict])
+@router.get("/talent/applications/{app_id}/overdue", response_model=DataResponse[dict],
+    summary="Check application overdue",
+    description="Check if application exceeded expected response time.",
+)
 async def check_application_overdue(
     app_id: str,
     db: AsyncSession = Depends(get_db),

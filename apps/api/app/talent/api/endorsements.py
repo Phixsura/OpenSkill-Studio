@@ -118,7 +118,10 @@ async def get_endorsement_summary(
 # ---- Leaderboard (N12) ----
 
 
-@router.get("/endorsements/leaderboard/users", response_model=DataResponse[list[dict]])
+@router.get("/endorsements/leaderboard/users", response_model=DataResponse[list[dict]],
+    summary="Get endorsement leaderboard",
+    description="Top endorsed users ranked by count and rating.",
+)
 async def get_top_endorsed_users(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -172,7 +175,10 @@ async def get_top_endorsed_capabilities(
     )
 
 
-@router.get("/endorsements/stats", response_model=DataResponse[dict])
+@router.get("/endorsements/stats", response_model=DataResponse[dict],
+    summary="Get endorsement statistics",
+    description="User endorsement stats including given, received, and top capabilities.",
+)
 async def get_endorsement_stats(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),

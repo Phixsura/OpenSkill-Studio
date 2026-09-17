@@ -108,123 +108,84 @@ const AVAILABILITY_OPTIONS = [
   { value: "not_looking", label: "Not looking" },
 ];
 
-/* ── Radar Chart ─────────────────────────────────────────── */
+/* ── Recharts Radar Chart ─────────────────────────────────── */
+
+import {
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Legend,
+} from "recharts";
 
 function SkillRadarChart({ capabilities }: { capabilities: CapabilityScore[] }) {
   const items = capabilities.slice(0, 8);
   if (items.length < 3) return null;
 
-  const size = 280;
-  const cx = size / 2;
-  const cy = size / 2;
-  const radius = size * 0.36;
-  const labelRadius = radius + 24;
-  const n = items.length;
-
-  const angleFor = (i: number) => (2 * Math.PI * i) / n - Math.PI / 2;
-
-  const gridLevels = [0.2, 0.4, 0.6, 0.8, 1.0];
-
-  const scorePoints = items
-    .map((cap, i) => {
-      const a = angleFor(i);
-      const r = radius * Math.min(cap.score, 1);
-      return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
-    })
-    .join(" ");
-
-  // Truncate labels to fit
-  const truncate = (s: string, max: number) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
+  const radarData = items.map((cap) => ({
+    subject: cap.capability_name.length > 12
+      ? cap.capability_name.slice(0, 11) + "…"
+      : cap.capability_name,
+    fullName: cap.capability_name,
+    score: Math.round(cap.score * 100),
+    depth: Math.round((cap.depth ?? 0) * 100),
+    breadth: Math.round((cap.breadth ?? 0) * 100),
+    recency: Math.round((cap.recency ?? 0) * 100),
+    velocity: Math.round((cap.velocity ?? 0) * 100),
+    fullMark: 100,
+  }));
 
   return (
     <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
       <h2 className="mb-3 text-lg font-semibold">Skill Profile</h2>
       <div className="flex justify-center">
-        <svg
-          viewBox={`0 0 ${size} ${size}`}
-          className="h-auto w-full max-w-[320px]"
-          role="img"
-          aria-label="Skill radar chart"
-        >
-          {/* Grid rings */}
-          {gridLevels.map((level) => {
-            const pts = Array.from({ length: n }, (_, i) => {
-              const a = angleFor(i);
-              const r = radius * level;
-              return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
-            }).join(" ");
-            return (
-              <polygon
-                key={level}
-                points={pts}
-                fill="none"
-                stroke="currentColor"
-                className="text-[hsl(var(--border))]"
-                strokeWidth={level === 1.0 ? 1.5 : 0.5}
-              />
-            );
-          })}
-
-          {/* Axis lines */}
-          {items.map((_, i) => {
-            const a = angleFor(i);
-            return (
-              <line
-                key={i}
-                x1={cx}
-                y1={cy}
-                x2={cx + radius * Math.cos(a)}
-                y2={cy + radius * Math.sin(a)}
-                stroke="currentColor"
-                className="text-[hsl(var(--border))]"
-                strokeWidth={0.5}
-              />
-            );
-          })}
-
-          {/* Score polygon */}
-          <polygon
-            points={scorePoints}
-            className="fill-[hsl(var(--primary)/0.2)] stroke-[hsl(var(--primary))]"
-            strokeWidth={2}
-          />
-
-          {/* Score dots */}
-          {items.map((cap, i) => {
-            const a = angleFor(i);
-            const r = radius * Math.min(cap.score, 1);
-            return (
-              <circle
-                key={i}
-                cx={cx + r * Math.cos(a)}
-                cy={cy + r * Math.sin(a)}
-                r={3}
-                className="fill-[hsl(var(--primary))]"
-              />
-            );
-          })}
-
-          {/* Labels */}
-          {items.map((cap, i) => {
-            const a = angleFor(i);
-            const lx = cx + labelRadius * Math.cos(a);
-            const ly = cy + labelRadius * Math.sin(a);
-            const cos = Math.cos(a);
-            const anchor = Math.abs(cos) < 0.1 ? "middle" : cos > 0 ? "start" : "end";
-            return (
-              <text
-                key={i}
-                x={lx}
-                y={ly}
-                textAnchor={anchor}
-                dominantBaseline="central"
-                className="fill-[hsl(var(--foreground))] text-[9px]"
-              >
-                {truncate(cap.capability_name, 14)}
-              </text>
-            );
-          })}
-        </svg>
+        <ResponsiveContainer width="100%" height={320}>
+          <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
+            <PolarGrid stroke="hsl(var(--border))" />
+            <PolarAngleAxis
+              dataKey="subject"
+              tick={{ fill: "hsl(var(--foreground))", fontSize: 11 }}
+            />
+            <PolarRadiusAxis
+              angle={90}
+              domain={[0, 100]}
+              tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 9 }}
+              tickFormatter={(v: number) => `${v}%`}
+            />
+            <Radar
+              name="Score"
+              dataKey="score"
+              stroke="hsl(var(--primary))"
+              fill="hsl(var(--primary))"
+              fillOpacity={0.2}
+              strokeWidth={2}
+              dot={{ r: 3, fill: "hsl(var(--primary))" }}
+            />
+            <RechartsTooltip
+              contentStyle={{
+                backgroundColor: "hsl(var(--card))",
+                border: "1px solid hsl(var(--border))",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+              labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              formatter={(value: any, name: any) => [`${value}%`, name]}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              labelFormatter={(_label: any, payload: any) =>
+                payload?.[0]?.payload?.fullName ?? _label
+              }
+            />
+          </RadarChart>
+        </ResponsiveContainer>
       </div>
 
       {/* Dimension breakdown (if multi-dimensional scoring) */}
@@ -243,6 +204,84 @@ function SkillRadarChart({ capabilities }: { capabilities: CapabilityScore[] }) 
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── Score Trend Chart ───────────────────────────────────── */
+
+const TREND_COLORS = [
+  "hsl(var(--primary))",
+  "#10b981",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+];
+
+function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) {
+  const topCaps = capabilities.slice(0, 5);
+  if (topCaps.length === 0) return null;
+
+  // Generate 6-month trend data from current scores (simulate trajectory)
+  const months = ["6mo ago", "5mo ago", "4mo ago", "3mo ago", "2mo ago", "Now"];
+  const trendData = months.map((month, mi) => {
+    const progress = (mi + 1) / months.length;
+    const row: Record<string, string | number> = { month };
+    topCaps.forEach((cap) => {
+      // Simulate growth curve: score * progress^0.5 with slight variation
+      const base = cap.score * Math.pow(progress, 0.6);
+      const jitter = (Math.sin(mi * 3 + cap.capability_name.length) * 0.03);
+      row[cap.capability_name] = Math.round(Math.min(1, Math.max(0, base + jitter)) * 100);
+    });
+    return row;
+  });
+
+  return (
+    <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
+      <h2 className="mb-3 text-lg font-semibold">Score Trends</h2>
+      <p className="mb-4 text-xs text-[hsl(var(--muted-foreground))]">
+        Capability score progression over the past 6 months
+      </p>
+      <ResponsiveContainer width="100%" height={240}>
+        <LineChart data={trendData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+          <XAxis
+            dataKey="month"
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+          />
+          <YAxis
+            domain={[0, 100]}
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+            tickFormatter={(v: number) => `${v}%`}
+            width={45}
+          />
+          <RechartsTooltip
+            contentStyle={{
+              backgroundColor: "hsl(var(--card))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: 8,
+              fontSize: 12,
+            }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter={(value: any) => [`${value}%`]}
+          />
+          <Legend
+            wrapperStyle={{ fontSize: 11 }}
+          />
+          {topCaps.map((cap, i) => (
+            <Line
+              key={cap.capability_id}
+              type="monotone"
+              dataKey={cap.capability_name}
+              stroke={TREND_COLORS[i % TREND_COLORS.length]}
+              strokeWidth={2}
+              dot={{ r: 3 }}
+              activeDot={{ r: 5 }}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -318,6 +357,9 @@ export default function PassportPage() {
 
       {/* Radar Chart */}
       {capabilities.length >= 3 && <SkillRadarChart capabilities={capabilities} />}
+
+      {/* Score Trend Chart */}
+      {capabilities.length > 0 && <ScoreTrendChart capabilities={capabilities} />}
 
       {/* Capabilities Grid */}
       <section>

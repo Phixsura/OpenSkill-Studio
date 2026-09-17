@@ -2,6 +2,17 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import {
+  BarChart,
+  Bar,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 import { apiWithAuth } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -53,142 +64,173 @@ function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
-/* ── Demand vs Supply Bar Chart ─────────────────────────── */
+/* ── Custom Recharts Tooltip ──────────────────────────────── */
 
-function DemandSupplyChart({ gaps }: { gaps: GapItem[] }) {
-  if (gaps.length === 0) return null;
-
-  const maxValue = Math.max(...gaps.flatMap((g) => [g.demand_count, g.qualified_supply]), 1);
-  const barScale = (val: number) => Math.max((val / maxValue) * 100, 2);
-
-  const gapPercent = (g: GapItem) => {
-    if (g.demand_count === 0) return 0;
-    return Math.round((g.gap / g.demand_count) * 100);
-  };
-
-  const gapColor = (pct: number) => {
-    if (pct > 50) return "text-red-600 dark:text-red-400";
-    if (pct > 25) return "text-amber-600 dark:text-amber-400";
-    if (pct > 10) return "text-yellow-600 dark:text-yellow-400";
-    return "text-emerald-600 dark:text-emerald-400";
-  };
+function DemandSupplyTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: { name: string; value: number; color: string }[];
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  const demand = payload.find((p) => p.name === "Demand")?.value ?? 0;
+  const supply = payload.find((p) => p.name === "Supply")?.value ?? 0;
+  const gap = demand - supply;
+  const gapPct = demand > 0 ? Math.round((gap / demand) * 100) : 0;
 
   return (
-    <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
-      <h3 className="mb-4 text-lg font-semibold">Demand vs Supply</h3>
-
-      {/* Legend */}
-      <div className="mb-4 flex items-center gap-4 text-xs">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-500" />
-          Demand
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500" />
-          Supply
-        </span>
-      </div>
-
-      <div className="space-y-3">
-        {gaps.map((g) => {
-          const pct = gapPercent(g);
-          return (
-            <div key={g.capability_id} className="grid grid-cols-[1fr_auto] items-center gap-3">
-              <div className="min-w-0">
-                <p className="mb-1 truncate text-sm font-medium">{g.capability_name}</p>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="h-3 rounded-sm bg-blue-500/80"
-                      style={{ width: `${barScale(g.demand_count)}%` }}
-                    />
-                    <span className="shrink-0 text-xs tabular-nums text-[hsl(var(--muted-foreground))]">
-                      {g.demand_count}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="h-3 rounded-sm bg-emerald-500/80"
-                      style={{ width: `${barScale(g.qualified_supply)}%` }}
-                    />
-                    <span className="shrink-0 text-xs tabular-nums text-[hsl(var(--muted-foreground))]">
-                      {g.qualified_supply}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <span className={cn("text-sm font-bold tabular-nums", gapColor(pct))}>
-                  {pct > 0 ? `-${pct}%` : "✓"}
-                </span>
-              </div>
-            </div>
-          );
-        })}
+    <div className="rounded-lg border bg-[hsl(var(--card))] p-3 shadow-lg">
+      <p className="mb-1.5 text-sm font-semibold">{label}</p>
+      <div className="space-y-1 text-xs">
+        <p className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-sm bg-blue-500" />
+          Demand: <span className="font-bold tabular-nums">{demand}</span>
+        </p>
+        <p className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-sm bg-emerald-500" />
+          Supply: <span className="font-bold tabular-nums">{supply}</span>
+        </p>
+        <p
+          className={cn(
+            "mt-1 border-t pt-1 font-medium",
+            gapPct > 50
+              ? "text-red-600 dark:text-red-400"
+              : gapPct > 25
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-emerald-600 dark:text-emerald-400",
+          )}
+        >
+          Gap: {gap} ({gapPct}%)
+        </p>
       </div>
     </div>
   );
 }
 
-/* ── Pipeline Funnel ────────────────────────────────────── */
+/* ── Demand vs Supply Bar Chart (Recharts) ────────────────── */
 
-const FUNNEL_STAGES = [
-  { key: "submitted", label: "Applied", color: "bg-blue-500" },
-  { key: "screening", label: "Screening", color: "bg-yellow-500" },
-  { key: "interview", label: "Interview", color: "bg-purple-500" },
-  { key: "offer", label: "Offer", color: "bg-green-500" },
-  { key: "hired", label: "Hired", color: "bg-emerald-600" },
-];
+function DemandSupplyChart({ gaps }: { gaps: GapItem[] }) {
+  if (gaps.length === 0) return null;
+
+  const chartData = gaps.map((g) => ({
+    name: g.capability_name.length > 20 ? g.capability_name.slice(0, 18) + "…" : g.capability_name,
+    fullName: g.capability_name,
+    Demand: g.demand_count,
+    Supply: g.qualified_supply,
+    severity: g.gap_severity,
+  }));
+
+  return (
+    <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
+      <h3 className="mb-4 text-lg font-semibold">Demand vs Supply</h3>
+      <ResponsiveContainer width="100%" height={Math.max(gaps.length * 52, 200)}>
+        <BarChart
+          data={chartData}
+          layout="vertical"
+          margin={{ top: 4, right: 30, left: 10, bottom: 4 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+          <XAxis type="number" tick={{ fontSize: 11 }} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={120}
+            tick={{ fontSize: 11 }}
+          />
+          <Tooltip content={<DemandSupplyTooltip />} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <Bar dataKey="Demand" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={14} />
+          <Bar dataKey="Supply" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/* ── Pipeline Funnel (Recharts) ───────────────────────────── */
+
+const PIPELINE_COLORS: Record<string, string> = {
+  Applied: "#3b82f6",
+  Screening: "#eab308",
+  Interview: "#a855f7",
+  Offer: "#22c55e",
+  Hired: "#059669",
+};
 
 function PipelineFunnel({ placements }: { placements: PlacementAnalytics }) {
   const statusMap = placements.applications_by_status;
-  const stages = FUNNEL_STAGES.map((s) => ({
-    ...s,
-    count: statusMap[s.key] ?? 0,
-  }));
 
-  const maxCount = Math.max(...stages.map((s) => s.count), 1);
+  const stageEntries = [
+    { key: "submitted", label: "Applied" },
+    { key: "screening", label: "Screening" },
+    { key: "interview", label: "Interview" },
+    { key: "offer", label: "Offer" },
+    { key: "hired", label: "Hired" },
+  ];
+
+  const chartData = stageEntries.map((s, i) => {
+    const count = statusMap[s.key] ?? 0;
+    const prevKey = i > 0 ? stageEntries[i - 1]?.key : undefined;
+    const prevCount = prevKey ? (statusMap[prevKey] ?? 0) : 0;
+    const convRate = i > 0 && prevCount > 0 ? Math.round((count / prevCount) * 100) : null;
+    return {
+      stage: s.label,
+      count,
+      convRate,
+    };
+  });
 
   return (
     <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
       <h3 className="mb-4 text-lg font-semibold">Placement Pipeline</h3>
-
-      <div className="space-y-2">
-        {stages.map((stage, i) => {
-          const widthPct = Math.max((stage.count / maxCount) * 100, 8);
-          const prev = i > 0 ? stages[i - 1] : undefined;
-          const prevCount = prev?.count ?? 0;
-          const conversionRate =
-            i > 0 && prevCount > 0 ? Math.round((stage.count / prevCount) * 100) : null;
-
-          return (
-            <div key={stage.key}>
-              {conversionRate !== null && (
-                <div className="mb-0.5 flex justify-end pr-2">
-                  <span className="text-[10px] text-[hsl(var(--muted-foreground))]">
-                    {conversionRate}% →
-                  </span>
-                </div>
-              )}
-              <div className="flex items-center gap-3">
-                <span className="w-20 shrink-0 text-right text-xs font-medium">{stage.label}</span>
-                <div className="relative flex-1">
-                  <div
-                    className={cn("h-7 rounded-md transition-all", stage.color)}
-                    style={{
-                      width: `${widthPct}%`,
-                      opacity: 0.8 - i * 0.08,
-                    }}
-                  />
-                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs font-bold text-white drop-shadow-sm">
-                    {stage.count}
-                  </span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <ResponsiveContainer width="100%" height={260}>
+        <BarChart
+          data={chartData}
+          layout="vertical"
+          margin={{ top: 4, right: 30, left: 10, bottom: 4 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+          <XAxis type="number" tick={{ fontSize: 11 }} />
+          <YAxis
+            type="category"
+            dataKey="stage"
+            width={80}
+            tick={{ fontSize: 11 }}
+          />
+          <Tooltip
+            contentStyle={{
+              borderRadius: "8px",
+              fontSize: "12px",
+              border: "1px solid hsl(var(--border))",
+              backgroundColor: "hsl(var(--card))",
+            }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter={(value: any, _name: any, props: any) => {
+              const convRate = props?.payload?.convRate;
+              return [
+                `${value}${convRate != null ? ` (${convRate}% conversion)` : ""}`,
+                "Count",
+              ];
+            }}
+          />
+          <Bar
+            dataKey="count"
+            radius={[0, 6, 6, 0]}
+            barSize={24}
+            label={{ position: "right", fontSize: 11, fontWeight: 600 }}
+          >
+            {chartData.map((entry) => (
+              <Cell
+                key={entry.stage}
+                fill={PIPELINE_COLORS[entry.stage] ?? "#6b7280"}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
 
       {/* Summary stats */}
       <div className="mt-4 grid grid-cols-3 gap-3 border-t pt-4 text-center text-xs">

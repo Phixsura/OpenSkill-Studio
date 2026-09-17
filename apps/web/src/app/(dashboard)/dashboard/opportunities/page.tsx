@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { apiWithAuth } from "@/lib/api";
@@ -28,6 +28,24 @@ interface Opportunity {
 interface CursorResponse {
   data: Opportunity[];
   meta: { next_cursor: string | null; has_more: boolean };
+}
+
+interface Bookmark {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+}
+
+interface Application {
+  id: string;
+  opportunity_id: string;
+  status: string;
+}
+
+interface SavedSearch {
+  id: string;
+  name: string;
+  criteria: Record<string, string>;
 }
 
 const TYPE_OPTIONS = [
@@ -72,6 +90,7 @@ const LOCATION_ICONS: Record<string, string> = {
 };
 
 export default function OpportunitiesPage() {
+  const queryClient = useQueryClient();
   const [typeFilter, setTypeFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [sortBy, setSortBy] = useState("newest");
@@ -79,6 +98,8 @@ export default function OpportunitiesPage() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<(string | null)[]>([]);
+  const [showSaveSearch, setShowSaveSearch] = useState(false);
+  const [saveSearchName, setSaveSearchName] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce search query (300ms)
@@ -94,7 +115,7 @@ export default function OpportunitiesPage() {
     };
   }, [searchQuery]);
 
-  // Server-side search: all filters go to the API
+  // Fetch opportunities
   const { data, isLoading } = useQuery({
     queryKey: ["opportunities", typeFilter, locationFilter, sortBy, debouncedQuery, cursor],
     queryFn: () => {
@@ -107,6 +128,111 @@ export default function OpportunitiesPage() {
       return apiWithAuth<CursorResponse>(`/talent/opportunities?${params}`);
     },
   });
+
+  // Fetch user's bookmarks
+  const { data: bookmarksData } = useQuery({
+    queryKey: ["bookmarks"],
+    queryFn: () => apiWithAuth<{ data: Bookmark[] }>("/talent/bookmarks"),
+  });
+  const bookmarkedIds = useMemo(() => {
+    const ids = new Set<string>();
+    bookmarksData?.data?.forEach((b: Bookmark) => {
+      if (b.entity_type === "opportunity") ids.add(b.entity_id);
+    });
+    return ids;
+  }, [bookmarksData]);
+
+  // Fetch user's applications to show "Applied" state
+  const { data: applicationsData } = useQuery({
+    queryKey: ["my-applications"],
+    queryFn: () => apiWithAuth<{ data: Application[] }>("/talent/applications?limit=200"),
+  });
+  const appliedOppIds = useMemo(() => {
+    const ids = new Set<string>();
+    applicationsData?.data?.forEach((a: Application) => ids.add(a.opportunity_id));
+    return ids;
+  }, [applicationsData]);
+
+  // Fetch saved searches
+  const { data: savedSearchesData } = useQuery({
+    queryKey: ["saved-searches"],
+    queryFn: () =>
+      apiWithAuth<{ data: SavedSearch[] }>("/talent/saved-searches").catch(() => ({ data: [] })),
+  });
+
+  // Bookmark mutation
+  const bookmarkMutation = useMutation({
+    mutationFn: (oppId: string) =>
+      apiWithAuth("/talent/bookmarks", {
+        method: "POST",
+        body: JSON.stringify({ entity_type: "opportunity", entity_id: oppId }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["bookmarks"] }),
+  });
+
+  // Unbookmark mutation
+  const unbookmarkMutation = useMutation({
+    mutationFn: (bookmarkId: string) =>
+      apiWithAuth(`/talent/bookmarks/${bookmarkId}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["bookmarks"] }),
+  });
+
+  // Apply mutation
+  const applyMutation = useMutation({
+    mutationFn: (oppId: string) =>
+      apiWithAuth("/talent/applications", {
+        method: "POST",
+        body: JSON.stringify({ opportunity_id: oppId }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["my-applications"] }),
+  });
+
+  // Save search mutation
+  const saveSearchMutation = useMutation({
+    mutationFn: (name: string) =>
+      apiWithAuth("/talent/saved-searches", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          criteria: {
+            q: debouncedQuery,
+            opportunity_type: typeFilter,
+            location_mode: locationFilter,
+            sort: sortBy,
+          },
+        }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["saved-searches"] });
+      setShowSaveSearch(false);
+      setSaveSearchName("");
+    },
+  });
+
+  const handleToggleBookmark = (oppId: string) => {
+    const existing = bookmarksData?.data?.find(
+      (b: Bookmark) => b.entity_type === "opportunity" && b.entity_id === oppId,
+    );
+    if (existing) {
+      unbookmarkMutation.mutate(existing.id);
+    } else {
+      bookmarkMutation.mutate(oppId);
+    }
+  };
+
+  const handleApply = (oppId: string) => {
+    applyMutation.mutate(oppId);
+  };
+
+  const handleRestoreSavedSearch = (search: SavedSearch) => {
+    const c = search.criteria ?? {};
+    setSearchQuery(c.q ?? "");
+    setTypeFilter(c.opportunity_type ?? "");
+    setLocationFilter(c.location_mode ?? "");
+    setSortBy(c.sort ?? "newest");
+    setCursor(null);
+    setCursorStack([]);
+  };
 
   const filtered = data?.data ?? [];
   const meta = data?.meta;
@@ -196,10 +322,63 @@ export default function OpportunitiesPage() {
             </button>
           )}
 
+          {/* Save Search */}
+          <button
+            onClick={() => setShowSaveSearch(!showSaveSearch)}
+            className="text-sm text-[hsl(var(--primary))] hover:underline"
+            title="Save current search"
+          >
+            💾 Save search
+          </button>
+
+          {/* Saved Searches dropdown */}
+          {savedSearchesData?.data && savedSearchesData.data.length > 0 && (
+            <select
+              onChange={(e) => {
+                const search = savedSearchesData.data.find(
+                  (s: SavedSearch) => s.id === e.target.value,
+                );
+                if (search) handleRestoreSavedSearch(search);
+              }}
+              value=""
+              className="rounded-md border bg-[hsl(var(--card))] px-3 py-2 text-sm"
+            >
+              <option value="">📂 Saved searches</option>
+              {savedSearchesData.data.map((s: SavedSearch) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+
           <span className="ml-auto text-sm text-[hsl(var(--muted-foreground))]">
             {filtered.length} result{filtered.length !== 1 ? "s" : ""}
           </span>
         </div>
+
+        {/* Save Search form */}
+        {showSaveSearch && (
+          <div className="flex items-center gap-2 rounded-md border bg-[hsl(var(--card))] p-3">
+            <input
+              type="text"
+              value={saveSearchName}
+              onChange={(e) => setSaveSearchName(e.target.value)}
+              placeholder="Name this search…"
+              className="flex-1 rounded-md border bg-transparent px-3 py-1.5 text-sm"
+            />
+            <Button
+              size="sm"
+              onClick={() => saveSearchName.trim() && saveSearchMutation.mutate(saveSearchName)}
+              disabled={!saveSearchName.trim() || saveSearchMutation.isPending}
+            >
+              {saveSearchMutation.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowSaveSearch(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Grid */}
@@ -227,7 +406,15 @@ export default function OpportunitiesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((opp) => (
-            <OpportunityCard key={opp.id} opportunity={opp} />
+            <OpportunityCard
+              key={opp.id}
+              opportunity={opp}
+              isBookmarked={bookmarkedIds.has(opp.id)}
+              isApplied={appliedOppIds.has(opp.id)}
+              onToggleBookmark={() => handleToggleBookmark(opp.id)}
+              onApply={() => handleApply(opp.id)}
+              applyPending={applyMutation.isPending}
+            />
           ))}
         </div>
       )}
@@ -266,22 +453,52 @@ export default function OpportunitiesPage() {
   );
 }
 
-function OpportunityCard({ opportunity: opp }: { opportunity: Opportunity }) {
+function OpportunityCard({
+  opportunity: opp,
+  isBookmarked,
+  isApplied,
+  onToggleBookmark,
+  onApply,
+  applyPending,
+}: {
+  opportunity: Opportunity;
+  isBookmarked: boolean;
+  isApplied: boolean;
+  onToggleBookmark: () => void;
+  onApply: () => void;
+  applyPending: boolean;
+}) {
   const typeColor = TYPE_COLORS[opp.opportunity_type] ?? "bg-gray-100 text-gray-800";
   const locationIcon = LOCATION_ICONS[opp.location_mode ?? ""] ?? "";
   const deadline = opp.application_deadline ? new Date(opp.application_deadline) : null;
   const isExpiring = deadline && deadline.getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000;
 
   return (
-    <Link
-      href={`/dashboard/opportunities/${opp.id}`}
-      className="group flex flex-col rounded-lg border bg-[hsl(var(--card))] p-5 transition-shadow hover:shadow-md"
-    >
+    <div className="group flex flex-col rounded-lg border bg-[hsl(var(--card))] p-5 transition-shadow hover:shadow-md">
       <div className="flex items-start justify-between gap-2">
-        <h3 className="font-semibold leading-tight group-hover:underline">{opp.title}</h3>
-        <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium", typeColor)}>
-          {opp.opportunity_type.replace(/_/g, " ")}
-        </span>
+        <Link
+          href={`/dashboard/opportunities/${opp.id}`}
+          className="font-semibold leading-tight hover:underline"
+        >
+          {opp.title}
+        </Link>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* Bookmark button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onToggleBookmark();
+            }}
+            className="text-lg transition-transform hover:scale-110"
+            title={isBookmarked ? "Remove bookmark" : "Bookmark"}
+          >
+            {isBookmarked ? "❤️" : "🤍"}
+          </button>
+          <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium", typeColor)}>
+            {opp.opportunity_type.replace(/_/g, " ")}
+          </span>
+        </div>
       </div>
 
       {(opp.location_mode || opp.location_text) && (
@@ -331,7 +548,29 @@ function OpportunityCard({ opportunity: opp }: { opportunity: Opportunity }) {
         {opp.openings > 1 && (
           <p className="text-xs text-[hsl(var(--muted-foreground))]">{opp.openings} openings</p>
         )}
+
+        {/* Apply button */}
+        <div className="mt-3">
+          {isApplied ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-green-100 px-3 py-1.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">
+              ✓ Applied
+            </span>
+          ) : (
+            <Button
+              size="sm"
+              className="w-full"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onApply();
+              }}
+              disabled={applyPending}
+            >
+              {applyPending ? "Applying…" : "Apply Now"}
+            </Button>
+          )}
+        </div>
       </div>
-    </Link>
+    </div>
   );
 }

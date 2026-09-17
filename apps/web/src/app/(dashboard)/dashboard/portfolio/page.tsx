@@ -21,6 +21,7 @@ interface PortfolioItem {
   featured: boolean;
   score: number | null;
   show_score: boolean;
+  sort_order?: number;
 }
 
 interface SkillBadge {
@@ -59,9 +60,42 @@ export default function PortfolioPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update badge"),
   });
 
+  const deleteItem = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth(`/talent/portfolio/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Item deleted");
+      queryClient.invalidateQueries({ queryKey: ["portfolio-items"] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Failed to delete item"),
+  });
+
+  const reorderItem = useMutation({
+    mutationFn: ({ id, sort_order }: { id: string; sort_order: number }) =>
+      apiWithAuth(`/talent/portfolio/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ sort_order }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["portfolio-items"] }),
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Failed to reorder"),
+  });
+
   const profile = profileData?.data;
   const items = itemsData?.data ?? [];
   const badges = badgesData?.data ?? [];
+
+  const moveItem = (index: number, direction: "up" | "down") => {
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= items.length) return;
+
+    const item = items[index];
+    const swapItem = items[swapIndex];
+    // Swap sort orders
+    reorderItem.mutate({ id: item.id, sort_order: swapItem.sort_order ?? swapIndex });
+    reorderItem.mutate({ id: swapItem.id, sort_order: item.sort_order ?? index });
+  };
 
   return (
     <div className="space-y-6">
@@ -138,9 +172,9 @@ export default function PortfolioPage() {
             No portfolio items yet. Add your first project.
           </div>
         )}
-        {items.map((item) => (
+        {items.map((item, index) => (
           <div key={item.id} className="flex items-center justify-between rounded-lg border p-4">
-            <div>
+            <div className="min-w-0 flex-1">
               <h3 className="font-semibold">{item.title}</h3>
               <p className="text-xs capitalize text-[hsl(var(--muted-foreground))]">
                 {item.visibility}
@@ -155,6 +189,39 @@ export default function PortfolioPage() {
               {item.show_score && item.score != null && (
                 <span className="font-mono text-sm">{item.score}/100</span>
               )}
+
+              {/* Reorder buttons */}
+              <div className="flex flex-col">
+                <button
+                  onClick={() => moveItem(index, "up")}
+                  disabled={index === 0 || reorderItem.isPending}
+                  className="px-1 text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] disabled:opacity-30"
+                  aria-label="Move up"
+                >
+                  ▲
+                </button>
+                <button
+                  onClick={() => moveItem(index, "down")}
+                  disabled={index === items.length - 1 || reorderItem.isPending}
+                  className="px-1 text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] disabled:opacity-30"
+                  aria-label="Move down"
+                >
+                  ▼
+                </button>
+              </div>
+
+              {/* Delete button */}
+              <button
+                onClick={() => {
+                  if (confirm(`Delete "${item.title}"? This cannot be undone.`))
+                    deleteItem.mutate(item.id);
+                }}
+                disabled={deleteItem.isPending}
+                className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+                aria-label={`Delete ${item.title}`}
+              >
+                🗑
+              </button>
             </div>
           </div>
         ))}

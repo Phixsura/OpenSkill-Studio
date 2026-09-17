@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
-import { api } from "@/lib/api";
+import { apiWithAuth, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface CareerGoal {
@@ -55,7 +56,7 @@ export default function CareerGoalsPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["career-goals"],
-    queryFn: () => api<{ data: CareerGoal[] }>("/talent/career-goals"),
+    queryFn: () => apiWithAuth<{ data: CareerGoal[] }>("/talent/career-goals"),
   });
 
   const goals = data?.data ?? [];
@@ -94,9 +95,9 @@ export default function CareerGoalsPage() {
       </div>
 
       {showForm && (
-        <CreateGoalForm
+        <GoalForm
           onClose={() => setShowForm(false)}
-          onCreated={() => {
+          onSaved={() => {
             setShowForm(false);
             queryClient.invalidateQueries({ queryKey: ["career-goals"] });
           }}
@@ -124,25 +125,59 @@ export default function CareerGoalsPage() {
 
 function GoalCard({ goal }: { goal: CareerGoal }) {
   const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
 
   const { data: progressData } = useQuery({
     queryKey: ["career-goal-progress", goal.id],
-    queryFn: () => api<{ data: GoalProgress }>(`/talent/career-goals/${goal.id}/progress`),
+    queryFn: () =>
+      apiWithAuth<{ data: GoalProgress }>(`/talent/career-goals/${goal.id}/progress`),
     enabled: goal.status === "active",
   });
 
   const completeMutation = useMutation({
-    mutationFn: () => api(`/talent/career-goals/${goal.id}/complete`, { method: "POST" }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["career-goals"] }),
+    mutationFn: () =>
+      apiWithAuth(`/talent/career-goals/${goal.id}/complete`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Goal completed!");
+      queryClient.invalidateQueries({ queryKey: ["career-goals"] });
+    },
   });
 
   const abandonMutation = useMutation({
-    mutationFn: () => api(`/talent/career-goals/${goal.id}/abandon`, { method: "POST" }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["career-goals"] }),
+    mutationFn: () =>
+      apiWithAuth(`/talent/career-goals/${goal.id}/abandon`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Goal abandoned");
+      queryClient.invalidateQueries({ queryKey: ["career-goals"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/talent/career-goals/${goal.id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Goal deleted");
+      queryClient.invalidateQueries({ queryKey: ["career-goals"] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Failed to delete goal"),
   });
 
   const progress = progressData?.data;
   const daysRemaining = progress?.days_remaining;
+
+  if (editing) {
+    return (
+      <GoalForm
+        existingGoal={goal}
+        onClose={() => setEditing(false)}
+        onSaved={() => {
+          setEditing(false);
+          queryClient.invalidateQueries({ queryKey: ["career-goals"] });
+        }}
+      />
+    );
+  }
 
   return (
     <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
@@ -214,26 +249,44 @@ function GoalCard({ goal }: { goal: CareerGoal }) {
       )}
 
       {/* Actions */}
-      {goal.status === "active" && (
-        <div className="flex gap-2 border-t pt-3">
-          <button
-            onClick={() => completeMutation.mutate()}
-            disabled={completeMutation.isPending}
-            className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            ✓ Complete
-          </button>
-          <button
-            onClick={() => {
-              if (confirm("Abandon this goal?")) abandonMutation.mutate();
-            }}
-            disabled={abandonMutation.isPending}
-            className="rounded-md border px-3 py-1.5 text-xs hover:bg-[hsl(var(--secondary))] disabled:opacity-50"
-          >
-            Abandon
-          </button>
-        </div>
-      )}
+      <div className="flex flex-wrap gap-2 border-t pt-3">
+        {goal.status === "active" && (
+          <>
+            <button
+              onClick={() => setEditing(true)}
+              className="rounded-md border px-3 py-1.5 text-xs hover:bg-[hsl(var(--secondary))]"
+            >
+              ✏️ Edit
+            </button>
+            <button
+              onClick={() => completeMutation.mutate()}
+              disabled={completeMutation.isPending}
+              className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              ✓ Complete
+            </button>
+            <button
+              onClick={() => {
+                if (confirm("Abandon this goal?")) abandonMutation.mutate();
+              }}
+              disabled={abandonMutation.isPending}
+              className="rounded-md border px-3 py-1.5 text-xs hover:bg-[hsl(var(--secondary))] disabled:opacity-50"
+            >
+              Abandon
+            </button>
+          </>
+        )}
+        <button
+          onClick={() => {
+            if (confirm("Are you sure you want to delete this goal? This cannot be undone."))
+              deleteMutation.mutate();
+          }}
+          disabled={deleteMutation.isPending}
+          className="rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+        >
+          🗑 Delete
+        </button>
+      </div>
 
       {goal.completed_at && (
         <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
@@ -244,39 +297,69 @@ function GoalCard({ goal }: { goal: CareerGoal }) {
   );
 }
 
-function CreateGoalForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [targetRole, setTargetRole] = useState("");
-  const [targetDate, setTargetDate] = useState("");
-  const [capabilities, setCapabilities] = useState<CapRow[]>([
-    { capability_name: "", capability_id: "", target_level: 3 },
-  ]);
+function GoalForm({
+  existingGoal,
+  onClose,
+  onSaved,
+}: {
+  existingGoal?: CareerGoal;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = !!existingGoal;
+  const [title, setTitle] = useState(existingGoal?.title ?? "");
+  const [description, setDescription] = useState(existingGoal?.description ?? "");
+  const [targetRole, setTargetRole] = useState(existingGoal?.target_role ?? "");
+  const [targetDate, setTargetDate] = useState(
+    existingGoal?.target_date ? existingGoal.target_date.slice(0, 10) : "",
+  );
+  const [capabilities, setCapabilities] = useState<CapRow[]>(
+    existingGoal?.target_capabilities?.length
+      ? existingGoal.target_capabilities.map((c) => ({
+          capability_name: c.capability_name ?? c.capability_id,
+          capability_id: c.capability_id,
+          target_level: c.target_level,
+        }))
+      : [{ capability_name: "", capability_id: "", target_level: 3 }],
+  );
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      api("/talent/career-goals", {
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const body = {
+        title,
+        description: description || null,
+        target_role: targetRole || null,
+        target_date: targetDate || null,
+        target_capabilities: capabilities
+          .filter((c) => c.capability_name.trim())
+          .map((c) => ({
+            capability_id: c.capability_id || c.capability_name,
+            capability_name: c.capability_name,
+            target_level: c.target_level,
+          })),
+      };
+      if (isEdit) {
+        return apiWithAuth(`/talent/career-goals/${existingGoal.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
+      }
+      return apiWithAuth("/talent/career-goals", {
         method: "POST",
-        body: JSON.stringify({
-          title,
-          description: description || null,
-          target_role: targetRole || null,
-          target_date: targetDate || null,
-          target_capabilities: capabilities
-            .filter((c) => c.capability_name.trim())
-            .map((c) => ({
-              capability_id: c.capability_id || c.capability_name,
-              capability_name: c.capability_name,
-              target_level: c.target_level,
-            })),
-        }),
-      }),
-    onSuccess: onCreated,
+        body: JSON.stringify(body),
+      });
+    },
+    onSuccess: () => {
+      toast.success(isEdit ? "Goal updated!" : "Goal created!");
+      onSaved();
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Failed to save goal"),
   });
 
   return (
     <div className="rounded-lg border bg-[hsl(var(--card))] p-6 shadow-sm">
-      <h3 className="mb-4 text-lg font-semibold">Create New Goal</h3>
+      <h3 className="mb-4 text-lg font-semibold">{isEdit ? "Edit Goal" : "Create New Goal"}</h3>
       <div className="space-y-4">
         <div>
           <label className="mb-1 block text-sm font-medium">Title *</label>
@@ -393,15 +476,21 @@ function CreateGoalForm({ onClose, onCreated }: { onClose: () => void; onCreated
             Cancel
           </button>
           <button
-            onClick={() => createMutation.mutate()}
-            disabled={!title.trim() || createMutation.isPending}
+            onClick={() => saveMutation.mutate()}
+            disabled={!title.trim() || saveMutation.isPending}
             className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
           >
-            {createMutation.isPending ? "Creating…" : "Create Goal"}
+            {saveMutation.isPending
+              ? isEdit
+                ? "Saving…"
+                : "Creating…"
+              : isEdit
+                ? "Save Changes"
+                : "Create Goal"}
           </button>
         </div>
-        {createMutation.isError && (
-          <p className="text-sm text-red-500">Failed to create goal. Please try again.</p>
+        {saveMutation.isError && (
+          <p className="text-sm text-red-500">Failed to save goal. Please try again.</p>
         )}
       </div>
     </div>

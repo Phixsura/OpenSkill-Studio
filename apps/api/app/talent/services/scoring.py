@@ -226,12 +226,24 @@ async def compute_capability_profile(
     db: AsyncSession,
     user_id: str,
     capability_ids: list[str] | None = None,
+    *,
+    use_cache: bool = True,
 ) -> list[CapabilityScore]:
     """Compute derived capability scores for a user.
 
     If capability_ids is None, computes for all capabilities the user has
-    evidence for.
+    evidence for.  Results are cached in Redis for 5 minutes when use_cache
+    is True and no specific capability_ids filter is applied.
     """
+    from app.talent.services.cache import get_cached, profile_cache_key, set_cached
+
+    # Check cache for full profile (skip when filtered to specific capabilities)
+    cache_key = profile_cache_key(user_id) if (use_cache and not capability_ids) else None
+    if cache_key:
+        cached = await get_cached(cache_key)
+        if cached is not None:
+            return [CapabilityScore(**row) for row in cached]
+
     now = datetime.now(UTC)
 
     # Get all active evidence for the user
@@ -369,4 +381,15 @@ async def compute_capability_profile(
 
     # Sort by composite score descending
     scores.sort(key=lambda s: s.score, reverse=True)
+
+    # Persist to cache (full profile only)
+    if cache_key and scores:
+        import dataclasses
+
+        await set_cached(
+            cache_key,
+            [dataclasses.asdict(s) for s in scores],
+            ttl=300,
+        )
+
     return scores

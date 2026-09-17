@@ -19,7 +19,12 @@ from app.talent.models.employer import Opportunity
 router = APIRouter(prefix="/talent", tags=["Talent — Matching"])
 
 
-@router.post("/opportunities/{opp_id}/match", response_model=DataResponse[list[dict]])
+@router.post(
+    "/opportunities/{opp_id}/match",
+    response_model=DataResponse[list[dict]],
+    summary="Match candidates to opportunity",
+    description="Generate a ranked shortlist of candidates for an opportunity. Uses 4-dimensional scoring (depth, breadth, recency, velocity) with adjacent skill inference via CapabilityEdge. Employer org member only.",
+)
 async def match_candidates(
     opp_id: str,
     limit: int = Query(20, ge=1, le=100),
@@ -60,7 +65,12 @@ async def match_candidates(
     })
 
 
-@router.get("/opportunities/matches", response_model=DataResponse[list[dict]])
+@router.get(
+    "/opportunities/matches",
+    response_model=DataResponse[list[dict]],
+    summary="Find matching opportunities for user",
+    description="Returns ranked opportunities matching the current user's capability profile. Uses 4-dimensional scoring with adjacent skill inference.",
+)
 async def match_opportunities_for_user(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -77,7 +87,12 @@ async def match_opportunities_for_user(
     return DataResponse(data=[dataclasses.asdict(r) for r in results])
 
 
-@router.get("/career-paths", response_model=DataResponse[list[dict]])
+@router.get(
+    "/career-paths",
+    response_model=DataResponse[list[dict]],
+    summary="Predict career paths",
+    description="Finds reachable career paths 1-3 capability gaps away from the user's current profile. Suggests specific learning actions to close each gap.",
+)
 async def get_career_paths(
     limit: int = Query(10, ge=1, le=50),
     opportunity_type: str | None = Query(None),
@@ -101,7 +116,12 @@ async def get_career_paths(
     return DataResponse(data=[dataclasses.asdict(s) for s in suggestions])
 
 
-@router.get("/learning-plan", response_model=DataResponse[list[dict]])
+@router.get(
+    "/learning-plan",
+    response_model=DataResponse[list[dict]],
+    summary="Generate learning plan",
+    description="Creates a personalized learning plan based on skill gaps. Optionally targets a specific opportunity's requirements.",
+)
 async def get_learning_plan(
     opportunity_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -122,7 +142,12 @@ async def get_learning_plan(
     return DataResponse(data=[dataclasses.asdict(r) for r in recommendations])
 
 
-@router.post("/opportunities/{opp_id}/match/fairness", response_model=DataResponse[dict])
+@router.post(
+    "/opportunities/{opp_id}/match/fairness",
+    response_model=DataResponse[dict],
+    summary="Compute match fairness metrics",
+    description="Runs the matching pipeline and returns a fairness audit with adverse impact ratio (EEOC four-fifths rule). Employer org member only.",
+)
 async def get_match_fairness(
     opp_id: str,
     limit: int = Query(50, ge=1, le=200),
