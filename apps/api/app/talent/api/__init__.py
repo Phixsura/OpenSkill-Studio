@@ -31,7 +31,6 @@ from app.talent.api.messages import router as messages_router
 from app.talent.api.notifications import router as notification_router
 from app.talent.api.offers import router as offers_router
 from app.talent.api.onboarding_api import router as onboarding_router
-from app.talent.api.outreach import router as outreach_router
 from app.talent.api.passport import router as passport_router
 from app.talent.api.pools import router as pools_router
 from app.talent.api.portfolio import router as portfolio_router
@@ -105,7 +104,7 @@ talent_router.include_router(onboarding_router)
 talent_router.include_router(messages_router)
 talent_router.include_router(webhooks_router)
 talent_router.include_router(succession_router)
-talent_router.include_router(outreach_router)
+# outreach_router removed — outreach endpoints live in pools.py (§39)
 
 
 def register_integrity_error_handler(app: object) -> None:
