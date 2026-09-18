@@ -396,18 +396,20 @@ def test_outreach_model():
 
 
 def test_outreach_router_registered():
-    from app.talent.api.outreach import router
+    """Outreach endpoints live in pools.py (§39)."""
+    from app.talent.api.pools import router
 
     paths = [r.path for r in router.routes]
-    assert len(paths) >= 3
+    assert any("outreach" in p for p in paths)
 
 
 def test_outreach_api_has_crud():
-    from app.talent.api import outreach
+    """Outreach CRUD lives in pools module."""
+    from app.talent.api import pools
 
-    assert hasattr(outreach, "list_outreach")
-    assert hasattr(outreach, "send_outreach")
-    assert hasattr(outreach, "respond_outreach")
+    assert hasattr(pools, "list_outreach")
+    assert hasattr(pools, "send_outreach")
+    assert hasattr(pools, "respond_to_outreach")
 
 
 # ═══════════════════════════════════════════════════════════════

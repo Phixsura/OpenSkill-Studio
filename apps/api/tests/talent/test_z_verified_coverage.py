@@ -2529,9 +2529,11 @@ def test_422_router_onboarding_api():
 
 
 def test_423_router_outreach():
-    from app.talent.api.outreach import router
+    """Outreach routes live in pools.py; outreach.py is the legacy duplicate."""
+    from app.talent.api.pools import router
 
-    assert len(list(router.routes)) >= 1
+    paths = [r.path for r in router.routes]
+    assert any("outreach" in p for p in paths)
 
 
 def test_425_router_passport():
