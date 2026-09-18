@@ -74,36 +74,19 @@ async def create_application(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Create application — accepts {opportunity_id} in body."""
+    """Create application — delegates to apply_to_opportunity to avoid logic drift."""
     opp_id = body.get("opportunity_id")
     if not opp_id:
         raise HTTPException(422, "opportunity_id is required")
 
-    opp = await db.get(Opportunity, opp_id)
-    if not opp or opp.status != "open":
-        raise HTTPException(404, "Opportunity not found or not open")
-    existing = await db.execute(
-        select(Application).where(
-            Application.user_id == user.id,
-            Application.opportunity_id == opp_id,
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(409, "You have already applied to this opportunity")
-    from ulid import ULID
-
-    app = Application(
-        id=str(ULID()),
-        user_id=user.id,
-        opportunity_id=opp_id,
-        status="submitted",
-        evidence_bundle=body.get("evidence_bundle"),
+    req = CreateApplicationRequest(
+        selected_credentials=body.get("selected_credentials", []),
+        selected_projects=body.get("selected_projects", []),
+        selected_evidence=body.get("selected_evidence", []),
         cover_note=body.get("cover_note"),
+        resume_asset_id=body.get("resume_asset_id"),
     )
-    db.add(app)
-    await db.commit()
-    await db.refresh(app)
-    return DataResponse(data=ApplicationResponse.model_validate(app))
+    return await apply_to_opportunity(opp_id, req, db, user)
 
 
 @router.post(
