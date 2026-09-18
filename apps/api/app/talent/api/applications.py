@@ -572,7 +572,7 @@ async def compare_applications(
 
 
 @router.post(
-    "/talent/opportunities/{opp_id}/custom-questions/validate",
+    "/opportunities/{opp_id}/custom-questions/validate",
     response_model=DataResponse[dict],
     summary="Validate custom questions",
     description="Validate answers to custom application questions.",
@@ -593,7 +593,7 @@ async def validate_custom_questions_endpoint(
 
 
 @router.post(
-    "/talent/applications/{app_id}/screen",
+    "/applications/{app_id}/screen",
     response_model=DataResponse[dict],
     summary="Screen application",
     description="Run automated screening against opportunity requirements.",
@@ -615,7 +615,7 @@ async def auto_screen_application(
 
 
 @router.get(
-    "/talent/applications/{app_id}/timeline",
+    "/applications/{app_id}/timeline",
     response_model=DataResponse[list[dict]],
     summary="Get application timeline",
     description="Full timeline of status changes for an application.",
@@ -662,7 +662,7 @@ async def get_application_timeline(
 
 
 @router.get(
-    "/talent/applications/{app_id}/overdue",
+    "/applications/{app_id}/overdue",
     response_model=DataResponse[dict],
     summary="Check application overdue",
     description="Check if application exceeded expected response time.",
