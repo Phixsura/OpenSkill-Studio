@@ -25,13 +25,9 @@ from app.talent.models.application import (
 # Statuses that mean "still waiting" (no employer action yet)
 _PENDING_STATUSES = frozenset({"submitted"})
 # Statuses that mean "active" (in progress)
-_ACTIVE_STATUSES = frozenset(
-    {"submitted", "screening", "interview", "assessment", "offer"}
-)
+_ACTIVE_STATUSES = frozenset({"submitted", "screening", "interview", "assessment", "offer"})
 # Statuses that mean "terminal"
-_TERMINAL_STATUSES = frozenset(
-    {"accepted", "rejected", "withdrawn", "hired", "completed"}
-)
+_TERMINAL_STATUSES = frozenset({"accepted", "rejected", "withdrawn", "hired", "completed"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,18 +133,12 @@ class CandidateAnalyticsService:
                         rejection_from_stages.append(ev.from_status)
                         break
 
-        avg_response = (
-            round(sum(response_days) / len(response_days), 1)
-            if response_days
-            else None
-        )
+        avg_response = round(sum(response_days) / len(response_days), 1) if response_days else None
 
         # Most common rejection stage
         rejection_counter = Counter(rejection_from_stages)
         most_common_rejection = (
-            rejection_counter.most_common(1)[0][0]
-            if rejection_counter
-            else None
+            rejection_counter.most_common(1)[0][0] if rejection_counter else None
         )
 
         success_rate = offers / total if total > 0 else 0.0

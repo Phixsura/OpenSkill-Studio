@@ -62,7 +62,11 @@ class SkillPassport(Base):
     discoverable_to: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Alumni mode (§31): graduated learners retain read-only passport + credential access
     alumni_mode: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -74,9 +78,7 @@ class PassportSnapshot(Base):
     __tablename__ = "passport_snapshots"
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     # External share token: /verify/passport/{token}
     share_token: Mapped[str] = mapped_column(String(64), unique=True)
     # Frozen capability/credential/evidence summary
@@ -85,7 +87,9 @@ class PassportSnapshot(Base):
     checksum: Mapped[str] = mapped_column(String(64))
     # Which fields were included (user-selected subset)
     included_fields: Mapped[list] = mapped_column(JSONB)
-    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now())
+    issued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # active | revoked
     status: Mapped[str] = mapped_column(String(20), default="active", server_default="'active'")

@@ -64,7 +64,8 @@ asyncio.run(go())
 """
     result = subprocess.run(
         [sys.executable, "-c", script],
-        capture_output=True, timeout=30,
+        capture_output=True,
+        timeout=30,
     )
     if result.returncode != 0:
         print(f"    DB exec failed: {result.stderr.decode()[-300:]}")
@@ -96,7 +97,8 @@ asyncio.run(go())
 """
     result = subprocess.run(
         [sys.executable, "-c", script],
-        capture_output=True, timeout=30,
+        capture_output=True,
+        timeout=30,
     )
     if result.returncode != 0:
         print(f"    DB batch failed: {result.stderr.decode()[-300:]}")
@@ -137,7 +139,8 @@ async def main() -> bool:  # noqa: PLR0915
 
         admin_email = f"e2e-admin-{uid()}@test.com"
         r = await post_with_backoff(
-            c, "/auth/register",
+            c,
+            "/auth/register",
             json={"email": admin_email, "password": "TestPass123!", "display_name": "Admin"},
         )
         check("Register admin", r.status_code == 201, f"{r.status_code}")
@@ -145,23 +148,30 @@ async def main() -> bool:  # noqa: PLR0915
         _db_exec(f"UPDATE users SET role = 'ADMIN' WHERE email = '{admin_email}'")
 
         r = await post_with_backoff(
-            c, "/auth/login", json={"email": admin_email, "password": "TestPass123!"},
+            c,
+            "/auth/login",
+            json={"email": admin_email, "password": "TestPass123!"},
         )
         admin_token = r.json()["access_token"]
         ha = {"Authorization": f"Bearer {admin_token}"}
 
-        r = await c.post("/orgs", json={"name": f"School {uid()}", "slug": f"school-{uid()}"}, headers=ha)
+        r = await c.post(
+            "/orgs", json={"name": f"School {uid()}", "slug": f"school-{uid()}"}, headers=ha
+        )
         check("Create school org", r.status_code == 201, f"{r.status_code}")
         school_org_id = safe_get(r.json(), "data", "id", default="MISSING")
 
         learner_email = f"e2e-learner-{uid()}@test.com"
         r = await post_with_backoff(
-            c, "/auth/register",
+            c,
+            "/auth/register",
             json={"email": learner_email, "password": "TestPass123!", "display_name": "Learner"},
         )
         check("Register learner", r.status_code == 201, f"{r.status_code}")
         r = await post_with_backoff(
-            c, "/auth/login", json={"email": learner_email, "password": "TestPass123!"},
+            c,
+            "/auth/login",
+            json={"email": learner_email, "password": "TestPass123!"},
         )
         learner_token = r.json()["access_token"]
         learner_id = r.json()["user"]["id"]
@@ -172,21 +182,28 @@ async def main() -> bool:  # noqa: PLR0915
             json={"user_id": learner_id, "role": "student"},
             headers=ha,
         )
-        check("Add learner to school", r.status_code in (200, 201), f"{r.status_code}: {r.text[:200]}")
+        check(
+            "Add learner to school", r.status_code in (200, 201), f"{r.status_code}: {r.text[:200]}"
+        )
 
         employer_email = f"e2e-employer-{uid()}@test.com"
         r = await post_with_backoff(
-            c, "/auth/register",
+            c,
+            "/auth/register",
             json={"email": employer_email, "password": "TestPass123!", "display_name": "Employer"},
         )
         check("Register employer", r.status_code == 201, f"{r.status_code}")
         r = await post_with_backoff(
-            c, "/auth/login", json={"email": employer_email, "password": "TestPass123!"},
+            c,
+            "/auth/login",
+            json={"email": employer_email, "password": "TestPass123!"},
         )
         employer_token = r.json()["access_token"]
         he = {"Authorization": f"Bearer {employer_token}"}
 
-        r = await c.post("/orgs", json={"name": f"Corp {uid()}", "slug": f"emp-{uid()}"}, headers=he)
+        r = await c.post(
+            "/orgs", json={"name": f"Corp {uid()}", "slug": f"emp-{uid()}"}, headers=he
+        )
         check("Create employer org", r.status_code == 201, f"{r.status_code}")
         employer_org_id = safe_get(r.json(), "data", "id", default="MISSING")
 
@@ -195,8 +212,11 @@ async def main() -> bool:  # noqa: PLR0915
 
         r = await c.post(
             "/talent/capabilities",
-            json={"canonical_name": f"AI Visual Design {uid()}", "category": "visual_design",
-                  "decay_config": {"half_life_days": 365}},
+            json={
+                "canonical_name": f"AI Visual Design {uid()}",
+                "category": "visual_design",
+                "decay_config": {"half_life_days": 365},
+            },
             headers=ha,
         )
         check("Create capability", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
@@ -227,21 +247,30 @@ async def main() -> bool:  # noqa: PLR0915
         print("\n📋 Phase 3: Evidence ledger")
 
         from datetime import UTC, datetime
+
         now = datetime.now(UTC).isoformat()
 
         r = await c.post(
             "/talent/evidence",
-            json={"capability_id": cap_id, "source_type": "skill_completion",
-                  "source_id": "test-001", "verification_level": "instructor_verified",
-                  "occurred_at": now},
+            json={
+                "capability_id": cap_id,
+                "source_type": "skill_completion",
+                "source_id": "test-001",
+                "verification_level": "instructor_verified",
+                "occurred_at": now,
+            },
             headers=hl,
         )
         check("Record evidence", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
-        check("Forced to self_reported",
-              safe_get(r.json(), "data", "verification_level") == "self_reported", "")
+        check(
+            "Forced to self_reported",
+            safe_get(r.json(), "data", "verification_level") == "self_reported",
+            "",
+        )
 
         # Seed instructor-verified evidence in a SEPARATE PROCESS
         from ulid import ULID
+
         stmts = []
         for i in range(5):
             sid = f"proj-{uid()}-{i}"
@@ -270,17 +299,26 @@ async def main() -> bool:  # noqa: PLR0915
 
         r = await c.get("/talent/passport", headers=hl)
         check("Get passport", r.status_code == 200, f"{r.status_code}")
-        check("Private by default", safe_get(r.json(), "data", "default_visibility") == "private", "")
+        check(
+            "Private by default", safe_get(r.json(), "data", "default_visibility") == "private", ""
+        )
         check("Not discoverable", safe_get(r.json(), "data", "discoverable") is False, "")
 
-        r = await c.patch("/talent/passport",
-                          json={"default_visibility": "share_link", "discoverable": True,
-                                "visible_fields": ["capabilities", "credentials"],
-                                "availability_status": "open"},
-                          headers=hl)
+        r = await c.patch(
+            "/talent/passport",
+            json={
+                "default_visibility": "share_link",
+                "discoverable": True,
+                "visible_fields": ["capabilities", "credentials"],
+                "availability_status": "open",
+            },
+            headers=hl,
+        )
         check("Update passport", r.status_code == 200, f"{r.status_code}")
 
-        r = await c.post("/talent/passport/snapshots", json={"included_fields": ["capabilities"]}, headers=hl)
+        r = await c.post(
+            "/talent/passport/snapshots", json={"included_fields": ["capabilities"]}, headers=hl
+        )
         check("Create snapshot", r.status_code == 201, f"{r.status_code}")
         snapshot_token = safe_get(r.json(), "data", "share_token", default="MISSING")
         snapshot_id = safe_get(r.json(), "data", "id", default="MISSING")
@@ -293,9 +331,14 @@ async def main() -> bool:  # noqa: PLR0915
 
         r = await c.post(
             f"/talent/assessments?org_id={school_org_id}",
-            json={"title": f"Assessment {uid()}", "assessment_type": "practical_task",
-                  "capability_requirements": [{"capability_id": cap_id, "min_level": 1, "weight": 1.0}],
-                  "config": {"attempt_limit": 3}},
+            json={
+                "title": f"Assessment {uid()}",
+                "assessment_type": "practical_task",
+                "capability_requirements": [
+                    {"capability_id": cap_id, "min_level": 1, "weight": 1.0}
+                ],
+                "config": {"attempt_limit": 3},
+            },
             headers=ha,
         )
         check("Create blueprint", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
@@ -307,53 +350,80 @@ async def main() -> bool:  # noqa: PLR0915
         check("Start run", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
         run_id = safe_get(r.json(), "data", "id", default="MISSING")
 
-        r = await c.patch(f"/talent/assessments/{bp_id}/runs/{run_id}",
-                          json={"results": {"answers": "test"}}, headers=hl)
+        r = await c.patch(
+            f"/talent/assessments/{bp_id}/runs/{run_id}",
+            json={"results": {"answers": "test"}},
+            headers=hl,
+        )
         check("Submit run", r.status_code == 200, f"{r.status_code}: {r.text[:200]}")
 
         r = await c.post(
             f"/talent/assessments/{bp_id}/runs/{run_id}/review",
-            json={"results": [{"capability_id": cap_id, "score": 0.9, "passed": True}],
-                  "status": "passed"},
+            json={
+                "results": [{"capability_id": cap_id, "score": 0.9, "passed": True}],
+                "status": "passed",
+            },
             headers=ha,
         )
         check("Review (passed)", r.status_code == 200, f"{r.status_code}: {r.text[:200]}")
 
         cred_type = f"ai_visual_{uid()}"
-        r = await c.post("/talent/credential-rules",
-                         json={"credential_type": cred_type, "display_name": "AI Visual",
-                               "requirements": [{"capability_id": cap_id, "min_level": 1}],
-                               "conditions": {"all_required": True}},
-                         headers=ha)
+        r = await c.post(
+            "/talent/credential-rules",
+            json={
+                "credential_type": cred_type,
+                "display_name": "AI Visual",
+                "requirements": [{"capability_id": cap_id, "min_level": 1}],
+                "conditions": {"all_required": True},
+            },
+            headers=ha,
+        )
         check("Create rule", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
 
-        _db_exec(f"UPDATE credential_rules SET status = 'active', activated_at = NOW() WHERE credential_type = '{cred_type}'")
+        _db_exec(
+            f"UPDATE credential_rules SET status = 'active', activated_at = NOW() WHERE credential_type = '{cred_type}'"
+        )
 
-        r = await c.post("/talent/credentials/evaluate", json={"credential_type": cred_type}, headers=hl)
+        r = await c.post(
+            "/talent/credentials/evaluate", json={"credential_type": cred_type}, headers=hl
+        )
         check("Evaluate", r.status_code == 200, f"{r.status_code}: {r.text[:200]}")
         check("Eligible", safe_get(r.json(), "data", "eligible") is True, "")
 
-        r = await c.post("/talent/credentials/issue", json={"credential_type": cred_type}, headers=hl)
+        r = await c.post(
+            "/talent/credentials/issue", json={"credential_type": cred_type}, headers=hl
+        )
         check("Issue credential", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
 
         # ═══ Phase 6: Employer + Opportunity ═══
         print("\n🏢 Phase 6: Employer + Opportunity")
 
-        r = await c.post(f"/talent/employers/{employer_org_id}",
-                         json={"company_size": "50-200", "industry": "AI/ML"}, headers=he)
+        r = await c.post(
+            f"/talent/employers/{employer_org_id}",
+            json={"company_size": "50-200", "industry": "AI/ML"},
+            headers=he,
+        )
         check("Register employer", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
 
-        r = await c.post(f"/talent/opportunities?org_id={employer_org_id}",
-                         json={"title": f"AI Designer {uid()}", "opportunity_type": "internship",
-                               "location_mode": "remote",
-                               "required_capabilities": [{"capability_id": cap_id, "min_level": 1}],
-                               "openings": 2},
-                         headers=he)
+        r = await c.post(
+            f"/talent/opportunities?org_id={employer_org_id}",
+            json={
+                "title": f"AI Designer {uid()}",
+                "opportunity_type": "internship",
+                "location_mode": "remote",
+                "required_capabilities": [{"capability_id": cap_id, "min_level": 1}],
+                "openings": 2,
+            },
+            headers=he,
+        )
         check("Create opportunity", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
         opp_id = safe_get(r.json(), "data", "id", default="MISSING")
 
-        r = await c.patch(f"/talent/opportunities/{opp_id}?org_id={employer_org_id}",
-                          json={"status": "open"}, headers=he)
+        r = await c.patch(
+            f"/talent/opportunities/{opp_id}?org_id={employer_org_id}",
+            json={"status": "open"},
+            headers=he,
+        )
         check("Open opportunity", r.status_code == 200, f"{r.status_code}")
 
         # ═══ Phase 7: Matching ═══
@@ -368,16 +438,25 @@ async def main() -> bool:  # noqa: PLR0915
         # ═══ Phase 8: Application pipeline ═══
         print("\n📨 Phase 8: Application pipeline")
 
-        r = await c.post(f"/talent/opportunities/{opp_id}/apply",
-                         json={"cover_note": "Excited!", "selected_credentials": []}, headers=hl)
+        r = await c.post(
+            f"/talent/opportunities/{opp_id}/apply",
+            json={"cover_note": "Excited!", "selected_credentials": []},
+            headers=hl,
+        )
         check("Apply", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
         app_id = safe_get(r.json(), "data", "id", default="MISSING")
         check("Status submitted", safe_get(r.json(), "data", "status") == "submitted", "")
 
-        for status, hdr in [("screening", he), ("interview", he), ("offer", he),
-                            ("accepted", hl), ("hired", he)]:
-            r = await c.patch(f"/talent/applications/{app_id}/status",
-                              json={"status": status}, headers=hdr)
+        for status, hdr in [
+            ("screening", he),
+            ("interview", he),
+            ("offer", he),
+            ("accepted", hl),
+            ("hired", he),
+        ]:
+            r = await c.patch(
+                f"/talent/applications/{app_id}/status", json={"status": status}, headers=hdr
+            )
             check(f"→ {status}", r.status_code == 200, f"{r.status_code}: {r.text[:200]}")
 
         r = await c.get("/talent/placements", headers=hl)
@@ -390,15 +469,30 @@ async def main() -> bool:  # noqa: PLR0915
         if placement_id != "MISSING":
             r = await c.post(
                 f"/talent/placements/{placement_id}/verification",
-                json={"capability_ratings": [{"capability_id": cap_id, "level_observed": 4,
-                                              "score": 4.5, "comment": "Excellent"}],
-                      "overall_rating": 4.5, "overall_comment": "Outstanding"},
+                json={
+                    "capability_ratings": [
+                        {
+                            "capability_id": cap_id,
+                            "level_observed": 4,
+                            "score": 4.5,
+                            "comment": "Excellent",
+                        }
+                    ],
+                    "overall_rating": 4.5,
+                    "overall_comment": "Outstanding",
+                },
                 headers=he,
             )
-            check("Verification submitted", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
+            check(
+                "Verification submitted", r.status_code == 201, f"{r.status_code}: {r.text[:200]}"
+            )
 
             r = await c.get("/talent/evidence?per_page=50", headers=hl)
-            emp_ev = [e for e in r.json().get("data", []) if e.get("verification_level") == "employer_verified"]
+            emp_ev = [
+                e
+                for e in r.json().get("data", [])
+                if e.get("verification_level") == "employer_verified"
+            ]
             check("Employer evidence created", len(emp_ev) >= 1, f"count={len(emp_ev)}")
         else:
             check("Verification (skipped)", False, "no placement")
@@ -406,7 +500,15 @@ async def main() -> bool:  # noqa: PLR0915
         # ═══ Phase 10: Intelligence ═══
         print("\n📈 Phase 10: Workforce intelligence")
 
-        for ep in ["demand", "supply", "gaps", "coverage", "placements", "outcomes", "recommendations"]:
+        for ep in [
+            "demand",
+            "supply",
+            "gaps",
+            "coverage",
+            "placements",
+            "outcomes",
+            "recommendations",
+        ]:
             r = await c.get(f"/talent/intelligence/{ep}", headers=ha)
             check(f"Intel: {ep}", r.status_code == 200, f"{r.status_code}")
 
@@ -428,34 +530,56 @@ async def main() -> bool:  # noqa: PLR0915
         # ═══ Phase 12: Pools + outreach ═══
         print("\n👥 Phase 12: Talent pools + outreach")
 
-        r = await c.post(f"/talent/pools?org_id={employer_org_id}",
-                         json={"name": f"Pool {uid()}", "membership_mode": "manual"}, headers=he)
+        r = await c.post(
+            f"/talent/pools?org_id={employer_org_id}",
+            json={"name": f"Pool {uid()}", "membership_mode": "manual"},
+            headers=he,
+        )
         check("Create pool", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
         pool_id = safe_get(r.json(), "data", "id", default="MISSING")
 
-        r = await c.post(f"/talent/pools/{pool_id}/members",
-                         json={"user_id": learner_id, "source": "manual_added"}, headers=he)
+        r = await c.post(
+            f"/talent/pools/{pool_id}/members",
+            json={"user_id": learner_id, "source": "manual_added"},
+            headers=he,
+        )
         check("Add member (pending)", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
-        check("Consent pending", safe_get(r.json(), "data", "consent_status") == "pending_consent", "")
+        check(
+            "Consent pending", safe_get(r.json(), "data", "consent_status") == "pending_consent", ""
+        )
 
-        r = await c.post(f"/talent/outreach?org_id={employer_org_id}",
-                         json={"user_id": learner_id, "outreach_type": "opportunity_invitation",
-                               "target_type": "opportunity", "target_id": opp_id,
-                               "message": "Great fit!"}, headers=he)
+        r = await c.post(
+            f"/talent/outreach?org_id={employer_org_id}",
+            json={
+                "user_id": learner_id,
+                "outreach_type": "opportunity_invitation",
+                "target_type": "opportunity",
+                "target_id": opp_id,
+                "message": "Great fit!",
+            },
+            headers=he,
+        )
         check("Send outreach", r.status_code == 201, f"{r.status_code}: {r.text[:200]}")
 
         # ═══ Phase 13: Security ═══
         print("\n🔒 Phase 13: Security invariants")
 
-        r = await c.post("/talent/capabilities",
-                         json={"canonical_name": f"Hack {uid()}", "category": "x"}, headers=hl)
+        r = await c.post(
+            "/talent/capabilities",
+            json={"canonical_name": f"Hack {uid()}", "category": "x"},
+            headers=hl,
+        )
         check("Non-admin cap create blocked", r.status_code == 403, f"{r.status_code}")
 
         other_email = f"e2e-other-{uid()}@test.com"
-        await post_with_backoff(c, "/auth/register",
-                                json={"email": other_email, "password": "TestPass123!", "display_name": "Other"})
-        r = await post_with_backoff(c, "/auth/login",
-                                    json={"email": other_email, "password": "TestPass123!"})
+        await post_with_backoff(
+            c,
+            "/auth/register",
+            json={"email": other_email, "password": "TestPass123!", "display_name": "Other"},
+        )
+        r = await post_with_backoff(
+            c, "/auth/login", json={"email": other_email, "password": "TestPass123!"}
+        )
         ho = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
         r = await c.get(f"/talent/applications/{app_id}", headers=ho)

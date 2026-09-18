@@ -62,22 +62,26 @@ def export_credential_as_ob3(
         external_ids = detail.get("external_ids", {})
 
         if external_ids.get("esco_uri"):
-            alignment.append({
-                "type": ["Alignment"],
-                "targetUrl": external_ids["esco_uri"],
-                "targetName": detail.get("canonical_name", cap_id),
-                "targetDescription": f"ESCO skill: {detail.get('canonical_name', '')}",
-                "targetFramework": "ESCO",
-            })
+            alignment.append(
+                {
+                    "type": ["Alignment"],
+                    "targetUrl": external_ids["esco_uri"],
+                    "targetName": detail.get("canonical_name", cap_id),
+                    "targetDescription": f"ESCO skill: {detail.get('canonical_name', '')}",
+                    "targetFramework": "ESCO",
+                }
+            )
 
         if external_ids.get("onet_code"):
-            alignment.append({
-                "type": ["Alignment"],
-                "targetUrl": f"https://www.onetonline.org/link/summary/{external_ids['onet_code']}",
-                "targetName": detail.get("canonical_name", cap_id),
-                "targetDescription": f"O*NET element: {external_ids['onet_code']}",
-                "targetFramework": "O*NET",
-            })
+            alignment.append(
+                {
+                    "type": ["Alignment"],
+                    "targetUrl": f"https://www.onetonline.org/link/summary/{external_ids['onet_code']}",
+                    "targetName": detail.get("canonical_name", cap_id),
+                    "targetDescription": f"O*NET element: {external_ids['onet_code']}",
+                    "targetFramework": "O*NET",
+                }
+            )
 
     # Build the achievement
     achievement = {
@@ -147,9 +151,7 @@ def verify_ob3(ob3: dict, public_key_pem: str) -> bool:
     return verify_signature(canonical, signature, public_key_pem)
 
 
-def _build_criteria_narrative(
-    capabilities: list[dict], details_map: dict
-) -> str:
+def _build_criteria_narrative(capabilities: list[dict], details_map: dict) -> str:
     """Build a human-readable criteria narrative for the achievement."""
     if not capabilities:
         return "Credential awarded based on verified assessment."
@@ -161,8 +163,6 @@ def _build_criteria_narrative(
         name = detail.get("canonical_name", cap_id)
         required = cap.get("required_level", 0)
         achieved = cap.get("achieved_level", 0)
-        lines.append(
-            f"- {name}: achieved level {achieved} (required: {required})"
-        )
+        lines.append(f"- {name}: achieved level {achieved} (required: {required})")
 
     return "\n".join(lines)

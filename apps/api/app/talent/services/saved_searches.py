@@ -37,9 +37,7 @@ class SavedSearchService:
         if search_type not in SEARCH_TYPES:
             raise ValueError(f"search_type must be one of {sorted(SEARCH_TYPES)}")
         if notify_frequency not in NOTIFY_FREQUENCIES:
-            raise ValueError(
-                f"notify_frequency must be one of {sorted(NOTIFY_FREQUENCIES)}"
-            )
+            raise ValueError(f"notify_frequency must be one of {sorted(NOTIFY_FREQUENCIES)}")
 
         search = SavedSearch(
             org_id=org_id,
@@ -94,9 +92,7 @@ class SavedSearchService:
 
     async def delete_search(self, search_id: str) -> bool:
         """Execute delete search."""
-        result = await self.db.execute(
-            delete(SavedSearch).where(SavedSearch.id == search_id)
-        )
+        result = await self.db.execute(delete(SavedSearch).where(SavedSearch.id == search_id))
         await self.db.flush()
         return (result.rowcount or 0) > 0
 

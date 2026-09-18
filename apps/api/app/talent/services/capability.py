@@ -109,7 +109,11 @@ class CapabilityService:
 
         if cursor:
             q = q.where(Capability.id < cursor)
-        q = q.order_by(Capability.sort_order, Capability.canonical_name).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
+        q = (
+            q.order_by(Capability.sort_order, Capability.canonical_name)
+            .limit(limit + 1 if cursor is not None else limit)
+            .offset(0 if cursor is not None else offset)
+        )
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -133,7 +137,9 @@ class CapabilityService:
             depth = 0
             while current and depth < MAX_TRAVERSAL_DEPTH:
                 if current in visited:
-                    raise ValueError("CYCLE_DETECTED: Setting this parent would create a circular reference")
+                    raise ValueError(
+                        "CYCLE_DETECTED: Setting this parent would create a circular reference"
+                    )
                 visited.add(current)
                 parent_cap = await self.db.get(Capability, current)
                 current = parent_cap.parent_id if parent_cap else None
@@ -205,8 +211,12 @@ class CapabilityService:
             raise ValueError("Source or target capability not found")
 
         # Cycle detection for `requires` edges
-        if edge_type == "requires" and await self._would_create_cycle(source_id, target_id, "requires"):
-            raise ValueError("CYCLE_DETECTED: Adding this edge would create a cycle in 'requires' graph")
+        if edge_type == "requires" and await self._would_create_cycle(
+            source_id, target_id, "requires"
+        ):
+            raise ValueError(
+                "CYCLE_DETECTED: Adding this edge would create a cycle in 'requires' graph"
+            )
 
         edge = CapabilityEdge(
             source_id=source_id,
@@ -310,15 +320,19 @@ class CapabilityService:
 
         adjacency: dict[str, list[dict]] = defaultdict(list)
         for e in edges:
-            adjacency[e.source_id].append({
-                "target_id": e.target_id,
-                "edge_type": e.edge_type,
-            })
+            adjacency[e.source_id].append(
+                {
+                    "target_id": e.target_id,
+                    "edge_type": e.edge_type,
+                }
+            )
             # Also include reverse for undirected traversal
-            adjacency[e.target_id].append({
-                "target_id": e.source_id,
-                "edge_type": e.edge_type,
-            })
+            adjacency[e.target_id].append(
+                {
+                    "target_id": e.source_id,
+                    "edge_type": e.edge_type,
+                }
+            )
 
         # BFS
         visited: set[str] = {capability_id}
@@ -333,11 +347,13 @@ class CapabilityService:
 
             for adj in adjacency.get(node_id, []):
                 target = adj["target_id"]
-                edge_list.append({
-                    "source_id": node_id,
-                    "target_id": target,
-                    "edge_type": adj["edge_type"],
-                })
+                edge_list.append(
+                    {
+                        "source_id": node_id,
+                        "target_id": target,
+                        "edge_type": adj["edge_type"],
+                    }
+                )
                 if target not in visited:
                     visited.add(target)
                     queue.append((target, depth + 1))
@@ -347,13 +363,15 @@ class CapabilityService:
             cap_q = select(Capability).where(Capability.id.in_(visited))
             cap_result = await self.db.execute(cap_q)
             for cap in cap_result.scalars().all():
-                nodes.append({
-                    "id": cap.id,
-                    "canonical_name": cap.canonical_name,
-                    "category": cap.category,
-                    "status": cap.status,
-                    "depth": 0,  # Approximate — exact depth needs BFS tracking
-                })
+                nodes.append(
+                    {
+                        "id": cap.id,
+                        "canonical_name": cap.canonical_name,
+                        "category": cap.category,
+                        "status": cap.status,
+                        "depth": 0,  # Approximate — exact depth needs BFS tracking
+                    }
+                )
 
         return {
             "root_id": capability_id,

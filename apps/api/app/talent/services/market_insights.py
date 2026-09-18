@@ -16,6 +16,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class SkillMarketValue:
     """Market value signal for a capability."""
+
     capability_id: str
     capability_name: str
     demand_index: float  # 0-100
@@ -29,6 +30,7 @@ class SkillMarketValue:
 @dataclass(frozen=True, slots=True)
 class CompensationBenchmark:
     """Aggregated compensation data (privacy-safe, min cohort enforced)."""
+
     opportunity_type: str
     capability_category: str
     sample_size: int
@@ -41,6 +43,7 @@ class CompensationBenchmark:
 @dataclass(frozen=True, slots=True)
 class EmployerReputation:
     """Employer reputation from platform activity."""
+
     org_id: str
     total_placements: int
     avg_placement_duration_days: float | None
@@ -53,6 +56,7 @@ class EmployerReputation:
 @dataclass(frozen=True, slots=True)
 class SkillROI:
     """Estimated return on investment for learning a skill."""
+
     capability_id: str
     capability_name: str
     demand_uplift: float  # how much demand increases with this skill
@@ -102,7 +106,9 @@ class MarketInsightsService:
                 opportunity_type=opportunity_type,
                 capability_category=category,
                 sample_size=len(compensation_values),
-                min_display=None, max_display=None, median_display=None,
+                min_display=None,
+                max_display=None,
+                median_display=None,
                 suppressed=True,
             )
 
@@ -139,10 +145,7 @@ class MarketInsightsService:
         resp_score = max(0, 100 - (avg_response_hours or 48)) if avg_response_hours else 50
 
         reputation = (
-            0.30 * ver_rate * 100
-            + 0.25 * return_rate * 100
-            + 0.25 * vol_score
-            + 0.20 * resp_score
+            0.30 * ver_rate * 100 + 0.25 * return_rate * 100 + 0.25 * vol_score + 0.20 * resp_score
         )
 
         return EmployerReputation(

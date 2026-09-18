@@ -21,9 +21,7 @@ class CapabilityScoreSnapshot(Base):
     __tablename__ = "capability_score_snapshots"
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     capability_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("capabilities.id", ondelete="CASCADE")
     )

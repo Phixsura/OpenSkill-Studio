@@ -29,13 +29,19 @@ class TestEdgeTypes:
 class TestMappingSourceTypes:
     def test_all_types_present(self):
         expected = {
-            "skill", "skill_pack", "project_template", "workflow_pack",
-            "rubric_criterion", "assessment_blueprint", "commercial_project",
+            "skill",
+            "skill_pack",
+            "project_template",
+            "workflow_pack",
+            "rubric_criterion",
+            "assessment_blueprint",
+            "commercial_project",
         }
         assert expected == MAPPING_SOURCE_TYPES
 
 
 # ---- API tests ----
+
 
 @pytest.mark.asyncio
 async def test_create_capability_missing_fields(client):

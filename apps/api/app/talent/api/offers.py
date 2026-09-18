@@ -41,7 +41,9 @@ async def create_offer(
     db.add(offer)
     await db.commit()
     await db.refresh(offer)
-    return DataResponse(data={"id": offer.id, "status": offer.status, "role_title": offer.role_title})
+    return DataResponse(
+        data={"id": offer.id, "status": offer.status, "role_title": offer.role_title}
+    )
 
 
 @router.get("/offers", response_model=CursorListResponse[dict])
@@ -51,7 +53,11 @@ async def list_offers(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    q = select(Offer).join(Application, Application.id == Offer.application_id).where(Application.user_id == user.id)
+    q = (
+        select(Offer)
+        .join(Application, Application.id == Offer.application_id)
+        .where(Application.user_id == user.id)
+    )
     if cursor:
         q = q.where(Offer.id < cursor)
     q = q.order_by(Offer.created_at.desc()).limit(limit + 1)
@@ -62,7 +68,15 @@ async def list_offers(
         items = items[:limit]
     next_cursor = items[-1].id if has_more and items else None
     return CursorListResponse(
-        data=[{"id": o.id, "role_title": o.role_title, "status": o.status, "compensation_text": o.compensation_text} for o in items],
+        data=[
+            {
+                "id": o.id,
+                "role_title": o.role_title,
+                "status": o.status,
+                "compensation_text": o.compensation_text,
+            }
+            for o in items
+        ],
         meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
@@ -80,9 +94,11 @@ async def accept_offer(
     if not app or app.user_id != user.id:
         raise HTTPException(404, "Offer not found")
     from app.talent.services.offer_management import OFFER_TRANSITIONS
+
     if "accepted" not in OFFER_TRANSITIONS.get(offer.status, set()):
         raise HTTPException(422, f"Cannot accept offer in status '{offer.status}'")
     from datetime import UTC, datetime
+
     offer.status = "accepted"
     offer.accepted_at = datetime.now(UTC)
     await db.commit()
@@ -104,9 +120,11 @@ async def decline_offer(
     if not app or app.user_id != user.id:
         raise HTTPException(404, "Offer not found")
     from app.talent.services.offer_management import OFFER_TRANSITIONS
+
     if "declined" not in OFFER_TRANSITIONS.get(offer.status, set()):
         raise HTTPException(422, f"Cannot decline offer in status '{offer.status}'")
     from datetime import UTC, datetime
+
     offer.status = "declined"
     offer.declined_at = datetime.now(UTC)
     offer.decline_reason = (body or {}).get("reason")

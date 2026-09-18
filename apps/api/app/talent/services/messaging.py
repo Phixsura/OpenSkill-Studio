@@ -14,10 +14,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-MESSAGE_TYPES = frozenset({
-    "text", "status_update", "document_request",
-    "interview_details", "offer_details", "system",
-})
+MESSAGE_TYPES = frozenset(
+    {
+        "text",
+        "status_update",
+        "document_request",
+        "interview_details",
+        "offer_details",
+        "system",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +111,8 @@ class MessagingService:
         )
 
     def compute_thread_summary(
-        self, messages: list[ApplicationMessage],
+        self,
+        messages: list[ApplicationMessage],
     ) -> MessageThread:
         """Compute thread summary from messages."""
         if not messages:
@@ -134,7 +141,8 @@ class MessagingService:
         )
 
     def compute_stats(
-        self, threads: list[MessageThread],
+        self,
+        threads: list[MessageThread],
     ) -> MessageStats:
         """Compute messaging statistics."""
         total = len(threads)

@@ -4,7 +4,6 @@ Partial success: each item is processed independently so a single failure
 does not roll back the successful siblings.
 """
 
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,9 +85,7 @@ async def bulk_create_capabilities(
         # Refresh to populate server_default timestamps
         for i, cap_resp in enumerate(result.created):
             obj = await db.get(
-                __import__(
-                    "app.talent.models.capability", fromlist=["Capability"]
-                ).Capability,
+                __import__("app.talent.models.capability", fromlist=["Capability"]).Capability,
                 cap_resp.id,
             )
             if obj:
@@ -179,9 +176,7 @@ async def bulk_transition_applications(
         try:
             app = await db.get(Application, item.application_id)
             if not app:
-                result.errors.append(
-                    BulkError(index=idx, error="Application not found")
-                )
+                result.errors.append(BulkError(index=idx, error="Application not found"))
                 continue
 
             # State machine check
@@ -201,16 +196,12 @@ async def bulk_transition_applications(
             # Authorization
             if item.status in _CANDIDATE_TRANSITIONS:
                 if app.user_id != user.id:
-                    result.errors.append(
-                        BulkError(index=idx, error="Application not found")
-                    )
+                    result.errors.append(BulkError(index=idx, error="Application not found"))
                     continue
             elif item.status in _EMPLOYER_TRANSITIONS:
                 opp = await db.get(Opportunity, app.opportunity_id)
                 if not opp:
-                    result.errors.append(
-                        BulkError(index=idx, error="Opportunity not found")
-                    )
+                    result.errors.append(BulkError(index=idx, error="Opportunity not found"))
                     continue
                 try:
                     await require_org_member(opp.employer_org_id, user, db)
@@ -222,9 +213,7 @@ async def bulk_transition_applications(
             else:
                 # submitted — must be applicant
                 if app.user_id != user.id:
-                    result.errors.append(
-                        BulkError(index=idx, error="Application not found")
-                    )
+                    result.errors.append(BulkError(index=idx, error="Application not found"))
                     continue
 
             old_status = app.status

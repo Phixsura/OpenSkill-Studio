@@ -45,7 +45,13 @@ class TestSensitiveOps:
 
 class TestAuditExport:
     def test_format_entry(self):
-        entry = {"created_at": "2026-01-01", "user_id": "u1", "action_type": "create", "target_type": "opportunity", "target_id": "o1"}
+        entry = {
+            "created_at": "2026-01-01",
+            "user_id": "u1",
+            "action_type": "create",
+            "target_type": "opportunity",
+            "target_id": "o1",
+        }
         result = format_audit_entry_for_export(entry)
         assert result["action"] == "create"
         assert result["timestamp"] == "2026-01-01"

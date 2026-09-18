@@ -124,7 +124,9 @@ async def update_pool(
 # ── Pool Membership ──
 
 
-@router.post("/pools/{pool_id}/members", response_model=DataResponse[MembershipResponse], status_code=201)
+@router.post(
+    "/pools/{pool_id}/members", response_model=DataResponse[MembershipResponse], status_code=201
+)
 async def add_member(
     pool_id: str,
     body: AddMemberRequest,

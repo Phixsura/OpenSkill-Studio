@@ -90,8 +90,7 @@ async def predict_career_paths(
     # 1. Get user's current capability profile
     profile = await compute_capability_profile(db, user_id)
     user_levels: dict[str, tuple[int, str]] = {
-        s.capability_id: (s.level, s.capability_name)
-        for s in profile
+        s.capability_id: (s.level, s.capability_name) for s in profile
     }
 
     # 2. Load open opportunities
@@ -124,14 +123,16 @@ async def predict_career_paths(
 
             gap_size = max(0, min_level - current_level)
             if gap_size > 0 and gap_size <= MAX_LEVEL_GAP:
-                gaps.append(SkillGap(
-                    capability_id=cap_id,
-                    capability_name=cap_name,
-                    current_level=current_level,
-                    required_level=min_level,
-                    gap_size=gap_size,
-                    action=_suggest_action(current_level, min_level, gap_size),
-                ))
+                gaps.append(
+                    SkillGap(
+                        capability_id=cap_id,
+                        capability_name=cap_name,
+                        current_level=current_level,
+                        required_level=min_level,
+                        gap_size=gap_size,
+                        action=_suggest_action(current_level, min_level, gap_size),
+                    )
+                )
 
         # Skip if too many gaps or no gaps (already fully qualified)
         if len(gaps) == 0 or len(gaps) > MAX_REACHABLE_GAPS:
@@ -154,16 +155,18 @@ async def predict_career_paths(
             coverage_bonus = met_count / max(len(required_caps), 1) * 0.2
             reachability = min(1.0, reachability + coverage_bonus)
 
-        suggestions.append(CareerPathSuggestion(
-            opportunity_id=opp.id,
-            opportunity_title=opp.title,
-            opportunity_type=opp.opportunity_type,
-            employer_org_id=opp.employer_org_id,
-            reachability_score=round(reachability, 3),
-            gaps=gaps,
-            total_gap_size=total_gap,
-            estimated_actions=len(gaps),
-        ))
+        suggestions.append(
+            CareerPathSuggestion(
+                opportunity_id=opp.id,
+                opportunity_title=opp.title,
+                opportunity_type=opp.opportunity_type,
+                employer_org_id=opp.employer_org_id,
+                reachability_score=round(reachability, 3),
+                gaps=gaps,
+                total_gap_size=total_gap,
+                estimated_actions=len(gaps),
+            )
+        )
 
     # Sort by reachability (highest first)
     suggestions.sort(key=lambda s: s.reachability_score, reverse=True)

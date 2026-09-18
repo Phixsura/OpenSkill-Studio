@@ -20,7 +20,10 @@ from app.talent.schemas.employer import (
 router = APIRouter(prefix="/talent", tags=["Talent — Employers"])
 
 
-@router.post("/employers/{org_id}", response_model=DataResponse[EmployerProfileResponse], status_code=201,
+@router.post(
+    "/employers/{org_id}",
+    response_model=DataResponse[EmployerProfileResponse],
+    status_code=201,
     summary="Create employer profile",
     description="Register an organization as an employer with company details and branding.",
 )
@@ -51,7 +54,9 @@ async def create_employer_profile(
     return DataResponse(data=EmployerProfileResponse.model_validate(profile))
 
 
-@router.get("/employers/{org_id}", response_model=DataResponse[EmployerProfileResponse],
+@router.get(
+    "/employers/{org_id}",
+    response_model=DataResponse[EmployerProfileResponse],
     summary="Get employer profile",
     description="Returns the employer profile for an organization.",
 )
@@ -66,7 +71,9 @@ async def get_employer_profile(
     return DataResponse(data=EmployerProfileResponse.model_validate(profile))
 
 
-@router.patch("/employers/{org_id}", response_model=DataResponse[EmployerProfileResponse],
+@router.patch(
+    "/employers/{org_id}",
+    response_model=DataResponse[EmployerProfileResponse],
     summary="Update employer profile",
     description="Update employer profile details like description, industry, logo, and career page settings.",
 )
@@ -93,7 +100,11 @@ async def update_employer_profile(
 
 # ---- Opportunities ----
 
-@router.post("/opportunities", response_model=DataResponse[OpportunityResponse], status_code=201,
+
+@router.post(
+    "/opportunities",
+    response_model=DataResponse[OpportunityResponse],
+    status_code=201,
     summary="Create opportunity",
     description="Post a new job, internship, or project role with capability requirements.",
 )
@@ -132,7 +143,9 @@ async def create_opportunity(
     return DataResponse(data=OpportunityResponse.model_validate(opp))
 
 
-@router.get("/opportunities", response_model=CursorListResponse[OpportunityResponse],
+@router.get(
+    "/opportunities",
+    response_model=CursorListResponse[OpportunityResponse],
     summary="List opportunities",
     description="Returns paginated list of opportunities with filtering by type, location, status.",
 )
@@ -174,7 +187,9 @@ async def list_opportunities(
     )
 
 
-@router.get("/opportunities/{opp_id}", response_model=DataResponse[OpportunityResponse],
+@router.get(
+    "/opportunities/{opp_id}",
+    response_model=DataResponse[OpportunityResponse],
     summary="Get opportunity detail",
     description="Returns full details of an opportunity including requirements and application stats.",
 )
@@ -189,7 +204,9 @@ async def get_opportunity(
     return DataResponse(data=OpportunityResponse.model_validate(opp))
 
 
-@router.patch("/opportunities/{opp_id}", response_model=DataResponse[OpportunityResponse],
+@router.patch(
+    "/opportunities/{opp_id}",
+    response_model=DataResponse[OpportunityResponse],
     summary="Update opportunity",
     description="Update opportunity details, requirements, or status. Employer org member only.",
 )
@@ -218,7 +235,9 @@ async def update_opportunity(
 # ---- Public Career Page (I6) ----
 
 
-@router.get("/employers/{org_id}/career-page", response_model=DataResponse[dict],
+@router.get(
+    "/employers/{org_id}/career-page",
+    response_model=DataResponse[dict],
     summary="Get career page",
     description="Returns public career page data for an employer.",
 )
@@ -245,23 +264,24 @@ async def get_career_page(
     opp_result = await db.execute(opp_q)
     opportunities = opp_result.scalars().all()
 
-    return DataResponse(data={
-        "profile": {
-            "org_id": profile.org_id,
-            "company_size": profile.company_size,
-            "industry": profile.industry,
-            "website_url": profile.website_url,
-            "logo_url": profile.logo_url,
-            "description": profile.description,
-            "cover_image_url": getattr(profile, "cover_image_url", None),
-            "culture_text": getattr(profile, "culture_text", None),
-            "benefits": getattr(profile, "benefits", None) or [],
-            "values": getattr(profile, "values", None) or [],
-            "social_links": getattr(profile, "social_links", None) or {},
-            "verification_status": profile.verification_status,
-        },
-        "opportunities": [
-            OpportunityResponse.model_validate(o).model_dump()
-            for o in opportunities
-        ],
-    })
+    return DataResponse(
+        data={
+            "profile": {
+                "org_id": profile.org_id,
+                "company_size": profile.company_size,
+                "industry": profile.industry,
+                "website_url": profile.website_url,
+                "logo_url": profile.logo_url,
+                "description": profile.description,
+                "cover_image_url": getattr(profile, "cover_image_url", None),
+                "culture_text": getattr(profile, "culture_text", None),
+                "benefits": getattr(profile, "benefits", None) or [],
+                "values": getattr(profile, "values", None) or [],
+                "social_links": getattr(profile, "social_links", None) or {},
+                "verification_status": profile.verification_status,
+            },
+            "opportunities": [
+                OpportunityResponse.model_validate(o).model_dump() for o in opportunities
+            ],
+        }
+    )

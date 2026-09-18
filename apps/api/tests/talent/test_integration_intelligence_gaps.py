@@ -50,7 +50,12 @@ class TestAPIKeys:
 
 class TestHRIS:
     def test_valid_employee(self):
-        emp = {"employee_id": "E001", "first_name": "Alice", "last_name": "Smith", "email": "alice@test.com"}
+        emp = {
+            "employee_id": "E001",
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "email": "alice@test.com",
+        }
         assert validate_hris_employee(emp) == []
 
     def test_missing_fields(self):
@@ -58,7 +63,9 @@ class TestHRIS:
         assert len(errors) >= 2
 
     def test_invalid_email(self):
-        errors = validate_hris_employee({"employee_id": "1", "first_name": "A", "last_name": "B", "email": "invalid"})
+        errors = validate_hris_employee(
+            {"employee_id": "1", "first_name": "A", "last_name": "B", "email": "invalid"}
+        )
         assert any("email" in e.lower() for e in errors)
 
     def test_providers(self):
@@ -73,15 +80,24 @@ class TestHRIS:
 
 class TestATS:
     def test_valid_config(self):
-        config = {"provider": "greenhouse", "api_url": "https://api.greenhouse.io", "sync_direction": "inbound", "sync_entities": ["jobs", "candidates"]}
+        config = {
+            "provider": "greenhouse",
+            "api_url": "https://api.greenhouse.io",
+            "sync_direction": "inbound",
+            "sync_entities": ["jobs", "candidates"],
+        }
         assert validate_ats_config(config) == []
 
     def test_invalid_provider(self):
-        errors = validate_ats_config({"provider": "invalid", "api_url": "https://x.com", "sync_direction": "inbound"})
+        errors = validate_ats_config(
+            {"provider": "invalid", "api_url": "https://x.com", "sync_direction": "inbound"}
+        )
         assert len(errors) > 0
 
     def test_invalid_direction(self):
-        errors = validate_ats_config({"provider": "greenhouse", "api_url": "https://x.com", "sync_direction": "wrong"})
+        errors = validate_ats_config(
+            {"provider": "greenhouse", "api_url": "https://x.com", "sync_direction": "wrong"}
+        )
         assert len(errors) > 0
 
     def test_providers(self):
@@ -91,7 +107,9 @@ class TestATS:
 
 class TestSlack:
     def test_build_message(self):
-        msg = build_slack_message("application.submitted", {"candidate": "Alice", "role": "AI Designer"})
+        msg = build_slack_message(
+            "application.submitted", {"candidate": "Alice", "role": "AI Designer"}
+        )
         assert msg is not None
         assert "Alice" in msg["text"]
         assert msg["channel"] == "#hiring"

@@ -62,9 +62,7 @@ class EndorsementLeaderboardService:
             select(
                 SkillEndorsement.user_id,
                 func.count(SkillEndorsement.id).label("total"),
-                func.count(func.distinct(SkillEndorsement.endorser_id)).label(
-                    "unique_endorsers"
-                ),
+                func.count(func.distinct(SkillEndorsement.endorser_id)).label("unique_endorsers"),
             )
             .join(
                 SkillPassport,
@@ -95,9 +93,7 @@ class EndorsementLeaderboardService:
             select(
                 SkillEndorsement.capability_id,
                 func.count(SkillEndorsement.id).label("total"),
-                func.count(func.distinct(SkillEndorsement.user_id)).label(
-                    "unique_users"
-                ),
+                func.count(func.distinct(SkillEndorsement.user_id)).label("unique_users"),
             )
             .group_by(SkillEndorsement.capability_id)
             .order_by(func.count(SkillEndorsement.id).desc())

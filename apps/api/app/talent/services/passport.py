@@ -53,7 +53,12 @@ class PassportService:
         passport = await self.get_or_create_passport(user_id)
 
         if default_visibility is not None:
-            if default_visibility not in ("private", "organization_only", "share_link", "public_subset"):
+            if default_visibility not in (
+                "private",
+                "organization_only",
+                "share_link",
+                "public_subset",
+            ):
                 raise ValueError(f"Invalid visibility: {default_visibility}")
             passport.default_visibility = default_visibility
 
@@ -111,11 +116,13 @@ class PassportService:
             from app.models.organization import OrgMember
 
             owner_member = await self.db.execute(
-                select(OrgMember.org_id).where(
+                select(OrgMember.org_id)
+                .where(
                     OrgMember.user_id == user_id,
                     OrgMember.org_id == requesting_org_id,
                     OrgMember.status == "active",
-                ).limit(1)
+                )
+                .limit(1)
             )
             if not owner_member.scalar_one_or_none():
                 return None
@@ -144,7 +151,9 @@ class PassportService:
                     "score": s.score,
                     "confidence": s.confidence,
                     "evidence_count": s.evidence_count,
-                    "last_verified_at": s.last_verified_at.isoformat() if s.last_verified_at else None,
+                    "last_verified_at": s.last_verified_at.isoformat()
+                    if s.last_verified_at
+                    else None,
                     "verification_mix": s.verification_mix,
                 }
                 for s in profile

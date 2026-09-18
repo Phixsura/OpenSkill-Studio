@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 
 # ── Module-level import tests ──
 
@@ -116,16 +115,12 @@ async def test_invalidate_deletes_matching_keys():
     from app.talent.services.cache import invalidate
 
     mock_redis = AsyncMock()
-    mock_redis.scan = AsyncMock(
-        side_effect=[(0, ["talent:profile:U1", "talent:profile:U2"])]
-    )
+    mock_redis.scan = AsyncMock(side_effect=[(0, ["talent:profile:U1", "talent:profile:U2"])])
     mock_redis.delete = AsyncMock()
 
     with patch("app.talent.services.cache._redis", return_value=mock_redis):
         await invalidate("talent:profile:*")
-        mock_redis.delete.assert_called_once_with(
-            "talent:profile:U1", "talent:profile:U2"
-        )
+        mock_redis.delete.assert_called_once_with("talent:profile:U1", "talent:profile:U2")
 
 
 # ── Scoring integration tests ──
@@ -142,7 +137,7 @@ def test_scoring_cache_key_matches_expected_format():
 def test_capability_score_dataclass_is_serializable():
     from app.talent.services.scoring import CapabilityScore
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     score = CapabilityScore(
         capability_id="CAP1",
         capability_name="Python",

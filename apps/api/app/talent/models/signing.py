@@ -22,26 +22,18 @@ class OrgSigningKey(Base):
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")
     )
-    key_type: Mapped[str] = mapped_column(
-        String(20), default="ed25519", server_default="'ed25519'"
-    )
+    key_type: Mapped[str] = mapped_column(String(20), default="ed25519", server_default="'ed25519'")
     # PEM-encoded public key (safe to expose)
     public_key: Mapped[str] = mapped_column(String(500))
     # PEM-encoded private key (encrypted at rest via app secret)
     private_key_encrypted: Mapped[str] = mapped_column(String(500))
     # active | rotated | revoked
-    status: Mapped[str] = mapped_column(
-        String(20), default="active", server_default="'active'"
-    )
+    status: Mapped[str] = mapped_column(String(20), default="active", server_default="'active'")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
-    rotated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (
-        Index("ix_talent_org_signing_keys_org", "org_id", "status"),
-    )
+    __table_args__ = (Index("ix_talent_org_signing_keys_org", "org_id", "status"),)

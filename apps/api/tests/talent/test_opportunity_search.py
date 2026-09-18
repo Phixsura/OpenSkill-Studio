@@ -15,6 +15,7 @@ class TestOpportunitySearchService:
         """search() method exists with correct signature."""
         svc = OpportunitySearchService(db=None)  # type: ignore
         import inspect
+
         sig = inspect.signature(svc.search)
         params = set(sig.parameters.keys())
         assert "q" in params
@@ -29,6 +30,7 @@ class TestOpportunitySearchService:
     def test_default_status_is_open(self):
         """Default status filter should be 'open'."""
         import inspect
+
         svc = OpportunitySearchService(db=None)  # type: ignore
         sig = inspect.signature(svc.search)
         assert sig.parameters["status"].default == "open"
@@ -36,6 +38,7 @@ class TestOpportunitySearchService:
     def test_default_sort_is_newest(self):
         """Default sort should be 'newest'."""
         import inspect
+
         svc = OpportunitySearchService(db=None)  # type: ignore
         sig = inspect.signature(svc.search)
         assert sig.parameters["sort"].default == "newest"
@@ -43,6 +46,7 @@ class TestOpportunitySearchService:
     def test_default_limit_is_20(self):
         """Default limit should be 20."""
         import inspect
+
         svc = OpportunitySearchService(db=None)  # type: ignore
         sig = inspect.signature(svc.search)
         assert sig.parameters["limit"].default == 20
@@ -55,6 +59,7 @@ class TestSearchQuerySanitization:
         """Empty or None query should not cause errors."""
         # This tests the schema level, not the service
         from app.talent.schemas.employer import CreateOpportunityRequest
+
         # Verify the schema imports work
         assert CreateOpportunityRequest is not None
 
@@ -63,6 +68,7 @@ class TestSearchQuerySanitization:
         import inspect
 
         from app.talent.api.employers import list_opportunities
+
         sig = inspect.signature(list_opportunities)
         params = set(sig.parameters.keys())
         assert "q" in params

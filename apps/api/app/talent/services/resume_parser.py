@@ -99,11 +99,13 @@ class ResumeParserService:
                     status="active",
                 )
                 self.db.add(ev)
-                evidence_created.append({
-                    "capability_id": skill.capability_id,
-                    "capability_name": skill.capability_name,
-                    "confidence": skill.confidence,
-                })
+                evidence_created.append(
+                    {
+                        "capability_id": skill.capability_id,
+                        "capability_name": skill.capability_name,
+                        "confidence": skill.confidence,
+                    }
+                )
 
             if evidence_created:
                 await self.db.flush()

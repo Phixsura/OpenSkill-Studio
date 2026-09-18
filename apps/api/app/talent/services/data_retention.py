@@ -55,17 +55,17 @@ class DataRetentionService:
 
         # Notifications older than 90 days
         notif_cutoff = now - timedelta(days=RETENTION_POLICIES["notifications"]["retention_days"])
-        notif_q = select(TalentNotification).where(
-            TalentNotification.created_at < notif_cutoff
-        )
+        notif_q = select(TalentNotification).where(TalentNotification.created_at < notif_cutoff)
         notif_result = await self.db.execute(notif_q)
         notif_count = len(notif_result.scalars().all())
-        reports.append(RetentionReport(
-            policy="notifications",
-            records_affected=notif_count,
-            action="delete",
-            cutoff_date=notif_cutoff,
-        ))
+        reports.append(
+            RetentionReport(
+                policy="notifications",
+                records_affected=notif_count,
+                action="delete",
+                cutoff_date=notif_cutoff,
+            )
+        )
 
         # Activity log older than 1 year (non-anonymized)
         activity_cutoff = now - timedelta(days=RETENTION_POLICIES["activity_log"]["retention_days"])
@@ -75,12 +75,14 @@ class DataRetentionService:
         )
         activity_result = await self.db.execute(activity_q)
         activity_count = len(activity_result.scalars().all())
-        reports.append(RetentionReport(
-            policy="activity_log",
-            records_affected=activity_count,
-            action="anonymize",
-            cutoff_date=activity_cutoff,
-        ))
+        reports.append(
+            RetentionReport(
+                policy="activity_log",
+                records_affected=activity_count,
+                action="anonymize",
+                cutoff_date=activity_cutoff,
+            )
+        )
 
         # Expired snapshots
         snapshot_q = select(PassportSnapshot).where(
@@ -90,12 +92,14 @@ class DataRetentionService:
         )
         snapshot_result = await self.db.execute(snapshot_q)
         snapshot_count = len(snapshot_result.scalars().all())
-        reports.append(RetentionReport(
-            policy="expired_snapshots",
-            records_affected=snapshot_count,
-            action="revoke",
-            cutoff_date=now,
-        ))
+        reports.append(
+            RetentionReport(
+                policy="expired_snapshots",
+                records_affected=snapshot_count,
+                action="revoke",
+                cutoff_date=now,
+            )
+        )
 
         return reports
 
@@ -112,12 +116,14 @@ class DataRetentionService:
             TalentNotification.created_at < notif_cutoff
         )
         notif_result = await self.db.execute(notif_del)
-        reports.append(RetentionReport(
-            policy="notifications",
-            records_affected=notif_result.rowcount or 0,
-            action="delete",
-            cutoff_date=notif_cutoff,
-        ))
+        reports.append(
+            RetentionReport(
+                policy="notifications",
+                records_affected=notif_result.rowcount or 0,
+                action="delete",
+                cutoff_date=notif_cutoff,
+            )
+        )
 
         # 2. Anonymize old activity logs
         activity_cutoff = now - timedelta(days=RETENTION_POLICIES["activity_log"]["retention_days"])
@@ -130,12 +136,14 @@ class DataRetentionService:
             .values(user_id="anonymized")
         )
         activity_result = await self.db.execute(activity_upd)
-        reports.append(RetentionReport(
-            policy="activity_log",
-            records_affected=activity_result.rowcount or 0,
-            action="anonymize",
-            cutoff_date=activity_cutoff,
-        ))
+        reports.append(
+            RetentionReport(
+                policy="activity_log",
+                records_affected=activity_result.rowcount or 0,
+                action="anonymize",
+                cutoff_date=activity_cutoff,
+            )
+        )
 
         # 3. Revoke expired snapshots
         snapshot_upd = (
@@ -148,12 +156,14 @@ class DataRetentionService:
             .values(status="revoked")
         )
         snapshot_result = await self.db.execute(snapshot_upd)
-        reports.append(RetentionReport(
-            policy="expired_snapshots",
-            records_affected=snapshot_result.rowcount or 0,
-            action="revoke",
-            cutoff_date=now,
-        ))
+        reports.append(
+            RetentionReport(
+                policy="expired_snapshots",
+                records_affected=snapshot_result.rowcount or 0,
+                action="revoke",
+                cutoff_date=now,
+            )
+        )
 
         await self.db.flush()
         return reports

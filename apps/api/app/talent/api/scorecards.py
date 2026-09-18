@@ -134,7 +134,9 @@ async def update_template(
 
     updates = body.model_dump(exclude_unset=True)
     if "criteria" in updates and updates["criteria"] is not None:
-        updates["criteria"] = [c.model_dump() if hasattr(c, "model_dump") else c for c in updates["criteria"]]
+        updates["criteria"] = [
+            c.model_dump() if hasattr(c, "model_dump") else c for c in updates["criteria"]
+        ]
     for key, value in updates.items():
         setattr(template, key, value)
 
@@ -219,9 +221,7 @@ async def list_scorecards(
     _, org_id = await _resolve_interview_org(db, interview_id)
     await require_org_member(org_id, user, db)
 
-    q = select(InterviewScorecard).where(
-        InterviewScorecard.interview_stage_id == interview_id
-    )
+    q = select(InterviewScorecard).where(InterviewScorecard.interview_stage_id == interview_id)
     if cursor:
         q = q.where(InterviewScorecard.id < cursor)
     q = q.order_by(InterviewScorecard.created_at.desc()).limit(limit + 1)

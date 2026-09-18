@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 # Gap #36: Passport PDF export
 # ---------------------------------------------------------------------------
 
+
 def generate_passport_html(passport_data: dict) -> str:
     """Generate print-ready HTML for passport PDF export.
 
@@ -29,11 +30,11 @@ def generate_passport_html(passport_data: dict) -> str:
     for c in caps:
         cap_rows += f"""
         <tr>
-            <td>{escape(str(c.get('capability_name', '')))}</td>
-            <td>L{int(c.get('level', 0) or 0)}</td>
-            <td>{escape(str(c.get('level_label', '')))}</td>
-            <td>{round(float(c.get('score', 0)) * 100)}%</td>
-            <td>{int(c.get('evidence_count', 0) or 0)}</td>
+            <td>{escape(str(c.get("capability_name", "")))}</td>
+            <td>L{int(c.get("level", 0) or 0)}</td>
+            <td>{escape(str(c.get("level_label", "")))}</td>
+            <td>{round(float(c.get("score", 0)) * 100)}%</td>
+            <td>{int(c.get("evidence_count", 0) or 0)}</td>
         </tr>"""
 
     return f"""<!DOCTYPE html>
@@ -49,7 +50,7 @@ def generate_passport_html(passport_data: dict) -> str:
   .badge {{ display: inline-block; background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 12px; font-size: 12px; }}
 </style></head><body>
 <h1>Verified Skill Passport</h1>
-<p class="meta">OpenSkill Studio — Generated {datetime.now(UTC).strftime('%Y-%m-%d')}</p>
+<p class="meta">OpenSkill Studio — Generated {datetime.now(UTC).strftime("%Y-%m-%d")}</p>
 <p><span class="badge">✓ Verified</span></p>
 <h2>Capabilities</h2>
 <table><thead><tr><th>Capability</th><th>Level</th><th>Label</th><th>Score</th><th>Evidence</th></tr></thead>
@@ -61,6 +62,7 @@ def generate_passport_html(passport_data: dict) -> str:
 # ---------------------------------------------------------------------------
 # Gap #37: QR code data
 # ---------------------------------------------------------------------------
+
 
 def generate_qr_data(
     share_token: str,
@@ -82,6 +84,7 @@ def generate_qr_data(
 # Gap #39: Passport comparison
 # ---------------------------------------------------------------------------
 
+
 def compare_passport_snapshots(
     snapshot_a: dict,
     snapshot_b: dict,
@@ -102,20 +105,37 @@ def compare_passport_snapshots(
         b = caps_b.get(cap_id)
 
         if a and not b:
-            removed.append({"capability_id": cap_id, "name": a.get("capability_name", ""), "was_level": a.get("level")})
-        elif b and not a:
-            added.append({"capability_id": cap_id, "name": b.get("capability_name", ""), "new_level": b.get("level")})
-        elif a and b:
-            if a.get("level") != b.get("level") or abs(a.get("score", 0) - b.get("score", 0)) > 0.01:
-                changed.append({
+            removed.append(
+                {
                     "capability_id": cap_id,
-                    "name": b.get("capability_name", a.get("capability_name", "")),
-                    "old_level": a.get("level"),
+                    "name": a.get("capability_name", ""),
+                    "was_level": a.get("level"),
+                }
+            )
+        elif b and not a:
+            added.append(
+                {
+                    "capability_id": cap_id,
+                    "name": b.get("capability_name", ""),
                     "new_level": b.get("level"),
-                    "old_score": a.get("score"),
-                    "new_score": b.get("score"),
-                    "score_delta": round(b.get("score", 0) - a.get("score", 0), 4),
-                })
+                }
+            )
+        elif a and b:
+            if (
+                a.get("level") != b.get("level")
+                or abs(a.get("score", 0) - b.get("score", 0)) > 0.01
+            ):
+                changed.append(
+                    {
+                        "capability_id": cap_id,
+                        "name": b.get("capability_name", a.get("capability_name", "")),
+                        "old_level": a.get("level"),
+                        "new_level": b.get("level"),
+                        "old_score": a.get("score"),
+                        "new_score": b.get("score"),
+                        "score_delta": round(b.get("score", 0) - a.get("score", 0), 4),
+                    }
+                )
             else:
                 unchanged.append(cap_id)
 
@@ -132,6 +152,7 @@ def compare_passport_snapshots(
 # ---------------------------------------------------------------------------
 # Gap #41: Passport analytics
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class PassportViewEvent:
@@ -168,8 +189,14 @@ DEFAULT_FIELD_SETS = {
     "minimal": ["capabilities", "credentials"],
     "standard": ["capabilities", "credentials", "evidence_summary", "endorsements"],
     "full": [
-        "capabilities", "credentials", "evidence_summary", "endorsements",
-        "portfolio", "career_goals", "availability", "preferred_types",
+        "capabilities",
+        "credentials",
+        "evidence_summary",
+        "endorsements",
+        "portfolio",
+        "career_goals",
+        "availability",
+        "preferred_types",
     ],
 }
 
@@ -210,6 +237,7 @@ def compute_visible_fields(
 # Gap #45: Passport embedding
 # ---------------------------------------------------------------------------
 
+
 def generate_embed_code(
     share_token: str,
     base_url: str = "https://openskill.studio",
@@ -238,12 +266,20 @@ def generate_embed_code(
 # Gap #46: Social proof badge
 # ---------------------------------------------------------------------------
 
+
 def generate_verification_badge_svg(
     capability_count: int,
     highest_level: int,
 ) -> str:
     """Generate SVG badge for 'Verified by OpenSkill' social proof."""
-    level_colors = {0: "#9ca3af", 1: "#3b82f6", 2: "#22c55e", 3: "#eab308", 4: "#f97316", 5: "#a855f7"}
+    level_colors = {
+        0: "#9ca3af",
+        1: "#3b82f6",
+        2: "#22c55e",
+        3: "#eab308",
+        4: "#f97316",
+        5: "#a855f7",
+    }
     color = level_colors.get(highest_level, "#3b82f6")
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="200" height="28" viewBox="0 0 200 28">
@@ -259,20 +295,32 @@ def generate_verification_badge_svg(
 # Gap #47: Revision history
 # ---------------------------------------------------------------------------
 
+
 def compute_revision_summary(snapshots: list[dict]) -> list[dict]:
     """Compute revision history summary from snapshots."""
     if len(snapshots) < 2:
-        return [{"snapshot_id": s.get("id"), "issued_at": s.get("issued_at"), "changes": "Initial snapshot"} for s in snapshots]
+        return [
+            {
+                "snapshot_id": s.get("id"),
+                "issued_at": s.get("issued_at"),
+                "changes": "Initial snapshot",
+            }
+            for s in snapshots
+        ]
 
     revisions = []
     for i in range(len(snapshots)):
         if i == 0:
-            revisions.append({
-                "snapshot_id": snapshots[i].get("id"),
-                "issued_at": snapshots[i].get("issued_at"),
-                "changes": "Initial snapshot",
-                "capability_count": len(snapshots[i].get("payload", {}).get("capabilities", [])),
-            })
+            revisions.append(
+                {
+                    "snapshot_id": snapshots[i].get("id"),
+                    "issued_at": snapshots[i].get("issued_at"),
+                    "changes": "Initial snapshot",
+                    "capability_count": len(
+                        snapshots[i].get("payload", {}).get("capabilities", [])
+                    ),
+                }
+            )
         else:
             diff = compare_passport_snapshots(
                 snapshots[i - 1].get("payload", {}),
@@ -286,12 +334,16 @@ def compute_revision_summary(snapshots: list[dict]) -> list[dict]:
             if diff["changed"]:
                 change_summary.append(f"~{len(diff['changed'])} updated")
 
-            revisions.append({
-                "snapshot_id": snapshots[i].get("id"),
-                "issued_at": snapshots[i].get("issued_at"),
-                "changes": ", ".join(change_summary) if change_summary else "No changes",
-                "capability_count": len(snapshots[i].get("payload", {}).get("capabilities", [])),
-                "diff_summary": diff,
-            })
+            revisions.append(
+                {
+                    "snapshot_id": snapshots[i].get("id"),
+                    "issued_at": snapshots[i].get("issued_at"),
+                    "changes": ", ".join(change_summary) if change_summary else "No changes",
+                    "capability_count": len(
+                        snapshots[i].get("payload", {}).get("capabilities", [])
+                    ),
+                    "diff_summary": diff,
+                }
+            )
 
     return revisions

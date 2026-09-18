@@ -79,6 +79,7 @@ class TestTalentOutreach:
 
 # ---- API auth tests ----
 
+
 @pytest.mark.asyncio
 async def test_create_pool_requires_auth(client):
     response = await client.post(

@@ -15,10 +15,19 @@ from datetime import UTC, datetime
 # Gap #81: Application form builder
 # ---------------------------------------------------------------------------
 
-QUESTION_TYPES = frozenset({
-    "text", "textarea", "select", "multiselect",
-    "yes_no", "number", "date", "file_upload", "url",
-})
+QUESTION_TYPES = frozenset(
+    {
+        "text",
+        "textarea",
+        "select",
+        "multiselect",
+        "yes_no",
+        "number",
+        "date",
+        "file_upload",
+        "url",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,11 +60,16 @@ def validate_custom_questions(questions: list[dict]) -> list[str]:
 # Gap #82: Auto-screening rules
 # ---------------------------------------------------------------------------
 
-SCREENING_RULE_TYPES = frozenset({
-    "min_capability_level", "required_credential",
-    "min_evidence_count", "min_endorsements",
-    "required_verification_level", "keyword_match",
-})
+SCREENING_RULE_TYPES = frozenset(
+    {
+        "min_capability_level",
+        "required_credential",
+        "min_evidence_count",
+        "min_endorsements",
+        "required_verification_level",
+        "keyword_match",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,18 +118,17 @@ def evaluate_screening_rules(
         if rule_passed:
             passed_count += 1
 
-        results.append({
-            "rule_type": rule_type,
-            "field": field,
-            "passed": rule_passed,
-            "action": rule.get("action", "pass"),
-        })
+        results.append(
+            {
+                "rule_type": rule_type,
+                "field": field,
+                "passed": rule_passed,
+                "action": rule.get("action", "pass"),
+            }
+        )
 
     score = passed_count / max(len(rules), 1) if rules else 1.0
-    all_passed = all(
-        r["passed"] or r["action"] == "flag_for_review"
-        for r in results
-    )
+    all_passed = all(r["passed"] or r["action"] == "flag_for_review" for r in results)
 
     return {"passed": all_passed, "results": results, "score": round(score, 3)}
 
@@ -124,11 +137,19 @@ def evaluate_screening_rules(
 # Gap #85: Withdrawal reasons
 # ---------------------------------------------------------------------------
 
-WITHDRAWAL_REASONS = frozenset({
-    "accepted_other_offer", "compensation_mismatch", "role_not_fit",
-    "location_issue", "timing_issue", "personal_reasons",
-    "company_culture", "better_opportunity", "other",
-})
+WITHDRAWAL_REASONS = frozenset(
+    {
+        "accepted_other_offer",
+        "compensation_mismatch",
+        "role_not_fit",
+        "location_issue",
+        "timing_issue",
+        "personal_reasons",
+        "company_culture",
+        "better_opportunity",
+        "other",
+    }
+)
 
 
 def validate_withdrawal_reason(reason: str) -> bool:
@@ -139,6 +160,7 @@ def validate_withdrawal_reason(reason: str) -> bool:
 # ---------------------------------------------------------------------------
 # Gap #86: Application timeline
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class TimelineEvent:
@@ -176,13 +198,15 @@ def build_application_timeline(events: list[dict]) -> list[TimelineEvent]:
         if ts and prev_ts:
             duration = round((ts - prev_ts).total_seconds() / 3600, 1)
 
-        timeline.append(TimelineEvent(
-            stage=ev.get("to_status", ev.get("stage", "")),
-            timestamp=ts or datetime.now(UTC),
-            actor=ev.get("acted_by"),
-            note=ev.get("note"),
-            duration_from_previous_hours=duration,
-        ))
+        timeline.append(
+            TimelineEvent(
+                stage=ev.get("to_status", ev.get("stage", "")),
+                timestamp=ts or datetime.now(UTC),
+                actor=ev.get("acted_by"),
+                note=ev.get("note"),
+                duration_from_previous_hours=duration,
+            )
+        )
 
     return timeline
 

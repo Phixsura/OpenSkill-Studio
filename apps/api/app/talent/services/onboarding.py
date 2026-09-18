@@ -13,12 +13,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-ONBOARDING_TASK_TYPES = frozenset({
-    "document_upload", "form_completion", "training_module",
-    "meeting_scheduled", "system_access", "equipment_setup",
-    "policy_acknowledgment", "mentor_introduction", "team_meeting",
-    "first_project_assignment", "custom",
-})
+ONBOARDING_TASK_TYPES = frozenset(
+    {
+        "document_upload",
+        "form_completion",
+        "training_module",
+        "meeting_scheduled",
+        "system_access",
+        "equipment_setup",
+        "policy_acknowledgment",
+        "mentor_introduction",
+        "team_meeting",
+        "first_project_assignment",
+        "custom",
+    }
+)
 
 TASK_STATUSES = frozenset({"pending", "in_progress", "completed", "skipped", "blocked"})
 
@@ -75,8 +84,10 @@ class OnboardingService:
                 t["phase"] = "first_week"
             validated.append(t)
         return OnboardingTemplate(
-            name=name, org_id=org_id,
-            tasks=validated, phases=list(ONBOARDING_PHASES),
+            name=name,
+            org_id=org_id,
+            tasks=validated,
+            phases=list(ONBOARDING_PHASES),
         )
 
     def generate_checklist(
@@ -88,17 +99,19 @@ class OnboardingService:
         """Generate a concrete checklist from a template for a placement."""
         tasks = []
         for t in template.tasks:
-            tasks.append(OnboardingTask(
-                task_type=t.get("task_type", "custom"),
-                title=t.get("title", "Untitled"),
-                description=t.get("description", ""),
-                assigned_to=t.get("assigned_to", "candidate"),
-                phase=t.get("phase", "first_week"),
-                required=t.get("required", True),
-                due_days_from_start=t.get("due_days_from_start"),
-                status="pending",
-                completed_at=None,
-            ))
+            tasks.append(
+                OnboardingTask(
+                    task_type=t.get("task_type", "custom"),
+                    title=t.get("title", "Untitled"),
+                    description=t.get("description", ""),
+                    assigned_to=t.get("assigned_to", "candidate"),
+                    phase=t.get("phase", "first_week"),
+                    required=t.get("required", True),
+                    due_days_from_start=t.get("due_days_from_start"),
+                    status="pending",
+                    completed_at=None,
+                )
+            )
         return tasks
 
     def compute_progress(
@@ -130,9 +143,12 @@ class OnboardingService:
         now = datetime.now(UTC)
         days = (now - start_date).days if start_date else None
         overdue = sum(
-            1 for t in tasks
-            if t.status == "pending" and t.due_days_from_start is not None
-            and days is not None and days > t.due_days_from_start
+            1
+            for t in tasks
+            if t.status == "pending"
+            and t.due_days_from_start is not None
+            and days is not None
+            and days > t.due_days_from_start
         )
 
         return OnboardingProgress(

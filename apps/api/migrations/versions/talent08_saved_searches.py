@@ -52,7 +52,9 @@ def upgrade() -> None:
     )
     op.create_index("ix_talent_saved_searches_org_id", "talent_saved_searches", ["org_id"])
     op.create_index("ix_talent_saved_searches_created_by", "talent_saved_searches", ["created_by"])
-    op.create_index("ix_talent_saved_searches_search_type", "talent_saved_searches", ["search_type"])
+    op.create_index(
+        "ix_talent_saved_searches_search_type", "talent_saved_searches", ["search_type"]
+    )
 
 
 def downgrade() -> None:

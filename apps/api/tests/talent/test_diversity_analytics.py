@@ -11,7 +11,14 @@ svc = DiversityAnalyticsService()
 
 class TestStageDropoffs:
     def test_normal_funnel(self):
-        stages = {"submitted": 100, "screening": 80, "interview": 40, "assessment": 20, "offer": 10, "hired": 8}
+        stages = {
+            "submitted": 100,
+            "screening": 80,
+            "interview": 40,
+            "assessment": 20,
+            "offer": 10,
+            "hired": 8,
+        }
         dropoffs = svc.compute_stage_dropoffs(stages)
         assert len(dropoffs) == 5
         assert dropoffs[0].from_stage == "submitted"
@@ -48,6 +55,7 @@ class TestSourceEffectiveness:
 class TestEquityFlags:
     def test_high_dropoff_flagged(self):
         from app.talent.services.diversity_analytics import StageDropoff
+
         dropoffs = [
             StageDropoff("screening", "interview", 50, 5, 0.9, None, None),
         ]
@@ -57,6 +65,7 @@ class TestEquityFlags:
 
     def test_source_disparity_flagged(self):
         from app.talent.services.diversity_analytics import SourceEffectiveness
+
         sources = [
             SourceEffectiveness("match", 20, 0.5, 0.3, 0.2, None),
             SourceEffectiveness("direct", 20, 0.5, 0.05, 0.02, None),
@@ -66,6 +75,7 @@ class TestEquityFlags:
 
     def test_no_flags_when_fair(self):
         from app.talent.services.diversity_analytics import SourceEffectiveness, StageDropoff
+
         dropoffs = [StageDropoff("s", "i", 50, 35, 0.3, None, None)]
         sources = [
             SourceEffectiveness("a", 20, 0.5, 0.3, 0.15, None),
@@ -81,9 +91,17 @@ class TestBuildReport:
             {"source": "match", "status": "hired"},
             {"source": "match", "status": "rejected"},
         ]
-        stages = {"submitted": 10, "screening": 8, "interview": 5, "assessment": 3, "offer": 2, "hired": 1}
+        stages = {
+            "submitted": 10,
+            "screening": 8,
+            "interview": 5,
+            "assessment": 3,
+            "offer": 2,
+            "hired": 1,
+        }
         report = svc.build_report(
-            org_id="o1", applications=apps,
+            org_id="o1",
+            applications=apps,
             applications_by_stage=stages,
         )
         assert report.total_applications == 2

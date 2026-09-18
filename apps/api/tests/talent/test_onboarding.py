@@ -32,7 +32,8 @@ class TestConstants:
 class TestCreateTemplate:
     def test_creates_template(self):
         t = svc.create_template(
-            name="Standard", org_id="org1",
+            name="Standard",
+            org_id="org1",
             tasks=[
                 {"task_type": "document_upload", "title": "ID", "phase": "pre_start"},
                 {"task_type": "team_meeting", "title": "Meet team", "phase": "day_one"},
@@ -43,14 +44,16 @@ class TestCreateTemplate:
 
     def test_filters_invalid_task_types(self):
         t = svc.create_template(
-            name="T", org_id="o",
+            name="T",
+            org_id="o",
             tasks=[{"task_type": "invalid_type", "title": "X", "phase": "day_one"}],
         )
         assert len(t.tasks) == 0
 
     def test_defaults_phase(self):
         t = svc.create_template(
-            name="T", org_id="o",
+            name="T",
+            org_id="o",
             tasks=[{"task_type": "custom", "title": "X", "phase": "invalid"}],
         )
         assert t.tasks[0]["phase"] == "first_week"
@@ -59,10 +62,26 @@ class TestCreateTemplate:
 class TestGenerateChecklist:
     def test_generates_tasks(self):
         template = OnboardingTemplate(
-            name="T", org_id="o", phases=list(ONBOARDING_PHASES),
+            name="T",
+            org_id="o",
+            phases=list(ONBOARDING_PHASES),
             tasks=[
-                {"task_type": "document_upload", "title": "Upload ID", "description": "Scan your ID", "assigned_to": "candidate", "phase": "pre_start", "required": True},
-                {"task_type": "system_access", "title": "Setup email", "description": "", "assigned_to": "employer", "phase": "day_one", "required": True},
+                {
+                    "task_type": "document_upload",
+                    "title": "Upload ID",
+                    "description": "Scan your ID",
+                    "assigned_to": "candidate",
+                    "phase": "pre_start",
+                    "required": True,
+                },
+                {
+                    "task_type": "system_access",
+                    "title": "Setup email",
+                    "description": "",
+                    "assigned_to": "employer",
+                    "phase": "day_one",
+                    "required": True,
+                },
             ],
         )
         tasks = svc.generate_checklist(template, "p1", datetime.now(UTC))
@@ -78,9 +97,21 @@ class TestComputeProgress:
 
     def test_partial(self):
         tasks = [
-            OnboardingTask("custom", "A", "", "candidate", "day_one", True, None, "completed", datetime.now(UTC)),
+            OnboardingTask(
+                "custom",
+                "A",
+                "",
+                "candidate",
+                "day_one",
+                True,
+                None,
+                "completed",
+                datetime.now(UTC),
+            ),
             OnboardingTask("custom", "B", "", "candidate", "day_one", True, None, "pending", None),
-            OnboardingTask("custom", "C", "", "employer", "first_week", True, None, "pending", None),
+            OnboardingTask(
+                "custom", "C", "", "employer", "first_week", True, None, "pending", None
+            ),
         ]
         p = svc.compute_progress(tasks, "p1", datetime.now(UTC))
         assert p.completion_percentage == round(1 / 3 * 100, 1)
@@ -96,7 +127,17 @@ class TestComputeProgress:
 
     def test_current_phase(self):
         tasks = [
-            OnboardingTask("custom", "A", "", "candidate", "pre_start", True, None, "completed", datetime.now(UTC)),
+            OnboardingTask(
+                "custom",
+                "A",
+                "",
+                "candidate",
+                "pre_start",
+                True,
+                None,
+                "completed",
+                datetime.now(UTC),
+            ),
             OnboardingTask("custom", "B", "", "candidate", "day_one", True, None, "pending", None),
         ]
         p = svc.compute_progress(tasks, "p1", datetime.now(UTC))

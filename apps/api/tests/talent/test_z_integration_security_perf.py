@@ -5,7 +5,6 @@ pagination mechanics, and error responses — all WITHOUT a real database.
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -13,8 +12,6 @@ from app.talent.models.application import (
     APPLICATION_TRANSITIONS,
     Application,
     ApplicationEvent,
-    ApplicationFeedback,
-    InterviewStage,
     Placement,
 )
 from app.talent.models.assessment import (
@@ -24,9 +21,9 @@ from app.talent.models.assessment import (
     CredentialRule,
 )
 from app.talent.models.bookmark import OpportunityBookmark
-from app.talent.models.capability import Capability, CapabilityEdge, CapabilityMapping
-from app.talent.models.career_goal import CareerGoal
 from app.talent.models.candidate_note import CandidateNote
+from app.talent.models.capability import Capability, CapabilityEdge
+from app.talent.models.career_goal import CareerGoal
 from app.talent.models.consent_log import ConsentLog
 from app.talent.models.credential_pathway import CredentialPathway
 from app.talent.models.employer import EmployerProfile, Opportunity
@@ -52,7 +49,6 @@ from app.talent.services.scoring import (
     decay_factor,
     determine_level,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # SECTION 1: SECURITY — IDOR / Auth / Injection (tests 1–70)
@@ -221,22 +217,26 @@ class TestRateLimitModule:
     # 34
     def test_rate_limiter_imports(self):
         from app.talent.api.rate_limit import MAX_REQUESTS, WINDOW_SECONDS
+
         assert MAX_REQUESTS > 0
         assert WINDOW_SECONDS > 0
 
     # 35
     def test_rate_limiter_default_window_60s(self):
         from app.talent.api.rate_limit import WINDOW_SECONDS
+
         assert WINDOW_SECONDS == 60
 
     # 36
     def test_rate_limiter_default_max_100(self):
         from app.talent.api.rate_limit import MAX_REQUESTS
+
         assert MAX_REQUESTS == 100
 
     # 37
     def test_rate_limiter_counter_is_dict(self):
         from app.talent.api.rate_limit import _counters
+
         assert isinstance(_counters, dict)
 
 
@@ -246,6 +246,7 @@ class TestETagModule:
     # 38
     def test_compute_etag_returns_weak(self):
         from app.talent.api.etag import compute_etag
+
         etag = compute_etag(b"hello world")
         assert etag.startswith('W/"')
         assert etag.endswith('"')
@@ -253,6 +254,7 @@ class TestETagModule:
     # 39
     def test_compute_etag_deterministic(self):
         from app.talent.api.etag import compute_etag
+
         a = compute_etag(b"test data")
         b = compute_etag(b"test data")
         assert a == b
@@ -260,6 +262,7 @@ class TestETagModule:
     # 40
     def test_compute_etag_different_for_different_data(self):
         from app.talent.api.etag import compute_etag
+
         a = compute_etag(b"data1")
         b = compute_etag(b"data2")
         assert a != b
@@ -267,12 +270,14 @@ class TestETagModule:
     # 41
     def test_compute_etag_handles_empty_body(self):
         from app.talent.api.etag import compute_etag
+
         etag = compute_etag(b"")
         assert etag.startswith('W/"')
 
     # 42
     def test_etag_route_class_exists(self):
         from app.talent.api.etag import ETagRoute
+
         assert ETagRoute is not None
 
 
@@ -398,7 +403,19 @@ class TestStateTransitionSecurity:
 
     # 65
     def test_all_states_defined(self):
-        expected = {"draft", "submitted", "screening", "interview", "assessment", "offer", "accepted", "rejected", "withdrawn", "hired", "completed"}
+        expected = {
+            "draft",
+            "submitted",
+            "screening",
+            "interview",
+            "assessment",
+            "offer",
+            "accepted",
+            "rejected",
+            "withdrawn",
+            "hired",
+            "completed",
+        }
         assert expected.issubset(set(APPLICATION_TRANSITIONS.keys()))
 
 
@@ -407,7 +424,9 @@ class TestVerificationWeights:
 
     # 66
     def test_self_reported_is_lowest(self):
-        assert VERIFICATION_WEIGHTS["self_reported"] <= VERIFICATION_WEIGHTS.get("peer_reviewed", 1.0)
+        assert VERIFICATION_WEIGHTS["self_reported"] <= VERIFICATION_WEIGHTS.get(
+            "peer_reviewed", 1.0
+        )
 
     # 67
     def test_employer_verified_is_high(self):
@@ -446,27 +465,42 @@ class TestCapabilityEvidenceScoreFlow:
 
     # 73
     def test_score_positive_for_single_active_evidence(self):
-        ev = [{
-            "status": "active", "score_normalized": 0.8,
-            "verification_level": "employer_verified", "confidence": 1.0,
-            "occurred_at": datetime.now(UTC), "expires_at": None,
-        }]
+        ev = [
+            {
+                "status": "active",
+                "score_normalized": 0.8,
+                "verification_level": "employer_verified",
+                "confidence": 1.0,
+                "occurred_at": datetime.now(UTC),
+                "expires_at": None,
+            }
+        ]
         s, _, _ = compute_score_from_evidence(ev, None, datetime.now(UTC))
         assert s > 0.0
 
     # 74
     def test_multiple_evidence_increases_score(self):
         now = datetime.now(UTC)
-        ev1 = [{
-            "status": "active", "score_normalized": 0.6,
-            "verification_level": "self_reported", "confidence": 0.8,
-            "occurred_at": now, "expires_at": None,
-        }]
-        ev2 = ev1 + [{
-            "status": "active", "score_normalized": 0.9,
-            "verification_level": "employer_verified", "confidence": 1.0,
-            "occurred_at": now, "expires_at": None,
-        }]
+        ev1 = [
+            {
+                "status": "active",
+                "score_normalized": 0.6,
+                "verification_level": "self_reported",
+                "confidence": 0.8,
+                "occurred_at": now,
+                "expires_at": None,
+            }
+        ]
+        ev2 = ev1 + [
+            {
+                "status": "active",
+                "score_normalized": 0.9,
+                "verification_level": "employer_verified",
+                "confidence": 1.0,
+                "occurred_at": now,
+                "expires_at": None,
+            }
+        ]
         s1, _, _ = compute_score_from_evidence(ev1, None, now)
         s2, _, _ = compute_score_from_evidence(ev2, None, now)
         assert s2 >= s1
@@ -474,23 +508,32 @@ class TestCapabilityEvidenceScoreFlow:
     # 75
     def test_voided_evidence_excluded(self):
         now = datetime.now(UTC)
-        ev = [{
-            "status": "voided", "score_normalized": 1.0,
-            "verification_level": "employer_verified", "confidence": 1.0,
-            "occurred_at": now, "expires_at": None,
-        }]
+        ev = [
+            {
+                "status": "voided",
+                "score_normalized": 1.0,
+                "verification_level": "employer_verified",
+                "confidence": 1.0,
+                "occurred_at": now,
+                "expires_at": None,
+            }
+        ]
         s, _, _ = compute_score_from_evidence(ev, None, now)
         assert s == 0.0
 
     # 76
     def test_expired_evidence_excluded(self):
         now = datetime.now(UTC)
-        ev = [{
-            "status": "active", "score_normalized": 1.0,
-            "verification_level": "employer_verified", "confidence": 1.0,
-            "occurred_at": now - timedelta(days=30),
-            "expires_at": now - timedelta(hours=1),
-        }]
+        ev = [
+            {
+                "status": "active",
+                "score_normalized": 1.0,
+                "verification_level": "employer_verified",
+                "confidence": 1.0,
+                "occurred_at": now - timedelta(days=30),
+                "expires_at": now - timedelta(hours=1),
+            }
+        ]
         s, _, _ = compute_score_from_evidence(ev, None, now)
         assert s == 0.0
 
@@ -499,9 +542,12 @@ class TestCapabilityEvidenceScoreFlow:
         now = datetime.now(UTC)
         ev = [
             {
-                "status": "active", "score_normalized": 1.0,
-                "verification_level": "employer_verified", "confidence": 1.0,
-                "occurred_at": now - timedelta(days=i), "expires_at": None,
+                "status": "active",
+                "score_normalized": 1.0,
+                "verification_level": "employer_verified",
+                "confidence": 1.0,
+                "occurred_at": now - timedelta(days=i),
+                "expires_at": None,
             }
             for i in range(20)
         ]
@@ -539,10 +585,7 @@ class TestCapabilityEvidenceScoreFlow:
     # 83
     def test_velocity_positive_for_recent_burst(self):
         now = datetime.now(UTC)
-        ev = [
-            {"occurred_at": now - timedelta(days=i), "status": "active"}
-            for i in range(5)
-        ]
+        ev = [{"occurred_at": now - timedelta(days=i), "status": "active"} for i in range(5)]
         assert compute_velocity(ev, now) > 0.0
 
     # 84
@@ -598,7 +641,7 @@ class TestApplicationOfferFlow:
         path = ["draft", "submitted", "screening", "interview", "offer", "accepted", "hired"]
         for i in range(len(path) - 1):
             assert path[i + 1] in APPLICATION_TRANSITIONS[path[i]], (
-                f"Can't go from {path[i]} to {path[i+1]}"
+                f"Can't go from {path[i]} to {path[i + 1]}"
             )
 
     # 94
@@ -777,34 +820,40 @@ class TestSkillInferenceIntegration:
     # 131
     def test_infer_function_exists(self):
         from app.talent.services.skill_inference import infer_skills_from_text
+
         assert callable(infer_skills_from_text)
 
     # 132
     def test_extract_candidates_helper_exists(self):
         from app.talent.services.skill_inference import _extract_candidates
+
         assert callable(_extract_candidates)
 
     # 133
     def test_extract_candidates_returns_list(self):
         from app.talent.services.skill_inference import _extract_candidates
+
         result = _extract_candidates("Python programming and data analysis")
         assert isinstance(result, list)
 
     # 134
     def test_extract_candidates_finds_terms(self):
         from app.talent.services.skill_inference import _extract_candidates
+
         result = _extract_candidates("Python programming experience")
         assert len(result) > 0
 
     # 135
     def test_find_excerpt_helper(self):
         from app.talent.services.skill_inference import _find_excerpt
+
         excerpt = _find_excerpt("I have Python experience in data", "Python")
         assert "Python" in excerpt
 
     # 136
     def test_find_excerpt_missing_term(self):
         from app.talent.services.skill_inference import _find_excerpt
+
         excerpt = _find_excerpt("No matching content here", "Rust")
         assert isinstance(excerpt, str)
 
@@ -815,23 +864,27 @@ class TestCareerPathIntegration:
     # 137
     def test_suggest_action_exists(self):
         from app.talent.services.career_path import _suggest_action
+
         assert callable(_suggest_action)
 
     # 138
     def test_suggest_action_gap_zero(self):
         from app.talent.services.career_path import _suggest_action
+
         action = _suggest_action(3, 3, 0)
         assert isinstance(action, str)
 
     # 139
     def test_suggest_action_positive_gap(self):
         from app.talent.services.career_path import _suggest_action
+
         action = _suggest_action(1, 3, 2)
         assert len(action) > 0
 
     # 140
     def test_suggest_action_negative_gap(self):
         from app.talent.services.career_path import _suggest_action
+
         action = _suggest_action(5, 3, -2)
         assert isinstance(action, str)
 
@@ -847,28 +900,33 @@ class TestPaginationModule:
     # 141
     def test_paginate_query_exists(self):
         from app.talent.api.pagination import paginate_query
+
         assert callable(paginate_query)
 
     # 142
     def test_cursor_meta_schema_exists(self):
         from app.talent.schemas.cursor import CursorMeta
+
         assert CursorMeta is not None
 
     # 143
     def test_cursor_meta_has_next_cursor(self):
         from app.talent.schemas.cursor import CursorMeta
+
         fields = CursorMeta.model_fields
         assert "next_cursor" in fields
 
     # 144
     def test_cursor_meta_has_has_more(self):
         from app.talent.schemas.cursor import CursorMeta
+
         fields = CursorMeta.model_fields
         assert "has_more" in fields
 
     # 145
     def test_cursor_meta_default_values(self):
         from app.talent.schemas.cursor import CursorMeta
+
         meta = CursorMeta(next_cursor=None, has_more=False)
         assert meta.next_cursor is None
         assert meta.has_more is False
@@ -876,6 +934,7 @@ class TestPaginationModule:
     # 146
     def test_cursor_meta_with_cursor(self):
         from app.talent.schemas.cursor import CursorMeta
+
         meta = CursorMeta(next_cursor="01ABCDEF", has_more=True)
         assert meta.next_cursor == "01ABCDEF"
         assert meta.has_more is True
@@ -1068,41 +1127,61 @@ class TestScoringErrorHandling:
 
     # 181
     def test_score_none_confidence_raises(self):
-        ev = [{
-            "status": "active", "score_normalized": None,
-            "verification_level": "self_reported", "confidence": None,
-            "occurred_at": datetime.now(UTC), "expires_at": None,
-        }]
+        ev = [
+            {
+                "status": "active",
+                "score_normalized": None,
+                "verification_level": "self_reported",
+                "confidence": None,
+                "occurred_at": datetime.now(UTC),
+                "expires_at": None,
+            }
+        ]
         with pytest.raises((TypeError, ValueError)):
             compute_score_from_evidence(ev, None, datetime.now(UTC))
 
     # 182
     def test_score_zero_confidence(self):
-        ev = [{
-            "status": "active", "score_normalized": 1.0,
-            "verification_level": "employer_verified", "confidence": 0.0,
-            "occurred_at": datetime.now(UTC), "expires_at": None,
-        }]
+        ev = [
+            {
+                "status": "active",
+                "score_normalized": 1.0,
+                "verification_level": "employer_verified",
+                "confidence": 0.0,
+                "occurred_at": datetime.now(UTC),
+                "expires_at": None,
+            }
+        ]
         s, _, _ = compute_score_from_evidence(ev, None, datetime.now(UTC))
         assert s >= 0.0
 
     # 183
     def test_score_negative_normalized(self):
-        ev = [{
-            "status": "active", "score_normalized": -0.5,
-            "verification_level": "self_reported", "confidence": 1.0,
-            "occurred_at": datetime.now(UTC), "expires_at": None,
-        }]
+        ev = [
+            {
+                "status": "active",
+                "score_normalized": -0.5,
+                "verification_level": "self_reported",
+                "confidence": 1.0,
+                "occurred_at": datetime.now(UTC),
+                "expires_at": None,
+            }
+        ]
         s, _, _ = compute_score_from_evidence(ev, None, datetime.now(UTC))
         assert isinstance(s, float)
 
     # 184
     def test_score_over_one_normalized(self):
-        ev = [{
-            "status": "active", "score_normalized": 5.0,
-            "verification_level": "employer_verified", "confidence": 1.0,
-            "occurred_at": datetime.now(UTC), "expires_at": None,
-        }]
+        ev = [
+            {
+                "status": "active",
+                "score_normalized": 5.0,
+                "verification_level": "employer_verified",
+                "confidence": 1.0,
+                "occurred_at": datetime.now(UTC),
+                "expires_at": None,
+            }
+        ]
         s, _, _ = compute_score_from_evidence(ev, None, datetime.now(UTC))
         assert isinstance(s, float)
 

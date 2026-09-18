@@ -83,9 +83,7 @@ class CareerGoalService:
             items = items[:limit]
         return items, has_more
 
-    async def update_goal(
-        self, goal_id: str, user_id: str, **fields: object
-    ) -> CareerGoal | None:
+    async def update_goal(self, goal_id: str, user_id: str, **fields: object) -> CareerGoal | None:
         goal = await self.db.get(CareerGoal, goal_id)
         if not goal or goal.user_id != user_id:
             return None
@@ -95,9 +93,7 @@ class CareerGoalService:
         await self.db.flush()
         return goal
 
-    async def complete_goal(
-        self, goal_id: str, user_id: str
-    ) -> CareerGoal | None:
+    async def complete_goal(self, goal_id: str, user_id: str) -> CareerGoal | None:
         goal = await self.db.get(CareerGoal, goal_id)
         if not goal or goal.user_id != user_id:
             return None
@@ -108,9 +104,7 @@ class CareerGoalService:
         await self.db.flush()
         return goal
 
-    async def abandon_goal(
-        self, goal_id: str, user_id: str
-    ) -> CareerGoal | None:
+    async def abandon_goal(self, goal_id: str, user_id: str) -> CareerGoal | None:
         goal = await self.db.get(CareerGoal, goal_id)
         if not goal or goal.user_id != user_id:
             return None
@@ -120,9 +114,7 @@ class CareerGoalService:
         await self.db.flush()
         return goal
 
-    async def check_goal_progress(
-        self, goal_id: str, user_id: str
-    ) -> dict:
+    async def check_goal_progress(self, goal_id: str, user_id: str) -> dict:
         """Check progress toward a goal by comparing current capability levels."""
         goal = await self.db.get(CareerGoal, goal_id)
         if not goal or goal.user_id != user_id:
@@ -164,14 +156,16 @@ class CareerGoalService:
             else:
                 progress_pct = min(100.0, (current_level / target_level) * 100)
 
-            cap_progress.append({
-                "capability_id": cap_id,
-                "capability_name": cap_name,
-                "current_level": current_level,
-                "target_level": target_level,
-                "progress": round(progress_pct, 1),
-                "met": current_level >= target_level,
-            })
+            cap_progress.append(
+                {
+                    "capability_id": cap_id,
+                    "capability_name": cap_name,
+                    "current_level": current_level,
+                    "target_level": target_level,
+                    "progress": round(progress_pct, 1),
+                    "met": current_level >= target_level,
+                }
+            )
             total_progress += progress_pct
 
         overall = round(total_progress / max(len(target_caps), 1), 1) if target_caps else 0.0

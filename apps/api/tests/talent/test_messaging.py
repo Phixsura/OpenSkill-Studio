@@ -15,10 +15,15 @@ svc = MessagingService()
 
 def _msg(**kw) -> ApplicationMessage:
     defaults = {
-        "id": "m1", "application_id": "a1", "sender_id": "u1",
-        "sender_role": "candidate", "message_type": "text",
-        "content": "Hello", "attachments": [],
-        "read_at": None, "created_at": datetime.now(UTC),
+        "id": "m1",
+        "application_id": "a1",
+        "sender_id": "u1",
+        "sender_role": "candidate",
+        "message_type": "text",
+        "content": "Hello",
+        "attachments": [],
+        "read_at": None,
+        "created_at": datetime.now(UTC),
     }
     defaults.update(kw)
     return ApplicationMessage(**defaults)
@@ -35,8 +40,11 @@ class TestMessageTypes:
 class TestCreateMessage:
     def test_valid_message(self):
         m = svc.create_message(
-            message_id="m1", application_id="a1",
-            sender_id="u1", sender_role="candidate", content="Hi",
+            message_id="m1",
+            application_id="a1",
+            sender_id="u1",
+            sender_role="candidate",
+            content="Hi",
         )
         assert m.content == "Hi"
         assert m.message_type == "text"
@@ -45,29 +53,41 @@ class TestCreateMessage:
     def test_invalid_type(self):
         with pytest.raises(ValueError, match="Invalid message_type"):
             svc.create_message(
-                message_id="m1", application_id="a1",
-                sender_id="u1", sender_role="candidate",
-                message_type="invalid", content="Hi",
+                message_id="m1",
+                application_id="a1",
+                sender_id="u1",
+                sender_role="candidate",
+                message_type="invalid",
+                content="Hi",
             )
 
     def test_invalid_role(self):
         with pytest.raises(ValueError, match="Invalid sender_role"):
             svc.create_message(
-                message_id="m1", application_id="a1",
-                sender_id="u1", sender_role="admin", content="Hi",
+                message_id="m1",
+                application_id="a1",
+                sender_id="u1",
+                sender_role="admin",
+                content="Hi",
             )
 
     def test_empty_content(self):
         with pytest.raises(ValueError, match="Content"):
             svc.create_message(
-                message_id="m1", application_id="a1",
-                sender_id="u1", sender_role="candidate", content="",
+                message_id="m1",
+                application_id="a1",
+                sender_id="u1",
+                sender_role="candidate",
+                content="",
             )
 
     def test_with_attachments(self):
         m = svc.create_message(
-            message_id="m1", application_id="a1",
-            sender_id="u1", sender_role="employer", content="See attached",
+            message_id="m1",
+            application_id="a1",
+            sender_id="u1",
+            sender_role="employer",
+            content="See attached",
             attachments=[{"name": "resume.pdf", "url": "https://..."}],
         )
         assert len(m.attachments) == 1
@@ -76,7 +96,8 @@ class TestCreateMessage:
 class TestSystemMessage:
     def test_creates_system_message(self):
         m = svc.create_system_message(
-            message_id="m1", application_id="a1",
+            message_id="m1",
+            application_id="a1",
             content="Application moved to interview stage",
         )
         assert m.sender_id == "system"
@@ -93,7 +114,14 @@ class TestThreadSummary:
         now = datetime.now(UTC)
         msgs = [
             _msg(id="1", content="Hi", created_at=now),
-            _msg(id="2", sender_id="u2", sender_role="employer", content="Hello", read_at=now, created_at=now),
+            _msg(
+                id="2",
+                sender_id="u2",
+                sender_role="employer",
+                content="Hello",
+                read_at=now,
+                created_at=now,
+            ),
         ]
         t = svc.compute_thread_summary(msgs)
         assert t.total_messages == 2

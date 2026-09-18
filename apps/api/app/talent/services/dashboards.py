@@ -109,9 +109,9 @@ class SchoolDashboardService:
         place_result = await self.db.execute(placement_q)
         placements_by_status = {row.status: row.cnt for row in place_result.all()}
         total_members_q = select(func.count()).select_from(
-            select(OrgMember.user_id).where(
-                OrgMember.org_id == org_id, OrgMember.status == "active"
-            ).subquery()
+            select(OrgMember.user_id)
+            .where(OrgMember.org_id == org_id, OrgMember.status == "active")
+            .subquery()
         )
         total_members = (await self.db.execute(total_members_q)).scalar() or 0
         total_placed = sum(placements_by_status.values())
@@ -124,18 +124,17 @@ class SchoolDashboardService:
         }
 
         # 4. Employer feedback: avg overall_rating from verifications of org members
-        feedback_q = (
-            select(
-                func.count().label("total_reviews"),
-                func.avg(EmployerVerification.overall_rating).label("avg_rating"),
-            )
-            .where(EmployerVerification.user_id.in_(member_ids_sub))
-        )
+        feedback_q = select(
+            func.count().label("total_reviews"),
+            func.avg(EmployerVerification.overall_rating).label("avg_rating"),
+        ).where(EmployerVerification.user_id.in_(member_ids_sub))
         fb_result = await self.db.execute(feedback_q)
         fb_row = fb_result.one_or_none()
         employer_feedback = {
             "total_reviews": fb_row.total_reviews if fb_row else 0,
-            "avg_rating": round(float(fb_row.avg_rating), 2) if fb_row and fb_row.avg_rating else None,
+            "avg_rating": round(float(fb_row.avg_rating), 2)
+            if fb_row and fb_row.avg_rating
+            else None,
         }
 
         return {
@@ -231,7 +230,9 @@ class EmployerDashboardService:
         )
         ttf_result = await self.db.execute(ttf_q)
         ttf_row = ttf_result.one_or_none()
-        avg_time_to_fill = round(float(ttf_row.avg_days), 1) if ttf_row and ttf_row.avg_days else None
+        avg_time_to_fill = (
+            round(float(ttf_row.avg_days), 1) if ttf_row and ttf_row.avg_days else None
+        )
 
         return {
             "employer_org_id": employer_org_id,
@@ -293,9 +294,9 @@ class PlatformDashboardService:
 
         total_evidence = (
             await self.db.execute(
-                select(func.count()).select_from(CapabilityEvidence).where(
-                    CapabilityEvidence.status == "active"
-                )
+                select(func.count())
+                .select_from(CapabilityEvidence)
+                .where(CapabilityEvidence.status == "active")
             )
         ).scalar() or 0
 

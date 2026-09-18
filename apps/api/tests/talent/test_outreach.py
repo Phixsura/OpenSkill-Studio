@@ -41,6 +41,7 @@ class TestOutreachModel:
 
 # ---- API auth tests ----
 
+
 @pytest.mark.asyncio
 async def test_send_outreach_requires_auth(client):
     response = await client.post(

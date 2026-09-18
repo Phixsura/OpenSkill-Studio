@@ -141,9 +141,7 @@ class GDPRService:
             export["data_categories"].append("outcomes")
 
         # Pool memberships
-        pm_q = select(TalentPoolMembership).where(
-            TalentPoolMembership.user_id == user_id
-        )
+        pm_q = select(TalentPoolMembership).where(TalentPoolMembership.user_id == user_id)
         pm_result = await self.db.execute(pm_q)
         memberships = pm_result.scalars().all()
         if memberships:
@@ -201,14 +199,18 @@ class GDPRService:
         entries: list[dict] = []
 
         if passport:
-            entries.append({
-                "event": "passport_created",
-                "timestamp": passport.created_at.isoformat() if hasattr(passport, "created_at") and passport.created_at else None,
-                "details": {
-                    "default_visibility": passport.default_visibility,
-                    "discoverable": passport.discoverable,
-                },
-            })
+            entries.append(
+                {
+                    "event": "passport_created",
+                    "timestamp": passport.created_at.isoformat()
+                    if hasattr(passport, "created_at") and passport.created_at
+                    else None,
+                    "details": {
+                        "default_visibility": passport.default_visibility,
+                        "discoverable": passport.discoverable,
+                    },
+                }
+            )
 
         # Pool consent decisions
         pm_q = select(TalentPoolMembership).where(
@@ -217,14 +219,18 @@ class GDPRService:
         )
         pm_result = await self.db.execute(pm_q)
         for m in pm_result.scalars().all():
-            entries.append({
-                "event": f"pool_consent_{m.consent_status}",
-                "timestamp": m.created_at.isoformat() if hasattr(m, "created_at") and m.created_at else None,
-                "details": {
-                    "pool_id": m.pool_id,
-                    "source": m.source,
-                    "consent_status": m.consent_status,
-                },
-            })
+            entries.append(
+                {
+                    "event": f"pool_consent_{m.consent_status}",
+                    "timestamp": m.created_at.isoformat()
+                    if hasattr(m, "created_at") and m.created_at
+                    else None,
+                    "details": {
+                        "pool_id": m.pool_id,
+                        "source": m.source,
+                        "consent_status": m.consent_status,
+                    },
+                }
+            )
 
         return entries

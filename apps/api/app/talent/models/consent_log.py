@@ -15,16 +15,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, ulid_pk
 
-CONSENT_TYPES = frozenset({
-    "passport_visibility",
-    "discoverable",
-    "pool_consent",
-    "outreach_response",
-    "deletion_request",
-    "data_export",
-    "snapshot_share",
-    "endorsement_opt_in",
-})
+CONSENT_TYPES = frozenset(
+    {
+        "passport_visibility",
+        "discoverable",
+        "pool_consent",
+        "outreach_response",
+        "deletion_request",
+        "data_export",
+        "snapshot_share",
+        "endorsement_opt_in",
+    }
+)
 
 CONSENT_ACTIONS = frozenset({"granted", "revoked", "updated"})
 
@@ -33,9 +35,7 @@ class ConsentLog(Base):
     __tablename__ = "talent_consent_log"
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id"), index=True
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), index=True)
     consent_type: Mapped[str] = mapped_column(String(50), index=True)
     action: Mapped[str] = mapped_column(String(20))
     details: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")

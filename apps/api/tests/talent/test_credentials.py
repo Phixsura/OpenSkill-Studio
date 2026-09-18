@@ -55,6 +55,7 @@ class TestCredentialStatusTransitions:
 
 # ---- API auth tests ----
 
+
 @pytest.mark.asyncio
 async def test_list_credentials_requires_auth(client):
     response = await client.get("/api/v1/talent/credentials")

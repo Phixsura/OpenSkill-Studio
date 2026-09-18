@@ -67,12 +67,18 @@ class TestConsentGate:
         code_lines = [
             line
             for line in source.split("\n")
-            if line.strip() and not line.strip().startswith("#") and not line.strip().startswith('"""')
+            if line.strip()
+            and not line.strip().startswith("#")
+            and not line.strip().startswith('"""')
         ]
         code_only = "\n".join(code_lines)
         # Must NOT reference demographic fields in executable code
-        for forbidden in ("date_of_birth", "sexual_orientation",
-                          "political_belief", "marital_status"):
+        for forbidden in (
+            "date_of_birth",
+            "sexual_orientation",
+            "political_belief",
+            "marital_status",
+        ):
             assert forbidden not in code_only.lower(), (
                 f"Protected attribute '{forbidden}' found in candidate query code"
             )
@@ -86,6 +92,7 @@ class TestEngineVersion:
 
 
 # ---- API auth tests ----
+
 
 class TestAdjacencyCredit:
     """Adjacent skill inference — partial credit at graph distances 1 and 2."""
@@ -165,9 +172,7 @@ class TestAdjacencyCredit:
         adjacency = {
             "cap_missing": [("cap_adj", 1)],
         }
-        reasons, _gaps = svc._explain_signals(
-            signals, required, [], profile, adjacency=adjacency
-        )
+        reasons, _gaps = svc._explain_signals(signals, required, [], profile, adjacency=adjacency)
         adj_reasons = [r for r in reasons if r["code"] == "ADJACENT_SKILL"]
         assert len(adj_reasons) == 1
         assert adj_reasons[0]["adjacent_capability_id"] == "cap_adj"
@@ -185,9 +190,7 @@ class TestAdjacencyCredit:
         adjacency = {
             "cap_met": [("cap_adj", 1)],
         }
-        reasons, _gaps = svc._explain_signals(
-            signals, required, [], profile, adjacency=adjacency
-        )
+        reasons, _gaps = svc._explain_signals(signals, required, [], profile, adjacency=adjacency)
         adj_reasons = [r for r in reasons if r["code"] == "ADJACENT_SKILL"]
         assert adj_reasons == [], "No adjacent reason when capability is directly met"
 
@@ -214,9 +217,7 @@ class TestFairnessService:
         from app.talent.services.fairness import FairnessService
 
         svc = FairnessService.__new__(FairnessService)
-        result = asyncio.run(
-            svc.compute_fairness_metrics([])
-        )
+        result = asyncio.run(svc.compute_fairness_metrics([]))
         assert result["status"] == "no_results"
 
     def test_all_excluded_results(self):
@@ -226,9 +227,7 @@ class TestFairnessService:
 
         svc = FairnessService.__new__(FairnessService)
         data = [{"tier": "excluded", "score": 0.0}]
-        result = asyncio.run(
-            svc.compute_fairness_metrics(data)
-        )
+        result = asyncio.run(svc.compute_fairness_metrics(data))
         assert result["status"] == "no_ranked_results"
 
     def test_score_distribution_single(self):
@@ -238,9 +237,7 @@ class TestFairnessService:
 
         svc = FairnessService.__new__(FairnessService)
         data = [{"score": 0.8, "tier": "great", "signals": {"a": 0.8}}]
-        result = asyncio.run(
-            svc.compute_fairness_metrics(data)
-        )
+        result = asyncio.run(svc.compute_fairness_metrics(data))
         assert result["status"] == "computed"
         dist = result["metrics"]["score_distribution"]
         assert dist["count"] == 1
@@ -260,9 +257,7 @@ class TestFairnessService:
             {"score": 0.6, "tier": "good", "signals": {"a": 0.6}},
             {"score": 0.8, "tier": "great", "signals": {"a": 0.8}},
         ]
-        result = asyncio.run(
-            svc.compute_fairness_metrics(data)
-        )
+        result = asyncio.run(svc.compute_fairness_metrics(data))
         dist = result["metrics"]["score_distribution"]
         assert dist["count"] == 4
         assert dist["mean"] == 0.5
@@ -280,9 +275,7 @@ class TestFairnessService:
             {"score": 0.7, "tier": "good", "signals": {"gap": 0.7}},
             {"score": 0.5, "tier": "fair", "signals": {"gap": 0.5}},
         ]
-        result = asyncio.run(
-            svc.compute_fairness_metrics(data)
-        )
+        result = asyncio.run(svc.compute_fairness_metrics(data))
         conc = result["metrics"]["signal_concentration"]
         assert conc["herfindahl_index"] == 1.0
         assert conc["interpretation"] == "high_concentration"
@@ -295,12 +288,18 @@ class TestFairnessService:
 
         svc = FairnessService.__new__(FairnessService)
         data = [
-            {"score": 0.6, "tier": "good", "signals": {"a": 0.2, "b": 0.2, "c": 0.2, "d": 0.2, "e": 0.2}},
-            {"score": 0.5, "tier": "fair", "signals": {"a": 0.2, "b": 0.2, "c": 0.2, "d": 0.2, "e": 0.2}},
+            {
+                "score": 0.6,
+                "tier": "good",
+                "signals": {"a": 0.2, "b": 0.2, "c": 0.2, "d": 0.2, "e": 0.2},
+            },
+            {
+                "score": 0.5,
+                "tier": "fair",
+                "signals": {"a": 0.2, "b": 0.2, "c": 0.2, "d": 0.2, "e": 0.2},
+            },
         ]
-        result = asyncio.run(
-            svc.compute_fairness_metrics(data)
-        )
+        result = asyncio.run(svc.compute_fairness_metrics(data))
         conc = result["metrics"]["signal_concentration"]
         assert conc["herfindahl_index"] == 0.2  # 5 × (0.2)^2
         assert conc["interpretation"] == "balanced"
@@ -317,9 +316,7 @@ class TestFairnessService:
             {"score": 0.7, "tier": "good", "signals": {}},
             {"score": 0.5, "tier": "fair", "signals": {}},
         ]
-        result = asyncio.run(
-            svc.compute_fairness_metrics(data)
-        )
+        result = asyncio.run(svc.compute_fairness_metrics(data))
         rc = result["metrics"]["rank_consistency"]
         assert rc["violations"] == 0
         assert rc["monotonicity"] == 1.0
@@ -335,9 +332,7 @@ class TestFairnessService:
             {"score": 0.0, "tier": "excluded", "signals": {}},
             {"score": 0.0, "tier": "excluded", "signals": {}},
         ]
-        result = asyncio.run(
-            svc.compute_fairness_metrics(data)
-        )
+        result = asyncio.run(svc.compute_fairness_metrics(data))
         assert result["excluded_count"] == 2
         assert result["result_count"] == 1  # Only 1 non-excluded
 
@@ -348,13 +343,8 @@ class TestFairnessService:
         from app.talent.services.fairness import FairnessService
 
         svc = FairnessService.__new__(FairnessService)
-        data = [
-            {"score": i / 20.0, "tier": "fair", "signals": {}}
-            for i in range(1, 21)
-        ]
-        result = asyncio.run(
-            svc.compute_fairness_metrics(data)
-        )
+        data = [{"score": i / 20.0, "tier": "fair", "signals": {}} for i in range(1, 21)]
+        result = asyncio.run(svc.compute_fairness_metrics(data))
         spread = result["metrics"]["score_spread"]
         assert "top_10_mean" in spread
         assert "bottom_10_mean" in spread
@@ -362,6 +352,7 @@ class TestFairnessService:
 
 
 # ---- API auth tests ----
+
 
 @pytest.mark.asyncio
 async def test_match_candidates_requires_auth(client):

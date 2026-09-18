@@ -41,7 +41,8 @@ class FairnessService:
 
         # Extract scores from ranked results (exclude hard-failed)
         scores = [
-            r["score"] for r in match_results
+            r["score"]
+            for r in match_results
             if r.get("tier") != "excluded" and r.get("score") is not None
         ]
 
@@ -54,7 +55,11 @@ class FairnessService:
         n = len(scores)
         mean = sum(scores) / n
         sorted_scores = sorted(scores)
-        median = sorted_scores[n // 2] if n % 2 else (sorted_scores[n // 2 - 1] + sorted_scores[n // 2]) / 2
+        median = (
+            sorted_scores[n // 2]
+            if n % 2
+            else (sorted_scores[n // 2 - 1] + sorted_scores[n // 2]) / 2
+        )
         variance = sum((s - mean) ** 2 for s in scores) / n if n > 1 else 0
         std = math.sqrt(variance)
 
@@ -62,7 +67,7 @@ class FairnessService:
         skewness = 0.0
         if std > 0 and n > 2:
             m3 = sum((s - mean) ** 3 for s in scores) / n
-            skewness = m3 / (std ** 3)
+            skewness = m3 / (std**3)
 
         metrics["score_distribution"] = {
             "count": n,
@@ -91,14 +96,16 @@ class FairnessService:
             total_signal = sum(signal_sums.values())
             if total_signal > 0:
                 shares = {k: v / total_signal for k, v in signal_sums.items()}
-                hhi = sum(s ** 2 for s in shares.values())
+                hhi = sum(s**2 for s in shares.values())
                 metrics["signal_concentration"] = {
                     "herfindahl_index": round(hhi, 4),
                     "dominant_signal": max(shares, key=shares.get),  # type: ignore[arg-type]
                     "signal_shares": {k: round(v, 4) for k, v in shares.items()},
                     "interpretation": (
-                        "balanced" if hhi < 0.25
-                        else "moderate_concentration" if hhi < 0.5
+                        "balanced"
+                        if hhi < 0.25
+                        else "moderate_concentration"
+                        if hhi < 0.5
                         else "high_concentration"
                     ),
                 }
@@ -107,18 +114,15 @@ class FairnessService:
         if n >= 10:
             top_10_mean = sum(sorted_scores[-10:]) / 10
             bottom_10_mean = sum(sorted_scores[:10]) / 10
-            spread_ratio = (
-                top_10_mean / bottom_10_mean if bottom_10_mean > 0
-                else float("inf")
-            )
+            spread_ratio = top_10_mean / bottom_10_mean if bottom_10_mean > 0 else float("inf")
             metrics["score_spread"] = {
                 "top_10_mean": round(top_10_mean, 4),
                 "bottom_10_mean": round(bottom_10_mean, 4),
                 "spread_ratio": round(spread_ratio, 4) if spread_ratio != float("inf") else None,
             }
         elif n >= 2:
-            top_half = sorted_scores[n // 2:]
-            bottom_half = sorted_scores[:n // 2]
+            top_half = sorted_scores[n // 2 :]
+            bottom_half = sorted_scores[: n // 2]
             top_mean = sum(top_half) / max(len(top_half), 1)
             bottom_mean = sum(bottom_half) / len(bottom_half) if bottom_half else 0
             metrics["score_spread"] = {
@@ -149,7 +153,9 @@ class FairnessService:
             bottom_group = [s for s in scores if s < sorted_scores[int(n * 0.2)]]
             if top_group and bottom_group:
                 top_pass_rate = len([s for s in top_group if s >= threshold]) / len(top_group)
-                bottom_pass_rate = len([s for s in bottom_group if s >= threshold]) / max(len(bottom_group), 1)
+                bottom_pass_rate = len([s for s in bottom_group if s >= threshold]) / max(
+                    len(bottom_group), 1
+                )
                 adverse_impact_ratio = bottom_pass_rate / top_pass_rate if top_pass_rate > 0 else 0
                 metrics["adverse_impact"] = {
                     "ratio": round(adverse_impact_ratio, 4),
@@ -158,8 +164,7 @@ class FairnessService:
                     "top_quintile_pass_rate": round(top_pass_rate, 4),
                     "bottom_quintile_pass_rate": round(bottom_pass_rate, 4),
                     "interpretation": (
-                        "compliant" if adverse_impact_ratio >= 0.8
-                        else "potential_adverse_impact"
+                        "compliant" if adverse_impact_ratio >= 0.8 else "potential_adverse_impact"
                     ),
                 }
 

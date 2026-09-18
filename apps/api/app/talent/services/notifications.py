@@ -80,9 +80,7 @@ class TalentNotificationService:
 
         Returns (notifications, has_more).
         """
-        q = select(TalentNotification).where(
-            TalentNotification.user_id == user_id
-        )
+        q = select(TalentNotification).where(TalentNotification.user_id == user_id)
         if unread_only:
             q = q.where(TalentNotification.read_at.is_(None))
         if cursor:
@@ -97,9 +95,7 @@ class TalentNotificationService:
             items = items[:limit]
         return items, has_more
 
-    async def mark_read(
-        self, notification_id: str, user_id: str
-    ) -> TalentNotification | None:
+    async def mark_read(self, notification_id: str, user_id: str) -> TalentNotification | None:
         """Mark a single notification as read."""
         notif = await self.db.get(TalentNotification, notification_id)
         if not notif or notif.user_id != user_id:
@@ -135,14 +131,10 @@ class TalentNotificationService:
         )
         return result.scalar() or 0
 
-    async def get_preferences(
-        self, user_id: str
-    ) -> list[dict]:
+    async def get_preferences(self, user_id: str) -> list[dict]:
         """Get all notification preferences with defaults for missing types."""
         result = await self.db.execute(
-            select(NotificationPreference).where(
-                NotificationPreference.user_id == user_id
-            )
+            select(NotificationPreference).where(NotificationPreference.user_id == user_id)
         )
         existing = {p.event_type: p for p in result.scalars().all()}
 
@@ -150,22 +142,24 @@ class TalentNotificationService:
         for event_type in sorted(NOTIFICATION_EVENT_TYPES):
             if event_type in existing:
                 p = existing[event_type]
-                prefs.append({
-                    "event_type": event_type,
-                    "channel": p.channel,
-                    "enabled": p.enabled,
-                })
+                prefs.append(
+                    {
+                        "event_type": event_type,
+                        "channel": p.channel,
+                        "enabled": p.enabled,
+                    }
+                )
             else:
-                prefs.append({
-                    "event_type": event_type,
-                    "channel": _DEFAULT_CHANNEL,
-                    "enabled": True,
-                })
+                prefs.append(
+                    {
+                        "event_type": event_type,
+                        "channel": _DEFAULT_CHANNEL,
+                        "enabled": True,
+                    }
+                )
         return prefs
 
-    async def update_preferences(
-        self, user_id: str, preferences: list[dict]
-    ) -> list[dict]:
+    async def update_preferences(self, user_id: str, preferences: list[dict]) -> list[dict]:
         """Bulk update notification preferences.
 
         Each dict: {"event_type": str, "enabled": bool, "channel": str?}

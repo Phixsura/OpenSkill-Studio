@@ -42,6 +42,7 @@ class TestConstants:
 class TestEdgeTypes:
     def test_edge_types_exist(self):
         from app.talent.models.capability import EDGE_TYPES
+
         assert "requires" in EDGE_TYPES
         assert "related_to" in EDGE_TYPES
         assert "specializes" in EDGE_TYPES
@@ -51,6 +52,7 @@ class TestEdgeTypes:
 
     def test_mapping_source_types(self):
         from app.talent.models.capability import MAPPING_SOURCE_TYPES
+
         assert "skill" in MAPPING_SOURCE_TYPES
         assert "skill_pack" in MAPPING_SOURCE_TYPES
         assert "assessment_blueprint" in MAPPING_SOURCE_TYPES

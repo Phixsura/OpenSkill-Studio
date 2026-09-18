@@ -128,9 +128,7 @@ class TeamAnalyticsService:
         if not member_ids:
             return []
 
-        matrix: dict[str, dict] = defaultdict(
-            lambda: {"capability_name": "", "members": []}
-        )
+        matrix: dict[str, dict] = defaultdict(lambda: {"capability_name": "", "members": []})
 
         for user_id in member_ids:
             profile = await compute_capability_profile(
@@ -187,9 +185,7 @@ class TeamAnalyticsService:
 
         cap_ids = [r.get("capability_id", "") for r in required_caps if r.get("capability_id")]
         for user_id in member_ids:
-            profile = await compute_capability_profile(
-                self.db, user_id, capability_ids=cap_ids
-            )
+            profile = await compute_capability_profile(self.db, user_id, capability_ids=cap_ids)
             for score in profile:
                 team_levels[score.capability_id] = max(
                     team_levels[score.capability_id], score.level
@@ -238,9 +234,7 @@ class TeamAnalyticsService:
         result = await self.db.execute(q)
         return [row[0] for row in result.all()]
 
-    async def _find_org_gaps(
-        self, org_id: str, team_cap_ids: set[str]
-    ) -> list[str]:
+    async def _find_org_gaps(self, org_id: str, team_cap_ids: set[str]) -> list[str]:
         """Find capabilities required by org's open opportunities but not in team."""
         q = select(Opportunity.required_capabilities).where(
             Opportunity.employer_org_id == org_id,

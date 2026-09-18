@@ -136,12 +136,14 @@ def compute_profile_completeness(
             score += item.get("weight", "")
             completed.append(key)
         else:
-            missing.append({
-                "key": key,
-                "label": item.get("label", ""),
-                "weight": item.get("weight", ""),
-                "action": item.get("action", ""),
-            })
+            missing.append(
+                {
+                    "key": key,
+                    "label": item.get("label", ""),
+                    "weight": item.get("weight", ""),
+                    "action": item.get("action", ""),
+                }
+            )
 
     level = _determine_level(score)
     return CompletenessResult(

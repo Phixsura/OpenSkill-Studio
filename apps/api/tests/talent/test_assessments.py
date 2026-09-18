@@ -56,6 +56,7 @@ class TestBlueprintStatusTransitions:
 
 # ---- API auth tests ----
 
+
 @pytest.mark.asyncio
 async def test_create_blueprint_requires_auth(client):
     response = await client.post(

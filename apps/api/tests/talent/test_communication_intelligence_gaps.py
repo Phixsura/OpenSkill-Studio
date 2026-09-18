@@ -20,11 +20,14 @@ class TestEmailTemplates:
         assert len(templates) >= 7
 
     def test_render(self):
-        result = render_email_template("credential_issued", {
-            "candidate_name": "Alice",
-            "credential_type": "AI Visual — Foundation",
-            "credential_url": "https://example.com/cred/1",
-        })
+        result = render_email_template(
+            "credential_issued",
+            {
+                "candidate_name": "Alice",
+                "credential_type": "AI Visual — Foundation",
+                "credential_url": "https://example.com/cred/1",
+            },
+        )
         assert result is not None
         assert "Alice" in result["body"]
         assert "AI Visual" in result["body"]

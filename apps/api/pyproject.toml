@@ -48,6 +48,9 @@ ignore = ["E501", "B008", "UP046", "UP042", "SIM117"]
 # R202: standalone dev tool (CLI mutation harness), not a test module —
 # compact multi-statement AST-dispatch style is intentional.
 "tests/tools_ast_mutate.py" = ["E701", "E702", "RUF001", "RUF003"]
+# Section-scoped imports in large test files for readability
+"tests/talent/test_z_services_comprehensive.py" = ["E402"]
+"tests/talent/test_z_api_endpoints_comprehensive.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

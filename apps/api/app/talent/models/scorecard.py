@@ -46,9 +46,7 @@ class ScorecardTemplate(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     criteria: Mapped[list] = mapped_column(JSONB, default=list, server_default="'[]'")
     status: Mapped[str] = mapped_column(String(20), default="active", server_default="'active'")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -85,12 +83,8 @@ class InterviewScorecard(Base):
     overall_rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     recommendation: Mapped[str | None] = mapped_column(String(30), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    submitted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

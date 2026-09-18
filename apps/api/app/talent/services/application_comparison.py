@@ -112,9 +112,7 @@ class ApplicationComparisonService:
             # Interview scorecard ratings
             from app.talent.models.application import InterviewStage
 
-            stage_q = select(InterviewStage.id).where(
-                InterviewStage.application_id == app.id
-            )
+            stage_q = select(InterviewStage.id).where(InterviewStage.application_id == app.id)
             stage_result = await self.db.execute(stage_q)
             stage_ids = [r[0] for r in stage_result.all()]
 
@@ -160,7 +158,11 @@ class ApplicationComparisonService:
                 if comp.capability_scores
                 else 0
             )
-            comp_score = avg_cap * 0.5 + min(comp.credential_count / 5, 1) * 0.2 + min(comp.evidence_count / 20, 1) * 0.3
+            comp_score = (
+                avg_cap * 0.5
+                + min(comp.credential_count / 5, 1) * 0.2
+                + min(comp.evidence_count / 20, 1) * 0.3
+            )
             comp.match_score = comp.match_score or round(comp_score, 3)
 
         # Sort by match_score descending and assign ranks

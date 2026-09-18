@@ -38,11 +38,17 @@ class TalentPool(Base):
     # For rule_suggested: {"min_level": 3, "capabilities": ["01J..."], ...}
     rule_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # internal | shared (visible to member candidates)
-    visibility: Mapped[str] = mapped_column(String(20), default="internal", server_default="'internal'")
+    visibility: Mapped[str] = mapped_column(
+        String(20), default="internal", server_default="'internal'"
+    )
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -59,9 +65,7 @@ class TalentPoolMembership(Base):
     pool_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("talent_pools.id", ondelete="CASCADE")
     )
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     # manual_added | rule_suggested | opted_in
     source: Mapped[str] = mapped_column(String(20))
     # pending_consent | accepted | declined
@@ -71,7 +75,11 @@ class TalentPoolMembership(Base):
     added_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("uq_pool_member", "pool_id", "user_id", unique=True),
@@ -88,9 +96,7 @@ class TalentOutreach(Base):
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")
     )
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     # opportunity_invitation | pool_invitation
     outreach_type: Mapped[str] = mapped_column(String(30))
     target_type: Mapped[str] = mapped_column(String(20))
@@ -98,10 +104,16 @@ class TalentOutreach(Base):
     # sent | viewed | accepted | declined | expired
     status: Mapped[str] = mapped_column(String(20), default="sent", server_default="'sent'")
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now())
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("ix_outreach_user", "user_id", "status"),

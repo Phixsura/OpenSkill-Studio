@@ -31,7 +31,11 @@ class TestLLMReadyExtraction:
 # Gap #2: ESCO/O*NET import
 class TestESCOImport:
     def test_parse_esco_row(self):
-        row = {"conceptUri": "http://esco/123", "preferredLabel": "Python", "description": "Programming"}
+        row = {
+            "conceptUri": "http://esco/123",
+            "preferredLabel": "Python",
+            "description": "Programming",
+        }
         result = parse_esco_csv_row(row)
         assert result is not None
         assert result["canonical_name"] == "Python"
@@ -103,6 +107,7 @@ class TestVersionHistory:
 
 # Gap #9: Co-occurrence — tested via API integration
 
+
 # Gap #11: Industry taxonomies
 class TestIndustryTaxonomies:
     def test_list_industries(self):
@@ -124,22 +129,28 @@ class TestIndustryTaxonomies:
 class TestMappingConfidence:
     def test_high_confidence(self):
         score = compute_mapping_confidence(
-            contribution_weight=0.9, evidence_type="assessment",
-            has_assessment=True, evidence_count=20,
+            contribution_weight=0.9,
+            evidence_type="assessment",
+            has_assessment=True,
+            evidence_count=20,
         )
         assert score > 0.7
 
     def test_low_confidence(self):
         score = compute_mapping_confidence(
-            contribution_weight=0.1, evidence_type="self_declared",
-            has_assessment=False, evidence_count=0,
+            contribution_weight=0.1,
+            evidence_type="self_declared",
+            has_assessment=False,
+            evidence_count=0,
         )
         assert score < 0.3
 
     def test_range(self):
         score = compute_mapping_confidence(
-            contribution_weight=0.5, evidence_type="primary_instruction",
-            has_assessment=False, evidence_count=5,
+            contribution_weight=0.5,
+            evidence_type="primary_instruction",
+            has_assessment=False,
+            evidence_count=5,
         )
         assert 0 <= score <= 1
 
@@ -160,6 +171,7 @@ class TestMultiLangSearch:
 
 
 # Gap #15: Edge strength — tested via API
+
 
 # Gap #17: API versioning
 class TestAPIVersioning:
@@ -197,21 +209,25 @@ class TestNormalization:
 class TestGovernance:
     def test_validate_valid(self):
         errors = validate_governance_request(
-            action="create", capability_name="New Skill",
+            action="create",
+            capability_name="New Skill",
             justification="Needed for AI training programs",
         )
         assert len(errors) == 0
 
     def test_validate_invalid_action(self):
         errors = validate_governance_request(
-            action="invalid", capability_name="X",
+            action="invalid",
+            capability_name="X",
             justification="Short but ok for test",
         )
         assert any("action" in e.lower() for e in errors)
 
     def test_validate_short_justification(self):
         errors = validate_governance_request(
-            action="create", capability_name="X", justification="short",
+            action="create",
+            capability_name="X",
+            justification="short",
         )
         assert any("justification" in e.lower() for e in errors)
 

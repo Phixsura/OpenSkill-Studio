@@ -69,6 +69,7 @@ class TestVerificationModel:
 
 # ---- API auth tests ----
 
+
 @pytest.mark.asyncio
 async def test_create_verification_requires_auth(client):
     response = await client.post(

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 # ---- Intelligence endpoints ----
 
+
 class ScreeningRulesRequest(BaseModel):
     rules: list[dict] = Field(default_factory=list, max_length=50)
     candidate_data: dict = Field(default_factory=dict)
@@ -138,6 +139,7 @@ class CalibrationValidationRequest(BaseModel):
 
 
 # ---- Other endpoints ----
+
 
 class SnapshotCompareRequest(BaseModel):
     snapshot_a_id: str = Field(..., min_length=1, max_length=26)

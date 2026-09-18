@@ -14,10 +14,17 @@ svc = PortfolioShowcaseService()
 
 def _item(**kw) -> PortfolioItem:
     defaults = {
-        "id": "i1", "user_id": "u1", "item_type": "project",
-        "title": "Test", "description": "Desc", "url": "https://example.com",
-        "image_url": None, "capability_ids": ["c1"],
-        "visibility": "public", "pinned": False, "sort_order": 0,
+        "id": "i1",
+        "user_id": "u1",
+        "item_type": "project",
+        "title": "Test",
+        "description": "Desc",
+        "url": "https://example.com",
+        "image_url": None,
+        "capability_ids": ["c1"],
+        "visibility": "public",
+        "pinned": False,
+        "sort_order": 0,
         "created_at": datetime.now(UTC),
     }
     defaults.update(kw)
@@ -43,7 +50,13 @@ class TestAssessQuality:
 
     def test_good_portfolio(self):
         items = [
-            _item(id="1", item_type="commercial_deliverable", url="https://a.com", image_url="https://img.com", capability_ids=["c1", "c2"]),
+            _item(
+                id="1",
+                item_type="commercial_deliverable",
+                url="https://a.com",
+                image_url="https://img.com",
+                capability_ids=["c1", "c2"],
+            ),
             _item(id="2", item_type="open_source", url="https://b.com", capability_ids=["c3"]),
             _item(id="3", url="https://c.com", capability_ids=["c4", "c5"]),
             _item(id="4", url="https://d.com", capability_ids=["c6"]),

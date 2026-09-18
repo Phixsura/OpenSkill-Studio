@@ -1,6 +1,5 @@
 """Skill inference API — extract capabilities from free text."""
 
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 

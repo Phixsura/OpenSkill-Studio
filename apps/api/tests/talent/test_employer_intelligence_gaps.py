@@ -28,15 +28,27 @@ class TestOfferHTML:
         assert "AI Designer" in html
 
     def test_with_conditions(self):
-        html = generate_offer_html({"role_title": "Dev", "conditions": ["Background check", "Drug test"]})
+        html = generate_offer_html(
+            {"role_title": "Dev", "conditions": ["Background check", "Drug test"]}
+        )
         assert "Background check" in html
 
 
 class TestOfferComparison:
     def test_compare(self):
         offers = [
-            {"role_title": "A", "compensation_text": "$50k", "start_date": "2026-03-01", "conditions": ["a"]},
-            {"role_title": "B", "compensation_text": "$60k-$70k", "start_date": "2026-02-01", "conditions": []},
+            {
+                "role_title": "A",
+                "compensation_text": "$50k",
+                "start_date": "2026-03-01",
+                "conditions": ["a"],
+            },
+            {
+                "role_title": "B",
+                "compensation_text": "$60k-$70k",
+                "start_date": "2026-02-01",
+                "conditions": [],
+            },
         ]
         result = compare_offers(offers)
         assert result.fewest_conditions == 0
@@ -89,16 +101,22 @@ class TestCustomPipeline:
 
 class TestPoolRules:
     def test_evaluate_pass(self):
-        assert evaluate_pool_rule(
-            {"rule_type": "min_capability_level", "field": "level", "value": 3},
-            {"level": 4},
-        ) is True
+        assert (
+            evaluate_pool_rule(
+                {"rule_type": "min_capability_level", "field": "level", "value": 3},
+                {"level": 4},
+            )
+            is True
+        )
 
     def test_evaluate_fail(self):
-        assert evaluate_pool_rule(
-            {"rule_type": "min_capability_level", "field": "level", "value": 5},
-            {"level": 2},
-        ) is False
+        assert (
+            evaluate_pool_rule(
+                {"rule_type": "min_capability_level", "field": "level", "value": 5},
+                {"level": 2},
+            )
+            is False
+        )
 
     def test_evaluate_all(self):
         rules = [{"rule_type": "min_capability_level", "field": "level", "value": 2}]
@@ -146,11 +164,18 @@ class TestRelationshipTimeline:
 
 class TestRequisitionApproval:
     def test_valid(self):
-        req = {"title": "Senior Dev", "department": "Engineering", "justification": "Team growth needed for Q3 deliverables", "headcount": 2}
+        req = {
+            "title": "Senior Dev",
+            "department": "Engineering",
+            "justification": "Team growth needed for Q3 deliverables",
+            "headcount": 2,
+        }
         assert validate_requisition(req) == []
 
     def test_missing_title(self):
-        errors = validate_requisition({"department": "Eng", "justification": "Need more people for projects", "headcount": 1})
+        errors = validate_requisition(
+            {"department": "Eng", "justification": "Need more people for projects", "headcount": 1}
+        )
         assert any("title" in e.lower() for e in errors)
 
     def test_statuses(self):

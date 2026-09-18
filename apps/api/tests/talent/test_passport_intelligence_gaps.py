@@ -16,9 +16,19 @@ from app.talent.services.passport_intelligence import (
 # Gap #36: PDF export
 class TestPDFExport:
     def test_generates_html(self):
-        html = generate_passport_html({"capabilities": [
-            {"capability_name": "AI Design", "level": 4, "level_label": "Commercial", "score": 0.84, "evidence_count": 10},
-        ]})
+        html = generate_passport_html(
+            {
+                "capabilities": [
+                    {
+                        "capability_name": "AI Design",
+                        "level": 4,
+                        "level_label": "Commercial",
+                        "score": 0.84,
+                        "evidence_count": 10,
+                    },
+                ]
+            }
+        )
         assert "<html>" in html
         assert "AI Design" in html
         assert "L4" in html
@@ -44,20 +54,36 @@ class TestQRCode:
 class TestSnapshotComparison:
     def test_added_capability(self):
         a = {"capabilities": []}
-        b = {"capabilities": [{"capability_id": "c1", "capability_name": "AI", "level": 3, "score": 0.7}]}
+        b = {
+            "capabilities": [
+                {"capability_id": "c1", "capability_name": "AI", "level": 3, "score": 0.7}
+            ]
+        }
         diff = compare_passport_snapshots(a, b)
         assert len(diff["added"]) == 1
         assert diff["added"][0]["new_level"] == 3
 
     def test_removed_capability(self):
-        a = {"capabilities": [{"capability_id": "c1", "capability_name": "AI", "level": 3, "score": 0.7}]}
+        a = {
+            "capabilities": [
+                {"capability_id": "c1", "capability_name": "AI", "level": 3, "score": 0.7}
+            ]
+        }
         b = {"capabilities": []}
         diff = compare_passport_snapshots(a, b)
         assert len(diff["removed"]) == 1
 
     def test_changed_level(self):
-        a = {"capabilities": [{"capability_id": "c1", "capability_name": "AI", "level": 2, "score": 0.5}]}
-        b = {"capabilities": [{"capability_id": "c1", "capability_name": "AI", "level": 4, "score": 0.8}]}
+        a = {
+            "capabilities": [
+                {"capability_id": "c1", "capability_name": "AI", "level": 2, "score": 0.5}
+            ]
+        }
+        b = {
+            "capabilities": [
+                {"capability_id": "c1", "capability_name": "AI", "level": 4, "score": 0.8}
+            ]
+        }
         diff = compare_passport_snapshots(a, b)
         assert len(diff["changed"]) == 1
         assert diff["changed"][0]["score_delta"] > 0
@@ -147,9 +173,15 @@ class TestRevisionHistory:
     def test_multiple_snapshots(self):
         snapshots = [
             {"id": "s1", "issued_at": "2026-01-01", "payload": {"capabilities": []}},
-            {"id": "s2", "issued_at": "2026-02-01", "payload": {"capabilities": [
-                {"capability_id": "c1", "capability_name": "AI", "level": 3, "score": 0.7},
-            ]}},
+            {
+                "id": "s2",
+                "issued_at": "2026-02-01",
+                "payload": {
+                    "capabilities": [
+                        {"capability_id": "c1", "capability_name": "AI", "level": 3, "score": 0.7},
+                    ]
+                },
+            },
         ]
         revisions = compute_revision_summary(snapshots)
         assert len(revisions) == 2

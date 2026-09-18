@@ -75,6 +75,7 @@ class TestOutcomeEventTypes:
 
 # ---- API auth tests ----
 
+
 @pytest.mark.asyncio
 async def test_create_supervision_requires_auth(client):
     response = await client.post(

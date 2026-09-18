@@ -22,7 +22,11 @@ from app.talent.services.interview_intelligence import (
 
 class TestQuestionBank:
     def test_valid_item(self):
-        item = {"question_text": "Explain polymorphism in OOP", "category": "knowledge", "difficulty": "medium"}
+        item = {
+            "question_text": "Explain polymorphism in OOP",
+            "category": "knowledge",
+            "difficulty": "medium",
+        }
         assert validate_question_bank_item(item) == []
 
     def test_short_text(self):
@@ -30,7 +34,9 @@ class TestQuestionBank:
         assert len(errors) > 0
 
     def test_invalid_category(self):
-        errors = validate_question_bank_item({"question_text": "Valid question text here", "category": "invalid"})
+        errors = validate_question_bank_item(
+            {"question_text": "Valid question text here", "category": "invalid"}
+        )
         assert any("category" in e.lower() for e in errors)
 
     def test_categories(self):

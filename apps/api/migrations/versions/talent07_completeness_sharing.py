@@ -4,8 +4,8 @@ Revision ID: talent07a00007
 Revises: talent06a00006
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "talent07a00007"

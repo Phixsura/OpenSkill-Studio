@@ -12,6 +12,7 @@ from dataclasses import dataclass
 # Gap #151: Read receipt visibility
 # ---------------------------------------------------------------------------
 
+
 def format_read_receipt(message: dict) -> dict:
     """Format read receipt data for display to sender."""
     return {
@@ -33,15 +34,15 @@ def detect_language(text: str) -> str:
     """Simple language detection heuristic (placeholder for ML-based detection)."""
     # CJK character ranges
     for ch in text[:100]:
-        if '一' <= ch <= '鿿':
+        if "一" <= ch <= "鿿":
             return "zh"
-        if '぀' <= ch <= 'ゟ' or '゠' <= ch <= 'ヿ':
+        if "぀" <= ch <= "ゟ" or "゠" <= ch <= "ヿ":
             return "ja"
-        if '가' <= ch <= '힯':
+        if "가" <= ch <= "힯":
             return "ko"
-        if '؀' <= ch <= 'ۿ':
+        if "؀" <= ch <= "ۿ":
             return "ar"
-        if 'ऀ' <= ch <= 'ॿ':
+        if "ऀ" <= ch <= "ॿ":
             return "hi"
     return "en"
 
@@ -56,7 +57,9 @@ def translation_placeholder(text: str, target_lang: str) -> dict:
         "source_language": source,
         "target_language": target_lang,
         "translated": source == target_lang,
-        "text": text if source == target_lang else f"[Translation to {target_lang} requires API integration]",
+        "text": text
+        if source == target_lang
+        else f"[Translation to {target_lang} requires API integration]",
         "provider": None,
     }
 
@@ -65,12 +68,21 @@ def translation_placeholder(text: str, target_lang: str) -> dict:
 # Gap #156: Custom report builder
 # ---------------------------------------------------------------------------
 
-REPORT_TYPES = frozenset({
-    "hiring_funnel", "skill_distribution", "placement_outcomes",
-    "evidence_growth", "capability_coverage", "employer_activity",
-    "candidate_pipeline", "credential_issuance", "workforce_gap",
-    "team_skills", "diversity_pipeline",
-})
+REPORT_TYPES = frozenset(
+    {
+        "hiring_funnel",
+        "skill_distribution",
+        "placement_outcomes",
+        "evidence_growth",
+        "capability_coverage",
+        "employer_activity",
+        "candidate_pipeline",
+        "credential_issuance",
+        "workforce_gap",
+        "team_skills",
+        "diversity_pipeline",
+    }
+)
 
 REPORT_FORMATS = frozenset({"json", "csv", "html"})
 
@@ -103,6 +115,7 @@ def validate_report_config(config: dict) -> list[str]:
 # Gap #159: Cohort analysis
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class CohortComparison:
     cohort_a: str
@@ -115,17 +128,23 @@ class CohortComparison:
 
 
 def compare_cohorts(
-    cohort_a_name: str, cohort_a_value: float,
-    cohort_b_name: str, cohort_b_value: float,
+    cohort_a_name: str,
+    cohort_a_value: float,
+    cohort_b_name: str,
+    cohort_b_value: float,
     metric: str,
 ) -> CohortComparison:
     delta = cohort_b_value - cohort_a_value
     avg = (cohort_a_value + cohort_b_value) / 2 if (cohort_a_value + cohort_b_value) > 0 else 1
     pct_diff = abs(delta) / avg
     return CohortComparison(
-        cohort_a=cohort_a_name, cohort_b=cohort_b_name,
-        metric=metric, value_a=cohort_a_value, value_b=cohort_b_value,
-        delta=round(delta, 3), significant=pct_diff > 0.10,
+        cohort_a=cohort_a_name,
+        cohort_b=cohort_b_name,
+        metric=metric,
+        value_a=cohort_a_value,
+        value_b=cohort_b_value,
+        delta=round(delta, 3),
+        significant=pct_diff > 0.10,
     )
 
 
@@ -133,11 +152,20 @@ def compare_cohorts(
 # Gap #160: Funnel drop-off with reasons
 # ---------------------------------------------------------------------------
 
-DROP_OFF_REASONS = frozenset({
-    "unresponsive", "withdrew", "rejected_skills", "rejected_culture",
-    "rejected_compensation", "failed_assessment", "no_show",
-    "position_filled", "budget_cut", "other",
-})
+DROP_OFF_REASONS = frozenset(
+    {
+        "unresponsive",
+        "withdrew",
+        "rejected_skills",
+        "rejected_culture",
+        "rejected_compensation",
+        "failed_assessment",
+        "no_show",
+        "position_filled",
+        "budget_cut",
+        "other",
+    }
+)
 
 
 def categorize_drop_offs(events: list[dict]) -> dict:
@@ -157,11 +185,20 @@ def categorize_drop_offs(events: list[dict]) -> dict:
 # Gap #162: Source attribution tracking
 # ---------------------------------------------------------------------------
 
-SOURCE_CHANNELS = frozenset({
-    "direct", "platform_match", "referral", "career_page",
-    "job_board", "social_media", "email_campaign", "event",
-    "pool_invitation", "other",
-})
+SOURCE_CHANNELS = frozenset(
+    {
+        "direct",
+        "platform_match",
+        "referral",
+        "career_page",
+        "job_board",
+        "social_media",
+        "email_campaign",
+        "event",
+        "pool_invitation",
+        "other",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +213,7 @@ class SourceAttribution:
 def parse_utm_params(url: str) -> dict:
     """Extract UTM parameters from a URL."""
     from urllib.parse import parse_qs, urlparse
+
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
     return {
@@ -192,10 +230,34 @@ def parse_utm_params(url: str) -> dict:
 # ---------------------------------------------------------------------------
 
 INDUSTRY_BENCHMARKS = {
-    "time_to_hire_days": {"tech": 35, "finance": 42, "healthcare": 49, "education": 28, "average": 38},
-    "offer_acceptance_rate": {"tech": 0.72, "finance": 0.68, "healthcare": 0.75, "education": 0.82, "average": 0.74},
-    "interview_to_offer_rate": {"tech": 0.25, "finance": 0.20, "healthcare": 0.30, "education": 0.35, "average": 0.27},
-    "placement_success_rate": {"tech": 0.85, "finance": 0.82, "healthcare": 0.88, "education": 0.90, "average": 0.86},
+    "time_to_hire_days": {
+        "tech": 35,
+        "finance": 42,
+        "healthcare": 49,
+        "education": 28,
+        "average": 38,
+    },
+    "offer_acceptance_rate": {
+        "tech": 0.72,
+        "finance": 0.68,
+        "healthcare": 0.75,
+        "education": 0.82,
+        "average": 0.74,
+    },
+    "interview_to_offer_rate": {
+        "tech": 0.25,
+        "finance": 0.20,
+        "healthcare": 0.30,
+        "education": 0.35,
+        "average": 0.27,
+    },
+    "placement_success_rate": {
+        "tech": 0.85,
+        "finance": 0.82,
+        "healthcare": 0.88,
+        "education": 0.90,
+        "average": 0.86,
+    },
 }
 
 
@@ -221,9 +283,12 @@ def compare_to_benchmark(metric: str, value: float, industry: str = "average") -
         pct = 0
 
     return {
-        "metric": metric, "value": value,
-        "benchmark": benchmark, "industry": industry,
-        "delta": round(diff, 3), "pct_diff": round(pct, 3),
+        "metric": metric,
+        "value": value,
+        "benchmark": benchmark,
+        "industry": industry,
+        "delta": round(diff, 3),
+        "pct_diff": round(pct, 3),
         "comparison": comparison,
     }
 

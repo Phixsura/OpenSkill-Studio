@@ -19,7 +19,11 @@ from app.talent.services.candidate_intelligence import (
 
 class TestAvailability:
     def test_valid(self):
-        pref = {"mode": "available_immediately", "hours_per_week": 40, "remote_preference": "flexible"}
+        pref = {
+            "mode": "available_immediately",
+            "hours_per_week": 40,
+            "remote_preference": "flexible",
+        }
         assert validate_availability_preference(pref) == []
 
     def test_invalid_mode(self):
@@ -69,15 +73,35 @@ class TestSalaryExpectation:
 
 class TestMentorship:
     def test_compatibility_high(self):
-        mentor = {"user_id": "m1", "capability_ids": ["c1", "c2", "c3"], "goals": ["skill_development"], "preferred_format": "video"}
-        mentee = {"user_id": "e1", "capability_ids": ["c1", "c2"], "goals": ["skill_development"], "preferred_format": "video"}
+        mentor = {
+            "user_id": "m1",
+            "capability_ids": ["c1", "c2", "c3"],
+            "goals": ["skill_development"],
+            "preferred_format": "video",
+        }
+        mentee = {
+            "user_id": "e1",
+            "capability_ids": ["c1", "c2"],
+            "goals": ["skill_development"],
+            "preferred_format": "video",
+        }
         match = compute_mentorship_compatibility(mentor, mentee)
         assert match.compatibility_score > 0.7
         assert len(match.shared_capabilities) == 2
 
     def test_compatibility_low(self):
-        mentor = {"user_id": "m1", "capability_ids": ["c1"], "goals": ["leadership"], "preferred_format": "in_person"}
-        mentee = {"user_id": "e1", "capability_ids": ["c5", "c6"], "goals": ["career_guidance"], "preferred_format": "chat"}
+        mentor = {
+            "user_id": "m1",
+            "capability_ids": ["c1"],
+            "goals": ["leadership"],
+            "preferred_format": "in_person",
+        }
+        mentee = {
+            "user_id": "e1",
+            "capability_ids": ["c5", "c6"],
+            "goals": ["career_guidance"],
+            "preferred_format": "chat",
+        }
         match = compute_mentorship_compatibility(mentor, mentee)
         assert match.compatibility_score < 0.4
 
@@ -100,7 +124,13 @@ class TestInterviewPrep:
 
 class TestGamification:
     def test_earned_achievements(self):
-        stats = {"evidence_count": 5, "capability_count": 6, "credential_count": 1, "endorsement_count": 2, "application_count": 3}
+        stats = {
+            "evidence_count": 5,
+            "capability_count": 6,
+            "credential_count": 1,
+            "endorsement_count": 2,
+            "application_count": 3,
+        }
         earned = check_achievements(stats)
         assert any(a["key"] == "first_evidence" for a in earned)
         assert any(a["key"] == "five_capabilities" for a in earned)

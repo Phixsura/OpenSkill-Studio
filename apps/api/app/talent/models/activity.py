@@ -18,28 +18,30 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, ulid_pk
 
-ACTIVITY_ACTION_TYPES = frozenset({
-    "evidence_added",
-    "evidence_voided",
-    "credential_issued",
-    "credential_revoked",
-    "application_submitted",
-    "application_transitioned",
-    "endorsement_received",
-    "endorsement_given",
-    "passport_updated",
-    "passport_snapshot_created",
-    "opportunity_created",
-    "opportunity_updated",
-    "match_generated",
-    "outreach_sent",
-    "outreach_responded",
-    "pool_joined",
-    "pool_left",
-    "interview_scheduled",
-    "scorecard_submitted",
-    "verification_submitted",
-})
+ACTIVITY_ACTION_TYPES = frozenset(
+    {
+        "evidence_added",
+        "evidence_voided",
+        "credential_issued",
+        "credential_revoked",
+        "application_submitted",
+        "application_transitioned",
+        "endorsement_received",
+        "endorsement_given",
+        "passport_updated",
+        "passport_snapshot_created",
+        "opportunity_created",
+        "opportunity_updated",
+        "match_generated",
+        "outreach_sent",
+        "outreach_responded",
+        "pool_joined",
+        "pool_left",
+        "interview_scheduled",
+        "scorecard_submitted",
+        "verification_submitted",
+    }
+)
 
 
 class TalentActivityLog(Base):
@@ -53,15 +55,9 @@ class TalentActivityLog(Base):
     )
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     action_type: Mapped[str] = mapped_column(String(50))
     target_type: Mapped[str] = mapped_column(String(50))
     target_id: Mapped[str] = mapped_column(String(26))
-    extra: Mapped[dict] = mapped_column(
-        "metadata", JSONB, default=dict, server_default="{}"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    extra: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

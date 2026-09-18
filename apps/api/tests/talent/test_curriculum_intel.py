@@ -21,6 +21,7 @@ class TestCoverageMatrix:
 
 # ---- API auth tests ----
 
+
 @pytest.mark.asyncio
 async def test_coverage_endpoint_requires_auth(client):
     response = await client.get("/api/v1/talent/intelligence/coverage")
@@ -30,7 +31,5 @@ async def test_coverage_endpoint_requires_auth(client):
 @pytest.mark.asyncio
 async def test_coverage_with_capability_filter(client):
     """Coverage endpoint supports capability_id filter — still requires auth."""
-    response = await client.get(
-        "/api/v1/talent/intelligence/coverage?capability_id=fake"
-    )
+    response = await client.get("/api/v1/talent/intelligence/coverage?capability_id=fake")
     assert response.status_code == 401

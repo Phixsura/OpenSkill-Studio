@@ -4,8 +4,8 @@ Revision ID: talent12a00012
 Revises: talent11a00011
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "talent12a00012"
 down_revision = "talent11a00011"
@@ -37,9 +37,7 @@ def upgrade() -> None:
             sa.DateTime(timezone=True),
             server_default=sa.func.now(),
         ),
-        sa.UniqueConstraint(
-            "user_id", "opportunity_id", name="uq_user_opportunity_bookmark"
-        ),
+        sa.UniqueConstraint("user_id", "opportunity_id", name="uq_user_opportunity_bookmark"),
     )
 
 

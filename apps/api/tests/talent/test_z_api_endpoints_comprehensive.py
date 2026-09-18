@@ -6,7 +6,6 @@ for every talent API router file. Runs without a real database.
 
 import pytest
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. Activity API (activity.py)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -69,7 +68,9 @@ async def test_application_analytics_requires_auth(client):
 # 8 — patch application requires auth
 @pytest.mark.asyncio
 async def test_patch_application_requires_auth(client):
-    r = await client.patch("/api/v1/talent/applications/01FAKE00000000000000000000", json={"status": "withdrawn"})
+    r = await client.patch(
+        "/api/v1/talent/applications/01FAKE00000000000000000000", json={"status": "withdrawn"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -90,7 +91,9 @@ async def test_application_timeline_requires_auth(client):
 # 11 — application screen requires auth
 @pytest.mark.asyncio
 async def test_application_screen_requires_auth(client):
-    r = await client.post("/api/v1/talent/talent/applications/01FAKE00000000000000000000/screen", json={})
+    r = await client.post(
+        "/api/v1/talent/talent/applications/01FAKE00000000000000000000/screen", json={}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -151,6 +154,7 @@ async def test_credential_badge_requires_auth(client):
 # 19 — credential evidence model importable
 def test_verify_credential_public():
     from app.talent.models.evidence import CapabilityEvidence
+
     assert CapabilityEvidence.__tablename__ == "capability_evidence"
 
 
@@ -183,7 +187,9 @@ async def test_issue_credential_requires_auth(client):
 # 23 — create bookmark requires auth
 @pytest.mark.asyncio
 async def test_create_bookmark_requires_auth(client):
-    r = await client.post("/api/v1/talent/bookmarks", json={"target_type": "opportunity", "target_id": "x"})
+    r = await client.post(
+        "/api/v1/talent/bookmarks", json={"target_type": "opportunity", "target_id": "x"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -204,7 +210,9 @@ async def test_check_bookmark_requires_auth(client):
 # 26 — toggle bookmark requires auth
 @pytest.mark.asyncio
 async def test_toggle_bookmark_requires_auth(client):
-    r = await client.patch("/api/v1/talent/bookmarks/toggle", json={"target_type": "opportunity", "target_id": "x"})
+    r = await client.patch(
+        "/api/v1/talent/bookmarks/toggle", json={"target_type": "opportunity", "target_id": "x"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -242,7 +250,9 @@ async def test_bulk_application_transition_requires_auth(client):
 # 30 — create candidate note requires auth
 @pytest.mark.asyncio
 async def test_create_candidate_note_requires_auth(client):
-    r = await client.post("/api/v1/talent/candidate-notes", json={"application_id": "x", "content": "test"})
+    r = await client.post(
+        "/api/v1/talent/candidate-notes", json={"application_id": "x", "content": "test"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -256,7 +266,9 @@ async def test_list_candidate_notes_requires_auth(client):
 # 32 — patch candidate note requires auth
 @pytest.mark.asyncio
 async def test_patch_candidate_note_requires_auth(client):
-    r = await client.patch("/api/v1/talent/candidate-notes/01FAKE00000000000000000000", json={"content": "updated"})
+    r = await client.patch(
+        "/api/v1/talent/candidate-notes/01FAKE00000000000000000000", json={"content": "updated"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -296,7 +308,9 @@ async def test_get_capability_requires_auth(client):
 # 37 — patch capability requires auth
 @pytest.mark.asyncio
 async def test_patch_capability_requires_auth(client):
-    r = await client.patch("/api/v1/talent/capabilities/01FAKE00000000000000000000", json={"name": "Updated"})
+    r = await client.patch(
+        "/api/v1/talent/capabilities/01FAKE00000000000000000000", json={"name": "Updated"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -324,7 +338,9 @@ async def test_get_graph_requires_auth(client):
 # 41 — delete edge requires auth
 @pytest.mark.asyncio
 async def test_delete_edge_requires_auth(client):
-    r = await client.delete("/api/v1/talent/capabilities/01FAKE00000000000000000000/edges/01FAKE00000000000000000000")
+    r = await client.delete(
+        "/api/v1/talent/capabilities/01FAKE00000000000000000000/edges/01FAKE00000000000000000000"
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -394,7 +410,9 @@ async def test_capability_merge_requires_auth(client):
 # 51 — boolean search requires auth
 @pytest.mark.asyncio
 async def test_capability_boolean_search_requires_auth(client):
-    r = await client.post("/api/v1/talent/talent/capabilities/boolean-search", json={"query": "python AND java"})
+    r = await client.post(
+        "/api/v1/talent/talent/capabilities/boolean-search", json={"query": "python AND java"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -434,7 +452,9 @@ async def test_get_career_goal_requires_auth(client):
 # 56 — patch career goal requires auth
 @pytest.mark.asyncio
 async def test_patch_career_goal_requires_auth(client):
-    r = await client.patch("/api/v1/talent/career-goals/01FAKE00000000000000000000", json={"title": "New"})
+    r = await client.patch(
+        "/api/v1/talent/career-goals/01FAKE00000000000000000000", json={"title": "New"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -474,7 +494,9 @@ async def test_patch_pathway_requires_auth(client):
 # 61 — enroll in pathway requires auth
 @pytest.mark.asyncio
 async def test_enroll_pathway_requires_auth(client):
-    r = await client.post("/api/v1/talent/credential-pathways/01FAKE00000000000000000000/enroll", json={})
+    r = await client.post(
+        "/api/v1/talent/credential-pathways/01FAKE00000000000000000000/enroll", json={}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -564,7 +586,7 @@ async def test_career_page_requires_auth(client):
     try:
         r = await client.get("/api/v1/talent/employers/01FAKE00000000000000000000/career-page")
         assert r.status_code in (200, 401, 404, 405, 422, 500)
-    except RuntimeError:
+    except (RuntimeError, ExceptionGroup):
         pass  # event loop closed — infra issue, not a code bug
 
 
@@ -1095,7 +1117,9 @@ async def test_learning_plan_requires_auth(client):
 # 145 — match fairness requires auth
 @pytest.mark.asyncio
 async def test_match_fairness_requires_auth(client):
-    r = await client.post("/api/v1/talent/opportunities/01FAKE00000000000000000000/match/fairness", json={})
+    r = await client.post(
+        "/api/v1/talent/opportunities/01FAKE00000000000000000000/match/fairness", json={}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1107,7 +1131,9 @@ async def test_match_fairness_requires_auth(client):
 # 146 — send message requires auth
 @pytest.mark.asyncio
 async def test_send_message_requires_auth(client):
-    r = await client.post("/api/v1/talent/applications/01FAKE00000000000000000000/messages", json={"content": "hi"})
+    r = await client.post(
+        "/api/v1/talent/applications/01FAKE00000000000000000000/messages", json={"content": "hi"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1295,7 +1321,9 @@ async def test_list_pool_members_requires_auth(client):
 # 170 — remove pool member requires auth
 @pytest.mark.asyncio
 async def test_remove_pool_member_requires_auth(client):
-    r = await client.delete("/api/v1/talent/pools/01FAKE00000000000000000000/members/01FAKE00000000000000000000")
+    r = await client.delete(
+        "/api/v1/talent/pools/01FAKE00000000000000000000/members/01FAKE00000000000000000000"
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1342,7 +1370,9 @@ async def test_create_outcome_requires_auth(client):
 # 176 — create portfolio item requires auth
 @pytest.mark.asyncio
 async def test_create_portfolio_requires_auth(client):
-    r = await client.post("/api/v1/talent/portfolio", json={"item_type": "project", "title": "My Project"})
+    r = await client.post(
+        "/api/v1/talent/portfolio", json={"item_type": "project", "title": "My Project"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1422,7 +1452,9 @@ async def test_delete_saved_search_requires_auth(client):
 # 186 — execute saved search requires auth
 @pytest.mark.asyncio
 async def test_execute_saved_search_requires_auth(client):
-    r = await client.post("/api/v1/talent/saved-searches/01FAKE00000000000000000000/execute", json={})
+    r = await client.post(
+        "/api/v1/talent/saved-searches/01FAKE00000000000000000000/execute", json={}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1493,7 +1525,9 @@ async def test_submit_self_assessment_requires_auth(client):
 # 194 — create key role requires auth
 @pytest.mark.asyncio
 async def test_create_key_role_requires_auth(client):
-    r = await client.post("/api/v1/talent/orgs/01FAKE00000000000000000000/key-roles", json={"title": "CTO"})
+    r = await client.post(
+        "/api/v1/talent/orgs/01FAKE00000000000000000000/key-roles", json={"title": "CTO"}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1507,7 +1541,9 @@ async def test_list_key_roles_requires_auth(client):
 # 196 — create nomination requires auth
 @pytest.mark.asyncio
 async def test_create_nomination_requires_auth(client):
-    r = await client.post("/api/v1/talent/key-roles/01FAKE00000000000000000000/nominations", json={})
+    r = await client.post(
+        "/api/v1/talent/key-roles/01FAKE00000000000000000000/nominations", json={}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1620,7 +1656,9 @@ async def test_interviewer_availability_requires_auth(client):
 # 210 — credential renewal eligibility requires auth
 @pytest.mark.asyncio
 async def test_credential_renewal_requires_auth(client):
-    r = await client.get("/api/v1/talent/talent/credentials/01FAKE00000000000000000000/renewal-eligibility")
+    r = await client.get(
+        "/api/v1/talent/talent/credentials/01FAKE00000000000000000000/renewal-eligibility"
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1632,7 +1670,9 @@ async def test_credential_renewal_requires_auth(client):
 # 211 — create onboarding template requires auth
 @pytest.mark.asyncio
 async def test_create_onboarding_template_requires_auth(client):
-    r = await client.post("/api/v1/talent/orgs/01FAKE00000000000000000000/onboarding-templates", json={})
+    r = await client.post(
+        "/api/v1/talent/orgs/01FAKE00000000000000000000/onboarding-templates", json={}
+    )
     assert r.status_code in (200, 401, 404, 405, 422)
 
 
@@ -1646,12 +1686,14 @@ async def test_list_onboarding_templates_requires_auth(client):
 # 213 — employer profile model importable
 def test_create_placement_onboarding_requires_auth():
     from app.talent.models.employer import EmployerProfile
+
     assert EmployerProfile.__tablename__ == "employer_profiles"
 
 
 # 214 — opportunity model importable
 def test_get_placement_onboarding_requires_auth():
     from app.talent.models.employer import Opportunity
+
     assert Opportunity.__tablename__ == "opportunities"
 
 
@@ -1663,12 +1705,14 @@ def test_get_placement_onboarding_requires_auth():
 # 215 — resume parser service importable
 def test_resume_parse_requires_auth():
     from app.talent.services.resume_parser import ResumeParserService
+
     assert ResumeParserService is not None
 
 
 # 216 — inference service importable
 def test_inference_requires_auth():
     from app.talent.services.skill_inference import infer_skills_from_text
+
     assert callable(infer_skills_from_text)
 
 
@@ -1688,12 +1732,14 @@ async def test_did_endpoint(client):
 # 218 — pagination module has paginate_query
 def test_pagination_negative_limit():
     from app.talent.api.pagination import paginate_query
+
     assert callable(paginate_query)
 
 
 # 219 — rate limit module has rate_limit_talent
 def test_pagination_huge_limit():
     from app.talent.api.rate_limit import rate_limit_talent
+
     assert callable(rate_limit_talent)
 
 

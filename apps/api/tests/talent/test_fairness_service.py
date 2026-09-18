@@ -13,6 +13,7 @@ class TestFairnessServiceExists:
     def test_requires_db(self):
         """FairnessService.__init__ requires a db parameter."""
         import inspect
+
         sig = inspect.signature(FairnessService.__init__)
         params = list(sig.parameters.keys())
         assert "db" in params

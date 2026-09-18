@@ -18,6 +18,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class StageDropoff:
     """Drop-off analysis per pipeline stage."""
+
     from_stage: str
     to_stage: str
     total_entered: int
@@ -30,6 +31,7 @@ class StageDropoff:
 @dataclass(frozen=True, slots=True)
 class SourceEffectiveness:
     """Application source effectiveness analysis."""
+
     source: str  # platform_match, direct_apply, referral, pool_invitation
     total_applications: int
     interview_rate: float
@@ -41,6 +43,7 @@ class SourceEffectiveness:
 @dataclass(frozen=True, slots=True)
 class CohortOutcomeComparison:
     """Compare outcomes across cohorts/programs (privacy-safe aggregate)."""
+
     cohort_id: str
     cohort_name: str
     sample_size: int
@@ -53,6 +56,7 @@ class CohortOutcomeComparison:
 @dataclass(frozen=True, slots=True)
 class PipelineEquityReport:
     """Full pipeline equity analysis."""
+
     opportunity_id: str | None
     org_id: str | None
     analysis_period_days: int
@@ -64,7 +68,12 @@ class PipelineEquityReport:
 
 
 PIPELINE_STAGES = [
-    "submitted", "screening", "interview", "assessment", "offer", "hired",
+    "submitted",
+    "screening",
+    "interview",
+    "assessment",
+    "offer",
+    "hired",
 ]
 
 MIN_COHORT_SIZE = 10
@@ -72,7 +81,8 @@ MIN_COHORT_SIZE = 10
 
 class DiversityAnalyticsService:
     def compute_stage_dropoffs(
-        self, applications_by_stage: dict[str, int],
+        self,
+        applications_by_stage: dict[str, int],
     ) -> list[StageDropoff]:
         """Compute drop-off between consecutive stages."""
         dropoffs = []
@@ -83,19 +93,22 @@ class DiversityAnalyticsService:
             progressed = applications_by_stage.get(to_stage, 0)
             rate = 1.0 - (progressed / entered) if entered > 0 else 0.0
 
-            dropoffs.append(StageDropoff(
-                from_stage=from_stage,
-                to_stage=to_stage,
-                total_entered=entered,
-                total_progressed=progressed,
-                drop_off_rate=round(rate, 3),
-                avg_days_in_stage=None,
-                variance_days=None,
-            ))
+            dropoffs.append(
+                StageDropoff(
+                    from_stage=from_stage,
+                    to_stage=to_stage,
+                    total_entered=entered,
+                    total_progressed=progressed,
+                    drop_off_rate=round(rate, 3),
+                    avg_days_in_stage=None,
+                    variance_days=None,
+                )
+            )
         return dropoffs
 
     def compute_source_effectiveness(
-        self, applications: list[dict],
+        self,
+        applications: list[dict],
     ) -> list[SourceEffectiveness]:
         """Analyze effectiveness by application source."""
         by_source: dict[str, dict] = {}
@@ -115,14 +128,16 @@ class DiversityAnalyticsService:
         results = []
         for src, data in by_source.items():
             total = data["total"]
-            results.append(SourceEffectiveness(
-                source=src,
-                total_applications=total,
-                interview_rate=round(data["interview"] / total, 3) if total else 0.0,
-                offer_rate=round(data["offer"] / total, 3) if total else 0.0,
-                hire_rate=round(data["hire"] / total, 3) if total else 0.0,
-                avg_time_to_hire_days=None,
-            ))
+            results.append(
+                SourceEffectiveness(
+                    source=src,
+                    total_applications=total,
+                    interview_rate=round(data["interview"] / total, 3) if total else 0.0,
+                    offer_rate=round(data["offer"] / total, 3) if total else 0.0,
+                    hire_rate=round(data["hire"] / total, 3) if total else 0.0,
+                    avg_time_to_hire_days=None,
+                )
+            )
         return results
 
     def compute_equity_flags(

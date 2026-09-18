@@ -36,9 +36,11 @@ def generate_keypair() -> tuple[str, str]:
     private_pem = private_key.private_bytes(
         Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
     ).decode("utf-8")
-    public_pem = private_key.public_key().public_bytes(
-        Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
-    ).decode("utf-8")
+    public_pem = (
+        private_key.public_key()
+        .public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+        .decode("utf-8")
+    )
     return private_pem, public_pem
 
 

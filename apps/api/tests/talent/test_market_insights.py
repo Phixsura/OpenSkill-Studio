@@ -44,8 +44,12 @@ class TestCompensationBenchmark:
 class TestEmployerReputation:
     def test_good_employer(self):
         r = svc.compute_employer_reputation(
-            org_id="o1", total_placements=20, verified_placements=18,
-            avg_duration_days=180, return_candidates=15, total_feedback=20,
+            org_id="o1",
+            total_placements=20,
+            verified_placements=18,
+            avg_duration_days=180,
+            return_candidates=15,
+            total_feedback=20,
             avg_response_hours=4,
         )
         assert r.reputation_score > 70
@@ -53,16 +57,24 @@ class TestEmployerReputation:
 
     def test_new_employer(self):
         r = svc.compute_employer_reputation(
-            org_id="o2", total_placements=1, verified_placements=0,
-            avg_duration_days=None, return_candidates=0, total_feedback=0,
+            org_id="o2",
+            total_placements=1,
+            verified_placements=0,
+            avg_duration_days=None,
+            return_candidates=0,
+            total_feedback=0,
             avg_response_hours=None,
         )
         assert r.reputation_score < 30
 
     def test_verification_rate(self):
         r = svc.compute_employer_reputation(
-            org_id="o3", total_placements=10, verified_placements=5,
-            avg_duration_days=90, return_candidates=3, total_feedback=10,
+            org_id="o3",
+            total_placements=10,
+            verified_placements=5,
+            avg_duration_days=90,
+            return_candidates=3,
+            total_feedback=10,
             avg_response_hours=24,
         )
         assert r.verification_rate == 0.5
@@ -71,8 +83,10 @@ class TestEmployerReputation:
 class TestSkillROI:
     def test_high_roi(self):
         roi = svc.compute_skill_roi(
-            capability_id="c1", capability_name="AI Design",
-            current_opportunities=10, opportunities_with_skill=25,
+            capability_id="c1",
+            capability_name="AI Design",
+            current_opportunities=10,
+            opportunities_with_skill=25,
             avg_learning_weeks=8,
         )
         assert roi.roi_rating == "high"
@@ -80,8 +94,10 @@ class TestSkillROI:
 
     def test_low_roi(self):
         roi = svc.compute_skill_roi(
-            capability_id="c2", capability_name="Basic Typing",
-            current_opportunities=50, opportunities_with_skill=52,
+            capability_id="c2",
+            capability_name="Basic Typing",
+            current_opportunities=50,
+            opportunities_with_skill=52,
             avg_learning_weeks=1,
         )
         assert roi.roi_rating == "low"

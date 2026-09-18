@@ -12,11 +12,18 @@ from datetime import UTC, datetime
 # Gap #181: MFA / sensitive operation confirmation
 # ---------------------------------------------------------------------------
 
-SENSITIVE_OPERATIONS = frozenset({
-    "delete_opportunity", "bulk_reject", "revoke_credential",
-    "delete_evidence", "change_org_role", "export_data",
-    "enforce_retention", "delete_webhook",
-})
+SENSITIVE_OPERATIONS = frozenset(
+    {
+        "delete_opportunity",
+        "bulk_reject",
+        "revoke_credential",
+        "delete_evidence",
+        "change_org_role",
+        "export_data",
+        "enforce_retention",
+        "delete_webhook",
+    }
+)
 
 
 def require_confirmation(operation: str, confirmation_token: str | None) -> dict:
@@ -24,7 +31,11 @@ def require_confirmation(operation: str, confirmation_token: str | None) -> dict
     if operation not in SENSITIVE_OPERATIONS:
         return {"required": False, "operation": operation}
     if not confirmation_token:
-        return {"required": True, "operation": operation, "error": "Confirmation token required for this operation"}
+        return {
+            "required": True,
+            "operation": operation,
+            "error": "Confirmation token required for this operation",
+        }
     return {"required": True, "operation": operation, "confirmed": True}
 
 
@@ -63,8 +74,16 @@ def validate_audit_export_request(req: dict) -> list[str]:
 DATA_CLASSIFICATION_LEVELS = {
     "public": {"level": 0, "label": "Public", "description": "Freely shareable"},
     "internal": {"level": 1, "label": "Internal", "description": "Visible to platform users"},
-    "confidential": {"level": 2, "label": "Confidential", "description": "Restricted to authorized roles"},
-    "restricted": {"level": 3, "label": "Restricted", "description": "Highly sensitive, minimal access"},
+    "confidential": {
+        "level": 2,
+        "label": "Confidential",
+        "description": "Restricted to authorized roles",
+    },
+    "restricted": {
+        "level": 3,
+        "label": "Restricted",
+        "description": "Highly sensitive, minimal access",
+    },
 }
 
 FIELD_CLASSIFICATIONS = {
@@ -92,9 +111,11 @@ def get_field_classification(field_name: str) -> dict:
 # Gap #184: IP allowlist
 # ---------------------------------------------------------------------------
 
+
 def validate_ip_allowlist(ips: list[str]) -> list[str]:
     """Validate IP addresses/CIDR ranges for allowlist."""
     import ipaddress
+
     errors = []
     for ip_str in ips:
         try:
@@ -112,6 +133,7 @@ def check_ip_allowed(client_ip: str, allowlist: list[str]) -> bool:
     if not allowlist:
         return True  # empty list = all allowed
     import ipaddress
+
     try:
         addr = ipaddress.ip_address(client_ip)
     except ValueError:
@@ -161,7 +183,9 @@ def detect_role_escalation(
         "new_role": new_role,
         "actor_role": actor_role,
         "blocked": escalation and not authorized,
-        "reason": "Actor cannot assign a role higher than their own" if escalation and not authorized else None,
+        "reason": "Actor cannot assign a role higher than their own"
+        if escalation and not authorized
+        else None,
     }
 
 
@@ -177,7 +201,10 @@ DEFAULT_FEATURE_FLAGS = {
     "self_assessment": {"enabled": True, "description": "Self-assessment quiz"},
     "gamification": {"enabled": False, "description": "Achievement badges and points"},
     "real_time_messaging": {"enabled": False, "description": "WebSocket-based chat"},
-    "ai_recommendations": {"enabled": False, "description": "AI-powered opportunity recommendations"},
+    "ai_recommendations": {
+        "enabled": False,
+        "description": "AI-powered opportunity recommendations",
+    },
     "video_interviews": {"enabled": False, "description": "Built-in video interview"},
     "advanced_analytics": {"enabled": True, "description": "Advanced analytics dashboards"},
 }
@@ -209,6 +236,7 @@ def list_feature_flags(org_overrides: dict | None = None) -> list[dict]:
 # Gap #193: Health check details
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class HealthCheckResult:
     service: str
@@ -239,11 +267,17 @@ def build_health_report(checks: list[dict]) -> dict:
 # Gap #198: Usage metering per org
 # ---------------------------------------------------------------------------
 
-METERED_OPERATIONS = frozenset({
-    "api_calls", "skill_inferences", "match_runs",
-    "credential_issuances", "webhook_deliveries",
-    "file_uploads", "report_generations",
-})
+METERED_OPERATIONS = frozenset(
+    {
+        "api_calls",
+        "skill_inferences",
+        "match_runs",
+        "credential_issuances",
+        "webhook_deliveries",
+        "file_uploads",
+        "report_generations",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,13 +325,15 @@ def build_isolation_test_suite() -> list[dict]:
     for check in ISOLATION_CHECKS:
         parts = check.split("_")
         entity = "_".join(parts[2:-1])
-        tests.append({
-            "test_id": check,
-            "description": f"Verify user from org A cannot access {entity} from org B",
-            "entity": entity,
-            "expected_result": "404 or 403",
-            "category": "authorization",
-        })
+        tests.append(
+            {
+                "test_id": check,
+                "description": f"Verify user from org A cannot access {entity} from org B",
+                "entity": entity,
+                "expected_result": "404 or 403",
+                "category": "authorization",
+            }
+        )
     return tests
 
 

@@ -33,22 +33,18 @@ class ApplicationFeedbackService:
     ) -> ApplicationFeedback:
         if feedback_type not in FEEDBACK_TYPES:
             raise ValueError(
-                f"Invalid feedback_type: {feedback_type}. "
-                f"Must be one of {sorted(FEEDBACK_TYPES)}"
+                f"Invalid feedback_type: {feedback_type}. Must be one of {sorted(FEEDBACK_TYPES)}"
             )
         if visibility not in FEEDBACK_VISIBILITY:
             raise ValueError(
-                f"Invalid visibility: {visibility}. "
-                f"Must be one of {sorted(FEEDBACK_VISIBILITY)}"
+                f"Invalid visibility: {visibility}. Must be one of {sorted(FEEDBACK_VISIBILITY)}"
             )
 
         # For rejection_reason, application must be in rejected status
         if feedback_type == "rejection_reason":
             app = await self.db.get(Application, application_id)
             if not app or app.status != "rejected":
-                raise ValueError(
-                    "Rejection reason can only be added to rejected applications"
-                )
+                raise ValueError("Rejection reason can only be added to rejected applications")
 
         feedback = ApplicationFeedback(
             application_id=application_id,
@@ -73,13 +69,9 @@ class ApplicationFeedbackService:
         - Employer org members see all feedback.
         - Candidates only see 'shared_with_candidate' feedback.
         """
-        q = select(ApplicationFeedback).where(
-            ApplicationFeedback.application_id == application_id
-        )
+        q = select(ApplicationFeedback).where(ApplicationFeedback.application_id == application_id)
         if not is_employer:
-            q = q.where(
-                ApplicationFeedback.visibility == "shared_with_candidate"
-            )
+            q = q.where(ApplicationFeedback.visibility == "shared_with_candidate")
         q = q.order_by(ApplicationFeedback.created_at.desc())
         result = await self.db.execute(q)
         return list(result.scalars().all())
@@ -93,8 +85,7 @@ class ApplicationFeedbackService:
         """Update feedback visibility. Only the author can change this."""
         if visibility not in FEEDBACK_VISIBILITY:
             raise ValueError(
-                f"Invalid visibility: {visibility}. "
-                f"Must be one of {sorted(FEEDBACK_VISIBILITY)}"
+                f"Invalid visibility: {visibility}. Must be one of {sorted(FEEDBACK_VISIBILITY)}"
             )
 
         feedback = await self.db.get(ApplicationFeedback, feedback_id)

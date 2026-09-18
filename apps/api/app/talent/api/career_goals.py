@@ -66,9 +66,7 @@ async def list_goals(
     from app.talent.services.career_goals import CareerGoalService
 
     svc = CareerGoalService(db)
-    items, has_more = await svc.list_goals(
-        user.id, status=status, cursor=cursor, limit=limit
-    )
+    items, has_more = await svc.list_goals(user.id, status=status, cursor=cursor, limit=limit)
     next_cursor = items[-1].id if has_more and items else None
     return CursorListResponse(
         data=[GoalResponse.model_validate(g) for g in items],
@@ -109,9 +107,7 @@ async def update_goal(
     from app.talent.services.career_goals import CareerGoalService
 
     svc = CareerGoalService(db)
-    updated = await svc.update_goal(
-        goal_id, user.id, **body.model_dump(exclude_unset=True)
-    )
+    updated = await svc.update_goal(goal_id, user.id, **body.model_dump(exclude_unset=True))
     if not updated:
         raise HTTPException(404, "Goal not found")
     await db.commit()

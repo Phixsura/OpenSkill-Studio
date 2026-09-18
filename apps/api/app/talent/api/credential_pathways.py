@@ -123,9 +123,7 @@ async def update_pathway(
     await require_org_member(pathway.org_id, user, db)
 
     try:
-        updated = await svc.update_pathway(
-            pathway_id, **body.model_dump(exclude_unset=True)
-        )
+        updated = await svc.update_pathway(pathway_id, **body.model_dump(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
 
@@ -185,10 +183,12 @@ async def check_and_issue(
     if credential:
         await db.commit()
         await db.refresh(credential)
-        return DataResponse(data={
-            "issued": True,
-            "credential_id": credential.id,
-            "credential_type": credential.credential_type,
-        })
+        return DataResponse(
+            data={
+                "issued": True,
+                "credential_id": credential.id,
+                "credential_type": credential.credential_type,
+            }
+        )
     progress = await svc.check_pathway_completion(user.id, pathway_id)
     return DataResponse(data={"issued": False, **progress})

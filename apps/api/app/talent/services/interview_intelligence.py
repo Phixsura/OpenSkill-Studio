@@ -12,9 +12,15 @@ from datetime import UTC, datetime, timedelta
 # Gap #51: Assessment question bank
 # ---------------------------------------------------------------------------
 
-QUESTION_CATEGORIES = frozenset({
-    "knowledge", "practical", "scenario", "behavioral", "technical",
-})
+QUESTION_CATEGORIES = frozenset(
+    {
+        "knowledge",
+        "practical",
+        "scenario",
+        "behavioral",
+        "technical",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +50,7 @@ def validate_question_bank_item(item: dict) -> list[str]:
 # Gap #53: Assessment rubric templates
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class RubricTemplate:
     id: str
@@ -57,10 +64,44 @@ DEFAULT_RUBRIC_TEMPLATES = {
     "technical_interview": {
         "name": "Technical Interview Rubric",
         "criteria": [
-            {"name": "Problem Solving", "weight": 0.3, "levels": {1: "Cannot approach", 2: "Needs guidance", 3: "Independent", 4: "Optimal", 5: "Innovative"}},
-            {"name": "Code Quality", "weight": 0.25, "levels": {1: "Non-functional", 2: "Works but messy", 3: "Clean", 4: "Well-structured", 5: "Exemplary"}},
-            {"name": "Communication", "weight": 0.2, "levels": {1: "Cannot explain", 2: "Unclear", 3: "Clear", 4: "Articulate", 5: "Excellent teacher"}},
-            {"name": "Domain Knowledge", "weight": 0.25, "levels": {1: "None", 2: "Basic", 3: "Solid", 4: "Deep", 5: "Expert"}},
+            {
+                "name": "Problem Solving",
+                "weight": 0.3,
+                "levels": {
+                    1: "Cannot approach",
+                    2: "Needs guidance",
+                    3: "Independent",
+                    4: "Optimal",
+                    5: "Innovative",
+                },
+            },
+            {
+                "name": "Code Quality",
+                "weight": 0.25,
+                "levels": {
+                    1: "Non-functional",
+                    2: "Works but messy",
+                    3: "Clean",
+                    4: "Well-structured",
+                    5: "Exemplary",
+                },
+            },
+            {
+                "name": "Communication",
+                "weight": 0.2,
+                "levels": {
+                    1: "Cannot explain",
+                    2: "Unclear",
+                    3: "Clear",
+                    4: "Articulate",
+                    5: "Excellent teacher",
+                },
+            },
+            {
+                "name": "Domain Knowledge",
+                "weight": 0.25,
+                "levels": {1: "None", 2: "Basic", 3: "Solid", 4: "Deep", 5: "Expert"},
+            },
         ],
         "passing_threshold": 0.6,
     },
@@ -90,6 +131,7 @@ def list_rubric_templates() -> list[str]:
 # ---------------------------------------------------------------------------
 # Gap #54: Assessment analytics
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class AssessmentAnalytics:
@@ -134,6 +176,7 @@ def compute_score_distribution(scores: list[float]) -> dict[str, int]:
 # Gap #57: Credential verification landing page data
 # ---------------------------------------------------------------------------
 
+
 def build_credential_verification_data(credential: dict, capability: dict | None) -> dict:
     """Build data for a public credential verification page."""
     return {
@@ -167,27 +210,41 @@ def check_renewal_eligibility(
     if isinstance(expires_at, str):
         try:
             try:
-
                 expires_at = datetime.fromisoformat(expires_at)
 
             except (ValueError, TypeError):
-
                 expires_at = None
         except (ValueError, TypeError):
-            return {"eligible": False, "reason": "Invalid expiration date", "status": "not_eligible"}
+            return {
+                "eligible": False,
+                "reason": "Invalid expiration date",
+                "status": "not_eligible",
+            }
 
     now = datetime.now(UTC)
     window_start = expires_at - timedelta(days=renewal_window_days)
 
     if now < window_start:
         days_until = (window_start - now).days
-        return {"eligible": False, "reason": f"Renewal window opens in {days_until} days", "status": "not_eligible"}
+        return {
+            "eligible": False,
+            "reason": f"Renewal window opens in {days_until} days",
+            "status": "not_eligible",
+        }
 
     if now > expires_at:
-        return {"eligible": True, "reason": "Credential has expired — renewal required", "status": "expired"}
+        return {
+            "eligible": True,
+            "reason": "Credential has expired — renewal required",
+            "status": "expired",
+        }
 
     days_remaining = (expires_at - now).days
-    return {"eligible": True, "reason": f"Expires in {days_remaining} days — eligible for renewal", "status": "eligible"}
+    return {
+        "eligible": True,
+        "reason": f"Expires in {days_remaining} days — eligible for renewal",
+        "status": "eligible",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -225,12 +282,14 @@ def validate_availability(slots: list[dict]) -> list[str]:
 # Gap #98: Self-scheduling booking links
 # ---------------------------------------------------------------------------
 
+
 def generate_booking_link(
     interview_stage_id: str,
     base_url: str = "https://openskill.studio",
 ) -> dict:
     """Generate a booking link for candidate self-scheduling."""
     import hashlib
+
     token = hashlib.sha256(f"book:{interview_stage_id}".encode()).hexdigest()[:16]
     url = f"{base_url}/book/{token}"
     return {"url": url, "token": token, "interview_stage_id": interview_stage_id}
@@ -239,6 +298,7 @@ def generate_booking_link(
 # ---------------------------------------------------------------------------
 # Gap #99: Interview reminders
 # ---------------------------------------------------------------------------
+
 
 def compute_reminder_schedule(
     interview_time: datetime,
@@ -250,17 +310,35 @@ def compute_reminder_schedule(
     # 24 hours before
     t24 = interview_time - timedelta(hours=24)
     if t24 > now:
-        reminders.append({"type": "24h_before", "send_at": t24.isoformat(), "message": "Your interview is tomorrow"})
+        reminders.append(
+            {
+                "type": "24h_before",
+                "send_at": t24.isoformat(),
+                "message": "Your interview is tomorrow",
+            }
+        )
 
     # 1 hour before
     t1 = interview_time - timedelta(hours=1)
     if t1 > now:
-        reminders.append({"type": "1h_before", "send_at": t1.isoformat(), "message": "Your interview starts in 1 hour"})
+        reminders.append(
+            {
+                "type": "1h_before",
+                "send_at": t1.isoformat(),
+                "message": "Your interview starts in 1 hour",
+            }
+        )
 
     # 15 minutes before
     t15 = interview_time - timedelta(minutes=15)
     if t15 > now:
-        reminders.append({"type": "15m_before", "send_at": t15.isoformat(), "message": "Your interview starts in 15 minutes"})
+        reminders.append(
+            {
+                "type": "15m_before",
+                "send_at": t15.isoformat(),
+                "message": "Your interview starts in 15 minutes",
+            }
+        )
 
     return reminders
 
@@ -269,7 +347,9 @@ def compute_reminder_schedule(
 # Gap #104: Interview no-show tracking
 # ---------------------------------------------------------------------------
 
-NO_SHOW_STATUSES = frozenset({"attended", "no_show_candidate", "no_show_interviewer", "cancelled", "rescheduled"})
+NO_SHOW_STATUSES = frozenset(
+    {"attended", "no_show_candidate", "no_show_interviewer", "cancelled", "rescheduled"}
+)
 
 
 def classify_attendance(
@@ -292,6 +372,7 @@ def classify_attendance(
 # ---------------------------------------------------------------------------
 # Gap #102: Interview debrief
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class DebriefSummary:

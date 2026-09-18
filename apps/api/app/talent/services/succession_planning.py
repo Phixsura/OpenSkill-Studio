@@ -106,16 +106,19 @@ class SuccessionPlanningService:
             min_level = req.get("min_level", 1)
             current = user_levels.get(cap_id, 0)
             if current < min_level:
-                gaps.append({
-                    "capability_name": cap_name,
-                    "current_level": current,
-                    "required_level": min_level,
-                    "gap": min_level - current,
-                })
+                gaps.append(
+                    {
+                        "capability_name": cap_name,
+                        "current_level": current,
+                        "required_level": min_level,
+                        "gap": min_level - current,
+                    }
+                )
         return gaps
 
     def generate_development_actions(
-        self, gaps: list[dict],
+        self,
+        gaps: list[dict],
     ) -> list[str]:
         """Generate development action items from gaps."""
         actions = []
@@ -127,7 +130,9 @@ class SuccessionPlanningService:
             elif gap_size == 2:
                 actions.append(f"Complete structured training program for {name}")
             else:
-                actions.append(f"Develop foundational skills in {name} through courses and mentoring")
+                actions.append(
+                    f"Develop foundational skills in {name} through courses and mentoring"
+                )
         return actions
 
     def assess_risk(

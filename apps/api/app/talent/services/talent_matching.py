@@ -35,9 +35,7 @@ from app.talent.services.scoring import (
 )
 
 # Edge types that indicate skill adjacency for partial-credit matching
-_ADJACENCY_EDGE_TYPES = frozenset(
-    {"related_to", "commonly_paired_with", "specializes", "subsumes"}
-)
+_ADJACENCY_EDGE_TYPES = frozenset({"related_to", "commonly_paired_with", "specializes", "subsumes"})
 
 # Credit multiplier by graph distance (edges traversed)
 _ADJACENCY_CREDIT = {1: 0.5, 2: 0.25}
@@ -125,16 +123,13 @@ class TalentMatchingService:
                 User.status == UserStatus.ACTIVE,
                 or_(
                     SkillPassport.discoverable_to.is_(None),
-                    SkillPassport.discoverable_to.op("@>")(
-                        cast([employer_org_id], JSONB)
-                    ),
+                    SkillPassport.discoverable_to.op("@>")(cast([employer_org_id], JSONB)),
                 ),
             )
         )
         eligible_result = await self.db.execute(eligible_q)
         eligible = [
-            {"id": row.id, "display_name": row.display_name}
-            for row in eligible_result.all()
+            {"id": row.id, "display_name": row.display_name} for row in eligible_result.all()
         ]
 
         if not eligible:
@@ -186,27 +181,29 @@ class TalentMatchingService:
 
             # --- S3: scoring (with partial credit for adjacent skills) ---
             signals = await self._score_candidate(
-                uid, profile, required_caps, preferred_caps, now,
+                uid,
+                profile,
+                required_caps,
+                preferred_caps,
+                now,
                 adjacency=adjacency,
                 preloaded_recency=bulk_recency.get(uid),
                 preloaded_placements=bulk_placements.get(uid, 0),
                 preloaded_cred_caps=bulk_credentials.get(uid, set()),
             )
-            score = sum(
-                signals.get(k, 0.0) * w for k, w in TALENT_WEIGHTS.items()
-            )
+            score = sum(signals.get(k, 0.0) * w for k, w in TALENT_WEIGHTS.items())
             score = round(score, 4)
 
             # Reasons and gaps from signal values
             reasons, gaps = self._explain_signals(
-                signals, required_caps, preferred_caps, profile,
+                signals,
+                required_caps,
+                preferred_caps,
+                profile,
                 adjacency=adjacency,
             )
 
-            tier = (
-                "great" if score >= 0.75
-                else ("good" if score >= 0.50 else "fair")
-            )
+            tier = "great" if score >= 0.75 else ("good" if score >= 0.50 else "fair")
 
             results.append(
                 TalentMatchResult(
@@ -308,20 +305,18 @@ class TalentMatchingService:
                 now,
                 adjacency=adjacency,
             )
-            score = sum(
-                signals.get(k, 0.0) * w for k, w in TALENT_WEIGHTS.items()
-            )
+            score = sum(signals.get(k, 0.0) * w for k, w in TALENT_WEIGHTS.items())
             score = round(score, 4)
 
             reasons, gaps = self._explain_signals(
-                signals, required_caps, preferred_caps, profile_dict,
+                signals,
+                required_caps,
+                preferred_caps,
+                profile_dict,
                 adjacency=adjacency,
             )
 
-            tier = (
-                "great" if score >= 0.75
-                else ("good" if score >= 0.50 else "fair")
-            )
+            tier = "great" if score >= 0.75 else ("good" if score >= 0.50 else "fair")
 
             results.append(
                 TalentMatchResult(
@@ -365,14 +360,18 @@ class TalentMatchingService:
 
         by_user_cap: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
         for ev in all_evidence:
-            by_user_cap[ev.user_id][ev.capability_id].append({
-                "score_normalized": float(ev.score_normalized) if ev.score_normalized is not None else None,
-                "verification_level": ev.verification_level,
-                "confidence": float(ev.confidence),
-                "occurred_at": ev.occurred_at,
-                "status": ev.status,
-                "expires_at": ev.expires_at,
-            })
+            by_user_cap[ev.user_id][ev.capability_id].append(
+                {
+                    "score_normalized": float(ev.score_normalized)
+                    if ev.score_normalized is not None
+                    else None,
+                    "verification_level": ev.verification_level,
+                    "confidence": float(ev.confidence),
+                    "occurred_at": ev.occurred_at,
+                    "status": ev.status,
+                    "expires_at": ev.expires_at,
+                }
+            )
 
         # Compute scores per user
         from app.talent.models.capability import Capability
@@ -496,17 +495,19 @@ class TalentMatchingService:
 
             # No direct or adjacent match → hard failure
             actual = user_cap["level"] if user_cap else 0
-            failures.append({
-                "code": "CAPABILITY_BELOW_REQUIRED",
-                "capability_id": cap_id,
-                "required_level": min_level,
-                "actual_level": actual,
-                "message": (
-                    f"No evidence for required capability (need L{min_level})"
-                    if not user_cap
-                    else f"Capability L{actual} below required L{min_level}"
-                ),
-            })
+            failures.append(
+                {
+                    "code": "CAPABILITY_BELOW_REQUIRED",
+                    "capability_id": cap_id,
+                    "required_level": min_level,
+                    "actual_level": actual,
+                    "message": (
+                        f"No evidence for required capability (need L{min_level})"
+                        if not user_cap
+                        else f"Capability L{actual} below required L{min_level}"
+                    ),
+                }
+            )
         return failures
 
     async def _score_candidate(
@@ -558,14 +559,8 @@ class TalentMatchingService:
 
         # 2. evidence_confidence: avg confidence across required capabilities
         req_cap_ids = {r.get("capability_id", "") for r in required_caps}
-        confidences = [
-            profile[cid]["confidence"]
-            for cid in req_cap_ids
-            if cid in profile
-        ]
-        evidence_confidence = (
-            sum(confidences) / len(confidences) if confidences else 0.0
-        )
+        confidences = [profile[cid]["confidence"] for cid in req_cap_ids if cid in profile]
+        evidence_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 
         # 3. evidence_recency: freshness of most recent evidence per required cap
         # Use preloaded batch data when available (N+1 fix)
@@ -590,9 +585,7 @@ class TalentMatchingService:
                 age_days = (now - row.latest).total_seconds() / 86400
                 recency = math.exp(-0.5 * (age_days / 180) ** 2)
                 recency_scores.append(recency)
-        evidence_recency = (
-            sum(recency_scores) / len(recency_scores) if recency_scores else 0.0
-        )
+        evidence_recency = sum(recency_scores) / len(recency_scores) if recency_scores else 0.0
 
         # 4. portfolio_relevance: count of approved placements / max expected
         if preloaded_placements is not None:
@@ -619,7 +612,7 @@ class TalentMatchingService:
             creds = cred_result.scalars().all()
             cred_cap_ids: set[str] = set()
             for cred in creds:
-                for cap_entry in (cred.capabilities or []):
+                for cap_entry in cred.capabilities or []:
                     cid = cap_entry.get("capability_id", "")
                     if cid:
                         cred_cap_ids.add(cid)
@@ -659,16 +652,20 @@ class TalentMatchingService:
             label = _SIGNAL_LABELS.get(signal_name, signal_name)
 
             if value >= reason_min:
-                reasons.append({
-                    "code": signal_name.upper(),
-                    "label": label,
-                    "evidence": "verified",
-                })
+                reasons.append(
+                    {
+                        "code": signal_name.upper(),
+                        "label": label,
+                        "evidence": "verified",
+                    }
+                )
             elif value < gap_max and weight >= 0.10:
-                gaps.append({
-                    "code": signal_name.upper(),
-                    "label": label,
-                })
+                gaps.append(
+                    {
+                        "code": signal_name.upper(),
+                        "label": label,
+                    }
+                )
 
         # Adjacent skill reasons: when a related skill gave partial credit
         all_caps = required_caps + preferred_caps
@@ -683,13 +680,15 @@ class TalentMatchingService:
                     for adj_cap_id, distance in adjacency[cap_id]:
                         adj_cap = profile.get(adj_cap_id)
                         if adj_cap and adj_cap.get("level", 0) >= min_level:
-                            reasons.append({
-                                "code": "ADJACENT_SKILL",
-                                "capability_id": cap_id,
-                                "adjacent_capability_id": adj_cap_id,
-                                "distance": distance,
-                                "label": f"Related skill at L{adj_cap['level']} (distance {distance})",
-                            })
+                            reasons.append(
+                                {
+                                    "code": "ADJACENT_SKILL",
+                                    "capability_id": cap_id,
+                                    "adjacent_capability_id": adj_cap_id,
+                                    "distance": distance,
+                                    "label": f"Related skill at L{adj_cap['level']} (distance {distance})",
+                                }
+                            )
                             break  # Only report the best adjacent match
 
         # Capability-specific gaps: preferred caps not met
@@ -699,18 +698,23 @@ class TalentMatchingService:
             user_cap = profile.get(cap_id)
             if not user_cap or user_cap.get("level", 0) < min_level:
                 actual = user_cap.get("level", 0) if user_cap else 0
-                gaps.append({
-                    "code": "PREFERRED_CAPABILITY_BELOW",
-                    "capability_id": cap_id,
-                    "label": f"L{actual} (preferred L{min_level})",
-                })
+                gaps.append(
+                    {
+                        "code": "PREFERRED_CAPABILITY_BELOW",
+                        "capability_id": cap_id,
+                        "label": f"L{actual} (preferred L{min_level})",
+                    }
+                )
 
         return reasons, gaps
 
     # ── Batch loaders (N+1 fix) ──────────────────────────────
 
     async def _bulk_evidence_recency(
-        self, user_ids: list[str], cap_ids: list[str], now: datetime,
+        self,
+        user_ids: list[str],
+        cap_ids: list[str],
+        now: datetime,
     ) -> dict[str, list[float]]:
         """Batch-load evidence recency scores for all users at once."""
         import math
@@ -740,7 +744,8 @@ class TalentMatchingService:
         return out
 
     async def _bulk_placement_counts(
-        self, user_ids: list[str],
+        self,
+        user_ids: list[str],
     ) -> dict[str, int]:
         """Batch-load placement counts for all users at once."""
         if not user_ids:
@@ -758,7 +763,8 @@ class TalentMatchingService:
         return {row.user_id: row.cnt for row in result.all()}
 
     async def _bulk_credential_caps(
-        self, user_ids: list[str],
+        self,
+        user_ids: list[str],
     ) -> dict[str, set[str]]:
         """Batch-load credential capability IDs for all users at once."""
         if not user_ids:
@@ -772,7 +778,7 @@ class TalentMatchingService:
         out: dict[str, set[str]] = {}
         for cred in result.scalars().all():
             caps = set()
-            for cap_entry in (cred.capabilities or []):
+            for cap_entry in cred.capabilities or []:
                 cid = cap_entry.get("capability_id", "")
                 if cid:
                     caps.add(cid)

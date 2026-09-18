@@ -1,6 +1,5 @@
 """OrgRole extension tests — employer roles (ADR-015 §16)."""
 
-
 from app.models.organization import ROLE_HIERARCHY, OrgRole
 
 
@@ -43,6 +42,8 @@ class TestOrgType:
         assert "org_type" in Organization.__table__.columns
 
     def test_org_type_default_is_school(self):
-        col = __import__("app.models.organization", fromlist=["Organization"]).Organization.__table__.columns["org_type"]
+        col = __import__(
+            "app.models.organization", fromlist=["Organization"]
+        ).Organization.__table__.columns["org_type"]
         assert col.server_default is not None
         assert "school" in str(col.server_default.arg)
