@@ -63,6 +63,46 @@ async def _load_app_and_opp(db: AsyncSession, app_id: str) -> tuple[Application,
 
 
 @router.post(
+    "/applications",
+    response_model=DataResponse[ApplicationResponse],
+    status_code=201,
+    summary="Create application",
+    description="Submit an application to an opportunity. Frontend-friendly alias that accepts opportunity_id in the body.",
+)
+async def create_application(
+    body: CreateApplicationRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create application — accepts {opportunity_id} in body."""
+    opp_id = body.opportunity_id
+    opp = await db.get(Opportunity, opp_id)
+    if not opp or opp.status != "open":
+        raise HTTPException(404, "Opportunity not found or not open")
+    existing = await db.execute(
+        select(Application).where(
+            Application.user_id == user.id,
+            Application.opportunity_id == opp_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, "You have already applied to this opportunity")
+    from ulid import ULID
+
+    app = Application(
+        id=str(ULID()),
+        user_id=user.id,
+        opportunity_id=opp_id,
+        status="submitted",
+        evidence_bundle=body.evidence_bundle if hasattr(body, "evidence_bundle") else None,
+    )
+    db.add(app)
+    await db.commit()
+    await db.refresh(app)
+    return DataResponse(data=ApplicationResponse.model_validate(app))
+
+
+@router.post(
     "/opportunities/{opp_id}/apply",
     response_model=DataResponse[ApplicationResponse],
     status_code=201,
