@@ -23,9 +23,8 @@ Pure unit tests, no DB required. Tests cover:
 - Search intelligence (297-317)
 """
 
-from datetime import UTC, datetime, timedelta
+import contextlib
 from unittest.mock import AsyncMock
-
 
 # ═══════════════════════════════════════════════════════════════
 # 1. Application Feedback (1-12)
@@ -97,14 +96,22 @@ def test_010_feedback_has_delete():
 def test_011_feedback_types_are_strings():
     from app.talent.services.application_feedback import FEEDBACK_TYPES
 
-    items = list(FEEDBACK_TYPES) if not isinstance(FEEDBACK_TYPES, dict) else list(FEEDBACK_TYPES.keys())
+    items = (
+        list(FEEDBACK_TYPES)
+        if not isinstance(FEEDBACK_TYPES, dict)
+        else list(FEEDBACK_TYPES.keys())
+    )
     assert all(isinstance(t, str) for t in items)
 
 
 def test_012_feedback_visibility_are_strings():
     from app.talent.services.application_feedback import FEEDBACK_VISIBILITY
 
-    items = list(FEEDBACK_VISIBILITY) if not isinstance(FEEDBACK_VISIBILITY, dict) else list(FEEDBACK_VISIBILITY.keys())
+    items = (
+        list(FEEDBACK_VISIBILITY)
+        if not isinstance(FEEDBACK_VISIBILITY, dict)
+        else list(FEEDBACK_VISIBILITY.keys())
+    )
     assert all(isinstance(v, str) for v in items)
 
 
@@ -403,7 +410,9 @@ def test_055_notification_service_has_create():
 def test_056_notification_service_has_list():
     from app.talent.services.notifications import TalentNotificationService
 
-    assert hasattr(TalentNotificationService, "list_notifications") or hasattr(TalentNotificationService, "get_unread_count")
+    assert hasattr(TalentNotificationService, "list_notifications") or hasattr(
+        TalentNotificationService, "get_unread_count"
+    )
 
 
 def test_057_notification_service_has_mark_read():
@@ -434,7 +443,11 @@ def test_060_notification_service_init():
 def test_061_notification_event_types_are_strings():
     from app.talent.services.notifications import NOTIFICATION_EVENT_TYPES
 
-    items = list(NOTIFICATION_EVENT_TYPES) if not isinstance(NOTIFICATION_EVENT_TYPES, dict) else list(NOTIFICATION_EVENT_TYPES.keys())
+    items = (
+        list(NOTIFICATION_EVENT_TYPES)
+        if not isinstance(NOTIFICATION_EVENT_TYPES, dict)
+        else list(NOTIFICATION_EVENT_TYPES.keys())
+    )
     assert all(isinstance(t, str) for t in items)
 
 
@@ -662,7 +675,11 @@ def test_095_pools_api_router():
 def test_096_outcome_event_types_includes_standard():
     from app.talent.services.talent_pool import OUTCOME_EVENT_TYPES
 
-    items = list(OUTCOME_EVENT_TYPES) if not isinstance(OUTCOME_EVENT_TYPES, dict) else list(OUTCOME_EVENT_TYPES.keys())
+    items = (
+        list(OUTCOME_EVENT_TYPES)
+        if not isinstance(OUTCOME_EVENT_TYPES, dict)
+        else list(OUTCOME_EVENT_TYPES.keys())
+    )
     assert any("internship" in t or "job" in t or "started" in t for t in items)
 
 
@@ -706,7 +723,9 @@ def test_101_verify_base():
 def test_102_generate_share_links_returns_dataclass():
     from app.talent.services.badge_sharing import generate_share_links
 
-    result = generate_share_links(credential_id="test-123", credential_name="Test Badge", credential_type="foundation")
+    result = generate_share_links(
+        credential_id="test-123", credential_name="Test Badge", credential_type="foundation"
+    )
     assert result is not None
     assert hasattr(result, "linkedin_share_url")
 
@@ -756,14 +775,22 @@ def test_108_share_links_has_verify_url():
 def test_109_share_platforms_includes_linkedin():
     from app.talent.services.badge_sharing import SHARE_PLATFORMS
 
-    items = list(SHARE_PLATFORMS) if not isinstance(SHARE_PLATFORMS, dict) else list(SHARE_PLATFORMS.keys())
+    items = (
+        list(SHARE_PLATFORMS)
+        if not isinstance(SHARE_PLATFORMS, dict)
+        else list(SHARE_PLATFORMS.keys())
+    )
     assert any("linkedin" in p.lower() for p in items)
 
 
 def test_110_share_platforms_are_strings():
     from app.talent.services.badge_sharing import SHARE_PLATFORMS
 
-    items = list(SHARE_PLATFORMS) if not isinstance(SHARE_PLATFORMS, dict) else list(SHARE_PLATFORMS.keys())
+    items = (
+        list(SHARE_PLATFORMS)
+        if not isinstance(SHARE_PLATFORMS, dict)
+        else list(SHARE_PLATFORMS.keys())
+    )
     assert all(isinstance(p, str) for p in items)
 
 
@@ -866,13 +893,16 @@ def test_123_candidate_analytics_init():
 def test_124_candidate_analytics_has_get_stats():
     from app.talent.services.candidate_analytics import CandidateAnalyticsService
 
-    assert hasattr(CandidateAnalyticsService, "get_candidate_stats") or hasattr(CandidateAnalyticsService, "get_stats")
+    assert hasattr(CandidateAnalyticsService, "get_candidate_stats") or hasattr(
+        CandidateAnalyticsService, "get_stats"
+    )
 
 
 def test_125_candidate_stats_dataclass():
+    import dataclasses
+
     from app.talent.services.candidate_analytics import CandidateApplicationStats
 
-    import dataclasses
     assert dataclasses.is_dataclass(CandidateApplicationStats)
 
 
@@ -889,9 +919,10 @@ def test_127_application_event_imported():
 
 
 def test_128_candidate_stats_has_fields():
+    import dataclasses
+
     from app.talent.services.candidate_analytics import CandidateApplicationStats
 
-    import dataclasses
     fields = {f.name for f in dataclasses.fields(CandidateApplicationStats)}
     assert len(fields) >= 2
 
@@ -1006,37 +1037,42 @@ def test_144_compute_mentorship_compatibility():
 
 
 def test_145_salary_expectation_dataclass():
+    import dataclasses
+
     from app.talent.services.candidate_intelligence import SalaryExpectation
 
-    import dataclasses
     assert dataclasses.is_dataclass(SalaryExpectation)
 
 
 def test_146_availability_preference_dataclass():
+    import dataclasses
+
     from app.talent.services.candidate_intelligence import AvailabilityPreference
 
-    import dataclasses
     assert dataclasses.is_dataclass(AvailabilityPreference)
 
 
 def test_147_job_alert_dataclass():
+    import dataclasses
+
     from app.talent.services.candidate_intelligence import JobAlertPreference
 
-    import dataclasses
     assert dataclasses.is_dataclass(JobAlertPreference)
 
 
 def test_148_mentorship_request_dataclass():
+    import dataclasses
+
     from app.talent.services.candidate_intelligence import MentorshipRequest
 
-    import dataclasses
     assert dataclasses.is_dataclass(MentorshipRequest)
 
 
 def test_149_mentorship_match_dataclass():
+    import dataclasses
+
     from app.talent.services.candidate_intelligence import MentorshipMatch
 
-    import dataclasses
     assert dataclasses.is_dataclass(MentorshipMatch)
 
 
@@ -1071,7 +1107,11 @@ def test_153_interview_prep_default():
 def test_154_currency_codes_has_usd():
     from app.talent.services.candidate_intelligence import CURRENCY_CODES
 
-    items = list(CURRENCY_CODES) if not isinstance(CURRENCY_CODES, dict) else list(CURRENCY_CODES.keys())
+    items = (
+        list(CURRENCY_CODES)
+        if not isinstance(CURRENCY_CODES, dict)
+        else list(CURRENCY_CODES.keys())
+    )
     assert any("USD" in c for c in items)
 
 
@@ -1165,9 +1205,10 @@ def test_167_validate_bulk_message():
 
 
 def test_168_digest_preference_dataclass():
+    import dataclasses
+
     from app.talent.services.communication_intelligence import DigestPreference
 
-    import dataclasses
     assert dataclasses.is_dataclass(DigestPreference)
 
 
@@ -1175,7 +1216,9 @@ def test_169_email_templates_have_subject():
     from app.talent.services.communication_intelligence import EMAIL_TEMPLATES
 
     for key, tmpl in EMAIL_TEMPLATES.items():
-        assert "subject" in tmpl or "body" in tmpl or isinstance(tmpl, str), f"Template {key} missing subject/body"
+        assert "subject" in tmpl or "body" in tmpl or isinstance(tmpl, str), (
+            f"Template {key} missing subject/body"
+        )
         break  # just check first
 
 
@@ -1195,12 +1238,12 @@ def test_171_build_digest_empty():
 
 
 def test_172_validate_bulk_empty():
+    import contextlib
+
     from app.talent.services.communication_intelligence import validate_bulk_message
 
-    try:
+    with contextlib.suppress(ValueError, TypeError):
         validate_bulk_message([], "test")
-    except (ValueError, TypeError):
-        pass  # expected for empty recipients
 
 
 def test_173_render_email_unknown_template():
@@ -1226,19 +1269,30 @@ def test_174_render_message_unknown_template():
 def test_175_digest_frequencies_are_strings():
     from app.talent.services.communication_intelligence import DIGEST_FREQUENCIES
 
-    items = list(DIGEST_FREQUENCIES) if not isinstance(DIGEST_FREQUENCIES, dict) else list(DIGEST_FREQUENCIES.keys())
+    items = (
+        list(DIGEST_FREQUENCIES)
+        if not isinstance(DIGEST_FREQUENCIES, dict)
+        else list(DIGEST_FREQUENCIES.keys())
+    )
     assert all(isinstance(f, str) for f in items)
 
 
 def test_176_digest_frequencies_includes_daily():
     from app.talent.services.communication_intelligence import DIGEST_FREQUENCIES
 
-    items = list(DIGEST_FREQUENCIES) if not isinstance(DIGEST_FREQUENCIES, dict) else list(DIGEST_FREQUENCIES.keys())
+    items = (
+        list(DIGEST_FREQUENCIES)
+        if not isinstance(DIGEST_FREQUENCIES, dict)
+        else list(DIGEST_FREQUENCIES.keys())
+    )
     assert any("daily" in f.lower() or "day" in f.lower() for f in items)
 
 
 def test_177_get_message_template_first():
-    from app.talent.services.communication_intelligence import MESSAGE_TEMPLATES, get_message_template
+    from app.talent.services.communication_intelligence import (
+        MESSAGE_TEMPLATES,
+        get_message_template,
+    )
 
     first_key = next(iter(MESSAGE_TEMPLATES))
     result = get_message_template(first_key)
@@ -1253,7 +1307,10 @@ def test_178_email_templates_keys_lowercase():
 
 
 def test_179_validate_bulk_too_many():
-    from app.talent.services.communication_intelligence import MAX_BULK_RECIPIENTS, validate_bulk_message
+    from app.talent.services.communication_intelligence import (
+        MAX_BULK_RECIPIENTS,
+        validate_bulk_message,
+    )
 
     try:
         recipients = [f"user{i}" for i in range(MAX_BULK_RECIPIENTS + 1)]
@@ -1352,23 +1409,26 @@ def test_192_compute_offer_deadline_alerts():
 
 
 def test_193_offer_comparison_dataclass():
+    import dataclasses
+
     from app.talent.services.employer_intelligence import OfferComparison
 
-    import dataclasses
     assert dataclasses.is_dataclass(OfferComparison)
 
 
 def test_194_department_dataclass():
+    import dataclasses
+
     from app.talent.services.employer_intelligence import Department
 
-    import dataclasses
     assert dataclasses.is_dataclass(Department)
 
 
 def test_195_compliance_report_dataclass():
+    import dataclasses
+
     from app.talent.services.employer_intelligence import ComplianceReport
 
-    import dataclasses
     assert dataclasses.is_dataclass(ComplianceReport)
 
 
@@ -1381,7 +1441,11 @@ def test_196_default_stages_ordered():
 def test_197_approval_statuses_include_approved():
     from app.talent.services.employer_intelligence import APPROVAL_STATUSES
 
-    items = list(APPROVAL_STATUSES) if not isinstance(APPROVAL_STATUSES, dict) else list(APPROVAL_STATUSES.keys())
+    items = (
+        list(APPROVAL_STATUSES)
+        if not isinstance(APPROVAL_STATUSES, dict)
+        else list(APPROVAL_STATUSES.keys())
+    )
     assert any("approved" in s.lower() or "accept" in s.lower() for s in items)
 
 
@@ -1427,7 +1491,11 @@ def test_203_adverse_impact_empty():
 def test_204_interview_kit_has_intro():
     from app.talent.services.employer_intelligence import INTERVIEW_KIT_SECTIONS
 
-    items = list(INTERVIEW_KIT_SECTIONS) if not isinstance(INTERVIEW_KIT_SECTIONS, dict) else list(INTERVIEW_KIT_SECTIONS.keys())
+    items = (
+        list(INTERVIEW_KIT_SECTIONS)
+        if not isinstance(INTERVIEW_KIT_SECTIONS, dict)
+        else list(INTERVIEW_KIT_SECTIONS.keys())
+    )
     assert len(items) >= 1
 
 
@@ -1450,14 +1518,22 @@ def test_206_evaluate_pool_rule_empty():
 def test_207_customizable_stages_are_strings():
     from app.talent.services.employer_intelligence import CUSTOMIZABLE_STAGES
 
-    items = list(CUSTOMIZABLE_STAGES) if not isinstance(CUSTOMIZABLE_STAGES, dict) else list(CUSTOMIZABLE_STAGES.keys())
+    items = (
+        list(CUSTOMIZABLE_STAGES)
+        if not isinstance(CUSTOMIZABLE_STAGES, dict)
+        else list(CUSTOMIZABLE_STAGES.keys())
+    )
     assert all(isinstance(s, str) for s in items)
 
 
 def test_208_approval_statuses_are_strings():
     from app.talent.services.employer_intelligence import APPROVAL_STATUSES
 
-    items = list(APPROVAL_STATUSES) if not isinstance(APPROVAL_STATUSES, dict) else list(APPROVAL_STATUSES.keys())
+    items = (
+        list(APPROVAL_STATUSES)
+        if not isinstance(APPROVAL_STATUSES, dict)
+        else list(APPROVAL_STATUSES.keys())
+    )
     assert all(isinstance(s, str) for s in items)
 
 
@@ -1530,16 +1606,18 @@ def test_218_list_slack_event_mappings():
 
 
 def test_219_api_key_dataclass():
+    import dataclasses
+
     from app.talent.services.integration_intelligence import APIKey
 
-    import dataclasses
     assert dataclasses.is_dataclass(APIKey)
 
 
 def test_220_ats_connector_config():
+    import dataclasses
+
     from app.talent.services.integration_intelligence import ATSConnectorConfig
 
-    import dataclasses
     assert dataclasses.is_dataclass(ATSConnectorConfig)
 
 
@@ -1566,26 +1644,26 @@ def test_223_generate_api_key_unique():
 def test_224_validate_scopes_valid():
     from app.talent.services.integration_intelligence import API_KEY_SCOPES, validate_api_key_scopes
 
-    items = list(API_KEY_SCOPES) if not isinstance(API_KEY_SCOPES, dict) else list(API_KEY_SCOPES.keys())
-    try:
+    items = (
+        list(API_KEY_SCOPES)
+        if not isinstance(API_KEY_SCOPES, dict)
+        else list(API_KEY_SCOPES.keys())
+    )
+    with contextlib.suppress(ValueError, TypeError):
         validate_api_key_scopes(items[:1])
-    except (ValueError, TypeError):
-        pass
 
 
 def test_225_validate_scopes_invalid():
     from app.talent.services.integration_intelligence import validate_api_key_scopes
 
-    try:
+    with contextlib.suppress(ValueError, TypeError):
         validate_api_key_scopes(["nonexistent_scope_xyz"])
-    except (ValueError, TypeError):
-        pass
 
 
 def test_226_endpoint_rate_limits_positive():
     from app.talent.services.integration_intelligence import ENDPOINT_RATE_LIMITS
 
-    for key, val in ENDPOINT_RATE_LIMITS.items():
+    for _key, val in ENDPOINT_RATE_LIMITS.items():
         assert isinstance(val, (int, float, dict))
         break
 
@@ -1611,9 +1689,12 @@ def test_228_build_verification_response_basic():
 
 
 def test_229_get_endpoint_limit_known():
-    from app.talent.services.integration_intelligence import ENDPOINT_RATE_LIMITS, get_endpoint_limit
+    from app.talent.services.integration_intelligence import (
+        ENDPOINT_RATE_LIMITS,
+        get_endpoint_limit,
+    )
 
-    first_key = next(iter(ENDPOINT_RATE_LIMITS))
+    next(iter(ENDPOINT_RATE_LIMITS))
     result = get_endpoint_limit("GET", "/api/v1/talent/opportunities")
     assert result is not None or result is None
 
@@ -1634,7 +1715,11 @@ def test_231_slack_mappings_nonempty():
 def test_232_api_key_scopes_are_strings():
     from app.talent.services.integration_intelligence import API_KEY_SCOPES
 
-    items = list(API_KEY_SCOPES) if not isinstance(API_KEY_SCOPES, dict) else list(API_KEY_SCOPES.keys())
+    items = (
+        list(API_KEY_SCOPES)
+        if not isinstance(API_KEY_SCOPES, dict)
+        else list(API_KEY_SCOPES.keys())
+    )
     assert all(isinstance(s, str) for s in items)
 
 
@@ -1651,17 +1736,19 @@ def test_234_hris_job_schema_has_fields():
 
 
 def test_235_ats_config_has_provider():
+    import dataclasses
+
     from app.talent.services.integration_intelligence import ATSConnectorConfig
 
-    import dataclasses
     fields = {f.name for f in dataclasses.fields(ATSConnectorConfig)}
     assert "provider" in fields or "name" in fields or len(fields) >= 2
 
 
 def test_236_api_key_has_key_field():
+    import dataclasses
+
     from app.talent.services.integration_intelligence import APIKey
 
-    import dataclasses
     fields = {f.name for f in dataclasses.fields(APIKey)}
     assert "key" in fields or "token" in fields or "value" in fields or len(fields) >= 2
 
@@ -1692,16 +1779,18 @@ def test_239_messaging_service_init():
 
 
 def test_240_message_thread_dataclass():
+    import dataclasses
+
     from app.talent.services.messaging import MessageThread
 
-    import dataclasses
     assert dataclasses.is_dataclass(MessageThread)
 
 
 def test_241_message_stats_dataclass():
+    import dataclasses
+
     from app.talent.services.messaging import MessageStats
 
-    import dataclasses
     assert dataclasses.is_dataclass(MessageStats)
 
 
@@ -1744,7 +1833,9 @@ def test_247_message_has_content():
 def test_248_message_types_are_strings():
     from app.talent.services.messaging import MESSAGE_TYPES
 
-    items = list(MESSAGE_TYPES) if not isinstance(MESSAGE_TYPES, dict) else list(MESSAGE_TYPES.keys())
+    items = (
+        list(MESSAGE_TYPES) if not isinstance(MESSAGE_TYPES, dict) else list(MESSAGE_TYPES.keys())
+    )
     assert all(isinstance(t, str) for t in items)
 
 
@@ -1773,16 +1864,18 @@ def test_251_offer_management_service():
 
 
 def test_252_offer_template_dataclass():
+    import dataclasses
+
     from app.talent.services.offer_management import OfferTemplate
 
-    import dataclasses
     assert dataclasses.is_dataclass(OfferTemplate)
 
 
 def test_253_offer_summary_dataclass():
+    import dataclasses
+
     from app.talent.services.offer_management import OfferSummary
 
-    import dataclasses
     assert dataclasses.is_dataclass(OfferSummary)
 
 
@@ -1808,14 +1901,22 @@ def test_256_offer_has_accept():
 def test_257_offer_statuses_include_pending():
     from app.talent.services.offer_management import OFFER_STATUSES
 
-    items = list(OFFER_STATUSES) if not isinstance(OFFER_STATUSES, dict) else list(OFFER_STATUSES.keys())
+    items = (
+        list(OFFER_STATUSES)
+        if not isinstance(OFFER_STATUSES, dict)
+        else list(OFFER_STATUSES.keys())
+    )
     assert any("pending" in s.lower() or "draft" in s.lower() for s in items)
 
 
 def test_258_offer_statuses_include_accepted():
     from app.talent.services.offer_management import OFFER_STATUSES
 
-    items = list(OFFER_STATUSES) if not isinstance(OFFER_STATUSES, dict) else list(OFFER_STATUSES.keys())
+    items = (
+        list(OFFER_STATUSES)
+        if not isinstance(OFFER_STATUSES, dict)
+        else list(OFFER_STATUSES.keys())
+    )
     assert any("accepted" in s.lower() or "accept" in s.lower() for s in items)
 
 
@@ -1914,9 +2015,10 @@ def test_272_compare_passport_snapshots():
 
 
 def test_273_passport_view_event():
+    import dataclasses
+
     from app.talent.services.passport_intelligence import PassportViewEvent
 
-    import dataclasses
     assert dataclasses.is_dataclass(PassportViewEvent)
 
 
@@ -1992,9 +2094,10 @@ def test_282_default_field_sets_nonempty():
 
 
 def test_283_passport_view_event_has_fields():
+    import dataclasses
+
     from app.talent.services.passport_intelligence import PassportViewEvent
 
-    import dataclasses
     fields = {f.name for f in dataclasses.fields(PassportViewEvent)}
     assert len(fields) >= 2
 
@@ -2031,16 +2134,18 @@ def test_287_portfolio_showcase_service():
 
 
 def test_288_portfolio_quality_dataclass():
+    import dataclasses
+
     from app.talent.services.portfolio_showcase import PortfolioQuality
 
-    import dataclasses
     assert dataclasses.is_dataclass(PortfolioQuality)
 
 
 def test_289_portfolio_item_dataclass():
+    import dataclasses
+
     from app.talent.services.portfolio_showcase import PortfolioItem
 
-    import dataclasses
     assert dataclasses.is_dataclass(PortfolioItem)
 
 
@@ -2054,14 +2159,22 @@ def test_290_portfolio_service_init():
 def test_291_portfolio_item_types_are_strings():
     from app.talent.services.portfolio_showcase import PORTFOLIO_ITEM_TYPES
 
-    items = list(PORTFOLIO_ITEM_TYPES) if not isinstance(PORTFOLIO_ITEM_TYPES, dict) else list(PORTFOLIO_ITEM_TYPES.keys())
+    items = (
+        list(PORTFOLIO_ITEM_TYPES)
+        if not isinstance(PORTFOLIO_ITEM_TYPES, dict)
+        else list(PORTFOLIO_ITEM_TYPES.keys())
+    )
     assert all(isinstance(t, str) for t in items)
 
 
 def test_292_portfolio_visibility_are_strings():
     from app.talent.services.portfolio_showcase import PORTFOLIO_VISIBILITY
 
-    items = list(PORTFOLIO_VISIBILITY) if not isinstance(PORTFOLIO_VISIBILITY, dict) else list(PORTFOLIO_VISIBILITY.keys())
+    items = (
+        list(PORTFOLIO_VISIBILITY)
+        if not isinstance(PORTFOLIO_VISIBILITY, dict)
+        else list(PORTFOLIO_VISIBILITY.keys())
+    )
     assert all(isinstance(v, str) for v in items)
 
 
@@ -2072,17 +2185,19 @@ def test_293_portfolio_api_router():
 
 
 def test_294_portfolio_quality_has_score():
+    import dataclasses
+
     from app.talent.services.portfolio_showcase import PortfolioQuality
 
-    import dataclasses
     fields = {f.name for f in dataclasses.fields(PortfolioQuality)}
     assert "score" in fields or "quality_score" in fields or len(fields) >= 2
 
 
 def test_295_portfolio_item_has_type():
+    import dataclasses
+
     from app.talent.services.portfolio_showcase import PortfolioItem
 
-    import dataclasses
     fields = {f.name for f in dataclasses.fields(PortfolioItem)}
     assert "item_type" in fields or "type" in fields or len(fields) >= 2
 
@@ -2090,7 +2205,11 @@ def test_295_portfolio_item_has_type():
 def test_296_portfolio_visibility_includes_public():
     from app.talent.services.portfolio_showcase import PORTFOLIO_VISIBILITY
 
-    items = list(PORTFOLIO_VISIBILITY) if not isinstance(PORTFOLIO_VISIBILITY, dict) else list(PORTFOLIO_VISIBILITY.keys())
+    items = (
+        list(PORTFOLIO_VISIBILITY)
+        if not isinstance(PORTFOLIO_VISIBILITY, dict)
+        else list(PORTFOLIO_VISIBILITY.keys())
+    )
     assert any("public" in v.lower() for v in items)
 
 
@@ -2177,23 +2296,26 @@ def test_308_apply_boolean_filter():
 
 
 def test_309_match_feedback_dataclass():
+    import dataclasses
+
     from app.talent.services.search_intelligence import MatchFeedback
 
-    import dataclasses
     assert dataclasses.is_dataclass(MatchFeedback)
 
 
 def test_310_search_cache_dataclass():
+    import dataclasses
+
     from app.talent.services.search_intelligence import SearchCache
 
-    import dataclasses
     assert dataclasses.is_dataclass(SearchCache)
 
 
 def test_311_search_analytics_store():
+    import dataclasses
+
     from app.talent.services.search_intelligence import SearchAnalyticsStore
 
-    import dataclasses
     assert dataclasses.is_dataclass(SearchAnalyticsStore)
 
 
@@ -2231,7 +2353,11 @@ def test_315_classify_tier_boundary():
 def test_316_experience_levels_are_strings():
     from app.talent.services.search_intelligence import EXPERIENCE_LEVELS
 
-    items = list(EXPERIENCE_LEVELS) if not isinstance(EXPERIENCE_LEVELS, dict) else list(EXPERIENCE_LEVELS.keys())
+    items = (
+        list(EXPERIENCE_LEVELS)
+        if not isinstance(EXPERIENCE_LEVELS, dict)
+        else list(EXPERIENCE_LEVELS.keys())
+    )
     assert all(isinstance(e, str) for e in items)
 
 
