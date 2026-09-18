@@ -86,6 +86,33 @@ async def list_saved_searches(
 
 
 @router.get(
+    "/saved-searches",
+    response_model=DataResponse[list[SavedSearchResponse]],
+    summary="List my saved searches",
+    description="List saved searches created by the current user across all orgs.",
+)
+async def list_my_saved_searches(
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List saved searches created by the current user."""
+    from sqlalchemy import select
+
+    from app.talent.models.saved_search import SavedSearch
+
+    q = (
+        select(SavedSearch)
+        .where(SavedSearch.created_by == user.id)
+        .order_by(SavedSearch.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(q)
+    items = result.scalars().all()
+    return DataResponse(data=[SavedSearchResponse.model_validate(s) for s in items])
+
+
+@router.get(
     "/saved-searches/{search_id}",
     response_model=DataResponse[SavedSearchResponse],
 )
