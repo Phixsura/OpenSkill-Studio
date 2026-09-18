@@ -97,13 +97,28 @@ async def create_my_saved_search(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Create a saved search — user-scoped, no org_id required."""
+    """Create a saved search — user-scoped, derives org_id from membership."""
+    from sqlalchemy import select
+
+    from app.models.organization import OrgMember
+
+    # Derive org_id: use body.org_id if provided, else user's first org
+    org_id = body.get("org_id")
+    if not org_id:
+        first_org = (
+            await db.execute(select(OrgMember.org_id).where(OrgMember.user_id == user.id).limit(1))
+        ).scalar_one_or_none()
+        if not first_org:
+            raise HTTPException(422, "No organization membership found; provide org_id")
+        org_id = first_org
+
     from ulid import ULID
 
     from app.talent.models.saved_search import SavedSearch
 
     search = SavedSearch(
         id=str(ULID()),
+        org_id=org_id,
         name=body.get("name", "Untitled"),
         search_type=body.get("search_type", "opportunity"),
         search_criteria=body.get("criteria", body.get("search_criteria", {})),
