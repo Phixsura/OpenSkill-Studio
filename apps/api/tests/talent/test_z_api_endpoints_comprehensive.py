@@ -91,9 +91,7 @@ async def test_application_timeline_requires_auth(client):
 # 11 — application screen requires auth
 @pytest.mark.asyncio
 async def test_application_screen_requires_auth(client):
-    r = await client.post(
-        "/api/v1/talent/applications/01FAKE00000000000000000000/screen", json={}
-    )
+    r = await client.post("/api/v1/talent/applications/01FAKE00000000000000000000/screen", json={})
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
