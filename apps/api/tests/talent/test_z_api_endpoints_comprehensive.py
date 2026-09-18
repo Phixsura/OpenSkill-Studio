@@ -84,7 +84,7 @@ async def test_placements_list_requires_auth(client):
 # 10 — application timeline requires auth
 @pytest.mark.asyncio
 async def test_application_timeline_requires_auth(client):
-    r = await client.get("/api/v1/talent/talent/applications/01FAKE00000000000000000000/timeline")
+    r = await client.get("/api/v1/talent/applications/01FAKE00000000000000000000/timeline")
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
@@ -92,7 +92,7 @@ async def test_application_timeline_requires_auth(client):
 @pytest.mark.asyncio
 async def test_application_screen_requires_auth(client):
     r = await client.post(
-        "/api/v1/talent/talent/applications/01FAKE00000000000000000000/screen", json={}
+        "/api/v1/talent/applications/01FAKE00000000000000000000/screen", json={}
     )
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
@@ -375,28 +375,28 @@ async def test_resolve_capability_requires_auth(client):
 # 46 — autocomplete requires auth
 @pytest.mark.asyncio
 async def test_capability_autocomplete_requires_auth(client):
-    r = await client.get("/api/v1/talent/talent/capabilities/autocomplete?q=py")
+    r = await client.get("/api/v1/talent/capabilities/autocomplete?q=py")
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
 # 47 — frequency requires auth
 @pytest.mark.asyncio
 async def test_capability_frequency_requires_auth(client):
-    r = await client.get("/api/v1/talent/talent/capabilities/frequency")
+    r = await client.get("/api/v1/talent/capabilities/frequency")
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
 # 48 — cooccurrence requires auth
 @pytest.mark.asyncio
 async def test_capability_cooccurrence_requires_auth(client):
-    r = await client.get("/api/v1/talent/talent/capabilities/cooccurrence")
+    r = await client.get("/api/v1/talent/capabilities/cooccurrence")
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
 # 49 — import requires auth
 @pytest.mark.asyncio
 async def test_capability_import_requires_auth(client):
-    r = await client.post("/api/v1/talent/talent/capabilities/import", json={})
+    r = await client.post("/api/v1/talent/capabilities/import", json={})
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
@@ -411,7 +411,7 @@ async def test_capability_merge_requires_auth(client):
 @pytest.mark.asyncio
 async def test_capability_boolean_search_requires_auth(client):
     r = await client.post(
-        "/api/v1/talent/talent/capabilities/boolean-search", json={"query": "python AND java"}
+        "/api/v1/talent/capabilities/boolean-search", json={"query": "python AND java"}
     )
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
@@ -419,7 +419,7 @@ async def test_capability_boolean_search_requires_auth(client):
 # 52 — match feedback requires auth
 @pytest.mark.asyncio
 async def test_match_feedback_requires_auth(client):
-    r = await client.post("/api/v1/talent/talent/match-feedback", json={})
+    r = await client.post("/api/v1/talent/match-feedback", json={})
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
@@ -1267,7 +1267,7 @@ async def test_delete_snapshot_requires_auth(client):
 # 163 — passport revisions requires auth
 @pytest.mark.asyncio
 async def test_passport_revisions_requires_auth(client):
-    r = await client.get("/api/v1/talent/talent/passport/revisions")
+    r = await client.get("/api/v1/talent/passport/revisions")
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
@@ -1642,14 +1642,14 @@ async def test_list_interviews_requires_auth(client):
 # 208 — question bank templates requires auth
 @pytest.mark.asyncio
 async def test_question_bank_requires_auth(client):
-    r = await client.get("/api/v1/talent/talent/question-bank/templates")
+    r = await client.get("/api/v1/talent/question-bank/templates")
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
 # 209 — interviewer availability validate requires auth
 @pytest.mark.asyncio
 async def test_interviewer_availability_requires_auth(client):
-    r = await client.post("/api/v1/talent/talent/interviewer-availability/validate", json={})
+    r = await client.post("/api/v1/talent/interviewer-availability/validate", json={})
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
 
@@ -1657,7 +1657,7 @@ async def test_interviewer_availability_requires_auth(client):
 @pytest.mark.asyncio
 async def test_credential_renewal_requires_auth(client):
     r = await client.get(
-        "/api/v1/talent/talent/credentials/01FAKE00000000000000000000/renewal-eligibility"
+        "/api/v1/talent/credentials/01FAKE00000000000000000000/renewal-eligibility"
     )
     assert r.status_code in (200, 401, 404, 405, 422, 429)
 
@@ -1716,12 +1716,12 @@ def test_inference_requires_auth():
     assert callable(infer_skills_from_text)
 
 
-# 217 — DID endpoint (org-scoped, may not require talent auth)
-@pytest.mark.asyncio
-async def test_did_endpoint(client):
-    r = await client.get("/api/v1/talent/talent/orgs/01FAKE00000000000000000000/did.json")
-    # DID can be public or 404
-    assert r.status_code in (200, 401, 404)
+# 217 — DID endpoint is public (no auth) — verify route exists without HTTP call
+def test_did_endpoint():
+    from app.talent.api.did import router
+
+    paths = [getattr(r, "path", "") for r in router.routes]
+    assert any("did.json" in p for p in paths)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
