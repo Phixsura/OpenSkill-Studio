@@ -85,6 +85,37 @@ async def list_saved_searches(
     )
 
 
+@router.post(
+    "/saved-searches",
+    response_model=DataResponse[SavedSearchResponse],
+    status_code=201,
+    summary="Create saved search (user-scoped)",
+    description="Create a saved search for the current user. Frontend-friendly alias.",
+)
+async def create_my_saved_search(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a saved search — user-scoped, no org_id required."""
+    from ulid import ULID
+
+    from app.talent.models.saved_search import SavedSearch
+
+    search = SavedSearch(
+        id=str(ULID()),
+        name=body.get("name", "Untitled"),
+        search_type=body.get("search_type", "opportunity"),
+        search_criteria=body.get("criteria", body.get("search_criteria", {})),
+        notify_frequency=body.get("notify_frequency", "never"),
+        created_by=user.id,
+    )
+    db.add(search)
+    await db.commit()
+    await db.refresh(search)
+    return DataResponse(data=SavedSearchResponse.model_validate(search))
+
+
 @router.get(
     "/saved-searches",
     response_model=DataResponse[list[SavedSearchResponse]],

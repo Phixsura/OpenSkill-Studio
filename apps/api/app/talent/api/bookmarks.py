@@ -41,6 +41,63 @@ async def toggle_bookmark(
     return DataResponse(data=None)
 
 
+@router.post(
+    "/bookmarks",
+    response_model=DataResponse[BookmarkResponse | None],
+    status_code=201,
+    summary="Create bookmark",
+    description="Bookmark an entity (opportunity) by type + ID. Frontend-friendly alias.",
+)
+async def create_bookmark(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a bookmark — accepts {entity_type, entity_id} or {opportunity_id}."""
+    from app.talent.services.bookmarks import BookmarkService
+
+    opp_id = body.get("entity_id") or body.get("opportunity_id")
+    if not opp_id:
+        raise HTTPException(422, "entity_id or opportunity_id is required")
+
+    svc = BookmarkService(db)
+    bookmark, created = await svc.toggle_bookmark(user.id, opp_id)
+    await db.commit()
+    if created and bookmark:
+        await db.refresh(bookmark)
+        return DataResponse(data=BookmarkResponse.model_validate(bookmark))
+    return DataResponse(data=None)
+
+
+@router.delete(
+    "/bookmarks/{bookmark_id}",
+    status_code=204,
+    summary="Delete bookmark",
+)
+async def delete_bookmark(
+    bookmark_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Remove a bookmark by ID — owner only."""
+    from sqlalchemy import select
+
+    from app.talent.models.bookmark import OpportunityBookmark
+
+    bm = (
+        await db.execute(
+            select(OpportunityBookmark).where(
+                OpportunityBookmark.id == bookmark_id,
+                OpportunityBookmark.user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not bm:
+        raise HTTPException(404, "Bookmark not found")
+    await db.delete(bm)
+    await db.commit()
+
+
 @router.get("/bookmarks", response_model=CursorListResponse[BookmarkResponse])
 async def list_bookmarks(
     cursor: str | None = Query(None),
