@@ -16,6 +16,7 @@ class TestPassportConstants:
 
 # ---- API tests ----
 
+
 @pytest.mark.asyncio
 async def test_get_passport_requires_auth(client):
     response = await client.get("/api/v1/talent/passport")

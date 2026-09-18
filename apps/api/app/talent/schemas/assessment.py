@@ -88,6 +88,7 @@ class RunResponse(BaseModel):
 
 # Credentials
 
+
 class CreateCredentialRuleRequest(BaseModel):
     credential_type: str = Field(..., min_length=1, max_length=80)
     display_name: str = Field(..., min_length=1, max_length=200)

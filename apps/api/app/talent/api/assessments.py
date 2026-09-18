@@ -28,7 +28,11 @@ _INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
 
 # ── Blueprints ──
 
-@router.post("/assessments", response_model=DataResponse[BlueprintResponse], status_code=201,
+
+@router.post(
+    "/assessments",
+    response_model=DataResponse[BlueprintResponse],
+    status_code=201,
     summary="Create assessment blueprint",
     description="Create a standardized assessment with criteria, rubric, and passing thresholds.",
 )
@@ -56,7 +60,9 @@ async def create_blueprint(
     return DataResponse(data=BlueprintResponse.model_validate(bp))
 
 
-@router.get("/assessments", response_model=CursorListResponse[BlueprintResponse],
+@router.get(
+    "/assessments",
+    response_model=CursorListResponse[BlueprintResponse],
     summary="List assessment blueprints",
     description="Returns paginated list of assessment blueprints.",
 )
@@ -83,7 +89,9 @@ async def list_blueprints(
     )
 
 
-@router.get("/assessments/{blueprint_id}", response_model=DataResponse[BlueprintResponse],
+@router.get(
+    "/assessments/{blueprint_id}",
+    response_model=DataResponse[BlueprintResponse],
     summary="Get assessment blueprint",
     description="Returns full details of an assessment blueprint.",
 )
@@ -105,7 +113,11 @@ async def get_blueprint(
 
 # ── Runs ──
 
-@router.post("/assessments/{blueprint_id}/runs", response_model=DataResponse[RunResponse], status_code=201,
+
+@router.post(
+    "/assessments/{blueprint_id}/runs",
+    response_model=DataResponse[RunResponse],
+    status_code=201,
     summary="Start assessment run",
     description="Begin a new assessment run against a blueprint.",
 )
@@ -131,7 +143,9 @@ async def start_run(
     return DataResponse(data=RunResponse.model_validate(run))
 
 
-@router.patch("/assessments/{blueprint_id}/runs/{run_id}", response_model=DataResponse[RunResponse],
+@router.patch(
+    "/assessments/{blueprint_id}/runs/{run_id}",
+    response_model=DataResponse[RunResponse],
     summary="Update assessment run",
     description="Update an in-progress assessment run with answers.",
 )
@@ -146,7 +160,9 @@ async def submit_run(
 
     svc = AssessmentService(db)
     try:
-        run = await svc.submit_run(run_id, user.id, results=body.results, project_id=body.project_id)
+        run = await svc.submit_run(
+            run_id, user.id, results=body.results, project_id=body.project_id
+        )
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     if not run:
@@ -156,7 +172,9 @@ async def submit_run(
     return DataResponse(data=RunResponse.model_validate(run))
 
 
-@router.post("/assessments/{blueprint_id}/runs/{run_id}/review", response_model=DataResponse[RunResponse],
+@router.post(
+    "/assessments/{blueprint_id}/runs/{run_id}/review",
+    response_model=DataResponse[RunResponse],
     summary="Review assessment run",
     description="Submit review and scoring for a completed assessment.",
 )
@@ -191,7 +209,10 @@ async def review_run(
 
 # ── Credentials ──
 
-@router.get("/credentials", response_model=DataResponse[list[CredentialResponse]],
+
+@router.get(
+    "/credentials",
+    response_model=DataResponse[list[CredentialResponse]],
     summary="List credentials",
     description="Returns all credentials earned by the authenticated user.",
 )
@@ -207,7 +228,9 @@ async def list_credentials(
     return DataResponse(data=[CredentialResponse.model_validate(c) for c in creds])
 
 
-@router.get("/credentials/{credential_id}", response_model=DataResponse[CredentialResponse],
+@router.get(
+    "/credentials/{credential_id}",
+    response_model=DataResponse[CredentialResponse],
     summary="Get credential detail",
     description="Returns full credential details including issuer and verification.",
 )
@@ -227,7 +250,10 @@ async def get_credential(
     return DataResponse(data=CredentialResponse.model_validate(cred))
 
 
-@router.post("/credential-rules", response_model=DataResponse[CredentialRuleResponse], status_code=201,
+@router.post(
+    "/credential-rules",
+    response_model=DataResponse[CredentialRuleResponse],
+    status_code=201,
     summary="Create credential rule",
     description="Define automatic credential issuance based on assessment results.",
 )
@@ -260,7 +286,9 @@ async def create_credential_rule(
     return DataResponse(data=CredentialRuleResponse.model_validate(rule))
 
 
-@router.post("/credentials/evaluate", response_model=DataResponse[dict],
+@router.post(
+    "/credentials/evaluate",
+    response_model=DataResponse[dict],
     summary="Evaluate credential eligibility",
     description="Check if user meets requirements for a credential.",
 )
@@ -281,7 +309,10 @@ async def evaluate_credential(
     return DataResponse(data=result)
 
 
-@router.post("/credentials/issue", response_model=DataResponse[CredentialResponse], status_code=201,
+@router.post(
+    "/credentials/issue",
+    response_model=DataResponse[CredentialResponse],
+    status_code=201,
     summary="Issue credential",
     description="Manually issue a credential with Ed25519 digital signature.",
 )
@@ -299,9 +330,13 @@ async def issue_credential(
     if target_user_id != user.id:
         if not body.org_id:
             raise HTTPException(404, "Credential not found")
-        await require_org_member(body.org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+        await require_org_member(
+            body.org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR
+        )
     if body.org_id and user.role != UserRole.ADMIN:
-        await require_org_member(body.org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+        await require_org_member(
+            body.org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR
+        )
 
     svc = CredentialService(db)
     try:
@@ -331,7 +366,9 @@ async def issue_credential(
 
 # ── Open Badges 3.0 export ──
 
-@router.get("/credentials/{credential_id}/badge",
+
+@router.get(
+    "/credentials/{credential_id}/badge",
     summary="Export as Open Badge 3.0",
     description="Export credential as Open Badges 3.0 AchievementCredential.",
 )
@@ -377,12 +414,14 @@ async def export_credential_as_badge(
     if cap_ids:
         result = await db.execute(select(Capability).where(Capability.id.in_(cap_ids)))
         for cap in result.scalars().all():
-            capability_details.append({
-                "id": cap.id,
-                "canonical_name": cap.canonical_name,
-                "description": cap.description,
-                "external_ids": cap.external_ids or {},
-            })
+            capability_details.append(
+                {
+                    "id": cap.id,
+                    "canonical_name": cap.canonical_name,
+                    "description": cap.description,
+                    "external_ids": cap.external_ids or {},
+                }
+            )
 
     ob3 = export_credential_as_ob3(
         credential_id=cred.id,
@@ -402,7 +441,10 @@ async def export_credential_as_badge(
 
 # ---- Public credential verification ----
 
-@router.get("/verify/credential/{credential_id}", response_model=DataResponse[dict],
+
+@router.get(
+    "/verify/credential/{credential_id}",
+    response_model=DataResponse[dict],
     summary="Verify credential",
     description="Public endpoint to verify credential authenticity. No auth required.",
 )
@@ -413,6 +455,7 @@ async def verify_credential_public(
     """Public credential verification page data — no auth required."""
     from app.talent.models.assessment import Credential
     from app.talent.services.interview_intelligence import build_credential_verification_data
+
     cred = await db.get(Credential, credential_id)
     if not cred:
         raise HTTPException(404, "Credential not found")
@@ -421,11 +464,18 @@ async def verify_credential_public(
         cap_ids = [c.get("capability_id") for c in cred.capabilities if c.get("capability_id")]
         if cap_ids:
             from app.talent.models.capability import Capability
+
             cap = await db.get(Capability, cap_ids[0])
             if cap:
                 cap_data = {"canonical_name": cap.canonical_name}
     data = build_credential_verification_data(
-        {"credential_type": cred.credential_type, "status": cred.status, "issued_at": cred.issued_at.isoformat() if cred.issued_at else None, "expires_at": cred.expires_at.isoformat() if cred.expires_at else None, "org_id": cred.org_id},
+        {
+            "credential_type": cred.credential_type,
+            "status": cred.status,
+            "issued_at": cred.issued_at.isoformat() if cred.issued_at else None,
+            "expires_at": cred.expires_at.isoformat() if cred.expires_at else None,
+            "org_id": cred.org_id,
+        },
         cap_data,
     )
     return DataResponse(data=data)

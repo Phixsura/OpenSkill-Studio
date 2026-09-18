@@ -102,9 +102,7 @@ class RecommendationFeedService:
         bookmarked_ids = {row[0] for row in bk_result.all()}
 
         # Already applied opportunity IDs
-        app_q = select(Application.opportunity_id).where(
-            Application.user_id == user_id
-        )
+        app_q = select(Application.opportunity_id).where(Application.user_id == user_id)
         app_result = await self.db.execute(app_q)
         applied_ids = {row[0] for row in app_result.all()}
 
@@ -155,8 +153,7 @@ class RecommendationFeedService:
             goal_score = 0.0
             if goal_cap_ids and required_caps:
                 goal_overlap = sum(
-                    1 for req in required_caps
-                    if req.get("capability_id") in goal_cap_ids
+                    1 for req in required_caps if req.get("capability_id") in goal_cap_ids
                 )
                 goal_score = min(goal_overlap / max(len(required_caps), 1), 1.0)
                 if goal_score > 0:
@@ -195,17 +192,19 @@ class RecommendationFeedService:
             if not reasons:
                 reasons.append("Open opportunity")
 
-            scored.append(RecommendedOpportunity(
-                opportunity_id=opp.id,
-                title=opp.title,
-                opportunity_type=opp.opportunity_type,
-                employer_org_id=opp.employer_org_id,
-                match_score=round(composite, 3),
-                match_reasons=reasons,
-                is_bookmarked=opp.id in bookmarked_ids,
-                already_applied=is_applied,
-                closes_in_days=closes_in,
-            ))
+            scored.append(
+                RecommendedOpportunity(
+                    opportunity_id=opp.id,
+                    title=opp.title,
+                    opportunity_type=opp.opportunity_type,
+                    employer_org_id=opp.employer_org_id,
+                    match_score=round(composite, 3),
+                    match_reasons=reasons,
+                    is_bookmarked=opp.id in bookmarked_ids,
+                    already_applied=is_applied,
+                    closes_in_days=closes_in,
+                )
+            )
 
         # Sort by score descending
         scored.sort(key=lambda r: r.match_score, reverse=True)

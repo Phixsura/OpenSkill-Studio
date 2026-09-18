@@ -8,11 +8,20 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, ulid_pk
 
-PORTFOLIO_ITEM_TYPES = frozenset({
-    "project", "case_study", "work_sample", "publication",
-    "presentation", "open_source", "certification_project",
-    "commercial_deliverable", "research", "creative_work",
-})
+PORTFOLIO_ITEM_TYPES = frozenset(
+    {
+        "project",
+        "case_study",
+        "work_sample",
+        "publication",
+        "presentation",
+        "open_source",
+        "certification_project",
+        "commercial_deliverable",
+        "research",
+        "creative_work",
+    }
+)
 
 PORTFOLIO_VISIBILITY_OPTIONS = frozenset({"private", "passport_visible", "public"})
 
@@ -32,4 +41,6 @@ class PortfolioItem(Base):
     pinned: Mapped[bool] = mapped_column(default=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

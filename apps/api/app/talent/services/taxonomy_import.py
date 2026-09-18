@@ -39,11 +39,7 @@ def parse_esco_csv_row(row: dict) -> dict | None:
         "description": row.get("description", ""),
         "category": row.get("skillType", "skill"),
         "external_ids": {"esco_uri": uri},
-        "aliases": [
-            a.strip()
-            for a in row.get("altLabels", "").split("\n")
-            if a.strip()
-        ],
+        "aliases": [a.strip() for a in row.get("altLabels", "").split("\n") if a.strip()],
     }
 
 
@@ -92,8 +88,11 @@ def validate_import_batch(
     """Dry-run validation of an import batch (no DB writes)."""
     if fmt not in SUPPORTED_TAXONOMY_FORMATS:
         return TaxonomyImportResult(
-            format=fmt, total_rows=len(rows),
-            created=0, updated=0, skipped=0,
+            format=fmt,
+            total_rows=len(rows),
+            created=0,
+            updated=0,
+            skipped=0,
             errors=[{"index": 0, "error": f"Unsupported format: {format}"}],
             duration_ms=0,
         )
@@ -109,15 +108,20 @@ def validate_import_batch(
             valid += 1
 
     return TaxonomyImportResult(
-        format=fmt, total_rows=len(rows),
-        created=valid, updated=0, skipped=len(rows) - valid - len(errors),
-        errors=errors, duration_ms=0,
+        format=fmt,
+        total_rows=len(rows),
+        created=valid,
+        updated=0,
+        skipped=len(rows) - valid - len(errors),
+        errors=errors,
+        duration_ms=0,
     )
 
 
 # ---------------------------------------------------------------------------
 # Gap #4: Capability version history
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class CapabilityChange:
@@ -140,22 +144,30 @@ def compute_changelog(
     now = datetime.now(UTC)
 
     tracked_fields = [
-        "canonical_name", "description", "category", "status",
-        "parent_id", "external_ids", "aliases", "decay_config",
+        "canonical_name",
+        "description",
+        "category",
+        "status",
+        "parent_id",
+        "external_ids",
+        "aliases",
+        "decay_config",
         "level_definitions",
     ]
     for field in tracked_fields:
         old = str(before.get(field, ""))
         new = str(after.get(field, ""))
         if old != new:
-            changes.append(CapabilityChange(
-                capability_id=cap_id,
-                field=field,
-                old_value=old if old else None,
-                new_value=new if new else None,
-                changed_by=changed_by,
-                changed_at=now,
-            ))
+            changes.append(
+                CapabilityChange(
+                    capability_id=cap_id,
+                    field=field,
+                    old_value=old if old else None,
+                    new_value=new if new else None,
+                    changed_by=changed_by,
+                    changed_at=now,
+                )
+            )
     return changes
 
 
@@ -213,6 +225,7 @@ def list_available_industries() -> list[str]:
 # Gap #14: Multi-language skill search
 # ---------------------------------------------------------------------------
 
+
 def build_multilang_search_terms(
     query: str,
     translations: dict | None,
@@ -249,6 +262,13 @@ TAXONOMY_VERSION_INFO = {
     "supported_formats": sorted(SUPPORTED_TAXONOMY_FORMATS),
     "supported_industries": list_available_industries(),
     "edge_types": ["requires", "related_to", "specializes", "subsumes", "commonly_paired_with"],
-    "mapping_source_types": ["skill", "skill_pack", "project_template", "workflow_pack",
-                              "rubric_criterion", "assessment_blueprint", "commercial_project"],
+    "mapping_source_types": [
+        "skill",
+        "skill_pack",
+        "project_template",
+        "workflow_pack",
+        "rubric_criterion",
+        "assessment_blueprint",
+        "commercial_project",
+    ],
 }

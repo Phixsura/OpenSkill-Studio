@@ -83,9 +83,7 @@ async def propose_slots(
     await db.commit()
     for s in slots:
         await db.refresh(s)
-    return DataResponse(
-        data=[InterviewSlotResponse.model_validate(s) for s in slots]
-    )
+    return DataResponse(data=[InterviewSlotResponse.model_validate(s) for s in slots])
 
 
 @router.get(
@@ -109,9 +107,7 @@ async def list_slots(
 
     svc = InterviewSchedulingService(db)
     slots = await svc.list_slots(interview_id, status=status)
-    return DataResponse(
-        data=[InterviewSlotResponse.model_validate(s) for s in slots]
-    )
+    return DataResponse(data=[InterviewSlotResponse.model_validate(s) for s in slots])
 
 
 @router.post(
@@ -194,9 +190,7 @@ async def cancel_slot(
     svc = InterviewSchedulingService(db)
     result = await svc.cancel_slot(slot_id, user.id)
     if not result:
-        raise HTTPException(
-            422, "Slot cannot be cancelled (already declined or cancelled)"
-        )
+        raise HTTPException(422, "Slot cannot be cancelled (already declined or cancelled)")
 
     await db.commit()
     await db.refresh(result)
@@ -225,20 +219,17 @@ async def download_calendar_invite(
     svc = InterviewSchedulingService(db)
     ics_content = await svc.get_calendar_invite(slot_id)
     if not ics_content:
-        raise HTTPException(
-            422, "Calendar invite only available for accepted slots"
-        )
+        raise HTTPException(422, "Calendar invite only available for accepted slots")
 
     return Response(
         content=ics_content,
         media_type="text/calendar",
-        headers={
-            "Content-Disposition": f'attachment; filename="interview-{slot_id}.ics"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="interview-{slot_id}.ics"'},
     )
 
 
 # ---- Gap #51: Question bank ----
+
 
 @router.get("/talent/question-bank/templates", response_model=DataResponse[list[str]])
 async def list_rubric_template_names(
@@ -246,6 +237,7 @@ async def list_rubric_template_names(
 ):
     """List available rubric templates."""
     from app.talent.services.interview_intelligence import list_rubric_templates
+
     return DataResponse(data=list_rubric_templates())
 
 
@@ -256,6 +248,7 @@ async def get_rubric_template_endpoint(
 ):
     """Get a rubric template by name."""
     from app.talent.services.interview_intelligence import get_rubric_template
+
     template = get_rubric_template(name)
     if not template:
         raise HTTPException(404, "Template not found")
@@ -264,6 +257,7 @@ async def get_rubric_template_endpoint(
 
 # ---- Gap #97: Availability validation ----
 
+
 @router.post("/talent/interviewer-availability/validate", response_model=DataResponse[dict])
 async def validate_availability_endpoint(
     body: dict,
@@ -271,11 +265,13 @@ async def validate_availability_endpoint(
 ):
     """Validate interviewer availability slots."""
     from app.talent.services.interview_intelligence import validate_availability
+
     errors = validate_availability(body.get("slots", []))
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
 # ---- Gap #98: Booking link ----
+
 
 @router.get("/talent/interviews/{interview_id}/booking-link", response_model=DataResponse[dict])
 async def get_booking_link(
@@ -284,10 +280,12 @@ async def get_booking_link(
 ):
     """Generate a self-scheduling booking link for candidates."""
     from app.talent.services.interview_intelligence import generate_booking_link
+
     return DataResponse(data=generate_booking_link(interview_id))
 
 
 # ---- Gap #99: Reminders ----
+
 
 @router.get("/talent/interviews/{interview_id}/reminders", response_model=DataResponse[list[dict]])
 async def get_interview_reminders(
@@ -313,7 +311,9 @@ async def get_interview_reminders(
                 await require_org_member(opp.employer_org_id, user, db)
 
     result = await db.execute(
-        sa_select(InterviewSlot).where(InterviewSlot.interview_stage_id == interview_id, InterviewSlot.status == "accepted")
+        sa_select(InterviewSlot).where(
+            InterviewSlot.interview_stage_id == interview_id, InterviewSlot.status == "accepted"
+        )
     )
     slot = result.scalar_one_or_none()
     if not slot:
@@ -324,7 +324,10 @@ async def get_interview_reminders(
 
 # ---- Gap #59: Credential renewal ----
 
-@router.get("/talent/credentials/{credential_id}/renewal-eligibility", response_model=DataResponse[dict])
+
+@router.get(
+    "/talent/credentials/{credential_id}/renewal-eligibility", response_model=DataResponse[dict]
+)
 async def check_credential_renewal(
     credential_id: str,
     db: AsyncSession = Depends(get_db),
@@ -333,11 +336,14 @@ async def check_credential_renewal(
     """Check if a credential is eligible for renewal."""
     from app.talent.models.assessment import Credential
     from app.talent.services.interview_intelligence import check_renewal_eligibility
+
     cred = await db.get(Credential, credential_id)
     if not cred or cred.user_id != user.id:
         raise HTTPException(404, "Credential not found")
-    result = check_renewal_eligibility({
-        "expires_at": cred.expires_at.isoformat() if cred.expires_at else None,
-        "revalidation_at": cred.revalidation_at.isoformat() if cred.revalidation_at else None,
-    })
+    result = check_renewal_eligibility(
+        {
+            "expires_at": cred.expires_at.isoformat() if cred.expires_at else None,
+            "revalidation_at": cred.revalidation_at.isoformat() if cred.revalidation_at else None,
+        }
+    )
     return DataResponse(data=result)

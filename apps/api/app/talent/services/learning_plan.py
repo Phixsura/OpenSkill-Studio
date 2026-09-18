@@ -64,8 +64,7 @@ class LearningPlanService:
         # 1. Get user's current capability scores
         profile = await compute_capability_profile(self.db, user_id)
         user_levels: dict[str, tuple[int, str]] = {
-            s.capability_id: (s.level, s.capability_name)
-            for s in profile
+            s.capability_id: (s.level, s.capability_name) for s in profile
         }
 
         # 2. Determine target capabilities
@@ -80,24 +79,28 @@ class LearningPlanService:
                     cap_name = req.get("capability_name", cap_id)
                     current = user_levels.get(cap_id, (0, cap_name))
                     if current[0] < min_level:
-                        gaps.append({
-                            "capability_id": cap_id,
-                            "capability_name": current[1] or cap_name,
-                            "current_level": current[0],
-                            "target_level": min_level,
-                        })
+                        gaps.append(
+                            {
+                                "capability_id": cap_id,
+                                "capability_name": current[1] or cap_name,
+                                "current_level": current[0],
+                                "target_level": min_level,
+                            }
+                        )
                 for pref in opp.preferred_capabilities or []:
                     cap_id = pref.get("capability_id", "")
                     min_level = pref.get("min_level", 1)
                     cap_name = pref.get("capability_name", cap_id)
                     current = user_levels.get(cap_id, (0, cap_name))
                     if current[0] < min_level:
-                        gaps.append({
-                            "capability_id": cap_id,
-                            "capability_name": current[1] or cap_name,
-                            "current_level": current[0],
-                            "target_level": min_level,
-                        })
+                        gaps.append(
+                            {
+                                "capability_id": cap_id,
+                                "capability_name": current[1] or cap_name,
+                                "current_level": current[0],
+                                "target_level": min_level,
+                            }
+                        )
 
         elif target_capabilities:
             for tc in target_capabilities:
@@ -106,12 +109,14 @@ class LearningPlanService:
                 cap_name = tc.get("capability_name", cap_id)
                 current = user_levels.get(cap_id, (0, cap_name))
                 if current[0] < min_level:
-                    gaps.append({
-                        "capability_id": cap_id,
-                        "capability_name": current[1] or cap_name,
-                        "current_level": current[0],
-                        "target_level": min_level,
-                    })
+                    gaps.append(
+                        {
+                            "capability_id": cap_id,
+                            "capability_name": current[1] or cap_name,
+                            "current_level": current[0],
+                            "target_level": min_level,
+                        }
+                    )
 
         if not gaps:
             return []
@@ -146,14 +151,16 @@ class LearningPlanService:
             ]
 
             gap_size = gap["target_level"] - gap["current_level"]
-            recommendations.append(LearningRecommendation(
-                capability_id=cap_id,
-                capability_name=gap["capability_name"],
-                current_level=gap["current_level"],
-                target_level=gap["target_level"],
-                gap_size=gap_size,
-                recommended_content=content,
-            ))
+            recommendations.append(
+                LearningRecommendation(
+                    capability_id=cap_id,
+                    capability_name=gap["capability_name"],
+                    current_level=gap["current_level"],
+                    target_level=gap["target_level"],
+                    gap_size=gap_size,
+                    recommended_content=content,
+                )
+            )
 
         # Sort by gap size descending (biggest gaps first)
         recommendations.sort(key=lambda r: r.gap_size, reverse=True)

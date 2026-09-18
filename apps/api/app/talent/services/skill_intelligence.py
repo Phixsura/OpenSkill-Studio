@@ -21,6 +21,7 @@ from app.talent.models.evidence import CapabilityEvidence
 # Gap #7: Autocomplete / typeahead
 # ---------------------------------------------------------------------------
 
+
 async def autocomplete_capabilities(
     db: AsyncSession,
     query: str,
@@ -39,22 +40,18 @@ async def autocomplete_capabilities(
     stmt = (
         select(Capability.id, Capability.canonical_name, Capability.category, Capability.slug)
         .where(Capability.status == status)
-        .where(
-            Capability.canonical_name.ilike(f"%{q.replace(chr(37), "").replace("_", "")}%")
-        )
+        .where(Capability.canonical_name.ilike(f"%{q.replace(chr(37), '').replace('_', '')}%"))
         .order_by(Capability.canonical_name)
         .limit(limit)
     )
     result = await db.execute(stmt)
-    return [
-        {"id": r[0], "name": r[1], "category": r[2], "slug": r[3]}
-        for r in result.all()
-    ]
+    return [{"id": r[0], "name": r[1], "category": r[2], "slug": r[3]} for r in result.all()]
 
 
 # ---------------------------------------------------------------------------
 # Gap #8: Skill frequency analytics
 # ---------------------------------------------------------------------------
+
 
 async def compute_skill_frequency(
     db: AsyncSession,
@@ -106,6 +103,7 @@ async def compute_skill_frequency(
 # Gap #9: Skill co-occurrence analysis
 # ---------------------------------------------------------------------------
 
+
 async def compute_skill_cooccurrence(
     db: AsyncSession,
     *,
@@ -135,7 +133,7 @@ async def compute_skill_cooccurrence(
     for caps in user_caps.values():
         cap_list = sorted(caps)
         for i, a in enumerate(cap_list):
-            for b in cap_list[i + 1:]:
+            for b in cap_list[i + 1 :]:
                 pair_counts[(a, b)] += 1
 
     # Filter by min_users and sort
@@ -162,6 +160,7 @@ async def compute_skill_cooccurrence(
 # ---------------------------------------------------------------------------
 # Gap #12: Mapping confidence scoring
 # ---------------------------------------------------------------------------
+
 
 def compute_mapping_confidence(
     *,
@@ -191,10 +190,7 @@ def compute_mapping_confidence(
     volume_factor = min(evidence_count / 10.0, 1.0) * 0.2
 
     confidence = (
-        0.35 * weight_factor
-        + 0.35 * type_score
-        + 0.10 * assessment_bonus
-        + 0.20 * volume_factor
+        0.35 * weight_factor + 0.35 * type_score + 0.10 * assessment_bonus + 0.20 * volume_factor
     )
     return round(min(confidence, 1.0), 3)
 
@@ -202,6 +198,7 @@ def compute_mapping_confidence(
 # ---------------------------------------------------------------------------
 # Gap #15: Edge strength scoring
 # ---------------------------------------------------------------------------
+
 
 async def compute_edge_strength(
     db: AsyncSession,
@@ -214,22 +211,29 @@ async def compute_edge_strength(
     """
     # Co-occurrence
     (
-        select(func.count(func.distinct(CapabilityEvidence.user_id)))
-        .where(
+        select(func.count(func.distinct(CapabilityEvidence.user_id))).where(
             CapabilityEvidence.capability_id.in_([source_id, target_id]),
             CapabilityEvidence.status == "active",
         )
     )
     # This counts users with evidence for EITHER — we need BOTH
     # Simplified: count users who have both
-    s1 = select(CapabilityEvidence.user_id).where(
-        CapabilityEvidence.capability_id == source_id,
-        CapabilityEvidence.status == "active",
-    ).distinct()
-    s2 = select(CapabilityEvidence.user_id).where(
-        CapabilityEvidence.capability_id == target_id,
-        CapabilityEvidence.status == "active",
-    ).distinct()
+    s1 = (
+        select(CapabilityEvidence.user_id)
+        .where(
+            CapabilityEvidence.capability_id == source_id,
+            CapabilityEvidence.status == "active",
+        )
+        .distinct()
+    )
+    s2 = (
+        select(CapabilityEvidence.user_id)
+        .where(
+            CapabilityEvidence.capability_id == target_id,
+            CapabilityEvidence.status == "active",
+        )
+        .distinct()
+    )
 
     r1 = await db.execute(s1)
     r2 = await db.execute(s2)
@@ -247,6 +251,7 @@ async def compute_edge_strength(
 # Gap #19: Normalization pipeline
 # ---------------------------------------------------------------------------
 
+
 def find_duplicate_candidates(
     capabilities: list[dict],
     *,
@@ -258,19 +263,21 @@ def find_duplicate_candidates(
     """
     duplicates = []
     for i, a in enumerate(capabilities):
-        for b in capabilities[i + 1:]:
+        for b in capabilities[i + 1 :]:
             name_a = a.get("canonical_name", "").lower()
             name_b = b.get("canonical_name", "").lower()
             ratio = SequenceMatcher(None, name_a, name_b).ratio()
             if ratio >= threshold:
-                duplicates.append({
-                    "cap_a_id": a.get("id"),
-                    "cap_a_name": a.get("canonical_name"),
-                    "cap_b_id": b.get("id"),
-                    "cap_b_name": b.get("canonical_name"),
-                    "similarity": round(ratio, 3),
-                    "suggestion": "merge" if ratio > 0.95 else "review",
-                })
+                duplicates.append(
+                    {
+                        "cap_a_id": a.get("id"),
+                        "cap_a_name": a.get("canonical_name"),
+                        "cap_b_id": b.get("id"),
+                        "cap_b_name": b.get("canonical_name"),
+                        "similarity": round(ratio, 3),
+                        "suggestion": "merge" if ratio > 0.95 else "review",
+                    }
+                )
     duplicates.sort(key=lambda d: d["similarity"], reverse=True)
     return duplicates
 
@@ -279,14 +286,20 @@ def find_duplicate_candidates(
 # Gap #20: Governance workflow
 # ---------------------------------------------------------------------------
 
-GOVERNANCE_STATUSES = frozenset({
-    "proposed", "under_review", "approved", "rejected",
-})
+GOVERNANCE_STATUSES = frozenset(
+    {
+        "proposed",
+        "under_review",
+        "approved",
+        "rejected",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
 class GovernanceRequest:
     """A request to add/modify/merge a capability."""
+
     action: str  # create, modify, merge, deprecate
     capability_name: str
     category: str | None
@@ -317,6 +330,7 @@ def validate_governance_request(
 # ---------------------------------------------------------------------------
 # Gap #1: LLM-ready extraction interface
 # ---------------------------------------------------------------------------
+
 
 async def extract_skills_llm_ready(
     db: AsyncSession,

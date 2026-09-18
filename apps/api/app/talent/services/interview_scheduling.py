@@ -105,9 +105,7 @@ class InterviewSchedulingService:
             start = s["start_time"]
             end = s["end_time"]
             if end <= start:
-                raise ValueError(
-                    f"end_time ({end}) must be after start_time ({start})"
-                )
+                raise ValueError(f"end_time ({end}) must be after start_time ({start})")
 
             slot = InterviewSlot(
                 interview_stage_id=interview_stage_id,
@@ -125,9 +123,7 @@ class InterviewSchedulingService:
         await self.db.flush()
         return created
 
-    async def accept_slot(
-        self, slot_id: str, user_id: str
-    ) -> InterviewSlot | None:
+    async def accept_slot(self, slot_id: str, user_id: str) -> InterviewSlot | None:
         """Accept a proposed slot.
 
         Automatically declines all other proposed slots for the same stage
@@ -162,9 +158,7 @@ class InterviewSchedulingService:
         await self.db.flush()
         return slot
 
-    async def decline_slot(
-        self, slot_id: str, user_id: str
-    ) -> InterviewSlot | None:
+    async def decline_slot(self, slot_id: str, user_id: str) -> InterviewSlot | None:
         """Decline a specific proposed slot."""
         slot = await self.db.get(InterviewSlot, slot_id)
         if not slot or slot.status != "proposed":
@@ -174,9 +168,7 @@ class InterviewSchedulingService:
         await self.db.flush()
         return slot
 
-    async def cancel_slot(
-        self, slot_id: str, user_id: str
-    ) -> InterviewSlot | None:
+    async def cancel_slot(self, slot_id: str, user_id: str) -> InterviewSlot | None:
         """Cancel an accepted or proposed slot."""
         slot = await self.db.get(InterviewSlot, slot_id)
         if not slot:
@@ -205,9 +197,7 @@ class InterviewSchedulingService:
         status: str | None = None,
     ) -> list[InterviewSlot]:
         """List all slots for an interview stage."""
-        q = select(InterviewSlot).where(
-            InterviewSlot.interview_stage_id == interview_stage_id
-        )
+        q = select(InterviewSlot).where(InterviewSlot.interview_stage_id == interview_stage_id)
         if status:
             q = q.where(InterviewSlot.status == status)
         q = q.order_by(InterviewSlot.start_time)

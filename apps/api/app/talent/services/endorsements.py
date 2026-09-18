@@ -58,8 +58,7 @@ class EndorsementService:
         )
         if existing.scalar_one_or_none():
             raise ValueError(
-                "DUPLICATE_ENDORSEMENT: You have already endorsed this "
-                "user for this capability"
+                "DUPLICATE_ENDORSEMENT: You have already endorsed this user for this capability"
             )
 
         endorsement = SkillEndorsement(
@@ -102,9 +101,7 @@ class EndorsementService:
         limit: int = 50,
     ) -> tuple[list[SkillEndorsement], bool]:
         """List endorsements received by a user."""
-        q = select(SkillEndorsement).where(
-            SkillEndorsement.user_id == user_id
-        )
+        q = select(SkillEndorsement).where(SkillEndorsement.user_id == user_id)
         if capability_id:
             q = q.where(SkillEndorsement.capability_id == capability_id)
         if cursor:
@@ -122,9 +119,7 @@ class EndorsementService:
     async def get_endorsement_summary(self, user_id: str) -> dict:
         """Get endorsement summary: count by capability and relationship."""
         result = await self.db.execute(
-            select(SkillEndorsement).where(
-                SkillEndorsement.user_id == user_id
-            )
+            select(SkillEndorsement).where(SkillEndorsement.user_id == user_id)
         )
         endorsements = result.scalars().all()
 

@@ -53,9 +53,7 @@ class BookmarkService:
         limit: int = 50,
     ) -> tuple[list[OpportunityBookmark], bool]:
         """List user's bookmarked opportunities, newest first."""
-        q = select(OpportunityBookmark).where(
-            OpportunityBookmark.user_id == user_id
-        )
+        q = select(OpportunityBookmark).where(OpportunityBookmark.user_id == user_id)
         if cursor:
             q = q.where(OpportunityBookmark.id < cursor)
 
@@ -68,9 +66,7 @@ class BookmarkService:
             items = items[:limit]
         return items, has_more
 
-    async def is_bookmarked(
-        self, user_id: str, opportunity_id: str
-    ) -> bool:
+    async def is_bookmarked(self, user_id: str, opportunity_id: str) -> bool:
         """Check if an opportunity is bookmarked by the user."""
         q = select(OpportunityBookmark.id).where(
             OpportunityBookmark.user_id == user_id,

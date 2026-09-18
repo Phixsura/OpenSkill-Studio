@@ -1,6 +1,5 @@
 """Outcome event tests — types, visibility defaults, model structure."""
 
-
 from app.talent.models.internship import OUTCOME_EVENT_TYPES, OutcomeEvent
 
 

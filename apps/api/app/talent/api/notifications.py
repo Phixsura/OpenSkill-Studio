@@ -110,9 +110,7 @@ async def get_preferences(
 
     svc = TalentNotificationService(db)
     prefs = await svc.get_preferences(user.id)
-    return DataResponse(
-        data=[NotificationPreferenceResponse(**p) for p in prefs]
-    )
+    return DataResponse(data=[NotificationPreferenceResponse(**p) for p in prefs])
 
 
 @router.put(
@@ -133,6 +131,4 @@ async def update_preferences(
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     await db.commit()
-    return DataResponse(
-        data=[NotificationPreferenceResponse(**p) for p in prefs]
-    )
+    return DataResponse(data=[NotificationPreferenceResponse(**p) for p in prefs])

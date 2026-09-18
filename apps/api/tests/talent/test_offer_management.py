@@ -35,8 +35,10 @@ class TestValidateTransition:
 class TestCreateOfferData:
     def test_creates_structure(self):
         data = svc.create_offer_data(
-            application_id="app1", role_title="AI Designer",
-            compensation_text="$50k-60k", expiry_days=14,
+            application_id="app1",
+            role_title="AI Designer",
+            compensation_text="$50k-60k",
+            expiry_days=14,
         )
         assert data["application_id"] == "app1"
         assert data["role_title"] == "AI Designer"
@@ -50,7 +52,8 @@ class TestCreateOfferData:
 
     def test_custom_sections(self):
         data = svc.create_offer_data(
-            application_id="a", role_title="r",
+            application_id="a",
+            role_title="r",
             custom_sections=[{"title": "Benefits", "content": "Health"}],
         )
         assert len(data["custom_sections"]) == 1

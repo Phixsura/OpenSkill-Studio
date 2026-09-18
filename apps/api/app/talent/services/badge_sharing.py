@@ -84,7 +84,9 @@ def generate_share_links(
 
     # Twitter share URL
     twitter_text = f"🏆 I earned the {credential_name} credential from {issuer_name}! #{credential_type.replace(' ', '').replace('-', '')} #OpenSkill"
-    twitter_share_url = f"https://twitter.com/intent/tweet?text={quote(twitter_text)}&url={quote(verify_url)}"
+    twitter_share_url = (
+        f"https://twitter.com/intent/tweet?text={quote(twitter_text)}&url={quote(verify_url)}"
+    )
 
     # Email share URL
     email_subject = f"My {credential_name} Credential"

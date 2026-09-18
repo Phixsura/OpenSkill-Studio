@@ -16,9 +16,13 @@ svc = WebhookDeliveryService()
 
 def _endpoint(**kw) -> WebhookEndpoint:
     defaults = {
-        "id": "e1", "org_id": "o1", "url": "https://example.com/webhook",
-        "secret": "test-secret-key", "event_types": [],
-        "active": True, "created_at": datetime.now(UTC),
+        "id": "e1",
+        "org_id": "o1",
+        "url": "https://example.com/webhook",
+        "secret": "test-secret-key",
+        "event_types": [],
+        "active": True,
+        "created_at": datetime.now(UTC),
     }
     defaults.update(kw)
     return WebhookEndpoint(**defaults)

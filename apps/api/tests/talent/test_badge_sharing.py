@@ -28,7 +28,10 @@ class TestGenerateShareLinks:
             issued_at=datetime(2026, 6, 15, tzinfo=UTC),
         )
         assert "linkedin.com/profile/add" in links.linkedin_add_url
-        assert "Python+Verified" in links.linkedin_add_url or "Python%20Verified" in links.linkedin_add_url
+        assert (
+            "Python+Verified" in links.linkedin_add_url
+            or "Python%20Verified" in links.linkedin_add_url
+        )
         assert "issueYear=2026" in links.linkedin_add_url
         assert "issueMonth=6" in links.linkedin_add_url
 

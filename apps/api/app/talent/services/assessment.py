@@ -77,7 +77,11 @@ class AssessmentService:
 
         if cursor:
             q = q.where(AssessmentBlueprint.id < cursor)
-        q = q.order_by(AssessmentBlueprint.created_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
+        q = (
+            q.order_by(AssessmentBlueprint.created_at.desc())
+            .limit(limit + 1 if cursor is not None else limit)
+            .offset(0 if cursor is not None else offset)
+        )
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -217,9 +221,7 @@ class AssessmentService:
                     cred_svc = CredentialService(self.db)
                     evaluation = await cred_svc.evaluate(cred_type, run.user_id)
                     if evaluation["eligible"]:
-                        await cred_svc.issue_credential(
-                            cred_type, run.user_id, org_id=run.org_id
-                        )
+                        await cred_svc.issue_credential(cred_type, run.user_id, org_id=run.org_id)
 
         return run
 
@@ -234,7 +236,7 @@ class AssessmentService:
 
         # Map results by capability_id for score lookup
         result_map: dict[str, float] = {}
-        for r in (run.results or []):
+        for r in run.results or []:
             cap_id = r.get("capability_id")
             if cap_id and r.get("passed"):
                 result_map[cap_id] = float(r.get("score", 0.8))
@@ -283,9 +285,8 @@ class CredentialService:
     ) -> CredentialRule:
         """Create a new credential rule version (auto-incremented)."""
         # Find the latest version for this credential_type
-        latest_q = (
-            select(func.max(CredentialRule.version))
-            .where(CredentialRule.credential_type == credential_type)
+        latest_q = select(func.max(CredentialRule.version)).where(
+            CredentialRule.credential_type == credential_type
         )
         latest_version = (await self.db.execute(latest_q)).scalar() or 0
 
@@ -341,8 +342,13 @@ class CredentialService:
         result = await self.db.execute(rule_q)
         rule = result.scalar_one_or_none()
         if not rule:
-            return {"eligible": False, "met": [], "unmet": [], "rule_id": None,
-                    "reason": "No active rule for this credential type"}
+            return {
+                "eligible": False,
+                "met": [],
+                "unmet": [],
+                "rule_id": None,
+                "reason": "No active rule for this credential type",
+            }
 
         # Load user's capability profile
         profile = await compute_capability_profile(self.db, user_id)
@@ -362,11 +368,13 @@ class CredentialService:
                 # Check capability level
                 cap_score = profile_map.get(cap_id)
                 if cap_score and cap_score.level >= min_level:
-                    met.append({
-                        "capability_id": cap_id,
-                        "required_level": min_level,
-                        "achieved_level": cap_score.level,
-                    })
+                    met.append(
+                        {
+                            "capability_id": cap_id,
+                            "required_level": min_level,
+                            "achieved_level": cap_score.level,
+                        }
+                    )
                 else:
                     entry = {
                         "capability_id": cap_id,
@@ -387,11 +395,13 @@ class CredentialService:
                 if passed > 0:
                     met.append({"assessment_blueprint_id": assessment_blueprint_id, "passed": True})
                 else:
-                    unmet.append({
-                        "assessment_blueprint_id": assessment_blueprint_id,
-                        "passed": False,
-                        "required": required,
-                    })
+                    unmet.append(
+                        {
+                            "assessment_blueprint_id": assessment_blueprint_id,
+                            "passed": False,
+                            "required": required,
+                        }
+                    )
 
         # Determine eligibility
         if all_required:
@@ -408,11 +418,13 @@ class CredentialService:
             total_evidence = sum(s.evidence_count for s in profile)
             if total_evidence < min_evidence_count:
                 eligible = False
-                unmet.append({
-                    "condition": "min_evidence_count",
-                    "required": min_evidence_count,
-                    "actual": total_evidence,
-                })
+                unmet.append(
+                    {
+                        "condition": "min_evidence_count",
+                        "required": min_evidence_count,
+                        "actual": total_evidence,
+                    }
+                )
 
         return {
             "eligible": eligible,
@@ -438,8 +450,7 @@ class CredentialService:
         evaluation = await self.evaluate(credential_type, user_id)
         if not evaluation["eligible"]:
             raise ValueError(
-                f"User does not meet requirements for '{credential_type}': "
-                f"{evaluation['unmet']}"
+                f"User does not meet requirements for '{credential_type}': {evaluation['unmet']}"
             )
 
         rule_id = evaluation["rule_id"]

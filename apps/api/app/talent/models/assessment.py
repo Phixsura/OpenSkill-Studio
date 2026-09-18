@@ -48,7 +48,11 @@ class AssessmentBlueprint(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -66,15 +70,15 @@ class AssessmentRun(Base):
         String(26), ForeignKey("assessment_blueprints.id", ondelete="CASCADE")
     )
     blueprint_version: Mapped[int] = mapped_column(Integer)
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")
     )
     attempt_number: Mapped[int] = mapped_column(Integer, default=1)
     # not_started | in_progress | submitted | under_review | passed | failed | expired
-    status: Mapped[str] = mapped_column(String(20), default="not_started", server_default="'not_started'")
+    status: Mapped[str] = mapped_column(
+        String(20), default="not_started", server_default="'not_started'"
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -86,7 +90,11 @@ class AssessmentRun(Base):
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("ix_assessment_runs_user", "user_id", "blueprint_id"),
@@ -124,7 +132,11 @@ class CredentialRule(Base):
     # draft | active | retired
     status: Mapped[str] = mapped_column(String(20), default="draft", server_default="'draft'")
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("uq_credential_rule_version", "credential_type", "version", unique=True),
@@ -146,9 +158,7 @@ class Credential(Base):
     issuer_org_id: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
     )
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     # [{"capability_id": "01J...", "required_level": 3, "achieved_level": 4}]
     capabilities: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     # Assessment/evidence IDs that satisfied the rule
@@ -162,7 +172,11 @@ class Credential(Base):
     revalidation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("ix_credentials_user", "user_id", "status"),

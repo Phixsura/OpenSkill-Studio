@@ -133,7 +133,11 @@ class EvidenceService:
 
         if cursor:
             q = q.where(CapabilityEvidence.id < cursor)
-        q = q.order_by(CapabilityEvidence.occurred_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
+        q = (
+            q.order_by(CapabilityEvidence.occurred_at.desc())
+            .limit(limit + 1 if cursor is not None else limit)
+            .offset(0 if cursor is not None else offset)
+        )
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -197,11 +201,13 @@ class EvidenceService:
             sub = await self.db.get(Submission, source_id)
             if not sub:
                 return chain
-            chain.append({
-                "type": "submission",
-                "id": sub.id,
-                "label": f"Submission (status: {sub.status})",
-            })
+            chain.append(
+                {
+                    "type": "submission",
+                    "id": sub.id,
+                    "label": f"Submission (status: {sub.status})",
+                }
+            )
             if sub.project_id:
                 from app.models.project import Project
 
@@ -210,17 +216,21 @@ class EvidenceService:
                     # Check access — only show if requestor is in the org
                     if requesting_user_id:
                         member = await self.db.execute(
-                            select(OrgMember.id).where(
+                            select(OrgMember.id)
+                            .where(
                                 OrgMember.org_id == proj.org_id,
                                 OrgMember.user_id == requesting_user_id,
-                            ).limit(1)
+                            )
+                            .limit(1)
                         )
                         if member.scalar_one_or_none():
-                            chain.append({
-                                "type": "project",
-                                "id": proj.id,
-                                "label": proj.title,
-                            })
+                            chain.append(
+                                {
+                                    "type": "project",
+                                    "id": proj.id,
+                                    "label": proj.title,
+                                }
+                            )
                         else:
                             chain.append({"type": "redacted", "reason": "insufficient_access"})
                     else:
@@ -236,20 +246,43 @@ class EvidenceService:
                     from app.models.project import Project
                     from app.models.project import Submission as SubModel
 
-                    sub = await self.db.get(SubModel, review.submission_id) if review.submission_id else None
-                    proj = await self.db.get(Project, sub.project_id) if sub and sub.project_id else None
+                    sub = (
+                        await self.db.get(SubModel, review.submission_id)
+                        if review.submission_id
+                        else None
+                    )
+                    proj = (
+                        await self.db.get(Project, sub.project_id)
+                        if sub and sub.project_id
+                        else None
+                    )
                     if proj:
-
-
                         m = await self.db.execute(
-                            select(OrgMember.id).where(OrgMember.org_id == proj.org_id, OrgMember.user_id == requesting_user_id).limit(1)
+                            select(OrgMember.id)
+                            .where(
+                                OrgMember.org_id == proj.org_id,
+                                OrgMember.user_id == requesting_user_id,
+                            )
+                            .limit(1)
                         )
                         if m.scalar_one_or_none():
-                            chain.append({"type": "submission_review", "id": review.id, "label": f"Review (score: {review.score})"})
+                            chain.append(
+                                {
+                                    "type": "submission_review",
+                                    "id": review.id,
+                                    "label": f"Review (score: {review.score})",
+                                }
+                            )
                         else:
                             chain.append({"type": "redacted", "reason": "insufficient_access"})
                     else:
-                        chain.append({"type": "submission_review", "id": review.id, "label": f"Review (score: {review.score})"})
+                        chain.append(
+                            {
+                                "type": "submission_review",
+                                "id": review.id,
+                                "label": f"Review (score: {review.score})",
+                            }
+                        )
                 else:
                     chain.append({"type": "redacted", "reason": "insufficient_access"})
 
@@ -260,15 +293,29 @@ class EvidenceService:
             if run:
                 # Check: requestor must be the run owner or in the run's org
                 if requesting_user_id == run.user_id:
-                    chain.append({"type": "assessment_run", "id": run.id, "label": f"Assessment (status: {run.status}, attempt #{run.attempt_number})"})
+                    chain.append(
+                        {
+                            "type": "assessment_run",
+                            "id": run.id,
+                            "label": f"Assessment (status: {run.status}, attempt #{run.attempt_number})",
+                        }
+                    )
                 elif requesting_user_id:
-
-
                     m = await self.db.execute(
-                        select(OrgMember.id).where(OrgMember.org_id == run.org_id, OrgMember.user_id == requesting_user_id).limit(1)
+                        select(OrgMember.id)
+                        .where(
+                            OrgMember.org_id == run.org_id, OrgMember.user_id == requesting_user_id
+                        )
+                        .limit(1)
                     )
                     if m.scalar_one_or_none():
-                        chain.append({"type": "assessment_run", "id": run.id, "label": f"Assessment (status: {run.status}, attempt #{run.attempt_number})"})
+                        chain.append(
+                            {
+                                "type": "assessment_run",
+                                "id": run.id,
+                                "label": f"Assessment (status: {run.status}, attempt #{run.attempt_number})",
+                            }
+                        )
                     else:
                         chain.append({"type": "redacted", "reason": "insufficient_access"})
                 else:
@@ -281,15 +328,30 @@ class EvidenceService:
             if verif:
                 # Check: requestor must be the verified user or in the employer org
                 if requesting_user_id == verif.user_id:
-                    chain.append({"type": "employer_verification", "id": verif.id, "label": f"Employer verification (rating: {verif.overall_rating})"})
+                    chain.append(
+                        {
+                            "type": "employer_verification",
+                            "id": verif.id,
+                            "label": f"Employer verification (rating: {verif.overall_rating})",
+                        }
+                    )
                 elif requesting_user_id:
-
-
                     m = await self.db.execute(
-                        select(OrgMember.id).where(OrgMember.org_id == verif.employer_org_id, OrgMember.user_id == requesting_user_id).limit(1)
+                        select(OrgMember.id)
+                        .where(
+                            OrgMember.org_id == verif.employer_org_id,
+                            OrgMember.user_id == requesting_user_id,
+                        )
+                        .limit(1)
                     )
                     if m.scalar_one_or_none():
-                        chain.append({"type": "employer_verification", "id": verif.id, "label": f"Employer verification (rating: {verif.overall_rating})"})
+                        chain.append(
+                            {
+                                "type": "employer_verification",
+                                "id": verif.id,
+                                "label": f"Employer verification (rating: {verif.overall_rating})",
+                            }
+                        )
                     else:
                         chain.append({"type": "redacted", "reason": "insufficient_access"})
                 else:
@@ -302,7 +364,13 @@ class EvidenceService:
             if cred:
                 # Credentials are user-owned; requestor must be the owner
                 if requesting_user_id == cred.user_id:
-                    chain.append({"type": "credential", "id": cred.id, "label": f"{cred.credential_type} v{cred.version}"})
+                    chain.append(
+                        {
+                            "type": "credential",
+                            "id": cred.id,
+                            "label": f"{cred.credential_type} v{cred.version}",
+                        }
+                    )
                 else:
                     chain.append({"type": "redacted", "reason": "insufficient_access"})
 

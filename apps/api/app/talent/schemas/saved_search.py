@@ -25,9 +25,7 @@ class CreateSavedSearchRequest(BaseModel):
     @classmethod
     def _validate_notify_frequency(cls, v: str) -> str:
         if v not in NOTIFY_FREQUENCIES:
-            raise ValueError(
-                f"notify_frequency must be one of {sorted(NOTIFY_FREQUENCIES)}"
-            )
+            raise ValueError(f"notify_frequency must be one of {sorted(NOTIFY_FREQUENCIES)}")
         return v
 
 
@@ -41,9 +39,7 @@ class UpdateSavedSearchRequest(BaseModel):
     @classmethod
     def _validate_notify_frequency(cls, v: str | None) -> str | None:
         if v is not None and v not in NOTIFY_FREQUENCIES:
-            raise ValueError(
-                f"notify_frequency must be one of {sorted(NOTIFY_FREQUENCIES)}"
-            )
+            raise ValueError(f"notify_frequency must be one of {sorted(NOTIFY_FREQUENCIES)}")
         return v
 
 

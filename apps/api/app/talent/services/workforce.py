@@ -68,7 +68,8 @@ class WorkforceIntelligenceService:
         # Count open opportunities per required capability
         # opportunities.required_capabilities is JSONB array of
         # [{"capability_id": "...", "min_level": N, "required": true}]
-        q = text("""
+        q = text(
+            """
             SELECT
                 c.id AS capability_id,
                 c.canonical_name,
@@ -84,7 +85,8 @@ class WorkforceIntelligenceService:
             HAVING COUNT(DISTINCT o.id) >= :min_cohort
             ORDER BY COUNT(DISTINCT o.id) DESC
             LIMIT :lim
-        """.replace("{category_filter}", "AND c.category = :cat" if category else ""))
+        """.replace("{category_filter}", "AND c.category = :cat" if category else "")
+        )
 
         params: dict = {"min_cohort": self.min_cohort_size, "lim": limit}
         if category:
@@ -171,14 +173,11 @@ class WorkforceIntelligenceService:
         supply_map = {s.capability_id: s.total_supply for s in supply}
 
         # Get content coverage per capability
-        coverage_q = (
-            select(
-                CapabilityMapping.capability_id,
-                CapabilityMapping.source_type,
-                func.count().label("cnt"),
-            )
-            .group_by(CapabilityMapping.capability_id, CapabilityMapping.source_type)
-        )
+        coverage_q = select(
+            CapabilityMapping.capability_id,
+            CapabilityMapping.source_type,
+            func.count().label("cnt"),
+        ).group_by(CapabilityMapping.capability_id, CapabilityMapping.source_type)
         coverage_result = await self.db.execute(coverage_q)
         coverage_map: dict[str, dict[str, int]] = {}
         for row in coverage_result.all():
@@ -251,11 +250,13 @@ class WorkforceIntelligenceService:
                     "content": [],
                     "coverage_by_type": {},
                 }
-            by_cap[cid]["content"].append({
-                "source_type": row.source_type,
-                "source_id": row.source_id,
-                "weight": float(row.contribution_weight),
-            })
+            by_cap[cid]["content"].append(
+                {
+                    "source_type": row.source_type,
+                    "source_id": row.source_id,
+                    "weight": float(row.contribution_weight),
+                }
+            )
             by_cap[cid]["coverage_by_type"][row.source_type] = (
                 by_cap[cid]["coverage_by_type"].get(row.source_type, 0) + 1
             )
@@ -275,9 +276,9 @@ class WorkforceIntelligenceService:
             func.count().label("cnt"),
         ).group_by(Application.status)
         if employer_org_id:
-            app_q = app_q.join(
-                Opportunity, Opportunity.id == Application.opportunity_id
-            ).where(Opportunity.employer_org_id == employer_org_id)
+            app_q = app_q.join(Opportunity, Opportunity.id == Application.opportunity_id).where(
+                Opportunity.employer_org_id == employer_org_id
+            )
 
         app_result = await self.db.execute(app_q)
         app_by_status = {row.status: row.cnt for row in app_result.all()}
@@ -335,14 +336,11 @@ class WorkforceIntelligenceService:
         )
         if capability_id:
             ev_base = ev_base.where(CapabilityEvidence.capability_id == capability_id)
-        ev_base = (
-            ev_base.group_by(
-                CapabilityEvidence.capability_id,
-                Capability.canonical_name,
-                CapabilityEvidence.source_type,
-            )
-            .having(func.count(func.distinct(CapabilityEvidence.user_id)) >= self.min_cohort_size)
-        )
+        ev_base = ev_base.group_by(
+            CapabilityEvidence.capability_id,
+            Capability.canonical_name,
+            CapabilityEvidence.source_type,
+        ).having(func.count(func.distinct(CapabilityEvidence.user_id)) >= self.min_cohort_size)
 
         ev_result = await self.db.execute(ev_base)
         groups = [
@@ -366,63 +364,60 @@ class WorkforceIntelligenceService:
             total_users = g["evidence_count"]
 
             # Users with this evidence who ALSO passed an assessment for same cap
-            passed_q = (
-                select(func.count(func.distinct(AssessmentRun.user_id)))
-                .where(
-                    AssessmentRun.status == "passed",
-                    AssessmentRun.user_id.in_(
-                        select(CapabilityEvidence.user_id).where(
-                            CapabilityEvidence.capability_id == cid,
-                            CapabilityEvidence.source_type == stype,
-                            CapabilityEvidence.status == "active",
-                        )
-                    ),
-                )
+            passed_q = select(func.count(func.distinct(AssessmentRun.user_id))).where(
+                AssessmentRun.status == "passed",
+                AssessmentRun.user_id.in_(
+                    select(CapabilityEvidence.user_id).where(
+                        CapabilityEvidence.capability_id == cid,
+                        CapabilityEvidence.source_type == stype,
+                        CapabilityEvidence.status == "active",
+                    )
+                ),
             )
             passed_count = (await self.db.execute(passed_q)).scalar() or 0
 
             # Users with this evidence who got placed
-            placed_q = (
-                select(func.count(func.distinct(Placement.user_id)))
-                .where(
-                    Placement.user_id.in_(
-                        select(CapabilityEvidence.user_id).where(
-                            CapabilityEvidence.capability_id == cid,
-                            CapabilityEvidence.source_type == stype,
-                            CapabilityEvidence.status == "active",
-                        )
-                    ),
-                )
+            placed_q = select(func.count(func.distinct(Placement.user_id))).where(
+                Placement.user_id.in_(
+                    select(CapabilityEvidence.user_id).where(
+                        CapabilityEvidence.capability_id == cid,
+                        CapabilityEvidence.source_type == stype,
+                        CapabilityEvidence.status == "active",
+                    )
+                ),
             )
             placed_count = (await self.db.execute(placed_q)).scalar() or 0
 
             # Users who received employer_verified evidence for same cap
-            emp_ver_q = (
-                select(func.count(func.distinct(CapabilityEvidence.user_id)))
-                .where(
-                    CapabilityEvidence.capability_id == cid,
-                    CapabilityEvidence.verification_level == "employer_verified",
-                    CapabilityEvidence.status == "active",
-                    CapabilityEvidence.user_id.in_(
-                        select(CapabilityEvidence.user_id).where(
-                            CapabilityEvidence.capability_id == cid,
-                            CapabilityEvidence.source_type == stype,
-                            CapabilityEvidence.status == "active",
-                        )
-                    ),
-                )
+            emp_ver_q = select(func.count(func.distinct(CapabilityEvidence.user_id))).where(
+                CapabilityEvidence.capability_id == cid,
+                CapabilityEvidence.verification_level == "employer_verified",
+                CapabilityEvidence.status == "active",
+                CapabilityEvidence.user_id.in_(
+                    select(CapabilityEvidence.user_id).where(
+                        CapabilityEvidence.capability_id == cid,
+                        CapabilityEvidence.source_type == stype,
+                        CapabilityEvidence.status == "active",
+                    )
+                ),
             )
             emp_ver_count = (await self.db.execute(emp_ver_q)).scalar() or 0
 
-            results.append({
-                "capability_id": cid,
-                "capability_name": g["capability_name"],
-                "source_type": stype,
-                "evidence_count": total_users,
-                "assessment_pass_rate": round(passed_count / total_users, 4) if total_users else 0,
-                "placement_rate": round(placed_count / total_users, 4) if total_users else 0,
-                "employer_verification_rate": round(emp_ver_count / total_users, 4) if total_users else 0,
-            })
+            results.append(
+                {
+                    "capability_id": cid,
+                    "capability_name": g["capability_name"],
+                    "source_type": stype,
+                    "evidence_count": total_users,
+                    "assessment_pass_rate": round(passed_count / total_users, 4)
+                    if total_users
+                    else 0,
+                    "placement_rate": round(placed_count / total_users, 4) if total_users else 0,
+                    "employer_verification_rate": round(emp_ver_count / total_users, 4)
+                    if total_users
+                    else 0,
+                }
+            )
 
         results.sort(key=lambda r: -r["evidence_count"])
         return results[:limit]
@@ -464,54 +459,62 @@ class WorkforceIntelligenceService:
 
             # Missing assessment → recommend creating one
             if not cov.get("assessment_blueprint"):
-                recommendations.append({
-                    "recommendation_type": "add_assessment",
-                    "capability_id": cid,
-                    "capability_name": cname,
-                    "reason": f"High demand ({gap.demand_count} opportunities) but no standardized assessment exists",
-                    "suggested_action": f"Create a practical assessment blueprint for {cname}",
-                    "confidence": "high" if gap.gap_severity == "high" else "medium",
-                    "requires_confirmation": True,
-                })
+                recommendations.append(
+                    {
+                        "recommendation_type": "add_assessment",
+                        "capability_id": cid,
+                        "capability_name": cname,
+                        "reason": f"High demand ({gap.demand_count} opportunities) but no standardized assessment exists",
+                        "suggested_action": f"Create a practical assessment blueprint for {cname}",
+                        "confidence": "high" if gap.gap_severity == "high" else "medium",
+                        "requires_confirmation": True,
+                    }
+                )
 
             # Missing project template
             if not cov.get("project_template"):
-                recommendations.append({
-                    "recommendation_type": "add_project_template",
-                    "capability_id": cid,
-                    "capability_name": cname,
-                    "reason": f"No project template maps to {cname}; learners lack hands-on practice",
-                    "suggested_action": f"Create an advanced project template for {cname}",
-                    "confidence": "medium",
-                    "requires_confirmation": True,
-                })
+                recommendations.append(
+                    {
+                        "recommendation_type": "add_project_template",
+                        "capability_id": cid,
+                        "capability_name": cname,
+                        "reason": f"No project template maps to {cname}; learners lack hands-on practice",
+                        "suggested_action": f"Create an advanced project template for {cname}",
+                        "confidence": "medium",
+                        "requires_confirmation": True,
+                    }
+                )
 
             # High demand, low supply → increase capacity
             if gap.gap_severity == "high":
-                recommendations.append({
-                    "recommendation_type": "increase_training_capacity",
-                    "capability_id": cid,
-                    "capability_name": cname,
-                    "reason": f"Supply-demand gap is severe: {gap.gap} unfilled out of {gap.demand_count} demand",
-                    "suggested_action": f"Add more Skill Packs or Learning Paths covering {cname}",
-                    "confidence": "high",
-                    "requires_confirmation": True,
-                })
+                recommendations.append(
+                    {
+                        "recommendation_type": "increase_training_capacity",
+                        "capability_id": cid,
+                        "capability_name": cname,
+                        "reason": f"Supply-demand gap is severe: {gap.gap} unfilled out of {gap.demand_count} demand",
+                        "suggested_action": f"Add more Skill Packs or Learning Paths covering {cname}",
+                        "confidence": "high",
+                        "requires_confirmation": True,
+                    }
+                )
 
             # Low employer verification rate → improve practical alignment
             emp_rate = emp_ver_by_cap.get(cid, 1.0)
             if emp_rate < 0.3 and gap.demand_count > 0:
-                recommendations.append({
-                    "recommendation_type": "improve_practical_alignment",
-                    "capability_id": cid,
-                    "capability_name": cname,
-                    "reason": (
-                        f"Employer verification rate is low ({emp_rate:.0%}); "
-                        "training may not align with real-world expectations"
-                    ),
-                    "suggested_action": f"Review rubrics and project briefs for {cname} against employer feedback",
-                    "confidence": "medium",
-                    "requires_confirmation": True,
-                })
+                recommendations.append(
+                    {
+                        "recommendation_type": "improve_practical_alignment",
+                        "capability_id": cid,
+                        "capability_name": cname,
+                        "reason": (
+                            f"Employer verification rate is low ({emp_rate:.0%}); "
+                            "training may not align with real-world expectations"
+                        ),
+                        "suggested_action": f"Review rubrics and project briefs for {cname} against employer feedback",
+                        "confidence": "medium",
+                        "requires_confirmation": True,
+                    }
+                )
 
         return recommendations[:limit]

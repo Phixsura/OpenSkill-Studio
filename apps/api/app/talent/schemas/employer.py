@@ -30,16 +30,18 @@ class EmployerProfileResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-OPPORTUNITY_TYPES = frozenset({
-    "internship",
-    "full_time",
-    "part_time",
-    "contract",
-    "freelance",
-    "project_role",
-    "apprenticeship",
-    "campus_project",
-})
+OPPORTUNITY_TYPES = frozenset(
+    {
+        "internship",
+        "full_time",
+        "part_time",
+        "contract",
+        "freelance",
+        "project_role",
+        "apprenticeship",
+        "campus_project",
+    }
+)
 
 
 class CreateOpportunityRequest(BaseModel):
@@ -53,10 +55,10 @@ class CreateOpportunityRequest(BaseModel):
     def _validate_type(cls, v: str) -> str:
         if v not in OPPORTUNITY_TYPES:
             raise ValueError(
-                f"Invalid opportunity_type: {v}. "
-                f"Must be one of {sorted(OPPORTUNITY_TYPES)}"
+                f"Invalid opportunity_type: {v}. Must be one of {sorted(OPPORTUNITY_TYPES)}"
             )
         return v
+
     location_text: str | None = Field(None, max_length=200)
     compensation_display: str | None = Field(None, max_length=200)
     required_capabilities: list[dict] = Field(default_factory=list)

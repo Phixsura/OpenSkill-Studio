@@ -31,21 +31,19 @@ class CohortOpportunityExposure(Base):
     __tablename__ = "cohort_opportunity_exposures"
 
     id: Mapped[str] = ulid_pk()
-    cohort_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("cohorts.id", ondelete="CASCADE")
-    )
+    cohort_id: Mapped[str] = mapped_column(String(26), ForeignKey("cohorts.id", ondelete="CASCADE"))
     opportunity_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("opportunities.id", ondelete="CASCADE")
     )
-    exposed_by: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    exposed_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
-
-    __table_args__ = (
-        Index("uq_cohort_exposure", "cohort_id", "opportunity_id", unique=True),
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
     )
+
+    __table_args__ = (Index("uq_cohort_exposure", "cohort_id", "opportunity_id", unique=True),)
 
 
 class InternshipSupervision(Base):
@@ -70,7 +68,11 @@ class InternshipSupervision(Base):
     notes: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     # pending | active | completed | terminated
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="'pending'")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -94,17 +96,17 @@ class EmployerVerification(Base):
     employer_org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")
     )
-    verified_by: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    verified_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     # [{"capability_id": "01J...", "level_observed": 4, "score": 0.85, "comment": "..."}]
     capability_ratings: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     overall_rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
     overall_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("ix_employer_verifications_placement", "placement_id"),
@@ -137,16 +139,20 @@ class OutcomeEvent(Base):
     __tablename__ = "outcome_events"
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     event_type: Mapped[str] = mapped_column(String(40))
     source_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     source_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     # private | passport_visible | public
-    visibility: Mapped[str] = mapped_column(String(20), default="private", server_default="'private'")
+    visibility: Mapped[str] = mapped_column(
+        String(20), default="private", server_default="'private'"
+    )
     extra: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default="{}")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (Index("ix_outcome_events_user", "user_id", "event_type"),)

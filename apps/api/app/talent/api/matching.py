@@ -59,10 +59,12 @@ async def match_candidates(
     fairness_svc = FairnessService(db)
     fairness = await fairness_svc.compute_fairness_metrics(result_dicts)
 
-    return DataResponse(data={
-        "results": result_dicts,
-        "fairness": fairness,
-    })
+    return DataResponse(
+        data={
+            "results": result_dicts,
+            "fairness": fairness,
+        }
+    )
 
 
 @router.get(

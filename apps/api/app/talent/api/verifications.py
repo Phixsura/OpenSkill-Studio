@@ -154,19 +154,13 @@ async def list_supervisions(
 ):
     await require_org_member(school_org_id, user, db)
 
-    q = select(InternshipSupervision).where(
-        InternshipSupervision.school_org_id == school_org_id
-    )
+    q = select(InternshipSupervision).where(InternshipSupervision.school_org_id == school_org_id)
     if status:
         q = q.where(InternshipSupervision.status == status)
 
-
     if cursor:
         q = q.where(InternshipSupervision.id < cursor)
-    q = (
-        q.order_by(InternshipSupervision.created_at.desc())
-        .limit(limit + 1)
-    )
+    q = q.order_by(InternshipSupervision.created_at.desc()).limit(limit + 1)
     result = await db.execute(q)
     all_items = list(result.scalars().all())
     has_more = len(all_items) > limit

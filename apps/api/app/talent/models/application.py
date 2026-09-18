@@ -47,9 +47,7 @@ class Application(Base):
     opportunity_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("opportunities.id", ondelete="CASCADE")
     )
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     # Frozen at submission — future passport changes don't update this
     evidence_bundle: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     passport_snapshot_id: Mapped[str | None] = mapped_column(
@@ -60,7 +58,11 @@ class Application(Base):
     status: Mapped[str] = mapped_column(String(20), default="draft", server_default="'draft'")
     resume_asset_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     cover_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -85,15 +87,15 @@ class ApplicationEvent(Base):
     from_status: Mapped[str] = mapped_column(String(20))
     to_status: Mapped[str] = mapped_column(String(20))
     # NOT nullable — every transition requires an authenticated actor
-    acted_by: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    acted_by: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_app_events_application", "application_id", "created_at"),
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
     )
+
+    __table_args__ = (Index("ix_app_events_application", "application_id", "created_at"),)
 
 
 class InterviewStage(Base):
@@ -119,7 +121,11 @@ class InterviewStage(Base):
     evaluation_notes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # pending | completed | cancelled | no_show
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="'pending'")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (Index("ix_interview_stages_app", "application_id"),)
 
@@ -136,9 +142,7 @@ class Placement(Base):
     opportunity_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("opportunities.id", ondelete="CASCADE")
     )
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     employer_org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")
     )
@@ -151,7 +155,11 @@ class Placement(Base):
     placement_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
     # active | completed | terminated | cancelled
     status: Mapped[str] = mapped_column(String(20), default="active", server_default="'active'")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -188,14 +196,10 @@ class ApplicationFeedback(Base):
     visibility: Mapped[str] = mapped_column(
         String(30), default="employer_only", server_default="'employer_only'"
     )
-    author_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    author_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: __import__("datetime").datetime.now(
-            __import__("datetime").UTC
-        ),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
         server_default=func.now(),
     )
 

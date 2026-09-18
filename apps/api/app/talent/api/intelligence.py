@@ -46,6 +46,7 @@ def _to_csv_response(rows: list[dict], filename: str) -> StreamingResponse:
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
+
 router = APIRouter(prefix="/talent/intelligence", tags=["Talent — Intelligence"])
 
 
@@ -66,7 +67,10 @@ async def get_skill_trends(
     from app.talent.services.skill_trends import compute_skill_trends
 
     trends = await compute_skill_trends(
-        db, direction=direction, category=category, limit=limit,
+        db,
+        direction=direction,
+        category=category,
+        limit=limit,
     )
     return DataResponse(data=[dataclasses.asdict(t) for t in trends])
 
@@ -81,16 +85,18 @@ async def get_demand(
     """Demand by capability (aggregated, privacy-safe)."""
     svc = WorkforceIntelligenceService(db)
     signals = await svc.get_demand_signals(category=category, limit=limit)
-    return DataResponse(data=[
-        {
-            "capability_id": s.capability_id,
-            "capability_name": s.capability_name,
-            "category": s.category,
-            "open_opportunities": s.open_opportunities,
-            "total_demand": s.total_demand,
-        }
-        for s in signals
-    ])
+    return DataResponse(
+        data=[
+            {
+                "capability_id": s.capability_id,
+                "capability_name": s.capability_name,
+                "category": s.category,
+                "open_opportunities": s.open_opportunities,
+                "total_demand": s.total_demand,
+            }
+            for s in signals
+        ]
+    )
 
 
 @router.get("/supply", response_model=DataResponse[list[dict]])
@@ -103,15 +109,17 @@ async def get_supply(
     """Verified supply by capability (aggregated, privacy-safe)."""
     svc = WorkforceIntelligenceService(db)
     signals = await svc.get_supply_signals(category=category, limit=limit)
-    return DataResponse(data=[
-        {
-            "capability_id": s.capability_id,
-            "capability_name": s.capability_name,
-            "category": s.category,
-            "total_supply": s.total_supply,
-        }
-        for s in signals
-    ])
+    return DataResponse(
+        data=[
+            {
+                "capability_id": s.capability_id,
+                "capability_name": s.capability_name,
+                "category": s.category,
+                "total_supply": s.total_supply,
+            }
+            for s in signals
+        ]
+    )
 
 
 @router.get("/gaps", response_model=DataResponse[list[dict]])
@@ -124,18 +132,20 @@ async def get_gaps(
     """Demand-supply gap analysis (aggregated, privacy-safe)."""
     svc = WorkforceIntelligenceService(db)
     gaps = await svc.get_gap_analysis(category=category, limit=limit)
-    return DataResponse(data=[
-        {
-            "capability_id": g.capability_id,
-            "capability_name": g.capability_name,
-            "demand_count": g.demand_count,
-            "qualified_supply": g.qualified_supply,
-            "gap": g.gap,
-            "gap_severity": g.gap_severity,
-            "content_coverage": g.content_coverage,
-        }
-        for g in gaps
-    ])
+    return DataResponse(
+        data=[
+            {
+                "capability_id": g.capability_id,
+                "capability_name": g.capability_name,
+                "demand_count": g.demand_count,
+                "qualified_supply": g.qualified_supply,
+                "gap": g.gap,
+                "gap_severity": g.gap_severity,
+                "content_coverage": g.content_coverage,
+            }
+            for g in gaps
+        ]
+    )
 
 
 @router.get("/coverage", response_model=DataResponse[list[dict]])
@@ -162,9 +172,7 @@ async def get_placement_analytics(
     if employer_org_id:
         await require_org_member(employer_org_id, user, db)
     svc = WorkforceIntelligenceService(db)
-    return DataResponse(
-        data=await svc.get_placement_analytics(employer_org_id=employer_org_id)
-    )
+    return DataResponse(data=await svc.get_placement_analytics(employer_org_id=employer_org_id))
 
 
 @router.get("/outcomes", response_model=DataResponse[list[dict]])
@@ -348,14 +356,16 @@ async def get_team_analytics(
 
     svc = TeamAnalyticsService(db)
     analytics = await svc.get_team_analytics(org_id)
-    return DataResponse(data={
-        "org_id": analytics.org_id,
-        "total_members": analytics.total_members,
-        "total_capabilities_covered": analytics.total_capabilities_covered,
-        "skill_distribution": [dataclasses.asdict(s) for s in analytics.skill_distribution],
-        "team_strengths": analytics.team_strengths,
-        "team_gaps": analytics.team_gaps,
-    })
+    return DataResponse(
+        data={
+            "org_id": analytics.org_id,
+            "total_members": analytics.total_members,
+            "total_capabilities_covered": analytics.total_capabilities_covered,
+            "skill_distribution": [dataclasses.asdict(s) for s in analytics.skill_distribution],
+            "team_strengths": analytics.team_strengths,
+            "team_gaps": analytics.team_gaps,
+        }
+    )
 
 
 @router.get("/analytics/team/{org_id}/coverage", response_model=DataResponse[list[dict]])
@@ -412,15 +422,17 @@ async def preview_retention(
 
     svc = DataRetentionService(db)
     reports = await svc.preview_retention()
-    return DataResponse(data=[
-        {
-            "policy": r.policy,
-            "records_affected": r.records_affected,
-            "action": r.action,
-            "cutoff_date": r.cutoff_date.isoformat(),
-        }
-        for r in reports
-    ])
+    return DataResponse(
+        data=[
+            {
+                "policy": r.policy,
+                "records_affected": r.records_affected,
+                "action": r.action,
+                "cutoff_date": r.cutoff_date.isoformat(),
+            }
+            for r in reports
+        ]
+    )
 
 
 @router.post("/retention/enforce", response_model=DataResponse[list[dict]])
@@ -439,15 +451,17 @@ async def enforce_retention(
     svc = DataRetentionService(db)
     reports = await svc.enforce_retention()
     await db.commit()
-    return DataResponse(data=[
-        {
-            "policy": r.policy,
-            "records_affected": r.records_affected,
-            "action": r.action,
-            "cutoff_date": r.cutoff_date.isoformat(),
-        }
-        for r in reports
-    ])
+    return DataResponse(
+        data=[
+            {
+                "policy": r.policy,
+                "records_affected": r.records_affected,
+                "action": r.action,
+                "cutoff_date": r.cutoff_date.isoformat(),
+            }
+            for r in reports
+        ]
+    )
 
 
 @router.get("/consent-history", response_model=DataResponse[list[dict]])
@@ -461,9 +475,7 @@ async def get_consent_history(
     from app.talent.services.data_retention import DataRetentionService
 
     svc = DataRetentionService(db)
-    trail = await svc.get_consent_audit_trail(
-        user.id, consent_type=consent_type, limit=limit
-    )
+    trail = await svc.get_consent_audit_trail(user.id, consent_type=consent_type, limit=limit)
     return DataResponse(data=trail)
 
 
@@ -491,14 +503,16 @@ async def get_skill_market_values(
         elif g.gap_severity == "low" and g.demand_count < 5:
             trend = "declining"
         mv = mi.compute_market_value(g.demand_count, g.qualified_supply, trend)
-        results.append({
-            "capability_id": g.capability_id,
-            "capability_name": g.capability_name,
-            "demand_index": mv.demand_index,
-            "scarcity_index": mv.scarcity_index,
-            "market_value_score": mv.market_value_score,
-            "trend": mv.trend,
-        })
+        results.append(
+            {
+                "capability_id": g.capability_id,
+                "capability_name": g.capability_name,
+                "demand_index": mv.demand_index,
+                "scarcity_index": mv.scarcity_index,
+                "market_value_score": mv.market_value_score,
+                "trend": mv.trend,
+            }
+        )
     results.sort(key=lambda x: x["market_value_score"], reverse=True)
     return DataResponse(data=results[:limit])
 
@@ -511,17 +525,25 @@ async def get_employer_reputation(
 ):
     """Employer reputation score from platform activity."""
     from app.talent.services.market_insights import MarketInsightsService
+
     mi = MarketInsightsService()
     rep = mi.compute_employer_reputation(
-        org_id=org_id, total_placements=0, verified_placements=0,
-        avg_duration_days=None, return_candidates=0, total_feedback=0,
+        org_id=org_id,
+        total_placements=0,
+        verified_placements=0,
+        avg_duration_days=None,
+        return_candidates=0,
+        total_feedback=0,
         avg_response_hours=None,
     )
-    return DataResponse(data={
-        "org_id": rep.org_id, "reputation_score": rep.reputation_score,
-        "total_placements": rep.total_placements,
-        "verification_rate": rep.verification_rate,
-    })
+    return DataResponse(
+        data={
+            "org_id": rep.org_id,
+            "reputation_score": rep.reputation_score,
+            "total_placements": rep.total_placements,
+            "verification_rate": rep.verification_rate,
+        }
+    )
 
 
 # ---- Diversity Analytics ----
@@ -536,14 +558,22 @@ async def get_pipeline_equity(
     """Pipeline equity analysis (demographic-free bias detection)."""
     await require_org_member(org_id, user, db)
     from app.talent.services.diversity_analytics import DiversityAnalyticsService
+
     svc = DiversityAnalyticsService()
     report = svc.build_report(org_id=org_id, applications=[], applications_by_stage={})
-    return DataResponse(data={
-        "total_applications": report.total_applications,
-        "stage_dropoffs": [{"from": d.from_stage, "to": d.to_stage, "rate": d.drop_off_rate} for d in report.stage_dropoffs],
-        "source_effectiveness": [{"source": s.source, "hire_rate": s.hire_rate} for s in report.source_effectiveness],
-        "equity_flags": report.equity_flags,
-    })
+    return DataResponse(
+        data={
+            "total_applications": report.total_applications,
+            "stage_dropoffs": [
+                {"from": d.from_stage, "to": d.to_stage, "rate": d.drop_off_rate}
+                for d in report.stage_dropoffs
+            ],
+            "source_effectiveness": [
+                {"source": s.source, "hire_rate": s.hire_rate} for s in report.source_effectiveness
+            ],
+            "equity_flags": report.equity_flags,
+        }
+    )
 
 
 # ---- Skill Gap Prediction ----
@@ -566,16 +596,25 @@ async def get_skill_gap_predictions(
     for g in gaps:
         growth = 0.1 if g.gap_severity == "high" else 0.0
         f = pred.build_forecast(
-            capability_id=g.capability_id, capability_name=g.capability_name,
-            current_demand=g.demand_count, current_supply=g.qualified_supply,
-            growth_rate_90d=growth, supply_growth_monthly=1,
+            capability_id=g.capability_id,
+            capability_name=g.capability_name,
+            current_demand=g.demand_count,
+            current_supply=g.qualified_supply,
+            growth_rate_90d=growth,
+            supply_growth_monthly=1,
         )
-        forecasts.append({
-            "capability_id": f.capability_id, "capability_name": f.capability_name,
-            "current_gap": f.current_gap, "predicted_gap_3m": f.predicted_gap_3m,
-            "predicted_gap_6m": f.predicted_gap_6m, "predicted_gap_12m": f.predicted_gap_12m,
-            "urgency": f.urgency, "action": f.recommended_action,
-        })
+        forecasts.append(
+            {
+                "capability_id": f.capability_id,
+                "capability_name": f.capability_name,
+                "current_gap": f.current_gap,
+                "predicted_gap_3m": f.predicted_gap_3m,
+                "predicted_gap_6m": f.predicted_gap_6m,
+                "predicted_gap_12m": f.predicted_gap_12m,
+                "urgency": f.urgency,
+                "action": f.recommended_action,
+            }
+        )
     return DataResponse(data=forecasts)
 
 
@@ -590,15 +629,22 @@ async def get_evidence_quality(
 ):
     """Score individual evidence quality (gap #21)."""
     from app.talent.models.evidence import CapabilityEvidence
+
     ev = await db.get(CapabilityEvidence, evidence_id)
     if not ev or ev.user_id != user.id:
         raise HTTPException(404, "Evidence not found")
     from app.talent.services.evidence_intelligence import compute_evidence_quality
-    quality = compute_evidence_quality({
-        "source_id": ev.source_id, "score_normalized": ev.score_normalized,
-        "verification_level": ev.verification_level, "occurred_at": ev.occurred_at,
-        "org_id": ev.org_id, "confidence": ev.confidence,
-    })
+
+    quality = compute_evidence_quality(
+        {
+            "source_id": ev.source_id,
+            "score_normalized": ev.score_normalized,
+            "verification_level": ev.verification_level,
+            "occurred_at": ev.occurred_at,
+            "org_id": ev.org_id,
+            "confidence": ev.confidence,
+        }
+    )
     return DataResponse(data=quality)
 
 
@@ -610,6 +656,7 @@ async def get_expiring_evidence(
 ):
     """Find evidence expiring within N days (gap #22)."""
     from app.talent.services.evidence_intelligence import find_expiring_evidence
+
     results = await find_expiring_evidence(db, days_ahead=days, user_id=user.id)
     return DataResponse(data=results)
 
@@ -622,6 +669,7 @@ async def simulate_evidence_impact(
 ):
     """Simulate how adding evidence would change a score (gap #26)."""
     from app.talent.services.evidence_intelligence import simulate_score_change
+
     result = simulate_score_change(
         current_evidence=body.get("current_evidence", []),
         hypothetical_evidence=body.get("new_evidence", {}),
@@ -637,6 +685,7 @@ async def get_evidence_distribution(
 ):
     """Evidence type distribution analytics (gap #32)."""
     from app.talent.services.evidence_intelligence import compute_evidence_distribution
+
     result = await compute_evidence_distribution(db, user_id=user.id)
     return DataResponse(data=result)
 
@@ -647,6 +696,7 @@ async def get_scoring_calibration(
 ):
     """Get current scoring calibration parameters (gap #28)."""
     from app.talent.services.evidence_intelligence import DEFAULT_CALIBRATION
+
     return DataResponse(data=DEFAULT_CALIBRATION)
 
 
@@ -657,11 +707,13 @@ async def validate_scoring_calibration(
 ):
     """Validate proposed scoring calibration changes (gap #28)."""
     from app.talent.services.evidence_intelligence import validate_calibration
+
     errors = validate_calibration(body)
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
 # ---- Employer Intelligence (#106-130) ----
+
 
 @router.get("/employer/interview-kit/{opp_id}", response_model=DataResponse[dict])
 async def get_interview_kit(
@@ -672,12 +724,22 @@ async def get_interview_kit(
 ):
     """Generate interview preparation kit for interviewers (gap #124)."""
     from app.talent.models.employer import Opportunity
+
     opp = await db.get(Opportunity, opp_id)
     if not opp:
         raise HTTPException(404, "Opportunity not found")
     await require_org_member(opp.employer_org_id, user, db)
     from app.talent.services.employer_intelligence import generate_interview_kit
-    kit = generate_interview_kit({"title": opp.title, "opportunity_type": opp.opportunity_type, "required_capabilities": opp.required_capabilities, "preferred_capabilities": opp.preferred_capabilities}, stage_type)
+
+    kit = generate_interview_kit(
+        {
+            "title": opp.title,
+            "opportunity_type": opp.opportunity_type,
+            "required_capabilities": opp.required_capabilities,
+            "preferred_capabilities": opp.preferred_capabilities,
+        },
+        stage_type,
+    )
     return DataResponse(data=kit)
 
 
@@ -688,6 +750,7 @@ async def validate_pipeline(
 ):
     """Validate custom pipeline stages (gap #121)."""
     from app.talent.services.employer_intelligence import validate_custom_pipeline
+
     errors = validate_custom_pipeline(body.get("stages", []))
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
@@ -699,6 +762,7 @@ async def evaluate_pool_rules_endpoint(
 ):
     """Evaluate talent pool automation rules (gap #122)."""
     from app.talent.services.employer_intelligence import evaluate_pool_rules
+
     result = evaluate_pool_rules(body.get("rules", []), body.get("candidate", {}))
     return DataResponse(data=result)
 
@@ -710,9 +774,12 @@ async def compute_adverse_impact_endpoint(
 ):
     """Compute adverse impact ratio (gap #125)."""
     from app.talent.services.employer_intelligence import compute_adverse_impact
+
     result = compute_adverse_impact(
-        body.get("group_a_selected", 0), body.get("group_a_total", 0),
-        body.get("group_b_selected", 0), body.get("group_b_total", 0),
+        body.get("group_a_selected", 0),
+        body.get("group_a_total", 0),
+        body.get("group_b_selected", 0),
+        body.get("group_b_total", 0),
     )
     return DataResponse(data=result)
 
@@ -724,11 +791,13 @@ async def validate_requisition_endpoint(
 ):
     """Validate job requisition for approval (gap #128)."""
     from app.talent.services.employer_intelligence import validate_requisition
+
     errors = validate_requisition(body)
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
 # ---- Candidate Intelligence (#131-145) ----
+
 
 @router.post("/candidate/availability/validate", response_model=DataResponse[dict])
 async def validate_candidate_availability(
@@ -737,6 +806,7 @@ async def validate_candidate_availability(
 ):
     """Validate candidate availability preferences (gap #132)."""
     from app.talent.services.candidate_intelligence import validate_availability_preference
+
     errors = validate_availability_preference(body)
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
@@ -748,6 +818,7 @@ async def validate_salary(
 ):
     """Validate salary expectation (gap #135)."""
     from app.talent.services.candidate_intelligence import validate_salary_expectation
+
     errors = validate_salary_expectation(body)
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
@@ -759,6 +830,7 @@ async def get_interview_prep_endpoint(
 ):
     """Get interview preparation tips (gap #141)."""
     from app.talent.services.candidate_intelligence import get_interview_prep
+
     return DataResponse(data=get_interview_prep(stage_type))
 
 
@@ -769,6 +841,7 @@ async def get_achievements(
 ):
     """Get earned achievements / gamification (gap #142)."""
     from app.talent.services.candidate_intelligence import check_achievements, compute_total_points
+
     stats = {}  # In production, compute from DB
     earned = check_achievements(stats)
     return DataResponse(data={"achievements": earned, "total_points": compute_total_points(earned)})
@@ -783,11 +856,13 @@ async def compute_mentorship_match(
     import dataclasses
 
     from app.talent.services.candidate_intelligence import compute_mentorship_compatibility
+
     match = compute_mentorship_compatibility(body.get("mentor", {}), body.get("mentee", {}))
     return DataResponse(data=dataclasses.asdict(match))
 
 
 # ---- Communication Intelligence (#146-155) ----
+
 
 @router.get("/communication/email-templates", response_model=DataResponse[list[str]])
 async def list_email_templates_endpoint(
@@ -795,6 +870,7 @@ async def list_email_templates_endpoint(
 ):
     """List available email templates (gap #146)."""
     from app.talent.services.communication_intelligence import list_email_templates
+
     return DataResponse(data=list_email_templates())
 
 
@@ -805,6 +881,7 @@ async def render_email_template_endpoint(
 ):
     """Render an email template with context (gap #146)."""
     from app.talent.services.communication_intelligence import render_email_template
+
     result = render_email_template(body.get("template_key", ""), body.get("context", {}))
     if not result:
         raise HTTPException(404, "Template not found")
@@ -817,6 +894,7 @@ async def list_message_templates_endpoint(
 ):
     """List quick-reply message templates (gap #152)."""
     from app.talent.services.communication_intelligence import list_message_templates
+
     return DataResponse(data=list_message_templates())
 
 
@@ -827,11 +905,13 @@ async def validate_bulk_message_endpoint(
 ):
     """Validate bulk message request (gap #153)."""
     from app.talent.services.communication_intelligence import validate_bulk_message
+
     errors = validate_bulk_message(body.get("recipient_ids", []), body.get("content", ""))
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
 # ---- Analytics Intelligence (#156-170) ----
+
 
 @router.post("/reports/validate", response_model=DataResponse[dict])
 async def validate_report(
@@ -840,6 +920,7 @@ async def validate_report(
 ):
     """Validate custom report configuration (gap #156)."""
     from app.talent.services.analytics_intelligence import validate_report_config
+
     errors = validate_report_config(body)
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
@@ -851,7 +932,10 @@ async def compare_benchmark(
 ):
     """Compare a metric against industry benchmarks (gap #165)."""
     from app.talent.services.analytics_intelligence import compare_to_benchmark
-    result = compare_to_benchmark(body.get("metric", ""), body.get("value", 0), body.get("industry", "average"))
+
+    result = compare_to_benchmark(
+        body.get("metric", ""), body.get("value", 0), body.get("industry", "average")
+    )
     return DataResponse(data=result)
 
 
@@ -862,11 +946,13 @@ async def evaluate_kpi_endpoint(
 ):
     """Evaluate a KPI against target (gap #169)."""
     from app.talent.services.analytics_intelligence import evaluate_kpi
+
     result = evaluate_kpi(body.get("kpi", {}), body.get("current_value", 0))
     return DataResponse(data=result)
 
 
 # ---- Integration Intelligence (#171-180) ----
+
 
 @router.post("/integrations/api-keys/generate", response_model=DataResponse[dict])
 async def generate_api_key_endpoint(
@@ -883,12 +969,15 @@ async def generate_api_key_endpoint(
         generate_api_key,
         validate_api_key_scopes,
     )
+
     scopes = body.get("scopes", [])
     errors = validate_api_key_scopes(scopes)
     if errors:
         raise HTTPException(422, errors[0])
     result = generate_api_key(body.get("org_id", ""), body.get("name", ""), scopes)
-    return DataResponse(data={"key": result["raw_key"], "prefix": result["key_prefix"], "scopes": scopes})
+    return DataResponse(
+        data={"key": result["raw_key"], "prefix": result["key_prefix"], "scopes": scopes}
+    )
 
 
 @router.post("/integrations/hris/validate", response_model=DataResponse[dict])
@@ -898,6 +987,7 @@ async def validate_hris_employee_endpoint(
 ):
     """Validate employee data against HRIS schema (gap #173)."""
     from app.talent.services.integration_intelligence import validate_hris_employee
+
     errors = validate_hris_employee(body)
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
@@ -909,6 +999,7 @@ async def validate_ats_config_endpoint(
 ):
     """Validate ATS connector configuration (gap #174)."""
     from app.talent.services.integration_intelligence import validate_ats_config
+
     errors = validate_ats_config(body)
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
@@ -919,10 +1010,12 @@ async def list_slack_events(
 ):
     """List Slack notification event mappings (gap #176)."""
     from app.talent.services.integration_intelligence import list_slack_event_mappings
+
     return DataResponse(data=list_slack_event_mappings())
 
 
 # ---- Platform Operations (#181-200) ----
+
 
 @router.get("/platform/feature-flags", response_model=DataResponse[list[dict]])
 async def get_feature_flags(
@@ -930,6 +1023,7 @@ async def get_feature_flags(
 ):
     """List feature flags with current status (gap #191)."""
     from app.talent.services.platform_operations import list_feature_flags
+
     return DataResponse(data=list_feature_flags())
 
 
@@ -939,6 +1033,7 @@ async def get_health_report(
 ):
     """Get platform health check report (gap #193)."""
     from app.talent.services.platform_operations import build_health_report
+
     checks = [
         {"service": "database", "status": "healthy", "latency_ms": 5},
         {"service": "redis", "status": "healthy", "latency_ms": 2},
@@ -953,6 +1048,7 @@ async def get_api_docs_metadata(
 ):
     """Get API documentation metadata (gap #200)."""
     from app.talent.services.platform_operations import API_DOCUMENTATION
+
     return DataResponse(data=API_DOCUMENTATION)
 
 
@@ -963,6 +1059,7 @@ async def classify_field(
 ):
     """Get data classification for a field (gap #183)."""
     from app.talent.services.platform_operations import get_field_classification
+
     return DataResponse(data=get_field_classification(body.get("field_name", "")))
 
 
@@ -973,6 +1070,7 @@ async def validate_ip_list(
 ):
     """Validate IP allowlist entries (gap #184)."""
     from app.talent.services.platform_operations import validate_ip_allowlist
+
     errors = validate_ip_allowlist(body.get("ips", []))
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
@@ -984,5 +1082,8 @@ async def check_role_escalation(
 ):
     """Check for role escalation (gap #186)."""
     from app.talent.services.platform_operations import detect_role_escalation
-    result = detect_role_escalation(body.get("current_role", ""), body.get("new_role", ""), body.get("actor_role", ""))
+
+    result = detect_role_escalation(
+        body.get("current_role", ""), body.get("new_role", ""), body.get("actor_role", "")
+    )
     return DataResponse(data=result)

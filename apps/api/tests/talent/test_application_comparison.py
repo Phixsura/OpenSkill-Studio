@@ -1,6 +1,5 @@
 """Application comparison tests — pure logic, no DB needed."""
 
-
 from app.talent.services.application_comparison import MAX_COMPARE, CandidateComparison
 
 
@@ -116,7 +115,11 @@ class TestCandidateComparison:
             overall_rank=0,
         )
         avg_cap = sum(comp.capability_scores.values()) / len(comp.capability_scores)
-        score = avg_cap * 0.5 + min(comp.credential_count / 5, 1) * 0.2 + min(comp.evidence_count / 20, 1) * 0.3
+        score = (
+            avg_cap * 0.5
+            + min(comp.credential_count / 5, 1) * 0.2
+            + min(comp.evidence_count / 20, 1) * 0.3
+        )
         assert score > 0  # Should be positive
         assert score < 1  # Should be bounded
 

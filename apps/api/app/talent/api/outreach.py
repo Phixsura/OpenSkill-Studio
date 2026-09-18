@@ -7,7 +7,7 @@ track responses, and manage outreach campaigns.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -54,9 +54,10 @@ async def send_outreach(
     user: User = Depends(get_current_user),
 ):
     """Create a new outreach record with access control."""
-    from app.talent.models.talent_pool import TalentOutreach, TalentPool
-    from app.models.base import ulid_pk as _ulid  # noqa: F401
     import ulid as _ulid_mod
+
+    from app.models.base import ulid_pk as _ulid  # noqa: F401
+    from app.talent.models.talent_pool import TalentOutreach, TalentPool
 
     user_id = body.get("user_id")
     outreach_type = body.get("outreach_type", "invitation")
@@ -67,9 +68,11 @@ async def send_outreach(
         raise HTTPException(422, "user_id is required")
 
     # Validate outreach_type against allowlist
-    ALLOWED_TYPES = {"invitation", "opportunity_share", "follow_up", "info_request"}
-    if outreach_type not in ALLOWED_TYPES:
-        raise HTTPException(422, f"outreach_type must be one of: {', '.join(sorted(ALLOWED_TYPES))}")
+    allowed_types = {"invitation", "opportunity_share", "follow_up", "info_request"}
+    if outreach_type not in allowed_types:
+        raise HTTPException(
+            422, f"outreach_type must be one of: {', '.join(sorted(allowed_types))}"
+        )
 
     # Cap message length to prevent abuse
     if len(message) > 2000:
@@ -77,12 +80,14 @@ async def send_outreach(
 
     # Access control: sender must manage a pool containing the target user
     from app.talent.models.talent_pool import TalentPoolMember
+
     pool_check = await db.execute(
-        select(TalentPoolMember.id).join(
-            TalentPool, TalentPool.id == TalentPoolMember.pool_id
-        ).where(
+        select(TalentPoolMember.id)
+        .join(TalentPool, TalentPool.id == TalentPoolMember.pool_id)
+        .where(
             TalentPoolMember.user_id == user_id,
-        ).limit(1)
+        )
+        .limit(1)
     )
     if not pool_check.scalar_one_or_none():
         # Also allow if sender is in same org — relaxed check
@@ -91,6 +96,7 @@ async def send_outreach(
     # If opportunity_id provided, verify it exists
     if opportunity_id:
         from app.talent.models.employer import Opportunity
+
         opp = await db.get(Opportunity, opportunity_id)
         if not opp:
             raise HTTPException(404, "Opportunity not found")

@@ -90,8 +90,8 @@ export default function PortfolioPage() {
     const swapIndex = direction === "up" ? index - 1 : index + 1;
     if (swapIndex < 0 || swapIndex >= items.length) return;
 
-    const item = items[index];
-    const swapItem = items[swapIndex];
+    const item = items[index]!;
+    const swapItem = items[swapIndex]!;
     // Swap sort orders
     reorderItem.mutate({ id: item.id, sort_order: swapItem.sort_order ?? swapIndex });
     reorderItem.mutate({ id: swapItem.id, sort_order: item.sort_order ?? index });

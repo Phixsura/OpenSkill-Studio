@@ -16,20 +16,24 @@ from datetime import UTC, datetime, timedelta
 # Gap #72: Search analytics
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SearchAnalyticsStore:
     """In-memory search analytics (swap for Redis in production)."""
+
     queries: list[dict] = field(default_factory=list)
     zero_result_queries: list[str] = field(default_factory=list)
 
     def record(self, query: str, result_count: int, filters: dict | None = None) -> None:
         """Execute record."""
-        self.queries.append({
-            "query": query,
-            "result_count": result_count,
-            "filters": filters or {},
-            "timestamp": datetime.now(UTC).isoformat(),
-        })
+        self.queries.append(
+            {
+                "query": query,
+                "result_count": result_count,
+                "filters": filters or {},
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
         if result_count == 0:
             self.zero_result_queries.append(query)
 
@@ -66,9 +70,11 @@ def get_search_analytics() -> SearchAnalyticsStore:
 # Gap #71: Search result caching
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SearchCache:
     """Simple TTL cache for search results."""
+
     _cache: dict = field(default_factory=dict)
     ttl_seconds: int = 60
 
@@ -115,6 +121,7 @@ def get_search_cache() -> SearchCache:
 # Gap #79: Boolean search operators
 # ---------------------------------------------------------------------------
 
+
 def parse_boolean_query(query: str) -> dict:
     """Parse Boolean search syntax into structured query.
 
@@ -132,13 +139,13 @@ def parse_boolean_query(query: str) -> dict:
 
     # Extract quoted phrases first
     phrases = re.findall(r'"([^"]+)"', query)
-    remaining = re.sub(r'"[^"]*"', '', query).strip()
+    remaining = re.sub(r'"[^"]*"', "", query).strip()
 
     for phrase in phrases:
         must.append(phrase.lower().strip())
 
     # Split by operators
-    parts = re.split(r'\s+(AND|OR|NOT)\s+', remaining, flags=re.IGNORECASE)
+    parts = re.split(r"\s+(AND|OR|NOT)\s+", remaining, flags=re.IGNORECASE)
 
     current_op = "AND"
     for part in parts:
@@ -215,9 +222,15 @@ ORG_SIZE_RANGES = {
 # Gap #75: Match quality feedback
 # ---------------------------------------------------------------------------
 
-MATCH_FEEDBACK_OPTIONS = frozenset({
-    "very_helpful", "helpful", "neutral", "not_helpful", "irrelevant",
-})
+MATCH_FEEDBACK_OPTIONS = frozenset(
+    {
+        "very_helpful",
+        "helpful",
+        "neutral",
+        "not_helpful",
+        "irrelevant",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +283,7 @@ def filter_by_tier(matches: list[dict], tier: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Gap #80: Search suggestions
 # ---------------------------------------------------------------------------
+
 
 def generate_search_suggestions(
     query: str,

@@ -49,9 +49,7 @@ def compute_evidence_quality(evidence: dict) -> dict:
     factors["has_org"] = 1.0 if evidence.get("org_id") else 0.0
     factors["high_confidence"] = float(evidence.get("confidence", 0.5))
 
-    total = sum(
-        factors[k] * QUALITY_FACTORS[k] for k in QUALITY_FACTORS
-    )
+    total = sum(factors[k] * QUALITY_FACTORS[k] for k in QUALITY_FACTORS)
 
     return {
         "quality_score": round(total, 3),
@@ -63,6 +61,7 @@ def compute_evidence_quality(evidence: dict) -> dict:
 # Gap #22: Expiration alerts
 # ---------------------------------------------------------------------------
 
+
 async def find_expiring_evidence(
     db: AsyncSession,
     *,
@@ -73,14 +72,11 @@ async def find_expiring_evidence(
     now = datetime.now(UTC)
     cutoff = now + timedelta(days=days_ahead)
 
-    q = (
-        select(CapabilityEvidence)
-        .where(
-            CapabilityEvidence.status == "active",
-            CapabilityEvidence.expires_at.isnot(None),
-            CapabilityEvidence.expires_at <= cutoff,
-            CapabilityEvidence.expires_at > now,
-        )
+    q = select(CapabilityEvidence).where(
+        CapabilityEvidence.status == "active",
+        CapabilityEvidence.expires_at.isnot(None),
+        CapabilityEvidence.expires_at <= cutoff,
+        CapabilityEvidence.expires_at > now,
     )
     if user_id:
         q = q.where(CapabilityEvidence.user_id == user_id)
@@ -106,10 +102,16 @@ async def find_expiring_evidence(
 # ---------------------------------------------------------------------------
 
 DISPUTE_STATUSES = frozenset({"open", "under_review", "resolved_upheld", "resolved_removed"})
-DISPUTE_REASONS = frozenset({
-    "inaccurate_score", "wrong_capability", "not_my_work",
-    "outdated", "duplicate", "other",
-})
+DISPUTE_REASONS = frozenset(
+    {
+        "inaccurate_score",
+        "wrong_capability",
+        "not_my_work",
+        "outdated",
+        "duplicate",
+        "other",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +143,7 @@ def validate_dispute(
 # Gap #26: Scoring simulation ("what-if")
 # ---------------------------------------------------------------------------
 
+
 def simulate_score_change(
     current_evidence: list[dict],
     hypothetical_evidence: dict,
@@ -156,13 +159,17 @@ def simulate_score_change(
 
     # Current score
     current_score, current_conf, current_sub = compute_score_from_evidence(
-        current_evidence, decay_config, now,
+        current_evidence,
+        decay_config,
+        now,
     )
 
     # Projected score with new evidence
     projected_evidence = current_evidence + [hypothetical_evidence]
     projected_score, projected_conf, projected_sub = compute_score_from_evidence(
-        projected_evidence, decay_config, now,
+        projected_evidence,
+        decay_config,
+        now,
     )
 
     return {
@@ -212,6 +219,7 @@ def validate_calibration(config: dict) -> list[str]:
 # Gap #32: Evidence type distribution analytics
 # ---------------------------------------------------------------------------
 
+
 async def compute_evidence_distribution(
     db: AsyncSession,
     *,
@@ -246,7 +254,9 @@ async def compute_evidence_distribution(
         "total_evidence": total,
         "by_verification_level": by_verification,
         "by_source_type": by_source,
-        "top_verification": max(by_verification, key=by_verification.get) if by_verification else None,
+        "top_verification": max(by_verification, key=by_verification.get)
+        if by_verification
+        else None,
         "top_source": max(by_source, key=by_source.get) if by_source else None,
     }
 

@@ -1,6 +1,5 @@
 """Self-assessment quiz tests — pure logic, no DB needed."""
 
-
 from app.talent.services.self_assessment import (
     ASSESSMENT_DIMENSIONS,
     DIMENSION_KEYS,
@@ -72,11 +71,14 @@ class TestScoreComputation:
 
     def test_composite_is_weighted_sum(self):
         """Verify composite formula: sum(weight * dimension_score)."""
-        dim_scores = {"knowledge": 0.5, "practice": 0.8, "autonomy": 0.6, "complexity": 0.4, "teaching": 0.3}
-        composite = sum(
-            d["weight"] * dim_scores[d["key"]]
-            for d in ASSESSMENT_DIMENSIONS
-        )
+        dim_scores = {
+            "knowledge": 0.5,
+            "practice": 0.8,
+            "autonomy": 0.6,
+            "complexity": 0.4,
+            "teaching": 0.3,
+        }
+        composite = sum(d["weight"] * dim_scores[d["key"]] for d in ASSESSMENT_DIMENSIONS)
         expected = 0.2 * 0.5 + 0.3 * 0.8 + 0.25 * 0.6 + 0.15 * 0.4 + 0.1 * 0.3
         assert abs(composite - expected) < 0.001
 

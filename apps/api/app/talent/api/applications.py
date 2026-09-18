@@ -51,9 +51,7 @@ _EMPLOYER_TRANSITIONS = frozenset(
 _EITHER_TRANSITIONS = frozenset({"submitted"})
 
 
-async def _load_app_and_opp(
-    db: AsyncSession, app_id: str
-) -> tuple[Application, Opportunity]:
+async def _load_app_and_opp(db: AsyncSession, app_id: str) -> tuple[Application, Opportunity]:
     """Load application + its opportunity, or raise 404."""
     app = await db.get(Application, app_id)
     if not app:
@@ -137,7 +135,9 @@ async def apply_to_opportunity(
     return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
-@router.get("/applications/analytics", response_model=DataResponse[dict],
+@router.get(
+    "/applications/analytics",
+    response_model=DataResponse[dict],
     summary="Get application analytics",
     description="Aggregated analytics including conversion rates and status breakdown.",
 )
@@ -155,7 +155,9 @@ async def get_application_analytics(
     return DataResponse(data=dataclasses.asdict(stats))
 
 
-@router.get("/applications", response_model=CursorListResponse[ApplicationResponse],
+@router.get(
+    "/applications",
+    response_model=CursorListResponse[ApplicationResponse],
     summary="List applications",
     description="Paginated list of user job applications with status.",
 )
@@ -170,7 +172,6 @@ async def list_applications(
     q = select(Application).where(Application.user_id == user.id)
     if status:
         q = q.where(Application.status == status)
-
 
     if cursor:
         q = q.where(Application.id < cursor)
@@ -189,7 +190,9 @@ async def list_applications(
     )
 
 
-@router.get("/applications/{app_id}", response_model=DataResponse[ApplicationResponse],
+@router.get(
+    "/applications/{app_id}",
+    response_model=DataResponse[ApplicationResponse],
     summary="Get application detail",
     description="Full application details including evidence bundle and messages.",
 )
@@ -234,8 +237,7 @@ async def transition_application(
     if body.status not in allowed:
         raise HTTPException(
             422,
-            f"Cannot transition from '{app.status}' to '{body.status}'. "
-            f"Allowed: {allowed}",
+            f"Cannot transition from '{app.status}' to '{body.status}'. Allowed: {allowed}",
         )
 
     # Authorization: who may perform this transition?
@@ -342,6 +344,7 @@ async def transition_application(
 
 # ---- Interviews ----
 
+
 @router.post(
     "/applications/{app_id}/interviews",
     response_model=DataResponse[InterviewStageResponse],
@@ -398,7 +401,10 @@ async def update_interview(
 
 # ---- Placements ----
 
-@router.get("/placements", response_model=CursorListResponse[PlacementResponse],
+
+@router.get(
+    "/placements",
+    response_model=CursorListResponse[PlacementResponse],
     summary="List placements",
     description="Paginated list of confirmed placements.",
 )
@@ -413,7 +419,6 @@ async def list_placements(
     q = select(Placement).where(Placement.user_id == user.id)
     if status:
         q = q.where(Placement.status == status)
-
 
     if cursor:
         q = q.where(Placement.id < cursor)
@@ -494,9 +499,7 @@ async def list_feedback(
     from app.talent.services.application_feedback import ApplicationFeedbackService
 
     svc = ApplicationFeedbackService(db)
-    items = await svc.list_feedback(
-        app_id, viewer_user_id=user.id, is_employer=is_employer
-    )
+    items = await svc.list_feedback(app_id, viewer_user_id=user.id, is_employer=is_employer)
     return DataResponse(data=[FeedbackResponse.model_validate(f) for f in items])
 
 
@@ -515,9 +518,7 @@ async def update_feedback_visibility(
 
     svc = ApplicationFeedbackService(db)
     try:
-        feedback = await svc.update_visibility(
-            feedback_id, body.visibility, user.id
-        )
+        feedback = await svc.update_visibility(feedback_id, body.visibility, user.id)
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
 
@@ -569,40 +570,53 @@ async def compare_applications(
 
 # ---- Gap #81: Custom questions validation ----
 
-@router.post("/talent/opportunities/{opp_id}/custom-questions/validate", response_model=DataResponse[dict],
+
+@router.post(
+    "/talent/opportunities/{opp_id}/custom-questions/validate",
+    response_model=DataResponse[dict],
     summary="Validate custom questions",
     description="Validate answers to custom application questions.",
 )
 async def validate_custom_questions_endpoint(
-    opp_id: str, body: dict,
+    opp_id: str,
+    body: dict,
     user: User = Depends(get_current_user),
 ):
     """Validate custom application questions for an opportunity."""
     from app.talent.services.application_intelligence import validate_custom_questions
+
     errors = validate_custom_questions(body.get("questions", []))
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
 # ---- Gap #82: Auto-screening ----
 
-@router.post("/talent/applications/{app_id}/screen", response_model=DataResponse[dict],
+
+@router.post(
+    "/talent/applications/{app_id}/screen",
+    response_model=DataResponse[dict],
     summary="Screen application",
     description="Run automated screening against opportunity requirements.",
 )
 async def auto_screen_application(
-    app_id: str, body: dict,
+    app_id: str,
+    body: dict,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Run auto-screening rules against a candidate's data."""
     from app.talent.services.application_intelligence import evaluate_screening_rules
+
     result = evaluate_screening_rules(body.get("rules", []), body.get("candidate_data", {}))
     return DataResponse(data=result)
 
 
 # ---- Gap #86: Application timeline ----
 
-@router.get("/talent/applications/{app_id}/timeline", response_model=DataResponse[list[dict]],
+
+@router.get(
+    "/talent/applications/{app_id}/timeline",
+    response_model=DataResponse[list[dict]],
     summary="Get application timeline",
     description="Full timeline of status changes for an application.",
 )
@@ -615,6 +629,7 @@ async def get_application_timeline(
     import dataclasses
 
     from app.talent.services.application_intelligence import build_application_timeline
+
     app = await db.get(Application, app_id)
     if not app or app.user_id != user.id:
         opp = await db.get(Opportunity, app.opportunity_id) if app else None
@@ -624,17 +639,31 @@ async def get_application_timeline(
             raise HTTPException(404, "Application not found")
     # Load events
     from sqlalchemy import select as sa_select
+
     result = await db.execute(
-        sa_select(ApplicationEvent).where(ApplicationEvent.application_id == app_id).order_by(ApplicationEvent.created_at)
+        sa_select(ApplicationEvent)
+        .where(ApplicationEvent.application_id == app_id)
+        .order_by(ApplicationEvent.created_at)
     )
-    events = [{"to_status": e.to_status, "timestamp": e.created_at.isoformat() if e.created_at else None, "acted_by": e.acted_by, "note": e.note} for e in result.scalars().all()]
+    events = [
+        {
+            "to_status": e.to_status,
+            "timestamp": e.created_at.isoformat() if e.created_at else None,
+            "acted_by": e.acted_by,
+            "note": e.note,
+        }
+        for e in result.scalars().all()
+    ]
     timeline = build_application_timeline(events)
     return DataResponse(data=[dataclasses.asdict(t) for t in timeline])
 
 
 # ---- Gap #92: Stage overdue check ----
 
-@router.get("/talent/applications/{app_id}/overdue", response_model=DataResponse[dict],
+
+@router.get(
+    "/talent/applications/{app_id}/overdue",
+    response_model=DataResponse[dict],
     summary="Check application overdue",
     description="Check if application exceeded expected response time.",
 )
@@ -645,6 +674,7 @@ async def check_application_overdue(
 ):
     """Check if application has exceeded stage time limit."""
     from app.talent.services.application_intelligence import check_stage_overdue
+
     app = await db.get(Application, app_id)
     if not app:
         raise HTTPException(404, "Application not found")

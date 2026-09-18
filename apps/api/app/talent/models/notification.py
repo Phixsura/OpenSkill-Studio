@@ -21,17 +21,19 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, ulid_pk
 
-NOTIFICATION_EVENT_TYPES = frozenset({
-    "application_status_changed",
-    "new_match_found",
-    "outreach_received",
-    "credential_issued",
-    "interview_scheduled",
-    "offer_extended",
-    "endorsement_received",
-    "pool_invitation",
-    "passport_viewed",
-})
+NOTIFICATION_EVENT_TYPES = frozenset(
+    {
+        "application_status_changed",
+        "new_match_found",
+        "outreach_received",
+        "credential_issued",
+        "interview_scheduled",
+        "offer_extended",
+        "endorsement_received",
+        "pool_invitation",
+        "passport_viewed",
+    }
+)
 
 
 class NotificationPreference(Base):
@@ -44,15 +46,11 @@ class NotificationPreference(Base):
     )
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     channel: Mapped[str] = mapped_column(String(20), default="in_app")
     event_type: Mapped[str] = mapped_column(String(50))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -69,18 +67,10 @@ class TalentNotification(Base):
     )
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     event_type: Mapped[str] = mapped_column(String(50))
     title: Mapped[str] = mapped_column(String(200))
     message: Mapped[str] = mapped_column(Text)
-    extra: Mapped[dict] = mapped_column(
-        "metadata", JSONB, default=dict, server_default="{}"
-    )
-    read_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    extra: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default="{}")
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

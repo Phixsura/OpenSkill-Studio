@@ -77,7 +77,11 @@ class TalentPoolService:
         q = select(TalentPool).where(TalentPool.org_id == org_id)
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
-        q = q.order_by(TalentPool.created_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
+        q = (
+            q.order_by(TalentPool.created_at.desc())
+            .limit(limit + 1 if cursor is not None else limit)
+            .offset(0 if cursor is not None else offset)
+        )
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -157,7 +161,11 @@ class TalentPoolService:
             q = q.where(TalentPoolMembership.consent_status == consent_status)
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
-        q = q.order_by(TalentPoolMembership.created_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
+        q = (
+            q.order_by(TalentPoolMembership.created_at.desc())
+            .limit(limit + 1 if cursor is not None else limit)
+            .offset(0 if cursor is not None else offset)
+        )
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -270,7 +278,11 @@ class OutreachService:
             q = q.where(TalentOutreach.status == status)
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
-        q = q.order_by(TalentOutreach.created_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
+        q = (
+            q.order_by(TalentOutreach.created_at.desc())
+            .limit(limit + 1 if cursor is not None else limit)
+            .offset(0 if cursor is not None else offset)
+        )
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 
@@ -296,7 +308,9 @@ class OutcomeEventService:
         metadata: dict | None = None,
     ) -> OutcomeEvent:
         if event_type not in OUTCOME_EVENT_TYPES:
-            raise ValueError(f"Invalid event_type: {event_type}. Must be one of {sorted(OUTCOME_EVENT_TYPES)}")
+            raise ValueError(
+                f"Invalid event_type: {event_type}. Must be one of {sorted(OUTCOME_EVENT_TYPES)}"
+            )
         if visibility not in ("private", "passport_visible", "public"):
             raise ValueError(f"Invalid visibility: {visibility}")
 
@@ -330,7 +344,11 @@ class OutcomeEventService:
             q = q.where(OutcomeEvent.visibility == visibility)
         count_q = select(func.count()).select_from(q.subquery())
         total = (await self.db.execute(count_q)).scalar() or 0
-        q = q.order_by(OutcomeEvent.occurred_at.desc()).limit(limit + 1 if cursor is not None else limit).offset(0 if cursor is not None else offset)
+        q = (
+            q.order_by(OutcomeEvent.occurred_at.desc())
+            .limit(limit + 1 if cursor is not None else limit)
+            .offset(0 if cursor is not None else offset)
+        )
         result = await self.db.execute(q)
         return list(result.scalars().all()), total
 

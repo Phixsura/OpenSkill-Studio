@@ -126,9 +126,7 @@ async def update_saved_search(
     if search.created_by != user.id:
         raise HTTPException(404, "Search not found")
 
-    updated = await svc.update(
-        search_id, **body.model_dump(exclude_unset=True)
-    )
+    updated = await svc.update(search_id, **body.model_dump(exclude_unset=True))
     await db.commit()
     await db.refresh(updated)
     return DataResponse(data=SavedSearchResponse.model_validate(updated))

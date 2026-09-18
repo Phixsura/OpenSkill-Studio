@@ -87,9 +87,7 @@ class CredentialPathwayService:
             items = items[:limit]
         return items, has_more
 
-    async def update_pathway(
-        self, pathway_id: str, **fields: object
-    ) -> CredentialPathway | None:
+    async def update_pathway(self, pathway_id: str, **fields: object) -> CredentialPathway | None:
         pathway = await self.db.get(CredentialPathway, pathway_id)
         if not pathway:
             return None
@@ -110,9 +108,7 @@ class CredentialPathwayService:
         await self.db.flush()
         return pathway
 
-    async def check_pathway_completion(
-        self, user_id: str, pathway_id: str
-    ) -> dict:
+    async def check_pathway_completion(self, user_id: str, pathway_id: str) -> dict:
         """Check if a user has completed a pathway's prerequisites."""
         pathway = await self.db.get(CredentialPathway, pathway_id)
         if not pathway:
@@ -159,9 +155,7 @@ class CredentialPathwayService:
             "missing_credential_types": missing,
         }
 
-    async def check_and_auto_issue(
-        self, user_id: str, pathway_id: str
-    ) -> Credential | None:
+    async def check_and_auto_issue(self, user_id: str, pathway_id: str) -> Credential | None:
         """Check completion and auto-issue the pathway credential if met.
 
         Returns the issued Credential or None if not yet complete or
@@ -192,9 +186,8 @@ class CredentialPathwayService:
             issuer_org_id=pathway.org_id,
             user_id=user_id,
             capabilities=[],
-            evidence_references=[
-                {"type": "pathway", "pathway_id": pathway.id}
-            ] + [
+            evidence_references=[{"type": "pathway", "pathway_id": pathway.id}]
+            + [
                 {"type": "prerequisite", "credential_type": ec["credential_type"]}
                 for ec in progress["earned_credentials"]
             ],

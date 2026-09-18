@@ -18,7 +18,9 @@ router = APIRouter(prefix="/talent", tags=["Talent — Messaging"])
 
 
 async def _check_message_access(
-    app_id: str, user: User, db: AsyncSession,
+    app_id: str,
+    user: User,
+    db: AsyncSession,
 ) -> tuple[Application, bool]:
     """Verify user is candidate or employer org member. Returns (app, is_candidate)."""
     app = await db.get(Application, app_id)
@@ -34,11 +36,17 @@ async def _check_message_access(
 
 
 @router.post("/applications/{app_id}/messages", response_model=DataResponse[dict], status_code=201)
-async def send_message(app_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def send_message(
+    app_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """Send message."""
     app, is_candidate = await _check_message_access(app_id, user, db)
     msg = ApplicationMessage(
-        application_id=app_id, sender_id=user.id,
+        application_id=app_id,
+        sender_id=user.id,
         sender_role="candidate" if is_candidate else "employer",
         message_type=body.get("message_type", "text"),
         content=body.get("content", ""),
@@ -50,7 +58,13 @@ async def send_message(app_id: str, body: dict, db: AsyncSession = Depends(get_d
 
 
 @router.get("/applications/{app_id}/messages", response_model=CursorListResponse[dict])
-async def list_messages(app_id: str, cursor: str | None = Query(None), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def list_messages(
+    app_id: str,
+    cursor: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """List messages."""
     await _check_message_access(app_id, user, db)
     q = select(ApplicationMessage).where(ApplicationMessage.application_id == app_id)
@@ -64,13 +78,25 @@ async def list_messages(app_id: str, cursor: str | None = Query(None), limit: in
         items = items[:limit]
     nc = items[-1].id if has_more and items else None
     return CursorListResponse(
-        data=[{"id": m.id, "sender_id": m.sender_id, "sender_role": m.sender_role, "content": m.content, "message_type": m.message_type, "read_at": m.read_at.isoformat() if m.read_at else None} for m in items],
+        data=[
+            {
+                "id": m.id,
+                "sender_id": m.sender_id,
+                "sender_role": m.sender_role,
+                "content": m.content,
+                "message_type": m.message_type,
+                "read_at": m.read_at.isoformat() if m.read_at else None,
+            }
+            for m in items
+        ],
         meta=CursorMeta(next_cursor=nc, has_more=has_more),
     )
 
 
 @router.patch("/messages/{msg_id}/read", response_model=DataResponse[dict])
-async def mark_message_read(msg_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def mark_message_read(
+    msg_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
     """Mark message read."""
     msg = await db.get(ApplicationMessage, msg_id)
     if not msg:

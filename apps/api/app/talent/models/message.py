@@ -13,7 +13,9 @@ class ApplicationMessage(Base):
     __tablename__ = "talent_application_messages"
 
     id: Mapped[str] = ulid_pk()
-    application_id: Mapped[str] = mapped_column(String(26), ForeignKey("talent_applications.id"), index=True)
+    application_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("talent_applications.id"), index=True
+    )
     sender_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"))
     sender_role: Mapped[str] = mapped_column(String(20))  # candidate, employer
     message_type: Mapped[str] = mapped_column(String(30), default="text")

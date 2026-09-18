@@ -21,7 +21,9 @@ class TestESCOParser:
         assert result["canonical_name"] == "Python"
 
     def test_with_alt_labels(self):
-        result = parse_esco_csv_row({"conceptUri": "u", "preferredLabel": "ML", "altLabels": "Machine Learning\nAI"})
+        result = parse_esco_csv_row(
+            {"conceptUri": "u", "preferredLabel": "ML", "altLabels": "Machine Learning\nAI"}
+        )
         assert len(result["aliases"]) == 2
 
     def test_empty(self):

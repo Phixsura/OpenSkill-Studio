@@ -136,7 +136,8 @@ class SkillGapPredictionService:
         """Build complete gap forecast."""
         current_gap = max(0, current_demand - current_supply)
         d3, d6, d12 = self.forecast_demand(
-            current_demand=current_demand, growth_rate_90d=growth_rate_90d,
+            current_demand=current_demand,
+            growth_rate_90d=growth_rate_90d,
         )
         # Assume supply grows linearly
         s3 = round(current_supply + supply_growth_monthly * 3)

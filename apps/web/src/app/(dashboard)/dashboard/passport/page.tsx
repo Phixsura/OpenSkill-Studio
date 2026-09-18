@@ -1,14 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { toast } from "sonner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { apiWithAuth, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useAuthStore } from "@/stores/auth";
 
 /* ── Types ────────────────────────────────────────────────── */
 
@@ -289,7 +287,6 @@ function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) 
 /* ── Page ─────────────────────────────────────────────────── */
 
 export default function PassportPage() {
-  const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
 
   const { data: passportData, isLoading: passportLoading } = useQuery({

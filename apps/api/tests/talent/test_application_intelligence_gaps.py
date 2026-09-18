@@ -45,13 +45,17 @@ class TestFormBuilder:
 
 class TestAutoScreening:
     def test_all_pass(self):
-        rules = [{"rule_type": "min_capability_level", "field": "level", "operator": ">=", "value": 3}]
+        rules = [
+            {"rule_type": "min_capability_level", "field": "level", "operator": ">=", "value": 3}
+        ]
         result = evaluate_screening_rules(rules, {"level": 4})
         assert result["passed"] is True
         assert result["score"] == 1.0
 
     def test_fail(self):
-        rules = [{"rule_type": "min_capability_level", "field": "level", "operator": ">=", "value": 5}]
+        rules = [
+            {"rule_type": "min_capability_level", "field": "level", "operator": ">=", "value": 5}
+        ]
         result = evaluate_screening_rules(rules, {"level": 2})
         assert result["passed"] is False
 
@@ -114,7 +118,11 @@ class TestBatchActions:
 
 class TestReferenceChecks:
     def test_valid(self):
-        ref = {"referee_name": "John", "referee_email": "j@test.com", "referee_relationship": "Manager"}
+        ref = {
+            "referee_name": "John",
+            "referee_email": "j@test.com",
+            "referee_relationship": "Manager",
+        }
         assert validate_reference(ref) == []
 
     def test_missing_email(self):

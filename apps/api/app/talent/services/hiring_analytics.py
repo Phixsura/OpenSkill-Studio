@@ -154,9 +154,7 @@ class HiringAnalyticsService:
             curr = PIPELINE_STAGES[i]
             key = f"{prev}→{curr}"
             if stage_counts[prev] > 0:
-                conversion_rates[key] = round(
-                    stage_counts[curr] / stage_counts[prev], 4
-                )
+                conversion_rates[key] = round(stage_counts[curr] / stage_counts[prev], 4)
             else:
                 conversion_rates[key] = 0.0
 
@@ -169,9 +167,7 @@ class HiringAnalyticsService:
         # Offer acceptance
         total_offers = stage_counts.get("offer", 0)
         total_hires = stage_counts.get("hired", 0)
-        offer_acceptance = (
-            round(total_hires / total_offers, 4) if total_offers > 0 else None
-        )
+        offer_acceptance = round(total_hires / total_offers, 4) if total_offers > 0 else None
 
         # Pipeline velocity: hires per month
         velocity = None

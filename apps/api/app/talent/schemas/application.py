@@ -9,6 +9,7 @@ from app.schemas.base import reject_ctrl_str
 
 class CreateApplicationRequest(BaseModel):
     """Submit an application to an opportunity."""
+
     selected_credentials: list[str] = Field(default_factory=list)
     selected_projects: list[str] = Field(default_factory=list)
     selected_evidence: list[str] = Field(default_factory=list)
@@ -73,6 +74,7 @@ class InterviewStageResponse(BaseModel):
 
     NOTE: evaluation_notes is intentionally EXCLUDED — employer-private.
     """
+
     id: str
     application_id: str
     stage_type: str
@@ -87,6 +89,7 @@ class InterviewStageResponse(BaseModel):
 
 class InterviewStageEmployerResponse(InterviewStageResponse):
     """Full response including evaluation notes — employer-only."""
+
     evaluation_notes: dict | None = None
 
 
@@ -110,7 +113,9 @@ class CreateFeedbackRequest(BaseModel):
         from app.talent.models.application import FEEDBACK_VISIBILITY
 
         if v not in FEEDBACK_VISIBILITY:
-            raise ValueError(f"Invalid visibility: {v}. Must be one of {sorted(FEEDBACK_VISIBILITY)}")
+            raise ValueError(
+                f"Invalid visibility: {v}. Must be one of {sorted(FEEDBACK_VISIBILITY)}"
+            )
         return v
 
 
@@ -123,7 +128,9 @@ class UpdateFeedbackVisibilityRequest(BaseModel):
         from app.talent.models.application import FEEDBACK_VISIBILITY
 
         if v not in FEEDBACK_VISIBILITY:
-            raise ValueError(f"Invalid visibility: {v}. Must be one of {sorted(FEEDBACK_VISIBILITY)}")
+            raise ValueError(
+                f"Invalid visibility: {v}. Must be one of {sorted(FEEDBACK_VISIBILITY)}"
+            )
         return v
 
 

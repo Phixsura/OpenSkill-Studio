@@ -24,22 +24,20 @@ No database required. Tests cover:
 """
 
 import json
-import math
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 # ═══════════════════════════════════════════════════════════════
 # 1. Scoring Engine (tests 1-20)
 # ═══════════════════════════════════════════════════════════════
-
 from app.talent.services.scoring import (
+    DIMENSION_WEIGHTS,
     SCORING_VERSION,
     SHRINKAGE_K,
     SHRINKAGE_PRIOR,
-    DIMENSION_WEIGHTS,
     compute_recency,
     compute_score_from_evidence,
     compute_velocity,
@@ -125,10 +123,7 @@ class TestScoringEngine:
     # 13
     def test_compute_velocity_recent_burst(self):
         now = datetime.now(UTC)
-        evidence = [
-            {"occurred_at": now - timedelta(days=i), "status": "active"}
-            for i in range(10)
-        ]
+        evidence = [{"occurred_at": now - timedelta(days=i), "status": "active"} for i in range(10)]
         result = compute_velocity(evidence, now)
         assert result > 0.5
 
@@ -136,8 +131,7 @@ class TestScoringEngine:
     def test_compute_velocity_no_recent(self):
         now = datetime.now(UTC)
         evidence = [
-            {"occurred_at": now - timedelta(days=200 + i), "status": "active"}
-            for i in range(5)
+            {"occurred_at": now - timedelta(days=200 + i), "status": "active"} for i in range(5)
         ]
         result = compute_velocity(evidence, now)
         assert result < 0.3
@@ -167,26 +161,30 @@ class TestScoringEngine:
     # 19
     def test_compute_score_single_evidence(self):
         now = datetime.now(UTC)
-        evidence = [{
-            "score_normalized": 0.8,
-            "occurred_at": now,
-            "verification_level": "peer_review",
-            "confidence": 1.0,
-            "status": "active",
-        }]
+        evidence = [
+            {
+                "score_normalized": 0.8,
+                "occurred_at": now,
+                "verification_level": "peer_review",
+                "confidence": 1.0,
+                "status": "active",
+            }
+        ]
         score, confidence, count = compute_score_from_evidence(evidence, None, now)
         assert 0 < score <= 1.0
 
     # 20
     def test_compute_score_returns_three_values(self):
         now = datetime.now(UTC)
-        evidence = [{
-            "score_normalized": 0.7,
-            "occurred_at": now,
-            "verification_level": "self",
-            "confidence": 1.0,
-            "status": "active",
-        }]
+        evidence = [
+            {
+                "score_normalized": 0.7,
+                "occurred_at": now,
+                "verification_level": "self",
+                "confidence": 1.0,
+                "status": "active",
+            }
+        ]
         result = compute_score_from_evidence(evidence, None, now)
         assert len(result) == 3  # (score, confidence, substantial_count)
 
@@ -245,7 +243,12 @@ class TestCareerPath:
     # 28
     def test_suggest_action_from_zero(self):
         action = _suggest_action(0, 1, 1)
-        assert "introductory" in action.lower() or "foundational" in action.lower() or "start" in action.lower() or len(action) > 0
+        assert (
+            "introductory" in action.lower()
+            or "foundational" in action.lower()
+            or "start" in action.lower()
+            or len(action) > 0
+        )
 
     # 29
     def test_suggest_action_expert_to_master(self):
@@ -298,7 +301,9 @@ class TestFairness:
         if max(selection_rate_a, selection_rate_b) == 0:
             ratio = 1.0
         else:
-            ratio = min(selection_rate_a, selection_rate_b) / max(selection_rate_a, selection_rate_b)
+            ratio = min(selection_rate_a, selection_rate_b) / max(
+                selection_rate_a, selection_rate_b
+            )
         assert ratio == 0.0
 
     # 35
@@ -308,7 +313,9 @@ class TestFairness:
         if max(selection_rate_a, selection_rate_b) == 0:
             ratio = 1.0
         else:
-            ratio = min(selection_rate_a, selection_rate_b) / max(selection_rate_a, selection_rate_b)
+            ratio = min(selection_rate_a, selection_rate_b) / max(
+                selection_rate_a, selection_rate_b
+            )
         assert ratio == 1.0
 
     # 36
@@ -455,6 +462,8 @@ class TestSkillInference:
 
 from app.talent.services.skill_synonyms import (
     FUZZY_THRESHOLD as SYNONYM_THRESHOLD,
+)
+from app.talent.services.skill_synonyms import (
     SkillSynonymService,
 )
 
@@ -475,30 +484,35 @@ class TestSkillSynonyms:
     # 58
     def test_exact_match_similarity(self):
         from difflib import SequenceMatcher
+
         ratio = SequenceMatcher(None, "python", "python").ratio()
         assert ratio == 1.0
 
     # 59
     def test_close_match_above_threshold(self):
         from difflib import SequenceMatcher
+
         ratio = SequenceMatcher(None, "javascript", "java script").ratio()
         assert ratio > 0.7
 
     # 60
     def test_distant_match_below_threshold(self):
         from difflib import SequenceMatcher
+
         ratio = SequenceMatcher(None, "python", "rust").ratio()
         assert ratio < SYNONYM_THRESHOLD
 
     # 61
     def test_case_insensitive_comparison(self):
         from difflib import SequenceMatcher
+
         ratio = SequenceMatcher(None, "python".lower(), "Python".lower()).ratio()
         assert ratio == 1.0
 
     # 62
     def test_empty_string_comparison(self):
         from difflib import SequenceMatcher
+
         ratio = SequenceMatcher(None, "", "python").ratio()
         assert ratio == 0.0
 
@@ -816,7 +830,11 @@ class TestOpenBadges:
         priv, _ = generate_keypair()
         ob3 = self._make_ob3(priv)
         ctx_str = str(ob3.get("@context", []))
-        assert "openbadges" in ctx_str.lower() or "credential" in ctx_str.lower() or "w3.org" in ctx_str.lower()
+        assert (
+            "openbadges" in ctx_str.lower()
+            or "credential" in ctx_str.lower()
+            or "w3.org" in ctx_str.lower()
+        )
 
     # 100
     def test_ob3_has_proof(self):
@@ -888,64 +906,82 @@ class TestProfileCompleteness:
     # 108
     def test_compute_completeness_result_has_level(self):
         result = compute_profile_completeness(
-            passport=None, evidence_count=0,
-            credential_count=0, has_verified_evidence=False,
+            passport=None,
+            evidence_count=0,
+            credential_count=0,
+            has_verified_evidence=False,
         )
         assert hasattr(result, "level")
 
     # 109
     def test_compute_completeness_result_has_completed(self):
         result = compute_profile_completeness(
-            passport={"bio": "test"}, evidence_count=5,
-            credential_count=1, has_verified_evidence=True,
+            passport={"bio": "test"},
+            evidence_count=5,
+            credential_count=1,
+            has_verified_evidence=True,
         )
         assert isinstance(result.completed_items, list)
 
     # 110
     def test_compute_completeness_result_has_missing(self):
         result = compute_profile_completeness(
-            passport=None, evidence_count=0,
-            credential_count=0, has_verified_evidence=False,
+            passport=None,
+            evidence_count=0,
+            credential_count=0,
+            has_verified_evidence=False,
         )
         assert isinstance(result.missing_items, list)
 
     # 111
     def test_completeness_score_range(self):
         result = compute_profile_completeness(
-            passport={"bio": "x"}, evidence_count=1,
-            credential_count=0, has_verified_evidence=False,
+            passport={"bio": "x"},
+            evidence_count=1,
+            credential_count=0,
+            has_verified_evidence=False,
         )
         assert 0 <= result.score <= 100
 
     # 112
     def test_completeness_more_evidence_higher_score(self):
         r1 = compute_profile_completeness(
-            passport=None, evidence_count=0,
-            credential_count=0, has_verified_evidence=False,
+            passport=None,
+            evidence_count=0,
+            credential_count=0,
+            has_verified_evidence=False,
         )
         r2 = compute_profile_completeness(
-            passport=None, evidence_count=10,
-            credential_count=0, has_verified_evidence=False,
+            passport=None,
+            evidence_count=10,
+            credential_count=0,
+            has_verified_evidence=False,
         )
         assert r2.score >= r1.score
 
     # 113
     def test_completeness_verified_evidence_bonus(self):
         r1 = compute_profile_completeness(
-            passport=None, evidence_count=5,
-            credential_count=0, has_verified_evidence=False,
+            passport=None,
+            evidence_count=5,
+            credential_count=0,
+            has_verified_evidence=False,
         )
         r2 = compute_profile_completeness(
-            passport=None, evidence_count=5,
-            credential_count=0, has_verified_evidence=True,
+            passport=None,
+            evidence_count=5,
+            credential_count=0,
+            has_verified_evidence=True,
         )
         assert r2.score >= r1.score
 
     # 114
     def test_completeness_result_frozen(self):
         result = CompletenessResult(
-            score=50.0, level="intermediate",
-            completed_items=["bio"], missing_items=[],
+            score=50.0,
+            level="intermediate",
+            completed_items=["bio"],
+            missing_items=[],
         )
         assert result.score == 50.0
 
@@ -995,10 +1031,14 @@ class TestOnboarding:
     # 120
     def test_onboarding_task_creation(self):
         task = OnboardingTask(
-            task_type="document_upload", title="Upload ID",
+            task_type="document_upload",
+            title="Upload ID",
             description="Upload your government ID",
-            assigned_to="candidate", phase="pre_start",
-            required=True, due_days_from_start=None, status="pending",
+            assigned_to="candidate",
+            phase="pre_start",
+            required=True,
+            due_days_from_start=None,
+            status="pending",
             completed_at=None,
         )
         assert task.task_type == "document_upload"
@@ -1006,9 +1046,14 @@ class TestOnboarding:
     # 121
     def test_onboarding_task_frozen(self):
         task = OnboardingTask(
-            task_type="training", title="T", description="D",
-            assigned_to="candidate", phase="day_one",
-            required=False, due_days_from_start=1, status="pending",
+            task_type="training",
+            title="T",
+            description="D",
+            assigned_to="candidate",
+            phase="day_one",
+            required=False,
+            due_days_from_start=1,
+            status="pending",
             completed_at=None,
         )
         with pytest.raises((AttributeError, FrozenInstanceError)):
@@ -1017,38 +1062,56 @@ class TestOnboarding:
     # 122
     def test_onboarding_progress_creation(self):
         progress = OnboardingProgress(
-            placement_id="p1", total_tasks=10, completed_tasks=3,
-            completion_percentage=30.0, current_phase="first_week",
+            placement_id="p1",
+            total_tasks=10,
+            completed_tasks=3,
+            completion_percentage=30.0,
+            current_phase="first_week",
             tasks_by_phase={"pre_start": {"total": 2, "completed": 2}},
-            overdue_tasks=0, days_since_start=7,
+            overdue_tasks=0,
+            days_since_start=7,
         )
         assert progress.completion_percentage == 30.0
 
     # 123
     def test_onboarding_progress_zero_tasks(self):
         progress = OnboardingProgress(
-            placement_id="p1", total_tasks=0, completed_tasks=0,
-            completion_percentage=0.0, current_phase="pre_start",
-            tasks_by_phase={}, overdue_tasks=0, days_since_start=None,
+            placement_id="p1",
+            total_tasks=0,
+            completed_tasks=0,
+            completion_percentage=0.0,
+            current_phase="pre_start",
+            tasks_by_phase={},
+            overdue_tasks=0,
+            days_since_start=None,
         )
         assert progress.total_tasks == 0
 
     # 124
     def test_onboarding_progress_all_complete(self):
         progress = OnboardingProgress(
-            placement_id="p1", total_tasks=5, completed_tasks=5,
-            completion_percentage=100.0, current_phase="first_quarter",
-            tasks_by_phase={}, overdue_tasks=0, days_since_start=90,
+            placement_id="p1",
+            total_tasks=5,
+            completed_tasks=5,
+            completion_percentage=100.0,
+            current_phase="first_quarter",
+            tasks_by_phase={},
+            overdue_tasks=0,
+            days_since_start=90,
         )
         assert progress.completion_percentage == 100.0
 
     # 125
     def test_onboarding_task_employer_assigned(self):
         task = OnboardingTask(
-            task_type="equipment_setup", title="Laptop",
-            description="Set up laptop", assigned_to="employer",
-            phase="day_one", required=True,
-            due_days_from_start=0, status="pending",
+            task_type="equipment_setup",
+            title="Laptop",
+            description="Set up laptop",
+            assigned_to="employer",
+            phase="day_one",
+            required=True,
+            due_days_from_start=0,
+            status="pending",
             completed_at=None,
         )
         assert task.assigned_to == "employer"
@@ -1066,9 +1129,14 @@ class TestOnboarding:
     # 128
     def test_onboarding_progress_overdue(self):
         progress = OnboardingProgress(
-            placement_id="p1", total_tasks=10, completed_tasks=2,
-            completion_percentage=20.0, current_phase="first_week",
-            tasks_by_phase={}, overdue_tasks=3, days_since_start=14,
+            placement_id="p1",
+            total_tasks=10,
+            completed_tasks=2,
+            completion_percentage=20.0,
+            current_phase="first_week",
+            tasks_by_phase={},
+            overdue_tasks=3,
+            days_since_start=14,
         )
         assert progress.overdue_tasks == 3
 
@@ -1081,8 +1149,8 @@ from app.talent.services.succession_planning import (
     READINESS_LEVELS,
     RISK_LEVELS,
     KeyRole,
-    SuccessorCandidate,
     SuccessionRisk,
+    SuccessorCandidate,
 )
 
 
@@ -1104,9 +1172,12 @@ class TestSuccessionPlanning:
     # 132
     def test_key_role_creation(self):
         role = KeyRole(
-            role_id="r1", org_id="o1", title="CTO",
+            role_id="r1",
+            org_id="o1",
+            title="CTO",
             required_capabilities=[{"capability_id": "c1", "min_level": 4}],
-            current_holder_id="u1", criticality="critical",
+            current_holder_id="u1",
+            criticality="critical",
             succession_status="at_risk",
         )
         assert role.title == "CTO"
@@ -1120,9 +1191,12 @@ class TestSuccessionPlanning:
     # 134
     def test_successor_candidate_creation(self):
         cand = SuccessorCandidate(
-            user_id="u2", readiness="ready_now",
-            readiness_score=0.9, capability_match=0.85,
-            gaps=[], development_actions=["Shadow CTO"],
+            user_id="u2",
+            readiness="ready_now",
+            readiness_score=0.9,
+            capability_match=0.85,
+            gaps=[],
+            development_actions=["Shadow CTO"],
             time_to_ready_months=None,
         )
         assert cand.readiness == "ready_now"
@@ -1130,8 +1204,10 @@ class TestSuccessionPlanning:
     # 135
     def test_successor_candidate_with_gaps(self):
         cand = SuccessorCandidate(
-            user_id="u3", readiness="ready_1_2_years",
-            readiness_score=0.5, capability_match=0.6,
+            user_id="u3",
+            readiness="ready_1_2_years",
+            readiness_score=0.5,
+            capability_match=0.6,
             gaps=[{"capability_name": "Leadership", "current_level": 2, "required_level": 4}],
             development_actions=["Leadership training"],
             time_to_ready_months=18,
@@ -1141,9 +1217,12 @@ class TestSuccessionPlanning:
     # 136
     def test_succession_risk_creation(self):
         risk = SuccessionRisk(
-            role_id="r1", role_title="CTO",
-            criticality="critical", ready_now_count=0,
-            pipeline_count=2, risk_level="high",
+            role_id="r1",
+            role_title="CTO",
+            criticality="critical",
+            ready_now_count=0,
+            pipeline_count=2,
+            risk_level="high",
             recommendation="Accelerate development of candidates",
         )
         assert risk.risk_level == "high"
@@ -1151,9 +1230,12 @@ class TestSuccessionPlanning:
     # 137
     def test_succession_risk_covered(self):
         risk = SuccessionRisk(
-            role_id="r1", role_title="VP Eng",
-            criticality="high", ready_now_count=2,
-            pipeline_count=5, risk_level="low",
+            role_id="r1",
+            role_title="VP Eng",
+            criticality="high",
+            ready_now_count=2,
+            pipeline_count=5,
+            risk_level="low",
             recommendation="Maintain current pipeline",
         )
         assert risk.ready_now_count == 2
@@ -1165,18 +1247,26 @@ class TestSuccessionPlanning:
     # 139
     def test_successor_candidate_zero_match(self):
         cand = SuccessorCandidate(
-            user_id="u1", readiness="not_ready",
-            readiness_score=0.0, capability_match=0.0,
-            gaps=[], development_actions=[], time_to_ready_months=None,
+            user_id="u1",
+            readiness="not_ready",
+            readiness_score=0.0,
+            capability_match=0.0,
+            gaps=[],
+            development_actions=[],
+            time_to_ready_months=None,
         )
         assert cand.capability_match == 0.0
 
     # 140
     def test_successor_candidate_perfect_match(self):
         cand = SuccessorCandidate(
-            user_id="u1", readiness="ready_now",
-            readiness_score=1.0, capability_match=1.0,
-            gaps=[], development_actions=[], time_to_ready_months=0,
+            user_id="u1",
+            readiness="ready_now",
+            readiness_score=1.0,
+            capability_match=1.0,
+            gaps=[],
+            development_actions=[],
+            time_to_ready_months=0,
         )
         assert cand.capability_match == 1.0
 
@@ -1195,8 +1285,8 @@ class TestSuccessionPlanning:
 # 12. Data Retention & GDPR (tests 143-155)
 # ═══════════════════════════════════════════════════════════════
 
-from app.talent.services.gdpr import DELETION_GRACE_DAYS, GDPRService
 from app.talent.services.data_retention import DataRetentionService, RetentionReport
+from app.talent.services.gdpr import DELETION_GRACE_DAYS, GDPRService
 
 
 class TestDataRetentionGDPR:
@@ -1439,7 +1529,8 @@ class TestMarketInsights:
     # 176
     def test_employer_reputation_creation(self):
         er = EmployerReputation(
-            org_id="o1", total_placements=50,
+            org_id="o1",
+            total_placements=50,
             avg_placement_duration_days=180.0,
             verification_rate=0.85,
             candidate_return_rate=0.7,
@@ -1492,6 +1583,8 @@ class TestMarketInsights:
 
 from app.talent.services.hiring_analytics import (
     PIPELINE_STAGES as HIRING_STAGES,
+)
+from app.talent.services.hiring_analytics import (
     HiringAnalytics,
     HiringAnalyticsService,
 )
@@ -1593,7 +1686,8 @@ class TestTeamAnalytics:
     # 195
     def test_team_analytics_creation(self):
         ta = TeamAnalytics(
-            org_id="o1", total_members=20,
+            org_id="o1",
+            total_members=20,
             total_capabilities_covered=15,
             skill_distribution=[],
             team_strengths=["Python", "React"],
@@ -1634,12 +1728,12 @@ class TestTeamAnalytics:
 
 from app.talent.services.diversity_analytics import (
     MIN_COHORT_SIZE,
-    PIPELINE_STAGES as DIVERSITY_STAGES,
-    CohortOutcomeComparison,
     DiversityAnalyticsService,
-    PipelineEquityReport,
     SourceEffectiveness,
     StageDropoff,
+)
+from app.talent.services.diversity_analytics import (
+    PIPELINE_STAGES as DIVERSITY_STAGES,
 )
 
 
@@ -1715,8 +1809,11 @@ class TestLearningPlan:
     # 210
     def test_learning_recommendation_creation(self):
         lr = LearningRecommendation(
-            capability_id="c1", capability_name="Python",
-            current_level=2, target_level=4, gap_size=2,
+            capability_id="c1",
+            capability_name="Python",
+            current_level=2,
+            target_level=4,
+            gap_size=2,
             recommended_content=[
                 ContentRecommendation("skill", "s1", 0.9),
             ],

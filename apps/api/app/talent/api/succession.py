@@ -1,4 +1,5 @@
 """Succession planning API."""
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,18 +12,39 @@ from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 
 router = APIRouter(prefix="/talent", tags=["Talent — Succession Planning"])
 
+
 @router.post("/orgs/{org_id}/key-roles", response_model=DataResponse[dict], status_code=201)
-async def create_key_role(org_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def create_key_role(
+    org_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """Create key role."""
     await require_org_member(org_id, user, db)
-    kr = KeyRole(org_id=org_id, title=body.get("title", ""), description=body.get("description"), required_capabilities=body.get("required_capabilities", []), current_holder_id=body.get("current_holder_id"), criticality=body.get("criticality", "medium"), created_by=user.id)
+    kr = KeyRole(
+        org_id=org_id,
+        title=body.get("title", ""),
+        description=body.get("description"),
+        required_capabilities=body.get("required_capabilities", []),
+        current_holder_id=body.get("current_holder_id"),
+        criticality=body.get("criticality", "medium"),
+        created_by=user.id,
+    )
     db.add(kr)
     await db.commit()
     await db.refresh(kr)
     return DataResponse(data={"id": kr.id, "title": kr.title, "criticality": kr.criticality})
 
+
 @router.get("/orgs/{org_id}/key-roles", response_model=CursorListResponse[dict])
-async def list_key_roles(org_id: str, cursor: str | None = Query(None), limit: int = Query(50, ge=1, le=100), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def list_key_roles(
+    org_id: str,
+    cursor: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """List key roles."""
     await require_org_member(org_id, user, db)
     q = select(KeyRole).where(KeyRole.org_id == org_id, KeyRole.status == "active")
@@ -35,23 +57,54 @@ async def list_key_roles(org_id: str, cursor: str | None = Query(None), limit: i
     if has_more:
         items = items[:limit]
     nc = items[-1].id if has_more and items else None
-    return CursorListResponse(data=[{"id": r.id, "title": r.title, "criticality": r.criticality, "current_holder_id": r.current_holder_id} for r in items], meta=CursorMeta(next_cursor=nc, has_more=has_more))
+    return CursorListResponse(
+        data=[
+            {
+                "id": r.id,
+                "title": r.title,
+                "criticality": r.criticality,
+                "current_holder_id": r.current_holder_id,
+            }
+            for r in items
+        ],
+        meta=CursorMeta(next_cursor=nc, has_more=has_more),
+    )
+
 
 @router.post("/key-roles/{role_id}/nominations", response_model=DataResponse[dict], status_code=201)
-async def nominate_successor(role_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def nominate_successor(
+    role_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """Nominate successor."""
     kr = await db.get(KeyRole, role_id)
     if not kr:
         raise HTTPException(404, "Key role not found")
     await require_org_member(kr.org_id, user, db)
-    nom = SuccessorNomination(key_role_id=role_id, candidate_user_id=body.get("candidate_user_id") or "", readiness=body.get("readiness", "not_assessed"), nominated_by=user.id)
+    nom = SuccessorNomination(
+        key_role_id=role_id,
+        candidate_user_id=body.get("candidate_user_id") or "",
+        readiness=body.get("readiness", "not_assessed"),
+        nominated_by=user.id,
+    )
     db.add(nom)
     await db.commit()
     await db.refresh(nom)
-    return DataResponse(data={"id": nom.id, "readiness": nom.readiness, "candidate_user_id": nom.candidate_user_id})
+    return DataResponse(
+        data={"id": nom.id, "readiness": nom.readiness, "candidate_user_id": nom.candidate_user_id}
+    )
+
 
 @router.get("/key-roles/{role_id}/nominations", response_model=CursorListResponse[dict])
-async def list_nominations(role_id: str, cursor: str | None = Query(None), limit: int = Query(20, ge=1, le=50), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def list_nominations(
+    role_id: str,
+    cursor: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """List nominations."""
     kr = await db.get(KeyRole, role_id)
     if not kr:
@@ -67,10 +120,24 @@ async def list_nominations(role_id: str, cursor: str | None = Query(None), limit
     if has_more:
         items = items[:limit]
     nc = items[-1].id if has_more and items else None
-    return CursorListResponse(data=[{"id": n.id, "candidate_user_id": n.candidate_user_id, "readiness": n.readiness, "capability_match": n.capability_match} for n in items], meta=CursorMeta(next_cursor=nc, has_more=has_more))
+    return CursorListResponse(
+        data=[
+            {
+                "id": n.id,
+                "candidate_user_id": n.candidate_user_id,
+                "readiness": n.readiness,
+                "capability_match": n.capability_match,
+            }
+            for n in items
+        ],
+        meta=CursorMeta(next_cursor=nc, has_more=has_more),
+    )
+
 
 @router.get("/key-roles/{role_id}/risk", response_model=DataResponse[dict])
-async def assess_succession_risk(role_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def assess_succession_risk(
+    role_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
     """Assess succession risk."""
     kr = await db.get(KeyRole, role_id)
     if not kr:
@@ -89,4 +156,12 @@ async def assess_succession_risk(role_id: str, db: AsyncSession = Depends(get_db
         risk = "medium"
     else:
         risk = "low"
-    return DataResponse(data={"role_id": role_id, "title": kr.title, "risk_level": risk, "ready_now": ready_now, "pipeline": pipeline})
+    return DataResponse(
+        data={
+            "role_id": role_id,
+            "title": kr.title,
+            "risk_level": risk,
+            "ready_now": ready_now,
+            "pipeline": pipeline,
+        }
+    )

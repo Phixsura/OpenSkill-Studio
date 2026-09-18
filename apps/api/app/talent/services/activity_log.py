@@ -53,9 +53,7 @@ class ActivityLogService:
         limit: int = 50,
     ) -> tuple[list[TalentActivityLog], bool]:
         """List activity entries for a user, newest first."""
-        q = select(TalentActivityLog).where(
-            TalentActivityLog.user_id == user_id
-        )
+        q = select(TalentActivityLog).where(TalentActivityLog.user_id == user_id)
         if action_type:
             q = q.where(TalentActivityLog.action_type == action_type)
         if cursor:

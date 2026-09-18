@@ -61,11 +61,11 @@ class EmployerVerificationService:
 
         # Build the set of capability_ids the employer is allowed to rate
         allowed_cap_ids: set[str] = set()
-        for cap_entry in (opportunity.required_capabilities or []):
+        for cap_entry in opportunity.required_capabilities or []:
             cid = cap_entry.get("capability_id", "")
             if cid:
                 allowed_cap_ids.add(cid)
-        for cap_entry in (opportunity.preferred_capabilities or []):
+        for cap_entry in opportunity.preferred_capabilities or []:
             cid = cap_entry.get("capability_id", "")
             if cid:
                 allowed_cap_ids.add(cid)
@@ -83,9 +83,7 @@ class EmployerVerificationService:
                 )
             score = rating.get("score")
             if score is not None and not (0 <= score <= 5):
-                raise ValueError(
-                    f"Capability rating score must be in [0, 5], got {score}"
-                )
+                raise ValueError(f"Capability rating score must be in [0, 5], got {score}")
 
         # --- Validate overall_rating (0-5 scale, matching schema) ---
         if overall_rating is not None and not (0 <= overall_rating <= 5):

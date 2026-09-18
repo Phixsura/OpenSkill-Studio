@@ -8,9 +8,17 @@ from app.talent.models.application import APPLICATION_TRANSITIONS, TERMINAL_STAT
 class TestApplicationStateMachine:
     def test_all_statuses_have_transitions(self):
         expected_statuses = {
-            "draft", "submitted", "screening", "interview",
-            "assessment", "offer", "accepted", "rejected",
-            "withdrawn", "hired", "completed",
+            "draft",
+            "submitted",
+            "screening",
+            "interview",
+            "assessment",
+            "offer",
+            "accepted",
+            "rejected",
+            "withdrawn",
+            "hired",
+            "completed",
         }
         assert set(APPLICATION_TRANSITIONS.keys()) == expected_statuses
 
@@ -62,6 +70,7 @@ class TestApplicationStateMachine:
 
 
 # ---- API tests ----
+
 
 @pytest.mark.asyncio
 async def test_list_applications_requires_auth(client):

@@ -70,9 +70,7 @@ class CapabilityEvidence(Base):
     __tablename__ = "capability_evidence"
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     capability_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("capabilities.id", ondelete="CASCADE")
     )
@@ -95,7 +93,11 @@ class CapabilityEvidence(Base):
     status: Mapped[str] = mapped_column(String(20), default="active", server_default="'active'")
     # Provenance, additional scores, rubric details, etc.
     extra: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("ix_cap_evidence_user_cap", "user_id", "capability_id", "status"),

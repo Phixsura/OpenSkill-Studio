@@ -16,19 +16,30 @@ import hmac
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-SUPPORTED_EVENTS = frozenset({
-    "credential.issued", "credential.revoked",
-    "application.submitted", "application.stage_changed",
-    "offer.created", "offer.accepted", "offer.declined",
-    "placement.started", "placement.completed",
-    "capability.verified", "capability.endorsed",
-    "employer_verification.submitted",
-    "outreach.sent", "outreach.responded",
-    "talent_pool.member_added",
-    "interview.scheduled", "interview.completed",
-    "assessment.completed", "credential_pathway.completed",
-    "career_goal.completed",
-})
+SUPPORTED_EVENTS = frozenset(
+    {
+        "credential.issued",
+        "credential.revoked",
+        "application.submitted",
+        "application.stage_changed",
+        "offer.created",
+        "offer.accepted",
+        "offer.declined",
+        "placement.started",
+        "placement.completed",
+        "capability.verified",
+        "capability.endorsed",
+        "employer_verification.submitted",
+        "outreach.sent",
+        "outreach.responded",
+        "talent_pool.member_added",
+        "interview.scheduled",
+        "interview.completed",
+        "assessment.completed",
+        "credential_pathway.completed",
+        "career_goal.completed",
+    }
+)
 
 DELIVERY_STATUSES = frozenset({"pending", "delivered", "failed", "skipped"})
 
@@ -39,6 +50,7 @@ RETRY_DELAYS_SECONDS = [10, 60, 300]  # exponential backoff
 @dataclass(frozen=True, slots=True)
 class WebhookEndpoint:
     """Registered webhook endpoint."""
+
     id: str
     org_id: str
     url: str
@@ -51,6 +63,7 @@ class WebhookEndpoint:
 @dataclass(frozen=True, slots=True)
 class WebhookDelivery:
     """Delivery attempt record."""
+
     id: str
     endpoint_id: str
     event_type: str
@@ -67,6 +80,7 @@ class WebhookDelivery:
 @dataclass(frozen=True, slots=True)
 class WebhookStats:
     """Webhook delivery statistics."""
+
     total_deliveries: int
     successful: int
     failed: int

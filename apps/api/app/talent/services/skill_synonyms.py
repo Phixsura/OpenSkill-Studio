@@ -127,9 +127,7 @@ class SkillSynonymService:
         best_match = None
         best_ratio = 0.0
         for c in all_caps:
-            ratio = SequenceMatcher(
-                None, normalized, c["canonical_name"].lower()
-            ).ratio()
+            ratio = SequenceMatcher(None, normalized, c["canonical_name"].lower()).ratio()
             if ratio > best_ratio:
                 best_ratio = ratio
                 best_match = c
@@ -153,9 +151,7 @@ class SkillSynonymService:
             results[text] = await self.resolve(text)
         return results
 
-    async def suggest_merge(
-        self, capability_id_a: str, capability_id_b: str
-    ) -> dict:
+    async def suggest_merge(self, capability_id_a: str, capability_id_b: str) -> dict:
         """Check if two capabilities are likely duplicates.
 
         Returns similarity score and recommendation.
@@ -177,12 +173,8 @@ class SkillSynonymService:
         ).ratio()
 
         # Check alias overlap
-        aliases_a = set(
-            a.lower() for a in (cap_a.aliases or []) if isinstance(a, str)
-        )
-        aliases_b = set(
-            a.lower() for a in (cap_b.aliases or []) if isinstance(a, str)
-        )
+        aliases_a = set(a.lower() for a in (cap_a.aliases or []) if isinstance(a, str))
+        aliases_b = set(a.lower() for a in (cap_b.aliases or []) if isinstance(a, str))
         alias_overlap = len(aliases_a & aliases_b) if aliases_a and aliases_b else 0
 
         # Combined score

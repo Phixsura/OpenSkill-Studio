@@ -64,7 +64,11 @@ class Capability(Base):
     # Multilingual names: {"zh": {"name": "...", "description": "..."}, "en": {...}}
     translations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -101,7 +105,11 @@ class CapabilityEdge(Base):
     # requires | related_to | specializes | subsumes | commonly_paired_with
     edge_type: Mapped[str] = mapped_column(String(30))
     extra: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("uq_capability_edge", "source_id", "target_id", "edge_type", unique=True),
@@ -147,7 +155,11 @@ class CapabilityMapping(Base):
     evidence_type: Mapped[str] = mapped_column(
         String(30), default="primary_instruction", server_default="'primary_instruction'"
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: __import__("datetime").datetime.now(__import__("datetime").UTC),
+        server_default=func.now(),
+    )
 
     __table_args__ = (
         Index("uq_cap_mapping", "capability_id", "source_type", "source_id", unique=True),

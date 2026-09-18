@@ -34,7 +34,9 @@ def _require_platform_admin(user: User) -> None:
         raise HTTPException(403, "Only platform admins can modify the capability ontology")
 
 
-@router.get("", response_model=CursorListResponse[CapabilityResponse],
+@router.get(
+    "",
+    response_model=CursorListResponse[CapabilityResponse],
     summary="List capabilities",
     description="Returns paginated list of capabilities in the taxonomy.",
 )
@@ -72,7 +74,10 @@ async def list_capabilities(
     )
 
 
-@router.post("", response_model=DataResponse[CapabilityResponse], status_code=201,
+@router.post(
+    "",
+    response_model=DataResponse[CapabilityResponse],
+    status_code=201,
     summary="Create capability",
     description="Add a new capability with optional ESCO/O*NET mappings.",
 )
@@ -101,7 +106,9 @@ async def create_capability(
     return DataResponse(data=CapabilityResponse.model_validate(cap))
 
 
-@router.get("/{capability_id}", response_model=DataResponse[CapabilityResponse],
+@router.get(
+    "/{capability_id}",
+    response_model=DataResponse[CapabilityResponse],
     summary="Get capability detail",
     description="Returns full capability details including edges and taxonomy mappings.",
 )
@@ -117,7 +124,9 @@ async def get_capability(
     return DataResponse(data=CapabilityResponse.model_validate(cap))
 
 
-@router.patch("/{capability_id}", response_model=DataResponse[CapabilityResponse],
+@router.patch(
+    "/{capability_id}",
+    response_model=DataResponse[CapabilityResponse],
     summary="Update capability",
     description="Update capability metadata or taxonomy mappings.",
 )
@@ -138,7 +147,9 @@ async def update_capability(
     return DataResponse(data=CapabilityResponse.model_validate(cap))
 
 
-@router.post("/{capability_id}/merge", response_model=DataResponse[CapabilityResponse],
+@router.post(
+    "/{capability_id}/merge",
+    response_model=DataResponse[CapabilityResponse],
     summary="Merge capabilities",
     description="Merge a duplicate capability transferring all evidence and edges.",
 )
@@ -163,7 +174,11 @@ async def merge_capability(
 
 # ---- Edges ----
 
-@router.post("/{capability_id}/edges", response_model=DataResponse[EdgeResponse], status_code=201,
+
+@router.post(
+    "/{capability_id}/edges",
+    response_model=DataResponse[EdgeResponse],
+    status_code=201,
     summary="Create capability edge",
     description="Add a relationship edge between capabilities.",
 )
@@ -192,7 +207,9 @@ async def add_edge(
     return DataResponse(data=EdgeResponse.model_validate(edge))
 
 
-@router.delete("/{capability_id}/edges/{edge_id}", status_code=204,
+@router.delete(
+    "/{capability_id}/edges/{edge_id}",
+    status_code=204,
     summary="Delete capability edge",
     description="Remove a relationship edge.",
 )
@@ -209,7 +226,9 @@ async def remove_edge(
     await db.commit()
 
 
-@router.get("/{capability_id}/edges", response_model=DataResponse[list[EdgeResponse]],
+@router.get(
+    "/{capability_id}/edges",
+    response_model=DataResponse[list[EdgeResponse]],
     summary="List capability edges",
     description="Returns all relationship edges for a capability.",
 )
@@ -227,7 +246,10 @@ async def get_edges(
 
 # ---- Graph traversal ----
 
-@router.get("/{capability_id}/graph", response_model=DataResponse[GraphResponse],
+
+@router.get(
+    "/{capability_id}/graph",
+    response_model=DataResponse[GraphResponse],
     summary="Get capability graph",
     description="Returns the neighborhood graph for visualization.",
 )
@@ -248,7 +270,11 @@ async def traverse_graph(
 
 # ---- Mappings ----
 
-@router.post("/mappings", response_model=DataResponse[MappingResponse], status_code=201,
+
+@router.post(
+    "/mappings",
+    response_model=DataResponse[MappingResponse],
+    status_code=201,
     summary="Create content mapping",
     description="Map platform content to a capability for evidence tracking.",
 )
@@ -274,7 +300,9 @@ async def create_mapping(
     return DataResponse(data=MappingResponse.model_validate(mapping))
 
 
-@router.get("/mappings", response_model=DataResponse[list[MappingResponse]],
+@router.get(
+    "/mappings",
+    response_model=DataResponse[list[MappingResponse]],
     summary="List content mappings",
     description="Returns all content-to-capability mappings.",
 )
@@ -294,7 +322,9 @@ async def list_mappings(
     return DataResponse(data=[MappingResponse.model_validate(m) for m in mappings])
 
 
-@router.post("/capabilities/resolve", response_model=DataResponse[dict],
+@router.post(
+    "/capabilities/resolve",
+    response_model=DataResponse[dict],
     summary="Resolve capability by name",
     description="Fuzzy-match a name to existing taxonomy entries.",
 )
@@ -321,7 +351,9 @@ async def resolve_skill_names(
     return DataResponse(data=results)
 
 
-@router.delete("/mappings/{mapping_id}", status_code=204,
+@router.delete(
+    "/mappings/{mapping_id}",
+    status_code=204,
     summary="Delete content mapping",
     description="Remove a content-to-capability mapping.",
 )
@@ -339,7 +371,10 @@ async def delete_mapping(
 
 # ---- Gap #7: Autocomplete ----
 
-@router.get("/talent/capabilities/autocomplete", response_model=DataResponse[list[dict]],
+
+@router.get(
+    "/talent/capabilities/autocomplete",
+    response_model=DataResponse[list[dict]],
     summary="Autocomplete capabilities",
     description="Returns suggestions for typeahead/autocomplete.",
 )
@@ -351,13 +386,17 @@ async def autocomplete_capabilities_endpoint(
 ):
     """Typeahead autocomplete for capability names."""
     from app.talent.services.skill_intelligence import autocomplete_capabilities
+
     results = await autocomplete_capabilities(db, q, limit=limit)
     return DataResponse(data=results)
 
 
 # ---- Gap #8: Skill frequency ----
 
-@router.get("/talent/capabilities/frequency", response_model=DataResponse[list[dict]],
+
+@router.get(
+    "/talent/capabilities/frequency",
+    response_model=DataResponse[list[dict]],
     summary="Get capability frequency",
     description="Capabilities ranked by evidence frequency.",
 )
@@ -369,13 +408,17 @@ async def get_skill_frequency(
 ):
     """Skill usage frequency analytics."""
     from app.talent.services.skill_intelligence import compute_skill_frequency
+
     results = await compute_skill_frequency(db, days=days, limit=limit)
     return DataResponse(data=results)
 
 
 # ---- Gap #9: Co-occurrence ----
 
-@router.get("/talent/capabilities/cooccurrence", response_model=DataResponse[list[dict]],
+
+@router.get(
+    "/talent/capabilities/cooccurrence",
+    response_model=DataResponse[list[dict]],
     summary="Get capability co-occurrence",
     description="Pairs of capabilities frequently appearing together.",
 )
@@ -387,13 +430,17 @@ async def get_skill_cooccurrence(
 ):
     """Skill co-occurrence analysis — which skills appear together."""
     from app.talent.services.skill_intelligence import compute_skill_cooccurrence
+
     results = await compute_skill_cooccurrence(db, min_users=min_users, limit=limit)
     return DataResponse(data=results)
 
 
 # ---- Gap #2: Taxonomy import ----
 
-@router.post("/talent/capabilities/import", response_model=DataResponse[dict],
+
+@router.post(
+    "/talent/capabilities/import",
+    response_model=DataResponse[dict],
     summary="Import capabilities",
     description="Bulk import from ESCO, O*NET, or custom files.",
 )
@@ -406,6 +453,7 @@ async def import_taxonomy(
     import dataclasses
 
     from app.talent.services.taxonomy_import import validate_import_batch
+
     fmt = body.get("format", "custom_json")
     rows = body.get("rows", [])
     result = validate_import_batch(rows, fmt)
@@ -414,7 +462,10 @@ async def import_taxonomy(
 
 # ---- Gap #11: Industry taxonomies ----
 
-@router.get("/talent/capabilities/industries", response_model=DataResponse[dict],
+
+@router.get(
+    "/talent/capabilities/industries",
+    response_model=DataResponse[dict],
     summary="List industry classifications",
     description="Industry categories with associated capability clusters.",
 )
@@ -423,16 +474,22 @@ async def list_industry_taxonomies(
 ):
     """List available industry taxonomy presets."""
     from app.talent.services.taxonomy_import import get_industry_taxonomy, list_available_industries
+
     industries = list_available_industries()
-    return DataResponse(data={
-        "industries": industries,
-        "presets": {i: get_industry_taxonomy(i) for i in industries},
-    })
+    return DataResponse(
+        data={
+            "industries": industries,
+            "presets": {i: get_industry_taxonomy(i) for i in industries},
+        }
+    )
 
 
 # ---- Gap #17: API version info ----
 
-@router.get("/talent/capabilities/version", response_model=DataResponse[dict],
+
+@router.get(
+    "/talent/capabilities/version",
+    response_model=DataResponse[dict],
     summary="Get taxonomy version",
     description="Current version of the capability taxonomy.",
 )
@@ -441,12 +498,16 @@ async def get_taxonomy_version(
 ):
     """Get taxonomy API version and metadata."""
     from app.talent.services.taxonomy_import import TAXONOMY_VERSION_INFO
+
     return DataResponse(data=TAXONOMY_VERSION_INFO)
 
 
 # ---- Gap #15: Edge strength ----
 
-@router.get("/talent/capabilities/edge-strength", response_model=DataResponse[dict],
+
+@router.get(
+    "/talent/capabilities/edge-strength",
+    response_model=DataResponse[dict],
     summary="Get edge strength",
     description="Edge weights between capabilities based on co-occurrence.",
 )
@@ -458,13 +519,17 @@ async def get_edge_strength(
 ):
     """Compute relationship strength between two capabilities."""
     from app.talent.services.skill_intelligence import compute_edge_strength
+
     strength = await compute_edge_strength(db, source_id, target_id)
     return DataResponse(data={"source_id": source_id, "target_id": target_id, "strength": strength})
 
 
 # ---- Gap #72: Search analytics ----
 
-@router.get("/talent/capabilities/search-analytics", response_model=DataResponse[dict],
+
+@router.get(
+    "/talent/capabilities/search-analytics",
+    response_model=DataResponse[dict],
     summary="Get search analytics",
     description="Aggregated search query analytics.",
 )
@@ -473,17 +538,23 @@ async def get_search_analytics_endpoint(
 ):
     """Search analytics — popular queries, zero-result tracking."""
     from app.talent.services.search_intelligence import get_search_analytics
+
     store = get_search_analytics()
-    return DataResponse(data={
-        "stats": store.get_stats(),
-        "popular": store.get_popular_queries(20),
-        "zero_results": store.get_zero_result_queries(20),
-    })
+    return DataResponse(
+        data={
+            "stats": store.get_stats(),
+            "popular": store.get_popular_queries(20),
+            "zero_results": store.get_zero_result_queries(20),
+        }
+    )
 
 
 # ---- Gap #79: Boolean search ----
 
-@router.post("/talent/capabilities/boolean-search", response_model=DataResponse[dict],
+
+@router.post(
+    "/talent/capabilities/boolean-search",
+    response_model=DataResponse[dict],
     summary="Boolean search",
     description="Search capabilities with boolean operators.",
 )
@@ -493,13 +564,17 @@ async def boolean_search(
 ):
     """Parse a Boolean search query into structured form."""
     from app.talent.services.search_intelligence import parse_boolean_query
+
     parsed = parse_boolean_query(body.get("query", ""))
     return DataResponse(data=parsed)
 
 
 # ---- Gap #75: Match feedback ----
 
-@router.post("/talent/match-feedback", response_model=DataResponse[dict],
+
+@router.post(
+    "/talent/match-feedback",
+    response_model=DataResponse[dict],
     summary="Submit match feedback",
     description="Provide feedback on match quality.",
 )
@@ -509,6 +584,7 @@ async def submit_match_feedback(
 ):
     """Submit feedback on match quality."""
     from app.talent.services.search_intelligence import validate_match_feedback
+
     errors = validate_match_feedback(body.get("rating", ""))
     if errors:
         raise HTTPException(422, errors[0])

@@ -4,8 +4,8 @@ Revision ID: talent14a00014
 Revises: talent13a00013
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "talent14a00014"
@@ -36,8 +36,12 @@ def upgrade() -> None:
     op.create_table(
         "talent_offers",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("application_id", sa.String(26), sa.ForeignKey("applications.id"), nullable=False),
-        sa.Column("employer_org_id", sa.String(26), sa.ForeignKey("organizations.id"), nullable=False),
+        sa.Column(
+            "application_id", sa.String(26), sa.ForeignKey("applications.id"), nullable=False
+        ),
+        sa.Column(
+            "employer_org_id", sa.String(26), sa.ForeignKey("organizations.id"), nullable=False
+        ),
         sa.Column("role_title", sa.String(200), nullable=False),
         sa.Column("compensation_text", sa.String(500), nullable=True),
         sa.Column("start_date", sa.DateTime(timezone=True), nullable=True),
@@ -73,7 +77,12 @@ def upgrade() -> None:
         "talent_onboarding_checklists",
         sa.Column("id", sa.String(26), primary_key=True),
         sa.Column("placement_id", sa.String(26), sa.ForeignKey("placements.id"), nullable=False),
-        sa.Column("template_id", sa.String(26), sa.ForeignKey("talent_onboarding_templates.id"), nullable=True),
+        sa.Column(
+            "template_id",
+            sa.String(26),
+            sa.ForeignKey("talent_onboarding_templates.id"),
+            nullable=True,
+        ),
         sa.Column("tasks", postgresql.JSONB, server_default="[]"),
         sa.Column("completion_percentage", sa.SmallInteger, server_default="0"),
         sa.Column("current_phase", sa.String(30), server_default="'pre_start'"),
@@ -87,7 +96,9 @@ def upgrade() -> None:
     op.create_table(
         "talent_application_messages",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("application_id", sa.String(26), sa.ForeignKey("applications.id"), nullable=False),
+        sa.Column(
+            "application_id", sa.String(26), sa.ForeignKey("applications.id"), nullable=False
+        ),
         sa.Column("sender_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("sender_role", sa.String(20), nullable=False),
         sa.Column("message_type", sa.String(30), server_default="'text'"),
@@ -116,7 +127,12 @@ def upgrade() -> None:
     op.create_table(
         "talent_webhook_delivery_log",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("endpoint_id", sa.String(26), sa.ForeignKey("talent_webhook_endpoints.id"), nullable=False),
+        sa.Column(
+            "endpoint_id",
+            sa.String(26),
+            sa.ForeignKey("talent_webhook_endpoints.id"),
+            nullable=False,
+        ),
         sa.Column("event_type", sa.String(50), nullable=False),
         sa.Column("payload", postgresql.JSONB, server_default="{}"),
         sa.Column("status", sa.String(20), server_default="'pending'"),
@@ -146,7 +162,9 @@ def upgrade() -> None:
     op.create_table(
         "talent_successor_nominations",
         sa.Column("id", sa.String(26), primary_key=True),
-        sa.Column("key_role_id", sa.String(26), sa.ForeignKey("talent_key_roles.id"), nullable=False),
+        sa.Column(
+            "key_role_id", sa.String(26), sa.ForeignKey("talent_key_roles.id"), nullable=False
+        ),
         sa.Column("candidate_user_id", sa.String(26), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("readiness", sa.String(30), server_default="'not_assessed'"),
         sa.Column("capability_match", sa.Float, nullable=True),

@@ -40,9 +40,7 @@ class SkillTrend:
 TREND_WINDOW_DAYS = 90
 
 
-def _classify_trend(
-    current: int, prior: int, total_all_time: int
-) -> tuple[str, float]:
+def _classify_trend(current: int, prior: int, total_all_time: int) -> tuple[str, float]:
     """Classify trend direction and compute growth rate."""
     if prior == 0 and current == 0:
         return "stable", 0.0
@@ -154,14 +152,11 @@ async def compute_skill_trends(
 
     # Demand: count open opportunities requiring each capability
     # This requires searching the JSONB required_capabilities array
-    demand_q = (
-        select(Opportunity)
-        .where(Opportunity.status == "open")
-    )
+    demand_q = select(Opportunity).where(Opportunity.status == "open")
     demand_result = await db.execute(demand_q)
     demand_counts: dict[str, int] = {}
     for opp in demand_result.scalars().all():
-        for req in (opp.required_capabilities or []):
+        for req in opp.required_capabilities or []:
             cid = req.get("capability_id", "")
             if cid in capabilities:
                 demand_counts[cid] = demand_counts.get(cid, 0) + 1
@@ -179,17 +174,19 @@ async def compute_skill_trends(
         if direction and trend_dir != direction:
             continue
 
-        trends.append(SkillTrend(
-            capability_id=cap_id,
-            capability_name=cap.canonical_name,
-            category=cap.category,
-            trend_direction=trend_dir,
-            current_period_count=current,
-            prior_period_count=prior,
-            growth_rate=growth,
-            demand_count=demand_counts.get(cap_id, 0),
-            supply_count=supply_counts.get(cap_id, 0),
-        ))
+        trends.append(
+            SkillTrend(
+                capability_id=cap_id,
+                capability_name=cap.canonical_name,
+                category=cap.category,
+                trend_direction=trend_dir,
+                current_period_count=current,
+                prior_period_count=prior,
+                growth_rate=growth,
+                demand_count=demand_counts.get(cap_id, 0),
+                supply_count=supply_counts.get(cap_id, 0),
+            )
+        )
 
     # Sort: rising first, then by growth rate descending
     direction_order = {"rising": 0, "emerging": 1, "stable": 2, "cooling": 3}

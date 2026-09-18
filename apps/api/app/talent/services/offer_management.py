@@ -15,10 +15,18 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-OFFER_STATUSES = frozenset({
-    "draft", "sent", "viewed", "countered",
-    "accepted", "declined", "expired", "withdrawn",
-})
+OFFER_STATUSES = frozenset(
+    {
+        "draft",
+        "sent",
+        "viewed",
+        "countered",
+        "accepted",
+        "declined",
+        "expired",
+        "withdrawn",
+    }
+)
 
 OFFER_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"sent", "withdrawn"},
@@ -35,6 +43,7 @@ OFFER_TRANSITIONS: dict[str, set[str]] = {
 @dataclass(frozen=True, slots=True)
 class OfferTemplate:
     """Reusable offer letter template."""
+
     name: str
     sections: list[dict]  # [{title, content_template}]
     default_conditions: list[str]
@@ -44,6 +53,7 @@ class OfferTemplate:
 @dataclass(frozen=True, slots=True)
 class OfferSummary:
     """Offer analytics summary."""
+
     total_offers: int
     acceptance_rate: float
     avg_time_to_decision_days: float | None
@@ -86,11 +96,13 @@ class OfferManagementService:
 
     def add_counter_offer(self, offer_data: dict, counter: dict) -> dict:
         """Add a counter-offer to negotiation history."""
-        offer_data["negotiation_history"].append({
-            "type": "counter",
-            "details": counter,
-            "timestamp": datetime.now(UTC).isoformat(),
-        })
+        offer_data["negotiation_history"].append(
+            {
+                "type": "counter",
+                "details": counter,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
         offer_data["status"] = "countered"
         return offer_data
 
@@ -115,7 +127,11 @@ class OfferManagementService:
         return OfferSummary(
             total_offers=len(offers),
             acceptance_rate=round(rate, 3),
-            avg_time_to_decision_days=round(sum(decision_days) / len(decision_days), 1) if decision_days else None,
-            avg_negotiation_rounds=round(sum(negotiation_rounds) / len(negotiation_rounds), 2) if negotiation_rounds else 0.0,
+            avg_time_to_decision_days=round(sum(decision_days) / len(decision_days), 1)
+            if decision_days
+            else None,
+            avg_negotiation_rounds=round(sum(negotiation_rounds) / len(negotiation_rounds), 2)
+            if negotiation_rounds
+            else 0.0,
             offers_by_status=by_status,
         )

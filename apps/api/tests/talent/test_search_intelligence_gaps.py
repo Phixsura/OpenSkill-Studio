@@ -110,7 +110,9 @@ class TestMatchTiers:
 
     def test_filter_by_tier(self):
         matches = [
-            {"composite_score": 0.9}, {"composite_score": 0.5}, {"composite_score": 0.3},
+            {"composite_score": 0.9},
+            {"composite_score": 0.5},
+            {"composite_score": 0.3},
         ]
         strong = filter_by_tier(matches, "strong")
         assert len(strong) == 1
@@ -131,7 +133,9 @@ class TestMatchFeedback:
 class TestSearchSuggestions:
     def test_generates(self):
         suggestions = generate_search_suggestions(
-            "py", ["python jobs", "react dev"], ["Python", "PyTorch"],
+            "py",
+            ["python jobs", "react dev"],
+            ["Python", "PyTorch"],
         )
         assert "Python" in suggestions or "PyTorch" in suggestions
 

@@ -27,7 +27,9 @@ from app.talent.services.scoring import compute_capability_profile
 router = APIRouter(prefix="/talent", tags=["Talent — Evidence"])
 
 
-@router.get("/evidence", response_model=CursorListResponse[EvidenceResponse],
+@router.get(
+    "/evidence",
+    response_model=CursorListResponse[EvidenceResponse],
     summary="List evidence",
     description="Returns paginated capability evidence for the authenticated user. Supports cursor-based pagination.",
 )
@@ -59,7 +61,10 @@ async def list_evidence(
     )
 
 
-@router.post("/evidence", response_model=DataResponse[EvidenceResponse], status_code=201,
+@router.post(
+    "/evidence",
+    response_model=DataResponse[EvidenceResponse],
+    status_code=201,
     summary="Record evidence",
     description="Submit new capability evidence with source, verification level, and optional digital signature.",
 )
@@ -99,7 +104,9 @@ async def record_evidence(
     return DataResponse(data=EvidenceResponse.model_validate(evidence))
 
 
-@router.get("/evidence/{evidence_id}", response_model=DataResponse[EvidenceResponse],
+@router.get(
+    "/evidence/{evidence_id}",
+    response_model=DataResponse[EvidenceResponse],
     summary="Get evidence detail",
     description="Returns a single evidence record with full provenance chain.",
 )
@@ -119,7 +126,9 @@ async def get_evidence(
     return DataResponse(data=EvidenceResponse.model_validate(evidence))
 
 
-@router.post("/evidence/{evidence_id}/void", response_model=DataResponse[EvidenceResponse],
+@router.post(
+    "/evidence/{evidence_id}/void",
+    response_model=DataResponse[EvidenceResponse],
     summary="Void evidence",
     description="Mark an evidence record as voided. Triggers score recalculation for affected capabilities.",
 )
@@ -146,7 +155,9 @@ async def void_evidence(
     return DataResponse(data=EvidenceResponse.model_validate(result))
 
 
-@router.get("/evidence/{evidence_id}/provenance", response_model=DataResponse[ProvenanceResponse],
+@router.get(
+    "/evidence/{evidence_id}/provenance",
+    response_model=DataResponse[ProvenanceResponse],
     summary="Get evidence provenance",
     description="Returns the full provenance chain for an evidence record.",
 )
@@ -171,7 +182,9 @@ async def get_provenance(
 
 # ---- Derived capability profile ----
 
-@router.get("/users/{user_id}/profile",
+
+@router.get(
+    "/users/{user_id}/profile",
     summary="Get user capability profile",
     description="Returns computed capability scores for a user aggregated from all verified evidence.",
 )
@@ -191,9 +204,7 @@ async def get_capability_profile(
         import dataclasses
 
         scores = await compute_capability_profile(db, user_id)
-        return DataResponse(
-            data=[dataclasses.asdict(s) for s in scores]
-        )
+        return DataResponse(data=[dataclasses.asdict(s) for s in scores])
 
     # Other user — respect passport privacy settings
     from app.talent.services.passport import PassportService

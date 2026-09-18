@@ -4,13 +4,15 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-PASSPORT_VISIBILITY_SCOPES = frozenset({
-    "private",
-    "organization_only",
-    "specific_employer",
-    "share_link",
-    "public_subset",
-})
+PASSPORT_VISIBILITY_SCOPES = frozenset(
+    {
+        "private",
+        "organization_only",
+        "specific_employer",
+        "share_link",
+        "public_subset",
+    }
+)
 
 
 class UpdatePassportRequest(BaseModel):

@@ -51,13 +51,17 @@ DEFAULT_LEVEL_THRESHOLDS: dict[int, dict] = {
 
 # Verification levels considered "substantial" for min_evidence counting
 SUBSTANTIAL_VERIFICATION = frozenset(
-    {"employer_verified", "client_verified", "assessment_verified", "instructor_verified", "peer_verified"}
+    {
+        "employer_verified",
+        "client_verified",
+        "assessment_verified",
+        "instructor_verified",
+        "peer_verified",
+    }
 )
 
 # Adjacency edge types for breadth computation
-_BREADTH_EDGE_TYPES = frozenset(
-    {"related_to", "commonly_paired_with", "specializes", "subsumes"}
-)
+_BREADTH_EDGE_TYPES = frozenset({"related_to", "commonly_paired_with", "specializes", "subsumes"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,14 +138,14 @@ def compute_score_from_evidence(
     raw_mean = sum(effective_scores) / n
 
     # Bayesian shrinkage
-    shrunk = (n / (n + SHRINKAGE_K)) * raw_mean + (SHRINKAGE_K / (n + SHRINKAGE_K)) * SHRINKAGE_PRIOR
+    shrunk = (n / (n + SHRINKAGE_K)) * raw_mean + (
+        SHRINKAGE_K / (n + SHRINKAGE_K)
+    ) * SHRINKAGE_PRIOR
     model_confidence = 1.0 - (SHRINKAGE_K / (n + SHRINKAGE_K))
 
     # Count substantial evidence (for level thresholds)
     substantial = sum(
-        1
-        for ev in active
-        if ev.get("verification_level", "") in SUBSTANTIAL_VERIFICATION
+        1 for ev in active if ev.get("verification_level", "") in SUBSTANTIAL_VERIFICATION
     )
 
     return round(shrunk, 4), round(model_confidence, 4), substantial
@@ -247,12 +251,9 @@ async def compute_capability_profile(
     now = datetime.now(UTC)
 
     # Get all active evidence for the user
-    q = (
-        select(CapabilityEvidence)
-        .where(
-            CapabilityEvidence.user_id == user_id,
-            CapabilityEvidence.status == "active",
-        )
+    q = select(CapabilityEvidence).where(
+        CapabilityEvidence.user_id == user_id,
+        CapabilityEvidence.status == "active",
     )
     if capability_ids:
         q = q.where(CapabilityEvidence.capability_id.in_(capability_ids))
@@ -269,14 +270,18 @@ async def compute_capability_profile(
         cap_id = ev.capability_id
         if cap_id not in by_cap:
             by_cap[cap_id] = []
-        by_cap[cap_id].append({
-            "score_normalized": float(ev.score_normalized) if ev.score_normalized is not None else None,
-            "verification_level": ev.verification_level,
-            "confidence": float(ev.confidence),
-            "occurred_at": ev.occurred_at,
-            "status": ev.status,
-            "expires_at": ev.expires_at,
-        })
+        by_cap[cap_id].append(
+            {
+                "score_normalized": float(ev.score_normalized)
+                if ev.score_normalized is not None
+                else None,
+                "verification_level": ev.verification_level,
+                "confidence": float(ev.confidence),
+                "occurred_at": ev.occurred_at,
+                "status": ev.status,
+                "expires_at": ev.expires_at,
+            }
+        )
 
     # Load capabilities for names and config
     cap_ids = list(by_cap.keys())
@@ -285,15 +290,12 @@ async def compute_capability_profile(
     capabilities = {c.id: c for c in cap_result.scalars().all()}
 
     # Pre-load adjacency edges for breadth computation
-    edge_q = (
-        select(CapabilityEdge.source_id, CapabilityEdge.target_id)
-        .where(
-            CapabilityEdge.edge_type.in_(_BREADTH_EDGE_TYPES),
-            or_(
-                CapabilityEdge.source_id.in_(cap_ids),
-                CapabilityEdge.target_id.in_(cap_ids),
-            ),
-        )
+    edge_q = select(CapabilityEdge.source_id, CapabilityEdge.target_id).where(
+        CapabilityEdge.edge_type.in_(_BREADTH_EDGE_TYPES),
+        or_(
+            CapabilityEdge.source_id.in_(cap_ids),
+            CapabilityEdge.target_id.in_(cap_ids),
+        ),
     )
     edge_result = await db.execute(edge_q)
     # Build adjacency: cap_id → set of related cap_ids
@@ -312,9 +314,7 @@ async def compute_capability_profile(
             continue
 
         # Depth (backward compatible with v1)
-        depth, confidence, substantial = compute_score_from_evidence(
-            ev_list, cap.decay_config, now
-        )
+        depth, confidence, substantial = compute_score_from_evidence(ev_list, cap.decay_config, now)
 
         # Breadth: fraction of related capabilities that also have evidence
         related = adjacency.get(cap_id, set())
@@ -339,9 +339,7 @@ async def compute_capability_profile(
         )
         composite = round(composite, 4)
 
-        level, level_label = determine_level(
-            composite, substantial, cap.level_definitions
-        )
+        level, level_label = determine_level(composite, substantial, cap.level_definitions)
 
         # Verification mix
         mix: dict[str, int] = {}

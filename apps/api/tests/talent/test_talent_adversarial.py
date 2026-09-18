@@ -4,8 +4,6 @@ These tests verify structural properties that MUST hold regardless of
 database state or user actions.
 """
 
-
-
 from app.talent.models.application import (
     APPLICATION_TRANSITIONS,
     Application,
@@ -81,9 +79,19 @@ class TestProtectedAttributeExclusion:
     """
 
     PROTECTED_COLUMN_NAMES = {
-        "race", "ethnicity", "gender", "sex", "religion", "political",
-        "sexual_orientation", "disability", "health", "age", "date_of_birth",
-        "national_origin", "marital_status",
+        "race",
+        "ethnicity",
+        "gender",
+        "sex",
+        "religion",
+        "political",
+        "sexual_orientation",
+        "disability",
+        "health",
+        "age",
+        "date_of_birth",
+        "national_origin",
+        "marital_status",
     }
 
     def test_evidence_no_protected_columns(self):
@@ -123,8 +131,10 @@ class TestSnapshotIntegrity:
 
     def test_snapshot_has_checksum_column(self):
         from app.talent.models.passport import PassportSnapshot
+
         assert "checksum" in PassportSnapshot.__table__.columns
 
     def test_snapshot_has_status_for_revocation(self):
         from app.talent.models.passport import PassportSnapshot
+
         assert "status" in PassportSnapshot.__table__.columns

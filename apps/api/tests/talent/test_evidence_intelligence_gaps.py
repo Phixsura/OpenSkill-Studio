@@ -21,9 +21,12 @@ from app.talent.services.evidence_intelligence import (
 class TestEvidenceQuality:
     def test_high_quality(self):
         ev = {
-            "source_id": "src1", "score_normalized": 0.9,
+            "source_id": "src1",
+            "score_normalized": 0.9,
             "verification_level": "employer_verified",
-            "occurred_at": datetime.now(UTC), "org_id": "org1", "confidence": 0.95,
+            "occurred_at": datetime.now(UTC),
+            "org_id": "org1",
+            "confidence": 0.95,
         }
         result = compute_evidence_quality(ev)
         assert result["quality_score"] > 0.7
@@ -31,10 +34,12 @@ class TestEvidenceQuality:
 
     def test_low_quality(self):
         ev = {
-            "source_id": None, "score_normalized": None,
+            "source_id": None,
+            "score_normalized": None,
             "verification_level": "self_reported",
             "occurred_at": datetime.now(UTC) - timedelta(days=800),
-            "org_id": None, "confidence": 0.3,
+            "org_id": None,
+            "confidence": 0.3,
         }
         result = compute_evidence_quality(ev)
         assert result["quality_score"] < 0.4
@@ -48,7 +53,10 @@ class TestEvidenceQuality:
 # Gap #24: Dispute validation
 class TestDisputeValidation:
     def test_valid_dispute(self):
-        errors = validate_dispute(reason="inaccurate_score", details="The score does not reflect my actual work on this project")
+        errors = validate_dispute(
+            reason="inaccurate_score",
+            details="The score does not reflect my actual work on this project",
+        )
         assert len(errors) == 0
 
     def test_invalid_reason(self):
@@ -70,25 +78,39 @@ class TestDisputeValidation:
 class TestScoringSimulation:
     def test_simulation_improves_score(self):
         current = [
-            {"score_normalized": 0.5, "verification_level": "self_reported",
-             "confidence": 0.8, "occurred_at": datetime.now(UTC),
-             "status": "active", "expires_at": None},
+            {
+                "score_normalized": 0.5,
+                "verification_level": "self_reported",
+                "confidence": 0.8,
+                "occurred_at": datetime.now(UTC),
+                "status": "active",
+                "expires_at": None,
+            },
         ]
         new = {
-            "score_normalized": 0.9, "verification_level": "employer_verified",
-            "confidence": 1.0, "occurred_at": datetime.now(UTC),
-            "status": "active", "expires_at": None,
+            "score_normalized": 0.9,
+            "verification_level": "employer_verified",
+            "confidence": 1.0,
+            "occurred_at": datetime.now(UTC),
+            "status": "active",
+            "expires_at": None,
         }
         result = simulate_score_change(current, new)
         assert result["score_delta"] > 0
         assert result["projected_score"] > result["current_score"]
 
     def test_simulation_with_empty_current(self):
-        result = simulate_score_change([], {
-            "score_normalized": 0.8, "verification_level": "instructor_verified",
-            "confidence": 1.0, "occurred_at": datetime.now(UTC),
-            "status": "active", "expires_at": None,
-        })
+        result = simulate_score_change(
+            [],
+            {
+                "score_normalized": 0.8,
+                "verification_level": "instructor_verified",
+                "confidence": 1.0,
+                "occurred_at": datetime.now(UTC),
+                "status": "active",
+                "expires_at": None,
+            },
+        )
         assert result["current_score"] == 0.0
         assert result["projected_score"] > 0
 
@@ -126,9 +148,11 @@ class TestAutoEvidence:
 
     def test_build_auto_evidence(self):
         ev = build_auto_evidence(
-            user_id="u1", capability_id="c1",
+            user_id="u1",
+            capability_id="c1",
             trigger_type="assessment_pass",
-            source_type="assessment_result", source_id="a1",
+            source_type="assessment_result",
+            source_id="a1",
         )
         assert ev is not None
         assert ev["verification_level"] == "assessment_verified"
@@ -136,9 +160,11 @@ class TestAutoEvidence:
 
     def test_build_unknown_trigger(self):
         ev = build_auto_evidence(
-            user_id="u1", capability_id="c1",
+            user_id="u1",
+            capability_id="c1",
             trigger_type="nonexistent",
-            source_type="unknown", source_id="x",
+            source_type="unknown",
+            source_id="x",
         )
         assert ev is None
 

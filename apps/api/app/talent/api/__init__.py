@@ -31,6 +31,7 @@ from app.talent.api.messages import router as messages_router
 from app.talent.api.notifications import router as notification_router
 from app.talent.api.offers import router as offers_router
 from app.talent.api.onboarding_api import router as onboarding_router
+from app.talent.api.outreach import router as outreach_router
 from app.talent.api.passport import router as passport_router
 from app.talent.api.pools import router as pools_router
 from app.talent.api.portfolio import router as portfolio_router
@@ -44,7 +45,6 @@ from app.talent.api.self_assessment import router as self_assessment_router
 from app.talent.api.succession import router as succession_router
 from app.talent.api.verifications import router as verifications_router
 from app.talent.api.webhooks import router as webhooks_router
-from app.talent.api.outreach import router as outreach_router
 
 # Apply ETagRoute on GET-heavy routers for conditional request support
 capabilities_router.route_class = ETagRoute
@@ -61,12 +61,15 @@ def register_talent_exception_handlers(app: object) -> None:
     Converts service-layer ValueError to 422 (prevents 500s from 107 endpoints).
     """
     if hasattr(app, "exception_handler"):
+
         @app.exception_handler(ValueError)  # type: ignore[arg-type]
         async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
             return JSONResponse(
                 status_code=422,
                 content={"error": {"code": "VALIDATION_ERROR", "message": str(exc)}},
             )
+
+
 talent_router.include_router(capabilities_router)
 talent_router.include_router(evidence_router)
 talent_router.include_router(passport_router)

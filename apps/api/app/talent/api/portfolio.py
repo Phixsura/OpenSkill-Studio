@@ -25,10 +25,14 @@ async def create_portfolio_item(
 ):
     item_type = body.get("item_type", "project")
     if item_type not in PORTFOLIO_ITEM_TYPES:
-        raise HTTPException(422, f"Invalid item_type. Must be one of {sorted(PORTFOLIO_ITEM_TYPES)}")
+        raise HTTPException(
+            422, f"Invalid item_type. Must be one of {sorted(PORTFOLIO_ITEM_TYPES)}"
+        )
     visibility = body.get("visibility", "private")
     if visibility not in PORTFOLIO_VISIBILITY_OPTIONS:
-        raise HTTPException(422, f"Invalid visibility. Must be one of {sorted(PORTFOLIO_VISIBILITY_OPTIONS)}")
+        raise HTTPException(
+            422, f"Invalid visibility. Must be one of {sorted(PORTFOLIO_VISIBILITY_OPTIONS)}"
+        )
     item = PortfolioItem(
         user_id=user.id,
         item_type=item_type,
@@ -44,7 +48,14 @@ async def create_portfolio_item(
     db.add(item)
     await db.commit()
     await db.refresh(item)
-    return DataResponse(data={"id": item.id, "title": item.title, "item_type": item.item_type, "visibility": item.visibility})
+    return DataResponse(
+        data={
+            "id": item.id,
+            "title": item.title,
+            "item_type": item.item_type,
+            "visibility": item.visibility,
+        }
+    )
 
 
 @router.get("/portfolio", response_model=CursorListResponse[dict])
@@ -68,7 +79,17 @@ async def list_portfolio(
         items = items[:limit]
     next_cursor = items[-1].id if has_more and items else None
     return CursorListResponse(
-        data=[{"id": i.id, "title": i.title, "item_type": i.item_type, "url": i.url, "visibility": i.visibility, "pinned": i.pinned} for i in items],
+        data=[
+            {
+                "id": i.id,
+                "title": i.title,
+                "item_type": i.item_type,
+                "url": i.url,
+                "visibility": i.visibility,
+                "pinned": i.pinned,
+            }
+            for i in items
+        ],
         meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),
     )
 
@@ -82,15 +103,24 @@ async def get_portfolio_quality(
 
     from app.talent.services.portfolio_showcase import PortfolioItem as PIDataclass
     from app.talent.services.portfolio_showcase import PortfolioShowcaseService
+
     q = select(PortfolioItem).where(PortfolioItem.user_id == user.id)
     result = await db.execute(q)
     db_items = result.scalars().all()
     items = [
         PIDataclass(
-            id=i.id, user_id=i.user_id, item_type=i.item_type, title=i.title,
-            description=i.description or "", url=i.url, image_url=i.image_url,
-            capability_ids=i.capability_ids or [], visibility=i.visibility,
-            pinned=i.pinned, sort_order=i.sort_order, created_at=i.created_at,
+            id=i.id,
+            user_id=i.user_id,
+            item_type=i.item_type,
+            title=i.title,
+            description=i.description or "",
+            url=i.url,
+            image_url=i.image_url,
+            capability_ids=i.capability_ids or [],
+            visibility=i.visibility,
+            pinned=i.pinned,
+            sort_order=i.sort_order,
+            created_at=i.created_at,
         )
         for i in db_items
     ]

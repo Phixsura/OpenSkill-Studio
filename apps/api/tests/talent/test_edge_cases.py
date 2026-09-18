@@ -42,14 +42,21 @@ class TestScoringEdgeCases:
     def test_zero_score_evidence(self):
         """Evidence with score=0 should still contribute (not be ignored)."""
         evs = [self._ev(score_normalized=0.0)]
-        score, conf, sub = compute_score_from_evidence(evs, None, __import__("datetime").datetime.now(__import__("datetime").UTC))
+        score, conf, sub = compute_score_from_evidence(
+            evs, None, __import__("datetime").datetime.now(__import__("datetime").UTC)
+        )
         assert score > 0  # Shrinkage prior pulls it above 0
         assert conf == 0.25  # 1 item: 1/(1+3) confidence
 
     def test_perfect_score_capped(self):
         """Even with perfect evidence, score shouldn't exceed 1.0."""
-        evs = [self._ev(score_normalized=1.0, verification_level="employer_verified") for _ in range(50)]
-        score, conf, sub = compute_score_from_evidence(evs, None, __import__("datetime").datetime.now(__import__("datetime").UTC))
+        evs = [
+            self._ev(score_normalized=1.0, verification_level="employer_verified")
+            for _ in range(50)
+        ]
+        score, conf, sub = compute_score_from_evidence(
+            evs, None, __import__("datetime").datetime.now(__import__("datetime").UTC)
+        )
         assert score <= 1.0
 
     def test_extremely_old_evidence_with_fast_decay(self):
@@ -90,15 +97,21 @@ class TestScoringEdgeCases:
     def test_null_score_uses_default_080(self):
         """Evidence with score_normalized=None uses default 0.8."""
         evs = [self._ev(score_normalized=None)]
-        score1, _, _ = compute_score_from_evidence(evs, None, __import__("datetime").datetime.now(__import__("datetime").UTC))
+        score1, _, _ = compute_score_from_evidence(
+            evs, None, __import__("datetime").datetime.now(__import__("datetime").UTC)
+        )
         evs2 = [self._ev(score_normalized=0.8)]
-        score2, _, _ = compute_score_from_evidence(evs2, None, __import__("datetime").datetime.now(__import__("datetime").UTC))
+        score2, _, _ = compute_score_from_evidence(
+            evs2, None, __import__("datetime").datetime.now(__import__("datetime").UTC)
+        )
         assert abs(score1 - score2) < 0.01
 
     def test_bayesian_shrinkage_converges(self):
         """With enough evidence, shrinkage effect becomes negligible."""
         evs = [self._ev() for _ in range(100)]
-        score, conf, _ = compute_score_from_evidence(evs, None, __import__("datetime").datetime.now(__import__("datetime").UTC))
+        score, conf, _ = compute_score_from_evidence(
+            evs, None, __import__("datetime").datetime.now(__import__("datetime").UTC)
+        )
         # With 100 items, confidence should be ~0.97
         assert conf > 0.95
 

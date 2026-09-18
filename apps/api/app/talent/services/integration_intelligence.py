@@ -14,15 +14,22 @@ from datetime import datetime
 # Gap #171: API key management
 # ---------------------------------------------------------------------------
 
-API_KEY_SCOPES = frozenset({
-    "read:capabilities", "write:capabilities",
-    "read:evidence", "write:evidence",
-    "read:passport", "write:passport",
-    "read:opportunities", "write:opportunities",
-    "read:applications", "write:applications",
-    "read:analytics",
-    "webhook:manage",
-})
+API_KEY_SCOPES = frozenset(
+    {
+        "read:capabilities",
+        "write:capabilities",
+        "read:evidence",
+        "write:evidence",
+        "read:passport",
+        "write:passport",
+        "read:opportunities",
+        "write:opportunities",
+        "read:applications",
+        "write:applications",
+        "read:analytics",
+        "webhook:manage",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +94,10 @@ HRIS_EMPLOYEE_SCHEMA = {
         "end_date": {"type": "string", "format": "date", "nullable": True},
         "manager_id": {"type": "string", "nullable": True},
         "location": {"type": "string"},
-        "employment_type": {"type": "string", "enum": ["full_time", "part_time", "contract", "intern"]},
+        "employment_type": {
+            "type": "string",
+            "enum": ["full_time", "part_time", "contract", "intern"],
+        },
         "status": {"type": "string", "enum": ["active", "inactive", "terminated"]},
     },
 }
@@ -103,15 +113,32 @@ HRIS_JOB_SCHEMA = {
         "requirements": {"type": "array", "items": {"type": "string"}},
         "location": {"type": "string"},
         "employment_type": {"type": "string"},
-        "compensation_range": {"type": "object", "properties": {"min": {"type": "number"}, "max": {"type": "number"}, "currency": {"type": "string"}}},
+        "compensation_range": {
+            "type": "object",
+            "properties": {
+                "min": {"type": "number"},
+                "max": {"type": "number"},
+                "currency": {"type": "string"},
+            },
+        },
     },
 }
 
 
-SUPPORTED_HRIS_PROVIDERS = frozenset({
-    "workday", "bamboohr", "adp", "namely", "gusto",
-    "rippling", "personio", "hibob", "sage", "custom",
-})
+SUPPORTED_HRIS_PROVIDERS = frozenset(
+    {
+        "workday",
+        "bamboohr",
+        "adp",
+        "namely",
+        "gusto",
+        "rippling",
+        "personio",
+        "hibob",
+        "sage",
+        "custom",
+    }
+)
 
 
 def validate_hris_employee(data: dict) -> list[str]:
@@ -130,10 +157,18 @@ def validate_hris_employee(data: dict) -> list[str]:
 # Gap #174: ATS integration connectors
 # ---------------------------------------------------------------------------
 
-SUPPORTED_ATS_PROVIDERS = frozenset({
-    "greenhouse", "lever", "icims", "workable",
-    "ashby", "teamtailor", "smartrecruiters", "custom",
-})
+SUPPORTED_ATS_PROVIDERS = frozenset(
+    {
+        "greenhouse",
+        "lever",
+        "icims",
+        "workable",
+        "ashby",
+        "teamtailor",
+        "smartrecruiters",
+        "custom",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,11 +205,31 @@ def validate_ats_config(config: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 
 SLACK_EVENT_MAPPINGS = {
-    "application.submitted": {"channel": "#hiring", "emoji": "📋", "template": "New application from {candidate} for {role}"},
-    "application.stage_changed": {"channel": "#hiring", "emoji": "🔄", "template": "{candidate} moved to {stage} for {role}"},
-    "offer.created": {"channel": "#hiring", "emoji": "🎉", "template": "Offer sent to {candidate} for {role}"},
-    "placement.started": {"channel": "#hiring", "emoji": "🚀", "template": "{candidate} started at {role}"},
-    "credential.issued": {"channel": "#achievements", "emoji": "🏆", "template": "{candidate} earned {credential}"},
+    "application.submitted": {
+        "channel": "#hiring",
+        "emoji": "📋",
+        "template": "New application from {candidate} for {role}",
+    },
+    "application.stage_changed": {
+        "channel": "#hiring",
+        "emoji": "🔄",
+        "template": "{candidate} moved to {stage} for {role}",
+    },
+    "offer.created": {
+        "channel": "#hiring",
+        "emoji": "🎉",
+        "template": "Offer sent to {candidate} for {role}",
+    },
+    "placement.started": {
+        "channel": "#hiring",
+        "emoji": "🚀",
+        "template": "{candidate} started at {role}",
+    },
+    "credential.issued": {
+        "channel": "#achievements",
+        "emoji": "🏆",
+        "template": "{candidate} earned {credential}",
+    },
 }
 
 
@@ -202,6 +257,7 @@ def list_slack_event_mappings() -> list[str]:
 # ---------------------------------------------------------------------------
 # Gap #178: Webhook signature verification endpoint
 # ---------------------------------------------------------------------------
+
 
 def build_verification_response(
     endpoint_id: str,

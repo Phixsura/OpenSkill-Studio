@@ -726,9 +726,7 @@ def upgrade() -> None:
         sa.Column("scheduled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("evaluation_notes", JSONB(), nullable=True),
-        sa.Column(
-            "status", sa.String(20), nullable=False, server_default="pending"
-        ),
+        sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -860,9 +858,7 @@ def upgrade() -> None:
         sa.Column("employer_mentor_name", sa.String(100), nullable=True),
         sa.Column("milestones", JSONB(), nullable=False, server_default="[]"),
         sa.Column("notes", JSONB(), nullable=False, server_default="[]"),
-        sa.Column(
-            "status", sa.String(20), nullable=False, server_default="pending"
-        ),
+        sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

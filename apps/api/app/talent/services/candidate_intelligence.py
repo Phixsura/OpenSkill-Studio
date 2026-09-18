@@ -12,10 +12,16 @@ from datetime import datetime
 # Gap #132: Availability calendar
 # ---------------------------------------------------------------------------
 
-AVAILABILITY_MODES = frozenset({
-    "available_immediately", "available_from_date", "open_to_offers",
-    "not_looking", "available_part_time", "freelance_only",
-})
+AVAILABILITY_MODES = frozenset(
+    {
+        "available_immediately",
+        "available_from_date",
+        "open_to_offers",
+        "not_looking",
+        "available_part_time",
+        "freelance_only",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +55,7 @@ def validate_availability_preference(pref: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 # Gap #133: Job alert preferences
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class JobAlertPreference:
@@ -109,10 +116,17 @@ def validate_salary_expectation(exp: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 
 MENTORSHIP_STATUSES = frozenset({"open", "matched", "active", "completed", "cancelled"})
-MENTORSHIP_GOALS = frozenset({
-    "career_guidance", "skill_development", "industry_knowledge",
-    "leadership", "portfolio_review", "interview_prep", "networking",
-})
+MENTORSHIP_GOALS = frozenset(
+    {
+        "career_guidance",
+        "skill_development",
+        "industry_knowledge",
+        "leadership",
+        "portfolio_review",
+        "interview_prep",
+        "networking",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +149,8 @@ class MentorshipMatch:
 
 
 def compute_mentorship_compatibility(
-    mentor: dict, mentee: dict,
+    mentor: dict,
+    mentee: dict,
 ) -> MentorshipMatch:
     """Compute compatibility between a mentor and mentee."""
     mentor_caps = set(mentor.get("capability_ids", []))
@@ -145,8 +160,15 @@ def compute_mentorship_compatibility(
     # Score: shared capabilities + goal alignment + format match
     cap_score = len(shared) / max(len(mentee_caps), 1) if mentee_caps else 0
     goal_overlap = set(mentor.get("goals", [])) & set(mentee.get("goals", []))
-    goal_score = len(goal_overlap) / max(len(mentee.get("goals", [])), 1) if mentee.get("goals") else 0
-    format_match = 1.0 if mentor.get("preferred_format") == mentee.get("preferred_format") or mentor.get("preferred_format") == "flexible" else 0.5
+    goal_score = (
+        len(goal_overlap) / max(len(mentee.get("goals", [])), 1) if mentee.get("goals") else 0
+    )
+    format_match = (
+        1.0
+        if mentor.get("preferred_format") == mentee.get("preferred_format")
+        or mentor.get("preferred_format") == "flexible"
+        else 0.5
+    )
 
     score = 0.5 * cap_score + 0.3 * goal_score + 0.2 * format_match
 
@@ -218,16 +240,66 @@ def get_interview_prep(stage_type: str) -> dict:
 # ---------------------------------------------------------------------------
 
 ACHIEVEMENT_TYPES = {
-    "first_evidence": {"name": "First Step", "description": "Added your first evidence", "points": 10, "icon": "🎯"},
-    "five_capabilities": {"name": "Skill Builder", "description": "Achieved 5+ capabilities", "points": 25, "icon": "⭐"},
-    "first_credential": {"name": "Certified", "description": "Earned your first credential", "points": 50, "icon": "🏆"},
-    "first_endorsement": {"name": "Peer Recognized", "description": "Received your first endorsement", "points": 15, "icon": "👍"},
-    "profile_complete": {"name": "All Star", "description": "Profile completeness 100%", "points": 30, "icon": "💯"},
-    "first_application": {"name": "Job Seeker", "description": "Submitted your first application", "points": 20, "icon": "📋"},
-    "first_placement": {"name": "Hired!", "description": "Started your first placement", "points": 100, "icon": "🎉"},
-    "ten_endorsements": {"name": "Influencer", "description": "Received 10+ endorsements", "points": 50, "icon": "🌟"},
-    "learning_streak_7": {"name": "Consistent Learner", "description": "7-day learning streak", "points": 35, "icon": "🔥"},
-    "portfolio_builder": {"name": "Show & Tell", "description": "Added 5+ portfolio items", "points": 25, "icon": "🎨"},
+    "first_evidence": {
+        "name": "First Step",
+        "description": "Added your first evidence",
+        "points": 10,
+        "icon": "🎯",
+    },
+    "five_capabilities": {
+        "name": "Skill Builder",
+        "description": "Achieved 5+ capabilities",
+        "points": 25,
+        "icon": "⭐",
+    },
+    "first_credential": {
+        "name": "Certified",
+        "description": "Earned your first credential",
+        "points": 50,
+        "icon": "🏆",
+    },
+    "first_endorsement": {
+        "name": "Peer Recognized",
+        "description": "Received your first endorsement",
+        "points": 15,
+        "icon": "👍",
+    },
+    "profile_complete": {
+        "name": "All Star",
+        "description": "Profile completeness 100%",
+        "points": 30,
+        "icon": "💯",
+    },
+    "first_application": {
+        "name": "Job Seeker",
+        "description": "Submitted your first application",
+        "points": 20,
+        "icon": "📋",
+    },
+    "first_placement": {
+        "name": "Hired!",
+        "description": "Started your first placement",
+        "points": 100,
+        "icon": "🎉",
+    },
+    "ten_endorsements": {
+        "name": "Influencer",
+        "description": "Received 10+ endorsements",
+        "points": 50,
+        "icon": "🌟",
+    },
+    "learning_streak_7": {
+        "name": "Consistent Learner",
+        "description": "7-day learning streak",
+        "points": 35,
+        "icon": "🔥",
+    },
+    "portfolio_builder": {
+        "name": "Show & Tell",
+        "description": "Added 5+ portfolio items",
+        "points": 25,
+        "icon": "🎨",
+    },
 }
 
 

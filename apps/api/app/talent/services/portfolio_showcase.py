@@ -14,11 +14,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-PORTFOLIO_ITEM_TYPES = frozenset({
-    "project", "case_study", "work_sample", "publication",
-    "presentation", "open_source", "certification_project",
-    "commercial_deliverable", "research", "creative_work",
-})
+PORTFOLIO_ITEM_TYPES = frozenset(
+    {
+        "project",
+        "case_study",
+        "work_sample",
+        "publication",
+        "presentation",
+        "open_source",
+        "certification_project",
+        "commercial_deliverable",
+        "research",
+        "creative_work",
+    }
+)
 
 PORTFOLIO_VISIBILITY = frozenset({"private", "passport_visible", "public"})
 
@@ -26,6 +35,7 @@ PORTFOLIO_VISIBILITY = frozenset({"private", "passport_visible", "public"})
 @dataclass(frozen=True, slots=True)
 class PortfolioItem:
     """A curated portfolio entry."""
+
     id: str
     user_id: str
     item_type: str
@@ -43,6 +53,7 @@ class PortfolioItem:
 @dataclass(frozen=True, slots=True)
 class PortfolioQuality:
     """Portfolio quality assessment."""
+
     total_items: int
     public_items: int
     items_with_urls: int
@@ -59,10 +70,15 @@ class PortfolioShowcaseService:
         """Assess portfolio quality and provide suggestions."""
         if not items:
             return PortfolioQuality(
-                total_items=0, public_items=0, items_with_urls=0,
-                items_with_images=0, capability_coverage=0,
-                has_commercial_work=False, has_open_source=False,
-                quality_score=0.0, suggestions=["Add your first portfolio item"],
+                total_items=0,
+                public_items=0,
+                items_with_urls=0,
+                items_with_images=0,
+                capability_coverage=0,
+                has_commercial_work=False,
+                has_open_source=False,
+                quality_score=0.0,
+                suggestions=["Add your first portfolio item"],
             )
 
         public = sum(1 for i in items if i.visibility == "public")
@@ -109,7 +125,9 @@ class PortfolioShowcaseService:
         )
 
     def reorder_items(
-        self, items: list[dict], new_order: list[str],
+        self,
+        items: list[dict],
+        new_order: list[str],
     ) -> list[dict]:
         """Reorder portfolio items by ID list."""
         by_id = {i["id"]: i for i in items}

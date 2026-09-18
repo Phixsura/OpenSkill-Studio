@@ -18,15 +18,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, ulid_pk
 
-ENDORSEMENT_RELATIONSHIPS = frozenset({
-    "colleague",
-    "manager",
-    "instructor",
-    "client",
-    "peer",
-    "mentor",
-    "mentee",
-})
+ENDORSEMENT_RELATIONSHIPS = frozenset(
+    {
+        "colleague",
+        "manager",
+        "instructor",
+        "client",
+        "peer",
+        "mentor",
+        "mentee",
+    }
+)
 
 
 class SkillEndorsement(Base):
@@ -47,18 +49,12 @@ class SkillEndorsement(Base):
     )
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
-    endorser_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
+    endorser_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     capability_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("talent_capabilities.id", ondelete="CASCADE")
     )
     relationship: Mapped[str] = mapped_column(String(30))
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="accepted")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

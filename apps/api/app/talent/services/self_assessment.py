@@ -121,8 +121,7 @@ class SelfAssessmentService:
 
         # Weighted composite
         composite = sum(
-            dim["weight"] * dimension_scores[dim["key"]]
-            for dim in ASSESSMENT_DIMENSIONS
+            dim["weight"] * dimension_scores[dim["key"]] for dim in ASSESSMENT_DIMENSIONS
         )
         composite = round(composite, 4)
 
@@ -156,7 +155,9 @@ class SelfAssessmentService:
                     "label": dim["label"],
                     "weight": dim["weight"],
                     "score": dimension_scores[dim["key"]],
-                    "raw_avg": round(sum(responses[dim["key"]]) / max(len(responses[dim["key"]]), 1), 2),
+                    "raw_avg": round(
+                        sum(responses[dim["key"]]) / max(len(responses[dim["key"]]), 1), 2
+                    ),
                 }
                 for dim in ASSESSMENT_DIMENSIONS
             },

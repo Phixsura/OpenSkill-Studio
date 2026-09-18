@@ -26,18 +26,12 @@ class TestBulkCapabilityRequest:
         assert len(req.items) == 2
 
     def test_max_items_exceeded(self):
-        items = [
-            {"canonical_name": f"Skill {i}", "category": "technical"}
-            for i in range(101)
-        ]
+        items = [{"canonical_name": f"Skill {i}", "category": "technical"} for i in range(101)]
         with pytest.raises(ValidationError, match="Maximum 100"):
             BulkCapabilityRequest(items=items)
 
     def test_max_items_at_limit(self):
-        items = [
-            {"canonical_name": f"Skill {i}", "category": "technical"}
-            for i in range(100)
-        ]
+        items = [{"canonical_name": f"Skill {i}", "category": "technical"} for i in range(100)]
         req = BulkCapabilityRequest(items=items)
         assert len(req.items) == 100
 
@@ -47,9 +41,7 @@ class TestBulkCapabilityRequest:
 
     def test_invalid_item_in_list(self):
         with pytest.raises(ValidationError):
-            BulkCapabilityRequest(
-                items=[{"canonical_name": "", "category": "technical"}]
-            )
+            BulkCapabilityRequest(items=[{"canonical_name": "", "category": "technical"}])
 
 
 class TestBulkEvidenceRequest:
@@ -94,16 +86,14 @@ class TestBulkTransitionRequest:
 
     def test_max_transitions_exceeded(self):
         transitions = [
-            TransitionItem(application_id=f"app{i}", status="screening")
-            for i in range(51)
+            TransitionItem(application_id=f"app{i}", status="screening") for i in range(51)
         ]
         with pytest.raises(ValidationError, match="Maximum 50"):
             BulkTransitionRequest(transitions=transitions)
 
     def test_max_at_limit(self):
         transitions = [
-            TransitionItem(application_id=f"app{i}", status="screening")
-            for i in range(50)
+            TransitionItem(application_id=f"app{i}", status="screening") for i in range(50)
         ]
         req = BulkTransitionRequest(transitions=transitions)
         assert len(req.transitions) == 50
