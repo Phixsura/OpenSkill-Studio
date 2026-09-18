@@ -323,7 +323,7 @@ async def list_mappings(
 
 
 @router.post(
-    "/capabilities/resolve",
+    "/resolve",
     response_model=DataResponse[dict],
     summary="Resolve capability by name",
     description="Fuzzy-match a name to existing taxonomy entries.",
@@ -373,7 +373,7 @@ async def delete_mapping(
 
 
 @router.get(
-    "/talent/capabilities/autocomplete",
+    "/autocomplete",
     response_model=DataResponse[list[dict]],
     summary="Autocomplete capabilities",
     description="Returns suggestions for typeahead/autocomplete.",
@@ -395,7 +395,7 @@ async def autocomplete_capabilities_endpoint(
 
 
 @router.get(
-    "/talent/capabilities/frequency",
+    "/frequency",
     response_model=DataResponse[list[dict]],
     summary="Get capability frequency",
     description="Capabilities ranked by evidence frequency.",
@@ -417,7 +417,7 @@ async def get_skill_frequency(
 
 
 @router.get(
-    "/talent/capabilities/cooccurrence",
+    "/cooccurrence",
     response_model=DataResponse[list[dict]],
     summary="Get capability co-occurrence",
     description="Pairs of capabilities frequently appearing together.",
@@ -439,7 +439,7 @@ async def get_skill_cooccurrence(
 
 
 @router.post(
-    "/talent/capabilities/import",
+    "/import",
     response_model=DataResponse[dict],
     summary="Import capabilities",
     description="Bulk import from ESCO, O*NET, or custom files.",
@@ -464,7 +464,7 @@ async def import_taxonomy(
 
 
 @router.get(
-    "/talent/capabilities/industries",
+    "/industries",
     response_model=DataResponse[dict],
     summary="List industry classifications",
     description="Industry categories with associated capability clusters.",
@@ -488,7 +488,7 @@ async def list_industry_taxonomies(
 
 
 @router.get(
-    "/talent/capabilities/version",
+    "/version",
     response_model=DataResponse[dict],
     summary="Get taxonomy version",
     description="Current version of the capability taxonomy.",
@@ -506,7 +506,7 @@ async def get_taxonomy_version(
 
 
 @router.get(
-    "/talent/capabilities/edge-strength",
+    "/edge-strength",
     response_model=DataResponse[dict],
     summary="Get edge strength",
     description="Edge weights between capabilities based on co-occurrence.",
@@ -528,7 +528,7 @@ async def get_edge_strength(
 
 
 @router.get(
-    "/talent/capabilities/search-analytics",
+    "/search-analytics",
     response_model=DataResponse[dict],
     summary="Get search analytics",
     description="Aggregated search query analytics.",
@@ -553,7 +553,7 @@ async def get_search_analytics_endpoint(
 
 
 @router.post(
-    "/talent/capabilities/boolean-search",
+    "/boolean-search",
     response_model=DataResponse[dict],
     summary="Boolean search",
     description="Search capabilities with boolean operators.",
@@ -573,7 +573,7 @@ async def boolean_search(
 
 
 @router.post(
-    "/talent/match-feedback",
+    "/match-feedback",
     response_model=DataResponse[dict],
     summary="Submit match feedback",
     description="Provide feedback on match quality.",

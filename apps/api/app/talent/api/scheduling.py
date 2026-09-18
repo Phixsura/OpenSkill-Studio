@@ -231,7 +231,7 @@ async def download_calendar_invite(
 # ---- Gap #51: Question bank ----
 
 
-@router.get("/talent/question-bank/templates", response_model=DataResponse[list[str]])
+@router.get("/question-bank/templates", response_model=DataResponse[list[str]])
 async def list_rubric_template_names(
     user: User = Depends(get_current_user),
 ):
@@ -241,7 +241,7 @@ async def list_rubric_template_names(
     return DataResponse(data=list_rubric_templates())
 
 
-@router.get("/talent/question-bank/templates/{name}", response_model=DataResponse[dict])
+@router.get("/question-bank/templates/{name}", response_model=DataResponse[dict])
 async def get_rubric_template_endpoint(
     name: str,
     user: User = Depends(get_current_user),
@@ -258,7 +258,7 @@ async def get_rubric_template_endpoint(
 # ---- Gap #97: Availability validation ----
 
 
-@router.post("/talent/interviewer-availability/validate", response_model=DataResponse[dict])
+@router.post("/interviewer-availability/validate", response_model=DataResponse[dict])
 async def validate_availability_endpoint(
     body: dict,
     user: User = Depends(get_current_user),
@@ -273,7 +273,7 @@ async def validate_availability_endpoint(
 # ---- Gap #98: Booking link ----
 
 
-@router.get("/talent/interviews/{interview_id}/booking-link", response_model=DataResponse[dict])
+@router.get("/interviews/{interview_id}/booking-link", response_model=DataResponse[dict])
 async def get_booking_link(
     interview_id: str,
     user: User = Depends(get_current_user),
@@ -287,7 +287,7 @@ async def get_booking_link(
 # ---- Gap #99: Reminders ----
 
 
-@router.get("/talent/interviews/{interview_id}/reminders", response_model=DataResponse[list[dict]])
+@router.get("/interviews/{interview_id}/reminders", response_model=DataResponse[list[dict]])
 async def get_interview_reminders(
     interview_id: str,
     db: AsyncSession = Depends(get_db),
@@ -325,9 +325,7 @@ async def get_interview_reminders(
 # ---- Gap #59: Credential renewal ----
 
 
-@router.get(
-    "/talent/credentials/{credential_id}/renewal-eligibility", response_model=DataResponse[dict]
-)
+@router.get("/credentials/{credential_id}/renewal-eligibility", response_model=DataResponse[dict])
 async def check_credential_renewal(
     credential_id: str,
     db: AsyncSession = Depends(get_db),
