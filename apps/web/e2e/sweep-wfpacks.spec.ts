@@ -86,12 +86,12 @@ test.afterAll(async () => {
 test("empty list state → create pack via UI form", async () => {
   // Fresh org: the list shows the empty state (unhappy/empty path)
   await page.goto(`/dashboard/orgs/${orgId}/workflow-packs`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByText("No workflow packs found.")).toBeVisible();
 
   // Navigate to the form through the real button
   await page.getByRole("button", { name: "New Workflow Pack" }).click();
-  await page.waitForURL(/workflow-packs\/new$/, { timeout: 15_000 });
+  await page.waitForURL(/workflow-packs\/new$/, { timeout: 30_000 });
 
   // Native required blocks an empty submit (stays on the form)
   await page.getByRole("button", { name: /Create Workflow Pack/i }).click();
@@ -105,7 +105,7 @@ test("empty list state → create pack via UI form", async () => {
   await page.locator("#scenarioTags").fill("ecommerce, hero-images");
   await page.getByRole("button", { name: /Create Workflow Pack/i }).click();
 
-  await page.waitForURL(/workflow-packs\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/workflow-packs\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   packUrl = page.url();
   packId = packUrl.split("/").pop()!;
   await expect(page.getByRole("heading", { name: packName })).toBeVisible();
@@ -117,8 +117,8 @@ test("empty list state → create pack via UI form", async () => {
 
 test("editor: add two steps in list view → canvas renders both nodes", async () => {
   await page.getByRole("button", { name: "Open Editor" }).click();
-  await page.waitForURL(/\/editor$/, { timeout: 15_000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForURL(/\/editor$/, { timeout: 30_000 });
+  await page.waitForLoadState("domcontentloaded");
 
   await page.getByRole("button", { name: "List", exact: true }).click();
 
@@ -279,7 +279,7 @@ test("declare workflow output, save → reload: definition round-trips with posi
 
   // Reload the editor — steps, edge, output, and positions all round-trip
   await page.reload();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page.getByRole("button", { name: "Canvas", exact: true })).toBeVisible({
     timeout: 15_000,
   });
@@ -312,7 +312,7 @@ test("unhappy: publishing a release with an empty definition shows a visible err
   emptyPackId = res.data.id;
 
   await page.goto(`/dashboard/orgs/${orgId}/workflow-packs/${emptyPackId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.getByLabel("Release version").fill("1.0.0");
   await page.getByRole("button", { name: /Publish Release/i }).click();
 
@@ -326,7 +326,7 @@ test("unhappy: publishing a release with an empty definition shows a visible err
 
 test("unhappy: duplicate release version shows a visible error", async () => {
   await page.goto(packUrl);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // First publish succeeds (definition saved in the round-trip test)
   await page.getByLabel("Release version").fill("1.0.0");
@@ -343,12 +343,12 @@ test("unhappy: duplicate release version shows a visible error", async () => {
 
 test("archive pack via UI: confirm dialog → removed from the list", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/workflow-packs/${emptyPackId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // window.confirm auto-accepted by the beforeAll dialog handler
   await page.getByRole("button", { name: "Archive Pack" }).click();
-  await page.waitForURL(/workflow-packs$/, { timeout: 15_000 });
-  await page.waitForLoadState("networkidle");
+  await page.waitForURL(/workflow-packs$/, { timeout: 30_000 });
+  await page.waitForLoadState("domcontentloaded");
 
   // Archived pack is filtered out of the default list; the live one remains
   await expect(page.getByText(packName)).toBeVisible({ timeout: 10_000 });

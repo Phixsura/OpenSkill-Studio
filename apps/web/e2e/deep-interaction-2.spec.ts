@@ -56,7 +56,7 @@ test("1. Instructor reviews submission → approved status visible", async ({ pa
   // Alice checks her submission in browser
   await loginInBrowser(page, alice.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/projects/${proj.data.id}/submissions/${sub.data.id}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   await expect(page.getByText("approved").first()).toBeVisible({ timeout: 10_000 });
@@ -79,7 +79,7 @@ test("2. Instructor requests revision → alice sees revision_requested", async 
 
   await loginInBrowser(page, alice.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/projects/${proj.data.id}/submissions/${sub.data.id}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   await expect(page.getByText(/revision/i).first()).toBeVisible({ timeout: 10_000 });
@@ -109,7 +109,7 @@ test("3. AI evaluation creates task visible on eval page", async ({ page }) => {
   // Check evaluation page shows the task
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/evaluation`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   // Should see at least one eval task (status: failed because no LLM key in test)
@@ -141,7 +141,7 @@ test("4. Alice completes MCQ → skill progress updates → badge appears", asyn
   // Check badge appears on portfolio page
   await loginInBrowser(page, alice.email, "TestPass123!");
   await page.goto("/dashboard/portfolio");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   // Navigate to badges (if there's a link) or check inline
@@ -177,7 +177,7 @@ test("5. Portfolio: publish approved submission as portfolio item", async ({ pag
   // Check portfolio page in browser
   await loginInBrowser(page, alice.email, "TestPass123!");
   await page.goto("/dashboard/portfolio");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   await expect(page.getByText("My Best Work")).toBeVisible({ timeout: 10_000 });
@@ -199,7 +199,7 @@ test("6. Individual creator assignment → bob sees the project", async ({ page 
   // Bob should see it
   await loginInBrowser(page, bob.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   await expect(page.getByText("Creator Only Proj")).toBeVisible({ timeout: 10_000 });
@@ -226,7 +226,7 @@ test("7. Completed cohort blocks new members (API returns 422)", async ({ page }
   // Verify in browser — cohort shows completed status
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   // The frozen cohort should not appear (default filter excludes archived)

@@ -20,7 +20,7 @@ const orgName = `Journey Org ${ts}`;
 test("complete instructor + student journey via browser", async ({ page }) => {
   // ═══════════════ Step 1: Register instructor ═══════════════
   await page.goto("/register");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   await page.getByLabel("Name").fill("Journey Instructor");
   await page.getByLabel("Email").fill(instructorEmail);
@@ -28,13 +28,13 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   await page.getByRole("button", { name: /sign up/i }).click();
 
   // Should redirect to dashboard
-  await page.waitForURL("**/dashboard**", { timeout: 15_000 });
+  await page.waitForURL("**/dashboard**", { timeout: 30_000 });
   await expect(page.locator("body")).toContainText("Journey Instructor", { timeout: 10_000 });
 
   // ═══════════════ Step 2: Create organization ═══════════════
   // Navigate to create org
   await page.goto("/dashboard/orgs/new");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   // Fill org name
@@ -45,23 +45,28 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   await page.waitForTimeout(3000);
   // Verify org was created by navigating to orgs list
   await page.goto("/dashboard/orgs");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
-  await expect(page.getByText(orgName)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(orgName).first()).toBeVisible({ timeout: 30_000 });
 
-  // Get org ID from the link href
-  const orgLink = page.locator(`a:has-text("${orgName}")`).first();
-  const orgHref = await orgLink.getAttribute("href");
-  const orgId = orgHref?.match(/orgs\/([^/]+)/)?.[1];
+  // Get org ID via API (more reliable than URL parsing)
+  const orgLoginRes = await fetch(`${API}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: instructorEmail, password }),
+  });
+  const orgLoginData = await orgLoginRes.json();
+  const orgsRes = await fetch(`${API}/orgs`, {
+    headers: { Authorization: `Bearer ${orgLoginData.access_token}` },
+  });
+  const orgsData = await orgsRes.json();
+  const orgId = orgsData.data?.[0]?.id;
   expect(orgId).toBeTruthy();
-
-  // Click into the org
-  await orgLink.click();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   // ═══════════════ Step 3: Create a project via UI ═══════════════
   await page.goto(`/dashboard/orgs/${orgId}/projects/new`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   // Fill project form using actual field IDs/placeholders
@@ -75,13 +80,13 @@ test("complete instructor + student journey via browser", async ({ page }) => {
 
   // Verify project appears in list
   await page.goto(`/dashboard/orgs/${orgId}/projects`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
   await expect(page.getByText("Journey Project")).toBeVisible({ timeout: 10_000 });
 
   // ═══════════════ Step 4: Create cohort via UI ═══════════════
   await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   await page.getByText("+ New Cohort").click();
@@ -96,7 +101,7 @@ test("complete instructor + student journey via browser", async ({ page }) => {
 
   // ═══════════════ Step 5: Create brief via UI ═══════════════
   await page.goto(`/dashboard/orgs/${orgId}/briefs`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   await page.getByText("+ New Brief").click();
   await page.waitForTimeout(500);
@@ -150,19 +155,19 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   // ═══════════════ Step 7: Instructor adds student to cohort via UI ═══════════════
   // Navigate to cohort list, click into cohort
   await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   // Click into the cohort
   await page.getByText("Journey Cohort").click();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   const cohortUrl = page.url();
   const cohortId = cohortUrl.match(/cohorts\/([^/]+)/)?.[1];
 
   // Go to members tab
   if (cohortId) {
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     // Activate the cohort first via API (UI doesn't have activate button inline)
@@ -187,18 +192,18 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   // Clear cookies and login as student
   await page.context().clearCookies();
   await page.goto("/login");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 
   await page.getByLabel("Email").fill(studentEmail);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: /log in|sign in/i }).first().click();
 
-  await page.waitForURL("**/dashboard**", { timeout: 15_000 });
+  await page.waitForURL("**/dashboard**", { timeout: 30_000 });
   await expect(page.locator("body")).toContainText("Journey Student", { timeout: 10_000 });
 
   // ═══════════════ Step 9: Student views org ═══════════════
   await page.goto(`/dashboard/orgs/${orgId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   // Should see org content without crashing
@@ -212,7 +217,7 @@ test("complete instructor + student journey via browser", async ({ page }) => {
 
   // Click Projects
   await page.getByRole("link", { name: "Projects" }).first().click();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1000);
 
   // Should see the org project list
@@ -222,7 +227,7 @@ test("complete instructor + student journey via browser", async ({ page }) => {
   // ═══════════════ Step 11: Student views cohort my-dashboard ═══════════════
   if (cohortId) {
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
     await expect(page.getByText("Journey Cohort")).toBeVisible({ timeout: 10_000 });

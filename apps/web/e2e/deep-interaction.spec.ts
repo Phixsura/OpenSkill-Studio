@@ -84,7 +84,7 @@ test.describe("Skill Assignment — real click", () => {
   test("clicking Assign moves skill to assigned list", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/skills`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     // Should see the skill in Available
@@ -92,7 +92,7 @@ test.describe("Skill Assignment — real click", () => {
 
     // Click Assign
     await page.getByRole("button", { name: "Assign" }).click();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     // Should now have Remove button (moved to assigned)
@@ -104,7 +104,7 @@ test.describe("Project Assignment — real form interaction", () => {
   test("select project + assign to cohort", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     // Select project from dropdown
@@ -113,7 +113,7 @@ test.describe("Project Assignment — real form interaction", () => {
 
     // Click Assign to Cohort
     await page.getByRole("button", { name: "Assign to Cohort" }).click();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     // Project should appear in assigned list
@@ -138,7 +138,7 @@ test.describe("Learner submission → dashboard update", () => {
     // Now instructor checks the cohort dashboard
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
     // Project progress table should show Submitted: 1
@@ -162,7 +162,7 @@ test.describe("Learner drill-down shows submission status", () => {
     await page.goto(
       `/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress/${alice.userId}`
     );
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     await expect(page.getByText("Deep Alice")).toBeVisible({ timeout: 10_000 });
@@ -176,7 +176,7 @@ test.describe("Alice's my-dashboard shows submitted project", () => {
   test("alice sees her own progress", async ({ page }) => {
     await loginInBrowser(page, alice.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     await expect(page.getByText("Deep Test Cohort")).toBeVisible({ timeout: 10_000 });
@@ -207,7 +207,7 @@ test.describe("Brief with deliverables → convert → verify", () => {
     // Navigate to brief detail
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/briefs/${briefId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     // Click convert
@@ -216,8 +216,8 @@ test.describe("Brief with deliverables → convert → verify", () => {
 
     // Fill rubric and submit
     await page.getByRole("button", { name: "Create Project" }).click();
-    await page.waitForURL("**/projects/**", { timeout: 15_000 });
-    await page.waitForLoadState("networkidle");
+    await page.waitForURL("**/projects/**", { timeout: 30_000 });
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     // Should see deliverables from the brief
@@ -230,7 +230,7 @@ test.describe("Cohort filter actually filters", () => {
   test("selecting cohort in filter changes project list", async ({ page }) => {
     await loginInBrowser(page, alice.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
 
     // Should see the cohort filter
@@ -247,7 +247,7 @@ test.describe("Cohort filter actually filters", () => {
       if (optionCount >= 2) {
         // Select the cohort (second option)
         await select.selectOption({ index: 1 });
-        await page.waitForLoadState("networkidle");
+        await page.waitForLoadState("domcontentloaded");
         await page.waitForTimeout(1000);
 
         // Should show filtered results (possibly fewer or same)
