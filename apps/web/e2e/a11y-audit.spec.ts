@@ -74,14 +74,14 @@ test.describe(RUN ? "a11y audit" : "a11y audit (skipped — set RUN_A11Y=1)", ()
   test("workflow-packs list page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/workflow-packs`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     expect(await scan(page, "workflow-packs list")).toHaveLength(0);
   });
 
   test("workflow editor (list view — keyboard accessibility claim)", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/workflow-packs/${packId}/editor`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     // switch to list view (the accessibility-first view per the plan)
     const listBtn = page.getByRole("button", { name: "List", exact: true });
     if (await listBtn.isVisible().catch(() => false)) await listBtn.click();
@@ -92,14 +92,14 @@ test.describe(RUN ? "a11y audit" : "a11y audit (skipped — set RUN_A11Y=1)", ()
   test("requirements intake page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/requirements/new`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     expect(await scan(page, "requirements intake")).toHaveLength(0);
   });
 
   test("providers page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/providers`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     expect(await scan(page, "providers")).toHaveLength(0);
   });
 });

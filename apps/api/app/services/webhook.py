@@ -26,6 +26,19 @@ VALID_EVENT_TYPES = frozenset(
         "pack.forked",
         "pack.updated",
         "pack.uninstalled",
+        # Talent layer (Issue #32)
+        "credential.issued",
+        "credential.revoked",
+        "application.submitted",
+        "application.stage_changed",
+        "offer.created",
+        "placement.started",
+        "placement.completed",
+        "capability.verified",
+        "employer_verification.submitted",
+        "outreach.sent",
+        "outreach.responded",
+        "talent_pool.member_added",
     }
 )
 

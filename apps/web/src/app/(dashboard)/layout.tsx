@@ -114,6 +114,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         Projects
       </NavLink>
       <NavLink
+        href="/dashboard/opportunities"
+        active={pathname.startsWith("/dashboard/opportunities")}
+        onClick={closeSidebar}
+      >
+        Opportunities
+      </NavLink>
+      <NavLink
+        href="/dashboard/applications"
+        active={pathname.startsWith("/dashboard/applications")}
+        onClick={closeSidebar}
+      >
+        Applications
+      </NavLink>
+      <NavLink
         href="/dashboard/portfolio"
         active={pathname.startsWith("/dashboard/portfolio")}
         onClick={closeSidebar}
@@ -121,11 +135,88 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         Portfolio
       </NavLink>
       <NavLink
+        href="/dashboard/passport"
+        active={pathname.startsWith("/dashboard/passport")}
+        onClick={closeSidebar}
+      >
+        Passport
+      </NavLink>
+      <NavLink
+        href="/dashboard/career-goals"
+        active={pathname.startsWith("/dashboard/career-goals")}
+        onClick={closeSidebar}
+      >
+        🎯 Career Goals
+      </NavLink>
+      <NavLink
+        href="/dashboard/learning-plan"
+        active={pathname.startsWith("/dashboard/learning-plan")}
+        onClick={closeSidebar}
+      >
+        📚 Learning Plan
+      </NavLink>
+      <NavLink
+        href="/dashboard/credential-pathways"
+        active={pathname.startsWith("/dashboard/credential-pathways")}
+        onClick={closeSidebar}
+      >
+        🏆 Credentials
+      </NavLink>
+      <NavLink
+        href="/dashboard/notifications"
+        active={pathname.startsWith("/dashboard/notifications")}
+        onClick={closeSidebar}
+      >
+        🔔 Notifications
+      </NavLink>
+      <NavLink
+        href="/dashboard/endorsements"
+        active={pathname.startsWith("/dashboard/endorsements")}
+        onClick={closeSidebar}
+      >
+        👍 Endorsements
+      </NavLink>
+      <NavLink
+        href="/dashboard/bookmarks"
+        active={pathname.startsWith("/dashboard/bookmarks")}
+        onClick={closeSidebar}
+      >
+        🔖 Bookmarks
+      </NavLink>
+      <NavLink
+        href="/dashboard/offers"
+        active={pathname.startsWith("/dashboard/offers")}
+        onClick={closeSidebar}
+      >
+        📄 Offers
+      </NavLink>
+      <NavLink
+        href="/dashboard/activity"
+        active={pathname.startsWith("/dashboard/activity")}
+        onClick={closeSidebar}
+      >
+        📋 Activity
+      </NavLink>
+      <NavLink
+        href="/dashboard/capabilities"
+        active={pathname.startsWith("/dashboard/capabilities")}
+        onClick={closeSidebar}
+      >
+        🧠 Capabilities
+      </NavLink>
+      <NavLink
         href="/dashboard/settings"
         active={pathname === "/dashboard/settings"}
         onClick={closeSidebar}
       >
         Settings
+      </NavLink>
+      <NavLink
+        href="/dashboard/talent"
+        active={pathname.startsWith("/dashboard/talent")}
+        onClick={closeSidebar}
+      >
+        Talent
       </NavLink>
       {/* R101[L8]: only memberships[0] got a link — users on multiple tenants
           or partners could never reach the others from the nav. One link per

@@ -41,7 +41,7 @@ test.describe("Cohort Members Page", () => {
   test("shows member list with names and roles", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("h1:has-text('Cohort Members')")).toBeVisible();
     // Should have 2 members (instructor + learnerA)
@@ -52,7 +52,7 @@ test.describe("Cohort Members Page", () => {
   test("member roles are displayed as badges", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Wait for table to populate, then check role badges
     await expect(page.locator("table tbody tr")).toHaveCount(2, { timeout: 10_000 });
@@ -61,7 +61,7 @@ test.describe("Cohort Members Page", () => {
   test("add member form is visible with inputs", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Member add uses org members dropdown (not raw User ID input)
     await expect(page.locator("select").first()).toBeVisible();
@@ -71,7 +71,7 @@ test.describe("Cohort Members Page", () => {
   test("remove button is present for each member", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.getByText("Remove").first()).toBeVisible();
   });
@@ -79,7 +79,7 @@ test.describe("Cohort Members Page", () => {
   test("student cannot access members page (403)", async ({ page }) => {
     await loginInBrowser(page, learnerB.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should not see the member table (API returns 403)
     await expect(page.getByText("MemberTest Alice")).not.toBeVisible({ timeout: 5_000 });

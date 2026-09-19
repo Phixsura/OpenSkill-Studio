@@ -32,11 +32,19 @@ async def c():
 
 
 async def _auth(c):
+    email = _email()
     r = await c.post(
         "/api/v1/auth/register",
-        json={"email": _email(), "password": "TestPass123!", "display_name": "Inst"},
+        json={"email": email, "password": "TestPass123!", "display_name": f"Inst-{email[:8]}"},
     )
     d = r.json()
+    if "access_token" not in d:
+        # Rate-limited or duplicate from stale DB — try login instead
+        r2 = await c.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": "TestPass123!"},
+        )
+        d = r2.json()
     return {"Authorization": f"Bearer {d['access_token']}"}, d["user"]
 
 
