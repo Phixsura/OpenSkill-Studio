@@ -166,6 +166,30 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: pnpm install --frozen-lockfile
       - run: cd apps/api && uv sync --extra dev
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 2
+          done
+      - name: Ensure MinIO bucket
+        run: |
+          cd apps/api && uv run python - <<'PY'
+          import asyncio
+          from app.core.storage import get_s3_client, ensure_bucket
+          async def main():
+              async for client in get_s3_client():
+                  await ensure_bucket(client)
+          asyncio.run(main())
+          PY
+        env:
+          APP_ENV: test
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
       - run: cd apps/api && uv run alembic upgrade head
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
@@ -173,7 +197,7 @@ jobs:
         working-directory: apps/web
       - name: Start API server
         run: |
-          cd apps/api && APP_ENV=test DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test REDIS_URL=redis://localhost:6379/0 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          cd apps/api && APP_ENV=test DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test REDIS_URL=redis://localhost:6379/0 S3_ENDPOINT=http://localhost:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 &
           sleep 5
       - name: Start frontend
         run: |
