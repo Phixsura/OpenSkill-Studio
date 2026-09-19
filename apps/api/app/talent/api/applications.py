@@ -74,19 +74,36 @@ async def create_application(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Create application — delegates to apply_to_opportunity to avoid logic drift."""
+    """Create application — accepts {opportunity_id} in body."""
     opp_id = body.get("opportunity_id")
     if not opp_id:
         raise HTTPException(422, "opportunity_id is required")
 
-    req = CreateApplicationRequest(
-        selected_credentials=body.get("selected_credentials", []),
-        selected_projects=body.get("selected_projects", []),
-        selected_evidence=body.get("selected_evidence", []),
-        cover_note=body.get("cover_note"),
-        resume_asset_id=body.get("resume_asset_id"),
+    opp = await db.get(Opportunity, opp_id)
+    if not opp or opp.status != "open":
+        raise HTTPException(404, "Opportunity not found or not open")
+    existing = await db.execute(
+        select(Application).where(
+            Application.user_id == user.id,
+            Application.opportunity_id == opp_id,
+        )
     )
-    return await apply_to_opportunity(opp_id, req, db, user)
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, "You have already applied to this opportunity")
+    from ulid import ULID
+
+    app = Application(
+        id=str(ULID()),
+        user_id=user.id,
+        opportunity_id=opp_id,
+        status="submitted",
+        evidence_bundle=body.get("evidence_bundle"),
+        cover_note=body.get("cover_note"),
+    )
+    db.add(app)
+    await db.commit()
+    await db.refresh(app)
+    return DataResponse(data=ApplicationResponse.model_validate(app))
 
 
 @router.post(
