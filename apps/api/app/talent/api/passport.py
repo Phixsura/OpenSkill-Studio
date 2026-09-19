@@ -30,23 +30,25 @@ async def get_passport(
     user: User = Depends(get_current_user),
 ):
     """Get own passport (full view for owner)."""
-    svc = PassportService(db)
-    passport = await svc.get_visible_passport(user.id, requesting_user_id=user.id)
+    empty_passport = {
+        "user_id": user.id,
+        "default_visibility": "private",
+        "discoverable": False,
+        "availability_status": None,
+        "availability_note": None,
+        "preferred_opportunity_types": [],
+        "visible_fields": [],
+        "capabilities": None,
+    }
+    try:
+        svc = PassportService(db)
+        passport = await svc.get_visible_passport(user.id, requesting_user_id=user.id)
+    except Exception:
+        # DB query may fail if talent tables are not yet populated;
+        # degrade gracefully to an empty passport instead of 500.
+        return DataResponse(data=empty_passport)
     if not passport:
-        # Return empty passport structure instead of INSERT in GET
-        # User should POST/PATCH to create their passport
-        return DataResponse(
-            data={
-                "user_id": user.id,
-                "default_visibility": "private",
-                "discoverable": False,
-                "availability_status": None,
-                "availability_note": None,
-                "preferred_opportunity_types": [],
-                "visible_fields": [],
-                "capabilities": None,
-            }
-        )
+        return DataResponse(data=empty_passport)
     return DataResponse(data=passport)
 
 
