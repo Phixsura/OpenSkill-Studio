@@ -36,10 +36,13 @@ export default function NewProjectPage() {
 
   const submitting = useRef(false);
 
-  const { data: templatesData, isError: templatesError, isLoading } = useQuery({
+  const {
+    data: templatesData,
+    isError: templatesError,
+    isLoading,
+  } = useQuery({
     queryKey: ["project-templates", orgId],
-    queryFn: () =>
-      apiWithAuth<{ data: Template[] }>(`/orgs/${orgId}/project-templates`),
+    queryFn: () => apiWithAuth<{ data: Template[] }>(`/orgs/${orgId}/project-templates`),
   });
   const templates = templatesData?.data ?? [];
 
@@ -89,33 +92,26 @@ export default function NewProjectPage() {
         rubric.push({ criterion: "Overall Quality", max_score: parseInt(maxScore) || 100 });
       }
 
-      const res = await apiWithAuth<{ data: { id: string } }>(
-        `/orgs/${orgId}/projects`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            title,
-            description,
-            instructions: instructions.trim() || "No instructions provided.",
-            project_type: projectType,
-            max_score: parseInt(maxScore) || 100,
-            rubric,
-          }),
-        },
-      );
+      const res = await apiWithAuth<{ data: { id: string } }>(`/orgs/${orgId}/projects`, {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          description,
+          instructions: instructions.trim() || "No instructions provided.",
+          project_type: projectType,
+          max_score: parseInt(maxScore) || 100,
+          rubric,
+        }),
+      });
       queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
       router.replace(`/dashboard/orgs/${orgId}/projects/${res.data.id}`);
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Failed to create project.",
-      );
+      setError(err instanceof ApiError ? err.message : "Failed to create project.");
     } finally {
       setLoading(false);
       submitting.current = false;
     }
   };
-
-  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -169,19 +165,13 @@ export default function NewProjectPage() {
                     <button
                       type="button"
                       className="mt-1 text-xs text-[hsl(var(--primary))] hover:underline"
-                      onClick={() =>
-                        setExpandedTemplate(expandedTemplate === t.id ? null : t.id)
-                      }
+                      onClick={() => setExpandedTemplate(expandedTemplate === t.id ? null : t.id)}
                     >
                       {expandedTemplate === t.id ? "Hide" : "Show"} {t.deliverables.length} workflow
                       stages
                     </button>
                   </div>
-                  <Button
-                    size="sm"
-                    disabled={loading}
-                    onClick={() => handleUseTemplate(t.id)}
-                  >
+                  <Button size="sm" disabled={loading} onClick={() => handleUseTemplate(t.id)}>
                     Use template
                   </Button>
                 </div>

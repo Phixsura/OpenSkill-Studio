@@ -48,17 +48,17 @@ export default function NewRequirementPage() {
   const [extractionUnavailable, setExtractionUnavailable] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const { data: capsData, isError, isLoading } = useQuery({
+  const {
+    data: capsData,
+    isError,
+    isLoading,
+  } = useQuery({
     queryKey: ["capabilities"],
     queryFn: () => apiWithAuth<{ data: Capability[] }>("/capabilities"),
   });
   const capabilities = capsData?.data ?? [];
 
-  const toggleCap = (
-    key: string,
-    list: string[],
-    setList: (v: string[]) => void,
-  ) => {
+  const toggleCap = (key: string, list: string[], setList: (v: string[]) => void) => {
     setList(list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
   };
 
@@ -85,17 +85,14 @@ export default function NewRequirementPage() {
     submitting.current = true;
     setLoading(true);
     try {
-      const res = await apiWithAuth<{ data: Profile }>(
-        `/orgs/${orgId}/requirement-profiles`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            context_type: contextType,
-            structured_requirements: buildStructured(),
-            raw_request: rawRequest.trim() || null,
-          }),
-        },
-      );
+      const res = await apiWithAuth<{ data: Profile }>(`/orgs/${orgId}/requirement-profiles`, {
+        method: "POST",
+        body: JSON.stringify({
+          context_type: contextType,
+          structured_requirements: buildStructured(),
+          raw_request: rawRequest.trim() || null,
+        }),
+      });
       toast.success("Requirement profile created");
       router.replace(`/dashboard/orgs/${orgId}/requirements/${res.data.id}`);
     } catch (err) {
@@ -132,10 +129,6 @@ export default function NewRequirementPage() {
       setLoading(false);
     }
   };
-
-  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
-
-  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

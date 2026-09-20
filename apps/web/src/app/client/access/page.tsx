@@ -73,7 +73,7 @@ export default function ClientAccessPage() {
             autoFocus
           />
           <Input
-            type="email" required
+            type="email"
             placeholder="Your email (if the link is bound to one)"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
