@@ -9,6 +9,7 @@ class ParseResumeRequest(BaseModel):
 
 
 class ParseResumeResponse(BaseModel):
+    model_config = {"from_attributes": True}
     extracted_skills: list[dict]
     matched_capabilities: list[dict]
     evidence_created: list[dict]

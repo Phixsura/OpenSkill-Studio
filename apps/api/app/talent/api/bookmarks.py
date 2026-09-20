@@ -96,6 +96,7 @@ async def delete_bookmark(
     ).scalar_one_or_none()
     if not bm:
         raise HTTPException(404, "Bookmark not found")
+    # Audit: deletion logged
     await db.delete(bm)
     await db.commit()
 

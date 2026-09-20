@@ -118,6 +118,7 @@ async def list_snapshots(
         select(PassportSnapshot)
         .where(PassportSnapshot.user_id == user.id)
         .order_by(PassportSnapshot.issued_at.desc())
+        .limit(100)
     )
     snapshots = result.scalars().all()
     return DataResponse(data=[SnapshotResponse.model_validate(s) for s in snapshots])

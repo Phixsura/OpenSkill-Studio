@@ -18,6 +18,7 @@ class DimensionScoreDetail(BaseModel):
 
 
 class AssessmentResultResponse(BaseModel):
+    model_config = {"from_attributes": True}
     evidence_id: str
     capability_id: str
     composite_score: float

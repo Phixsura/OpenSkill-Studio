@@ -30,6 +30,7 @@ class SkillInferenceRequest(BaseModel):
 
 
 class InferredSkillResponse(BaseModel):
+    model_config = {"from_attributes": True}
     capability_id: str | None = None
     capability_name: str
     confidence: float
@@ -38,6 +39,7 @@ class InferredSkillResponse(BaseModel):
 
 
 class SkillInferenceResponse(BaseModel):
+    model_config = {"from_attributes": True}
     skills: list[InferredSkillResponse]
     source_type: str
     text_length: int

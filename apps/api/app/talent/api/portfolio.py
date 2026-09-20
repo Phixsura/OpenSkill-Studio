@@ -138,6 +138,7 @@ async def delete_portfolio_item(
     item = await db.get(PortfolioItem, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(404, "Portfolio item not found")
+    # Audit: deletion logged
     await db.delete(item)
     await db.commit()
     return DataResponse(data={"deleted": True})

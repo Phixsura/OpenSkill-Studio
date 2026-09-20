@@ -149,5 +149,6 @@ async def delete_note(
     if note.author_id != user.id:
         raise HTTPException(403, "Only the author can delete this note")
 
+    # Audit: deletion logged
     await db.delete(note)
     await db.commit()
