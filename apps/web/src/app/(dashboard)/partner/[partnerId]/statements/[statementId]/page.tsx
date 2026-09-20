@@ -62,7 +62,7 @@ export default function StatementDetailPage() {
       // submission upload) instead of telling the user to reload — a partner
       // reading a statement for >15 min hit the expiry on every export.
       const doFetch = (tok: string | null) =>
-        fetch(`${API_BASE}/api/v1/partners/${partnerId}/statements/${statementId}/export.csv`, {
+        fetch(/* NOTE: add credentials: "include" if auth needed */ `${API_BASE}/api/v1/partners/${partnerId}/statements/${statementId}/export.csv`, {
           headers: tok ? { Authorization: `Bearer ${tok}` } : {},
         });
       let res = await doFetch(useAuthStore.getState().accessToken);

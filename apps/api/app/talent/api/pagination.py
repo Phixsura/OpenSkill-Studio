@@ -58,4 +58,4 @@ async def paginate_query(
 
     next_cursor = items[-1].id if has_more and items else None
 
-    return items, CursorMeta(next_cursor=next_cursor, has_more=has_more)
+    return items, CursorMeta(next_cursor=next_cursor, has_more=has_more, total_count=None)
