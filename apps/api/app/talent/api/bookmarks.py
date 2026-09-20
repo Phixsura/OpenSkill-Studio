@@ -21,6 +21,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Bookmarks"])
 @router.post(
     "/opportunities/{opp_id}/bookmark",
     response_model=DataResponse[BookmarkResponse | None],
+    summary="Toggle Bookmark",
 )
 async def toggle_bookmark(
     opp_id: str,
@@ -101,7 +102,9 @@ async def delete_bookmark(
     await db.commit()
 
 
-@router.get("/bookmarks", response_model=CursorListResponse[BookmarkResponse])
+@router.get("/bookmarks", response_model=CursorListResponse[BookmarkResponse],
+    summary="List Bookmarks",
+)
 async def list_bookmarks(
     cursor: str | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
@@ -123,6 +126,7 @@ async def list_bookmarks(
 @router.get(
     "/opportunities/{opp_id}/bookmarked",
     response_model=DataResponse[dict],
+    summary="Check Bookmarked",
 )
 async def check_bookmarked(
     opp_id: str,
@@ -140,6 +144,7 @@ async def check_bookmarked(
 @router.patch(
     "/bookmarks/{bookmark_id}/notes",
     response_model=DataResponse[BookmarkResponse],
+    summary="Update Bookmark Notes",
 )
 async def update_bookmark_notes(
     bookmark_id: str,

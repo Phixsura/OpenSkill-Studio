@@ -57,6 +57,7 @@ async def _load_slot_context(
     "/interviews/{interview_id}/slots",
     response_model=DataResponse[list[InterviewSlotResponse]],
     status_code=201,
+    summary="Propose Slots",
 )
 async def propose_slots(
     interview_id: str,
@@ -89,6 +90,7 @@ async def propose_slots(
 @router.get(
     "/interviews/{interview_id}/slots",
     response_model=DataResponse[list[InterviewSlotResponse]],
+    summary="List Slots",
 )
 async def list_slots(
     interview_id: str,
@@ -113,6 +115,7 @@ async def list_slots(
 @router.post(
     "/interview-slots/{slot_id}/accept",
     response_model=DataResponse[InterviewSlotResponse],
+    summary="Accept Slot",
 )
 async def accept_slot(
     slot_id: str,
@@ -145,6 +148,7 @@ async def accept_slot(
 @router.post(
     "/interview-slots/{slot_id}/decline",
     response_model=DataResponse[InterviewSlotResponse],
+    summary="Decline Slot",
 )
 async def decline_slot(
     slot_id: str,
@@ -172,6 +176,7 @@ async def decline_slot(
 @router.post(
     "/interview-slots/{slot_id}/cancel",
     response_model=DataResponse[InterviewSlotResponse],
+    summary="Cancel Slot",
 )
 async def cancel_slot(
     slot_id: str,
@@ -197,7 +202,10 @@ async def cancel_slot(
     return DataResponse(data=InterviewSlotResponse.model_validate(result))
 
 
-@router.get("/interview-slots/{slot_id}/calendar.ics")
+@router.get("/interview-slots/{slot_id}/calendar.ics",
+    response_model=DataResponse[dict],
+    summary="Download Calendar Invite",
+)
 async def download_calendar_invite(
     slot_id: str,
     db: AsyncSession = Depends(get_db),
@@ -231,7 +239,9 @@ async def download_calendar_invite(
 # ---- Gap #51: Question bank ----
 
 
-@router.get("/question-bank/templates", response_model=DataResponse[list[str]])
+@router.get("/question-bank/templates", response_model=DataResponse[list[str]],
+    summary="List Rubric Template Names",
+)
 async def list_rubric_template_names(
     user: User = Depends(get_current_user),
 ):
@@ -241,7 +251,9 @@ async def list_rubric_template_names(
     return DataResponse(data=list_rubric_templates())
 
 
-@router.get("/question-bank/templates/{name}", response_model=DataResponse[dict])
+@router.get("/question-bank/templates/{name}", response_model=DataResponse[dict],
+    summary="Get Rubric Template Endpoint",
+)
 async def get_rubric_template_endpoint(
     name: str,
     user: User = Depends(get_current_user),
@@ -258,7 +270,9 @@ async def get_rubric_template_endpoint(
 # ---- Gap #97: Availability validation ----
 
 
-@router.post("/interviewer-availability/validate", response_model=DataResponse[dict])
+@router.post("/interviewer-availability/validate", response_model=DataResponse[dict],
+    summary="Validate Availability Endpoint",
+)
 async def validate_availability_endpoint(
     body: dict,
     user: User = Depends(get_current_user),
@@ -273,7 +287,9 @@ async def validate_availability_endpoint(
 # ---- Gap #98: Booking link ----
 
 
-@router.get("/interviews/{interview_id}/booking-link", response_model=DataResponse[dict])
+@router.get("/interviews/{interview_id}/booking-link", response_model=DataResponse[dict],
+    summary="Get Booking Link",
+)
 async def get_booking_link(
     interview_id: str,
     user: User = Depends(get_current_user),
@@ -287,7 +303,9 @@ async def get_booking_link(
 # ---- Gap #99: Reminders ----
 
 
-@router.get("/interviews/{interview_id}/reminders", response_model=DataResponse[list[dict]])
+@router.get("/interviews/{interview_id}/reminders", response_model=DataResponse[list[dict]],
+    summary="Get Interview Reminders",
+)
 async def get_interview_reminders(
     interview_id: str,
     db: AsyncSession = Depends(get_db),
@@ -325,7 +343,9 @@ async def get_interview_reminders(
 # ---- Gap #59: Credential renewal ----
 
 
-@router.get("/credentials/{credential_id}/renewal-eligibility", response_model=DataResponse[dict])
+@router.get("/credentials/{credential_id}/renewal-eligibility", response_model=DataResponse[dict],
+    summary="Check Credential Renewal",
+)
 async def check_credential_renewal(
     credential_id: str,
     db: AsyncSession = Depends(get_db),

@@ -15,7 +15,9 @@ from app.talent.services.dashboards import (
 router = APIRouter(prefix="/talent/dashboards", tags=["Talent — Dashboards"])
 
 
-@router.get("/school", response_model=DataResponse[dict])
+@router.get("/school", response_model=DataResponse[dict],
+    summary="Get School Dashboard",
+)
 async def get_school_dashboard(
     org_id: str = Query(..., description="School org ID"),
     db: AsyncSession = Depends(get_db),
@@ -31,7 +33,9 @@ async def get_school_dashboard(
     return DataResponse(data=await svc.get_dashboard(org_id))
 
 
-@router.get("/employer", response_model=DataResponse[dict])
+@router.get("/employer", response_model=DataResponse[dict],
+    summary="Get Employer Dashboard",
+)
 async def get_employer_dashboard(
     org_id: str = Query(..., description="Employer org ID"),
     db: AsyncSession = Depends(get_db),
@@ -47,7 +51,9 @@ async def get_employer_dashboard(
     return DataResponse(data=await svc.get_dashboard(org_id))
 
 
-@router.get("/platform", response_model=DataResponse[dict])
+@router.get("/platform", response_model=DataResponse[dict],
+    summary="Get Platform Dashboard",
+)
 async def get_platform_dashboard(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),

@@ -13,7 +13,9 @@ from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 router = APIRouter(prefix="/talent", tags=["Talent — Succession Planning"])
 
 
-@router.post("/orgs/{org_id}/key-roles", response_model=DataResponse[dict], status_code=201)
+@router.post("/orgs/{org_id}/key-roles", response_model=DataResponse[dict], status_code=201,
+    summary="Create Key Role",
+)
 async def create_key_role(
     org_id: str,
     body: dict,
@@ -37,7 +39,9 @@ async def create_key_role(
     return DataResponse(data={"id": kr.id, "title": kr.title, "criticality": kr.criticality})
 
 
-@router.get("/orgs/{org_id}/key-roles", response_model=CursorListResponse[dict])
+@router.get("/orgs/{org_id}/key-roles", response_model=CursorListResponse[dict],
+    summary="List Key Roles",
+)
 async def list_key_roles(
     org_id: str,
     cursor: str | None = Query(None),
@@ -71,7 +75,9 @@ async def list_key_roles(
     )
 
 
-@router.post("/key-roles/{role_id}/nominations", response_model=DataResponse[dict], status_code=201)
+@router.post("/key-roles/{role_id}/nominations", response_model=DataResponse[dict], status_code=201,
+    summary="Nominate Successor",
+)
 async def nominate_successor(
     role_id: str,
     body: dict,
@@ -97,7 +103,9 @@ async def nominate_successor(
     )
 
 
-@router.get("/key-roles/{role_id}/nominations", response_model=CursorListResponse[dict])
+@router.get("/key-roles/{role_id}/nominations", response_model=CursorListResponse[dict],
+    summary="List Nominations",
+)
 async def list_nominations(
     role_id: str,
     cursor: str | None = Query(None),
@@ -134,7 +142,9 @@ async def list_nominations(
     )
 
 
-@router.get("/key-roles/{role_id}/risk", response_model=DataResponse[dict])
+@router.get("/key-roles/{role_id}/risk", response_model=DataResponse[dict],
+    summary="Assess Succession Risk",
+)
 async def assess_succession_risk(
     role_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):

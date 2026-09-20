@@ -26,6 +26,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Endorsements"])
     "/users/{user_id}/endorse",
     response_model=DataResponse[EndorsementResponse],
     status_code=201,
+    summary="Endorse User",
 )
 async def endorse_user(
     user_id: str,
@@ -77,6 +78,7 @@ async def endorse_user(
 @router.get(
     "/endorsements",
     response_model=CursorListResponse[EndorsementResponse],
+    summary="List My Endorsements",
 )
 async def list_my_endorsements(
     capability_id: str | None = Query(None),
@@ -102,6 +104,7 @@ async def list_my_endorsements(
 @router.get(
     "/endorsements/summary",
     response_model=DataResponse[EndorsementSummaryResponse],
+    summary="Get Endorsement Summary",
 )
 async def get_endorsement_summary(
     db: AsyncSession = Depends(get_db),
@@ -151,6 +154,7 @@ async def get_top_endorsed_users(
 @router.get(
     "/endorsements/leaderboard/capabilities",
     response_model=DataResponse[list[dict]],
+    summary="Get Top Endorsed Capabilities",
 )
 async def get_top_endorsed_capabilities(
     limit: int = Query(20, ge=1, le=100),
@@ -207,6 +211,7 @@ async def get_endorsement_stats(
 @router.get(
     "/users/{user_id}/endorsements",
     response_model=CursorListResponse[EndorsementResponse],
+    summary="List User Endorsements",
 )
 async def list_user_endorsements(
     user_id: str,

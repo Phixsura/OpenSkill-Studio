@@ -12,7 +12,9 @@ from app.schemas.base import DataResponse
 router = APIRouter(prefix="/talent", tags=["Talent — Recommendations"])
 
 
-@router.get("/recommendations/feed", response_model=DataResponse[list[dict]])
+@router.get("/recommendations/feed", response_model=DataResponse[list[dict]],
+    summary="Get Recommendation Feed",
+)
 async def get_recommendation_feed(
     limit: int = Query(20, ge=1, le=100),
     cursor: str | None = Query(None),

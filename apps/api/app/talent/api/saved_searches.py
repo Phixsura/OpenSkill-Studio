@@ -26,6 +26,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Saved Searches"])
     "/orgs/{org_id}/saved-searches",
     response_model=DataResponse[SavedSearchResponse],
     status_code=201,
+    summary="Create Saved Search",
 )
 async def create_saved_search(
     org_id: str,
@@ -60,6 +61,7 @@ async def create_saved_search(
 @router.get(
     "/orgs/{org_id}/saved-searches",
     response_model=CursorListResponse[SavedSearchResponse],
+    summary="List Saved Searches",
 )
 async def list_saved_searches(
     org_id: str,
@@ -172,6 +174,7 @@ async def list_my_saved_searches(
 @router.get(
     "/saved-searches/{search_id}",
     response_model=DataResponse[SavedSearchResponse],
+    summary="Get Saved Search",
 )
 async def get_saved_search(
     search_id: str,
@@ -192,6 +195,7 @@ async def get_saved_search(
 @router.patch(
     "/saved-searches/{search_id}",
     response_model=DataResponse[SavedSearchResponse],
+    summary="Update Saved Search",
 )
 async def update_saved_search(
     search_id: str,
@@ -216,7 +220,9 @@ async def update_saved_search(
     return DataResponse(data=SavedSearchResponse.model_validate(updated))
 
 
-@router.delete("/saved-searches/{search_id}", status_code=204)
+@router.delete("/saved-searches/{search_id}", status_code=204,
+    summary="Delete Saved Search",
+)
 async def delete_saved_search(
     search_id: str,
     db: AsyncSession = Depends(get_db),
@@ -240,6 +246,7 @@ async def delete_saved_search(
 @router.post(
     "/saved-searches/{search_id}/run",
     response_model=DataResponse[SavedSearchRunResponse],
+    summary="Run Saved Search",
 )
 async def run_saved_search(
     search_id: str,

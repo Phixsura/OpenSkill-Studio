@@ -36,6 +36,7 @@ _INSTRUCTOR_ROLES = (OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
     "/placements/{placement_id}/verification",
     response_model=DataResponse[VerificationResponse],
     status_code=201,
+    summary="Create Verification",
 )
 async def create_verification(
     placement_id: str,
@@ -102,6 +103,7 @@ async def create_verification(
     "/supervisions",
     response_model=DataResponse[SupervisionResponse],
     status_code=201,
+    summary="Create Supervision",
 )
 async def create_supervision(
     body: CreateSupervisionRequest,
@@ -143,7 +145,9 @@ async def create_supervision(
     return DataResponse(data=SupervisionResponse.model_validate(supervision))
 
 
-@router.get("/supervisions", response_model=CursorListResponse[SupervisionResponse])
+@router.get("/supervisions", response_model=CursorListResponse[SupervisionResponse],
+    summary="List Supervisions",
+)
 async def list_supervisions(
     school_org_id: str = Query(...),
     status: str | None = None,
@@ -176,6 +180,7 @@ async def list_supervisions(
 @router.patch(
     "/supervisions/{supervision_id}",
     response_model=DataResponse[SupervisionResponse],
+    summary="Update Supervision",
 )
 async def update_supervision(
     supervision_id: str,
@@ -203,6 +208,7 @@ async def update_supervision(
     "/cohorts/{cohort_id}/expose",
     response_model=DataResponse[CohortExposureResponse],
     status_code=201,
+    summary="Expose Opportunity",
 )
 async def expose_opportunity(
     cohort_id: str,
@@ -236,6 +242,7 @@ async def expose_opportunity(
 @router.get(
     "/cohorts/{cohort_id}/opportunities",
     response_model=DataResponse[list[CohortExposureResponse]],
+    summary="List Cohort Opportunities",
 )
 async def list_cohort_opportunities(
     cohort_id: str,

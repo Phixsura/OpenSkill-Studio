@@ -83,6 +83,7 @@ async def update_passport(
     "/talent/passport/snapshots",
     response_model=DataResponse[SnapshotResponse],
     status_code=201,
+    summary="Create Snapshot",
 )
 async def create_snapshot(
     body: CreateSnapshotRequest,
@@ -174,6 +175,7 @@ async def verify_passport(
     "/talent/passport/snapshots/{snapshot_id}/vc",
     summary="Export as W3C Verifiable Credential",
     description="Export a passport snapshot as a W3C Verifiable Credential (JSON-LD with Ed25519 proof).",
+    response_model=DataResponse[dict],
 )
 async def export_snapshot_as_vc(
     snapshot_id: str,

@@ -42,6 +42,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Scorecards"])
     "/orgs/{org_id}/scorecard-templates",
     response_model=DataResponse[ScorecardTemplateResponse],
     status_code=201,
+    summary="Create Template",
 )
 async def create_template(
     org_id: str,
@@ -67,6 +68,7 @@ async def create_template(
 @router.get(
     "/orgs/{org_id}/scorecard-templates",
     response_model=CursorListResponse[ScorecardTemplateResponse],
+    summary="List Templates",
 )
 async def list_templates(
     org_id: str,
@@ -102,6 +104,7 @@ async def list_templates(
 @router.get(
     "/scorecard-templates/{template_id}",
     response_model=DataResponse[ScorecardTemplateResponse],
+    summary="Get Template",
 )
 async def get_template(
     template_id: str,
@@ -119,6 +122,7 @@ async def get_template(
 @router.patch(
     "/scorecard-templates/{template_id}",
     response_model=DataResponse[ScorecardTemplateResponse],
+    summary="Update Template",
 )
 async def update_template(
     template_id: str,
@@ -170,6 +174,7 @@ async def _resolve_interview_org(
     "/interviews/{interview_id}/scorecards",
     response_model=DataResponse[ScorecardResponse],
     status_code=201,
+    summary="Create Scorecard",
 )
 async def create_scorecard(
     interview_id: str,
@@ -209,6 +214,7 @@ async def create_scorecard(
 @router.get(
     "/interviews/{interview_id}/scorecards",
     response_model=CursorListResponse[ScorecardResponse],
+    summary="List Scorecards",
 )
 async def list_scorecards(
     interview_id: str,
@@ -242,6 +248,7 @@ async def list_scorecards(
 @router.patch(
     "/scorecards/{scorecard_id}",
     response_model=DataResponse[ScorecardResponse],
+    summary="Update Scorecard",
 )
 async def update_scorecard(
     scorecard_id: str,
@@ -269,6 +276,7 @@ async def update_scorecard(
 @router.post(
     "/scorecards/{scorecard_id}/submit",
     response_model=DataResponse[ScorecardResponse],
+    summary="Submit Scorecard",
 )
 async def submit_scorecard(
     scorecard_id: str,

@@ -371,6 +371,7 @@ async def issue_credential(
     "/credentials/{credential_id}/badge",
     summary="Export as Open Badge 3.0",
     description="Export credential as Open Badges 3.0 AchievementCredential.",
+    response_model=DataResponse[dict],
 )
 async def export_credential_as_badge(
     credential_id: str,

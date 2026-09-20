@@ -22,6 +22,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Self-Assessment"])
 @router.get(
     "/self-assessment/{capability_id}/quiz",
     response_model=DataResponse[dict],
+    summary="Get Quiz",
 )
 async def get_quiz(
     capability_id: str,
@@ -40,6 +41,7 @@ async def get_quiz(
     "/self-assessment/{capability_id}/submit",
     response_model=DataResponse[AssessmentResultResponse],
     status_code=201,
+    summary="Submit Assessment",
 )
 async def submit_assessment(
     capability_id: str,

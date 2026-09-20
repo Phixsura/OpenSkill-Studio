@@ -48,6 +48,7 @@ class NoteResponse(BaseModel):
     "/orgs/{org_id}/candidates/{user_id}/notes",
     response_model=DataResponse[NoteResponse],
     status_code=201,
+    summary="Create Note",
 )
 async def create_note(
     org_id: str,
@@ -76,6 +77,7 @@ async def create_note(
 @router.get(
     "/orgs/{org_id}/candidates/{user_id}/notes",
     response_model=CursorListResponse[NoteResponse],
+    summary="List Notes",
 )
 async def list_notes(
     org_id: str,
@@ -112,6 +114,7 @@ async def list_notes(
 @router.patch(
     "/candidate-notes/{note_id}",
     response_model=DataResponse[NoteResponse],
+    summary="Update Note",
 )
 async def update_note(
     note_id: str,
@@ -136,7 +139,9 @@ async def update_note(
     return DataResponse(data=NoteResponse.model_validate(note))
 
 
-@router.delete("/candidate-notes/{note_id}", status_code=204)
+@router.delete("/candidate-notes/{note_id}", status_code=204,
+    summary="Delete Note",
+)
 async def delete_note(
     note_id: str,
     db: AsyncSession = Depends(get_db),

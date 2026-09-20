@@ -24,6 +24,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Notifications"])
 @router.get(
     "/notifications",
     response_model=CursorListResponse[NotificationResponse],
+    summary="List Notifications",
 )
 async def list_notifications(
     unread_only: bool = Query(False),
@@ -49,6 +50,7 @@ async def list_notifications(
 @router.get(
     "/notifications/unread-count",
     response_model=DataResponse[UnreadCountResponse],
+    summary="Get Unread Count",
 )
 async def get_unread_count(
     db: AsyncSession = Depends(get_db),
@@ -65,6 +67,7 @@ async def get_unread_count(
 @router.patch(
     "/notifications/{notification_id}/read",
     response_model=DataResponse[NotificationResponse],
+    summary="Mark Notification Read",
 )
 async def mark_notification_read(
     notification_id: str,
@@ -83,7 +86,9 @@ async def mark_notification_read(
     return DataResponse(data=NotificationResponse.model_validate(notif))
 
 
-@router.post("/notifications/mark-all-read", response_model=DataResponse[dict])
+@router.post("/notifications/mark-all-read", response_model=DataResponse[dict],
+    summary="Mark All Read",
+)
 async def mark_all_read(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -100,6 +105,7 @@ async def mark_all_read(
 @router.get(
     "/notifications/preferences",
     response_model=DataResponse[list[NotificationPreferenceResponse]],
+    summary="Get Preferences",
 )
 async def get_preferences(
     db: AsyncSession = Depends(get_db),
@@ -116,6 +122,7 @@ async def get_preferences(
 @router.put(
     "/notifications/preferences",
     response_model=DataResponse[list[NotificationPreferenceResponse]],
+    summary="Update Preferences",
 )
 async def update_preferences(
     body: UpdatePreferencesRequest,

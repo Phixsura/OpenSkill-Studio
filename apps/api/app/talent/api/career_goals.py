@@ -24,6 +24,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Career Goals"])
     "/career-goals",
     response_model=DataResponse[GoalResponse],
     status_code=201,
+    summary="Create Goal",
 )
 async def create_goal(
     body: CreateGoalRequest,
@@ -54,6 +55,7 @@ async def create_goal(
 @router.get(
     "/career-goals",
     response_model=CursorListResponse[GoalResponse],
+    summary="List Goals",
 )
 async def list_goals(
     status: str | None = Query(None),
@@ -77,6 +79,7 @@ async def list_goals(
 @router.get(
     "/career-goals/{goal_id}",
     response_model=DataResponse[GoalResponse],
+    summary="Get Goal",
 )
 async def get_goal(
     goal_id: str,
@@ -96,6 +99,7 @@ async def get_goal(
 @router.patch(
     "/career-goals/{goal_id}",
     response_model=DataResponse[GoalResponse],
+    summary="Update Goal",
 )
 async def update_goal(
     goal_id: str,
@@ -118,6 +122,7 @@ async def update_goal(
 @router.post(
     "/career-goals/{goal_id}/complete",
     response_model=DataResponse[GoalResponse],
+    summary="Complete Goal",
 )
 async def complete_goal(
     goal_id: str,
@@ -142,6 +147,7 @@ async def complete_goal(
 @router.post(
     "/career-goals/{goal_id}/abandon",
     response_model=DataResponse[GoalResponse],
+    summary="Abandon Goal",
 )
 async def abandon_goal(
     goal_id: str,
@@ -166,6 +172,7 @@ async def abandon_goal(
 @router.get(
     "/career-goals/{goal_id}/progress",
     response_model=DataResponse[GoalProgressResponse],
+    summary="Check Progress",
 )
 async def check_progress(
     goal_id: str,

@@ -43,7 +43,9 @@ router = APIRouter(prefix="/talent", tags=["Talent — Pools & Outreach"])
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@router.post("/pools", response_model=DataResponse[PoolResponse], status_code=201)
+@router.post("/pools", response_model=DataResponse[PoolResponse], status_code=201,
+    summary="Create Pool",
+)
 async def create_pool(
     body: CreatePoolRequest,
     org_id: str = Query(..., description="Organization ID"),
@@ -66,7 +68,9 @@ async def create_pool(
     return DataResponse(data=PoolResponse.model_validate(pool))
 
 
-@router.get("/pools", response_model=CursorListResponse[PoolResponse])
+@router.get("/pools", response_model=CursorListResponse[PoolResponse],
+    summary="List Pools",
+)
 async def list_pools(
     org_id: str = Query(...),
     cursor: str | None = Query(None, description="Cursor for pagination (last item ID)"),
@@ -87,7 +91,9 @@ async def list_pools(
     )
 
 
-@router.get("/pools/{pool_id}", response_model=DataResponse[PoolResponse])
+@router.get("/pools/{pool_id}", response_model=DataResponse[PoolResponse],
+    summary="Get Pool",
+)
 async def get_pool(
     pool_id: str,
     db: AsyncSession = Depends(get_db),
@@ -101,7 +107,9 @@ async def get_pool(
     return DataResponse(data=PoolResponse.model_validate(pool))
 
 
-@router.patch("/pools/{pool_id}", response_model=DataResponse[PoolResponse])
+@router.patch("/pools/{pool_id}", response_model=DataResponse[PoolResponse],
+    summary="Update Pool",
+)
 async def update_pool(
     pool_id: str,
     body: UpdatePoolRequest,
@@ -125,7 +133,8 @@ async def update_pool(
 
 
 @router.post(
-    "/pools/{pool_id}/members", response_model=DataResponse[MembershipResponse], status_code=201
+    "/pools/{pool_id}/members", response_model=DataResponse[MembershipResponse], status_code=201,
+    summary="Add Member",
 )
 async def add_member(
     pool_id: str,
@@ -147,7 +156,9 @@ async def add_member(
     return DataResponse(data=MembershipResponse.model_validate(membership))
 
 
-@router.get("/pools/{pool_id}/members", response_model=CursorListResponse[MembershipResponse])
+@router.get("/pools/{pool_id}/members", response_model=CursorListResponse[MembershipResponse],
+    summary="List Members",
+)
 async def list_members(
     pool_id: str,
     consent_status: str | None = None,
@@ -178,6 +189,7 @@ async def list_members(
 @router.patch(
     "/pools/{pool_id}/members/{membership_id}",
     response_model=DataResponse[MembershipResponse],
+    summary="Respond To Membership",
 )
 async def respond_to_membership(
     pool_id: str,
@@ -199,7 +211,9 @@ async def respond_to_membership(
     return DataResponse(data=MembershipResponse.model_validate(membership))
 
 
-@router.delete("/pools/{pool_id}/members/{user_id}", status_code=204)
+@router.delete("/pools/{pool_id}/members/{user_id}", status_code=204,
+    summary="Remove Member",
+)
 async def remove_member(
     pool_id: str,
     user_id: str,
@@ -221,7 +235,9 @@ async def remove_member(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@router.post("/outreach", response_model=DataResponse[OutreachResponse], status_code=201)
+@router.post("/outreach", response_model=DataResponse[OutreachResponse], status_code=201,
+    summary="Send Outreach",
+)
 async def send_outreach(
     body: SendOutreachRequest,
     org_id: str = Query(..., description="Sending organization ID"),
@@ -250,7 +266,9 @@ async def send_outreach(
     return DataResponse(data=OutreachResponse.model_validate(outreach))
 
 
-@router.get("/outreach", response_model=CursorListResponse[OutreachResponse])
+@router.get("/outreach", response_model=CursorListResponse[OutreachResponse],
+    summary="List Outreach",
+)
 async def list_outreach(
     org_id: str | None = Query(None, description="Filter by sending org (sent view)"),
     status: str | None = None,
@@ -282,7 +300,9 @@ async def list_outreach(
     )
 
 
-@router.patch("/outreach/{outreach_id}", response_model=DataResponse[OutreachResponse])
+@router.patch("/outreach/{outreach_id}", response_model=DataResponse[OutreachResponse],
+    summary="Respond To Outreach",
+)
 async def respond_to_outreach(
     outreach_id: str,
     body: RespondOutreachRequest,
@@ -307,7 +327,9 @@ async def respond_to_outreach(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@router.get("/outcomes", response_model=CursorListResponse[OutcomeEventResponse])
+@router.get("/outcomes", response_model=CursorListResponse[OutcomeEventResponse],
+    summary="List Outcomes",
+)
 async def list_outcomes(
     event_type: str | None = None,
     visibility: str | None = None,
@@ -336,7 +358,9 @@ async def list_outcomes(
     )
 
 
-@router.post("/outcomes", response_model=DataResponse[OutcomeEventResponse], status_code=201)
+@router.post("/outcomes", response_model=DataResponse[OutcomeEventResponse], status_code=201,
+    summary="Record Outcome",
+)
 async def record_outcome(
     body: RecordOutcomeRequest,
     db: AsyncSession = Depends(get_db),
@@ -361,7 +385,9 @@ async def record_outcome(
     return DataResponse(data=OutcomeEventResponse.model_validate(event))
 
 
-@router.patch("/outcomes/{event_id}", response_model=DataResponse[OutcomeEventResponse])
+@router.patch("/outcomes/{event_id}", response_model=DataResponse[OutcomeEventResponse],
+    summary="Update Outcome Visibility",
+)
 async def update_outcome_visibility(
     event_id: str,
     body: UpdateOutcomeVisibilityRequest,

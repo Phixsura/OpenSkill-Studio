@@ -48,6 +48,7 @@ _EMPLOYER_TRANSITIONS = frozenset(
     "/capabilities/bulk",
     response_model=DataResponse[BulkCapabilityResult],
     status_code=200,
+    summary="Bulk Create Capabilities",
 )
 async def bulk_create_capabilities(
     body: BulkCapabilityRequest,
@@ -104,6 +105,7 @@ async def bulk_create_capabilities(
     "/evidence/bulk",
     response_model=DataResponse[BulkEvidenceResult],
     status_code=200,
+    summary="Bulk Record Evidence",
 )
 async def bulk_record_evidence(
     body: BulkEvidenceRequest,
@@ -159,6 +161,7 @@ async def bulk_record_evidence(
     "/applications/bulk-transition",
     response_model=DataResponse[BulkTransitionResult],
     status_code=200,
+    summary="Bulk Transition Applications",
 )
 async def bulk_transition_applications(
     body: BulkTransitionRequest,

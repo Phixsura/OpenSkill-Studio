@@ -26,6 +26,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Credential Pathways"])
     "/orgs/{org_id}/credential-pathways",
     response_model=DataResponse[PathwayResponse],
     status_code=201,
+    summary="Create Pathway",
 )
 async def create_pathway(
     org_id: str,
@@ -61,6 +62,7 @@ async def create_pathway(
 @router.get(
     "/orgs/{org_id}/credential-pathways",
     response_model=CursorListResponse[PathwayResponse],
+    summary="List Pathways",
 )
 async def list_pathways(
     org_id: str,
@@ -87,6 +89,7 @@ async def list_pathways(
 @router.get(
     "/credential-pathways/{pathway_id}",
     response_model=DataResponse[PathwayResponse],
+    summary="Get Pathway",
 )
 async def get_pathway(
     pathway_id: str,
@@ -106,6 +109,7 @@ async def get_pathway(
 @router.patch(
     "/credential-pathways/{pathway_id}",
     response_model=DataResponse[PathwayResponse],
+    summary="Update Pathway",
 )
 async def update_pathway(
     pathway_id: str,
@@ -135,6 +139,7 @@ async def update_pathway(
 @router.get(
     "/credential-pathways/{pathway_id}/progress",
     response_model=DataResponse[PathwayProgressResponse],
+    summary="Check Progress",
 )
 async def check_progress(
     pathway_id: str,
@@ -152,6 +157,7 @@ async def check_progress(
 @router.get(
     "/credential-pathways/my-progress",
     response_model=DataResponse[list[PathwayProgressResponse]],
+    summary="List My Progress",
 )
 async def list_my_progress(
     org_id: str | None = Query(None),
@@ -169,6 +175,7 @@ async def list_my_progress(
 @router.post(
     "/credential-pathways/{pathway_id}/check-issue",
     response_model=DataResponse[dict],
+    summary="Check And Issue",
 )
 async def check_and_issue(
     pathway_id: str,

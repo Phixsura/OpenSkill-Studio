@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.schemas.base import DataResponse
 from app.talent.services.credential_signing import (
     SigningKeyService,
     build_did_document,
@@ -13,7 +14,10 @@ from app.talent.services.credential_signing import (
 router = APIRouter(tags=["Talent — DID"])
 
 
-@router.get("/talent/orgs/{org_id}/did.json")
+@router.get("/talent/orgs/{org_id}/did.json",
+    response_model=DataResponse[dict],
+    summary="Get Did Document",
+)
 async def get_did_document(
     org_id: str,
     db: AsyncSession = Depends(get_db),

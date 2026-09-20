@@ -187,6 +187,7 @@ async def get_provenance(
     "/users/{user_id}/profile",
     summary="Get user capability profile",
     description="Returns computed capability scores for a user aggregated from all verified evidence.",
+    response_model=DataResponse[dict],
 )
 async def get_capability_profile(
     user_id: str,

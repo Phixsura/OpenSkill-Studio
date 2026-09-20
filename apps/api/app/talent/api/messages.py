@@ -35,7 +35,9 @@ async def _check_message_access(
     return app, False
 
 
-@router.post("/applications/{app_id}/messages", response_model=DataResponse[dict], status_code=201)
+@router.post("/applications/{app_id}/messages", response_model=DataResponse[dict], status_code=201,
+    summary="Send Message",
+)
 async def send_message(
     app_id: str,
     body: dict,
@@ -57,7 +59,9 @@ async def send_message(
     return DataResponse(data={"id": msg.id, "sender_role": msg.sender_role, "content": msg.content})
 
 
-@router.get("/applications/{app_id}/messages", response_model=CursorListResponse[dict])
+@router.get("/applications/{app_id}/messages", response_model=CursorListResponse[dict],
+    summary="List Messages",
+)
 async def list_messages(
     app_id: str,
     cursor: str | None = Query(None),
@@ -93,7 +97,9 @@ async def list_messages(
     )
 
 
-@router.patch("/messages/{msg_id}/read", response_model=DataResponse[dict])
+@router.patch("/messages/{msg_id}/read", response_model=DataResponse[dict],
+    summary="Mark Message Read",
+)
 async def mark_message_read(
     msg_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):

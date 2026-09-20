@@ -109,6 +109,7 @@ async def create_application(
     "/opportunities/{opp_id}/apply",
     response_model=DataResponse[ApplicationResponse],
     status_code=201,
+    summary="Apply To Opportunity",
 )
 async def apply_to_opportunity(
     opp_id: str,
@@ -260,6 +261,7 @@ async def get_application(
 @router.patch(
     "/applications/{app_id}/status",
     response_model=DataResponse[ApplicationResponse],
+    summary="Transition Application",
 )
 async def transition_application(
     app_id: str,
@@ -392,6 +394,7 @@ async def transition_application(
     "/applications/{app_id}/interviews",
     response_model=DataResponse[InterviewStageResponse],
     status_code=201,
+    summary="Create Interview",
 )
 async def create_interview(
     app_id: str,
@@ -418,6 +421,7 @@ async def create_interview(
 @router.patch(
     "/applications/{app_id}/interviews/{interview_id}",
     response_model=DataResponse[InterviewStageEmployerResponse],
+    summary="Update Interview",
 )
 async def update_interview(
     app_id: str,
@@ -487,6 +491,7 @@ async def list_placements(
     "/applications/{app_id}/feedback",
     response_model=DataResponse[FeedbackResponse],
     status_code=201,
+    summary="Add Feedback",
 )
 async def add_feedback(
     app_id: str,
@@ -520,6 +525,7 @@ async def add_feedback(
 @router.get(
     "/applications/{app_id}/feedback",
     response_model=DataResponse[list[FeedbackResponse]],
+    summary="List Feedback",
 )
 async def list_feedback(
     app_id: str,
@@ -549,6 +555,7 @@ async def list_feedback(
 @router.patch(
     "/feedback/{feedback_id}/visibility",
     response_model=DataResponse[FeedbackResponse],
+    summary="Update Feedback Visibility",
 )
 async def update_feedback_visibility(
     feedback_id: str,
@@ -583,6 +590,7 @@ class CompareRequest(BaseModel):
 @router.post(
     "/opportunities/{opp_id}/compare",
     response_model=DataResponse[list[dict]],
+    summary="Compare Applications",
 )
 async def compare_applications(
     opp_id: str,

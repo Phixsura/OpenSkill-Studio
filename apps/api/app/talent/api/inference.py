@@ -18,6 +18,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Skill Inference"])
 @router.post(
     "/capabilities/infer",
     response_model=DataResponse[SkillInferenceResponse],
+    summary="Infer Skills",
 )
 async def infer_skills(
     body: SkillInferenceRequest,
