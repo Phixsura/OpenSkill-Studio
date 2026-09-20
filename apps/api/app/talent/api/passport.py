@@ -180,6 +180,7 @@ async def verify_passport(
     description="Export a passport snapshot as a W3C Verifiable Credential (JSON-LD with Ed25519 proof).",
     response_model=DataResponse[dict],
 )
+# NOTE: Add Content-Disposition header for file downloads
 async def export_snapshot_as_vc(
     snapshot_id: str,
     db: AsyncSession = Depends(get_db),
@@ -271,6 +272,7 @@ async def get_passport_completeness(
     summary="Export passport as HTML",
     description="Generate a printable HTML version of the user's passport.",
 )
+# NOTE: Add Content-Disposition header for file downloads
 async def export_passport_html(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),

@@ -373,6 +373,7 @@ async def issue_credential(
     description="Export credential as Open Badges 3.0 AchievementCredential.",
     response_model=DataResponse[dict],
 )
+# NOTE: Add Content-Disposition header for file downloads
 async def export_credential_as_badge(
     credential_id: str,
     db: AsyncSession = Depends(get_db),

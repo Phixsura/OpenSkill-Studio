@@ -15,6 +15,7 @@ from app.api.deps import get_current_user, get_db, require_org_member
 from app.models.user import User
 from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 
+# NOTE: GET endpoints could benefit from Cache-Control: no-cache or ETag headers
 router = APIRouter(prefix="/talent", tags=["Talent — Activity"])
 
 

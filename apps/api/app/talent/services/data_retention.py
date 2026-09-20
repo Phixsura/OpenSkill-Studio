@@ -41,6 +41,8 @@ class RetentionReport:
     cutoff_date: datetime
 
 
+# NOTE: Add cleanup for stale draft applications (>30 days) and expired snapshots
+
 class DataRetentionService:
     def __init__(self, db: AsyncSession):
         self.db = db
