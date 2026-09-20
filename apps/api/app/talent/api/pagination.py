@@ -21,7 +21,11 @@ async def paginate_query(
     limit: int = 50,
     id_column=None,
 ) -> tuple[list, CursorMeta]:
-    """Apply cursor-based pagination to a SQLAlchemy select query.
+    """Apply cursor-based pagination.
+
+    NOTE: Uses ULID ordering (time-ordered) which provides natural
+    created_at stability. New inserts get higher ULIDs, so pagination
+    is stable as long as items are not re-ordered. to a SQLAlchemy select query.
 
     Args:
         db: Async database session

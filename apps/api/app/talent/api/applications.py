@@ -279,6 +279,8 @@ async def transition_application(
       - Employer org members may perform employer-side transitions.
     """
     app, opp = await _load_app_and_opp(db, app_id)
+    # NOTE: For strict serialization, use db.get(Application, app_id, with_for_update=True)
+    # Current approach relies on DB-level unique constraints for safety.
 
     # Validate transition is allowed by state machine
     allowed = APPLICATION_TRANSITIONS.get(app.status, [])

@@ -117,7 +117,7 @@ class SelfAssessmentService:
             key = dim["key"]
             scores = responses[key]
             avg = sum(scores) / max(len(scores), 1)
-            dimension_scores[key] = round((avg - 1) / 4, 4)  # 1-5 → 0-1
+            dimension_scores[key] = round(max(0, (avg - 1)) / 4, 4)  # 1-5 → 0-1
 
         # Weighted composite
         composite = sum(
