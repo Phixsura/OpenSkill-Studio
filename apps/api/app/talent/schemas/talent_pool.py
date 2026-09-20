@@ -15,7 +15,7 @@ class CreatePoolRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(None, max_length=5000)
     membership_mode: str = Field("manual", pattern=r"^(manual|rule_suggested|candidate_opt_in)$")
-    rule_config: dict | None = None
+    rule_config: dict | None = Field(None)
     visibility: str = Field("internal", pattern=r"^(internal|shared)$")
 
     @field_validator("name")
@@ -35,9 +35,9 @@ class CreatePoolRequest(BaseModel):
 class UpdatePoolRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = Field(None, max_length=5000)
-    membership_mode: str | None = None
-    rule_config: dict | None = None
-    visibility: str | None = None
+    membership_mode: str | None = Field(None, max_length=500)
+    rule_config: dict | None = Field(None)
+    visibility: str | None = Field(None, max_length=500)
 
 
 class PoolResponse(BaseModel):
@@ -134,7 +134,7 @@ class RecordOutcomeRequest(BaseModel):
     source_id: str | None = None
     occurred_at: datetime
     visibility: str = Field("private", pattern=r"^(private|passport_visible|public)$")
-    metadata: dict | None = None
+    metadata: dict | None = Field(None)
 
     @field_validator("metadata")
     @classmethod

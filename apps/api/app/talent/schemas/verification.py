@@ -59,11 +59,11 @@ class CreateSupervisionRequest(BaseModel):
 
 
 class UpdateSupervisionRequest(BaseModel):
-    milestones: list[dict] | None = None
-    notes: list[dict] | None = None
-    status: str | None = None
+    milestones: list[dict] | None = Field(None, max_length=100)
+    notes: list[dict] | None = Field(None, max_length=100)
+    status: str | None = Field(None, max_length=500)
     supervisor_user_id: str | None = None
-    employer_mentor_name: str | None = None
+    employer_mentor_name: str | None = Field(None, max_length=500)
 
     @field_validator("milestones", "notes")
     @classmethod

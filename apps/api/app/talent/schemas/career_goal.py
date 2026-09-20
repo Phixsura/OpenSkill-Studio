@@ -9,15 +9,15 @@ class CreateGoalRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(None, max_length=5000)
     target_role: str | None = Field(None, max_length=200)
-    target_capabilities: list[dict] | None = None
+    target_capabilities: list[dict] | None = Field(None, max_length=100)
     target_date: date | None = None
 
 
 class UpdateGoalRequest(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
-    description: str | None = None
-    target_role: str | None = None
-    target_capabilities: list[dict] | None = None
+    description: str | None = Field(None, max_length=500)
+    target_role: str | None = Field(None, max_length=500)
+    target_capabilities: list[dict] | None = Field(None, max_length=100)
     target_date: date | None = None
 
 

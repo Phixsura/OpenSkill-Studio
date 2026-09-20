@@ -10,9 +10,9 @@ from app.talent.models.saved_search import NOTIFY_FREQUENCIES, SEARCH_TYPES
 class CreateSavedSearchRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(None, max_length=2000)
-    search_type: str
-    search_criteria: dict
-    notify_frequency: str = "never"
+    search_type: str | None = Field(..., max_length=500)
+    search_criteria: dict = Field(default_factory=dict)
+    notify_frequency: str | None = Field("never", max_length=500)
 
     @field_validator("search_type")
     @classmethod
@@ -31,9 +31,9 @@ class CreateSavedSearchRequest(BaseModel):
 
 class UpdateSavedSearchRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
-    description: str | None = None
-    search_criteria: dict | None = None
-    notify_frequency: str | None = None
+    description: str | None = Field(None, max_length=500)
+    search_criteria: dict | None = Field(None)
+    notify_frequency: str | None = Field(None, max_length=500)
 
     @field_validator("notify_frequency")
     @classmethod

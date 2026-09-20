@@ -13,13 +13,13 @@ class CreateCapabilityRequest(BaseModel):
     description: str | None = Field(None, max_length=2000)
     parent_id: str | None = None
     capability_tag_id: str | None = None
-    level_definitions: dict | None = None
-    decay_config: dict | None = None
+    level_definitions: dict | None = Field(None)
+    decay_config: dict | None = Field(None)
     sort_order: int = 0
     # Taxonomy interop (ESCO, O*NET, ISCED-F)
-    external_ids: dict | None = None
+    external_ids: dict | None = Field(None)
     aliases: list[str] | None = None
-    translations: dict | None = None
+    translations: dict | None = Field(None)
 
     @field_validator("canonical_name")
     @classmethod
@@ -32,13 +32,13 @@ class UpdateCapabilityRequest(BaseModel):
     category: str | None = Field(None, min_length=1, max_length=40)
     description: str | None = Field(None, max_length=2000)
     parent_id: str | None = None
-    status: str | None = None
-    level_definitions: dict | None = None
-    decay_config: dict | None = None
+    status: str | None = Field(None, max_length=500)
+    level_definitions: dict | None = Field(None)
+    decay_config: dict | None = Field(None)
     sort_order: int | None = None
-    external_ids: dict | None = None
+    external_ids: dict | None = Field(None)
     aliases: list[str] | None = None
-    translations: dict | None = None
+    translations: dict | None = Field(None)
 
 
 class CapabilityResponse(BaseModel):
@@ -67,7 +67,7 @@ class CreateEdgeRequest(BaseModel):
     source_id: str
     target_id: str
     edge_type: str = Field(..., min_length=1, max_length=30)
-    metadata: dict | None = None
+    metadata: dict | None = Field(None)
 
 
 class EdgeResponse(BaseModel):
@@ -86,7 +86,7 @@ class CreateMappingRequest(BaseModel):
     source_type: str = Field(..., min_length=1, max_length=30)
     source_id: str
     contribution_weight: float = Field(1.0, ge=0.0, le=1.0)
-    evidence_type: str = "primary_instruction"
+    evidence_type: str | None = Field("primary_instruction", max_length=500)
 
 
 class MappingResponse(BaseModel):

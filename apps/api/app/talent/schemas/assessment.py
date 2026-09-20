@@ -29,10 +29,10 @@ class CreateBlueprintRequest(BaseModel):
 class UpdateBlueprintRequest(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = Field(None, max_length=5000)
-    assessment_type: str | None = None
-    capability_requirements: list[dict] | None = None
-    config: dict | None = None
-    status: str | None = None
+    assessment_type: str | None = Field(None, max_length=500)
+    capability_requirements: list[dict] | None = Field(None, max_length=100)
+    config: dict | None = Field(None)
+    status: str | None = Field(None, max_length=500)
 
 
 class BlueprintResponse(BaseModel):
@@ -57,7 +57,7 @@ class StartRunRequest(BaseModel):
 
 
 class SubmitRunRequest(BaseModel):
-    results: dict | None = None
+    results: dict | None = Field(None)
     project_id: str | None = None
 
 
@@ -93,7 +93,7 @@ class CreateCredentialRuleRequest(BaseModel):
     credential_type: str = Field(..., min_length=1, max_length=80)
     display_name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(None, max_length=5000)
-    requirements: list[dict]
+    requirements: list[dict] = Field(default_factory=list, max_length=100)
     conditions: dict = Field(default_factory=dict)
     org_id: str | None = None
 
@@ -135,11 +135,11 @@ class CredentialResponse(BaseModel):
 
 
 class EvaluateCredentialRequest(BaseModel):
-    credential_type: str
+    credential_type: str | None = Field(..., max_length=500)
     user_id: str | None = None  # Default: current user
 
 
 class IssueCredentialRequest(BaseModel):
-    credential_type: str
+    credential_type: str | None = Field(..., max_length=500)
     user_id: str | None = None
     org_id: str | None = None

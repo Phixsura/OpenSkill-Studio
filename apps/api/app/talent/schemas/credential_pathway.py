@@ -23,10 +23,10 @@ class CreatePathwayRequest(BaseModel):
 
 class UpdatePathwayRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
-    description: str | None = None
+    description: str | None = Field(None, max_length=500)
     prerequisite_count: int | None = Field(None, ge=1)
     auto_issue: bool | None = None
-    status: str | None = None
+    status: str | None = Field(None, max_length=500)
 
     @field_validator("status")
     @classmethod

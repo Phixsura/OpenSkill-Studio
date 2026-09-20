@@ -63,7 +63,7 @@ class CreateOpportunityRequest(BaseModel):
     compensation_display: str | None = Field(None, max_length=200)
     required_capabilities: list[dict] = Field(default_factory=list)
     preferred_capabilities: list[dict] = Field(default_factory=list)
-    minimum_verification: str | None = None
+    minimum_verification: str | None = Field(None, max_length=500)
     portfolio_requirements: str | None = Field(None, max_length=5000)
     application_deadline: datetime | None = None
     openings: int = Field(1, ge=1, le=1000)
@@ -83,17 +83,17 @@ class CreateOpportunityRequest(BaseModel):
 class UpdateOpportunityRequest(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = Field(None, max_length=10000)
-    opportunity_type: str | None = None
-    location_mode: str | None = None
-    location_text: str | None = None
-    compensation_display: str | None = None
-    required_capabilities: list[dict] | None = None
-    preferred_capabilities: list[dict] | None = None
-    minimum_verification: str | None = None
-    portfolio_requirements: str | None = None
+    opportunity_type: str | None = Field(None, max_length=500)
+    location_mode: str | None = Field(None, max_length=500)
+    location_text: str | None = Field(None, max_length=500)
+    compensation_display: str | None = Field(None, max_length=500)
+    required_capabilities: list[dict] | None = Field(None, max_length=100)
+    preferred_capabilities: list[dict] | None = Field(None, max_length=100)
+    minimum_verification: str | None = Field(None, max_length=500)
+    portfolio_requirements: str | None = Field(None, max_length=500)
     application_deadline: datetime | None = None
     openings: int | None = Field(None, ge=1, le=1000)
-    status: str | None = None
+    status: str | None = Field(None, max_length=500)
 
 
 class OpportunityResponse(BaseModel):

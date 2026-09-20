@@ -16,10 +16,10 @@ PASSPORT_VISIBILITY_SCOPES = frozenset(
 
 
 class UpdatePassportRequest(BaseModel):
-    default_visibility: str | None = None
+    default_visibility: str | None = Field(None, max_length=500)
     visible_fields: list[str] | None = None
     preferred_opportunity_types: list[str] | None = None
-    availability_status: str | None = None
+    availability_status: str | None = Field(None, max_length=500)
     availability_note: str | None = Field(None, max_length=500)
     discoverable: bool | None = None
     discoverable_to: list[str] | None = None

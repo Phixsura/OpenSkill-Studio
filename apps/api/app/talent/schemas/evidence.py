@@ -17,7 +17,7 @@ class RecordEvidenceRequest(BaseModel):
     score_normalized: float | None = Field(None, ge=0.0, le=1.0)
     confidence: float = Field(1.0, ge=0.0, le=1.0)
     expires_at: datetime | None = None
-    metadata: dict | None = None
+    metadata: dict | None = Field(None)
 
     @field_validator("metadata")
     @classmethod

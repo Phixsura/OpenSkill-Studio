@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # --- Templates ---
 
@@ -26,16 +26,16 @@ class CriterionItem(BaseModel):
 
 
 class CreateScorecardTemplateRequest(BaseModel):
-    name: str
-    description: str | None = None
+    name: str | None = Field(..., max_length=500)
+    description: str | None = Field(None, max_length=500)
     criteria: list[CriterionItem] = []
 
 
 class UpdateScorecardTemplateRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
+    name: str | None = Field(None, max_length=500)
+    description: str | None = Field(None, max_length=500)
     criteria: list[CriterionItem] | None = None
-    status: str | None = None
+    status: str | None = Field(None, max_length=500)
 
     @field_validator("status")
     @classmethod
@@ -65,10 +65,10 @@ VALID_RECOMMENDATIONS = frozenset({"strong_hire", "hire", "no_hire", "strong_no_
 
 class CreateScorecardRequest(BaseModel):
     template_id: str | None = None
-    ratings: dict[str, Any] = {}
+    ratings: dict = Field(default_factory=dict)
     overall_rating: int | None = None
-    recommendation: str | None = None
-    notes: str | None = None
+    recommendation: str | None = Field(None, max_length=500)
+    notes: str | None = Field(None, max_length=500)
 
     @field_validator("overall_rating")
     @classmethod
@@ -86,10 +86,10 @@ class CreateScorecardRequest(BaseModel):
 
 
 class UpdateScorecardRequest(BaseModel):
-    ratings: dict[str, Any] | None = None
+    ratings: dict | None = Field(None)
     overall_rating: int | None = None
-    recommendation: str | None = None
-    notes: str | None = None
+    recommendation: str | None = Field(None, max_length=500)
+    notes: str | None = Field(None, max_length=500)
 
     @field_validator("overall_rating")
     @classmethod

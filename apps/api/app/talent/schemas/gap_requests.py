@@ -39,17 +39,17 @@ class AdverseImpactRequest(BaseModel):
 
 
 class RequisitionValidationRequest(BaseModel):
-    title: str | None = None
-    department: str | None = None
+    title: str | None = Field(None, max_length=500)
+    department: str | None = Field(None, max_length=500)
     justification: str | None = Field(None, max_length=5000)
     headcount: int = Field(0, ge=0)
 
 
 class AvailabilityValidationRequest(BaseModel):
-    mode: str | None = None
+    mode: str | None = Field(None, max_length=500)
     hours_per_week: int | None = Field(None, ge=1, le=80)
     notice_period_days: int | None = Field(None, ge=0, le=180)
-    remote_preference: str | None = None
+    remote_preference: str | None = Field(None, max_length=500)
 
 
 class SalaryExpectationRequest(BaseModel):
@@ -100,9 +100,9 @@ class APIKeyGenerateRequest(BaseModel):
 
 class HRISValidationRequest(BaseModel):
     employee_id: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-    email: str | None = None
+    first_name: str | None = Field(None, max_length=500)
+    last_name: str | None = Field(None, max_length=500)
+    email: str | None = Field(None, max_length=500)
 
 
 class ATSConfigRequest(BaseModel):
@@ -129,11 +129,11 @@ class RoleEscalationRequest(BaseModel):
 class EvidenceSimulationRequest(BaseModel):
     current_evidence: list[dict] = Field(default_factory=list)
     new_evidence: dict = Field(default_factory=dict)
-    decay_config: dict | None = None
+    decay_config: dict | None = Field(None)
 
 
 class CalibrationValidationRequest(BaseModel):
-    dimension_weights: dict | None = None
+    dimension_weights: dict | None = Field(None)
     shrinkage_k: float | None = Field(None, ge=0, le=100)
     shrinkage_prior: float | None = Field(None, ge=0, le=1)
 

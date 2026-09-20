@@ -25,7 +25,7 @@ class CreateApplicationRequest(BaseModel):
 
 
 class TransitionApplicationRequest(BaseModel):
-    status: str
+    status: str | None = Field(..., max_length=500)
     note: str | None = Field(None, max_length=2000)
 
 
@@ -63,8 +63,8 @@ class CreateInterviewRequest(BaseModel):
 
 
 class UpdateInterviewRequest(BaseModel):
-    status: str | None = None
-    evaluation_notes: dict | None = None
+    status: str | None = Field(None, max_length=500)
+    evaluation_notes: dict | None = Field(None)
     scheduled_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -94,9 +94,9 @@ class InterviewStageEmployerResponse(InterviewStageResponse):
 
 
 class CreateFeedbackRequest(BaseModel):
-    feedback_type: str
+    feedback_type: str | None = Field(..., max_length=500)
     content: str = Field(..., min_length=1, max_length=5000)
-    visibility: str = "employer_only"
+    visibility: str | None = Field("employer_only", max_length=500)
 
     @field_validator("feedback_type")
     @classmethod
@@ -120,7 +120,7 @@ class CreateFeedbackRequest(BaseModel):
 
 
 class UpdateFeedbackVisibilityRequest(BaseModel):
-    visibility: str
+    visibility: str | None = Field(..., max_length=500)
 
     @field_validator("visibility")
     @classmethod
