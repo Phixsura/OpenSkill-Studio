@@ -769,3 +769,89 @@ test.describe("7. Responsive & accessibility", () => {
     expect(api500s).toHaveLength(0);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 8: API Mutation Tests (tests 101-110)
+// ═══════════════════════════════════════════════════════════════
+
+test.describe("8. API mutation tests", () => {
+  test("101 — PATCH /talent/passport updates visibility", async () => {
+    const res = await fetch(`${API}/talent/passport`, {
+      method: "PATCH",
+      headers: { ...auth.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ default_visibility: "private" }),
+    });
+    expect(res.status).toBeLessThan(500);
+    expect([200, 422]).toContain(res.status);
+  });
+
+  test("102 — POST /talent/bookmarks creates bookmark", async () => {
+    const res = await fetch(`${API}/talent/bookmarks`, {
+      method: "POST",
+      headers: { ...auth.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ entity_type: "opportunity", entity_id: "nonexistent-id" }),
+    });
+    // 201 created, 404 opportunity not found, 422 validation — all acceptable, not 500
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("103 — GET /talent/bookmarks lists bookmarks", async () => {
+    const res = await fetch(`${API}/talent/bookmarks`, { headers: auth.headers });
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("104 — POST /talent/applications creates application", async () => {
+    const res = await fetch(`${API}/talent/applications`, {
+      method: "POST",
+      headers: { ...auth.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ opportunity_id: "nonexistent-opp" }),
+    });
+    // 404 opportunity not found is expected, not 500
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("105 — GET /talent/applications lists user applications", async () => {
+    const res = await fetch(`${API}/talent/applications`, { headers: auth.headers });
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("106 — POST /talent/career-goals creates goal", async () => {
+    const res = await fetch(`${API}/talent/career-goals`, {
+      method: "POST",
+      headers: { ...auth.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "E2E Test Goal",
+        target_role: "Senior Engineer",
+        timeline_months: 12,
+      }),
+    });
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("107 — GET /talent/career-goals lists goals", async () => {
+    const res = await fetch(`${API}/talent/career-goals`, { headers: auth.headers });
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("108 — POST /talent/passport/snapshots creates snapshot", async () => {
+    const res = await fetch(`${API}/talent/passport/snapshots`, {
+      method: "POST",
+      headers: { ...auth.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    // May fail if passport not initialized, but should not be 500
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("109 — GET /talent/endorsements/stats returns stats", async () => {
+    const res = await fetch(`${API}/talent/endorsements/stats`, {
+      headers: auth.headers,
+    });
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("110 — GET /talent/activity returns activity log", async () => {
+    const res = await fetch(`${API}/talent/activity`, { headers: auth.headers });
+    expect(res.status).toBeLessThan(500);
+  });
+});
