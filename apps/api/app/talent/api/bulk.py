@@ -29,6 +29,8 @@ from app.talent.schemas.bulk import (
 from app.talent.schemas.capability import CapabilityResponse
 from app.talent.schemas.evidence import EvidenceResponse
 
+MAX_BATCH_SIZE = 500
+
 router = APIRouter(prefix="/talent", tags=["Talent — Bulk Operations"])
 
 # Transitions that only the candidate (applicant) may perform

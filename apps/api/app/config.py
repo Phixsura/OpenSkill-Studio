@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
 
     # Auth / JWT
-    jwt_secret: str = "dev-secret-change-me-in-production"
+    jwt_secret: str = "dev-secret-change-me-in-production"  # SECURITY: boot guard rejects in production
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
     # Concurrent-refresh grace: a just-rotated token re-presented within this

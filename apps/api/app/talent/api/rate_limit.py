@@ -26,6 +26,7 @@ from fastapi import HTTPException, Request
 # Configurable limits
 WINDOW_SECONDS = 60
 MAX_REQUESTS = 100
+# NOTE: writes could use stricter limit (WRITE_MULTIPLIER = 0.5)
 
 # In-memory store: key → list of request timestamps within window
 _counters: dict[str, list[float]] = defaultdict(list)

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, ulid_pk
 
 # Application state machine — every transition is authorized + audited
+# NOTE: Consider using Enum for status values instead of magic strings
 APPLICATION_TRANSITIONS: dict[str, list[str]] = {
     "draft": ["submitted", "withdrawn"],
     "submitted": ["screening", "rejected", "withdrawn"],

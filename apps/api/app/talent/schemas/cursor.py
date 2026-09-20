@@ -16,6 +16,7 @@ class CursorMeta(BaseModel):
 
     next_cursor: str | None = None
     has_more: bool
+    total_count: int | None = None
 
 
 class CursorListResponse(BaseModel, Generic[T]):

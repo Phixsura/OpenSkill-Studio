@@ -40,6 +40,9 @@ from app.talent.schemas.application import (
 from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 from app.talent.schemas.requests import CreateApplicationBody
 
+# NOTE: POST create endpoints should accept Idempotency-Key header
+# to prevent duplicate submissions on network retry.
+
 router = APIRouter(prefix="/talent", tags=["Talent — Applications"])
 
 # Transitions that only the candidate (applicant) may perform
