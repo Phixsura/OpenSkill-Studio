@@ -21,7 +21,6 @@ MAX_ACTIVE_GOALS = 5
 class CareerGoal(Base):
     __tablename__ = "talent_career_goals"
 
-
     def __repr__(self) -> str:
         return f"<CareerGoal {self.id}>"
 

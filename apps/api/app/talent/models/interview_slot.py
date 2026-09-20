@@ -19,7 +19,6 @@ class InterviewSlot(Base):
 
     __tablename__ = "talent_interview_slots"
 
-
     def __repr__(self) -> str:
         return f"<InterviewSlot {self.id}>"
 

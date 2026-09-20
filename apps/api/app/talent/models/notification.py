@@ -41,9 +41,9 @@ class NotificationPreference(Base):
 
     __tablename__ = "talent_notification_preferences"
 
-
     def __repr__(self) -> str:
         return f"<NotificationPreference {self.id}>"
+
     __table_args__ = (
         Index("ix_notif_pref_user", "user_id"),
         Index("ix_notif_pref_user_event", "user_id", "event_type", unique=True),
@@ -65,9 +65,9 @@ class TalentNotification(Base):
 
     __tablename__ = "talent_notifications"
 
-
     def __repr__(self) -> str:
         return f"<TalentNotification {self.id}>"
+
     __table_args__ = (
         Index("ix_notif_user_created", "user_id", "created_at"),
         Index("ix_notif_user_read", "user_id", "read_at"),

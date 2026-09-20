@@ -18,7 +18,6 @@ class OrgSigningKey(Base):
 
     __tablename__ = "talent_org_signing_keys"
 
-
     def __repr__(self) -> str:
         return f"<OrgSigningKey {self.id}>"
 

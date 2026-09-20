@@ -12,7 +12,6 @@ from app.models.base import Base, ulid_pk
 class KeyRole(Base):
     __tablename__ = "talent_key_roles"
 
-
     def __repr__(self) -> str:
         return f"<KeyRole {self.id}>"
 
@@ -39,7 +38,6 @@ class KeyRole(Base):
 
 class SuccessorNomination(Base):
     __tablename__ = "talent_successor_nominations"
-
 
     def __repr__(self) -> str:
         return f"<SuccessorNomination {self.id}>"

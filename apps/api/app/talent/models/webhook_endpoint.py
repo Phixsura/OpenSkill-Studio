@@ -12,7 +12,6 @@ from app.models.base import Base, ulid_pk
 class WebhookEndpointConfig(Base):
     __tablename__ = "talent_webhook_endpoints"
 
-
     def __repr__(self) -> str:
         return f"<WebhookEndpointConfig {self.id}>"
 
@@ -35,7 +34,6 @@ class WebhookEndpointConfig(Base):
 
 class WebhookDeliveryLog(Base):
     __tablename__ = "talent_webhook_delivery_log"
-
 
     def __repr__(self) -> str:
         return f"<WebhookDeliveryLog {self.id}>"

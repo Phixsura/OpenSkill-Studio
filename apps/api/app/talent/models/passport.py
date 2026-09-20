@@ -40,7 +40,6 @@ class SkillPassport(Base):
 
     __tablename__ = "skill_passports"
 
-
     def __repr__(self) -> str:
         return f"<SkillPassport {self.id}>"
 
@@ -80,7 +79,6 @@ class PassportSnapshot(Base):
     """Immutable point-in-time snapshot for external verification."""
 
     __tablename__ = "passport_snapshots"
-
 
     def __repr__(self) -> str:
         return f"<PassportSnapshot {self.id}>"

@@ -69,7 +69,6 @@ class CapabilityEvidence(Base):
 
     __tablename__ = "capability_evidence"
 
-
     def __repr__(self) -> str:
         return f"<CapabilityEvidence {self.id}>"
 

@@ -36,9 +36,9 @@ class SkillEndorsement(Base):
 
     __tablename__ = "talent_skill_endorsements"
 
-
     def __repr__(self) -> str:
         return f"<SkillEndorsement {self.id}>"
+
     __table_args__ = (
         Index("ix_endorse_user", "user_id"),
         Index("ix_endorse_endorser", "endorser_id"),

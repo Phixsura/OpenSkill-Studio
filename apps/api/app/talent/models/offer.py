@@ -12,7 +12,6 @@ from app.models.base import Base, ulid_pk
 class Offer(Base):
     __tablename__ = "talent_offers"
 
-
     def __repr__(self) -> str:
         return f"<Offer {self.id}>"
 

@@ -21,7 +21,6 @@ PATHWAY_STATUSES = frozenset({"active", "archived"})
 class CredentialPathway(Base):
     __tablename__ = "talent_credential_pathways"
 
-
     def __repr__(self) -> str:
         return f"<CredentialPathway {self.id}>"
 

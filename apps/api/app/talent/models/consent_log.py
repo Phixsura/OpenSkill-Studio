@@ -35,7 +35,6 @@ CONSENT_ACTIONS = frozenset({"granted", "revoked", "updated"})
 class ConsentLog(Base):
     __tablename__ = "talent_consent_log"
 
-
     def __repr__(self) -> str:
         return f"<ConsentLog {self.id}>"
 

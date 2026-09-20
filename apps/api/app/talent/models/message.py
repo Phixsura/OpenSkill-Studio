@@ -12,7 +12,6 @@ from app.models.base import Base, ulid_pk
 class ApplicationMessage(Base):
     __tablename__ = "talent_application_messages"
 
-
     def __repr__(self) -> str:
         return f"<ApplicationMessage {self.id}>"
 

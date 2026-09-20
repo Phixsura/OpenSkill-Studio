@@ -12,7 +12,6 @@ from app.models.base import Base, ulid_pk
 class OnboardingTemplate(Base):
     __tablename__ = "talent_onboarding_templates"
 
-
     def __repr__(self) -> str:
         return f"<OnboardingTemplate {self.id}>"
 
@@ -32,7 +31,6 @@ class OnboardingTemplate(Base):
 
 class OnboardingChecklist(Base):
     __tablename__ = "talent_onboarding_checklists"
-
 
     def __repr__(self) -> str:
         return f"<OnboardingChecklist {self.id}>"

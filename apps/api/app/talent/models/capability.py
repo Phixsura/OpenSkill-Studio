@@ -32,7 +32,6 @@ class Capability(Base):
 
     __tablename__ = "capabilities"
 
-
     def __repr__(self) -> str:
         return f"<Capability {self.id}>"
 
@@ -99,7 +98,6 @@ class CapabilityEdge(Base):
 
     __tablename__ = "capability_edges"
 
-
     def __repr__(self) -> str:
         return f"<CapabilityEdge {self.id}>"
 
@@ -148,7 +146,6 @@ class CapabilityMapping(Base):
     """Maps platform content to a capability with a contribution weight."""
 
     __tablename__ = "capability_mappings"
-
 
     def __repr__(self) -> str:
         return f"<CapabilityMapping {self.id}>"

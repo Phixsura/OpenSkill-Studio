@@ -20,7 +20,6 @@ class CapabilityScoreSnapshot(Base):
 
     __tablename__ = "capability_score_snapshots"
 
-
     def __repr__(self) -> str:
         return f"<CapabilityScoreSnapshot {self.id}>"
 

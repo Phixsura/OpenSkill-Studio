@@ -49,9 +49,9 @@ class TalentActivityLog(Base):
 
     __tablename__ = "talent_activity_log"
 
-
     def __repr__(self) -> str:
         return f"<TalentActivityLog {self.id}>"
+
     __table_args__ = (
         Index("ix_activity_user_created", "user_id", "created_at"),
         Index("ix_activity_action", "action_type"),
