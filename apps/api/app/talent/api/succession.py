@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import AnalyticsBody
+
 """Succession planning API."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,7 +20,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Succession Planning"])
 )
 async def create_key_role(
     org_id: str,
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -80,7 +82,7 @@ async def list_key_roles(
 )
 async def nominate_successor(
     role_id: str,
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

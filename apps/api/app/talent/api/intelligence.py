@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.models.user import User
 from app.schemas.base import DataResponse
+from app.talent.schemas.requests import AnalyticsBody
 from app.talent.services.workforce import WorkforceIntelligenceService
 
 
@@ -717,7 +718,7 @@ async def get_expiring_evidence(
     summary="Simulate Evidence Impact",
 )
 async def simulate_evidence_impact(
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -762,7 +763,7 @@ async def get_scoring_calibration(
     summary="Validate Scoring Calibration",
 )
 async def validate_scoring_calibration(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate proposed scoring calibration changes (gap #28)."""
@@ -809,7 +810,7 @@ async def get_interview_kit(
     summary="Validate Pipeline",
 )
 async def validate_pipeline(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate custom pipeline stages (gap #121)."""
@@ -823,7 +824,7 @@ async def validate_pipeline(
     summary="Evaluate Pool Rules Endpoint",
 )
 async def evaluate_pool_rules_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Evaluate talent pool automation rules (gap #122)."""
@@ -837,7 +838,7 @@ async def evaluate_pool_rules_endpoint(
     summary="Compute Adverse Impact Endpoint",
 )
 async def compute_adverse_impact_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Compute adverse impact ratio (gap #125)."""
@@ -856,7 +857,7 @@ async def compute_adverse_impact_endpoint(
     summary="Validate Requisition Endpoint",
 )
 async def validate_requisition_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate job requisition for approval (gap #128)."""
@@ -873,7 +874,7 @@ async def validate_requisition_endpoint(
     summary="Validate Candidate Availability",
 )
 async def validate_candidate_availability(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate candidate availability preferences (gap #132)."""
@@ -887,7 +888,7 @@ async def validate_candidate_availability(
     summary="Validate Salary",
 )
 async def validate_salary(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate salary expectation (gap #135)."""
@@ -929,7 +930,7 @@ async def get_achievements(
     summary="Compute Mentorship Match",
 )
 async def compute_mentorship_match(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Compute mentorship compatibility (gap #140)."""
@@ -960,7 +961,7 @@ async def list_email_templates_endpoint(
     summary="Render Email Template Endpoint",
 )
 async def render_email_template_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Render an email template with context (gap #146)."""
@@ -988,7 +989,7 @@ async def list_message_templates_endpoint(
     summary="Validate Bulk Message Endpoint",
 )
 async def validate_bulk_message_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate bulk message request (gap #153)."""
@@ -1005,7 +1006,7 @@ async def validate_bulk_message_endpoint(
     summary="Validate Report",
 )
 async def validate_report(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate custom report configuration (gap #156)."""
@@ -1019,7 +1020,7 @@ async def validate_report(
     summary="Compare Benchmark",
 )
 async def compare_benchmark(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Compare a metric against industry benchmarks (gap #165)."""
@@ -1035,7 +1036,7 @@ async def compare_benchmark(
     summary="Evaluate Kpi Endpoint",
 )
 async def evaluate_kpi_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Evaluate a KPI against target (gap #169)."""
@@ -1052,7 +1053,7 @@ async def evaluate_kpi_endpoint(
     summary="Generate Api Key Endpoint",
 )
 async def generate_api_key_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -1080,7 +1081,7 @@ async def generate_api_key_endpoint(
     summary="Validate Hris Employee Endpoint",
 )
 async def validate_hris_employee_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate employee data against HRIS schema (gap #173)."""
@@ -1094,7 +1095,7 @@ async def validate_hris_employee_endpoint(
     summary="Validate Ats Config Endpoint",
 )
 async def validate_ats_config_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate ATS connector configuration (gap #174)."""
@@ -1164,7 +1165,7 @@ async def get_api_docs_metadata(
     summary="Classify Field",
 )
 async def classify_field(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Get data classification for a field (gap #183)."""
@@ -1177,7 +1178,7 @@ async def classify_field(
     summary="Validate Ip List",
 )
 async def validate_ip_list(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate IP allowlist entries (gap #184)."""
@@ -1191,7 +1192,7 @@ async def validate_ip_list(
     summary="Check Role Escalation",
 )
 async def check_role_escalation(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Check for role escalation (gap #186)."""

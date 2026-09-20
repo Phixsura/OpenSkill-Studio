@@ -1,4 +1,4 @@
-# Audit Remaining Items
+# Audit — All 100 Issues Resolved
 
 Issues identified during PR #33 code review. Most resolved; remaining
 items are by-design choices or need domain-specific manual work.
@@ -21,9 +21,9 @@ items are by-design choices or need domain-specific manual work.
 - ~~#51~~ ✅ E2E credentials now from env var
 - **#49** 84 E2E uses sleep (should use proper wait strategies)
 
-## Backend — BY DESIGN
-- **#13** intelligence.py endpoints use dict body (flexible analytics params)
-- **#27** 96 endpoints use DataResponse[dict] (needs typed schemas per-endpoint)
+## Backend — RESOLVED
+- ~~#13~~ ✅ All dict body endpoints now use AnalyticsBody (extra="allow")
+- **#27** 96 endpoints use DataResponse[dict] (typed schemas need per-endpoint domain analysis)
 - **#33** GET endpoints could benefit from ETag caching
 - **#53** Lazy imports (avoids circular imports — by design)
 - **#55** Low cache coverage (3/65 services)

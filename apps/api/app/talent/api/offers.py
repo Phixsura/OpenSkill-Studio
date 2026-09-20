@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import AnalyticsBody
+
 """Offer management API."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,7 +22,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Offers"])
 )
 async def create_offer(
     app_id: str,
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -117,7 +119,7 @@ async def accept_offer(
 )
 async def decline_offer(
     offer_id: str,
-    body: dict | None = None,
+    body: AnalyticsBody | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

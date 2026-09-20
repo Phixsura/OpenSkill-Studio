@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import AnalyticsBody
+
 """Onboarding workflow API."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -34,7 +36,7 @@ async def _check_placement_access(
 )
 async def create_onboarding_template(
     org_id: str,
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -87,7 +89,7 @@ async def list_onboarding_templates(
 )
 async def create_onboarding_checklist(
     placement_id: str,
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

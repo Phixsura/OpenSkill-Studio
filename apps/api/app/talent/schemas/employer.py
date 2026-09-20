@@ -27,7 +27,7 @@ class EmployerProfileResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "json_schema_extra": {"examples": [{}]}}
 
 
 OPPORTUNITY_TYPES = frozenset(

@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import AnalyticsBody
+
 """Interview scheduling API — time slot proposals, acceptance, and .ics calendar invites.
 
 Authorization:
@@ -274,7 +276,7 @@ async def get_rubric_template_endpoint(
     summary="Validate Availability Endpoint",
 )
 async def validate_availability_endpoint(
-    body: dict,
+    body: AnalyticsBody,
     user: User = Depends(get_current_user),
 ):
     """Validate interviewer availability slots."""

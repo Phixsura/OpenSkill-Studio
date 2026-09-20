@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import AnalyticsBody
+
 """In-app messaging API."""
 
 from datetime import UTC, datetime
@@ -40,7 +42,7 @@ async def _check_message_access(
 )
 async def send_message(
     app_id: str,
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

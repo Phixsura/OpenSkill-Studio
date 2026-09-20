@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import AnalyticsBody
+
 """Portfolio showcase API."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,7 +23,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Portfolio"])
     summary="Create Portfolio Item",
 )
 async def create_portfolio_item(
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

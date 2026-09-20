@@ -59,3 +59,8 @@ class SuccessionPlanBody(BaseModel):
     org_id: str = Field(..., min_length=1, max_length=26)
     required_capabilities: list[str] = Field(default_factory=list, max_length=50)
     timeline_months: int = Field(default=12, ge=1, le=120)
+
+
+class AnalyticsBody(BaseModel):
+    """Generic analytics request body — accepts flexible parameters."""
+    model_config = {"extra": "allow"}  # Allow additional fields for analytics queries

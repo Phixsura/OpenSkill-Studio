@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import AnalyticsBody
+
 """Skill Passport API — own passport, snapshots, public verification, W3C VC export."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -349,7 +351,7 @@ async def get_verification_badge(
     description="Compare two passport snapshots to show skill progression over time.",
 )
 async def compare_snapshots(
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

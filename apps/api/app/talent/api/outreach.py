@@ -1,3 +1,4 @@
+
 """Outreach / invitation records API (§39).
 
 Allows org admins to send outreach invitations to talent pool members,
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.schemas.base import DataResponse
+from app.talent.schemas.requests import AnalyticsBody
 
 router = APIRouter(prefix="/talent", tags=["Talent — Outreach"])
 
@@ -49,7 +51,7 @@ async def list_outreach(
     description="Send an outreach invitation to a user. Requires the target user to be in a talent pool you manage.",
 )
 async def send_outreach(
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -124,7 +126,7 @@ async def send_outreach(
 )
 async def respond_outreach(
     outreach_id: str,
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

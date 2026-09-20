@@ -45,7 +45,7 @@ class PassportResponse(BaseModel):
     visible_fields: list[str]
     capabilities: list[dict] | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "json_schema_extra": {"examples": [{}]}}
 
 
 class CreateSnapshotRequest(BaseModel):

@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import AnalyticsBody
+
 """Webhook endpoint management API."""
 
 import secrets
@@ -24,7 +26,7 @@ router = APIRouter(prefix="/talent", tags=["Talent — Webhooks"])
 )
 async def register_webhook(
     org_id: str,
-    body: dict,
+    body: AnalyticsBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
