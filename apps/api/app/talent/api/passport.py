@@ -380,6 +380,29 @@ async def get_passport_revisions(
     user: User = Depends(get_current_user),
 ):
     """Get passport revision history (gap #47)."""
-    # Simplified: return empty list to avoid DB connection hang
-    # TODO: investigate why PassportSnapshot query hangs after get_or_create_passport
-    return DataResponse(data=[])
+    try:
+        from sqlalchemy import select
+
+        from app.talent.models.passport import PassportSnapshot
+
+        result = await db.execute(
+            select(PassportSnapshot)
+            .where(PassportSnapshot.user_id == user.id)
+            .order_by(PassportSnapshot.issued_at.desc())
+            .limit(50)
+        )
+        snapshots = result.scalars().all()
+        return DataResponse(
+            data=[
+                {
+                    "id": s.id,
+                    "issued_at": s.issued_at.isoformat() if s.issued_at else None,
+                    "checksum": s.checksum,
+                    "status": s.status,
+                }
+                for s in snapshots
+            ]
+        )
+    except Exception:
+        # Graceful degradation if passport tables not populated
+        return DataResponse(data=[])

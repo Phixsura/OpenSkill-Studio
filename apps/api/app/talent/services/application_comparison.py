@@ -118,16 +118,25 @@ class ApplicationComparisonService:
 
             interview_ratings: dict[str, float | None] = {}
             if stage_ids:
-                for stage_id in stage_ids:
-                    stage = await self.db.get(InterviewStage, stage_id)
-                    if not stage:
-                        continue
-                    rating_q = select(func.avg(InterviewScorecard.overall_rating)).where(
-                        InterviewScorecard.interview_stage_id == stage_id,
+                # Single query instead of N+1: join stages with avg scorecard rating
+                rating_q = (
+                    select(
+                        InterviewStage.stage_type,
+                        func.avg(InterviewScorecard.overall_rating),
+                    )
+                    .join(
+                        InterviewScorecard,
+                        InterviewScorecard.interview_stage_id == InterviewStage.id,
+                    )
+                    .where(
+                        InterviewStage.id.in_(stage_ids),
                         InterviewScorecard.submitted_at.isnot(None),
                     )
-                    avg_rating = (await self.db.execute(rating_q)).scalar()
-                    interview_ratings[stage.stage_type] = (
+                    .group_by(InterviewStage.stage_type)
+                )
+                rating_rows = (await self.db.execute(rating_q)).all()
+                for stage_type, avg_rating in rating_rows:
+                    interview_ratings[stage_type] = (
                         round(float(avg_rating), 2) if avg_rating else None
                     )
 

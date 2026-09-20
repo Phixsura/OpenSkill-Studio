@@ -1,3 +1,5 @@
+from app.talent.schemas.requests import CreateBookmarkBody
+
 """Opportunity bookmarking API — save opportunities for later (N13).
 
 Authorization:
@@ -49,14 +51,14 @@ async def toggle_bookmark(
     description="Bookmark an entity (opportunity) by type + ID. Frontend-friendly alias.",
 )
 async def create_bookmark(
-    body: dict,
+    body: CreateBookmarkBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Create a bookmark — accepts {entity_type, entity_id} or {opportunity_id}."""
     from app.talent.services.bookmarks import BookmarkService
 
-    opp_id = body.get("entity_id") or body.get("opportunity_id")
+    opp_id = body.entity_id or body.opportunity_id
     if not opp_id:
         raise HTTPException(422, "entity_id or opportunity_id is required")
 

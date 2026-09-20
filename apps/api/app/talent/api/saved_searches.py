@@ -103,7 +103,7 @@ async def create_my_saved_search(
     from app.models.organization import OrgMember
 
     # Derive org_id: use body.org_id if provided (with membership check), else user's first org
-    org_id = body.get("org_id")
+    org_id = body.org_id
     if org_id:
         # IDOR guard: verify the user is actually a member of the specified org
         membership = (

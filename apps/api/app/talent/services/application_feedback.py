@@ -72,7 +72,7 @@ class ApplicationFeedbackService:
         q = select(ApplicationFeedback).where(ApplicationFeedback.application_id == application_id)
         if not is_employer:
             q = q.where(ApplicationFeedback.visibility == "shared_with_candidate")
-        q = q.order_by(ApplicationFeedback.created_at.desc())
+        q = q.order_by(ApplicationFeedback.created_at.desc()).limit(200)
         result = await self.db.execute(q)
         return list(result.scalars().all())
 

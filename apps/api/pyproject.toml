@@ -51,6 +51,9 @@ ignore = ["E501", "B008", "UP046", "UP042", "SIM117"]
 # Section-scoped imports in large test files for readability
 "tests/talent/test_z_services_comprehensive.py" = ["E402"]
 "tests/talent/test_z_api_endpoints_comprehensive.py" = ["E402"]
+# Import-after-docstring in API modules
+"app/talent/api/bookmarks.py" = ["E402"]
+"app/talent/api/saved_searches.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

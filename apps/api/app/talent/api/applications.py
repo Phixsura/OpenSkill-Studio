@@ -38,6 +38,7 @@ from app.talent.schemas.application import (
     UpdateInterviewRequest,
 )
 from app.talent.schemas.cursor import CursorListResponse, CursorMeta
+from app.talent.schemas.requests import CreateApplicationBody
 
 router = APIRouter(prefix="/talent", tags=["Talent — Applications"])
 
@@ -70,14 +71,12 @@ async def _load_app_and_opp(db: AsyncSession, app_id: str) -> tuple[Application,
     description="Submit an application to an opportunity. Frontend-friendly alias that accepts opportunity_id in the body.",
 )
 async def create_application(
-    body: dict,
+    body: CreateApplicationBody,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Create application — accepts {opportunity_id} in body."""
-    opp_id = body.get("opportunity_id")
-    if not opp_id:
-        raise HTTPException(422, "opportunity_id is required")
+    opp_id = body.opportunity_id
 
     opp = await db.get(Opportunity, opp_id)
     if not opp or opp.status != "open":
@@ -291,9 +290,9 @@ async def transition_application(
             raise HTTPException(404, "Application not found")
     elif body.status in _EMPLOYER_TRANSITIONS:
         # Only employer org members can screen/interview/offer/hire/reject.
-        # TODO: tighten to HIRING_MANAGER+ once employer role assignment
-        # UI is in place (OrgRole.HIRING_MANAGER, OrgRole.ADMIN, OrgRole.OWNER).
-        # Currently any org member can perform these transitions.
+        # NOTE: currently any org member can perform employer transitions.
+        # Future enhancement: restrict to HIRING_MANAGER/ADMIN/OWNER roles
+        # once the employer role assignment UI is in place.
         await require_org_member(opp.employer_org_id, user, db)
     elif body.status in _EITHER_TRANSITIONS:
         # submitted: must be the applicant
