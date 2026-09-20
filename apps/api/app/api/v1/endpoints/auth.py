@@ -17,6 +17,10 @@ from app.schemas.base import DataResponse
 from app.schemas.user import AuthResponse, UpdateProfileRequest, UserResponse
 from app.services.auth import AuthService
 
+# NOTE: Account lockout after repeated failures should be implemented
+# via Redis counter (increment on 401, reset on success, block at threshold)
+MAX_LOGIN_ATTEMPTS = 10  # threshold — enforcement pending Redis integration
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 COOKIE_OPTS = {

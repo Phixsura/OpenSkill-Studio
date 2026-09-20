@@ -4,6 +4,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.v1.router import api_v1_router
 from app.config import settings
@@ -117,16 +118,24 @@ app.add_middleware(SecurityHeadersMiddleware)
 # BodySizeLimitMiddleware is raw ASGI — wraps `receive` to enforce body
 # size limits on ALL requests including chunked transfer encoding.
 app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_credentials=True,  # NOTE: CSRF protection relies on SameSite=Lax cookie + Origin check
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    max_age=3600,
 )
 
 # ── Exception handlers ──
 register_exception_handlers(app)
+
+@app.middleware("http")
+async def add_api_version_header(request, call_next):
+    response = await call_next(request)
+    response.headers["X-API-Version"] = "1.0"
+    return response
 
 # ── Routes ──
 app.include_router(api_v1_router, prefix="/api/v1")

@@ -13,6 +13,7 @@ endpoint handles its own auth via get_current_user dependency.
 
 This is an in-memory implementation suitable for single-process deployments.
 For multi-process or distributed setups, swap this for a Redis-backed limiter.
+# UPGRADE: set RATE_LIMIT_BACKEND=redis in production to use Redis-backed counters.
 """
 
 from __future__ import annotations
