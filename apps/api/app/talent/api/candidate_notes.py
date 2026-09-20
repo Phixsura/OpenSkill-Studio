@@ -139,7 +139,9 @@ async def update_note(
     return DataResponse(data=NoteResponse.model_validate(note))
 
 
-@router.delete("/candidate-notes/{note_id}", status_code=204,
+@router.delete(
+    "/candidate-notes/{note_id}",
+    status_code=204,
     summary="Delete Note",
 )
 async def delete_note(

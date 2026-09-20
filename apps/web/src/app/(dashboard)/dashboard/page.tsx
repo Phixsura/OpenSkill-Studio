@@ -37,12 +37,20 @@ interface Overview {
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
 
-  const { data: orgsData, isError, isLoading } = useQuery({
+  const {
+    data: orgsData,
+    isError,
+    isLoading,
+  } = useQuery({
     queryKey: ["my-orgs"],
     queryFn: () => apiWithAuth<{ data: OrgItem[] }>("/orgs"),
   });
 
-  const { data: overviewData, isError, isLoading } = useQuery({
+  const {
+    data: overviewData,
+    isError: _isErr2,
+    isLoading: _isLoad2,
+  } = useQuery({
     queryKey: ["my-overview"],
     queryFn: () => apiWithAuth<{ data: Overview }>("/me/overview"),
   });
@@ -61,9 +69,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold">
-          Welcome, {user?.display_name ?? "User"}
-        </h1>
+        <h1 className="text-3xl font-bold">Welcome, {user?.display_name ?? "User"}</h1>
         <p className="mt-1 text-[hsl(var(--muted-foreground))]">
           Here&apos;s an overview of your OpenSkill Studio workspace.
         </p>
@@ -86,8 +92,8 @@ export default function DashboardPage() {
           {(ov?.peer_assessments_pending ?? 0) > 0 && (
             <div className="flex items-center justify-between rounded-lg border p-4">
               <p className="text-sm">
-                🤝 <span className="font-semibold">{ov?.peer_assessments_pending}</span> peer
-                review{(ov?.peer_assessments_pending ?? 0) !== 1 ? "s" : ""} assigned to you
+                🤝 <span className="font-semibold">{ov?.peer_assessments_pending}</span> peer review
+                {(ov?.peer_assessments_pending ?? 0) !== 1 ? "s" : ""} assigned to you
               </p>
             </div>
           )}
@@ -164,7 +170,9 @@ export default function DashboardPage() {
                   <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 capitalize">
                     {org.role}
                   </span>
-                  <span>{org.member_count} member{org.member_count !== 1 ? "s" : ""}</span>
+                  <span>
+                    {org.member_count} member{org.member_count !== 1 ? "s" : ""}
+                  </span>
                 </div>
               </Link>
             ))}

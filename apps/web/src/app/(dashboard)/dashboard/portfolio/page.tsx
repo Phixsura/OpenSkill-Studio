@@ -34,18 +34,30 @@ interface SkillBadge {
 }
 
 export default function PortfolioPage() {
-  const { data: profileData, isError, isLoading } = useQuery({
+  const {
+    data: profileData,
+    isError,
+    isLoading,
+  } = useQuery({
     queryKey: ["portfolio-profile"],
     queryFn: () => apiWithAuth<{ data: ProfileData }>("/portfolio/profile"),
   });
 
-  const { data: itemsData, isError, isLoading } = useQuery({
+  const {
+    data: itemsData,
+    isError: _isErr2,
+    isLoading: _isLoad2,
+  } = useQuery({
     queryKey: ["portfolio-items"],
     queryFn: () => apiWithAuth<{ data: PortfolioItem[] }>("/portfolio/items"),
   });
 
   const queryClient = useQueryClient();
-  const { data: badgesData, isError, isLoading } = useQuery({
+  const {
+    data: badgesData,
+    isError: _isErr3,
+    isLoading: _isLoad3,
+  } = useQuery({
     queryKey: ["portfolio-badges"],
     queryFn: () => apiWithAuth<{ data: SkillBadge[] }>("/portfolio/badges"),
   });
@@ -61,14 +73,12 @@ export default function PortfolioPage() {
   });
 
   const deleteItem = useMutation({
-    mutationFn: (id: string) =>
-      apiWithAuth(`/talent/portfolio/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => apiWithAuth(`/talent/portfolio/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       toast.success("Item deleted");
       queryClient.invalidateQueries({ queryKey: ["portfolio-items"] });
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Failed to delete item"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to delete item"),
   });
 
   const reorderItem = useMutation({
@@ -78,8 +88,7 @@ export default function PortfolioPage() {
         body: JSON.stringify({ sort_order }),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["portfolio-items"] }),
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Failed to reorder"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to reorder"),
   });
 
   const profile = profileData?.data;

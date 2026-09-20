@@ -220,7 +220,9 @@ async def update_saved_search(
     return DataResponse(data=SavedSearchResponse.model_validate(updated))
 
 
-@router.delete("/saved-searches/{search_id}", status_code=204,
+@router.delete(
+    "/saved-searches/{search_id}",
+    status_code=204,
     summary="Delete Saved Search",
 )
 async def delete_saved_search(

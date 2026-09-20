@@ -44,12 +44,15 @@ export default function PeerAssessPage() {
 
   const { data: projectData, isLoading } = useQuery({
     queryKey: ["project", projectId],
-    queryFn: () =>
-      apiWithAuth<{ data: ProjectDetail }>(`/orgs/${orgId}/projects/${projectId}`),
+    queryFn: () => apiWithAuth<{ data: ProjectDetail }>(`/orgs/${orgId}/projects/${projectId}`),
   });
   const project = projectData?.data;
 
-  const { data: subData, isError, isLoading } = useQuery({
+  const {
+    data: subData,
+    isError,
+    isLoading: _isLoad2,
+  } = useQuery({
     queryKey: ["peer-sub", submissionId],
     enabled: !!submissionId,
     queryFn: () =>
@@ -117,8 +120,8 @@ export default function PeerAssessPage() {
       <div>
         <h1 className="text-2xl font-bold">Peer Review</h1>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-          Review this submission against the rubric. Be specific and constructive — feedback is
-          how everyone improves.
+          Review this submission against the rubric. Be specific and constructive — feedback is how
+          everyone improves.
         </p>
       </div>
 
@@ -132,9 +135,7 @@ export default function PeerAssessPage() {
         <div className="mt-3 space-y-3">
           {[...latestByDeliverable.values()].map((item) => (
             <div key={item.id} className="rounded-lg border p-4">
-              {item.file_name && (
-                <p className="mb-2 text-sm font-medium">{item.file_name}</p>
-              )}
+              {item.file_name && <p className="mb-2 text-sm font-medium">{item.file_name}</p>}
               {item.type === "prompt" ? (
                 <PromptDisplay content={item.content} />
               ) : item.type === "file" ? (
@@ -174,9 +175,7 @@ export default function PeerAssessPage() {
                   max={r.max_score}
                   className="w-20 rounded-md border bg-transparent px-2 py-1 text-right text-sm"
                   value={scores[r.criterion] ?? ""}
-                  onChange={(e) =>
-                    setScores((s) => ({ ...s, [r.criterion]: e.target.value }))
-                  }
+                  onChange={(e) => setScores((s) => ({ ...s, [r.criterion]: e.target.value }))}
                 />
                 <span className="text-[hsl(var(--muted-foreground))]">/ {r.max_score}</span>
               </div>

@@ -19,7 +19,10 @@ from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 router = APIRouter(prefix="/talent", tags=["Talent — Portfolio"])
 
 
-@router.post("/portfolio", response_model=DataResponse[dict], status_code=201,
+@router.post(
+    "/portfolio",
+    response_model=DataResponse[dict],
+    status_code=201,
     summary="Create Portfolio Item",
 )
 async def create_portfolio_item(
@@ -62,7 +65,9 @@ async def create_portfolio_item(
     )
 
 
-@router.get("/portfolio", response_model=CursorListResponse[dict],
+@router.get(
+    "/portfolio",
+    response_model=CursorListResponse[dict],
     summary="List Portfolio",
 )
 async def list_portfolio(
@@ -100,7 +105,9 @@ async def list_portfolio(
     )
 
 
-@router.get("/portfolio/quality", response_model=DataResponse[dict],
+@router.get(
+    "/portfolio/quality",
+    response_model=DataResponse[dict],
     summary="Get Portfolio Quality",
 )
 async def get_portfolio_quality(
@@ -137,7 +144,9 @@ async def get_portfolio_quality(
     return DataResponse(data=dataclasses.asdict(quality))
 
 
-@router.delete("/portfolio/{item_id}", response_model=DataResponse[dict],
+@router.delete(
+    "/portfolio/{item_id}",
+    response_model=DataResponse[dict],
     summary="Delete Portfolio Item",
 )
 async def delete_portfolio_item(

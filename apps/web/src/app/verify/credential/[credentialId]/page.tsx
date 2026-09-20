@@ -26,10 +26,10 @@ export default function VerifyCredentialPage() {
     if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-[hsl(var(--muted-foreground))]">Verifying credential…</div>
-      </div>
-    );
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="text-[hsl(var(--muted-foreground))]">Verifying credential…</div>
+    </div>
+  );
 
   if (error || !data?.data)
     return (
@@ -44,7 +44,7 @@ export default function VerifyCredentialPage() {
       </div>
     );
 
-  const cred = data.data;
+  const cred = data!.data;
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
       <div className="mx-auto max-w-2xl px-4 py-12">
@@ -75,13 +75,13 @@ export default function VerifyCredentialPage() {
             {cred.issued_at && (
               <div>
                 <p className="text-sm text-[hsl(var(--muted-foreground))]">Issued</p>
-                <p className="font-medium">{new Date(cred.issued_at).toLocaleDateString()}</p>
+                <p className="font-medium">{new Date(cred.issued_at!).toLocaleDateString()}</p>
               </div>
             )}
             {cred.expires_at && (
               <div>
                 <p className="text-sm text-[hsl(var(--muted-foreground))]">Expires</p>
-                <p className="font-medium">{new Date(cred.expires_at).toLocaleDateString()}</p>
+                <p className="font-medium">{new Date(cred.expires_at!).toLocaleDateString()}</p>
               </div>
             )}
           </div>

@@ -204,7 +204,8 @@ async def cancel_slot(
     return DataResponse(data=InterviewSlotResponse.model_validate(result))
 
 
-@router.get("/interview-slots/{slot_id}/calendar.ics",
+@router.get(
+    "/interview-slots/{slot_id}/calendar.ics",
     response_model=DataResponse[dict],
     summary="Download Calendar Invite",
 )
@@ -241,7 +242,9 @@ async def download_calendar_invite(
 # ---- Gap #51: Question bank ----
 
 
-@router.get("/question-bank/templates", response_model=DataResponse[list[str]],
+@router.get(
+    "/question-bank/templates",
+    response_model=DataResponse[list[str]],
     summary="List Rubric Template Names",
 )
 async def list_rubric_template_names(
@@ -253,7 +256,9 @@ async def list_rubric_template_names(
     return DataResponse(data=list_rubric_templates())
 
 
-@router.get("/question-bank/templates/{name}", response_model=DataResponse[dict],
+@router.get(
+    "/question-bank/templates/{name}",
+    response_model=DataResponse[dict],
     summary="Get Rubric Template Endpoint",
 )
 async def get_rubric_template_endpoint(
@@ -272,7 +277,9 @@ async def get_rubric_template_endpoint(
 # ---- Gap #97: Availability validation ----
 
 
-@router.post("/interviewer-availability/validate", response_model=DataResponse[dict],
+@router.post(
+    "/interviewer-availability/validate",
+    response_model=DataResponse[dict],
     summary="Validate Availability Endpoint",
 )
 async def validate_availability_endpoint(
@@ -289,7 +296,9 @@ async def validate_availability_endpoint(
 # ---- Gap #98: Booking link ----
 
 
-@router.get("/interviews/{interview_id}/booking-link", response_model=DataResponse[dict],
+@router.get(
+    "/interviews/{interview_id}/booking-link",
+    response_model=DataResponse[dict],
     summary="Get Booking Link",
 )
 async def get_booking_link(
@@ -305,7 +314,9 @@ async def get_booking_link(
 # ---- Gap #99: Reminders ----
 
 
-@router.get("/interviews/{interview_id}/reminders", response_model=DataResponse[list[dict]],
+@router.get(
+    "/interviews/{interview_id}/reminders",
+    response_model=DataResponse[list[dict]],
     summary="Get Interview Reminders",
 )
 async def get_interview_reminders(
@@ -345,7 +356,9 @@ async def get_interview_reminders(
 # ---- Gap #59: Credential renewal ----
 
 
-@router.get("/credentials/{credential_id}/renewal-eligibility", response_model=DataResponse[dict],
+@router.get(
+    "/credentials/{credential_id}/renewal-eligibility",
+    response_model=DataResponse[dict],
     summary="Check Credential Renewal",
 )
 async def check_credential_renewal(

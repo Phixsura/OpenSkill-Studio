@@ -92,5 +92,10 @@ class InterviewScorecard(Base):
     __table_args__ = (
         Index("ix_scorecard_interview", "interview_stage_id"),
         Index("ix_scorecard_interviewer", "interviewer_id"),
-        Index("uq_scorecard_interview_interviewer", "interview_stage_id", "interviewer_id", unique=True),
+        Index(
+            "uq_scorecard_interview_interviewer",
+            "interview_stage_id",
+            "interviewer_id",
+            unique=True,
+        ),
     )

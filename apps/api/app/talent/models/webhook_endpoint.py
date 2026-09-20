@@ -13,7 +13,9 @@ class WebhookEndpointConfig(Base):
     __tablename__ = "talent_webhook_endpoints"
 
     id: Mapped[str] = ulid_pk()
-    org_id: Mapped[str] = mapped_column(String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    org_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
     url: Mapped[str] = mapped_column(String(500))
     secret: Mapped[str] = mapped_column(String(200))
     event_types: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")

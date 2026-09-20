@@ -36,9 +36,7 @@ const EDITABLE_FIELDS: { key: string; label: string; kind: "text" | "number" | "
 
 function ProvenanceBadge({ source }: { source?: string }) {
   if (source === "extracted") {
-    if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
-
-  return (
+    return (
       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
         AI extracted
       </span>
@@ -95,7 +93,10 @@ export default function RequirementProfilePage() {
         } else if (f.kind === "number") {
           edits[f.key] = parseInt(raw, 10);
         } else if (f.kind === "list") {
-          edits[f.key] = raw.split(",").map((s) => s.trim()).filter(Boolean);
+          edits[f.key] = raw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
         } else {
           edits[f.key] = raw;
         }
@@ -109,8 +110,7 @@ export default function RequirementProfilePage() {
       toast.success("Profile updated");
       queryClient.invalidateQueries({ queryKey: ["requirement-profile", orgId, profileId] });
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Failed to save"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to save"),
   });
 
   const confirmMutation = useMutation({
@@ -122,8 +122,7 @@ export default function RequirementProfilePage() {
       toast.success("Profile confirmed");
       queryClient.invalidateQueries({ queryKey: ["requirement-profile", orgId, profileId] });
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Failed to confirm"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to confirm"),
   });
 
   if (isLoading || !profile) {
@@ -153,8 +152,7 @@ export default function RequirementProfilePage() {
 
       {unmatched.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          Unrecognized mentions (not mapped to any known value):{" "}
-          {unmatched.join(", ")}
+          Unrecognized mentions (not mapped to any known value): {unmatched.join(", ")}
         </div>
       )}
 
@@ -186,10 +184,7 @@ export default function RequirementProfilePage() {
             >
               {saveMutation.isPending ? "Saving..." : "Save Edits"}
             </Button>
-            <Button
-              onClick={() => confirmMutation.mutate()}
-              disabled={confirmMutation.isPending}
-            >
+            <Button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}>
               {confirmMutation.isPending ? "Confirming..." : "Confirm Profile"}
             </Button>
           </div>
@@ -209,9 +204,7 @@ export default function RequirementProfilePage() {
 
       {profile.raw_request && (
         <details className="rounded-lg border p-4">
-          <summary className="cursor-pointer text-sm font-medium">
-            Original request
-          </summary>
+          <summary className="cursor-pointer text-sm font-medium">Original request</summary>
           <p className="mt-2 whitespace-pre-wrap text-sm text-[hsl(var(--muted-foreground))]">
             {profile.raw_request}
           </p>

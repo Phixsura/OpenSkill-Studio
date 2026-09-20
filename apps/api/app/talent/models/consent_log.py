@@ -36,7 +36,9 @@ class ConsentLog(Base):
     __tablename__ = "talent_consent_log"
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     consent_type: Mapped[str] = mapped_column(String(50), index=True)
     action: Mapped[str] = mapped_column(String(20))
     details: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")

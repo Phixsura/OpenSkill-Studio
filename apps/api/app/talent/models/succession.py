@@ -13,7 +13,9 @@ class KeyRole(Base):
     __tablename__ = "talent_key_roles"
 
     id: Mapped[str] = ulid_pk()
-    org_id: Mapped[str] = mapped_column(String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    org_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     required_capabilities: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
@@ -38,7 +40,9 @@ class SuccessorNomination(Base):
     key_role_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("talent_key_roles.id", ondelete="CASCADE"), index=True
     )
-    candidate_user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    candidate_user_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     readiness: Mapped[str] = mapped_column(String(30), default="not_assessed")
     capability_match: Mapped[float | None] = mapped_column(nullable=True)
     gaps: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")

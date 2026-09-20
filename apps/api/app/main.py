@@ -131,11 +131,13 @@ app.add_middleware(
 # ── Exception handlers ──
 register_exception_handlers(app)
 
+
 @app.middleware("http")
 async def add_api_version_header(request, call_next):
     response = await call_next(request)
     response.headers["X-API-Version"] = "1.0"
     return response
+
 
 # ── Observability ──
 # NOTE: Add OpenTelemetry or Prometheus metrics middleware for production

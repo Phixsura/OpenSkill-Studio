@@ -52,8 +52,6 @@ const SEVERITY_STYLES: Record<string, string> = {
 };
 
 function SeverityBadge({ severity }: { severity: string }) {
-  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
-
   return (
     <span
       className={cn(
@@ -136,12 +134,7 @@ function DemandSupplyChart({ gaps }: { gaps: GapItem[] }) {
         >
           <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
           <XAxis type="number" tick={{ fontSize: 11 }} />
-          <YAxis
-            type="category"
-            dataKey="name"
-            width={120}
-            tick={{ fontSize: 11 }}
-          />
+          <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
           <Tooltip content={<DemandSupplyTooltip />} />
           <Legend wrapperStyle={{ fontSize: 12 }} />
           <Bar dataKey="Demand" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={14} />
@@ -196,12 +189,7 @@ function PipelineFunnel({ placements }: { placements: PlacementAnalytics }) {
         >
           <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
           <XAxis type="number" tick={{ fontSize: 11 }} />
-          <YAxis
-            type="category"
-            dataKey="stage"
-            width={80}
-            tick={{ fontSize: 11 }}
-          />
+          <YAxis type="category" dataKey="stage" width={80} tick={{ fontSize: 11 }} />
           <Tooltip
             contentStyle={{
               borderRadius: "8px",
@@ -212,10 +200,7 @@ function PipelineFunnel({ placements }: { placements: PlacementAnalytics }) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             formatter={(value: any, _name: any, props: any) => {
               const convRate = props?.payload?.convRate;
-              return [
-                `${value}${convRate != null ? ` (${convRate}% conversion)` : ""}`,
-                "Count",
-              ];
+              return [`${value}${convRate != null ? ` (${convRate}% conversion)` : ""}`, "Count"];
             }}
           />
           <Bar
@@ -225,10 +210,7 @@ function PipelineFunnel({ placements }: { placements: PlacementAnalytics }) {
             label={{ position: "right", fontSize: 11, fontWeight: 600 }}
           >
             {chartData.map((entry) => (
-              <Cell
-                key={entry.stage}
-                fill={PIPELINE_COLORS[entry.stage] ?? "#6b7280"}
-              />
+              <Cell key={entry.stage} fill={PIPELINE_COLORS[entry.stage] ?? "#6b7280"} />
             ))}
           </Bar>
         </BarChart>
@@ -262,17 +244,29 @@ function PipelineFunnel({ placements }: { placements: PlacementAnalytics }) {
 /* ── Page ────────────────────────────────────────────────── */
 
 export default function TalentDashboardPage() {
-  const { data: gapsData, isLoading: gapsLoading, isError } = useQuery({
+  const {
+    data: gapsData,
+    isLoading: gapsLoading,
+    isError,
+  } = useQuery({
     queryKey: ["talent-gaps"],
     queryFn: () => apiWithAuth<{ data: GapItem[] }>("/talent/intelligence/gaps?limit=10"),
   });
 
-  const { data: coverageData, isLoading: coverageLoading, isError } = useQuery({
+  const {
+    data: coverageData,
+    isLoading: coverageLoading,
+    isError: _isErr2,
+  } = useQuery({
     queryKey: ["talent-coverage"],
     queryFn: () => apiWithAuth<{ data: CoverageItem[] }>("/talent/intelligence/coverage?limit=8"),
   });
 
-  const { data: placementsData, isLoading: placementsLoading, isError } = useQuery({
+  const {
+    data: placementsData,
+    isLoading: placementsLoading,
+    isError: _isErr3,
+  } = useQuery({
     queryKey: ["talent-placements"],
     queryFn: () => apiWithAuth<{ data: PlacementAnalytics }>("/talent/intelligence/placements"),
   });

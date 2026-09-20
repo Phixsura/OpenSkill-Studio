@@ -68,7 +68,11 @@ export default function CreatorShortlistPage() {
   // Two-click assign confirmation (no window.confirm)
   const [armedUserId, setArmedUserId] = useState<string | null>(null);
 
-  const { data: profilesData, isError, isLoading } = useQuery({
+  const {
+    data: profilesData,
+    isError,
+    isLoading,
+  } = useQuery({
     queryKey: ["requirement-profiles", orgId, "all"],
     queryFn: async () => {
       // per_page=100 is the API cap — follow has_more so orgs with more
@@ -87,11 +91,13 @@ export default function CreatorShortlistPage() {
       return { data: all };
     },
   });
-  const confirmedProfiles = (profilesData?.data ?? []).filter(
-    (p) => p.status === "confirmed",
-  );
+  const confirmedProfiles = (profilesData?.data ?? []).filter((p) => p.status === "confirmed");
 
-  const { data: assignmentsData, isError, isLoading } = useQuery({
+  const {
+    data: assignmentsData,
+    isError: _isErr2,
+    isLoading: _isLoad2,
+  } = useQuery({
     queryKey: ["creator-assignments", orgId, projectId],
     queryFn: () =>
       apiWithAuth<{ data: Assignment[] }>(
@@ -106,8 +112,7 @@ export default function CreatorShortlistPage() {
         `/orgs/${orgId}/projects/${projectId}/creator-shortlist?profile_id=${profileId}`,
       ),
     onSuccess: (res) => setShortlist(res.data),
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Shortlist failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Shortlist failed"),
   });
 
   const assignMutation = useMutation({
@@ -144,8 +149,8 @@ export default function CreatorShortlistPage() {
       <div>
         <h1 className="text-3xl font-bold">Creator Shortlist</h1>
         <p className="mt-1 text-[hsl(var(--muted-foreground))]">
-          Ranked by verified platform evidence. Assignment is always your decision —
-          creators accept or decline the offer.
+          Ranked by verified platform evidence. Assignment is always your decision — creators accept
+          or decline the offer.
         </p>
       </div>
 
@@ -196,9 +201,7 @@ export default function CreatorShortlistPage() {
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${TIER_STYLES[creator.tier] ?? ""}`}
                       title={
-                        creator.score != null
-                          ? `Score: ${creator.score.toFixed(4)}`
-                          : undefined
+                        creator.score != null ? `Score: ${creator.score.toFixed(4)}` : undefined
                       }
                     >
                       {creator.tier === "great"
@@ -222,11 +225,7 @@ export default function CreatorShortlistPage() {
                     >
                       Confirm offer?
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => setArmedUserId(null)}
-                    >
+                    <Button size="sm" variant="secondary" onClick={() => setArmedUserId(null)}>
                       Cancel
                     </Button>
                   </div>

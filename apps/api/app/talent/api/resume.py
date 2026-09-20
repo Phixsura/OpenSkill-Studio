@@ -11,7 +11,9 @@ from app.talent.schemas.resume import ParseResumeRequest, ParseResumeResponse
 router = APIRouter(prefix="/talent", tags=["Talent — Resume"])
 
 
-@router.post("/resume/parse", response_model=DataResponse[ParseResumeResponse],
+@router.post(
+    "/resume/parse",
+    response_model=DataResponse[ParseResumeResponse],
     summary="Parse Resume",
 )
 async def parse_resume(

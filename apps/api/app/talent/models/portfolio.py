@@ -30,7 +30,9 @@ class PortfolioItem(Base):
     __tablename__ = "talent_portfolio_items"
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     item_type: Mapped[str] = mapped_column(String(30))
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

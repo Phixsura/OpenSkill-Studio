@@ -20,6 +20,7 @@ def validate_password_strength(password: str) -> None:
     if not PASSWORD_PATTERN.match(password):
         raise ValueError("Password must contain uppercase, lowercase, and a digit")
 
+
 ALGORITHM = "HS256"
 
 

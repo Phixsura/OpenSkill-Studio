@@ -31,7 +31,9 @@ async def _check_placement_access(
 
 
 @router.post(
-    "/orgs/{org_id}/onboarding-templates", response_model=DataResponse[dict], status_code=201,
+    "/orgs/{org_id}/onboarding-templates",
+    response_model=DataResponse[dict],
+    status_code=201,
     summary="Create Onboarding Template",
 )
 async def create_onboarding_template(
@@ -55,7 +57,9 @@ async def create_onboarding_template(
     return DataResponse(data={"id": t.id, "name": t.name, "tasks_count": len(t.tasks)})
 
 
-@router.get("/orgs/{org_id}/onboarding-templates", response_model=CursorListResponse[dict],
+@router.get(
+    "/orgs/{org_id}/onboarding-templates",
+    response_model=CursorListResponse[dict],
     summary="List Onboarding Templates",
 )
 async def list_onboarding_templates(
@@ -84,7 +88,9 @@ async def list_onboarding_templates(
 
 
 @router.post(
-    "/placements/{placement_id}/onboarding", response_model=DataResponse[dict], status_code=201,
+    "/placements/{placement_id}/onboarding",
+    response_model=DataResponse[dict],
+    status_code=201,
     summary="Create Onboarding Checklist",
 )
 async def create_onboarding_checklist(
@@ -110,7 +116,9 @@ async def create_onboarding_checklist(
     )
 
 
-@router.get("/placements/{placement_id}/onboarding", response_model=DataResponse[dict],
+@router.get(
+    "/placements/{placement_id}/onboarding",
+    response_model=DataResponse[dict],
     summary="Get Onboarding Progress",
 )
 async def get_onboarding_progress(

@@ -14,7 +14,8 @@ from app.talent.services.credential_signing import (
 router = APIRouter(tags=["Talent — DID"])
 
 
-@router.get("/talent/orgs/{org_id}/did.json",
+@router.get(
+    "/talent/orgs/{org_id}/did.json",
     response_model=DataResponse[dict],
     summary="Get Did Document",
 )

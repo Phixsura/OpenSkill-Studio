@@ -1,4 +1,3 @@
-
 """Outreach / invitation records API (§39).
 
 Allows org admins to send outreach invitations to talent pool members,

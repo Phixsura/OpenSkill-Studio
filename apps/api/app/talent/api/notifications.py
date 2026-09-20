@@ -86,7 +86,9 @@ async def mark_notification_read(
     return DataResponse(data=NotificationResponse.model_validate(notif))
 
 
-@router.post("/notifications/mark-all-read", response_model=DataResponse[dict],
+@router.post(
+    "/notifications/mark-all-read",
+    response_model=DataResponse[dict],
     summary="Mark All Read",
 )
 async def mark_all_read(

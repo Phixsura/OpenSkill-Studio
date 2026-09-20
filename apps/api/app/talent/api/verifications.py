@@ -145,7 +145,9 @@ async def create_supervision(
     return DataResponse(data=SupervisionResponse.model_validate(supervision))
 
 
-@router.get("/supervisions", response_model=CursorListResponse[SupervisionResponse],
+@router.get(
+    "/supervisions",
+    response_model=CursorListResponse[SupervisionResponse],
     summary="List Supervisions",
 )
 async def list_supervisions(

@@ -91,6 +91,7 @@ class WebhookStats:
 
 DELIVERY_TIMEOUT = 10
 
+
 class WebhookDeliveryService:
     def sign_payload(self, payload_json: str, secret: str) -> str:
         """Generate HMAC-SHA256 signature for webhook payload."""

@@ -30,7 +30,9 @@ class ActivityResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-@router.get("/activity", response_model=CursorListResponse[ActivityResponse],
+@router.get(
+    "/activity",
+    response_model=CursorListResponse[ActivityResponse],
     summary="List My Activity",
 )
 async def list_my_activity(

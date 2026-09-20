@@ -22,7 +22,9 @@ class CredentialPathway(Base):
     __tablename__ = "talent_credential_pathways"
 
     id: Mapped[str] = ulid_pk()
-    org_id: Mapped[str] = mapped_column(String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    org_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     pathway_credential_type: Mapped[str] = mapped_column(String(100))

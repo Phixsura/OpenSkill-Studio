@@ -63,7 +63,11 @@ export default function NotificationsPage() {
   const queryClient = useQueryClient();
 
   // Notifications list
-  const { data: notifData, isLoading: notifLoading, isError } = useQuery({
+  const {
+    data: notifData,
+    isLoading: notifLoading,
+    isError,
+  } = useQuery({
     queryKey: ["talent-notifications"],
     queryFn: () =>
       api<{ data: Notification[]; meta: { next_cursor: string | null; has_more: boolean } }>(
@@ -79,7 +83,11 @@ export default function NotificationsPage() {
   });
 
   // Preferences
-  const { data: prefData, isLoading: prefLoading, isError } = useQuery({
+  const {
+    data: prefData,
+    isLoading: prefLoading,
+    isError: _isErr2,
+  } = useQuery({
     queryKey: ["talent-notification-preferences"],
     queryFn: () => api<{ data: NotificationPreference[] }>("/talent/notifications/preferences"),
     enabled: tab === "settings",

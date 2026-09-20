@@ -21,7 +21,10 @@ from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 router = APIRouter(prefix="/talent", tags=["Talent — Webhooks"])
 
 
-@router.post("/orgs/{org_id}/webhooks", response_model=DataResponse[dict], status_code=201,
+@router.post(
+    "/orgs/{org_id}/webhooks",
+    response_model=DataResponse[dict],
+    status_code=201,
     summary="Register Webhook",
 )
 async def register_webhook(
@@ -79,7 +82,9 @@ async def register_webhook(
     )
 
 
-@router.get("/orgs/{org_id}/webhooks", response_model=CursorListResponse[dict],
+@router.get(
+    "/orgs/{org_id}/webhooks",
+    response_model=CursorListResponse[dict],
     summary="List Webhooks",
 )
 async def list_webhooks(
@@ -116,7 +121,9 @@ async def list_webhooks(
     )
 
 
-@router.delete("/webhooks/{endpoint_id}", response_model=DataResponse[dict],
+@router.delete(
+    "/webhooks/{endpoint_id}",
+    response_model=DataResponse[dict],
     summary="Delete Webhook",
 )
 async def delete_webhook(
@@ -132,7 +139,9 @@ async def delete_webhook(
     return DataResponse(data={"deleted": True})
 
 
-@router.get("/webhooks/{endpoint_id}/deliveries", response_model=CursorListResponse[dict],
+@router.get(
+    "/webhooks/{endpoint_id}/deliveries",
+    response_model=CursorListResponse[dict],
     summary="List Deliveries",
 )
 async def list_deliveries(

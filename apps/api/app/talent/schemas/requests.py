@@ -63,4 +63,5 @@ class SuccessionPlanBody(BaseModel):
 
 class AnalyticsBody(BaseModel):
     """Generic analytics request body — accepts flexible parameters."""
+
     model_config = {"extra": "allow"}  # Allow additional fields for analytics queries

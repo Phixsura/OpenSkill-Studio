@@ -129,9 +129,10 @@ function SkillRadarChart({ capabilities }: { capabilities: CapabilityScore[] }) 
   if (items.length < 3) return null;
 
   const radarData = items.map((cap) => ({
-    subject: cap.capability_name.length > 12
-      ? cap.capability_name.slice(0, 11) + "…"
-      : cap.capability_name,
+    subject:
+      cap.capability_name.length > 12
+        ? cap.capability_name.slice(0, 11) + "…"
+        : cap.capability_name,
     fullName: cap.capability_name,
     score: Math.round(cap.score * 100),
     depth: Math.round((cap.depth ?? 0) * 100),
@@ -140,8 +141,6 @@ function SkillRadarChart({ capabilities }: { capabilities: CapabilityScore[] }) 
     velocity: Math.round((cap.velocity ?? 0) * 100),
     fullMark: 100,
   }));
-
-  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
@@ -210,14 +209,7 @@ function SkillRadarChart({ capabilities }: { capabilities: CapabilityScore[] }) 
 
 /* ── Score Trend Chart ───────────────────────────────────── */
 
-const TREND_COLORS = [
-  "hsl(var(--primary))",
-  "#10b981",
-  "#f59e0b",
-  "#8b5cf6",
-  "#ec4899",
-  "#06b6d4",
-];
+const TREND_COLORS = ["hsl(var(--primary))", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4"];
 
 function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) {
   const topCaps = capabilities.slice(0, 5);
@@ -231,7 +223,7 @@ function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) 
     topCaps.forEach((cap) => {
       // Simulate growth curve: score * progress^0.5 with slight variation
       const base = cap.score * Math.pow(progress, 0.6);
-      const jitter = (Math.sin(mi * 3 + cap.capability_name.length) * 0.03);
+      const jitter = Math.sin(mi * 3 + cap.capability_name.length) * 0.03;
       row[cap.capability_name] = Math.round(Math.min(1, Math.max(0, base + jitter)) * 100);
     });
     return row;
@@ -246,10 +238,7 @@ function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) 
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={trendData}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-          <XAxis
-            dataKey="month"
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
-          />
+          <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
           <YAxis
             domain={[0, 100]}
             tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
@@ -266,9 +255,7 @@ function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             formatter={(value: any) => [`${value}%`]}
           />
-          <Legend
-            wrapperStyle={{ fontSize: 11 }}
-          />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
           {topCaps.map((cap, i) => (
             <Line
               key={cap.capability_id}
@@ -291,7 +278,11 @@ function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) 
 export default function PassportPage() {
   const queryClient = useQueryClient();
 
-  const { data: passportData, isLoading: passportLoading, isError } = useQuery({
+  const {
+    data: passportData,
+    isLoading: passportLoading,
+    isError,
+  } = useQuery({
     queryKey: ["passport"],
     queryFn: () => apiWithAuth<{ data: PassportData }>("/talent/passport"),
   });

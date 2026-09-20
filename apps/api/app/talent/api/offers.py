@@ -17,7 +17,10 @@ from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 router = APIRouter(prefix="/talent", tags=["Talent — Offers"])
 
 
-@router.post("/applications/{app_id}/offer", response_model=DataResponse[dict], status_code=201,
+@router.post(
+    "/applications/{app_id}/offer",
+    response_model=DataResponse[dict],
+    status_code=201,
     summary="Create Offer",
 )
 async def create_offer(
@@ -50,7 +53,9 @@ async def create_offer(
     )
 
 
-@router.get("/offers", response_model=CursorListResponse[dict],
+@router.get(
+    "/offers",
+    response_model=CursorListResponse[dict],
     summary="List Offers",
 )
 async def list_offers(
@@ -87,7 +92,9 @@ async def list_offers(
     )
 
 
-@router.patch("/offers/{offer_id}/accept", response_model=DataResponse[dict],
+@router.patch(
+    "/offers/{offer_id}/accept",
+    response_model=DataResponse[dict],
     summary="Accept Offer",
 )
 async def accept_offer(
@@ -114,7 +121,9 @@ async def accept_offer(
     return DataResponse(data={"id": offer.id, "status": offer.status})
 
 
-@router.patch("/offers/{offer_id}/decline", response_model=DataResponse[dict],
+@router.patch(
+    "/offers/{offer_id}/decline",
+    response_model=DataResponse[dict],
     summary="Decline Offer",
 )
 async def decline_offer(

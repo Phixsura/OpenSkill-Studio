@@ -51,7 +51,9 @@ def _to_csv_response(rows: list[dict], filename: str) -> StreamingResponse:
 router = APIRouter(prefix="/talent/intelligence", tags=["Talent — Intelligence"])
 
 
-@router.get("/trends", response_model=DataResponse[list[dict]],
+@router.get(
+    "/trends",
+    response_model=DataResponse[list[dict]],
     summary="Get Skill Trends",
 )
 async def get_skill_trends(
@@ -78,7 +80,9 @@ async def get_skill_trends(
     return DataResponse(data=[dataclasses.asdict(t) for t in trends])
 
 
-@router.get("/demand", response_model=DataResponse[list[dict]],
+@router.get(
+    "/demand",
+    response_model=DataResponse[list[dict]],
     summary="Get Demand",
 )
 async def get_demand(
@@ -104,7 +108,9 @@ async def get_demand(
     )
 
 
-@router.get("/supply", response_model=DataResponse[list[dict]],
+@router.get(
+    "/supply",
+    response_model=DataResponse[list[dict]],
     summary="Get Supply",
 )
 async def get_supply(
@@ -129,7 +135,9 @@ async def get_supply(
     )
 
 
-@router.get("/gaps", response_model=DataResponse[list[dict]],
+@router.get(
+    "/gaps",
+    response_model=DataResponse[list[dict]],
     summary="Get Gaps",
 )
 async def get_gaps(
@@ -157,7 +165,9 @@ async def get_gaps(
     )
 
 
-@router.get("/coverage", response_model=DataResponse[list[dict]],
+@router.get(
+    "/coverage",
+    response_model=DataResponse[list[dict]],
     summary="Get Coverage",
 )
 async def get_coverage(
@@ -173,7 +183,9 @@ async def get_coverage(
     )
 
 
-@router.get("/placements", response_model=DataResponse[dict],
+@router.get(
+    "/placements",
+    response_model=DataResponse[dict],
     summary="Get Placement Analytics",
 )
 async def get_placement_analytics(
@@ -188,7 +200,9 @@ async def get_placement_analytics(
     return DataResponse(data=await svc.get_placement_analytics(employer_org_id=employer_org_id))
 
 
-@router.get("/outcomes", response_model=DataResponse[list[dict]],
+@router.get(
+    "/outcomes",
+    response_model=DataResponse[list[dict]],
     summary="Get Outcome Analytics",
 )
 async def get_outcome_analytics(
@@ -209,7 +223,9 @@ async def get_outcome_analytics(
     )
 
 
-@router.get("/recommendations", response_model=DataResponse[list[dict]],
+@router.get(
+    "/recommendations",
+    response_model=DataResponse[list[dict]],
     summary="Get Recommendations",
 )
 async def get_recommendations(
@@ -229,7 +245,9 @@ async def get_recommendations(
 # ---- Hiring Analytics (I1) ----
 
 
-@router.get("/hiring", response_model=DataResponse[dict],
+@router.get(
+    "/hiring",
+    response_model=DataResponse[dict],
     summary="Get Hiring Analytics",
 )
 async def get_hiring_analytics(
@@ -254,7 +272,8 @@ async def get_hiring_analytics(
 # ---- CSV Export (N5) ----
 
 
-@router.get("/gaps/export",
+@router.get(
+    "/gaps/export",
     response_model=DataResponse[dict],
     summary="Export Gaps Csv",
 )
@@ -285,7 +304,9 @@ async def export_gaps_csv(
 # ---- GDPR (I5) ----
 
 
-@router.get("/my-data/export", response_model=DataResponse[dict],
+@router.get(
+    "/my-data/export",
+    response_model=DataResponse[dict],
     summary="Export My Data",
 )
 async def export_my_data(
@@ -300,7 +321,9 @@ async def export_my_data(
     return DataResponse(data=data)
 
 
-@router.post("/my-data/deletion-request", response_model=DataResponse[dict],
+@router.post(
+    "/my-data/deletion-request",
+    response_model=DataResponse[dict],
     summary="Request Data Deletion",
 )
 async def request_data_deletion(
@@ -319,7 +342,9 @@ async def request_data_deletion(
     return DataResponse(data=result)
 
 
-@router.get("/my-data/consent-log", response_model=DataResponse[list[dict]],
+@router.get(
+    "/my-data/consent-log",
+    response_model=DataResponse[list[dict]],
     summary="Get Consent Log",
 )
 async def get_consent_log(
@@ -337,7 +362,9 @@ async def get_consent_log(
 # ---- Badge Sharing (I2) ----
 
 
-@router.get("/credentials/{credential_id}/share-links", response_model=DataResponse[dict],
+@router.get(
+    "/credentials/{credential_id}/share-links",
+    response_model=DataResponse[dict],
     summary="Get Share Links",
 )
 async def get_share_links(
@@ -373,7 +400,9 @@ async def get_share_links(
 # ---- Team Skill Analytics (N9) ----
 
 
-@router.get("/analytics/team/{org_id}", response_model=DataResponse[dict],
+@router.get(
+    "/analytics/team/{org_id}",
+    response_model=DataResponse[dict],
     summary="Get Team Analytics",
 )
 async def get_team_analytics(
@@ -400,7 +429,9 @@ async def get_team_analytics(
     )
 
 
-@router.get("/analytics/team/{org_id}/coverage", response_model=DataResponse[list[dict]],
+@router.get(
+    "/analytics/team/{org_id}/coverage",
+    response_model=DataResponse[list[dict]],
     summary="Get Team Coverage",
 )
 async def get_team_coverage(
@@ -442,7 +473,9 @@ async def compare_team_vs_opportunity(
 # ---- Data Retention & Consent (N20) ----
 
 
-@router.get("/retention/preview", response_model=DataResponse[list[dict]],
+@router.get(
+    "/retention/preview",
+    response_model=DataResponse[list[dict]],
     summary="Preview Retention",
 )
 async def preview_retention(
@@ -472,7 +505,9 @@ async def preview_retention(
     )
 
 
-@router.post("/retention/enforce", response_model=DataResponse[list[dict]],
+@router.post(
+    "/retention/enforce",
+    response_model=DataResponse[list[dict]],
     summary="Enforce Retention",
 )
 async def enforce_retention(
@@ -503,7 +538,9 @@ async def enforce_retention(
     )
 
 
-@router.get("/consent-history", response_model=DataResponse[list[dict]],
+@router.get(
+    "/consent-history",
+    response_model=DataResponse[list[dict]],
     summary="Get Consent History",
 )
 async def get_consent_history(
@@ -523,7 +560,9 @@ async def get_consent_history(
 # ---- Market Insights ----
 
 
-@router.get("/market/skill-values", response_model=DataResponse[list[dict]],
+@router.get(
+    "/market/skill-values",
+    response_model=DataResponse[list[dict]],
     summary="Get Skill Market Values",
 )
 async def get_skill_market_values(
@@ -560,7 +599,9 @@ async def get_skill_market_values(
     return DataResponse(data=results[:limit])
 
 
-@router.get("/market/employer-reputation/{org_id}", response_model=DataResponse[dict],
+@router.get(
+    "/market/employer-reputation/{org_id}",
+    response_model=DataResponse[dict],
     summary="Get Employer Reputation",
 )
 async def get_employer_reputation(
@@ -594,7 +635,9 @@ async def get_employer_reputation(
 # ---- Diversity Analytics ----
 
 
-@router.get("/diversity/pipeline/{org_id}", response_model=DataResponse[dict],
+@router.get(
+    "/diversity/pipeline/{org_id}",
+    response_model=DataResponse[dict],
     summary="Get Pipeline Equity",
 )
 async def get_pipeline_equity(
@@ -626,7 +669,9 @@ async def get_pipeline_equity(
 # ---- Skill Gap Prediction ----
 
 
-@router.get("/predictions/skill-gaps", response_model=DataResponse[list[dict]],
+@router.get(
+    "/predictions/skill-gaps",
+    response_model=DataResponse[list[dict]],
     summary="Get Skill Gap Predictions",
 )
 async def get_skill_gap_predictions(
@@ -670,7 +715,9 @@ async def get_skill_gap_predictions(
 # ---- Gaps #21-35: Evidence Intelligence ----
 
 
-@router.get("/evidence/quality/{evidence_id}", response_model=DataResponse[dict],
+@router.get(
+    "/evidence/quality/{evidence_id}",
+    response_model=DataResponse[dict],
     summary="Get Evidence Quality",
 )
 async def get_evidence_quality(
@@ -699,7 +746,9 @@ async def get_evidence_quality(
     return DataResponse(data=quality)
 
 
-@router.get("/evidence/expiring", response_model=DataResponse[list[dict]],
+@router.get(
+    "/evidence/expiring",
+    response_model=DataResponse[list[dict]],
     summary="Get Expiring Evidence",
 )
 async def get_expiring_evidence(
@@ -714,7 +763,9 @@ async def get_expiring_evidence(
     return DataResponse(data=results)
 
 
-@router.post("/evidence/simulate", response_model=DataResponse[dict],
+@router.post(
+    "/evidence/simulate",
+    response_model=DataResponse[dict],
     summary="Simulate Evidence Impact",
 )
 async def simulate_evidence_impact(
@@ -733,7 +784,9 @@ async def simulate_evidence_impact(
     return DataResponse(data=result)
 
 
-@router.get("/evidence/distribution", response_model=DataResponse[dict],
+@router.get(
+    "/evidence/distribution",
+    response_model=DataResponse[dict],
     summary="Get Evidence Distribution",
 )
 async def get_evidence_distribution(
@@ -747,7 +800,9 @@ async def get_evidence_distribution(
     return DataResponse(data=result)
 
 
-@router.get("/scoring/calibration", response_model=DataResponse[dict],
+@router.get(
+    "/scoring/calibration",
+    response_model=DataResponse[dict],
     summary="Get Scoring Calibration",
 )
 async def get_scoring_calibration(
@@ -759,7 +814,9 @@ async def get_scoring_calibration(
     return DataResponse(data=DEFAULT_CALIBRATION)
 
 
-@router.post("/scoring/calibration/validate", response_model=DataResponse[dict],
+@router.post(
+    "/scoring/calibration/validate",
+    response_model=DataResponse[dict],
     summary="Validate Scoring Calibration",
 )
 async def validate_scoring_calibration(
@@ -776,7 +833,9 @@ async def validate_scoring_calibration(
 # ---- Employer Intelligence (#106-130) ----
 
 
-@router.get("/employer/interview-kit/{opp_id}", response_model=DataResponse[dict],
+@router.get(
+    "/employer/interview-kit/{opp_id}",
+    response_model=DataResponse[dict],
     summary="Get Interview Kit",
 )
 async def get_interview_kit(
@@ -806,7 +865,9 @@ async def get_interview_kit(
     return DataResponse(data=kit)
 
 
-@router.post("/employer/pipeline/validate", response_model=DataResponse[dict],
+@router.post(
+    "/employer/pipeline/validate",
+    response_model=DataResponse[dict],
     summary="Validate Pipeline",
 )
 async def validate_pipeline(
@@ -820,7 +881,9 @@ async def validate_pipeline(
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
-@router.post("/employer/pool-rules/evaluate", response_model=DataResponse[dict],
+@router.post(
+    "/employer/pool-rules/evaluate",
+    response_model=DataResponse[dict],
     summary="Evaluate Pool Rules Endpoint",
 )
 async def evaluate_pool_rules_endpoint(
@@ -834,7 +897,9 @@ async def evaluate_pool_rules_endpoint(
     return DataResponse(data=result)
 
 
-@router.post("/employer/compliance/adverse-impact", response_model=DataResponse[dict],
+@router.post(
+    "/employer/compliance/adverse-impact",
+    response_model=DataResponse[dict],
     summary="Compute Adverse Impact Endpoint",
 )
 async def compute_adverse_impact_endpoint(
@@ -853,7 +918,9 @@ async def compute_adverse_impact_endpoint(
     return DataResponse(data=result)
 
 
-@router.post("/employer/requisition/validate", response_model=DataResponse[dict],
+@router.post(
+    "/employer/requisition/validate",
+    response_model=DataResponse[dict],
     summary="Validate Requisition Endpoint",
 )
 async def validate_requisition_endpoint(
@@ -870,7 +937,9 @@ async def validate_requisition_endpoint(
 # ---- Candidate Intelligence (#131-145) ----
 
 
-@router.post("/candidate/availability/validate", response_model=DataResponse[dict],
+@router.post(
+    "/candidate/availability/validate",
+    response_model=DataResponse[dict],
     summary="Validate Candidate Availability",
 )
 async def validate_candidate_availability(
@@ -884,7 +953,9 @@ async def validate_candidate_availability(
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
-@router.post("/candidate/salary-expectation/validate", response_model=DataResponse[dict],
+@router.post(
+    "/candidate/salary-expectation/validate",
+    response_model=DataResponse[dict],
     summary="Validate Salary",
 )
 async def validate_salary(
@@ -898,7 +969,9 @@ async def validate_salary(
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
-@router.get("/candidate/interview-prep/{stage_type}", response_model=DataResponse[dict],
+@router.get(
+    "/candidate/interview-prep/{stage_type}",
+    response_model=DataResponse[dict],
     summary="Get Interview Prep Endpoint",
 )
 async def get_interview_prep_endpoint(
@@ -911,7 +984,9 @@ async def get_interview_prep_endpoint(
     return DataResponse(data=get_interview_prep(stage_type))
 
 
-@router.get("/candidate/achievements", response_model=DataResponse[dict],
+@router.get(
+    "/candidate/achievements",
+    response_model=DataResponse[dict],
     summary="Get Achievements",
 )
 async def get_achievements(
@@ -926,7 +1001,9 @@ async def get_achievements(
     return DataResponse(data={"achievements": earned, "total_points": compute_total_points(earned)})
 
 
-@router.post("/candidate/mentorship/match", response_model=DataResponse[dict],
+@router.post(
+    "/candidate/mentorship/match",
+    response_model=DataResponse[dict],
     summary="Compute Mentorship Match",
 )
 async def compute_mentorship_match(
@@ -945,7 +1022,9 @@ async def compute_mentorship_match(
 # ---- Communication Intelligence (#146-155) ----
 
 
-@router.get("/communication/email-templates", response_model=DataResponse[list[str]],
+@router.get(
+    "/communication/email-templates",
+    response_model=DataResponse[list[str]],
     summary="List Email Templates Endpoint",
 )
 async def list_email_templates_endpoint(
@@ -957,7 +1036,9 @@ async def list_email_templates_endpoint(
     return DataResponse(data=list_email_templates())
 
 
-@router.post("/communication/email-templates/render", response_model=DataResponse[dict],
+@router.post(
+    "/communication/email-templates/render",
+    response_model=DataResponse[dict],
     summary="Render Email Template Endpoint",
 )
 async def render_email_template_endpoint(
@@ -973,7 +1054,9 @@ async def render_email_template_endpoint(
     return DataResponse(data=result)
 
 
-@router.get("/communication/message-templates", response_model=DataResponse[list[str]],
+@router.get(
+    "/communication/message-templates",
+    response_model=DataResponse[list[str]],
     summary="List Message Templates Endpoint",
 )
 async def list_message_templates_endpoint(
@@ -985,7 +1068,9 @@ async def list_message_templates_endpoint(
     return DataResponse(data=list_message_templates())
 
 
-@router.post("/communication/bulk-message/validate", response_model=DataResponse[dict],
+@router.post(
+    "/communication/bulk-message/validate",
+    response_model=DataResponse[dict],
     summary="Validate Bulk Message Endpoint",
 )
 async def validate_bulk_message_endpoint(
@@ -1002,7 +1087,9 @@ async def validate_bulk_message_endpoint(
 # ---- Analytics Intelligence (#156-170) ----
 
 
-@router.post("/reports/validate", response_model=DataResponse[dict],
+@router.post(
+    "/reports/validate",
+    response_model=DataResponse[dict],
     summary="Validate Report",
 )
 async def validate_report(
@@ -1016,7 +1103,9 @@ async def validate_report(
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
-@router.post("/benchmarks/compare", response_model=DataResponse[dict],
+@router.post(
+    "/benchmarks/compare",
+    response_model=DataResponse[dict],
     summary="Compare Benchmark",
 )
 async def compare_benchmark(
@@ -1032,7 +1121,9 @@ async def compare_benchmark(
     return DataResponse(data=result)
 
 
-@router.post("/kpi/evaluate", response_model=DataResponse[dict],
+@router.post(
+    "/kpi/evaluate",
+    response_model=DataResponse[dict],
     summary="Evaluate Kpi Endpoint",
 )
 async def evaluate_kpi_endpoint(
@@ -1049,7 +1140,9 @@ async def evaluate_kpi_endpoint(
 # ---- Integration Intelligence (#171-180) ----
 
 
-@router.post("/integrations/api-keys/generate", response_model=DataResponse[dict],
+@router.post(
+    "/integrations/api-keys/generate",
+    response_model=DataResponse[dict],
     summary="Generate Api Key Endpoint",
 )
 async def generate_api_key_endpoint(
@@ -1077,7 +1170,9 @@ async def generate_api_key_endpoint(
     )
 
 
-@router.post("/integrations/hris/validate", response_model=DataResponse[dict],
+@router.post(
+    "/integrations/hris/validate",
+    response_model=DataResponse[dict],
     summary="Validate Hris Employee Endpoint",
 )
 async def validate_hris_employee_endpoint(
@@ -1091,7 +1186,9 @@ async def validate_hris_employee_endpoint(
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
-@router.post("/integrations/ats/validate", response_model=DataResponse[dict],
+@router.post(
+    "/integrations/ats/validate",
+    response_model=DataResponse[dict],
     summary="Validate Ats Config Endpoint",
 )
 async def validate_ats_config_endpoint(
@@ -1105,7 +1202,9 @@ async def validate_ats_config_endpoint(
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
-@router.get("/integrations/slack/event-mappings", response_model=DataResponse[list[str]],
+@router.get(
+    "/integrations/slack/event-mappings",
+    response_model=DataResponse[list[str]],
     summary="List Slack Events",
 )
 async def list_slack_events(
@@ -1120,7 +1219,9 @@ async def list_slack_events(
 # ---- Platform Operations (#181-200) ----
 
 
-@router.get("/platform/feature-flags", response_model=DataResponse[list[dict]],
+@router.get(
+    "/platform/feature-flags",
+    response_model=DataResponse[list[dict]],
     summary="Get Feature Flags",
 )
 async def get_feature_flags(
@@ -1132,7 +1233,9 @@ async def get_feature_flags(
     return DataResponse(data=list_feature_flags())
 
 
-@router.get("/platform/health", response_model=DataResponse[dict],
+@router.get(
+    "/platform/health",
+    response_model=DataResponse[dict],
     summary="Get Health Report",
 )
 async def get_health_report(
@@ -1149,7 +1252,9 @@ async def get_health_report(
     return DataResponse(data=build_health_report(checks))
 
 
-@router.get("/platform/api-docs", response_model=DataResponse[dict],
+@router.get(
+    "/platform/api-docs",
+    response_model=DataResponse[dict],
     summary="Get Api Docs Metadata",
 )
 async def get_api_docs_metadata(
@@ -1161,7 +1266,9 @@ async def get_api_docs_metadata(
     return DataResponse(data=API_DOCUMENTATION)
 
 
-@router.post("/platform/data-classification", response_model=DataResponse[dict],
+@router.post(
+    "/platform/data-classification",
+    response_model=DataResponse[dict],
     summary="Classify Field",
 )
 async def classify_field(
@@ -1174,7 +1281,9 @@ async def classify_field(
     return DataResponse(data=get_field_classification(body.get("field_name", "")))
 
 
-@router.post("/platform/ip-allowlist/validate", response_model=DataResponse[dict],
+@router.post(
+    "/platform/ip-allowlist/validate",
+    response_model=DataResponse[dict],
     summary="Validate Ip List",
 )
 async def validate_ip_list(
@@ -1188,7 +1297,9 @@ async def validate_ip_list(
     return DataResponse(data={"valid": len(errors) == 0, "errors": errors})
 
 
-@router.post("/platform/role-escalation/check", response_model=DataResponse[dict],
+@router.post(
+    "/platform/role-escalation/check",
+    response_model=DataResponse[dict],
     summary="Check Role Escalation",
 )
 async def check_role_escalation(

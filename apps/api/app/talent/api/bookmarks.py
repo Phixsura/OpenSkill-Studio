@@ -102,7 +102,9 @@ async def delete_bookmark(
     await db.commit()
 
 
-@router.get("/bookmarks", response_model=CursorListResponse[BookmarkResponse],
+@router.get(
+    "/bookmarks",
+    response_model=CursorListResponse[BookmarkResponse],
     summary="List Bookmarks",
 )
 async def list_bookmarks(
