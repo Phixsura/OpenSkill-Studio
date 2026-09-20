@@ -70,7 +70,7 @@ async def update_passport(
             **body.model_dump(exclude_unset=True),
         )
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     await db.commit()
     await db.refresh(passport)
     return DataResponse(data=PassportResponse.model_validate(passport))

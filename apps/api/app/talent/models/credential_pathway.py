@@ -22,7 +22,7 @@ class CredentialPathway(Base):
     __tablename__ = "talent_credential_pathways"
 
     id: Mapped[str] = ulid_pk()
-    org_id: Mapped[str] = mapped_column(String(26), ForeignKey("organizations.id"), index=True)
+    org_id: Mapped[str] = mapped_column(String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     pathway_credential_type: Mapped[str] = mapped_column(String(100))
@@ -35,7 +35,7 @@ class CredentialPathway(Base):
     auto_issue: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     status: Mapped[str] = mapped_column(String(20), default="active", server_default="'active'")
     created_by: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("users.id"), nullable=True
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

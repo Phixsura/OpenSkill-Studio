@@ -50,8 +50,8 @@ async def create_pathway(
             auto_issue=body.auto_issue,
             created_by=user.id,
         )
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     await db.commit()
     await db.refresh(pathway)
@@ -124,8 +124,8 @@ async def update_pathway(
 
     try:
         updated = await svc.update_pathway(pathway_id, **body.model_dump(exclude_unset=True))
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     await db.commit()
     await db.refresh(updated)

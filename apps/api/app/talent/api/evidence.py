@@ -98,7 +98,7 @@ async def record_evidence(
             metadata=body.metadata,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     await db.commit()
     await db.refresh(evidence)
     return DataResponse(data=EvidenceResponse.model_validate(evidence))

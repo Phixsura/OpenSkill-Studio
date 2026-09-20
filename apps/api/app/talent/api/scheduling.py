@@ -77,8 +77,8 @@ async def propose_slots(
             proposed_by=user.id,
             slots=[s.model_dump() for s in body.slots],
         )
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     await db.commit()
     for s in slots:

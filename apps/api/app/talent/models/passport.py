@@ -82,11 +82,11 @@ class PassportSnapshot(Base):
     # External share token: /verify/passport/{token}
     share_token: Mapped[str] = mapped_column(String(64), unique=True)
     # Frozen capability/credential/evidence summary
-    payload: Mapped[dict] = mapped_column(JSONB)
+    payload: Mapped[dict] = mapped_column(JSONB, server_default="{}")
     # SHA-256 of canonical JSON payload — tamper detection
     checksum: Mapped[str] = mapped_column(String(64))
     # Which fields were included (user-selected subset)
-    included_fields: Mapped[list] = mapped_column(JSONB)
+    included_fields: Mapped[list] = mapped_column(JSONB, server_default="[]")
     issued_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )

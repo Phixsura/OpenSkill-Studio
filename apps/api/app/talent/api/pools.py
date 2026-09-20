@@ -141,7 +141,7 @@ async def add_member(
     try:
         membership = await svc.add_member(pool_id, body.user_id, body.source, added_by=user.id)
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     await db.commit()
     await db.refresh(membership)
     return DataResponse(data=MembershipResponse.model_validate(membership))
@@ -191,7 +191,7 @@ async def respond_to_membership(
     try:
         membership = await svc.respond_to_membership(membership_id, user.id, accept=body.accept)
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     if not membership:
         raise HTTPException(404, "Membership not found")
     await db.commit()
@@ -294,7 +294,7 @@ async def respond_to_outreach(
     try:
         outreach = await svc.respond_to_outreach(outreach_id, user.id, status=body.status)
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     if not outreach:
         raise HTTPException(404, "Outreach not found")
     await db.commit()
@@ -355,7 +355,7 @@ async def record_outcome(
             metadata=body.metadata,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     await db.commit()
     await db.refresh(event)
     return DataResponse(data=OutcomeEventResponse.model_validate(event))
@@ -373,7 +373,7 @@ async def update_outcome_visibility(
     try:
         event = await svc.update_visibility(event_id, user.id, body.visibility)
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     if not event:
         raise HTTPException(404, "Outcome event not found")
     await db.commit()

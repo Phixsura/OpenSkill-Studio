@@ -17,9 +17,9 @@ class OpportunityBookmark(Base):
     )
 
     id: Mapped[str] = ulid_pk()
-    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), index=True)
+    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True)
     opportunity_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("talent_opportunities.id"), index=True
+        String(26), ForeignKey("opportunities.id", ondelete="CASCADE"), index=True
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

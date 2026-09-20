@@ -120,7 +120,7 @@ class CredentialRule(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # [{"capability_id": "01J...", "min_level": 3},
     #  {"assessment_blueprint_id": "01J...", "required": true}]
-    requirements: Mapped[list] = mapped_column(JSONB)
+    requirements: Mapped[list] = mapped_column(JSONB, server_default="[]")
     # min_evidence_count, min_verification_level,
     # required_assessment_types, all_required (AND) vs any_required (OR),
     # auto_issue, validity_days

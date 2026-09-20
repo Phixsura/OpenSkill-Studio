@@ -164,7 +164,7 @@ async def submit_run(
             run_id, user.id, results=body.results, project_id=body.project_id
         )
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     if not run:
         raise HTTPException(404, "Assessment run not found")
     await db.commit()
@@ -199,7 +199,7 @@ async def review_run(
     try:
         result = await svc.review_run(run_id, user.id, results=body.results, status=body.status)
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     if not result:
         raise HTTPException(404, "Assessment run not found")
     await db.commit()
@@ -342,7 +342,7 @@ async def issue_credential(
     try:
         cred = await svc.issue_credential(body.credential_type, target_user_id, org_id=body.org_id)
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     await db.commit()
 
     # Webhook: credential.issued

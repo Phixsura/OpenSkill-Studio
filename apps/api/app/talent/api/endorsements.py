@@ -45,8 +45,8 @@ async def endorse_user(
             relationship=body.relationship,
             message=body.message,
         )
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     await db.commit()
     await db.refresh(endorsement)

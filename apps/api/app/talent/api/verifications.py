@@ -63,7 +63,7 @@ async def create_verification(
             overall_comment=body.overall_comment,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     await db.commit()
 
     # Webhook: employer_verification.submitted + capability.verified

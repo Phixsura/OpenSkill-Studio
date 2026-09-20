@@ -49,8 +49,8 @@ async def create_saved_search(
             notify_frequency=body.notify_frequency,
             created_by=user.id,
         )
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     await db.commit()
     await db.refresh(search)

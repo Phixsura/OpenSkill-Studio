@@ -43,8 +43,8 @@ async def create_goal(
             target_capabilities=body.target_capabilities,
             target_date=body.target_date,
         )
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     await db.commit()
     await db.refresh(goal)
@@ -130,8 +130,8 @@ async def complete_goal(
     svc = CareerGoalService(db)
     try:
         goal = await svc.complete_goal(goal_id, user.id)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
     if not goal:
         raise HTTPException(404, "Goal not found")
     await db.commit()
@@ -154,8 +154,8 @@ async def abandon_goal(
     svc = CareerGoalService(db)
     try:
         goal = await svc.abandon_goal(goal_id, user.id)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
     if not goal:
         raise HTTPException(404, "Goal not found")
     await db.commit()

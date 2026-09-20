@@ -128,7 +128,7 @@ async def update_preferences(
     svc = TalentNotificationService(db)
     try:
         prefs = await svc.update_preferences(user.id, body.preferences)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
     await db.commit()
     return DataResponse(data=[NotificationPreferenceResponse(**p) for p in prefs])

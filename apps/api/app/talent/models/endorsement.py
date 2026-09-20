@@ -52,7 +52,7 @@ class SkillEndorsement(Base):
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     endorser_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     capability_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("talent_capabilities.id", ondelete="CASCADE")
+        String(26), ForeignKey("capabilities.id", ondelete="CASCADE")
     )
     relationship: Mapped[str] = mapped_column(String(30))
     message: Mapped[str | None] = mapped_column(Text, nullable=True)

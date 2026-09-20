@@ -14,10 +14,10 @@ class Offer(Base):
 
     id: Mapped[str] = ulid_pk()
     application_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("talent_applications.id"), index=True
+        String(26), ForeignKey("applications.id", ondelete="CASCADE"), index=True
     )
     employer_org_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("organizations.id"), index=True
+        String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
     )
     role_title: Mapped[str] = mapped_column(String(200))
     compensation_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -31,7 +31,7 @@ class Offer(Base):
     declined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decline_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("users.id"), nullable=True
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -13,13 +13,13 @@ class OnboardingTemplate(Base):
     __tablename__ = "talent_onboarding_templates"
 
     id: Mapped[str] = ulid_pk()
-    org_id: Mapped[str] = mapped_column(String(26), ForeignKey("organizations.id"), index=True)
+    org_id: Mapped[str] = mapped_column(String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     tasks: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     status: Mapped[str] = mapped_column(String(20), default="active")
     created_by: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("users.id"), nullable=True
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -29,10 +29,10 @@ class OnboardingChecklist(Base):
 
     id: Mapped[str] = ulid_pk()
     placement_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("talent_placements.id"), index=True
+        String(26), ForeignKey("placements.id", ondelete="CASCADE"), index=True
     )
     template_id: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("talent_onboarding_templates.id"), nullable=True
+        String(26), ForeignKey("talent_onboarding_templates.id", ondelete="CASCADE"), nullable=True
     )
     tasks: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     completion_percentage: Mapped[int] = mapped_column(SmallInteger, default=0)

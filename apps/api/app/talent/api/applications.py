@@ -509,8 +509,8 @@ async def add_feedback(
             visibility=body.visibility,
             author_id=user.id,
         )
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     await db.commit()
     await db.refresh(feedback)
@@ -562,8 +562,8 @@ async def update_feedback_visibility(
     svc = ApplicationFeedbackService(db)
     try:
         feedback = await svc.update_visibility(feedback_id, body.visibility, user.id)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     if not feedback:
         raise HTTPException(404, "Feedback not found or not the author")
@@ -603,8 +603,8 @@ async def compare_applications(
     svc = ApplicationComparisonService(db)
     try:
         comparisons = await svc.compare(opp_id, body.application_ids)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     import dataclasses
 

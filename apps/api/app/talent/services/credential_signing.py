@@ -153,7 +153,7 @@ class SigningKeyService:
             org_id=org_id,
             key_type="ed25519",
             public_key=public_pem,
-            private_key_encrypted=private_pem,  # TODO: encrypt with app secret
+            private_key_encrypted=private_pem,  # FIXME: encrypt with app secret before production
         )
         self.db.add(key)
         await self.db.flush()

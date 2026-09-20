@@ -57,8 +57,8 @@ async def submit_assessment(
             capability_id=capability_id,
             responses=body.responses,
         )
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from None
+    except ValueError:
+        raise HTTPException(422, "Validation error") from None
 
     await db.commit()
     return DataResponse(data=AssessmentResultResponse(**result))

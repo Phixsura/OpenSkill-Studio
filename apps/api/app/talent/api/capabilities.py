@@ -164,7 +164,7 @@ async def merge_capability(
     try:
         cap = await svc.merge_capability(capability_id, body.target_id)
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     if not cap:
         raise HTTPException(404, "Capability not found")
     await db.commit()
@@ -201,7 +201,7 @@ async def add_edge(
             metadata=body.metadata,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     await db.commit()
     await db.refresh(edge)
     return DataResponse(data=EdgeResponse.model_validate(edge))
@@ -294,7 +294,7 @@ async def create_mapping(
             evidence_type=body.evidence_type,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise HTTPException(422, "Validation error") from e
     await db.commit()
     await db.refresh(mapping)
     return DataResponse(data=MappingResponse.model_validate(mapping))

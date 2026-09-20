@@ -564,6 +564,7 @@ class TalentMatchingService:
 
         # 3. evidence_recency: freshness of most recent evidence per required cap
         # Use preloaded batch data when available (N+1 fix)
+        recency_scores: list[float] = []
         if preloaded_recency is not None:
             recency_scores = preloaded_recency
         elif req_cap_ids:
