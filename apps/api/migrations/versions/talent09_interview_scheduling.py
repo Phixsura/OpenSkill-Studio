@@ -87,6 +87,7 @@ def upgrade() -> None:
     )
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     op.drop_column("interview_stages", "duration_minutes")
     op.drop_column("interview_stages", "meeting_url")

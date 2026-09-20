@@ -111,6 +111,7 @@ def upgrade() -> None:
     )
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     op.drop_table("capability_score_snapshots")
     op.drop_index("ix_capabilities_external_ids", table_name="capabilities")

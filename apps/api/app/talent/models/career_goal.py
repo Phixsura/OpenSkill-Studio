@@ -21,6 +21,10 @@ MAX_ACTIVE_GOALS = 5
 class CareerGoal(Base):
     __tablename__ = "talent_career_goals"
 
+
+    def __repr__(self) -> str:
+        return f"<CareerGoal {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True

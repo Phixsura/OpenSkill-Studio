@@ -19,6 +19,10 @@ class InterviewSlot(Base):
 
     __tablename__ = "talent_interview_slots"
 
+
+    def __repr__(self) -> str:
+        return f"<InterviewSlot {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     interview_stage_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("interview_stages.id", ondelete="CASCADE")

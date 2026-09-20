@@ -61,6 +61,7 @@ def upgrade() -> None:
     )
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     op.drop_index("ix_app_feedback_type", table_name="talent_application_feedback")
     op.drop_index("ix_app_feedback_author", table_name="talent_application_feedback")

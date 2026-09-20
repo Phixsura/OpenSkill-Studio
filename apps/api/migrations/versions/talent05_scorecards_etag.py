@@ -103,6 +103,7 @@ def upgrade() -> None:
     )
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     op.drop_table("talent_interview_scorecards")
     op.drop_table("talent_scorecard_templates")

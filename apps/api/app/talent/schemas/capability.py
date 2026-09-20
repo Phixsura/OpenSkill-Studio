@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field, field_validator
 from app.schemas.base import reject_ctrl_str
 
 
+# NOTE: canonical_name should be NFKC-normalized for consistent matching
+# (handled by slugify in service layer)
 class CreateCapabilityRequest(BaseModel):
     canonical_name: str = Field(..., min_length=1, max_length=120)
     category: str = Field(..., min_length=1, max_length=40)

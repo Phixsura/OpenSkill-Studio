@@ -17,6 +17,10 @@ NOTIFY_FREQUENCIES = frozenset({"never", "daily", "weekly", "on_new_match"})
 class SavedSearch(Base):
     __tablename__ = "talent_saved_searches"
 
+
+    def __repr__(self) -> str:
+        return f"<SavedSearch {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True

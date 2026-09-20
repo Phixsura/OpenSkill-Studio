@@ -30,6 +30,10 @@ class CohortOpportunityExposure(Base):
 
     __tablename__ = "cohort_opportunity_exposures"
 
+
+    def __repr__(self) -> str:
+        return f"<CohortOpportunityExposure {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     cohort_id: Mapped[str] = mapped_column(String(26), ForeignKey("cohorts.id", ondelete="CASCADE"))
     opportunity_id: Mapped[str] = mapped_column(
@@ -50,6 +54,10 @@ class InternshipSupervision(Base):
     """School-side tracking of an internship placement."""
 
     __tablename__ = "internship_supervisions"
+
+
+    def __repr__(self) -> str:
+        return f"<InternshipSupervision {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     placement_id: Mapped[str] = mapped_column(
@@ -88,6 +96,10 @@ class EmployerVerification(Base):
     """
 
     __tablename__ = "employer_verifications"
+
+
+    def __repr__(self) -> str:
+        return f"<EmployerVerification {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     placement_id: Mapped[str] = mapped_column(
@@ -137,6 +149,10 @@ class OutcomeEvent(Base):
     """Longitudinal career milestone — user-controlled visibility."""
 
     __tablename__ = "outcome_events"
+
+
+    def __repr__(self) -> str:
+        return f"<OutcomeEvent {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))

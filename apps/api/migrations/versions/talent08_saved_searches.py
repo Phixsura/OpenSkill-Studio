@@ -57,6 +57,7 @@ def upgrade() -> None:
     )
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     op.drop_index("ix_talent_saved_searches_search_type")
     op.drop_index("ix_talent_saved_searches_created_by")

@@ -27,6 +27,10 @@ class AssessmentBlueprint(Base):
 
     __tablename__ = "assessment_blueprints"
 
+
+    def __repr__(self) -> str:
+        return f"<AssessmentBlueprint {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")
@@ -64,6 +68,10 @@ class AssessmentRun(Base):
     """A user's attempt at a specific assessment blueprint version."""
 
     __tablename__ = "assessment_runs"
+
+
+    def __repr__(self) -> str:
+        return f"<AssessmentRun {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     blueprint_id: Mapped[str] = mapped_column(
@@ -112,6 +120,10 @@ class CredentialRule(Base):
 
     __tablename__ = "credential_rules"
 
+
+    def __repr__(self) -> str:
+        return f"<CredentialRule {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     credential_type: Mapped[str] = mapped_column(String(80))
     version: Mapped[int] = mapped_column(Integer)
@@ -147,6 +159,10 @@ class Credential(Base):
     """Verified credential issued when a versioned rule set is satisfied."""
 
     __tablename__ = "credentials"
+
+
+    def __repr__(self) -> str:
+        return f"<Credential {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     credential_type: Mapped[str] = mapped_column(String(80))

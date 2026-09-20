@@ -44,6 +44,10 @@ class Application(Base):
 
     __tablename__ = "applications"
 
+
+    def __repr__(self) -> str:
+        return f"<Application {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     opportunity_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("opportunities.id", ondelete="CASCADE")
@@ -81,6 +85,10 @@ class ApplicationEvent(Base):
 
     __tablename__ = "application_events"
 
+
+    def __repr__(self) -> str:
+        return f"<ApplicationEvent {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     application_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("applications.id", ondelete="CASCADE")
@@ -103,6 +111,10 @@ class InterviewStage(Base):
     """Structured interview/evaluation record — employer-private notes."""
 
     __tablename__ = "interview_stages"
+
+
+    def __repr__(self) -> str:
+        return f"<InterviewStage {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     application_id: Mapped[str] = mapped_column(
@@ -135,6 +147,10 @@ class Placement(Base):
     """Outcome record when an application reaches hired status."""
 
     __tablename__ = "placements"
+
+
+    def __repr__(self) -> str:
+        return f"<Placement {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     application_id: Mapped[str] = mapped_column(
@@ -187,6 +203,10 @@ class ApplicationFeedback(Base):
     """
 
     __tablename__ = "talent_application_feedback"
+
+
+    def __repr__(self) -> str:
+        return f"<ApplicationFeedback {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     application_id: Mapped[str] = mapped_column(

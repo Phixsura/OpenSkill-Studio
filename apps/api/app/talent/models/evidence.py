@@ -69,6 +69,10 @@ class CapabilityEvidence(Base):
 
     __tablename__ = "capability_evidence"
 
+
+    def __repr__(self) -> str:
+        return f"<CapabilityEvidence {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     capability_id: Mapped[str] = mapped_column(

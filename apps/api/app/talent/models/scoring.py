@@ -20,6 +20,10 @@ class CapabilityScoreSnapshot(Base):
 
     __tablename__ = "capability_score_snapshots"
 
+
+    def __repr__(self) -> str:
+        return f"<CapabilityScoreSnapshot {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))
     capability_id: Mapped[str] = mapped_column(

@@ -53,6 +53,7 @@ def upgrade():
     )
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade():
     op.drop_index("ix_talent_org_signing_keys_org")
     op.drop_table("talent_org_signing_keys")

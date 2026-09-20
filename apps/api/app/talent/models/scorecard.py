@@ -38,6 +38,10 @@ class ScorecardTemplate(Base):
 
     __tablename__ = "talent_scorecard_templates"
 
+
+    def __repr__(self) -> str:
+        return f"<ScorecardTemplate {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")
@@ -66,6 +70,10 @@ class InterviewScorecard(Base):
     """
 
     __tablename__ = "talent_interview_scorecards"
+
+
+    def __repr__(self) -> str:
+        return f"<InterviewScorecard {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     interview_stage_id: Mapped[str] = mapped_column(

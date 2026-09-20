@@ -25,6 +25,10 @@ class TalentPool(Base):
 
     __tablename__ = "talent_pools"
 
+
+    def __repr__(self) -> str:
+        return f"<TalentPool {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")
@@ -61,6 +65,10 @@ class TalentPoolMembership(Base):
 
     __tablename__ = "talent_pool_memberships"
 
+
+    def __repr__(self) -> str:
+        return f"<TalentPoolMembership {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     pool_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("talent_pools.id", ondelete="CASCADE")
@@ -91,6 +99,10 @@ class TalentOutreach(Base):
     """Opportunity invitation or talent-pool invitation."""
 
     __tablename__ = "talent_outreach"
+
+
+    def __repr__(self) -> str:
+        return f"<TalentOutreach {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(

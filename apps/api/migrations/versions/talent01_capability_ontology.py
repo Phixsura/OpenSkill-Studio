@@ -1104,6 +1104,7 @@ def upgrade() -> None:
     op.create_index("ix_outreach_org", "talent_outreach", ["org_id"])
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     # Drop in reverse FK-dependency order
     op.drop_table("talent_outreach")

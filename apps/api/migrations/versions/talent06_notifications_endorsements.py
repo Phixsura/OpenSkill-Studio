@@ -159,6 +159,7 @@ def upgrade() -> None:
     )
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     op.drop_table("talent_activity_log")
     op.drop_table("talent_skill_endorsements")

@@ -178,6 +178,7 @@ def upgrade() -> None:
     op.create_index("ix_successor_user", "talent_successor_nominations", ["candidate_user_id"])
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     op.drop_table("talent_successor_nominations")
     op.drop_table("talent_key_roles")

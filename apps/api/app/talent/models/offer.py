@@ -12,6 +12,10 @@ from app.models.base import Base, ulid_pk
 class Offer(Base):
     __tablename__ = "talent_offers"
 
+
+    def __repr__(self) -> str:
+        return f"<Offer {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     application_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("applications.id", ondelete="CASCADE"), index=True

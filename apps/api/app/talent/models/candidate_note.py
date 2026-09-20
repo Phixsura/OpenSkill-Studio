@@ -18,6 +18,10 @@ class CandidateNote(Base):
 
     __tablename__ = "talent_candidate_notes"
 
+
+    def __repr__(self) -> str:
+        return f"<CandidateNote {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE")

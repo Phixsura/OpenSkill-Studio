@@ -40,6 +40,10 @@ class SkillPassport(Base):
 
     __tablename__ = "skill_passports"
 
+
+    def __repr__(self) -> str:
+        return f"<SkillPassport {self.id}>"
+
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
@@ -76,6 +80,10 @@ class PassportSnapshot(Base):
     """Immutable point-in-time snapshot for external verification."""
 
     __tablename__ = "passport_snapshots"
+
+
+    def __repr__(self) -> str:
+        return f"<PassportSnapshot {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="CASCADE"))

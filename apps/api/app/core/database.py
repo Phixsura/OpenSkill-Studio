@@ -11,6 +11,10 @@ engine = create_async_engine(
     connect_args={"timeout": 10, "command_timeout": 30},
     max_overflow=settings.db_max_overflow,
     pool_pre_ping=True,
+    # NOTE: Add pool event listeners for monitoring in production:
+    # from sqlalchemy import event
+    # event.listen(engine.sync_engine, "checkout", on_checkout)
+    # event.listen(engine.sync_engine, "checkin", on_checkin)
 )
 
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

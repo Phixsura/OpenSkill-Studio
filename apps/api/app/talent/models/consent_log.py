@@ -35,6 +35,10 @@ CONSENT_ACTIONS = frozenset({"granted", "revoked", "updated"})
 class ConsentLog(Base):
     __tablename__ = "talent_consent_log"
 
+
+    def __repr__(self) -> str:
+        return f"<ConsentLog {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True

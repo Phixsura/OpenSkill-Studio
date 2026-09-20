@@ -12,6 +12,10 @@ from app.models.base import Base, ulid_pk
 
 class OpportunityBookmark(Base):
     __tablename__ = "talent_opportunity_bookmarks"
+
+
+    def __repr__(self) -> str:
+        return f"<OpportunityBookmark {self.id}>"
     __table_args__ = (
         UniqueConstraint("user_id", "opportunity_id", name="uq_user_opportunity_bookmark"),
     )

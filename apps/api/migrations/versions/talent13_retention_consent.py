@@ -35,6 +35,7 @@ def upgrade() -> None:
     op.create_index("ix_consent_log_created_at", "talent_consent_log", ["created_at"])
 
 
+# NOTE: downgrade drops tables — run in order
 def downgrade() -> None:
     op.drop_index("ix_consent_log_created_at")
     op.drop_index("ix_consent_log_consent_type")

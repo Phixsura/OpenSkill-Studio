@@ -29,6 +29,10 @@ PORTFOLIO_VISIBILITY_OPTIONS = frozenset({"private", "passport_visible", "public
 class PortfolioItem(Base):
     __tablename__ = "talent_portfolio_items"
 
+
+    def __repr__(self) -> str:
+        return f"<PortfolioItem {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True

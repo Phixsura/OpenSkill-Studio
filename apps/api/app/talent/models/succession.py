@@ -12,6 +12,10 @@ from app.models.base import Base, ulid_pk
 class KeyRole(Base):
     __tablename__ = "talent_key_roles"
 
+
+    def __repr__(self) -> str:
+        return f"<KeyRole {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
@@ -35,6 +39,10 @@ class KeyRole(Base):
 
 class SuccessorNomination(Base):
     __tablename__ = "talent_successor_nominations"
+
+
+    def __repr__(self) -> str:
+        return f"<SuccessorNomination {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     key_role_id: Mapped[str] = mapped_column(

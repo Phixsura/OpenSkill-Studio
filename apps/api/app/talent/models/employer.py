@@ -26,6 +26,10 @@ class EmployerProfile(Base):
 
     __tablename__ = "employer_profiles"
 
+
+    def __repr__(self) -> str:
+        return f"<EmployerProfile {self.id}>"
+
     org_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
     )
@@ -59,6 +63,10 @@ class Opportunity(Base):
     """A structured internship/job/project-role posting."""
 
     __tablename__ = "opportunities"
+
+
+    def __repr__(self) -> str:
+        return f"<Opportunity {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     employer_org_id: Mapped[str] = mapped_column(

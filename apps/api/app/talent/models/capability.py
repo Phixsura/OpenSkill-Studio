@@ -32,6 +32,10 @@ class Capability(Base):
 
     __tablename__ = "capabilities"
 
+
+    def __repr__(self) -> str:
+        return f"<Capability {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     canonical_name: Mapped[str] = mapped_column(String(120), unique=True)
     slug: Mapped[str] = mapped_column(String(120), unique=True)
@@ -95,6 +99,10 @@ class CapabilityEdge(Base):
 
     __tablename__ = "capability_edges"
 
+
+    def __repr__(self) -> str:
+        return f"<CapabilityEdge {self.id}>"
+
     id: Mapped[str] = ulid_pk()
     source_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("capabilities.id", ondelete="CASCADE")
@@ -140,6 +148,10 @@ class CapabilityMapping(Base):
     """Maps platform content to a capability with a contribution weight."""
 
     __tablename__ = "capability_mappings"
+
+
+    def __repr__(self) -> str:
+        return f"<CapabilityMapping {self.id}>"
 
     id: Mapped[str] = ulid_pk()
     capability_id: Mapped[str] = mapped_column(
