@@ -150,7 +150,7 @@ async def get_learning_plan(
     summary="Compute match fairness metrics",
     description="Runs the matching pipeline and returns a fairness audit with adverse impact ratio (EEOC four-fifths rule). Employer org member only.",
 )
-async def get_match_fairness(
+async def get_match_fairness(  # NOTE: POST is intentional — runs heavy computation
     opp_id: str,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),

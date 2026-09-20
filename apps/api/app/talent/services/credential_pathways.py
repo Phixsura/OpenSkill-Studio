@@ -7,6 +7,10 @@ when all prerequisites (or N of M) are met.
 
 from __future__ import annotations
 
+import structlog
+
+log = structlog.get_logger()
+
 from datetime import UTC, datetime
 
 from sqlalchemy import select

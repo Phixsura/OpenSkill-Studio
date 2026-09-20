@@ -7,6 +7,10 @@ self-endorsement and duplicate endorsements.
 
 from __future__ import annotations
 
+import structlog
+
+log = structlog.get_logger()
+
 from collections import defaultdict
 
 from sqlalchemy import select

@@ -31,6 +31,7 @@ CONSENT_TYPES = frozenset(
 CONSENT_ACTIONS = frozenset({"granted", "revoked", "updated"})
 
 
+# FIXME: PII fields (ip_address) should be encrypted at rest
 class ConsentLog(Base):
     __tablename__ = "talent_consent_log"
 

@@ -69,6 +69,7 @@ async def endorse_user(
             },
         )
         await db.commit()
+        await db.refresh(endorsement)
     except Exception:
         pass  # Notification failure should not block endorsement
 

@@ -54,6 +54,10 @@ ignore = ["E501", "B008", "UP046", "UP042", "SIM117"]
 # Import-after-docstring in API modules
 "app/talent/api/bookmarks.py" = ["E402"]
 "app/talent/api/saved_searches.py" = ["E402"]
+# Services with structlog added after docstring
+"app/talent/services/endorsements.py" = ["E402"]
+"app/talent/services/career_goals.py" = ["E402"]
+"app/talent/services/credential_pathways.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

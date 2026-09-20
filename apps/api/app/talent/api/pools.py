@@ -35,6 +35,7 @@ from app.talent.services.talent_pool import (
     TalentPoolService,
 )
 
+# NOTE: Multi-step writes should use begin_nested() for atomicity
 router = APIRouter(prefix="/talent", tags=["Talent — Pools & Outreach"])
 
 

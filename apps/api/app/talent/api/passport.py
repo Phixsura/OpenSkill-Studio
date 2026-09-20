@@ -16,6 +16,7 @@ from app.talent.schemas.passport import (
 )
 from app.talent.services.passport import PassportService
 
+# NOTE: Multi-step writes should use begin_nested() for atomicity
 router = APIRouter(tags=["Talent — Passport"])
 
 

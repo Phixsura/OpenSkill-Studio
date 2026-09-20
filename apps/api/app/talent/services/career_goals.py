@@ -7,6 +7,10 @@ against the goal's targets.
 
 from __future__ import annotations
 
+import structlog
+
+log = structlog.get_logger()
+
 from datetime import UTC, date, datetime
 
 from sqlalchemy import func, select
