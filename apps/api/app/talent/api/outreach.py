@@ -38,7 +38,7 @@ async def list_outreach(
     q = q.order_by(TalentOutreach.created_at.desc()).limit(limit)
     result = await db.execute(q)
     rows = result.scalars().all()
-    return {"data": [_outreach_dict(r) for r in rows]}
+    return DataResponse(data=[_outreach_dict(r) for r in rows])
 
 
 @router.post(
@@ -113,7 +113,7 @@ async def send_outreach(
     db.add(record)
     await db.commit()
     await db.refresh(record)
-    return {"data": _outreach_dict(record)}
+    return DataResponse(data=_outreach_dict(record))
 
 
 @router.post(
@@ -148,7 +148,7 @@ async def respond_outreach(
     record.status = response
     await db.commit()
     await db.refresh(record)
-    return {"data": _outreach_dict(record)}
+    return DataResponse(data=_outreach_dict(record))
 
 
 def _outreach_dict(r) -> dict:
