@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 export default function OffersPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["talent-offers"],
     queryFn: () =>
       api<{
@@ -27,6 +27,8 @@ export default function OffersPage() {
     declined: "bg-red-100 text-red-700",
     expired: "bg-yellow-100 text-yellow-700",
   };
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6 p-6">

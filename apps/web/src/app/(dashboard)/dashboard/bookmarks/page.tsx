@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 export default function BookmarksPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["talent-bookmarks"],
     queryFn: () =>
       api<{ data: { id: string; opportunity_id: string; notes: string | null }[] }>(
@@ -14,6 +14,8 @@ export default function BookmarksPage() {
   });
 
   const items = data?.data ?? [];
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6 p-6">

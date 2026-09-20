@@ -192,7 +192,7 @@ def test_sl21_slugify_unicode():
     from app.talent.services.capability import slugify
 
     result = slugify("AI 产品设计")
-    assert isinstance(result, str)
+    assert isinstance(result, str) and result
     assert len(result) > 0
 
 

@@ -71,7 +71,7 @@ export default function OpportunityDetailPage() {
   const [selectedCredentials, setSelectedCredentials] = useState<string[]>([]);
 
   // Load opportunity
-  const { data: oppData, isLoading } = useQuery({
+  const { data: oppData, isLoading, isError } = useQuery({
     queryKey: ["opportunity", opportunityId],
     queryFn: () => apiWithAuth<{ data: Opportunity }>(`/talent/opportunities/${opportunityId}`),
   });
@@ -126,7 +126,9 @@ export default function OpportunityDetailPage() {
   const profileMap = new Map(profile.map((s) => [s.capability_id, s]));
 
   if (isLoading) {
-    return (
+    if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  return (
       <div className="animate-pulse space-y-4">
         <div className="h-10 w-2/3 rounded bg-[hsl(var(--secondary))]" />
         <div className="h-40 rounded bg-[hsl(var(--secondary))]" />

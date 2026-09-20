@@ -37,12 +37,12 @@ interface Overview {
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
 
-  const { data: orgsData } = useQuery({
+  const { data: orgsData, isError, isLoading } = useQuery({
     queryKey: ["my-orgs"],
     queryFn: () => apiWithAuth<{ data: OrgItem[] }>("/orgs"),
   });
 
-  const { data: overviewData } = useQuery({
+  const { data: overviewData, isError, isLoading } = useQuery({
     queryKey: ["my-overview"],
     queryFn: () => apiWithAuth<{ data: Overview }>("/me/overview"),
   });
@@ -53,6 +53,10 @@ export default function DashboardPage() {
     (ov?.drafts.length ?? 0) > 0 ||
     (ov?.peer_assessments_pending ?? 0) > 0 ||
     (ov?.pending_reviews_to_grade ?? 0) > 0;
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="space-y-8">

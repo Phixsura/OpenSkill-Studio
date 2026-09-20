@@ -159,7 +159,7 @@ def test_d15_level_zero_no_evidence():
 
     level, label = determine_level(0.9, 0, None)
     assert level == 0
-    assert isinstance(label, str)
+    assert isinstance(label, str) and label
 
 
 def test_d16_level_increases_with_score():
@@ -183,7 +183,7 @@ def test_d18_level_labels_are_strings():
 
     for score in [0.0, 0.3, 0.5, 0.7, 0.9]:
         _, label = determine_level(score, 10, None)
-        assert isinstance(label, str)
+        assert isinstance(label, str) and label
         assert len(label) > 0
 
 
@@ -450,7 +450,7 @@ def test_d46_suggest_action_small_gap():
     from app.talent.services.career_path import _suggest_action
 
     action = _suggest_action(current_level=2, required_level=3, gap=1)
-    assert isinstance(action, str)
+    assert isinstance(action, str) and action
     assert len(action) > 0
 
 
@@ -458,21 +458,21 @@ def test_d47_suggest_action_large_gap():
     from app.talent.services.career_path import _suggest_action
 
     action = _suggest_action(current_level=0, required_level=5, gap=5)
-    assert isinstance(action, str)
+    assert isinstance(action, str) and action
 
 
 def test_d48_suggest_action_no_gap():
     from app.talent.services.career_path import _suggest_action
 
     action = _suggest_action(current_level=3, required_level=3, gap=0)
-    assert isinstance(action, str)
+    assert isinstance(action, str) and action
 
 
 def test_d49_suggest_action_exceeds():
     from app.talent.services.career_path import _suggest_action
 
     action = _suggest_action(current_level=5, required_level=3, gap=-2)
-    assert isinstance(action, str)
+    assert isinstance(action, str) and action
 
 
 def test_d50_skill_gap_dataclass():
@@ -547,7 +547,7 @@ def test_d56_suggest_action_boundary_levels():
     for current in range(6):
         for required in range(6):
             action = _suggest_action(current, required, required - current)
-            assert isinstance(action, str)
+            assert isinstance(action, str) and action
 
 
 def test_d57_suggest_action_returns_nonempty():
@@ -695,7 +695,7 @@ def test_d71_supported_taxonomy_formats():
 def test_d72_taxonomy_api_version():
     from app.talent.services.taxonomy_import import TAXONOMY_API_VERSION
 
-    assert isinstance(TAXONOMY_API_VERSION, str)
+    assert isinstance(TAXONOMY_API_VERSION, str) and TAXONOMY_API_VERSION
 
 
 def test_d73_parsers_dict():

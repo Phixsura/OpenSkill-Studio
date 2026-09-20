@@ -91,7 +91,7 @@ export default function ApplicationsPage() {
   const [cursorStack, setCursorStack] = useState<(string | null)[]>([]);
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["my-applications", statusFilter, cursor],
     queryFn: () => {
       const params = new URLSearchParams({ limit: "20" });
@@ -128,6 +128,8 @@ export default function ApplicationsPage() {
   });
 
   const oppMap = oppsData ?? {};
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6">

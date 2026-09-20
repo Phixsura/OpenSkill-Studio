@@ -15,7 +15,7 @@ interface CredentialVerification {
 
 export default function VerifyCredentialPage() {
   const { credentialId } = useParams<{ credentialId: string }>();
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, isError } = useQuery({
     queryKey: ["verify-credential", credentialId],
     queryFn: () => api<{ data: CredentialVerification }>(`/verify/credential/${credentialId}`),
     enabled: !!credentialId,
@@ -23,7 +23,9 @@ export default function VerifyCredentialPage() {
   });
 
   if (isLoading)
-    return (
+    if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-[hsl(var(--muted-foreground))]">Verifying credential…</div>
       </div>

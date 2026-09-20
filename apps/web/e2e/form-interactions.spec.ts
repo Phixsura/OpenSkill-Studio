@@ -223,7 +223,7 @@ test("brief detail → convert button works and redirects", async ({ page }) => 
 
   // Click "Create Project" to convert
   await page.getByRole("button", { name: "Create Project" }).click();
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(3000);
 
   // Should redirect to project page or stay on briefs
   const url = page.url();

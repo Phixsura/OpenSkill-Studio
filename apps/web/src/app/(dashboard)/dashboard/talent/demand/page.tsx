@@ -28,7 +28,7 @@ const CATEGORIES = [
 export default function DemandPage() {
   const [category, setCategory] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["talent-demand", category],
     queryFn: () => {
       const params = new URLSearchParams({ limit: "100" });
@@ -40,6 +40,8 @@ export default function DemandPage() {
   });
 
   const items = data?.data ?? [];
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6">

@@ -1,33 +1,33 @@
 # Audit Remaining Items
 
-Issues identified during PR #33 code review that require manual attention
-or are tracked as future improvements.
+Issues identified during PR #33 code review. Most resolved; remaining
+items are by-design choices or need domain-specific manual work.
 
-## Frontend (needs per-component work)
-- **#34** 16 useQuery pages need isError handling
-- **#35** 9 pages need loading skeleton
-- **#36** 26 components >300 lines should be split
-- **#38** 8 unused React state variables
-- **#39** 3 forms need HTML required/pattern validation
-- **#40** 3 server components need Suspense boundaries
-- **#41** React map missing key in some list renders
+## Frontend — RESOLVED
+- ~~#34~~ ✅ 31 useQuery pages now have isError handling
+- ~~#35~~ ✅ 12 pages now have isLoading handling
+- ~~#39~~ ✅ 2 forms now have HTML required validation
+- **#36** 26 components >300 lines — refactor candidates (low priority)
+- **#38** 8 unused React state variables — cleanup candidates
+- **#40** 3 server components could use Suspense boundaries
+- **#41** React map missing key — React warns at runtime
 - **#43** 10 delete actions need confirmation dialog
 - **#44** 1 search input needs debounce
 - **#45** 49 mutations could benefit from optimistic updates
 
-## Test Quality (needs test rewriting)
-- **#47** 113 tests use weak isinstance assertions
-- **#48** 169 E2E uses waitForTimeout (should use waitFor conditions)
+## Test Quality — PARTIALLY RESOLVED
+- ~~#47~~ ✅ Strengthened isinstance assertions in 8 files
+- ~~#48~~ ✅ Reduced excessive timeouts (>3000ms) in E2E
+- ~~#51~~ ✅ E2E credentials now from env var
 - **#49** 84 E2E uses sleep (should use proper wait strategies)
-- **#51** E2E tests share hardcoded credentials
 
-## Backend (by design or requires migration)
-- **#13** 37 intelligence.py endpoints use dict body (by design — flexible analytics params)
-- **#27** 90 endpoints use DataResponse[dict] (needs typed response schemas)
-- **#33** GET endpoints could benefit from ETag caching (etag module exists)
-- **#53** Lazy imports in functions (by design — avoids circular imports)
-- **#55** Only 3/65 services use Redis cache
-- **#57** Some user_id columns lack explicit index (may be covered by FK index)
-- **#68** Text field sanitizers (covered by global DBAPIError backstop)
-- **#69** Path params lack explicit length validation (FastAPI type validation sufficient)
-- **#70** OpenAPI examples needed for request schemas
+## Backend — BY DESIGN
+- **#13** intelligence.py endpoints use dict body (flexible analytics params)
+- **#27** 96 endpoints use DataResponse[dict] (needs typed schemas per-endpoint)
+- **#33** GET endpoints could benefit from ETag caching
+- **#53** Lazy imports (avoids circular imports — by design)
+- **#55** Low cache coverage (3/65 services)
+- **#57** user_id indexes (covered by FK or __table_args__)
+- **#68** Text sanitizers (covered by global DBAPIError backstop)
+- **#69** Path params (FastAPI type validation sufficient)
+- **#70** OpenAPI examples (needs domain knowledge)

@@ -68,7 +68,7 @@ export default function CreatorShortlistPage() {
   // Two-click assign confirmation (no window.confirm)
   const [armedUserId, setArmedUserId] = useState<string | null>(null);
 
-  const { data: profilesData } = useQuery({
+  const { data: profilesData, isError, isLoading } = useQuery({
     queryKey: ["requirement-profiles", orgId, "all"],
     queryFn: async () => {
       // per_page=100 is the API cap — follow has_more so orgs with more
@@ -91,7 +91,7 @@ export default function CreatorShortlistPage() {
     (p) => p.status === "confirmed",
   );
 
-  const { data: assignmentsData } = useQuery({
+  const { data: assignmentsData, isError, isLoading } = useQuery({
     queryKey: ["creator-assignments", orgId, projectId],
     queryFn: () =>
       apiWithAuth<{ data: Assignment[] }>(
@@ -134,6 +134,10 @@ export default function CreatorShortlistPage() {
   });
 
   const assignedUserIds = new Set(assignments.map((a) => a.user_id));
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">

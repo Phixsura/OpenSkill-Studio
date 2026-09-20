@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 export default function ActivityPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["talent-activity"],
     queryFn: () =>
       api<{ data: { action_type: string; target_type: string; created_at: string }[] }>(
@@ -14,6 +14,8 @@ export default function ActivityPage() {
   });
 
   const items = data?.data ?? [];
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6 p-6">

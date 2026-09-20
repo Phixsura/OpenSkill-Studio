@@ -140,7 +140,7 @@ class TestScoringEngine:
     def test_determine_level_zero_score(self):
         level, label = determine_level(0.0, 0, None)
         assert level == 0
-        assert isinstance(label, str)
+        assert isinstance(label, str) and label
 
     # 16
     def test_determine_level_high_score(self):
@@ -219,18 +219,18 @@ class TestCareerPath:
     # 23
     def test_suggest_action_zero_gap(self):
         action = _suggest_action(3, 3, 0)
-        assert isinstance(action, str)
+        assert isinstance(action, str) and action
         assert len(action) > 0
 
     # 24
     def test_suggest_action_small_gap(self):
         action = _suggest_action(2, 3, 1)
-        assert isinstance(action, str)
+        assert isinstance(action, str) and action
 
     # 25
     def test_suggest_action_large_gap(self):
         action = _suggest_action(0, 4, 4)
-        assert isinstance(action, str)
+        assert isinstance(action, str) and action
 
     # 26
     def test_max_reachable_gaps_positive(self):
@@ -253,7 +253,7 @@ class TestCareerPath:
     # 29
     def test_suggest_action_expert_to_master(self):
         action = _suggest_action(4, 5, 1)
-        assert isinstance(action, str)
+        assert isinstance(action, str) and action
 
     # 30
     def test_skill_gap_equality(self):
@@ -424,7 +424,7 @@ class TestSkillInference:
     def test_find_excerpt_not_found(self):
         text = "I have no relevant skills"
         excerpt = _find_excerpt(text, "Kubernetes")
-        assert isinstance(excerpt, str)
+        assert isinstance(excerpt, str) and excerpt
 
     # 51
     def test_find_excerpt_window_size(self):
@@ -537,8 +537,8 @@ class TestCredentialSigning:
     # 63
     def test_generate_keypair_returns_tuple(self):
         private_pem, public_pem = generate_keypair()
-        assert isinstance(private_pem, str)
-        assert isinstance(public_pem, str)
+        assert isinstance(private_pem, str) and private_pem
+        assert isinstance(public_pem, str) and public_pem
 
     # 64
     def test_generate_keypair_pem_format(self):
@@ -556,7 +556,7 @@ class TestCredentialSigning:
     def test_sign_payload_returns_string(self):
         priv, pub = generate_keypair()
         sig = sign_payload('{"test": 1}', priv)
-        assert isinstance(sig, str)
+        assert isinstance(sig, str) and sig
         assert len(sig) > 0
 
     # 67
@@ -584,7 +584,7 @@ class TestCredentialSigning:
     # 70
     def test_compute_payload_hash(self):
         h = compute_payload_hash('{"test": 1}')
-        assert isinstance(h, str)
+        assert isinstance(h, str) and h
         assert len(h) > 0
 
     # 71
@@ -603,7 +603,7 @@ class TestCredentialSigning:
     def test_public_key_to_multibase(self):
         _, pub = generate_keypair()
         mb = public_key_to_multibase(pub)
-        assert isinstance(mb, str)
+        assert isinstance(mb, str) and mb
         assert mb.startswith("z")  # base58btc multibase prefix
 
     # 74
@@ -777,13 +777,13 @@ class TestOpenBadges:
         caps = [{"capability_id": "c1", "name": "Python"}]
         details = {"c1": {"name": "Python", "description": "Programming"}}
         narrative = _build_criteria_narrative(caps, details)
-        assert isinstance(narrative, str)
+        assert isinstance(narrative, str) and narrative
         assert len(narrative) > 0
 
     # 94
     def test_build_criteria_narrative_empty(self):
         narrative = _build_criteria_narrative([], {})
-        assert isinstance(narrative, str)
+        assert isinstance(narrative, str) and narrative
 
     def _make_ob3(self, priv):
         now = datetime.now(UTC)
@@ -870,17 +870,17 @@ class TestProfileCompleteness:
     # 103
     def test_determine_level_zero(self):
         level = _determine_level(0.0)
-        assert isinstance(level, str)
+        assert isinstance(level, str) and level
 
     # 104
     def test_determine_level_hundred(self):
         level = _determine_level(100.0)
-        assert isinstance(level, str)
+        assert isinstance(level, str) and level
 
     # 105
     def test_determine_level_fifty(self):
         level = _determine_level(50.0)
-        assert isinstance(level, str)
+        assert isinstance(level, str) and level
 
     # 106
     def test_compute_completeness_empty(self):
@@ -1119,7 +1119,7 @@ class TestOnboarding:
     # 126
     def test_onboarding_phases_are_strings(self):
         for phase in ONBOARDING_PHASES:
-            assert isinstance(phase, str)
+            assert isinstance(phase, str) and phase
 
     # 127
     def test_task_statuses_complete_set(self):
@@ -1862,7 +1862,7 @@ class TestWebhookEvents:
     # 216
     def test_talent_event_types_are_strings(self):
         for et in TALENT_EVENT_TYPES:
-            assert isinstance(et, str)
+            assert isinstance(et, str) and et
 
     # 217
     def test_talent_event_types_is_frozenset(self):

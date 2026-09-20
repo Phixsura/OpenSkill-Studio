@@ -34,18 +34,18 @@ interface SkillBadge {
 }
 
 export default function PortfolioPage() {
-  const { data: profileData } = useQuery({
+  const { data: profileData, isError, isLoading } = useQuery({
     queryKey: ["portfolio-profile"],
     queryFn: () => apiWithAuth<{ data: ProfileData }>("/portfolio/profile"),
   });
 
-  const { data: itemsData } = useQuery({
+  const { data: itemsData, isError, isLoading } = useQuery({
     queryKey: ["portfolio-items"],
     queryFn: () => apiWithAuth<{ data: PortfolioItem[] }>("/portfolio/items"),
   });
 
   const queryClient = useQueryClient();
-  const { data: badgesData } = useQuery({
+  const { data: badgesData, isError, isLoading } = useQuery({
     queryKey: ["portfolio-badges"],
     queryFn: () => apiWithAuth<{ data: SkillBadge[] }>("/portfolio/badges"),
   });
@@ -96,6 +96,10 @@ export default function PortfolioPage() {
     reorderItem.mutate({ id: item.id, sort_order: swapItem.sort_order ?? swapIndex });
     reorderItem.mutate({ id: swapItem.id, sort_order: item.sort_order ?? index });
   };
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="space-y-6">

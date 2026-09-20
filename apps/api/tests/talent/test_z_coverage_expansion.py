@@ -710,14 +710,14 @@ def test_099_share_links_dataclass():
 def test_100_platform_base():
     from app.talent.services.badge_sharing import PLATFORM_BASE
 
-    assert isinstance(PLATFORM_BASE, str)
+    assert isinstance(PLATFORM_BASE, str) and PLATFORM_BASE
     assert "http" in PLATFORM_BASE
 
 
 def test_101_verify_base():
     from app.talent.services.badge_sharing import VERIFY_BASE
 
-    assert isinstance(VERIFY_BASE, str)
+    assert isinstance(VERIFY_BASE, str) and VERIFY_BASE
 
 
 def test_102_generate_share_links_returns_dataclass():
@@ -804,7 +804,7 @@ def test_111_profile_cache_key():
 
     key = profile_cache_key("user123")
     assert "user123" in key
-    assert isinstance(key, str)
+    assert isinstance(key, str) and key
 
 
 def test_112_match_cache_key():
@@ -2026,7 +2026,7 @@ def test_274_default_field_sets_keys():
     from app.talent.services.passport_intelligence import DEFAULT_FIELD_SETS
 
     for key, val in DEFAULT_FIELD_SETS.items():
-        assert isinstance(key, str)
+        assert isinstance(key, str) and key
         assert isinstance(val, (list, set, tuple))
         break
 
@@ -2072,7 +2072,7 @@ def test_280_generate_passport_html_basic():
 
     try:
         result = generate_passport_html({"name": "Test User", "capabilities": []})
-        assert isinstance(result, str)
+        assert isinstance(result, str) and result
     except (KeyError, TypeError):
         pass
 
@@ -2254,14 +2254,14 @@ def test_302_classify_match_tier():
     from app.talent.services.search_intelligence import classify_match_tier
 
     result = classify_match_tier(0.95)
-    assert isinstance(result, str)
+    assert isinstance(result, str) and result
 
 
 def test_303_classify_match_tier_low():
     from app.talent.services.search_intelligence import classify_match_tier
 
     result = classify_match_tier(0.1)
-    assert isinstance(result, str)
+    assert isinstance(result, str) and result
 
 
 def test_304_filter_by_tier():
@@ -2347,7 +2347,7 @@ def test_315_classify_tier_boundary():
     # Test boundary values
     for score in [0.0, 0.5, 1.0]:
         result = classify_match_tier(score)
-        assert isinstance(result, str)
+        assert isinstance(result, str) and result
 
 
 def test_316_experience_levels_are_strings():

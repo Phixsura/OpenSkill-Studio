@@ -63,7 +63,7 @@ export default function NotificationsPage() {
   const queryClient = useQueryClient();
 
   // Notifications list
-  const { data: notifData, isLoading: notifLoading } = useQuery({
+  const { data: notifData, isLoading: notifLoading, isError } = useQuery({
     queryKey: ["talent-notifications"],
     queryFn: () =>
       api<{ data: Notification[]; meta: { next_cursor: string | null; has_more: boolean } }>(
@@ -79,7 +79,7 @@ export default function NotificationsPage() {
   });
 
   // Preferences
-  const { data: prefData, isLoading: prefLoading } = useQuery({
+  const { data: prefData, isLoading: prefLoading, isError } = useQuery({
     queryKey: ["talent-notification-preferences"],
     queryFn: () => api<{ data: NotificationPreference[] }>("/talent/notifications/preferences"),
     enabled: tab === "settings",
@@ -118,6 +118,8 @@ export default function NotificationsPage() {
   const notifications = notifData?.data ?? [];
   const unreadCount = unreadData?.data?.unread_count ?? 0;
   const preferences = prefData?.data ?? [];
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div>

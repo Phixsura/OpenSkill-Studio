@@ -45,7 +45,7 @@ export default function PlatformTenantDetailPage() {
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["platform-tenant", tenantId],
     queryFn: () =>
       apiWithAuth<{ data: { tenant: PlatformTenantDetail; organizations: TenantOrgSummary[] } }>(
@@ -120,6 +120,8 @@ export default function PlatformTenantDetailPage() {
   if (!tenant) {
     return <p className="text-sm text-red-600">Failed to load tenant.</p>;
   }
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6">

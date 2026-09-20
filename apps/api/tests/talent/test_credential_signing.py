@@ -32,7 +32,7 @@ class TestSignAndVerify:
         private_pem, public_pem = generate_keypair()
         payload = json.dumps({"test": "data", "number": 42})
         signature = sign_payload(payload, private_pem)
-        assert isinstance(signature, str)
+        assert isinstance(signature, str) and signature
         assert len(signature) > 0
         assert verify_signature(payload, signature, public_pem)
 

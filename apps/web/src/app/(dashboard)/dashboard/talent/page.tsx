@@ -52,6 +52,8 @@ const SEVERITY_STYLES: Record<string, string> = {
 };
 
 function SeverityBadge({ severity }: { severity: string }) {
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
   return (
     <span
       className={cn(
@@ -260,17 +262,17 @@ function PipelineFunnel({ placements }: { placements: PlacementAnalytics }) {
 /* ── Page ────────────────────────────────────────────────── */
 
 export default function TalentDashboardPage() {
-  const { data: gapsData, isLoading: gapsLoading } = useQuery({
+  const { data: gapsData, isLoading: gapsLoading, isError } = useQuery({
     queryKey: ["talent-gaps"],
     queryFn: () => apiWithAuth<{ data: GapItem[] }>("/talent/intelligence/gaps?limit=10"),
   });
 
-  const { data: coverageData, isLoading: coverageLoading } = useQuery({
+  const { data: coverageData, isLoading: coverageLoading, isError } = useQuery({
     queryKey: ["talent-coverage"],
     queryFn: () => apiWithAuth<{ data: CoverageItem[] }>("/talent/intelligence/coverage?limit=8"),
   });
 
-  const { data: placementsData, isLoading: placementsLoading } = useQuery({
+  const { data: placementsData, isLoading: placementsLoading, isError } = useQuery({
     queryKey: ["talent-placements"],
     queryFn: () => apiWithAuth<{ data: PlacementAnalytics }>("/talent/intelligence/placements"),
   });

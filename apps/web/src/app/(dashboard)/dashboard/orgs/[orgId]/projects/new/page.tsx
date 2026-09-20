@@ -36,7 +36,7 @@ export default function NewProjectPage() {
 
   const submitting = useRef(false);
 
-  const { data: templatesData, isError: templatesError } = useQuery({
+  const { data: templatesData, isError: templatesError, isLoading } = useQuery({
     queryKey: ["project-templates", orgId],
     queryFn: () =>
       apiWithAuth<{ data: Template[] }>(`/orgs/${orgId}/project-templates`),
@@ -114,6 +114,8 @@ export default function NewProjectPage() {
       submitting.current = false;
     }
   };
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

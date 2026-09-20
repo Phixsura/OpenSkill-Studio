@@ -38,7 +38,7 @@ export default function ImportComfyUIPage() {
   const [currentImport, setCurrentImport] = useState<ImportResult | null>(null);
   const [draftName, setDraftName] = useState("");
 
-  const { data: importsData } = useQuery({
+  const { data: importsData, isError, isLoading } = useQuery({
     queryKey: ["comfyui-imports", orgId],
     queryFn: () =>
       apiWithAuth<{ data: ImportResult[] }>(`/orgs/${orgId}/comfyui-imports`),
@@ -94,6 +94,10 @@ export default function ImportComfyUIPage() {
 
   const report = currentImport?.dependency_report;
   const previousImports = importsData?.data ?? [];
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="space-y-8">

@@ -44,7 +44,7 @@ class TestQuizGeneration:
         for key, questions in DIMENSION_QUESTIONS.items():
             assert len(questions) == QUESTIONS_PER_DIMENSION, f"{key} has wrong count"
             for q in questions:
-                assert isinstance(q, str)
+                assert isinstance(q, str) and q
 
 
 class TestScoreComputation:

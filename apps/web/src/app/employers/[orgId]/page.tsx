@@ -46,14 +46,16 @@ const TYPE_LABELS: Record<string, string> = {
 export default function EmployerCareerPage() {
   const { orgId } = useParams<{ orgId: string }>();
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, isError } = useQuery({
     queryKey: ["career-page", orgId],
     queryFn: () => api<{ data: CareerPageData }>(`/talent/employers/${orgId}/career-page`),
     enabled: !!orgId,
   });
 
   if (isLoading) {
-    return (
+    if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  return (
       <div className="flex min-h-screen items-center justify-center bg-[hsl(var(--background))]">
         <div className="text-[hsl(var(--muted-foreground))]">Loading…</div>
       </div>

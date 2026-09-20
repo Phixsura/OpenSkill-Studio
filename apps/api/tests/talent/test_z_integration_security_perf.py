@@ -621,7 +621,7 @@ class TestCapabilityEvidenceScoreFlow:
     # 90
     def test_determine_level_label_is_string(self):
         _, label = determine_level(0.5, 5, None)
-        assert isinstance(label, str)
+        assert isinstance(label, str) and label
 
 
 class TestApplicationOfferFlow:
@@ -855,7 +855,7 @@ class TestSkillInferenceIntegration:
         from app.talent.services.skill_inference import _find_excerpt
 
         excerpt = _find_excerpt("No matching content here", "Rust")
-        assert isinstance(excerpt, str)
+        assert isinstance(excerpt, str) and excerpt
 
 
 class TestCareerPathIntegration:
@@ -872,7 +872,7 @@ class TestCareerPathIntegration:
         from app.talent.services.career_path import _suggest_action
 
         action = _suggest_action(3, 3, 0)
-        assert isinstance(action, str)
+        assert isinstance(action, str) and action
 
     # 139
     def test_suggest_action_positive_gap(self):
@@ -886,7 +886,7 @@ class TestCareerPathIntegration:
         from app.talent.services.career_path import _suggest_action
 
         action = _suggest_action(5, 3, -2)
-        assert isinstance(action, str)
+        assert isinstance(action, str) and action
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1208,13 +1208,13 @@ class TestScoringErrorHandling:
     def test_determine_level_very_high_score(self):
         lvl, label = determine_level(1.0, 100, None)
         assert lvl > 0
-        assert isinstance(label, str)
+        assert isinstance(label, str) and label
 
     # 189
     def test_determine_level_custom_defs_malformed(self):
         lvl, label = determine_level(0.5, 5, {"not_valid": True})
         assert isinstance(lvl, int)
-        assert isinstance(label, str)
+        assert isinstance(label, str) and label
 
     # 190
     def test_recency_future_evidence(self):

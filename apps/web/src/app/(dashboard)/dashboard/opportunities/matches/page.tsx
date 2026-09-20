@@ -24,12 +24,14 @@ const TIER_STYLES: Record<string, string> = {
 };
 
 export default function OpportunityMatchesPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["opportunity-matches"],
     queryFn: () => apiWithAuth<{ data: MatchResult[] }>("/talent/opportunities/matches"),
   });
 
   const matches = data?.data ?? [];
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6">

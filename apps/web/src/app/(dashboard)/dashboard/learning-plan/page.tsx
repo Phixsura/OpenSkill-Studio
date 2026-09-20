@@ -40,7 +40,7 @@ export default function LearningPlanPage() {
   const [opportunityId, setOpportunityId] = useState<string>("");
 
   const queryParams = opportunityId ? `?opportunity_id=${opportunityId}` : "";
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["learning-plan", opportunityId],
     queryFn: () => api<{ data: LearningRecommendation[] }>(`/talent/learning-plan${queryParams}`),
   });
@@ -50,7 +50,9 @@ export default function LearningPlanPage() {
   const totalContent = recommendations.reduce((sum, r) => sum + r.recommended_content.length, 0);
 
   if (isLoading) {
-    return (
+    if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  return (
       <div className="space-y-6">
         <div className="h-8 w-56 animate-pulse rounded bg-[hsl(var(--muted))]" />
         <div className="grid gap-4 sm:grid-cols-3">

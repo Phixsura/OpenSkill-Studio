@@ -14,7 +14,7 @@ interface Capability {
 
 export default function CapabilitiesAdminPage() {
   const [category, setCategory] = useState<string>("");
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["capabilities", category],
     queryFn: () =>
       api<{ data: Capability[]; meta: { total: number } }>(
@@ -24,6 +24,8 @@ export default function CapabilitiesAdminPage() {
 
   const capabilities = data?.data ?? [];
   const total = (data as { meta?: { total: number } })?.meta?.total ?? capabilities.length;
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6 p-6">

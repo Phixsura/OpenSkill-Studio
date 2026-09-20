@@ -36,7 +36,9 @@ const EDITABLE_FIELDS: { key: string; label: string; kind: "text" | "number" | "
 
 function ProvenanceBadge({ source }: { source?: string }) {
   if (source === "extracted") {
-    return (
+    if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  return (
       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
         AI extracted
       </span>
@@ -58,7 +60,7 @@ export default function RequirementProfilePage() {
   const synced = useRef(false);
   const [fields, setFields] = useState<Record<string, string>>({});
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["requirement-profile", orgId, profileId],
     queryFn: () =>
       apiWithAuth<{ data: Profile }>(`/orgs/${orgId}/requirement-profiles/${profileId}`),

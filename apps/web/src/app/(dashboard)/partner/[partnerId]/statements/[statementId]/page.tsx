@@ -46,7 +46,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 export default function StatementDetailPage() {
   const { partnerId, statementId } = useParams<{ partnerId: string; statementId: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["partner-statement", partnerId, statementId],
     queryFn: () =>
       apiWithAuth<{ data: StatementDetail }>(`/partners/${partnerId}/statements/${statementId}`),
@@ -93,6 +93,8 @@ export default function StatementDetailPage() {
   if (!stmt) {
     return <p className="text-sm text-red-600">Failed to load statement.</p>;
   }
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6">

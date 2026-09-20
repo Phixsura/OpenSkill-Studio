@@ -65,7 +65,7 @@ export async function registerUser(name: string): Promise<AuthContext> {
     const res = await fetch(`${API}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: "TestPass123!", display_name: name }),
+      body: JSON.stringify({ email, password: process.env.E2E_TEST_PASSWORD || "TestPass123!", display_name: name }),
     });
     if (res.ok) {
       const data = await res.json();

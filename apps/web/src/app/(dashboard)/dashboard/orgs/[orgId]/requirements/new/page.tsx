@@ -48,7 +48,7 @@ export default function NewRequirementPage() {
   const [extractionUnavailable, setExtractionUnavailable] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const { data: capsData } = useQuery({
+  const { data: capsData, isError, isLoading } = useQuery({
     queryKey: ["capabilities"],
     queryFn: () => apiWithAuth<{ data: Capability[] }>("/capabilities"),
   });
@@ -132,6 +132,10 @@ export default function NewRequirementPage() {
       setLoading(false);
     }
   };
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

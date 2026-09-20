@@ -43,7 +43,7 @@ export default function SnapshotsPage() {
   const [selectedFields, setSelectedFields] = useState<string[]>(["capabilities", "credentials"]);
   const [copied, setCopied] = useState<string | null>(null);
 
-  const { data: snapshotsData, isLoading } = useQuery({
+  const { data: snapshotsData, isLoading, isError } = useQuery({
     queryKey: ["passport-snapshots"],
     queryFn: () => apiWithAuth<{ data: Snapshot[] }>("/talent/passport/snapshots"),
   });
@@ -92,6 +92,8 @@ export default function SnapshotsPage() {
       setTimeout(() => setCopied(null), 2000);
     });
   };
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6">

@@ -42,14 +42,14 @@ export default function PeerAssessPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const { data: projectData } = useQuery({
+  const { data: projectData, isLoading } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () =>
       apiWithAuth<{ data: ProjectDetail }>(`/orgs/${orgId}/projects/${projectId}`),
   });
   const project = projectData?.data;
 
-  const { data: subData, isError } = useQuery({
+  const { data: subData, isError, isLoading } = useQuery({
     queryKey: ["peer-sub", submissionId],
     enabled: !!submissionId,
     queryFn: () =>
@@ -109,6 +109,8 @@ export default function PeerAssessPage() {
     const prev = latestByDeliverable.get(item.deliverable_id);
     if (!prev || item.version > prev.version) latestByDeliverable.set(item.deliverable_id, item);
   }
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">

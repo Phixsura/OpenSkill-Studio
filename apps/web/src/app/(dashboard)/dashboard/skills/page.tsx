@@ -11,12 +11,16 @@ interface OrgItem {
 }
 
 export default function SkillsPage() {
-  const { data } = useQuery({
+  const { data, isError, isLoading } = useQuery({
     queryKey: ["my-orgs"],
     queryFn: () => apiWithAuth<{ data: OrgItem[] }>("/orgs"),
   });
 
   const orgs = data?.data ?? [];
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="space-y-4">

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 export default function EndorsementsPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["talent-endorsements"],
     queryFn: () =>
       api<{
@@ -24,6 +24,8 @@ export default function EndorsementsPage() {
 
   const items = data?.data ?? [];
   const summary = summaryData?.data;
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6 p-6">

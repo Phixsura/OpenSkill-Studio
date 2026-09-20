@@ -115,7 +115,7 @@ def test_b15_slugify_function():
     from app.talent.services.capability import slugify
 
     result = slugify("AI Product Visual Design")
-    assert isinstance(result, str)
+    assert isinstance(result, str) and result
     assert " " not in result
 
 
@@ -130,7 +130,7 @@ def test_b17_slugify_special_chars():
     from app.talent.services.capability import slugify
 
     result = slugify("C++ Programming & Design")
-    assert isinstance(result, str)
+    assert isinstance(result, str) and result
     assert len(result) > 0
 
 
@@ -377,7 +377,7 @@ def test_b50_passport_has_alumni_mode():
 def test_b51_ics_template():
     from app.talent.services.interview_scheduling import ICS_TEMPLATE
 
-    assert isinstance(ICS_TEMPLATE, str)
+    assert isinstance(ICS_TEMPLATE, str) and ICS_TEMPLATE
     assert "BEGIN:VCALENDAR" in ICS_TEMPLATE
     assert "END:VCALENDAR" in ICS_TEMPLATE
 

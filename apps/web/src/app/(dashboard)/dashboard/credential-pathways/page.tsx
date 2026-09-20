@@ -19,7 +19,7 @@ interface PathwayProgress {
 export default function CredentialPathwaysPage() {
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["credential-pathways-progress"],
     queryFn: () => api<{ data: PathwayProgress[] }>("/talent/credential-pathways/my-progress"),
   });
@@ -27,7 +27,9 @@ export default function CredentialPathwaysPage() {
   const pathways = data?.data ?? [];
 
   if (isLoading) {
-    return (
+    if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  return (
       <div className="space-y-6">
         <div className="h-8 w-56 animate-pulse rounded bg-[hsl(var(--muted))]" />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -116,7 +116,7 @@ export default function OpportunitiesPage() {
   }, [searchQuery]);
 
   // Fetch opportunities
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["opportunities", typeFilter, locationFilter, sortBy, debouncedQuery, cursor],
     queryFn: () => {
       const params = new URLSearchParams({ status: "open", limit: "12" });
@@ -245,6 +245,8 @@ export default function OpportunitiesPage() {
     setCursor(null);
     setCursorStack([]);
   };
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6">

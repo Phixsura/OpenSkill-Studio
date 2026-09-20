@@ -141,6 +141,8 @@ function SkillRadarChart({ capabilities }: { capabilities: CapabilityScore[] }) 
     fullMark: 100,
   }));
 
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
   return (
     <div className="rounded-lg border bg-[hsl(var(--card))] p-5 shadow-sm">
       <h2 className="mb-3 text-lg font-semibold">Skill Profile</h2>
@@ -289,7 +291,7 @@ function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) 
 export default function PassportPage() {
   const queryClient = useQueryClient();
 
-  const { data: passportData, isLoading: passportLoading } = useQuery({
+  const { data: passportData, isLoading: passportLoading, isError } = useQuery({
     queryKey: ["passport"],
     queryFn: () => apiWithAuth<{ data: PassportData }>("/talent/passport"),
   });
