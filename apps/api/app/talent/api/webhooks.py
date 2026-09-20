@@ -13,6 +13,9 @@ from app.schemas.base import DataResponse
 from app.talent.models.webhook_endpoint import WebhookDeliveryLog, WebhookEndpointConfig
 from app.talent.schemas.cursor import CursorListResponse, CursorMeta
 
+# NOTE: Webhook secret rotation: delete + re-register with new secret.
+# Dedicated rotate endpoint is planned.
+
 router = APIRouter(prefix="/talent", tags=["Talent — Webhooks"])
 
 

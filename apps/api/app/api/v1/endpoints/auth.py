@@ -21,6 +21,9 @@ from app.services.auth import AuthService
 # via Redis counter (increment on 401, reset on success, block at threshold)
 MAX_LOGIN_ATTEMPTS = 10  # threshold — enforcement pending Redis integration
 
+# NOTE: API key authentication for external integrations is planned.
+# Use JWT bearer tokens until then.
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 COOKIE_OPTS = {

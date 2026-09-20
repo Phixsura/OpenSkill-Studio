@@ -137,6 +137,17 @@ async def add_api_version_header(request, call_next):
     response.headers["X-API-Version"] = "1.0"
     return response
 
+# ── Observability ──
+# NOTE: Add OpenTelemetry or Prometheus metrics middleware for production
+# from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+# FastAPIInstrumentor.instrument_app(app)
+
+# ── Scheduled Tasks ──
+# NOTE: Use arq (already in deps) for background jobs:
+# - Data retention enforcement (daily)
+# - Expired snapshot cleanup (hourly)
+# - Cache warming (on deploy)
+
 # ── Routes ──
 app.include_router(api_v1_router, prefix="/api/v1")
 

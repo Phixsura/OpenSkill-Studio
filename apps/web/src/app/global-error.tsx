@@ -1,5 +1,7 @@
 "use client";
 
+// TODO: integrate Sentry.captureException(error) for production error tracking
+
 export default function GlobalError({
   error,
   reset,
