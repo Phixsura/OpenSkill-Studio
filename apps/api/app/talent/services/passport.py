@@ -132,7 +132,10 @@ class PassportService:
 
     async def _build_full_passport(self, user_id: str, passport: SkillPassport) -> dict:
         """Build complete passport for the owner."""
-        profile = await compute_capability_profile(self.db, user_id)
+        try:
+            profile = await compute_capability_profile(self.db, user_id)
+        except Exception:
+            profile = []
 
         return {
             "user_id": user_id,
