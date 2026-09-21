@@ -78,8 +78,8 @@ from app.ecosystem.models.replacement import (  # noqa: F401
     ReplacementCandidate,
     ReplacementEdge,
     RolloutPlan,
-    Watchlist,
     WatchItem,
+    Watchlist,
 )
 from app.ecosystem.models.source import (  # noqa: F401
     CIRCUIT_BREAKER_THRESHOLD,
