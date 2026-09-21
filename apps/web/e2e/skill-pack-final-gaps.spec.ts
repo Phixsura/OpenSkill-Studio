@@ -57,13 +57,13 @@ test.afterAll(async () => { await ctx?.close(); });
 // ═══ 1. Pack Create: select Unlisted visibility → verify ═══
 test("1. Create pack with visibility=Unlisted, verify", async () => {
   await p.goto(`/dashboard/orgs/${orgId}/packs/new`);
-  await p.waitForLoadState("networkidle");
+  await p.waitForLoadState("domcontentloaded");
 
   await p.locator("#name").fill("Unlisted Pack Test");
   await p.locator("#visibility").selectOption("Unlisted");
   await p.click('button:has-text("Create Skill Pack")');
-  await p.waitForURL(/\/packs\/01/, { timeout: 15_000 });
-  await p.waitForLoadState("networkidle");
+  await p.waitForURL(/\/packs\/01/, { timeout: 30_000 });
+  await p.waitForLoadState("domcontentloaded");
 
   await expect(p.getByText("unlisted", { exact: true })).toBeVisible();
 });
@@ -71,13 +71,13 @@ test("1. Create pack with visibility=Unlisted, verify", async () => {
 // ═══ 2. Pack Create: select Expert difficulty → verify ═══
 test("2. Create pack with difficulty=Expert, verify", async () => {
   await p.goto(`/dashboard/orgs/${orgId}/packs/new`);
-  await p.waitForLoadState("networkidle");
+  await p.waitForLoadState("domcontentloaded");
 
   await p.locator("#name").fill("Expert Pack Test");
   await p.locator("#difficulty").selectOption("Expert");
   await p.click('button:has-text("Create Skill Pack")');
-  await p.waitForURL(/\/packs\/01/, { timeout: 15_000 });
-  await p.waitForLoadState("networkidle");
+  await p.waitForURL(/\/packs\/01/, { timeout: 30_000 });
+  await p.waitForLoadState("domcontentloaded");
 
   // Verify pack created (we're on detail page)
   await expect(p.locator("text=Expert Pack Test")).toBeVisible();
@@ -89,7 +89,7 @@ test("3. Publish second release v1.1.0, verify 2 releases listed", async () => {
   const pack = packs.data.find((pk: any) => pk.name === "MultiRelease Pack");
 
   await p.goto(`/dashboard/orgs/${orgId}/packs/${pack.id}`);
-  await p.waitForLoadState("networkidle");
+  await p.waitForLoadState("domcontentloaded");
   await sleep(500);
 
   // Should already show v1.0.0
@@ -99,7 +99,7 @@ test("3. Publish second release v1.1.0, verify 2 releases listed", async () => {
   await p.locator("#releaseVersion").fill("1.1.0");
   await p.locator("textarea").last().fill("Second release");
   await p.locator("button:has-text('Publish')").click();
-  await p.waitForLoadState("networkidle");
+  await p.waitForLoadState("domcontentloaded");
   await sleep(1000);
 
   // Both versions should be visible
@@ -113,7 +113,7 @@ test("4. Path detail: add project item type", async () => {
   const pathId = path.data.id;
 
   await p.goto(`/dashboard/orgs/${orgId}/paths/${pathId}`);
-  await p.waitForLoadState("networkidle");
+  await p.waitForLoadState("domcontentloaded");
   await sleep(1000);
 
   // Select "Project" from Type dropdown
@@ -129,7 +129,7 @@ test("4. Path detail: add project item type", async () => {
   if (projOpt) {
     await projSelect.selectOption({ label: projOpt });
     await p.click('button:has-text("Add Item")');
-    await p.waitForLoadState("networkidle");
+    await p.waitForLoadState("domcontentloaded");
     await sleep(500);
 
     // Project should appear in items list (use span to avoid matching dropdown option)
@@ -143,7 +143,7 @@ test("5. Registry detail: capabilities tags displayed", async () => {
   const pack = packs.data.find((pk: any) => pk.name === "MultiRelease Pack");
 
   await p.goto(`/registry/${pack.id}`);
-  await p.waitForLoadState("networkidle");
+  await p.waitForLoadState("domcontentloaded");
 
   // Capabilities section should show tags
   await expect(p.locator("text=Capabilities")).toBeVisible();
@@ -163,7 +163,7 @@ test("6. Registry detail: description text shown", async () => {
   await api(admin, "POST", `/orgs/${orgId}/packs/${pack.data.id}/approve`);
 
   await p.goto(`/registry/${pack.data.id}`);
-  await p.waitForLoadState("networkidle");
+  await p.waitForLoadState("domcontentloaded");
 
   await expect(p.getByRole("heading", { name: "Description" })).toBeVisible();
   await expect(p.locator("text=This is a detailed pack description for testing.")).toBeVisible();

@@ -83,7 +83,7 @@ function LearningComposerInner() {
   const [matchRun, setMatchRun] = useState<MatchRun | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
 
-  const { data: profilesData } = useQuery({
+  const { data: profilesData, isError, isLoading } = useQuery({
     queryKey: ["requirement-profiles", orgId, "all"],
     queryFn: async () => {
       // per_page=100 is the API cap — follow has_more so orgs with more
@@ -161,6 +161,10 @@ function LearningComposerInner() {
   const activeItems =
     draft?.payload.items.filter((i) => i.status === "included") ?? [];
   const confirmedDraft = draft?.status === "confirmed";
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">

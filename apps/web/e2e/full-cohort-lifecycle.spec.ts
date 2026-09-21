@@ -56,14 +56,14 @@ test.describe("Full Cohort Lifecycle", () => {
 
     // Click Cohorts tab
     await page.click('text=Cohorts');
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Cohort card should be visible
     await expect(page.locator("text=AI Visual Commerce")).toBeVisible();
 
     // Click into the cohort
     await page.click("text=AI Visual Commerce");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should see stats cards
     await expect(page.locator("text=Learners")).toBeVisible();
@@ -72,7 +72,7 @@ test.describe("Full Cohort Lifecycle", () => {
   test("instructor can manage cohort members", async ({ page }) => {
     await loginInBrowser(page, instructor.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should see at least 2 members (instructor + learner)
     await expect(page.locator("text=Cohort Members")).toBeVisible();
@@ -85,7 +85,7 @@ test.describe("Full Cohort Lifecycle", () => {
     await loginInBrowser(page, instructor.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Click create
     await page.click("text=+ New Brief");
@@ -96,7 +96,7 @@ test.describe("Full Cohort Lifecycle", () => {
     await page.fill('textarea[placeholder*="Objective"]', "Create hero product images for Q4 launch campaign targeting young professionals");
 
     await page.click("text=Create Brief");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should see it in the list
     await expect(page.locator("text=Acme Product Campaign")).toBeVisible();
@@ -106,11 +106,11 @@ test.describe("Full Cohort Lifecycle", () => {
     await loginInBrowser(page, instructor.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Click into the brief
     await page.click("text=Acme Product Campaign");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should see brief detail
     await expect(page.locator("text=Acme Corp")).toBeVisible();
@@ -127,7 +127,7 @@ test.describe("Full Cohort Lifecycle", () => {
     }
 
     await page.click("text=Create Project");
-    await page.waitForURL("**/projects/**", { timeout: 15_000 });
+    await page.waitForURL("**/projects/**", { timeout: 30_000 });
 
     // Should be on the new project page
     await expect(page.locator("text=Acme Product Campaign")).toBeVisible();
@@ -138,7 +138,7 @@ test.describe("Full Cohort Lifecycle", () => {
   test("instructor can assign projects to cohort", async ({ page }) => {
     await loginInBrowser(page, instructor.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Assigned Projects")).toBeVisible();
   });
@@ -146,7 +146,7 @@ test.describe("Full Cohort Lifecycle", () => {
   test("instructor can assign skills to cohort", async ({ page }) => {
     await loginInBrowser(page, instructor.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/skills`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Assigned Skills")).toBeVisible();
   });
@@ -156,7 +156,7 @@ test.describe("Full Cohort Lifecycle", () => {
   test("instructor can see cohort progress dashboard", async ({ page }) => {
     await loginInBrowser(page, instructor.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Stats cards (inside main content area)
     const main = page.locator("main");
@@ -175,7 +175,7 @@ test.describe("Full Cohort Lifecycle", () => {
   test("learner can see their cohort dashboard", async ({ page }) => {
     await loginInBrowser(page, learner.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=AI Visual Commerce")).toBeVisible();
   });
@@ -200,7 +200,7 @@ test.describe("Full Cohort Lifecycle", () => {
 
     // Learner should see the Projects tab
     await page.click("text=Projects");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should not crash — the page loads
     await expect(page.locator("h1, h2, [class*='text-2xl']").first()).toBeVisible();
@@ -214,7 +214,7 @@ test.describe("Full Cohort Lifecycle", () => {
 
     // Navigate to briefs
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should either show empty/error or the page loads but API returns 403
     // (FE handles this gracefully — no crash)

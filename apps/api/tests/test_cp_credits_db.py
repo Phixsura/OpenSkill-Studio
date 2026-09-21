@@ -1189,10 +1189,16 @@ async def test_run_terminal_settles_actual_usage():
         # leaves unrelated backlog that would otherwise exhaust the pass
         # budget before reaching our messages. usage.recorded rates the
         # events; run.terminal then settles the reservation with actual usage.
-        for _ in range(30):
+        # Allow enough iterations to drain stale data from prior local runs.
+        quiet = 0
+        for _ in range(60):
             async with AsyncSessionLocal() as db:
                 if await process_outbox_once(db, topics=["usage.recorded", "run.terminal"]) == 0:
-                    break
+                    quiet += 1
+                    if quiet >= 2:
+                        break
+                else:
+                    quiet = 0
 
         async with AsyncSessionLocal() as db:
             balance = (
@@ -1284,10 +1290,15 @@ async def test_credit_settled_usage_not_reinvoiced():
             await db.commit()
             tid, sub_id = tenant.id, sub.id
         # settle via the handler (scoped drain)
-        for _ in range(30):
+        quiet = 0
+        for _ in range(60):
             async with AsyncSessionLocal() as db:
                 if await process_outbox_once(db, topics=["usage.recorded", "run.terminal"]) == 0:
-                    break
+                    quiet += 1
+                    if quiet >= 2:
+                        break
+                else:
+                    quiet = 0
         # force the period closed → invoice
         async with AsyncSessionLocal() as db:
             period = (
@@ -3445,10 +3456,15 @@ async def test_run_terminal_cancelled_with_usage_settles_not_releases():
             await db.commit()
             tid = tenant.id
 
-        for _ in range(30):
+        quiet = 0
+        for _ in range(60):
             async with AsyncSessionLocal() as db:
                 if await process_outbox_once(db, topics=["usage.recorded", "run.terminal"]) == 0:
-                    break
+                    quiet += 1
+                    if quiet >= 2:
+                        break
+                else:
+                    quiet = 0
 
         async with AsyncSessionLocal() as db:
             balance = (

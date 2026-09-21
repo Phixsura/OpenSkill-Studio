@@ -1,4 +1,11 @@
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "OpenSkill Studio",
+  description:
+    "AI-powered project-based training and delivery platform for creators",
+};
 
 export default function HomePage() {
   return (

@@ -148,7 +148,7 @@ export default function PlatformInvoicesPage() {
 
 /** §37 acceptance UI: invoice line → RatedUsage snapshots → provider call refs. */
 function TraceDrawer({ lineId, onClose }: { lineId: string; onClose: () => void }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading: _isLoad2 } = useQuery({
     queryKey: ["trace-invoice-line", lineId],
     queryFn: () => apiWithAuth<{ data: Trace }>(`/platform/trace/invoice-lines/${lineId}`),
   });
@@ -166,7 +166,7 @@ function TraceDrawer({ lineId, onClose }: { lineId: string; onClose: () => void 
             Close
           </button>
         </div>
-        {isLoading && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
+        {_isLoad2 && <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>}
         {trace && (
           <div className="space-y-4 text-sm">
             <div className="rounded-md border p-3">

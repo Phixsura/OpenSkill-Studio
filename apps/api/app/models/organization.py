@@ -19,14 +19,24 @@ class OrgRole(str, enum.Enum):
     ADMIN = "admin"
     INSTRUCTOR = "instructor"
     STUDENT = "student"
+    # Employer roles (Issue #32, ADR-015 §16)
+    HIRING_MANAGER = "hiring_manager"
+    RECRUITER = "recruiter"
+    INTERVIEWER = "interviewer"
 
 
-# Role hierarchy — lower index = higher privilege
+# Role hierarchy — lower index = higher privilege.
+# Training roles and employer roles share the same hierarchy so a single
+# require_org_member check works for both org types. hiring_manager sits
+# at the same privilege as instructor (both are "team lead" level).
 ROLE_HIERARCHY = {
     OrgRole.OWNER: 0,
     OrgRole.ADMIN: 1,
     OrgRole.INSTRUCTOR: 2,
+    OrgRole.HIRING_MANAGER: 2,
     OrgRole.STUDENT: 3,
+    OrgRole.RECRUITER: 3,
+    OrgRole.INTERVIEWER: 4,
 }
 
 
@@ -57,6 +67,8 @@ class Organization(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    # school | employer (Issue #32, ADR-015 §16)
+    org_type: Mapped[str] = mapped_column(String(20), default="school", server_default="'school'")
     description: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[OrgStatus] = mapped_column(

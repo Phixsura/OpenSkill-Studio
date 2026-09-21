@@ -54,11 +54,7 @@ export default function NewRequirementPage() {
   });
   const capabilities = capsData?.data ?? [];
 
-  const toggleCap = (
-    key: string,
-    list: string[],
-    setList: (v: string[]) => void,
-  ) => {
+  const toggleCap = (key: string, list: string[], setList: (v: string[]) => void) => {
     setList(list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
   };
 
@@ -85,17 +81,14 @@ export default function NewRequirementPage() {
     submitting.current = true;
     setLoading(true);
     try {
-      const res = await apiWithAuth<{ data: Profile }>(
-        `/orgs/${orgId}/requirement-profiles`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            context_type: contextType,
-            structured_requirements: buildStructured(),
-            raw_request: rawRequest.trim() || null,
-          }),
-        },
-      );
+      const res = await apiWithAuth<{ data: Profile }>(`/orgs/${orgId}/requirement-profiles`, {
+        method: "POST",
+        body: JSON.stringify({
+          context_type: contextType,
+          structured_requirements: buildStructured(),
+          raw_request: rawRequest.trim() || null,
+        }),
+      });
       toast.success("Requirement profile created");
       router.replace(`/dashboard/orgs/${orgId}/requirements/${res.data.id}`);
     } catch (err) {

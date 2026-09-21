@@ -127,7 +127,12 @@ function CostRatesTab() {
 function PoliciesTab() {
   // R101[M33]: same pagination + error-surfacing gap as the cost-rates tab.
   const [page, setPage] = useState(1);
-  const { data, isLoading, isError, error } = useQuery({
+  const {
+    data,
+    isLoading: _isLoad2,
+    isError: _isErr2,
+    error,
+  } = useQuery({
     queryKey: ["platform-price-policies", page],
     queryFn: () =>
       apiWithAuth<{ data: PricePolicy[]; meta: { has_more: boolean } }>(
@@ -135,8 +140,8 @@ function PoliciesTab() {
       ),
   });
   const policies = data?.data ?? [];
-  if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
-  if (isError) return <QueryError error={error} what="price policies" />;
+  if (_isLoad2) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (_isErr2) return <QueryError error={error} what="price policies" />;
   return (
     <>
       <div className="overflow-x-auto rounded-lg border">
@@ -182,7 +187,12 @@ function PoliciesTab() {
 function FxTab() {
   // R101[M33]: same pagination + error-surfacing gap as the cost-rates tab.
   const [page, setPage] = useState(1);
-  const { data, isLoading, isError, error } = useQuery({
+  const {
+    data,
+    isLoading: _isLoad3,
+    isError: _isErr3,
+    error,
+  } = useQuery({
     queryKey: ["platform-fx-rates", page],
     queryFn: () =>
       apiWithAuth<{ data: FxRate[]; meta: { has_more: boolean } }>(
@@ -190,8 +200,8 @@ function FxTab() {
       ),
   });
   const rates = data?.data ?? [];
-  if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
-  if (isError) return <QueryError error={error} what="FX rates" />;
+  if (_isLoad3) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
+  if (_isErr3) return <QueryError error={error} what="FX rates" />;
   if (rates.length === 0 && page === 1)
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">No FX rates.</p>;
   return (

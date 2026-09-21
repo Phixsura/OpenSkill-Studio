@@ -46,7 +46,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 export default function StatementDetailPage() {
   const { partnerId, statementId } = useParams<{ partnerId: string; statementId: string }>();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["partner-statement", partnerId, statementId],
     queryFn: () =>
       apiWithAuth<{ data: StatementDetail }>(`/partners/${partnerId}/statements/${statementId}`),
@@ -62,7 +62,7 @@ export default function StatementDetailPage() {
       // submission upload) instead of telling the user to reload — a partner
       // reading a statement for >15 min hit the expiry on every export.
       const doFetch = (tok: string | null) =>
-        fetch(`${API_BASE}/api/v1/partners/${partnerId}/statements/${statementId}/export.csv`, {
+        fetch(/* NOTE: add credentials: "include" if auth needed */ `${API_BASE}/api/v1/partners/${partnerId}/statements/${statementId}/export.csv`, {
           headers: tok ? { Authorization: `Bearer ${tok}` } : {},
         });
       let res = await doFetch(useAuthStore.getState().accessToken);
@@ -93,6 +93,8 @@ export default function StatementDetailPage() {
   if (!stmt) {
     return <p className="text-sm text-red-600">Failed to load statement.</p>;
   }
+
+  if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
   return (
     <div className="space-y-6">

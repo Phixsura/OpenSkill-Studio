@@ -146,7 +146,7 @@ test.describe("Admin walks through all pages", () => {
   test("01 — cohorts list page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "cohorts-list");
 
@@ -161,7 +161,7 @@ test.describe("Admin walks through all pages", () => {
   test("02 — cohort detail / overview page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "cohort-detail");
 
@@ -178,7 +178,7 @@ test.describe("Admin walks through all pages", () => {
   test("03 — cohort members page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/members`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "cohort-members");
 
@@ -195,7 +195,7 @@ test.describe("Admin walks through all pages", () => {
   test("04 — cohort skills page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/skills`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "cohort-skills");
 
@@ -208,7 +208,7 @@ test.describe("Admin walks through all pages", () => {
   test("05 — cohort projects page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "cohort-projects");
 
@@ -223,7 +223,7 @@ test.describe("Admin walks through all pages", () => {
   test("06 — cohort progress page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "cohort-progress");
 
@@ -236,7 +236,7 @@ test.describe("Admin walks through all pages", () => {
     await page.goto(
       `/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress/${student.userId}`
     );
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "learner-drilldown");
 
@@ -250,7 +250,7 @@ test.describe("Admin walks through all pages", () => {
   test("08 — briefs list page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/briefs`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "briefs-list");
 
@@ -263,7 +263,7 @@ test.describe("Admin walks through all pages", () => {
   test("09 — brief detail page", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/briefs/${briefId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "brief-detail");
 
@@ -281,7 +281,7 @@ test.describe("Admin walks through all pages", () => {
   test("10 — convert brief to project (click through)", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/briefs/${briefId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     // Click convert
@@ -310,7 +310,7 @@ test.describe("Admin walks through all pages", () => {
     if (!redirectedToProject) {
       // Go back and check brief is now active
       await page.goto(`/dashboard/orgs/${orgId}/briefs/${briefId}`);
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
       await page.waitForTimeout(1000);
       await snap(page, "brief-after-convert");
       await expect(page.getByText("active")).toBeVisible({ timeout: 5_000 });
@@ -324,7 +324,7 @@ test.describe("Student walks through their views", () => {
   test("11 — student my-dashboard page", async ({ page }) => {
     await loginInBrowser(page, student.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "student-dashboard");
 
@@ -338,7 +338,7 @@ test.describe("Student walks through their views", () => {
   test("12 — student projects list with cohort filter", async ({ page }) => {
     await loginInBrowser(page, student.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/projects`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "student-projects");
 
@@ -349,7 +349,7 @@ test.describe("Student walks through their views", () => {
   test("13 — student submission page", async ({ page }) => {
     await loginInBrowser(page, student.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/projects/${projectId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "student-project-detail");
 
@@ -364,7 +364,7 @@ test.describe("Error and edge case rendering", () => {
   test("14 — nonexistent cohort shows error", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/01NONEXISTENT0000000000000`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(3000);
     await snap(page, "nonexistent-cohort");
 
@@ -377,7 +377,7 @@ test.describe("Error and edge case rendering", () => {
   test("15 — nonexistent brief shows error", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/briefs/01NONEXISTENT0000000000000`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(3000);
     await snap(page, "nonexistent-brief");
 
@@ -399,7 +399,7 @@ test.describe("Error and edge case rendering", () => {
 
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts/${emptyCohortId}`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2000);
     await snap(page, "empty-cohort");
 
@@ -412,7 +412,7 @@ test.describe("Error and edge case rendering", () => {
   test("17 — org nav has Cohorts and Briefs tabs", async ({ page }) => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
     await snap(page, "org-nav-tabs");
 

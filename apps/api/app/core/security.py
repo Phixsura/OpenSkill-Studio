@@ -1,5 +1,6 @@
 """Password hashing and JWT token utilities."""
 
+import re as _re
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -7,6 +8,18 @@ import jwt
 from ulid import ULID
 
 from app.config import settings
+
+MIN_PASSWORD_LENGTH = 8
+PASSWORD_PATTERN = _re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$")
+
+
+def validate_password_strength(password: str) -> None:
+    """Raise ValueError if password doesn't meet complexity requirements."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    if not PASSWORD_PATTERN.match(password):
+        raise ValueError("Password must contain uppercase, lowercase, and a digit")
+
 
 ALGORITHM = "HS256"
 

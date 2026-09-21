@@ -18,7 +18,7 @@ export default function NewSkillPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const { data: catData, isError: catError } = useQuery({
+  const { data: catData, isError: catError, isLoading } = useQuery({
     queryKey: ["categories", orgId],
     queryFn: () =>
       apiWithAuth<{ data: Category[] }>(`/orgs/${orgId}/categories`),
@@ -79,6 +79,8 @@ export default function NewSkillPage() {
       submitting.current = false;
     }
   };
+
+  if (isLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

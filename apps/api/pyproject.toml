@@ -4,26 +4,26 @@ version = "0.1.0"
 description = "OpenSkill Studio API"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115",
+    "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.34",
-    "sqlalchemy[asyncio]>=2.0",
-    "asyncpg>=0.30",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "asyncpg>=0.30,<1",
     "alembic>=1.14",
-    "pydantic-settings>=2.7",
-    "redis>=5.0",
+    "pydantic-settings>=2.7,<3",
+    "redis>=5.0,<7",
     "aioboto3>=13.0",
     "structlog>=24.0",
     "python-ulid>=3.0",
-    "pyjwt>=2.9",
-    "bcrypt>=4.2",
-    "pydantic[email]>=2.0",
+    "pyjwt>=2.9,<3",
+    "bcrypt>=4.2,<5",
+    "pydantic[email]>=2.0,<3",
     "python-multipart>=0.0.18",
     "arq>=0.26",
     "anthropic>=0.40",
     "openai>=1.50",
     "httpx>=0.28",
     "cryptography>=43.0",
-    "stripe>=11",
+    "stripe>=11,<13",
     "dnspython>=2",
 ]
 
@@ -48,6 +48,26 @@ ignore = ["E501", "B008", "UP046", "UP042", "SIM117"]
 # R202: standalone dev tool (CLI mutation harness), not a test module —
 # compact multi-statement AST-dispatch style is intentional.
 "tests/tools_ast_mutate.py" = ["E701", "E702", "RUF001", "RUF003"]
+# Section-scoped imports in large test files for readability
+"tests/talent/test_z_services_comprehensive.py" = ["E402"]
+"tests/talent/test_z_api_endpoints_comprehensive.py" = ["E402"]
+# Import-after-docstring in API modules
+"app/talent/api/bookmarks.py" = ["E402"]
+"app/talent/api/saved_searches.py" = ["E402"]
+"app/talent/api/intelligence.py" = ["E402"]
+"app/talent/api/messages.py" = ["E402"]
+"app/talent/api/offers.py" = ["E402"]
+"app/talent/api/onboarding_api.py" = ["E402"]
+"app/talent/api/outreach.py" = ["E402"]
+"app/talent/api/passport.py" = ["E402"]
+"app/talent/api/portfolio.py" = ["E402"]
+"app/talent/api/scheduling.py" = ["E402"]
+"app/talent/api/succession.py" = ["E402"]
+"app/talent/api/webhooks.py" = ["E402"]
+# Services with structlog added after docstring
+"app/talent/services/endorsements.py" = ["E402"]
+"app/talent/services/career_goals.py" = ["E402"]
+"app/talent/services/credential_pathways.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

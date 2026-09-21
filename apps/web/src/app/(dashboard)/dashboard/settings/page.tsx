@@ -64,7 +64,7 @@ export default function SettingsPage() {
           </label>
           <Input
             id="email"
-            type="email"
+            type="email" required
             value={user?.email ?? ""}
             disabled
             className="mt-1 opacity-60"
@@ -77,7 +77,7 @@ export default function SettingsPage() {
           </label>
           <Input
             id="displayName"
-            type="text"
+            type="text" required
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             className="mt-1"

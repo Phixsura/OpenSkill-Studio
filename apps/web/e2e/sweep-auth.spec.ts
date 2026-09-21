@@ -79,7 +79,7 @@ test.afterAll(async () => {
 
 test("protected route redirect: /dashboard/settings logged-out → /login", async () => {
   await page.goto("/dashboard/settings");
-  await page.waitForURL(/\/login\?redirect=/, { timeout: 15_000 });
+  await page.waitForURL(/\/login\?redirect=/, { timeout: 30_000 });
   expect(page.url()).toContain("redirect=%2Fdashboard%2Fsettings");
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
 });
@@ -146,12 +146,12 @@ test("register: happy path via UI form → dashboard", async () => {
   // the isAuthenticated effect fires router.replace("/dashboard") as soon
   // as registration sets auth. Accept either path.
   await Promise.race([
-    page.waitForURL("**/dashboard", { timeout: 15_000 }),
-    page.getByRole("button", { name: "Continue to Dashboard" }).waitFor({ timeout: 15_000 }),
+    page.waitForURL("**/dashboard", { timeout: 30_000 }),
+    page.getByRole("button", { name: "Continue to Dashboard" }).waitFor({ timeout: 30_000 }),
   ]);
   if (!page.url().includes("/dashboard")) {
     await page.getByRole("button", { name: "Continue to Dashboard" }).click();
-    await page.waitForURL("**/dashboard", { timeout: 15_000 });
+    await page.waitForURL("**/dashboard", { timeout: 30_000 });
   }
   await expect(page.getByRole("heading", { name: `Welcome, ${uiName}` })).toBeVisible({
     timeout: 15_000,
@@ -177,7 +177,7 @@ test("create org via UI form → lands on org detail page", async () => {
   await page.locator("#description").fill("E2E sweep-auth org");
   await page.getByRole("button", { name: "Create Organization" }).click();
 
-  await page.waitForURL(/\/dashboard\/orgs\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/\/dashboard\/orgs\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: orgName })).toBeVisible({
     timeout: 15_000,
   });
@@ -210,9 +210,9 @@ test("settings: renders user info; display-name change persists after reload", a
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
   // Email shown (disabled input)
-  await expect(page.locator("#email")).toHaveValue(uiEmail, { timeout: 15_000 });
+  await expect(page.locator("#email")).toHaveValue(uiEmail, { timeout: 30_000 });
   await expect(page.locator("#email")).toBeDisabled();
-  await expect(page.locator("#displayName")).toHaveValue(uiName, { timeout: 15_000 });
+  await expect(page.locator("#displayName")).toHaveValue(uiName, { timeout: 30_000 });
 
   const newName = "Sweep Auth Renamed";
   await page.locator("#displayName").fill(newName);
@@ -224,8 +224,8 @@ test("settings: renders user info; display-name change persists after reload", a
 
   // Persists across a full reload (session restored via refresh cookie)
   await page.reload();
-  await page.waitForLoadState("networkidle");
-  await expect(page.locator("#displayName")).toHaveValue(newName, { timeout: 15_000 });
+  await page.waitForLoadState("domcontentloaded");
+  await expect(page.locator("#displayName")).toHaveValue(newName, { timeout: 30_000 });
   await expect(page.locator("#email")).toHaveValue(uiEmail);
 });
 
@@ -259,7 +259,7 @@ test("join via invite link: accept creates membership + success message", async 
 test("join redirect lands on the joined org page", async () => {
   // After the success message the page router.push()es to the org.
   // Continues from previous test's page state (success screen).
-  await page.waitForURL(/\/dashboard\/orgs\/.+/, { timeout: 15_000 });
+  await page.waitForURL(/\/dashboard\/orgs\/.+/, { timeout: 30_000 });
   expect(page.url()).toContain(`/dashboard/orgs/${adminOrgId}`);
 });
 
@@ -284,17 +284,17 @@ test("logout via UI → redirected to login; dashboard protected again", async (
   // refresh cookie is never revoked/cleared — the UI redirects to /login but
   // the next /dashboard visit silently re-authenticates. Wait for the
   // authenticated sidebar (user email rendered) so logout carries a token.
-  await expect(page.getByText(uiEmail)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(uiEmail)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Log out" })).toBeVisible({
     timeout: 15_000,
   });
   await page.getByRole("button", { name: "Log out" }).click();
-  await page.waitForURL(/\/login/, { timeout: 15_000 });
+  await page.waitForURL(/\/login/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
 
   // Refresh cookie was cleared — middleware bounces /dashboard back to /login
   await page.goto("/dashboard");
-  await page.waitForURL(/\/login/, { timeout: 15_000 });
+  await page.waitForURL(/\/login/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
 });
 

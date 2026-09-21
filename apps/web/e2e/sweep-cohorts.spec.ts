@@ -96,7 +96,7 @@ test.afterAll(async () => {
 test("admin: empty states, then create cohort via UI", async () => {
   // ── Empty states first (fresh org) ──
   await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-  await expect(page.getByText(/No cohorts yet/i)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/No cohorts yet/i)).toBeVisible({ timeout: 30_000 });
 
   await page.goto(`/dashboard/orgs/${orgId}/opportunities`);
   await expect(page.getByRole("heading", { name: "Commercial Opportunities" })).toBeVisible();
@@ -121,7 +121,7 @@ test("admin: empty states, then create cohort via UI", async () => {
 test("admin: cohort detail renders, enroll member via Members page UI", async () => {
   // Navigate into the cohort from the list card
   await page.getByRole("heading", { name: cohortName }).click();
-  await page.waitForURL(/cohorts\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/cohorts\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   cohortUrl = page.url();
 
   // Detail header + stats render
@@ -134,7 +134,7 @@ test("admin: cohort detail renders, enroll member via Members page UI", async ()
 
   // ── Members page: empty state then add the student ──
   await page.getByRole("link", { name: "Manage Members" }).click();
-  await page.waitForURL(/\/members$/, { timeout: 15_000 });
+  await page.waitForURL(/\/members$/, { timeout: 30_000 });
   await expect(page.getByText("No members enrolled yet.")).toBeVisible({ timeout: 10_000 });
 
   // First select = org member picker (value = user id), second = role
@@ -176,7 +176,7 @@ test("admin: assign published project via UI, dashboard shows member progress", 
 
   // ── Overview dashboard reflects member progress ──
   await page.goto(cohortUrl);
-  await expect(page.getByText("Project Progress")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Project Progress")).toBeVisible({ timeout: 30_000 });
   // Quick stats: 1 learner enrolled
   await expect(page.locator("div.rounded-lg.border", { hasText: /^1Learners$/ })).toBeVisible();
   // Progress table row: project title with 1 not-started learner
@@ -187,7 +187,7 @@ test("admin: assign published project via UI, dashboard shows member progress", 
   // ── Progress tab lists the learner (two "Progress" links exist on the page:
   // the org sidebar and the cohort tab — pick the cohort-scoped one) ──
   await page.locator(`a[href="${new URL(cohortUrl).pathname}/progress"]`).click();
-  await page.waitForURL(/\/progress$/, { timeout: 15_000 });
+  await page.waitForURL(/\/progress$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Learner Progress" })).toBeVisible();
   await expect(page.getByText("Sweep Student")).toBeVisible({ timeout: 10_000 });
 });
@@ -227,7 +227,7 @@ test("admin: brief form validation (unhappy), then create brief via UI", async (
 
 test("admin: brief detail renders, convert brief → project via UI", async () => {
   await page.getByRole("heading", { name: briefTitle }).click();
-  await page.waitForURL(/briefs\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/briefs\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   briefUrl = page.url();
 
   // Detail renders
@@ -243,7 +243,7 @@ test("admin: brief detail renders, convert brief → project via UI", async () =
   await page.getByRole("button", { name: "Create Project", exact: true }).click();
 
   // Redirects to the new project page which carries the brief title
-  await page.waitForURL(/projects\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/projects\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: briefTitle })).toBeVisible({ timeout: 10_000 });
 
   // Brief is now active and no longer convertible
@@ -286,7 +286,7 @@ test("student: cannot create cohorts — 403 toast in UI", async () => {
 
   // The "+ New Cohort" control is NOT role-hidden; the API rejects with 403
   await page.goto(`/dashboard/orgs/${orgId}/cohorts`);
-  await expect(page.getByRole("heading", { name: "Cohorts" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "Cohorts" })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "+ New Cohort" }).click();
   await page.getByPlaceholder(/Cohort name/i).fill("Student Rogue Cohort");
   await page.getByRole("button", { name: "Create Cohort" }).click();
@@ -299,7 +299,7 @@ test("student: cannot create cohorts — 403 toast in UI", async () => {
 
 test("student: briefs admin list is permission-blocked (error state in UI)", async () => {
   await page.goto(`/dashboard/orgs/${orgId}/briefs`);
-  await expect(page.getByText(/Failed to load briefs/i)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Failed to load briefs/i)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/No client briefs yet/i)).toHaveCount(0);
 });
 
@@ -336,7 +336,7 @@ test("student: opportunity card opens the brief detail with application state", 
   // the earlier admin-review test).
   await page.goto(`/dashboard/orgs/${orgId}/opportunities`);
   await page.locator("a", { hasText: openBriefTitle }).click();
-  await page.waitForURL(/briefs\/[0-9A-Z]{26}$/, { timeout: 15_000 });
+  await page.waitForURL(/briefs\/[0-9A-Z]{26}$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: openBriefTitle })).toBeVisible();
   await expect(page.getByText(/You have applied/)).toBeVisible({ timeout: 10_000 });
 

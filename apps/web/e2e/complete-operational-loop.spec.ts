@@ -117,7 +117,7 @@ test("complete operational loop: training → brief → commercial → eval → 
   // ═══════ Step 5: Learner sees project in dashboard ═══════
   await loginInBrowser(page, learner.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   await expect(page.getByText("AI Commerce")).toBeVisible({ timeout: 10_000 });
@@ -144,7 +144,7 @@ test("complete operational loop: training → brief → commercial → eval → 
   // ═══════ Step 7: Instructor checks progress dashboard ═══════
   await loginInBrowser(page, instructor.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   // Should show 1 submitted in progress table
@@ -152,7 +152,7 @@ test("complete operational loop: training → brief → commercial → eval → 
 
   // ═══════ Step 8: Instructor drills into learner ═══════
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}/progress/${learner.userId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   await expect(page.getByText("Loop Learner")).toBeVisible({ timeout: 10_000 });
@@ -183,7 +183,7 @@ test("complete operational loop: training → brief → commercial → eval → 
 
   // ═══════ Step 10: Dashboard reflects approval ═══════
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   // The progress table should now show approval

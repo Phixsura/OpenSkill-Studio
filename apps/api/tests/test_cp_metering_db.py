@@ -823,11 +823,17 @@ async def test_backfill_bound_open_period_accepted_closed_rejected(db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_seat_sweep_isolates_one_bad_org(db, monkeypatch):
     """R169: one org whose emit_usage raises must NOT abort the whole MONTHLY
     seat sweep (it fires only on the 1st — an unguarded abort loses a full
     month of seat billing platform-wide). The healthy org still gets its
     seat event; the poison org's savepoint rolls back cleanly."""
+    # Dispose stale connections from prior DB tests before starting
+    from app.core.database import engine
+
+    await engine.dispose()
+    # The db fixture's session will obtain a fresh connection from the pool
     from app.models.organization import OrgRole
     from app.services.organization import OrgService
 

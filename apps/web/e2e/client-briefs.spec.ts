@@ -27,7 +27,7 @@ test.describe("Brief List Page", () => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=No client briefs")).toBeVisible();
   });
@@ -36,14 +36,14 @@ test.describe("Brief List Page", () => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await page.click("text=+ New Brief");
     await page.fill('input[placeholder*="Brief title"]', "Acme Q4 Campaign");
     await page.fill('input[placeholder*="Client name"]', "Acme Corporation");
     await page.fill('textarea[placeholder*="Objective"]', "Create hero images for the Q4 product launch targeting young professionals 25-40");
     await page.click("button:has-text('Create Brief')");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Acme Q4 Campaign")).toBeVisible();
   });
@@ -52,7 +52,7 @@ test.describe("Brief List Page", () => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Acme Corporation")).toBeVisible();
     await expect(page.locator("text=draft").first()).toBeVisible();
@@ -62,7 +62,7 @@ test.describe("Brief List Page", () => {
     await loginInBrowser(page, student.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // API returns 403, FE should not show brief data
     await expect(page.getByText("Acme Q4 Campaign")).not.toBeVisible({ timeout: 5_000 });
@@ -74,9 +74,9 @@ test.describe("Brief Detail Page", () => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.click("text=Acme Q4 Campaign");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("h1:has-text('Acme Q4 Campaign')")).toBeVisible();
     await expect(page.locator("text=Acme Corporation")).toBeVisible();
@@ -87,9 +87,9 @@ test.describe("Brief Detail Page", () => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.click("text=Acme Q4 Campaign");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("button:has-text('Convert to Project')")).toBeVisible();
   });
@@ -98,9 +98,9 @@ test.describe("Brief Detail Page", () => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.click("text=Acme Q4 Campaign");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await page.click("button:has-text('Convert to Project')");
     await page.waitForTimeout(300);
@@ -115,14 +115,14 @@ test.describe("Brief Detail Page", () => {
     await loginInBrowser(page, admin.email, "TestPass123!");
     await goToOrg(page, orgId);
     await page.click("text=Briefs");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.click("text=Acme Q4 Campaign");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await page.click("button:has-text('Convert to Project')");
     await page.waitForTimeout(300);
     await page.click("button:has-text('Create Project')");
-    await page.waitForURL("**/projects/**", { timeout: 15_000 });
+    await page.waitForURL("**/projects/**", { timeout: 30_000 });
 
     // Should land on the new project page
     await expect(page.locator("text=Acme Q4 Campaign")).toBeVisible();

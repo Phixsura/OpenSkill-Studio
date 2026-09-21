@@ -46,3 +46,7 @@ docker-compose.override.yml
 *.tsbuildinfo
 .claude/worktrees/
 e2e/screenshots/
+# Security
+*.pem
+*.key
+.env.production

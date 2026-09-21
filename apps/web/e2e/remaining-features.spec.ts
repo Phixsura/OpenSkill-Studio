@@ -34,7 +34,7 @@ test("cohort delete: draft cohort can be deleted", async ({ page }) => {
 
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/cohorts/${cohortId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
 
   // Should have Delete button for draft cohort
@@ -70,7 +70,7 @@ test("brief edit: change title and objective", async ({ page }) => {
 
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/briefs/${briefId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
 
   // Click Edit button
@@ -109,7 +109,7 @@ test("brief delete: draft brief can be deleted", async ({ page }) => {
 
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/briefs/${briefId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
 
   // Should have Delete button
@@ -144,7 +144,7 @@ test("creator assignment: assign and list on project page", async ({ page }) => 
 
   await loginInBrowser(page, admin.email, "TestPass123!");
   await page.goto(`/dashboard/orgs/${orgId}/projects/${projectId}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2000);
 
   // Should see "Creator Assignments" section (instructor view)
