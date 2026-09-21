@@ -1,0 +1,91 @@
+"""Ecosystem intelligence models (ADR-016). Importing this module registers
+all eco_* tables on the shared SQLAlchemy Base metadata."""
+
+from app.ecosystem.models.benchmark import (  # noqa: F401
+    BENCHMARK_FAMILIES,
+    RUN_STATUSES,
+    SCORE_DIMENSIONS,
+    SUITE_STATUSES,
+    BenchmarkCase,
+    BenchmarkResult,
+    BenchmarkReview,
+    BenchmarkRun,
+    BenchmarkSuite,
+    ReviewBatch,
+)
+from app.ecosystem.models.catalog import (  # noqa: F401
+    AUTO_MERGE_METHODS,
+    AUTO_MERGE_MIN_CONFIDENCE,
+    CATALOG_KIND_TO_MODEL,
+    DEPRECATION_REASONS,
+    LIFECYCLE_STATUSES,
+    LIFECYCLE_TRANSITIONS,
+    RESOLUTION_METHODS,
+    AIModel,
+    AIProvider,
+    AITool,
+    EntityAlias,
+    ExternalAgent,
+    ExternalNodePackage,
+    ExternalWorkflow,
+    LifecycleTransition,
+    ModelVersion,
+    ResolutionCandidate,
+)
+from app.ecosystem.models.graph import (  # noqa: F401
+    CONSTRAINT_TYPES,
+    GRAPH_NODE_KINDS,
+    IMPACT_CLASSIFICATIONS,
+    IMPACT_MAX_DEPTH,
+    IMPACT_MAX_NODES,
+    RECOMMENDED_ACTIONS,
+    TELEMETRY_MIN_ORGS,
+    TELEMETRY_MIN_SAMPLE,
+    DependencyEdge,
+    ImpactAnalysis,
+    ImpactItem,
+    TelemetrySnapshot,
+)
+from app.ecosystem.models.mapping import (  # noqa: F401
+    AVAILABILITY_RECORD_TYPES,
+    EVIDENCE_LEVELS,
+    EVIDENCE_RANK,
+    PRICE_UNITS,
+    RECONCILIATION_STATUSES,
+    AvailabilityRecord,
+    CapabilityMapping,
+    PriceObservation,
+)
+from app.ecosystem.models.observation import (  # noqa: F401
+    CHANGE_SEVERITIES,
+    CHANGE_TYPES,
+    ENTITY_KINDS,
+    EXTRACTION_METHODS,
+    OBSERVATION_EVENT_TYPES,
+    ChangeEvent,
+    EcosystemObservation,
+)
+from app.ecosystem.models.replacement import (  # noqa: F401
+    CANDIDATE_STATUSES,
+    DEFAULT_REPLACEMENT_WEIGHTS,
+    DRAFT_STATUSES,
+    DRAFT_TYPES,
+    REPLACEMENT_EDGE_TYPES,
+    ROLLOUT_SCOPES,
+    ROLLOUT_STATUSES,
+    WATCH_TARGET_KINDS,
+    ComponentDraft,
+    ReplacementCandidate,
+    ReplacementEdge,
+    RolloutPlan,
+    Watchlist,
+    WatchItem,
+)
+from app.ecosystem.models.source import (  # noqa: F401
+    CIRCUIT_BREAKER_THRESHOLD,
+    SOURCE_STATUSES,
+    SOURCE_TYPES,
+    TRUST_LEVELS,
+    EcosystemSource,
+    SourceSyncRun,
+)

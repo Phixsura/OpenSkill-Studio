@@ -3,6 +3,9 @@
 # Base so Alembic discovers them, but we import the module (not names) to
 # avoid duplicate Table registration when product code also imports them.
 import app.talent.models as _talent_models  # noqa: F401
+
+# ── Ecosystem intelligence layer (Issue #35, ADR-016) ──
+import app.ecosystem.models as _eco_models  # noqa: F401, E402
 from app.models.base import Base  # noqa: F401
 from app.models.capability import CapabilityTag  # noqa: F401
 from app.models.certificate import Certificate  # noqa: F401
