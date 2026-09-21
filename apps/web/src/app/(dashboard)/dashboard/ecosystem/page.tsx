@@ -9,6 +9,8 @@ import { SEVERITY_STYLES, fmtDate } from "./lib";
 interface Overview {
   sources: { active: number; paused: number; error: number };
   discoveries_7d: number;
+  observations_unverified: number;
+  injection_flagged_unverified: number;
   changes_unacknowledged: number;
   security_critical_open: number;
   pricing_unreviewed: number;
@@ -65,6 +67,16 @@ export default function EcosystemOverviewPage() {
               alert={overview.sources.error > 0}
             />
             <StatCard label="Discoveries (7d)" value={overview.discoveries_7d} />
+            <StatCard
+              label="Unverified observations"
+              value={overview.observations_unverified}
+              alert={overview.observations_unverified > 50}
+            />
+            <StatCard
+              label="Injection-flagged (advisory)"
+              value={overview.injection_flagged_unverified}
+              alert={overview.injection_flagged_unverified > 0}
+            />
             <StatCard
               label="Unacknowledged changes"
               value={overview.changes_unacknowledged}

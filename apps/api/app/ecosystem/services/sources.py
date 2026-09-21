@@ -112,6 +112,7 @@ class SourceService:
         allowed = {
             "name",
             "trust_level",
+            "adapter_key",
             "base_url",
             "config",
             "sync_interval_minutes",
@@ -130,6 +131,12 @@ class SourceService:
                 raise AppError("VALIDATION_ERROR", f"Unknown status: {value}", 422)
             if key == "base_url" and value:
                 validate_external_url(value, resolve_dns=False)
+            if key == "adapter_key":
+                # §11.5: vendor swap is a config change — re-stamp parser version;
+                # historical observations keep their original provenance
+                if value not in ADAPTERS:
+                    raise AppError("VALIDATION_ERROR", f"Unknown adapter_key: {value}", 422)
+                source.parser_version = ADAPTERS[value].version
             setattr(source, key, value)
         # Un-pausing resets the circuit breaker
         if updates.get("status") == "active":

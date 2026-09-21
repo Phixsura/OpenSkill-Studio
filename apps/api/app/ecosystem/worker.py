@@ -92,6 +92,23 @@ async def handle_telemetry_window(db: AsyncSession, payload: dict) -> None:
     )
 
 
+@register_handler("eco.check_availability")
+async def handle_check_availability(db: AsyncSession, payload: dict) -> None:
+    """§11.3: availability probed independently of catalog syncs."""
+    from app.ecosystem.services.pricing import AvailabilityService
+
+    entity_kind, entity_id = payload.get("entity_kind"), payload.get("entity_id")
+    if not entity_kind or not entity_id:
+        return
+    try:
+        await AvailabilityService(db).probe_status(entity_kind, entity_id)
+    except AppError as exc:
+        if exc.code in ("NOT_FOUND", "VALIDATION_ERROR"):
+            log.info("eco_availability_skipped", entity_id=entity_id, code=exc.code)
+            return
+        raise
+
+
 @register_handler("eco.generate_candidates")
 async def handle_generate_candidates(db: AsyncSession, payload: dict) -> None:
     from app.ecosystem.services.replacement import ReplacementService

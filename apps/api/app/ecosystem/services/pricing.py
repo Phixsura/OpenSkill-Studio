@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
 from app.ecosystem.models.mapping import (
     AVAILABILITY_RECORD_TYPES,
     PRICE_UNITS,
@@ -183,9 +184,46 @@ class PricingService:
         return row
 
 
+async def _mock_prober(entity_kind: str, entity_id: str) -> dict:
+    """Default availability prober — deterministic mock; provider adapters can
+    replace it via set_availability_prober() (ADR-016 §11.3)."""
+    return {"status": "operational", "probe": {"kind": "mock"}}
+
+
+# Injectable module-level prober so worker + tests share one seam
+AVAILABILITY_PROBER = _mock_prober
+
+
+def set_availability_prober(prober) -> None:
+    global AVAILABILITY_PROBER
+    AVAILABILITY_PROBER = prober
+
+
 class AvailabilityService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def probe_status(self, entity_kind: str, entity_id: str) -> AvailabilityRecord:
+        """§11.3: catalog presence ≠ availability — status is probed
+        INDEPENDENTLY of catalog syncs and appended even when unchanged."""
+        if entity_kind not in CATALOG_KIND_TO_MODEL:
+            raise AppError("VALIDATION_ERROR", f"Unknown entity kind: {entity_kind}", 422)
+        if await self.db.get(CATALOG_KIND_TO_MODEL[entity_kind], entity_id) is None:
+            raise AppError("NOT_FOUND", "Entity not found", 404)
+        try:
+            result = await AVAILABILITY_PROBER(entity_kind, entity_id)
+            status = result.get("status", "unreachable")
+            if status not in ("operational", "degraded", "unreachable"):
+                status = "unreachable"
+            value = {"status": status, "probe": result.get("probe", {})}
+        except Exception as exc:  # noqa: BLE001 — a failing probe IS the signal
+            value = {"status": "unreachable", "probe": {"error": str(exc)[:200]}}
+        return await self.record(
+            entity_kind=entity_kind,
+            entity_id=entity_id,
+            record_type="status",
+            value=value,
+        )
 
     async def record(
         self,

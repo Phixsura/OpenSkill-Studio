@@ -478,3 +478,70 @@ No crawling beyond registered adapters; no auth/paywall/robots bypass (attestati
 no auto-publish (draft gate); no auto-migration (rollout gate + no binding rewrites); no
 third-party code execution/installation (no such code path exists); no autonomous price
 changes (reconciliation gate); no private-user-data scraping; no hiring decisions.
+
+## 11. Amendments from competitive analysis (2026-09-22)
+
+Derived from `competitive-analysis-ecosystem-intelligence.md` (20 world-class products);
+each amendment below is normative and implemented.
+
+### 11.1 Curation cost — bulk review operations (Snyk/Advisory lesson)
+
+Trust is bought with analyst hours; the review queue must be cheap to drain.
+
+- `POST /ecosystem/observations/bulk-verify` — body `{ids: [..≤100]}`, marks each
+  observation human-verified (idempotent; missing ids reported, not fatal).
+- `POST /ecosystem/resolution-candidates/bulk-decide` — body
+  `{ids: [..≤100], decision: "confirm"|"reject"}`; per-id outcome list returned
+  (confirm uses each candidate's own proposal; failures collected as
+  `{id, error_code}` without aborting the batch).
+- Dashboard overview adds `observations_unverified` and `injection_flagged_unverified`
+  counts so queue rot is visible.
+
+### 11.2 Heuristic findings flag, never block (ComfyUI YARA-FP lesson)
+
+Injection/security heuristics are ADVISORY: they set `normalized.injection_flag`
+and surface in UI/filters, but never gate ingestion, resolution or drafts. Only
+HARD rules block (SSRF, size/depth bounds, robots attestation, hard I/O
+incompatibility, lifecycle blocked/retired). API: `GET /ecosystem/observations`
+gains `injection_flagged` filter (JSONB `normalized->>'injection_flag'`).
+
+### 11.3 Catalog presence ≠ availability (OpenRouter lesson)
+
+Availability is probed INDEPENDENTLY of catalog syncs:
+
+- Worker topic `eco.check_availability {entity_kind, entity_id}` runs an injectable
+  prober (`app.ecosystem.services.pricing.AVAILABILITY_PROBER`, mock by default,
+  provider adapters later) and appends an `eco_availability_records` row with
+  `record_type="status"`, `value={"status": "operational|degraded|unreachable",
+"probe": {...}}` — even when the catalog entry is unchanged.
+- A listed catalog entity with a stale/absent status record is rendered as
+  availability-unknown, never assumed reachable.
+
+### 11.4 Rollout guardrails — minimum sample + per-dimension thresholds (LaunchDarkly lesson)
+
+`eco_rollout_plans.guardrails JSONB` (eco02 migration), shape:
+`{"min_samples": int>=0, "thresholds": {"<dimension>": max_allowed_regression_float}}`.
+Semantics (enforced in `RolloutService`):
+
+- `evaluate` records `comparison.sample_size` = benchmark-result count of the
+  candidate's latest completed run, and per-dimension `regression: bool` where a
+  guarded dimension worsens beyond its threshold (higher-is-better dims: delta <
+  -threshold; lower-is-better dims: delta > +threshold).
+- `decide("promote")` is refused with `ECO_ROLLOUT_INSUFFICIENT_SAMPLES` (409)
+  when `sample_size < min_samples`, and with `ECO_ROLLOUT_REGRESSION` (409) when
+  any guarded dimension regressed. Guardrails are opt-in per plan (default
+  `{"min_samples": 0, "thresholds": {}}`) but the operator UI proposes defaults;
+  revising thresholds is a human act — there is still NO auto-promotion and,
+  by design (stricter than LaunchDarkly), no auto-rollback of anything in
+  production because rollouts never mutate production bindings in the first place.
+
+### 11.5 Single-vendor fragility — sources are config, not code (Helicone lesson)
+
+Every external feed stays behind an adapter key resolved at sync time. A dead or
+replaced vendor is handled by `PATCH /ecosystem/sources/{id}` updating
+`adapter_key` (validated against the registry; `parser_version` re-stamped) and/or
+`base_url` — no code change, no data loss (observations keep the old
+`parser_version` provenance). Circuit breaker + last-good ETag state already
+guarantee a dying source degrades to a paused config row, never a crash.
+
+New error codes: `ECO_ROLLOUT_INSUFFICIENT_SAMPLES` 409 · `ECO_ROLLOUT_REGRESSION` 409.

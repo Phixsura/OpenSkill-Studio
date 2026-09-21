@@ -24,8 +24,10 @@ from app.ecosystem.security import sanitize_text
 from app.exceptions import AppError
 
 
-async def latest_dimension_scores(db: AsyncSession, entity_kind: str, entity_id: str) -> dict:
-    """Latest completed run's dimension scores for one target entity."""
+async def latest_completed_run(
+    db: AsyncSession, entity_kind: str, entity_id: str
+) -> BenchmarkRun | None:
+    """Latest completed run targeting one entity (None when never benchmarked)."""
     runs = await db.scalars(
         select(BenchmarkRun)
         .where(BenchmarkRun.status == "completed")
@@ -35,8 +37,14 @@ async def latest_dimension_scores(db: AsyncSession, entity_kind: str, entity_id:
     for run in runs:
         target = run.target or {}
         if target.get("entity_kind") == entity_kind and target.get("entity_id") == entity_id:
-            return dict(run.dimension_scores or {})
-    return {}
+            return run
+    return None
+
+
+async def latest_dimension_scores(db: AsyncSession, entity_kind: str, entity_id: str) -> dict:
+    """Latest completed run's dimension scores for one target entity."""
+    run = await latest_completed_run(db, entity_kind, entity_id)
+    return dict(run.dimension_scores or {}) if run else {}
 
 
 class MockExecutor:

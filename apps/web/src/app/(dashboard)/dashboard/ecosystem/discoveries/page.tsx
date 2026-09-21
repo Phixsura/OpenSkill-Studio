@@ -57,6 +57,14 @@ export default function DiscoveriesPage() {
       apiWithAuth(`/ecosystem/observations/${id}/verify`, { method: "POST" }),
     onSuccess: invalidate,
   });
+  const bulkVerify = useMutation({
+    mutationFn: (ids: string[]) =>
+      apiWithAuth(`/ecosystem/observations/bulk-verify`, {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    onSuccess: invalidate,
+  });
   const confirm = useMutation({
     mutationFn: (id: string) =>
       apiWithAuth(`/ecosystem/resolution-candidates/${id}/confirm`, {
@@ -131,6 +139,15 @@ export default function DiscoveriesPage() {
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Observation ledger (append-only)</h2>
+          <button
+            onClick={() =>
+              bulkVerify.mutate(rows.filter((o) => !o.human_verified).map((o) => o.id))
+            }
+            disabled={bulkVerify.isPending || rows.every((o) => o.human_verified)}
+            className="rounded-md border px-3 py-1 text-xs hover:bg-[hsl(var(--secondary))] disabled:opacity-50"
+          >
+            Verify all shown ({rows.filter((o) => !o.human_verified).length})
+          </button>
           <select
             value={eventType}
             onChange={(e) => setEventType(e.target.value)}

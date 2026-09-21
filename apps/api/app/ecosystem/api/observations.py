@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.ecosystem.api.deps import require_platform_admin
 from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
-from app.ecosystem.schemas import ChangeEventResponse, ManualObservationRequest, ObservationResponse
+from app.ecosystem.schemas import (
+    BulkIdsRequest,
+    ChangeEventResponse,
+    ManualObservationRequest,
+    ObservationResponse,
+)
 from app.ecosystem.services.change_detection import detect_changes
 from app.ecosystem.services.resolution import propose_resolution
 from app.ecosystem.services.sources import SourceService
@@ -29,6 +34,9 @@ async def list_observations(
     entity_kind: str | None = None,
     canonical_entity_id: str | None = None,
     human_verified: bool | None = None,
+    injection_flagged: bool | None = Query(
+        None, description="ADR-016 §11.2: heuristic flags filter — advisory, never blocking"
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -37,6 +45,9 @@ async def list_observations(
     query = select(EcosystemObservation)
     if source_id:
         query = query.where(EcosystemObservation.source_id == source_id)
+    if injection_flagged is not None:
+        flag = EcosystemObservation.normalized["injection_flag"].as_boolean()
+        query = query.where(flag.is_(True) if injection_flagged else flag.isnot(True))
     if event_type:
         query = query.where(EcosystemObservation.event_type == event_type)
     if entity_kind:
@@ -84,6 +95,31 @@ async def create_manual_observation(
     await propose_resolution(db, obs, trust_level=source.trust_level)
     await db.commit()
     return {"data": obs}
+
+
+@router.post("/observations/bulk-verify", response_model=DataResponse[dict])
+async def bulk_verify_observations(
+    body: BulkIdsRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """ADR-016 §11.1 — drain the review queue cheaply. Idempotent; missing ids
+    are reported, never fatal."""
+    verified: list[str] = []
+    missing: list[str] = []
+    now = datetime.now(UTC)
+    for obs_id in body.ids:
+        obs = await db.get(EcosystemObservation, obs_id)
+        if obs is None:
+            missing.append(obs_id)
+            continue
+        if not obs.human_verified:
+            obs.human_verified = True
+            obs.verified_by = user.id
+            obs.verified_at = now
+        verified.append(obs_id)
+    await db.commit()
+    return {"data": {"verified": verified, "missing": missing}}
 
 
 @router.get("/observations/{obs_id}", response_model=DataResponse[ObservationResponse])

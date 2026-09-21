@@ -16,6 +16,11 @@ WRITE_ENDPOINTS = [
     ("post", "/api/v1/ecosystem/rollouts", {}),
     ("post", "/api/v1/ecosystem/watchlists", {}),
     ("post", "/api/v1/ecosystem/impact/analyses", {}),
+    # ADR-016 §11 amendments
+    ("post", "/api/v1/ecosystem/observations/bulk-verify", {"ids": ["a" * 26]}),
+    ("post", "/api/v1/ecosystem/resolution-candidates/bulk-decide",
+     {"ids": ["a" * 26], "decision": "confirm"}),
+    ("post", "/api/v1/ecosystem/pricing/availability/probe/model/" + "a" * 26, {}),
 ]
 
 READ_ENDPOINTS = [

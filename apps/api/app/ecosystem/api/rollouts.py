@@ -23,6 +23,7 @@ async def create_rollout(
         replacement_candidate_id=body.replacement_candidate_id,
         scope_type=body.scope_type,
         scope_ref=body.scope_ref,
+        guardrails=body.guardrails,
     )
     await db.commit()
     return {"data": plan}

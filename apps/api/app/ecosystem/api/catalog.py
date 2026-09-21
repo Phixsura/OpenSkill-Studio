@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.ecosystem.api.deps import require_platform_admin
 from app.ecosystem.schemas import (
+    BulkDecideRequest,
     CatalogEntityResponse,
     ConfirmResolutionRequest,
     LifecycleTransitionRequest,
@@ -162,6 +163,32 @@ async def list_resolution_candidates(
             entity_kind=entity_kind, limit=limit, offset=offset
         )
     }
+
+
+@router.post("/resolution-candidates/bulk-decide", response_model=DataResponse[dict])
+async def bulk_decide_resolution(
+    body: BulkDecideRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """ADR-016 §11.1 — per-id outcomes; one bad id never aborts the batch."""
+    if body.decision not in ("confirm", "reject"):
+        raise AppError("VALIDATION_ERROR", f"Unknown decision: {body.decision}", 422)
+    svc = ResolutionService(db)
+    decided: list[dict] = []
+    failed: list[dict] = []
+    for candidate_id in body.ids:
+        try:
+            if body.decision == "confirm":
+                _, entity_id = await svc.confirm(candidate_id, actor_id=user.id)
+                decided.append({"id": candidate_id, "entity_id": entity_id})
+            else:
+                await svc.reject(candidate_id, actor_id=user.id)
+                decided.append({"id": candidate_id})
+        except AppError as exc:
+            failed.append({"id": candidate_id, "error_code": exc.code})
+    await db.commit()
+    return {"data": {"decision": body.decision, "decided": decided, "failed": failed}}
 
 
 @router.post("/resolution-candidates/{candidate_id}/confirm", response_model=dict)

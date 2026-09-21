@@ -23,6 +23,8 @@ class CreateSourceRequest(BaseModel):
 class UpdateSourceRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     trust_level: str | None = None
+    # §11.5: a dead/replaced vendor is a config change — swap the adapter
+    adapter_key: str | None = Field(default=None, max_length=64)
     base_url: str | None = Field(default=None, max_length=2000)
     config: dict | None = None
     sync_interval_minutes: int | None = Field(default=None, ge=5, le=43200)
@@ -56,6 +58,17 @@ class UpdateCatalogEntityRequest(BaseModel):
 
 class ConfirmResolutionRequest(BaseModel):
     target_entity_id: str | None = Field(default=None, min_length=26, max_length=26)
+
+
+class BulkIdsRequest(BaseModel):
+    """ADR-016 §11.1 bulk review operations (≤100 per call)."""
+
+    ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class BulkDecideRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=100)
+    decision: str = Field(max_length=10)  # confirm | reject
 
 
 class LifecycleTransitionRequest(BaseModel):
@@ -189,6 +202,8 @@ class CreateRolloutRequest(BaseModel):
     replacement_candidate_id: str = Field(min_length=26, max_length=26)
     scope_type: str = Field(max_length=30)
     scope_ref: str | None = None
+    # §11.4: {"min_samples": int>=0, "thresholds": {dimension: max_regression}}
+    guardrails: dict | None = None
 
 
 class CreateWatchlistRequest(BaseModel):
@@ -469,6 +484,7 @@ class RolloutResponse(_Orm):
     replacement_candidate_id: str
     scope_type: str
     scope_ref: str | None
+    guardrails: dict
     baseline: dict
     candidate_metrics: dict
     comparison: dict

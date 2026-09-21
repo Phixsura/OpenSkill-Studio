@@ -44,7 +44,11 @@ interface Rollout {
   id: string;
   scope_type: string;
   status: string;
-  comparison: Record<string, { baseline: number; candidate: number; improved: boolean }>;
+  guardrails: { min_samples?: number; thresholds?: Record<string, number> };
+  comparison: Record<string, unknown> & {
+    sample_size?: number;
+    regressions?: string[];
+  };
   created_at: string;
 }
 
@@ -353,13 +357,37 @@ export default function ComponentsPage() {
                     )}
                   </div>
                 </div>
+                {(r.comparison?.regressions ?? []).length > 0 && (
+                  <div className="mt-2 rounded-md border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-700">
+                    Guarded regression: {(r.comparison.regressions ?? []).join(", ")} — promote
+                    blocked
+                  </div>
+                )}
+                {r.comparison?.sample_size != null &&
+                  (r.guardrails?.min_samples ?? 0) > (r.comparison.sample_size ?? 0) && (
+                    <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-800">
+                      Samples {r.comparison.sample_size}/{r.guardrails.min_samples} — below
+                      guardrail
+                    </div>
+                  )}
                 {Object.keys(r.comparison ?? {}).length > 0 && (
                   <div className="mt-2 grid gap-1 text-xs md:grid-cols-2">
-                    {Object.entries(r.comparison).map(([dim, cmp]) => (
-                      <div key={dim} className={cmp.improved ? "text-emerald-700" : "text-red-600"}>
-                        {dim}: {cmp.baseline} → {cmp.candidate} {cmp.improved ? "▲" : "▼"}
-                      </div>
-                    ))}
+                    {Object.entries(r.comparison)
+                      .filter(
+                        ([, cmp]) =>
+                          typeof cmp === "object" && cmp !== null && "delta" in (cmp as object),
+                      )
+                      .map(([dim, cmp]) => {
+                        const c = cmp as { baseline: number; candidate: number; improved: boolean };
+                        return (
+                          <div
+                            key={dim}
+                            className={c.improved ? "text-emerald-700" : "text-red-600"}
+                          >
+                            {dim}: {c.baseline} → {c.candidate} {c.improved ? "▲" : "▼"}
+                          </div>
+                        );
+                      })}
                   </div>
                 )}
               </div>

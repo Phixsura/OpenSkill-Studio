@@ -41,6 +41,19 @@ class DashboardService:
                     EcosystemObservation.observed_at >= week_ago
                 )
             ),
+            # §11.1: review-queue visibility so curation debt can't rot silently
+            "observations_unverified": await self._count(
+                select(EcosystemObservation.id).where(
+                    EcosystemObservation.human_verified.is_(False)
+                )
+            ),
+            # §11.2: heuristic flags are advisory — surfaced, never blocking
+            "injection_flagged_unverified": await self._count(
+                select(EcosystemObservation.id).where(
+                    EcosystemObservation.human_verified.is_(False),
+                    EcosystemObservation.normalized["injection_flag"].as_boolean().is_(True),
+                )
+            ),
             "changes_unacknowledged": await self._count(
                 select(ChangeEvent.id).where(ChangeEvent.acknowledged.is_(False))
             ),

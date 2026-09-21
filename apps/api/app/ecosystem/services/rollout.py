@@ -41,12 +41,43 @@ class RolloutService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _validate_guardrails(guardrails: dict | None) -> dict:
+        """§11.4 shape check: {"min_samples": int>=0, "thresholds": {dim: float>=0}}."""
+        if not guardrails:
+            return {"min_samples": 0, "thresholds": {}}
+        if not isinstance(guardrails, dict):
+            raise AppError("VALIDATION_ERROR", "guardrails must be an object", 422)
+        min_samples = guardrails.get("min_samples", 0)
+        if not isinstance(min_samples, int) or min_samples < 0 or min_samples > 100_000:
+            raise AppError("VALIDATION_ERROR", "guardrails.min_samples must be int >= 0", 422)
+        thresholds = guardrails.get("thresholds", {})
+        if not isinstance(thresholds, dict):
+            raise AppError("VALIDATION_ERROR", "guardrails.thresholds must be an object", 422)
+        clean: dict[str, float] = {}
+        for dim, value in thresholds.items():
+            if dim not in _COMPARE_DIMENSIONS:
+                raise AppError(
+                    "VALIDATION_ERROR",
+                    f"Unknown guarded dimension: {dim} (allowed: {sorted(_COMPARE_DIMENSIONS)})",
+                    422,
+                )
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError) as exc:
+                raise AppError("VALIDATION_ERROR", f"Threshold {dim} not numeric", 422) from exc
+            if numeric != numeric or numeric < 0:
+                raise AppError("VALIDATION_ERROR", f"Threshold {dim} must be >= 0", 422)
+            clean[str(dim)] = numeric
+        return {"min_samples": min_samples, "thresholds": clean}
+
     async def create(
         self,
         *,
         replacement_candidate_id: str,
         scope_type: str,
         scope_ref: str | None = None,
+        guardrails: dict | None = None,
     ) -> RolloutPlan:
         if scope_type not in ROLLOUT_SCOPES:
             raise AppError("VALIDATION_ERROR", f"Unknown scope type: {scope_type}", 422)
@@ -68,6 +99,7 @@ class RolloutService:
             replacement_candidate_id=replacement_candidate_id,
             scope_type=scope_type,
             scope_ref=scope_ref,
+            guardrails=self._validate_guardrails(guardrails),
             baseline=baseline,
         )
         self.db.add(plan)
@@ -103,26 +135,57 @@ class RolloutService:
         return plan
 
     async def evaluate(self, plan_id: str) -> RolloutPlan:
-        """Collect candidate metrics and compute per-dimension deltas."""
+        """Collect candidate metrics; compute per-dimension deltas, sample size
+        and guardrail regressions (§11.4)."""
+        from sqlalchemy import func, select
+
+        from app.ecosystem.models.benchmark import BenchmarkResult
+        from app.ecosystem.services.benchmark import latest_completed_run
+
         plan = await self.get(plan_id)
         self._check_transition(plan, "evaluating")
         candidate = await self.db.get(ReplacementCandidate, plan.replacement_candidate_id)
-        candidate_metrics = await latest_dimension_scores(
+        candidate_run = await latest_completed_run(
             self.db, candidate.candidate_kind, candidate.candidate_id
         )
-        comparison: dict = {}
+        candidate_metrics = dict(candidate_run.dimension_scores or {}) if candidate_run else {}
+        sample_size = 0
+        if candidate_run is not None:
+            sample_size = (
+                await self.db.scalar(
+                    select(func.count())
+                    .select_from(BenchmarkResult)
+                    .where(BenchmarkResult.run_id == candidate_run.id)
+                )
+            ) or 0
+        guardrails = plan.guardrails or {}
+        thresholds: dict = guardrails.get("thresholds", {}) or {}
+        comparison: dict = {"sample_size": sample_size}
+        regressions: list[str] = []
         for dim, higher_is_better in _COMPARE_DIMENSIONS.items():
             base = (plan.baseline or {}).get(dim)
             cand = candidate_metrics.get(dim)
             if base is None or cand is None:
                 continue
             delta = float(cand) - float(base)
-            comparison[dim] = {
+            entry = {
                 "baseline": float(base),
                 "candidate": float(cand),
                 "delta": round(delta, 6),
                 "improved": (delta > 0) if higher_is_better else (delta < 0),
             }
+            # Guarded dimension: regression = worsens beyond its threshold
+            if dim in thresholds:
+                threshold = float(thresholds[dim])
+                regressed = (
+                    delta < -threshold if higher_is_better else delta > threshold
+                )
+                entry["threshold"] = threshold
+                entry["regression"] = regressed
+                if regressed:
+                    regressions.append(dim)
+            comparison[dim] = entry
+        comparison["regressions"] = regressions
         plan.candidate_metrics = candidate_metrics
         plan.comparison = comparison
         plan.status = "evaluating"
@@ -142,6 +205,25 @@ class RolloutService:
                     409,
                 )
             self._check_transition(plan, "promoted")
+            # §11.4 guardrails — promote refused, never silently overridden.
+            # Revising thresholds is an explicit human act on the plan.
+            guardrails = plan.guardrails or {}
+            comparison = plan.comparison or {}
+            min_samples = int(guardrails.get("min_samples", 0) or 0)
+            if int(comparison.get("sample_size", 0) or 0) < min_samples:
+                raise AppError(
+                    "ECO_ROLLOUT_INSUFFICIENT_SAMPLES",
+                    f"Candidate has {comparison.get('sample_size', 0)} benchmark "
+                    f"samples; guardrail requires >= {min_samples}",
+                    409,
+                )
+            regressions = comparison.get("regressions") or []
+            if regressions:
+                raise AppError(
+                    "ECO_ROLLOUT_REGRESSION",
+                    f"Guarded dimensions regressed beyond threshold: {regressions}",
+                    409,
+                )
             candidate = await self.db.get(
                 ReplacementCandidate, plan.replacement_candidate_id
             )

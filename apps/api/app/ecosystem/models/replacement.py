@@ -184,6 +184,8 @@ class RolloutPlan(Base):
     # benchmark_only | internal_org | selected_cohort | selected_installation
     scope_type: Mapped[str] = mapped_column(String(30))
     scope_ref: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    # §11.4 guardrails: {"min_samples": int, "thresholds": {dim: max_regression}}
+    guardrails: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     # Metrics snapshot of the incumbent at plan creation
     baseline: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     candidate_metrics: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")

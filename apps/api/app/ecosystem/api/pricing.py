@@ -73,6 +73,23 @@ async def reconcile_price(
     return {"data": row}
 
 
+@router.post(
+    "/availability/probe/{entity_kind}/{entity_id}",
+    response_model=DataResponse[AvailabilityResponse],
+    status_code=201,
+)
+async def probe_availability(
+    entity_kind: str,
+    entity_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """§11.3: on-demand status probe, independent of catalog syncs."""
+    record = await AvailabilityService(db).probe_status(entity_kind, entity_id)
+    await db.commit()
+    return {"data": record}
+
+
 @router.get("/availability", response_model=DataResponse[list[AvailabilityResponse]])
 async def list_availability(
     entity_kind: str | None = None,
