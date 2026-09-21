@@ -191,11 +191,13 @@ class ResolutionService:
         payload = candidate.proposed_payload or {}
         name = sanitize_text(payload.get("name"), 200) or "unnamed"
         slug = _slugify(name)
-        # De-dupe slug
-        base_slug, i = slug, 1
-        while await self.db.scalar(select(model).where(model.slug == slug)):
-            i += 1
-            slug = f"{base_slug}-{i}"
+        # De-dupe slug (ModelVersion has no slug column — uniqueness is
+        # (model_id, version) instead)
+        if candidate.entity_kind != "model_version":
+            base_slug, i = slug, 1
+            while await self.db.scalar(select(model).where(model.slug == slug)):
+                i += 1
+                slug = f"{base_slug}-{i}"
         kwargs: dict = {
             "canonical_name": name,
             "slug": slug,
@@ -204,6 +206,9 @@ class ResolutionService:
             "first_observed_at": datetime.now(UTC),
         }
         if candidate.entity_kind == "model_version":
+            # ModelVersion has no slug/description columns
+            kwargs.pop("slug", None)
+            kwargs.pop("description", None)
             # A version needs its parent model — resolve or create by name
             from app.ecosystem.models.catalog import AIModel
 
@@ -226,7 +231,6 @@ class ResolutionService:
             kwargs["license"] = sanitize_text(payload.get("license"), 100)
             if isinstance(payload.get("limits"), dict):
                 kwargs["limits"] = payload["limits"]
-            kwargs.pop("slug")
             kwargs["canonical_name"] = f"{model_name} {kwargs['version']}"
         entity = model(**kwargs)
         self.db.add(entity)

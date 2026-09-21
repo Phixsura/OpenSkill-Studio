@@ -135,13 +135,13 @@ class RolloutService:
         """Explicit human promote/reject/abort."""
         plan = await self.get(plan_id)
         if decision == "promote":
-            self._check_transition(plan, "promoted")
-            if not plan.comparison:
+            if plan.status in ("draft", "running"):
                 raise AppError(
                     "ECO_ROLLOUT_NOT_EVALUATED",
                     "Run evaluation before promoting",
                     409,
                 )
+            self._check_transition(plan, "promoted")
             candidate = await self.db.get(
                 ReplacementCandidate, plan.replacement_candidate_id
             )
