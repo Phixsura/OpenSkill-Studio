@@ -27,6 +27,7 @@ const api500s: string[] = [];
 const consoleErrors: string[] = [];
 
 test.beforeAll(async ({ browser }) => {
+  test.setTimeout(120_000); // 2min for setup (rate limits from sweep-all-pages)
   // Retry registration (may hit rate limits from prior runs)
   for (let i = 0; i < 5; i++) {
     try {
