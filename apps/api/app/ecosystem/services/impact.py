@@ -83,7 +83,12 @@ class ImpactService:
         self.db.add(analysis)
         await self.db.flush()
 
-        items, truncated = await self._traverse(root_kind, root_id)
+        # Renovate/deps.dev-grade constraint semantics: when the root is a
+        # versioned entity, first-hop edges carrying a version_range that the
+        # affected version does NOT satisfy are pruned — a pack pinned to
+        # '>=3.0' is unaffected by a 2.x sunset.
+        changed_version = await self._root_version(root_kind, root_id)
+        items, truncated = await self._traverse(root_kind, root_id, changed_version)
         summary: dict = {"truncated": truncated}
         action = _CLASSIFICATION_ACTION[classification]
         for (node_kind, node_id), (depth, path) in items.items():
@@ -103,10 +108,25 @@ class ImpactService:
         await self.db.flush()
         return analysis
 
+    async def _root_version(self, root_kind: str, root_id: str) -> str | None:
+        if root_kind != "model_version":
+            return None
+        from app.ecosystem.models.catalog import ModelVersion
+
+        row = await self.db.get(ModelVersion, root_id)
+        return row.version if row else None
+
     async def _traverse(
-        self, root_kind: str, root_id: str
+        self, root_kind: str, root_id: str, changed_version: str | None = None
     ) -> tuple[dict[tuple[str, str], tuple[int, list]], bool]:
-        """Cycle-safe BFS: dependency -> dependents, capped depth & node count."""
+        """Cycle-safe BFS: dependency -> dependents, capped depth & node count.
+
+        First-hop version_range constraints are evaluated against the changed
+        version (semver); non-matching edges are pruned. Unparseable ranges
+        FAIL OPEN — an unknown constraint still counts as affected.
+        """
+        from app.ecosystem.services.stats import version_in_range
+
         visited: set[tuple[str, str]] = {(root_kind, root_id)}
         result: dict[tuple[str, str], tuple[int, list]] = {}
         queue: deque = deque([((root_kind, root_id), 0, [])])
@@ -121,6 +141,15 @@ class ImpactService:
                 )
             )
             for edge in edges:
+                # Constraint pruning applies where the edge targets the ROOT
+                # (depth 0): that edge's version_range speaks about the
+                # changed version itself
+                if depth == 0 and changed_version:
+                    range_expr = (edge.constraint_spec or {}).get("version_range")
+                    if range_expr:
+                        matches = version_in_range(changed_version, range_expr)
+                        if matches is False:
+                            continue  # pinned elsewhere — provably unaffected
                 key = (edge.from_kind, edge.from_id)
                 if key in visited:
                     continue  # cycle safety

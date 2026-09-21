@@ -272,6 +272,18 @@ async def _poll_outbox(ctx: dict) -> None:
             log.info("outbox_processed", count=n)
 
 
+async def _eco_sync_sweep(ctx: dict) -> None:
+    """Continuous discovery (ADR-016 Part A): enqueue syncs for due sources."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_due_sources
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_due_sources(db)
+        if n:
+            await db.commit()
+            log.info("eco_sources_enqueued", count=n)
+
+
 async def _reap_outbox(ctx: dict) -> None:
     from app.core.database import AsyncSessionLocal
 
@@ -400,6 +412,8 @@ def _cron_jobs() -> list:
         # Outbox poll every 15s (arq cron supports second-level sets).
         cron(_poll_outbox, second={0, 15, 30, 45}, name="cp_outbox_poll"),
         cron(_reap_outbox, minute=set(range(0, 60, 10)), second=5, name="cp_outbox_reaper"),
+        # ADR-016 Part A: continuous external discovery — sweep due sources
+        cron(_eco_sync_sweep, minute={4, 19, 34, 49}, name="eco_sync_sweep"),
         # Trial expiry: hourly at :12 (off-minute by design)
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);

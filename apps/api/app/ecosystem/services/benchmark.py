@@ -47,6 +47,86 @@ async def latest_dimension_scores(db: AsyncSession, entity_kind: str, entity_id:
     return dict(run.dimension_scores or {}) if run else {}
 
 
+class OfferingExecutor:
+    """Executes cases against a REAL ProviderModelOffering through the
+    platform's provider-adapter chain (same contract as the workflow runtime:
+    late credential resolution, stable idempotency key per case×repeat,
+    bounded call timeout). Selected automatically when the run target names
+    an `offering_id` — this is what makes the Benchmark Lab able to measure
+    actual providers, not just mocks (Replicate/AA-grade realness).
+    """
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def execute_case(self, run: "BenchmarkRun", case: "BenchmarkCase", repeat: int) -> dict:
+        import asyncio
+        import time
+
+        from app.config import settings
+        from app.core.crypto import decrypt_credentials
+        from app.models.provider import (
+            OrgCredential,
+            ProviderAdapter,
+            ProviderConnection,
+            ProviderModelOffering,
+        )
+        from app.services.workflow_adapters import get_adapter
+
+        offering_id = (run.target or {}).get("offering_id")
+        offering = await self.db.get(ProviderModelOffering, offering_id) if offering_id else None
+        if offering is None or not offering.is_active:
+            raise RuntimeError("BENCH_OFFERING_UNAVAILABLE: offering missing or inactive")
+        connection = await self.db.get(ProviderConnection, offering.connection_id)
+        if connection is None or connection.status != "active":
+            raise RuntimeError("BENCH_CONNECTION_INACTIVE: provider connection not active")
+        adapter_row = await self.db.get(ProviderAdapter, connection.adapter_id)
+        adapter = get_adapter(adapter_row.key) if adapter_row else None
+        if adapter is None:
+            raise RuntimeError("BENCH_ADAPTER_UNAVAILABLE: provider adapter not available")
+        # Late credential resolution — same posture as the runtime (R3)
+        credentials = None
+        if connection.credential_id:
+            cred = await self.db.get(OrgCredential, connection.credential_id)
+            if cred is not None:
+                credentials = decrypt_credentials(cred.encrypted_data)
+        inputs = {
+            "prompt": case.prompt,
+            "constraints": case.constraints or {},
+            "reference_assets": case.reference_assets or [],
+            "seed_settings": run.seed_settings or {},
+            "repeat_index": repeat,
+        }
+        # Stable per case×repeat: a crashed executor retrying never double-bills
+        idempotency_key = f"bench-{run.id}-{case.id}-{repeat}"
+        started = time.monotonic()
+        output = await asyncio.wait_for(
+            adapter.execute(
+                capability=offering.capability_key,
+                model_name=offering.model_name,
+                inputs=inputs,
+                config=connection.config or {},
+                credentials=credentials,
+                idempotency_key=idempotency_key,
+            ),
+            timeout=settings.workflow_step_timeout_seconds,
+        )
+        latency_ms = int((time.monotonic() - started) * 1000)
+        usage = output.pop("__usage__", []) if isinstance(output, dict) else []
+        result_ref = output.get("result") if isinstance(output, dict) else None
+        return {
+            "output_assets": (
+                [{"kind": "provider_output", "ref": str(result_ref)[:500]}] if result_ref else []
+            ),
+            "latency_ms": latency_ms,
+            "usage": {"events": usage},
+            "cost_usd": float(offering.cost_per_call_usd or 0),
+            "automated_scores": {},
+            "failed": False,
+            "retries": 0,
+        }
+
+
 class MockExecutor:
     """Deterministic executor for tests/dev: derives outputs from the seed."""
 
@@ -67,7 +147,16 @@ class MockExecutor:
 class BenchmarkService:
     def __init__(self, db: AsyncSession, executor=None):
         self.db = db
-        self.executor = executor or MockExecutor()
+        # None = auto-select at execute time: OfferingExecutor when the run
+        # targets a real offering, MockExecutor otherwise
+        self.executor = executor
+
+    def _resolve_executor(self, run: "BenchmarkRun"):
+        if self.executor is not None:
+            return self.executor
+        if (run.target or {}).get("offering_id"):
+            return OfferingExecutor(self.db)
+        return MockExecutor()
 
     # ── Suites & cases ──────────────────────────────────────────────
 
@@ -195,7 +284,14 @@ class BenchmarkService:
             target=target,
             budget_usd_cap=budget_usd_cap or suite.budget_usd_cap,
             seed_settings=seed_settings or {},
-            environment_snapshot={"executor": type(self.executor).__name__, "suite_key": suite.key},
+            environment_snapshot={
+                "executor": (
+                    type(self.executor).__name__
+                    if self.executor is not None
+                    else ("OfferingExecutor" if target.get("offering_id") else "MockExecutor")
+                ),
+                "suite_key": suite.key,
+            },
             triggered_by=triggered_by,
         )
         self.db.add(run)
@@ -219,6 +315,7 @@ class BenchmarkService:
         run.status = "running"
         run.started_at = datetime.now(UTC)
         await self.db.flush()
+        executor = self._resolve_executor(run)
 
         total_cost = Decimal("0")
         budget = Decimal(str(run.budget_usd_cap))
@@ -229,7 +326,7 @@ class BenchmarkService:
                     aborted = True
                     break
                 try:
-                    outcome = await self.executor.execute_case(run, case, repeat)
+                    outcome = await executor.execute_case(run, case, repeat)
                 except Exception as exc:  # noqa: BLE001 — provider failures are data
                     outcome = {
                         "output_assets": [],
@@ -276,35 +373,60 @@ class BenchmarkService:
         return run
 
     async def _aggregate(self, run: BenchmarkRun) -> dict:
-        """Aggregate results into preserved per-dimension scores."""
+        """Aggregate results into preserved per-dimension scores.
+
+        World-class posture (HELM/AA): case weights are honored, and every
+        aggregated dimension carries uncertainty (std, n, 95% CI) in a
+        parallel `dimension_stats` key — the point value stays in
+        `dimension_scores` for backward-compatible ranking/compare flows.
+        """
+        from app.ecosystem.services.stats import mean_ci95, weighted_mean
+
         results = await self.db.scalars(
             select(BenchmarkResult).where(BenchmarkResult.run_id == run.id)
         )
         results = list(results)
         if not results:
             return {}
+        case_weight: dict[str, float] = {
+            c.id: float(c.weight or 1.0) for c in await self.list_cases(run.suite_id)
+        }
+
+        def w(result) -> float:
+            return case_weight.get(result.case_id, 1.0)
+
         latencies = [r.latency_ms for r in results if r.latency_ms is not None]
         costs = [float(r.cost_usd or 0) for r in results]
-        failures = sum(1 for r in results if r.failed)
+        success_flags = [(0.0 if r.failed else 1.0, w(r)) for r in results]
         dims: dict = {
-            "reliability": round(1 - failures / len(results), 4),
+            "reliability": round(weighted_mean(success_flags), 4),
             "speed_p50_ms": statistics.median(latencies) if latencies else None,
             "cost_per_case_usd": round(sum(costs) / len(results), 6),
         }
-        # Automated metric means become their own dimensions
-        metric_values: dict[str, list[float]] = {}
+        stats_out: dict = {
+            "latency_ms": mean_ci95([float(v) for v in latencies]),
+            "cost_usd": mean_ci95(costs),
+            "reliability": mean_ci95([flag for flag, _ in success_flags]),
+        }
+        # Automated metrics: weighted point value + CI per dimension
+        metric_values: dict[str, list[tuple[float, float]]] = {}
         for r in results:
             for key, value in (r.automated_scores or {}).items():
                 if isinstance(value, (int, float)) and value == value:
-                    metric_values.setdefault(key, []).append(float(value))
-        for key, values in metric_values.items():
-            dims[key] = round(sum(values) / len(values), 4)
+                    metric_values.setdefault(key, []).append((float(value), w(r)))
+        for key, pairs in metric_values.items():
+            dims[key] = round(weighted_mean(pairs), 4)
+            stats_out[key] = mean_ci95([v for v, _ in pairs])
         # Human-review dimensions merge in after blind reveal (see blind_review)
-        human = await self._human_dimensions(run.id)
+        human, human_stats = await self._human_dimensions(run.id)
         dims.update(human)
+        stats_out.update(human_stats)
+        dims["dimension_stats"] = stats_out
         return dims
 
-    async def _human_dimensions(self, run_id: str) -> dict:
+    async def _human_dimensions(self, run_id: str) -> tuple[dict, dict]:
+        from app.ecosystem.services.stats import mean_ci95
+
         reviews = await self.db.scalars(
             select(BenchmarkReview).where(
                 BenchmarkReview.run_id == run_id,
@@ -316,7 +438,9 @@ class BenchmarkService:
             for dim, score in (review.scores or {}).items():
                 if isinstance(score, (int, float)) and score == score:
                     buckets.setdefault(dim, []).append(float(score))
-        return {dim: round(sum(v) / len(v), 4) for dim, v in buckets.items()}
+        dims = {dim: round(sum(v) / len(v), 4) for dim, v in buckets.items()}
+        stats_out = {dim: mean_ci95(v) for dim, v in buckets.items()}
+        return dims, stats_out
 
     async def refresh_dimensions(self, run_id: str) -> BenchmarkRun:
         """Re-aggregate after human reviews land (post-reveal)."""
@@ -370,5 +494,11 @@ class BenchmarkService:
             )
         dims: set[str] = set()
         for row in rows:
-            dims.update(row["dimension_scores"].keys())
+            # Only numeric score keys are comparable dimensions; nested
+            # structures (dimension_stats) travel with each run untouched
+            dims.update(
+                k
+                for k, v in row["dimension_scores"].items()
+                if isinstance(v, (int, float)) or v is None
+            )
         return {"runs": rows, "dimensions": sorted(dims)}

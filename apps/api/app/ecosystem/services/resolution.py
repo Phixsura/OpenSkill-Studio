@@ -1,14 +1,19 @@
-"""Entity resolution (ADR-016 Part C §3.3).
+"""Entity resolution (ADR-016 Part C §3.3, trigram-backed since eco03).
 
-Order: official IDs → deterministic aliases → structured similarity →
-(optional) LLM suggestion. Only deterministic methods at confidence >= 0.9
-auto-merge; everything else queues for human confirmation.
+Order: official IDs → deterministic NORMALIZED aliases → indexed pg_trgm
+similarity → (optional) LLM suggestion. Only deterministic methods at
+confidence >= 0.9 auto-merge; everything else queues for human confirmation.
+
+deps.dev/HF lesson: resolution quality comes from normalization + indexed
+similarity, not from fuzzy-matching raw strings in application code. The
+Python difflib fallback remains only for DBs without pg_trgm (unit contexts).
 """
 
+import re
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.catalog import (
@@ -32,20 +37,63 @@ def _slugify(value: str) -> str:
     return out[:200] or "entity"
 
 
+_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
+
+
+def normalize_name(value: str | None) -> str | None:
+    """Deterministic resolution key: casefold + squash punctuation/whitespace.
+
+    'GPT-Image 2' and 'gpt_image_2' resolve to the same key — the class of
+    alias drift that plagues raw-string matching (Lightcast's alias models,
+    HF namespace conventions).
+    """
+    if not isinstance(value, str):
+        return None
+    normalized = _NORMALIZE_RE.sub(" ", value.casefold()).strip()
+    return normalized[:300] or None
+
+
+# Table names per entity kind for indexed similarity SQL (eco03 trgm indexes)
+_KIND_TABLES = {
+    "provider": "eco_ai_providers",
+    "tool": "eco_ai_tools",
+    "model": "eco_ai_models",
+    "model_version": "eco_model_versions",
+    "workflow": "eco_external_workflows",
+    "agent": "eco_external_agents",
+    "node_package": "eco_node_packages",
+}
+
+
 async def _find_by_alias(
     db: AsyncSession, entity_kind: str, candidates: list[tuple[str, str]]
 ) -> tuple[str | None, str | None]:
-    """Return (entity_id, method) for the first matching deterministic alias."""
+    """Return (entity_id, method) for the first matching deterministic alias.
+
+    Matches on the NORMALIZED key (exact string as fallback for pre-eco03
+    rows), so 'GPT-Image-2' finds an alias registered as 'gpt image 2'.
+    """
     for alias_value, alias_type in candidates:
         if not alias_value:
             continue
+        normalized = normalize_name(alias_value)
         row = await db.scalar(
             select(EntityAlias).where(
                 EntityAlias.entity_kind == entity_kind,
-                EntityAlias.alias == alias_value,
                 EntityAlias.alias_type == alias_type,
+                (EntityAlias.alias_normalized == normalized)
+                if normalized
+                else (EntityAlias.alias == alias_value),
             )
         )
+        if row is None and normalized:
+            row = await db.scalar(
+                select(EntityAlias).where(
+                    EntityAlias.entity_kind == entity_kind,
+                    EntityAlias.alias == alias_value,
+                    EntityAlias.alias_type == alias_type,
+                )
+            )
         if row:
             method = "official_id" if alias_type in ("official_id", "api_identifier") else "alias"
             return row.entity_id, method
@@ -55,22 +103,58 @@ async def _find_by_alias(
 async def _similarity_candidate(
     db: AsyncSession, entity_kind: str, name: str
 ) -> tuple[str | None, float]:
-    """Best fuzzy match over canonical names + registered aliases."""
+    """Best fuzzy match: indexed pg_trgm over canonical names + normalized
+    aliases; Python difflib only as a fallback where pg_trgm is unavailable."""
     model = CATALOG_KIND_TO_MODEL.get(entity_kind)
+    table = _KIND_TABLES.get(entity_kind)
     if model is None or not name:
         return None, 0.0
-    best_id, best_score = None, 0.0
-    rows = await db.scalars(select(model).limit(2000))
-    lowered = name.lower()
-    for row in rows:
-        names = [row.canonical_name or ""] + list(row.aliases or [])
-        for candidate in names:
-            if not isinstance(candidate, str):
-                continue
-            score = SequenceMatcher(None, lowered, candidate.lower()).ratio()
-            if score > best_score:
-                best_id, best_score = row.id, score
-    return (best_id, best_score) if best_score >= SIMILARITY_THRESHOLD else (None, best_score)
+    normalized = normalize_name(name) or name.lower()
+    try:
+        # Two indexed probes, best of both: canonical names and alias registry
+        name_row = (
+            await db.execute(
+                text(
+                    f"SELECT id, similarity(lower(canonical_name), :n) AS sim "  # noqa: S608 — table from fixed map
+                    f"FROM {table} WHERE lower(canonical_name) % :n "
+                    f"ORDER BY sim DESC LIMIT 1"
+                ),
+                {"n": normalized},
+            )
+        ).first()
+        alias_row = (
+            await db.execute(
+                text(
+                    "SELECT entity_id, similarity(alias_normalized, :n) AS sim "
+                    "FROM eco_entity_aliases "
+                    "WHERE entity_kind = :k AND alias_normalized % :n "
+                    "ORDER BY sim DESC LIMIT 1"
+                ),
+                {"n": normalized, "k": entity_kind},
+            )
+        ).first()
+        best_id, best_score = None, 0.0
+        if name_row is not None and float(name_row.sim) > best_score:
+            best_id, best_score = name_row.id, float(name_row.sim)
+        if alias_row is not None and float(alias_row.sim) > best_score:
+            best_id, best_score = alias_row.entity_id, float(alias_row.sim)
+        return (best_id, round(best_score, 3)) if best_score >= SIMILARITY_THRESHOLD else (
+            None,
+            round(best_score, 3),
+        )
+    except Exception:  # noqa: BLE001 — pg_trgm unavailable (non-PG test DB)
+        best_id, best_score = None, 0.0
+        rows = await db.scalars(select(model).limit(2000))
+        lowered = name.lower()
+        for row in rows:
+            names = [row.canonical_name or ""] + list(row.aliases or [])
+            for candidate in names:
+                if not isinstance(candidate, str):
+                    continue
+                score = SequenceMatcher(None, lowered, candidate.lower()).ratio()
+                if score > best_score:
+                    best_id, best_score = row.id, score
+        return (best_id, best_score) if best_score >= SIMILARITY_THRESHOLD else (None, best_score)
 
 
 async def propose_resolution(
@@ -259,6 +343,7 @@ class ResolutionService:
                     entity_kind=candidate.entity_kind,
                     entity_id=entity_id,
                     alias=alias,
+                    alias_normalized=normalize_name(alias),
                     alias_type=alias_type,
                     source_id=obs.source_id,
                 )

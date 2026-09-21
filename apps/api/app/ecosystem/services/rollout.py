@@ -137,10 +137,11 @@ class RolloutService:
     async def evaluate(self, plan_id: str) -> RolloutPlan:
         """Collect candidate metrics; compute per-dimension deltas, sample size
         and guardrail regressions (§11.4)."""
-        from sqlalchemy import func, select
+        from sqlalchemy import select
 
         from app.ecosystem.models.benchmark import BenchmarkResult
         from app.ecosystem.services.benchmark import latest_completed_run
+        from app.ecosystem.services.stats import two_proportion_z_test, welch_t_test
 
         plan = await self.get(plan_id)
         self._check_transition(plan, "evaluating")
@@ -148,19 +149,49 @@ class RolloutService:
         candidate_run = await latest_completed_run(
             self.db, candidate.candidate_kind, candidate.candidate_id
         )
-        candidate_metrics = dict(candidate_run.dimension_scores or {}) if candidate_run else {}
-        sample_size = 0
-        if candidate_run is not None:
-            sample_size = (
-                await self.db.scalar(
-                    select(func.count())
-                    .select_from(BenchmarkResult)
-                    .where(BenchmarkResult.run_id == candidate_run.id)
+        # Baseline per-result samples for significance testing (LaunchDarkly
+        # lesson taken further: raw deltas never call a regression alone —
+        # a guarded regression must also be statistically significant when
+        # per-sample data exists on both sides)
+        baseline_run = await latest_completed_run(
+            self.db, candidate.deprecated_kind, candidate.deprecated_id
+        )
+
+        async def _samples(run) -> dict:
+            if run is None:
+                return {"latency": [], "cost": [], "successes": 0, "n": 0}
+            rows = list(
+                await self.db.scalars(
+                    select(BenchmarkResult).where(BenchmarkResult.run_id == run.id)
                 )
-            ) or 0
+            )
+            return {
+                "latency": [float(r.latency_ms) for r in rows if r.latency_ms is not None],
+                "cost": [float(r.cost_usd or 0) for r in rows],
+                "successes": sum(1 for r in rows if not r.failed),
+                "n": len(rows),
+            }
+
+        cand_samples = await _samples(candidate_run)
+        base_samples = await _samples(baseline_run)
+        candidate_metrics = dict(candidate_run.dimension_scores or {}) if candidate_run else {}
+        sample_size = cand_samples["n"]
+
+        # Per-dimension significance tests where raw samples exist
+        tests: dict[str, dict] = {}
+        if cand_samples["latency"] and base_samples["latency"]:
+            tests["speed_p50_ms"] = welch_t_test(cand_samples["latency"], base_samples["latency"])
+        if cand_samples["cost"] and base_samples["cost"]:
+            tests["cost_per_case_usd"] = welch_t_test(cand_samples["cost"], base_samples["cost"])
+        if cand_samples["n"] and base_samples["n"]:
+            tests["reliability"] = two_proportion_z_test(
+                cand_samples["successes"], cand_samples["n"],
+                base_samples["successes"], base_samples["n"],
+            )
+
         guardrails = plan.guardrails or {}
         thresholds: dict = guardrails.get("thresholds", {}) or {}
-        comparison: dict = {"sample_size": sample_size}
+        comparison: dict = {"sample_size": sample_size, "baseline_sample_size": base_samples["n"]}
         regressions: list[str] = []
         for dim, higher_is_better in _COMPARE_DIMENSIONS.items():
             base = (plan.baseline or {}).get(dim)
@@ -174,12 +205,17 @@ class RolloutService:
                 "delta": round(delta, 6),
                 "improved": (delta > 0) if higher_is_better else (delta < 0),
             }
-            # Guarded dimension: regression = worsens beyond its threshold
+            test = tests.get(dim)
+            if test is not None:
+                entry["p_value"] = test["p_value"]
+                entry["significant"] = test["p_value"] < 0.05
+            # Guarded dimension: regression = worsens beyond its threshold AND,
+            # when a significance test exists, the difference is significant —
+            # noise never blocks a promote, real regressions always do
             if dim in thresholds:
                 threshold = float(thresholds[dim])
-                regressed = (
-                    delta < -threshold if higher_is_better else delta > threshold
-                )
+                beyond = delta < -threshold if higher_is_better else delta > threshold
+                regressed = beyond and (test is None or test["p_value"] < 0.05)
                 entry["threshold"] = threshold
                 entry["regression"] = regressed
                 if regressed:

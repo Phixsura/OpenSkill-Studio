@@ -161,6 +161,42 @@ class BlindReviewService:
                 batch.status = "complete"
                 await self.db.flush()
 
+    async def _bradley_terry_elo(self, batch: ReviewBatch) -> dict[str, float]:
+        """LMArena-method Elo: each reviewer's scores on the same case form
+        pairwise preferences between runs; Bradley-Terry MLE turns those into
+        a preference rating. Ties count half. Uses the mean of each review's
+        dimension scores as the reviewer's overall preference signal."""
+        from app.ecosystem.services.stats import bradley_terry, pairwise_wins_from_scores
+
+        reviews = await self.db.scalars(
+            select(BenchmarkReview).where(
+                BenchmarkReview.batch_id == batch.id,
+                BenchmarkReview.submitted_at.isnot(None),
+            )
+        )
+        reviews = list(reviews)
+        if not reviews:
+            return {}
+        result_case: dict[str, str] = {}
+        for review in reviews:
+            if review.result_id not in result_case:
+                result = await self.db.get(BenchmarkResult, review.result_id)
+                result_case[review.result_id] = result.case_id if result else review.result_id
+        rows = []
+        for review in reviews:
+            scores = [v for v in (review.scores or {}).values() if isinstance(v, (int, float))]
+            if not scores:
+                continue
+            rows.append(
+                {
+                    "context": result_case.get(review.result_id, review.result_id),
+                    "judge": review.reviewer_id,
+                    "item": review.run_id,
+                    "score": sum(scores) / len(scores),
+                }
+            )
+        return bradley_terry(pairwise_wins_from_scores(rows))
+
     async def reveal(self, batch_id: str) -> dict:
         """Reveal identities — refused until every review is submitted."""
         batch = await self.get_batch(batch_id)
@@ -172,13 +208,20 @@ class BlindReviewService:
             )
         batch.status = "revealed"
         await self.db.flush()
-        # Fold human dimensions back into each run's preserved scores
+        # Fold human dimensions back into each run's preserved scores +
+        # Bradley-Terry preference Elo from the blind pairwise structure
         from app.ecosystem.services.benchmark import BenchmarkService
 
+        elo = await self._bradley_terry_elo(batch)
         bench = BenchmarkService(self.db)
         revealed = []
         for run_id in batch.run_ids or []:
             run = await bench.refresh_dimensions(run_id)
+            if run_id in elo:
+                scores = dict(run.dimension_scores or {})
+                scores["human_pref_elo"] = elo[run_id]
+                run.dimension_scores = scores
+                await self.db.flush()
             revealed.append(
                 {
                     "run_id": run_id,

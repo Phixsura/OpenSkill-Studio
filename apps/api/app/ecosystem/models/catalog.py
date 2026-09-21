@@ -318,6 +318,8 @@ class EntityAlias(Base):
     entity_kind: Mapped[str] = mapped_column(String(30))
     entity_id: Mapped[str] = mapped_column(String(26))
     alias: Mapped[str] = mapped_column(String(300))
+    # Casefolded, punctuation-squashed key for deterministic + trigram lookups
+    alias_normalized: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # official_id | slug | name | api_identifier
     alias_type: Mapped[str] = mapped_column(String(30), default="name", server_default="name")
     source_id: Mapped[str | None] = mapped_column(
