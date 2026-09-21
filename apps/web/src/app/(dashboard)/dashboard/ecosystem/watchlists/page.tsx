@@ -1,0 +1,232 @@
+"use client";
+/** Watchlists + deprecation calendar (Part P). */
+
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiWithAuth } from "@/lib/api";
+import { EcosystemNav, EmptyState, Pill } from "../components";
+import { LIFECYCLE_STYLES, SEVERITY_STYLES, fmtDate, shortId } from "../lib";
+
+interface Watchlist {
+  id: string;
+  name: string;
+  created_at: string;
+}
+interface WatchItem {
+  id: string;
+  target_kind: string;
+  target_id: string | null;
+  target_ref: string | null;
+}
+interface ChangeEvent {
+  id: string;
+  change_type: string;
+  field: string;
+  severity: string;
+  detected_at: string;
+}
+interface Sunset {
+  entity_id: string;
+  name: string;
+  sunset_at: string;
+  lifecycle_status: string;
+}
+
+export default function WatchlistsPage() {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [item, setItem] = useState({ target_kind: "model", target_id: "", target_ref: "" });
+
+  const watchlists = useQuery({
+    queryKey: ["eco-watchlists"],
+    queryFn: () => apiWithAuth<{ data: Watchlist[] }>("/ecosystem/watchlists"),
+  });
+  const items = useQuery({
+    queryKey: ["eco-watch-items", selected],
+    enabled: Boolean(selected),
+    queryFn: () => apiWithAuth<{ data: WatchItem[] }>(`/ecosystem/watchlists/${selected}/items`),
+  });
+  const feed = useQuery({
+    queryKey: ["eco-watched-changes"],
+    queryFn: () => apiWithAuth<{ data: ChangeEvent[] }>("/ecosystem/watchlists/changes/feed"),
+  });
+  const calendar = useQuery({
+    queryKey: ["eco-sunsets"],
+    queryFn: () => apiWithAuth<{ data: Sunset[] }>("/ecosystem/deprecation-calendar"),
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["eco-watchlists"] });
+    queryClient.invalidateQueries({ queryKey: ["eco-watch-items"] });
+    queryClient.invalidateQueries({ queryKey: ["eco-watched-changes"] });
+  };
+
+  const createList = useMutation({
+    mutationFn: () =>
+      apiWithAuth("/ecosystem/watchlists", { method: "POST", body: JSON.stringify({ name }) }),
+    onSuccess: () => {
+      setName("");
+      invalidate();
+    },
+  });
+  const addItem = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/ecosystem/watchlists/${selected}/items`, {
+        method: "POST",
+        body: JSON.stringify({
+          target_kind: item.target_kind,
+          target_id: item.target_id || null,
+          target_ref: item.target_ref || null,
+        }),
+      }),
+    onSuccess: invalidate,
+  });
+  const removeItem = useMutation({
+    mutationFn: (itemId: string) =>
+      apiWithAuth(`/ecosystem/watchlists/${selected}/items/${itemId}`, { method: "DELETE" }),
+    onSuccess: invalidate,
+  });
+
+  return (
+    <div className="space-y-6 p-6">
+      <h1 className="text-2xl font-bold">Watchlists & Deprecation Calendar</h1>
+      <EcosystemNav />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">My watchlists</h2>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (name.trim()) createList.mutate();
+            }}
+            className="flex gap-2"
+          >
+            <input
+              placeholder="New watchlist name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="flex-1 rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"
+            />
+            <button
+              type="submit"
+              className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-[hsl(var(--primary-foreground))]"
+            >
+              Create
+            </button>
+          </form>
+          {(watchlists.data?.data ?? []).map((w) => (
+            <button
+              key={w.id}
+              onClick={() => setSelected(selected === w.id ? null : w.id)}
+              className={`block w-full rounded-lg border p-3 text-left text-sm shadow-sm ${
+                selected === w.id
+                  ? "border-[hsl(var(--primary))] bg-[hsl(var(--secondary))]"
+                  : "bg-[hsl(var(--card))]"
+              }`}
+            >
+              {w.name}
+            </button>
+          ))}
+          {selected && (
+            <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+              <div className="mb-2 flex gap-2">
+                <select
+                  value={item.target_kind}
+                  onChange={(e) => setItem({ ...item, target_kind: e.target.value })}
+                  className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-xs"
+                >
+                  {[
+                    "provider",
+                    "model",
+                    "tool",
+                    "workflow",
+                    "github_repo",
+                    "capability",
+                    "component",
+                  ].map((k) => (
+                    <option key={k}>{k}</option>
+                  ))}
+                </select>
+                <input
+                  placeholder="entity id (26 chars) or leave blank"
+                  value={item.target_id}
+                  onChange={(e) => setItem({ ...item, target_id: e.target.value })}
+                  className="flex-1 rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-xs"
+                />
+                <input
+                  placeholder="external ref (repo url…)"
+                  value={item.target_ref}
+                  onChange={(e) => setItem({ ...item, target_ref: e.target.value })}
+                  className="flex-1 rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-xs"
+                />
+                <button
+                  onClick={() => addItem.mutate()}
+                  className="rounded-md border px-2 py-1 text-xs"
+                >
+                  Watch
+                </button>
+              </div>
+              {(items.data?.data ?? []).map((i) => (
+                <div key={i.id} className="flex items-center justify-between py-1 text-sm">
+                  <span>
+                    {i.target_kind}: {i.target_ref ?? shortId(i.target_id)}
+                  </span>
+                  <button
+                    onClick={() => removeItem.mutate(i.id)}
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Changes on watched entities</h2>
+          {(feed.data?.data ?? []).length === 0 ? (
+            <EmptyState icon="👀" text="No changes on your watched entities." />
+          ) : (
+            (feed.data?.data ?? []).map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between rounded-lg border bg-[hsl(var(--card))] p-3 text-sm shadow-sm"
+              >
+                <span>
+                  {c.change_type} · {c.field}
+                </span>
+                <span className="flex items-center gap-2">
+                  <Pill value={c.severity} styles={SEVERITY_STYLES} />
+                  <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                    {fmtDate(c.detected_at)}
+                  </span>
+                </span>
+              </div>
+            ))
+          )}
+
+          <h2 className="pt-4 text-lg font-semibold">Deprecation calendar (next 90 days)</h2>
+          {(calendar.data?.data ?? []).length === 0 ? (
+            <EmptyState icon="🗓️" text="No upcoming sunsets." />
+          ) : (
+            (calendar.data?.data ?? []).map((s) => (
+              <div
+                key={s.entity_id}
+                className="flex items-center justify-between rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm"
+              >
+                <span className="font-medium">{s.name}</span>
+                <span className="flex items-center gap-2">
+                  <Pill value={s.lifecycle_status} styles={LIFECYCLE_STYLES} />
+                  <span className="text-xs text-orange-700">sunset {fmtDate(s.sunset_at)}</span>
+                </span>
+              </div>
+            ))
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
