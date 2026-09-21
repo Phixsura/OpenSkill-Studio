@@ -161,13 +161,9 @@ class BlindReviewService:
                 batch.status = "complete"
                 await self.db.flush()
 
-    async def _bradley_terry_elo(self, batch: ReviewBatch) -> dict[str, float]:
-        """LMArena-method Elo: each reviewer's scores on the same case form
-        pairwise preferences between runs; Bradley-Terry MLE turns those into
-        a preference rating. Ties count half. Uses the mean of each review's
-        dimension scores as the reviewer's overall preference signal."""
-        from app.ecosystem.services.stats import bradley_terry, pairwise_wins_from_scores
-
+    async def _review_rows(self, batch: ReviewBatch) -> list[dict]:
+        """(context=case, judge=reviewer, item=run, score=mean of dims) rows
+        for Bradley-Terry and inter-rater agreement."""
         reviews = await self.db.scalars(
             select(BenchmarkReview).where(
                 BenchmarkReview.batch_id == batch.id,
@@ -175,26 +171,35 @@ class BlindReviewService:
             )
         )
         reviews = list(reviews)
-        if not reviews:
-            return {}
         result_case: dict[str, str] = {}
+        rows: list[dict] = []
         for review in reviews:
             if review.result_id not in result_case:
                 result = await self.db.get(BenchmarkResult, review.result_id)
                 result_case[review.result_id] = result.case_id if result else review.result_id
-        rows = []
-        for review in reviews:
             scores = [v for v in (review.scores or {}).values() if isinstance(v, (int, float))]
             if not scores:
                 continue
             rows.append(
                 {
-                    "context": result_case.get(review.result_id, review.result_id),
+                    "context": result_case[review.result_id],
                     "judge": review.reviewer_id,
                     "item": review.run_id,
                     "score": sum(scores) / len(scores),
                 }
             )
+        return rows
+
+    async def _bradley_terry_elo(self, batch: ReviewBatch) -> dict[str, float]:
+        """LMArena-method Elo: each reviewer's scores on the same case form
+        pairwise preferences between runs; Bradley-Terry MLE turns those into
+        a preference rating. Ties count half. Uses the mean of each review's
+        dimension scores as the reviewer's overall preference signal."""
+        from app.ecosystem.services.stats import bradley_terry, pairwise_wins_from_scores
+
+        rows = await self._review_rows(batch)
+        if not rows:
+            return {}
         return bradley_terry(pairwise_wins_from_scores(rows))
 
     async def reveal(self, batch_id: str) -> dict:
@@ -211,8 +216,12 @@ class BlindReviewService:
         # Fold human dimensions back into each run's preserved scores +
         # Bradley-Terry preference Elo from the blind pairwise structure
         from app.ecosystem.services.benchmark import BenchmarkService
+        from app.ecosystem.services.stats import reviewer_agreement
 
         elo = await self._bradley_terry_elo(batch)
+        # Inter-rater reliability (§13): an Elo built on reviewers who don't
+        # agree with each other is noise — report agreement alongside it
+        agreement = reviewer_agreement(await self._review_rows(batch))
         bench = BenchmarkService(self.db)
         revealed = []
         for run_id in batch.run_ids or []:
@@ -230,4 +239,4 @@ class BlindReviewService:
                     "dimension_scores": run.dimension_scores,
                 }
             )
-        return {"batch_id": batch.id, "runs": revealed}
+        return {"batch_id": batch.id, "runs": revealed, "reviewer_agreement": agreement}

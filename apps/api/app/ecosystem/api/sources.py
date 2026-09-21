@@ -89,6 +89,17 @@ async def sync_source(
     return {"data": run}
 
 
+@router.get("/{source_id}/health", response_model=DataResponse[dict])
+async def source_health(
+    source_id: str,
+    window_days: int = Query(7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """§13: per-source health summary (success rate, volume, last error)."""
+    return {"data": await SourceService(db).health(source_id, window_days=window_days)}
+
+
 @router.get("/{source_id}/sync-runs", response_model=DataResponse[list[SyncRunResponse]])
 async def list_sync_runs(
     source_id: str,

@@ -47,6 +47,25 @@ async def latest_dimension_scores(db: AsyncSession, entity_kind: str, entity_id:
     return dict(run.dimension_scores or {}) if run else {}
 
 
+
+def _cases_fingerprint(cases: list) -> str:
+    """Deterministic hash over the case set (id, prompt, weight, constraints) —
+    HELM-style suite versioning: a run is bound to the exact case set it saw."""
+    import hashlib
+    import json
+
+    basis = [
+        {
+            "id": c.id,
+            "prompt": c.prompt,
+            "weight": float(c.weight or 1.0),
+            "constraints": c.constraints or {},
+        }
+        for c in sorted(cases, key=lambda c: c.id)
+    ]
+    return hashlib.sha256(json.dumps(basis, sort_keys=True, default=str).encode()).hexdigest()
+
+
 class OfferingExecutor:
     """Executes cases against a REAL ProviderModelOffering through the
     platform's provider-adapter chain (same contract as the workflow runtime:
@@ -279,6 +298,7 @@ class BenchmarkService:
             raise AppError("VALIDATION_ERROR", "Suite must be active to run", 422)
         if not isinstance(target, dict) or not target.get("entity_kind"):
             raise AppError("VALIDATION_ERROR", "Run target must name an entity", 422)
+        cases = await self.list_cases(suite_id)
         run = BenchmarkRun(
             suite_id=suite_id,
             target=target,
@@ -291,6 +311,14 @@ class BenchmarkService:
                     else ("OfferingExecutor" if target.get("offering_id") else "MockExecutor")
                 ),
                 "suite_key": suite.key,
+                # §13 suite versioning: the run is pinned to this exact case
+                # set; execute refuses to run against a drifted suite
+                "suite_snapshot": {
+                    "cases_fingerprint": _cases_fingerprint(cases),
+                    "case_count": len(cases),
+                    "repeat_count": suite.repeat_count,
+                    "rubric": suite.rubric,
+                },
             },
             triggered_by=triggered_by,
         )
@@ -310,6 +338,16 @@ class BenchmarkService:
         if not cases:
             run.status = "failed"
             run.error = "Suite has no cases"
+            await self.db.flush()
+            return run
+        snapshot = (run.environment_snapshot or {}).get("suite_snapshot")
+        if snapshot and snapshot.get("cases_fingerprint") != _cases_fingerprint(cases):
+            # HELM lesson: results must correspond to the recorded suite. A
+            # suite edited between queue and execute invalidates the run
+            # rather than silently measuring something else.
+            run.status = "failed"
+            run.error = "ECO_SUITE_DRIFT: suite cases changed since the run was created"
+            run.finished_at = datetime.now(UTC)
             await self.db.flush()
             return run
         run.status = "running"

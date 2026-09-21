@@ -271,3 +271,71 @@ def version_in_range(version: str, range_expr: str) -> bool | None:
         if not ok:
             return False
     return ok if matched_any else None
+
+
+# ── Inter-rater reliability (serious human-eval table stakes) ────────
+
+
+def cohen_kappa(labels_a: list, labels_b: list) -> float | None:
+    """Cohen's kappa for two raters' paired categorical labels.
+
+    Returns None for empty input; 1.0 when observed agreement is perfect
+    (including the degenerate single-category case where chance == 1).
+    """
+    if not labels_a or len(labels_a) != len(labels_b):
+        return None
+    n = len(labels_a)
+    observed = sum(1 for a, b in zip(labels_a, labels_b, strict=True) if a == b) / n
+    categories = set(labels_a) | set(labels_b)
+    expected = 0.0
+    for cat in categories:
+        pa = sum(1 for a in labels_a if a == cat) / n
+        pb = sum(1 for b in labels_b if b == cat) / n
+        expected += pa * pb
+    if expected >= 1.0:
+        return 1.0 if observed == 1.0 else 0.0
+    return round((observed - expected) / (1.0 - expected), 4)
+
+
+def reviewer_agreement(rows: list[dict]) -> dict:
+    """Inter-rater agreement over blind-review preferences.
+
+    rows: same shape as pairwise_wins_from_scores input. Per (context, judge)
+    the top-scored item is that judge's preference label ('tie' on equal
+    tops). Reports mean pairwise percent agreement and mean pairwise Cohen's
+    kappa across judges sharing >=1 context.
+    """
+    prefs: dict[str, dict[str, str]] = {}  # judge -> context -> preferred item
+    groups: dict[tuple, list[tuple[str, float]]] = {}
+    for row in rows:
+        groups.setdefault((row["context"], row["judge"]), []).append(
+            (row["item"], float(row["score"]))
+        )
+    for (context, judge), members in groups.items():
+        best = max(score for _, score in members)
+        top = [item for item, score in members if score == best]
+        prefs.setdefault(judge, {})[context] = top[0] if len(top) == 1 else "tie"
+    judges = sorted(prefs)
+    agreements: list[float] = []
+    kappas: list[float] = []
+    pairs = 0
+    for i in range(len(judges)):
+        for j in range(i + 1, len(judges)):
+            shared = sorted(set(prefs[judges[i]]) & set(prefs[judges[j]]))
+            if not shared:
+                continue
+            labels_a = [prefs[judges[i]][c] for c in shared]
+            labels_b = [prefs[judges[j]][c] for c in shared]
+            pairs += 1
+            agreements.append(
+                sum(1 for a, b in zip(labels_a, labels_b, strict=True) if a == b)
+                / len(shared)
+            )
+            kappa = cohen_kappa(labels_a, labels_b)
+            if kappa is not None:
+                kappas.append(kappa)
+    return {
+        "reviewer_pairs": pairs,
+        "percent_agreement": round(sum(agreements) / len(agreements), 4) if agreements else None,
+        "mean_cohen_kappa": round(sum(kappas) / len(kappas), 4) if kappas else None,
+    }

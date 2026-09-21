@@ -27,7 +27,7 @@ from app.schemas.base import DataResponse
 router = APIRouter(prefix="/ecosystem", tags=["Ecosystem — Observations"])
 
 
-@router.get("/observations", response_model=DataResponse[list[ObservationResponse]])
+@router.get("/observations", response_model=dict)
 async def list_observations(
     source_id: str | None = None,
     event_type: str | None = None,
@@ -37,11 +37,16 @@ async def list_observations(
     injection_flagged: bool | None = Query(
         None, description="ADR-016 §11.2: heuristic flags filter — advisory, never blocking"
     ),
+    cursor: str | None = Query(
+        None, description="ULID cursor (id of last item from the previous page)"
+    ),
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, description="Legacy; prefer cursor"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    """Append-only feed → ULID cursor pagination (§13): stable under concurrent
+    inserts, unlike offset pages which shift as new observations land."""
     query = select(EcosystemObservation)
     if source_id:
         query = query.where(EcosystemObservation.source_id == source_id)
@@ -56,10 +61,23 @@ async def list_observations(
         query = query.where(EcosystemObservation.canonical_entity_id == canonical_entity_id)
     if human_verified is not None:
         query = query.where(EcosystemObservation.human_verified == human_verified)
-    rows = await db.scalars(
-        query.order_by(EcosystemObservation.observed_at.desc()).limit(limit).offset(offset)
-    )
-    return {"data": list(rows)}
+    if cursor:
+        query = query.where(EcosystemObservation.id < cursor)
+        query = query.order_by(EcosystemObservation.id.desc()).limit(limit + 1)
+    else:
+        query = (
+            query.order_by(EcosystemObservation.id.desc()).limit(limit + 1).offset(offset)
+        )
+    rows = list(await db.scalars(query))
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "data": [ObservationResponse.model_validate(r).model_dump() for r in rows],
+        "meta": {
+            "has_more": has_more,
+            "next_cursor": rows[-1].id if has_more and rows else None,
+        },
+    }
 
 
 @router.post("/observations", response_model=DataResponse[ObservationResponse], status_code=201)
@@ -150,14 +168,15 @@ async def verify_observation(
     return {"data": obs}
 
 
-@router.get("/changes", response_model=DataResponse[list[ChangeEventResponse]])
+@router.get("/changes", response_model=dict)
 async def list_changes(
     change_type: str | None = None,
     severity: str | None = None,
     acknowledged: bool | None = None,
     canonical_entity_id: str | None = None,
+    cursor: str | None = Query(None, description="ULID cursor (id of last item)"),
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, description="Legacy; prefer cursor"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -170,10 +189,21 @@ async def list_changes(
         query = query.where(ChangeEvent.acknowledged == acknowledged)
     if canonical_entity_id:
         query = query.where(ChangeEvent.canonical_entity_id == canonical_entity_id)
-    rows = await db.scalars(
-        query.order_by(ChangeEvent.detected_at.desc()).limit(limit).offset(offset)
-    )
-    return {"data": list(rows)}
+    if cursor:
+        query = query.where(ChangeEvent.id < cursor)
+        query = query.order_by(ChangeEvent.id.desc()).limit(limit + 1)
+    else:
+        query = query.order_by(ChangeEvent.id.desc()).limit(limit + 1).offset(offset)
+    rows = list(await db.scalars(query))
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "data": [ChangeEventResponse.model_validate(r).model_dump() for r in rows],
+        "meta": {
+            "has_more": has_more,
+            "next_cursor": rows[-1].id if has_more and rows else None,
+        },
+    }
 
 
 @router.post("/changes/{change_id}/acknowledge", response_model=DataResponse[ChangeEventResponse])

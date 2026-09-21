@@ -144,6 +144,46 @@ class SourceService:
         await self.db.flush()
         return source
 
+    async def health(self, source_id: str, *, window_days: int = 7) -> dict:
+        """StatusGator-grade source health: success/not-modified/failure rates,
+        volume, and the most recent error over a window (§13)."""
+        from datetime import UTC, datetime, timedelta
+
+        source = await self.get(source_id)
+        window_start = datetime.now(UTC) - timedelta(days=window_days)
+        rows = list(
+            await self.db.scalars(
+                select(SourceSyncRun).where(
+                    SourceSyncRun.source_id == source_id,
+                    SourceSyncRun.started_at >= window_start,
+                )
+            )
+        )
+        total = len(rows)
+        by_status: dict[str, int] = {}
+        for run in rows:
+            by_status[run.status] = by_status.get(run.status, 0) + 1
+        succeeded = by_status.get("success", 0) + by_status.get("not_modified", 0)
+        last_error_run = max(
+            (r for r in rows if r.status == "failed"),
+            key=lambda r: r.started_at,
+            default=None,
+        )
+        return {
+            "source_id": source_id,
+            "status": source.status,
+            "window_days": window_days,
+            "runs": total,
+            "by_status": by_status,
+            "success_rate": round(succeeded / total, 4) if total else None,
+            "observations_created": sum(r.observations_created for r in rows),
+            "changes_detected": sum(r.changes_detected for r in rows),
+            "bytes_fetched": sum(r.bytes_fetched for r in rows),
+            "consecutive_failures": source.consecutive_failures,
+            "last_success_at": source.last_success_at,
+            "last_error": last_error_run.error if last_error_run else None,
+        }
+
     async def list_sync_runs(
         self, source_id: str, *, limit: int = 50
     ) -> list[SourceSyncRun]:

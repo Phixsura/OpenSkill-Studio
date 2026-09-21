@@ -115,6 +115,35 @@ async def handle_notify_watchers(db: AsyncSession, payload: dict) -> None:
         .where(WatchItem.target_id == change.canonical_entity_id)
         .distinct()
     )
+    # §13: org-scoped watchlists also fan out over the org's webhook
+    # subscriptions (StatusGator/GitHub posture: watching means being CALLED,
+    # not just having an in-app bell). Delivery is the webhook service's
+    # fail-safe, entitlement-gated, SSRF-guarded path.
+    org_rows = await db.execute(
+        select(Watchlist.org_id)
+        .join(WatchItem, WatchItem.watchlist_id == Watchlist.id)
+        .where(
+            WatchItem.target_id == change.canonical_entity_id,
+            Watchlist.org_id.isnot(None),
+        )
+        .distinct()
+    )
+    webhook_payload = {
+        "change_event_id": change.id,
+        "change_type": change.change_type,
+        "field": change.field,
+        "severity": change.severity,
+        "entity_kind": change.entity_kind,
+        "entity_id": change.canonical_entity_id,
+        "old_value": change.old_value,
+        "new_value": change.new_value,
+        "detected_at": change.detected_at.isoformat() if change.detected_at else None,
+    }
+    from app.services.webhook import WebhookService
+
+    webhook_svc = WebhookService(db)
+    for (org_id,) in org_rows:
+        await webhook_svc.trigger_event(org_id, "ecosystem.change", webhook_payload)
     svc = NotificationService(db)
     for (owner_id,) in watcher_rows:
         existing = await db.scalar(
