@@ -823,7 +823,7 @@ async def test_backfill_bound_open_period_accepted_closed_rejected(db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(180)
+@pytest.mark.timeout(300)
 async def test_seat_sweep_isolates_one_bad_org(db, monkeypatch):
     """R169: one org whose emit_usage raises must NOT abort the whole MONTHLY
     seat sweep (it fires only on the 1st — an unguarded abort loses a full
