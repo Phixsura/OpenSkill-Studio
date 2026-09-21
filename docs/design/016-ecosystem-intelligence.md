@@ -1,0 +1,480 @@
+# ADR-016: AI Ecosystem Intelligence, Benchmark Lab & Component Lifecycle Automation
+
+- **Status**: Accepted
+- **Issue**: #35
+- **Depends on**: ADR-011 (capability tags / provider offerings), ADR-012 (matching engine),
+  ADR-014 (control plane, `ProviderCostRate`, outbox), ADR-015 (talent capability ontology,
+  workforce intelligence)
+
+## 1. Problem
+
+The platform can package, run, monetize, teach and match _existing_ AI capabilities, but it
+depends on humans to notice that a new model appeared, a price changed, a tool was deprecated,
+or a Skill/Workflow Pack now depends on something outdated. We need a continuously updating
+intelligence layer with a strict safety posture: **never silently publish unverified external
+content, never auto-migrate production workflows, never execute untrusted code.**
+
+Core loop: Discover → Normalize → Verify → Benchmark → Map to Capabilities → Compare → Draft →
+Human Review → Publish/Rollout → Observe Production → Deprecate/Replace → Feed back.
+
+## 2. Package layout
+
+Follows the `app/talent/` / `app/controlplane/` vertical-package precedent:
+
+```
+apps/api/app/ecosystem/
+  __init__.py
+  facade.py            # ONLY entry point for product code (registry/matching/workforce)
+  security.py          # SSRF guard, bounded JSON parsing, URL validation, injection hygiene
+  models/              # sources, observations, catalog, mapping, pricing, benchmark,
+                       # graph, impact, replacement, drafts, lifecycle, rollout, watchlist
+  schemas/             # Pydantic request/response
+  services/            # one service per bounded context
+  api/                 # routers aggregated into ecosystem_router
+  worker.py            # outbox topic handlers (eco.*)
+```
+
+Migrations: `eco01_*` … chained after `talent15a00015`. All tables prefixed `eco_`.
+
+## 3. Data model
+
+All PKs are 26-char ULIDs (`ulid_pk()`); all timestamps `DateTime(timezone=True)`.
+String status/type columns are validated at the service layer (extensible, no DB enums —
+same rationale as `capability_tags`).
+
+### 3.1 Part A — `eco_sources` (EcosystemSource)
+
+| column                         | type                   | notes                                                                                                                                                |
+| ------------------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| id                             | str(26) PK             |                                                                                                                                                      |
+| name                           | str(200)               | unique                                                                                                                                               |
+| source_type                    | str(40)                | `provider_api` \| `model_docs_feed` \| `github_repo` \| `huggingface` \| `comfyui_repo` \| `pricing_feed` \| `internal_research` \| `manual_analyst` |
+| trust_level                    | str(20)                | `official` \| `verified_partner` \| `community` \| `unverified` \| `internal`                                                                        |
+| base_url                       | str(2000) nullable     | validated by SSRF guard at write time; `manual_analyst` needs none                                                                                   |
+| adapter_key                    | str(64)                | parser/adapter implementation key                                                                                                                    |
+| parser_version                 | str(20)                | current parser version, stamped onto observations                                                                                                    |
+| config                         | JSONB `{}`             | non-sensitive adapter config; credential **field names only**, never values                                                                          |
+| sync_interval_minutes          | int, default 1440      |                                                                                                                                                      |
+| rate_limit_per_hour            | int, default 60        |                                                                                                                                                      |
+| max_response_bytes             | int, default 5_242_880 | hard response-size cap                                                                                                                               |
+| timeout_seconds                | int, default 30        |                                                                                                                                                      |
+| etag                           | str(500) nullable      | conditional GET state                                                                                                                                |
+| last_modified                  | str(100) nullable      | conditional GET state                                                                                                                                |
+| status                         | str(20)                | `active` \| `paused` \| `error` \| `archived`                                                                                                        |
+| last_sync_at / last_success_at | ts nullable            |                                                                                                                                                      |
+| consecutive_failures           | int default 0          | circuit breaker: pause at 5                                                                                                                          |
+| robots_compliant               | bool default true      | operator attestation; sync refuses if false                                                                                                          |
+| created_by                     | FK users SET NULL      |                                                                                                                                                      |
+| created_at / updated_at        | ts                     |                                                                                                                                                      |
+
+Indexes: `ix_eco_sources_status(status)`, `ix_eco_sources_type(source_type)`.
+
+`eco_source_sync_runs` (SourceSyncRun): id, source_id FK CASCADE, started_at, finished_at,
+status (`running|success|not_modified|failed|skipped`), http_status int nullable,
+bytes_fetched int, observations_created int, changes_detected int, error text nullable,
+parser_version. Index `(source_id, started_at)`.
+
+### 3.2 Part B — `eco_observations` (append-only ledger)
+
+| column                    | type                    | notes                                                                                                                                                                                                                                        |
+| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| id                        | PK                      |                                                                                                                                                                                                                                              |
+| source_id                 | FK eco_sources RESTRICT | provenance must survive                                                                                                                                                                                                                      |
+| sync_run_id               | FK nullable SET NULL    |                                                                                                                                                                                                                                              |
+| event_type                | str(40)                 | `model_released` \| `model_deprecated` \| `price_changed` \| `api_changed` \| `limits_changed` \| `region_changed` \| `license_changed` \| `security_advisory` \| `workflow_dependency_changed` \| `release_published` \| `catalog_snapshot` |
+| entity_kind               | str(30) nullable        | hint: `provider                                                                                                                                                                                                                              | tool | model | model_version | workflow | agent | node_package` |
+| external_ref              | str(500) nullable       | source-native identifier                                                                                                                                                                                                                     |
+| canonical_entity_id       | str(26) nullable        | set after resolution (kind in `canonical_entity_kind`)                                                                                                                                                                                       |
+| canonical_entity_kind     | str(30) nullable        |                                                                                                                                                                                                                                              |
+| observed_at               | ts                      | when we saw it                                                                                                                                                                                                                               |
+| effective_at              | ts nullable             | when the change takes effect (sunsets in the future)                                                                                                                                                                                         |
+| raw_hash                  | str(64)                 | SHA-256 of raw payload — idempotency key with source                                                                                                                                                                                         |
+| normalized                | JSONB                   | strict-schema extraction output                                                                                                                                                                                                              |
+| parser_version            | str(20)                 |                                                                                                                                                                                                                                              |
+| confidence                | Numeric(4,3)            | 0..1                                                                                                                                                                                                                                         |
+| provenance_url            | str(2000) nullable      |                                                                                                                                                                                                                                              |
+| extraction_method         | str(20)                 | `structured` \| `llm` \| `manual` — LLM-extracted facts are flagged                                                                                                                                                                          |
+| human_verified            | bool default false      |                                                                                                                                                                                                                                              |
+| verified_by / verified_at | nullable                |                                                                                                                                                                                                                                              |
+| superseded_by_id          | FK self nullable        | corrections chain — **never UPDATE normalized**                                                                                                                                                                                              |
+| created_at                | ts                      |                                                                                                                                                                                                                                              |
+
+Constraint: `uq_eco_obs_idem UNIQUE(source_id, raw_hash, event_type)` — re-ingesting an
+unchanged payload is a no-op. Indexes on `(event_type, observed_at)`,
+`(canonical_entity_kind, canonical_entity_id)`. **No UPDATE path exists in the service for
+`normalized`/`raw_hash`; corrections append a new row with `superseded_by_id` back-link.**
+
+`eco_change_events` (typed change detection, Part B):
+id, observation_id FK, change_type (`price|limits|license|api|model_version|lifecycle|region|security`),
+field str(100), old_value JSONB nullable, new_value JSONB nullable,
+severity (`info|update_available|degraded|breaking|security_critical|sunset_risk`),
+entity_kind, canonical_entity_id nullable, detected_at, acknowledged bool default false,
+acknowledged_by nullable. Index `(change_type, detected_at)`, `(severity, acknowledged)`.
+
+### 3.3 Part C — canonical catalog
+
+Seven entity tables share a column core (id, canonical_name, slug unique-per-table,
+description, lifecycle_status, external_ids JSONB, aliases JSONB list, metadata JSONB,
+first_observed_at, created_at, updated_at):
+
+- `eco_ai_providers` — + website, vendor_status (`operational|degraded|outage|unknown`)
+- `eco_ai_tools` — + provider_id FK nullable, tool_type (`api|desktop|node|cli|service`)
+- `eco_ai_models` — + provider_id FK, modality inputs/outputs JSONB, family str
+- `eco_model_versions` — + model_id FK CASCADE, version str(100), released_at,
+  deprecated_at, sunset_at, api_identifier str(200), context/limits JSONB,
+  license str(100), commercial_use_allowed bool nullable,
+  `uq_eco_model_version UNIQUE(model_id, version)`
+- `eco_external_workflows` — + source_repo str, workflow_format (`comfyui|other`),
+  node_types JSONB list, graph_hash str(64)
+- `eco_external_agents` — + agent_framework str
+- `eco_node_packages` — + package_name, repo_url, latest_version, security_flags JSONB
+
+`lifecycle_status` (Part L): `discovered | under_review | verified | recommended | watch |
+deprecated | blocked | retired`. Transitions validated by `LifecycleService` (§3.9).
+
+`eco_entity_aliases`: id, entity_kind, entity_id, alias str(300), alias_type
+(`official_id|slug|name|api_identifier`), source_id FK nullable,
+`UNIQUE(entity_kind, alias, alias_type)`.
+
+`eco_resolution_candidates` (entity-resolution queue): id, observation_id FK,
+entity_kind, candidate_entity_id nullable (null ⇒ proposes new entity),
+match_method (`official_id|alias|similarity|llm_suggested`), confidence Numeric(4,3),
+proposed_payload JSONB, status (`pending|auto_merged|confirmed|rejected`),
+decided_by/decided_at nullable, created_at.
+**Rule: `confidence >= 0.9` AND method in (`official_id`,`alias`) may auto-merge; anything
+lower or LLM-suggested requires human confirmation** (`ECO_MERGE_CONFIRMATION_REQUIRED`).
+
+### 3.4 Part D — `eco_capability_mappings`
+
+id, entity_kind, entity_id, capability_key str(64) (loose FK to `capability_tags.key`,
+same pattern as `ProviderModelOffering`), evidence_level
+(`vendor_claimed | platform_observed | benchmark_verified | production_verified | human_verified`),
+io_spec JSONB (`{"inputs":[{"type":"image","formats":["png"],"max_mp":25}],
+"outputs":[{"type":"video","max_seconds":10}],"constraints":{...}}`),
+confidence, source_observation_id nullable, verified_by/at nullable, created_at, updated_at.
+`UNIQUE(entity_kind, entity_id, capability_key)` — evidence level is _upgraded in place_,
+history recoverable from observations.
+Evidence order is total: vendor_claimed < platform_observed < benchmark_verified <
+production_verified < human_verified; downgrades require `force=true` + admin.
+
+### 3.5 Part E — pricing / limits / availability
+
+`eco_price_observations`: id, observation_id FK, entity_kind, entity_id, region str(30)
+nullable, unit (`token_input|token_output|image|megapixel|video_second|minute|request|
+subscription_month|volume_tier`), price Numeric(14,6), currency str(3) default USD,
+tier JSONB nullable, effective_at, observed_at, reconciliation_status
+(`unreviewed|under_review|approved|rejected|superseded`), reconciled_by/at nullable,
+approved_cost_rate_id str(26) nullable (loose ref to `cp_provider_cost_rates.id`), created_at.
+Index `(entity_kind, entity_id, observed_at)`, `(reconciliation_status)`.
+**Approving creates a NEW `ProviderCostRate` via the control-plane facade — this service
+never mutates billing tables directly and never auto-approves** (`ECO_PRICING_NOT_APPROVED`).
+
+`eco_availability_records`: id, entity_kind, entity_id, region nullable,
+record_type (`rate_limit|concurrency|queue|latency|status|deprecation|sunset`),
+value JSONB, observed_at, source_observation_id nullable, created_at.
+
+### 3.6 Part F — Benchmark Lab
+
+`eco_benchmark_suites`: id, key str(64) unique, name, description, family
+(one of the 10 AI-visual families, e.g. `ecommerce_hero`, `product_consistency`,
+`character_consistency`, `chinese_text_render`, `storyboard_adherence`, `i2v_motion`,
+`temporal_consistency`, `commercial_ad_15s`, `background_replacement`, `multimodal_qa`),
+capability_key, rubric JSONB (dimension list with weights & anchors), human_review_policy
+JSONB (`{"required": true, "blind": true, "min_reviewers": 2}`), automated_metrics JSONB
+list, budget_usd_cap Numeric(10,2), repeat_count int default 3, status
+(`draft|active|archived`), created_by, created_at, updated_at.
+
+`eco_benchmark_cases`: id, suite_id FK CASCADE, name, prompt text, reference_assets JSONB
+list (asset refs, not blobs), constraints JSONB, weight Numeric(4,3) default 1, sort_order.
+
+`eco_benchmark_runs`: id, suite_id FK, status (`queued|running|completed|failed|cancelled`),
+target JSONB (`{"entity_kind":"model_version","entity_id":...,"offering_id":...,
+"provider_key":...}`), environment_snapshot JSONB (adapter versions, config), seed_settings
+JSONB, budget_usd_cap, total_cost_usd Numeric(12,6) default 0, started_at, finished_at,
+triggered_by, created_at. Index `(suite_id, created_at)`.
+
+`eco_benchmark_results` (one per run×case×repeat): id, run_id FK CASCADE, case_id FK,
+repeat_index int, input_snapshot JSONB, output_assets JSONB list, latency_ms int nullable,
+usage JSONB, cost_usd Numeric(12,6), retries int default 0, failed bool default false,
+error text nullable, automated_scores JSONB (`{"text_accuracy":0.91,...}`), created_at.
+`UNIQUE(run_id, case_id, repeat_index)`.
+
+**Dimensional scoring — never collapsed:** run aggregation produces
+`dimension_scores JSONB` on the run: `{"quality":..., "brief_adherence":...,
+"consistency":..., "text_accuracy":..., "motion_quality":..., "temporal_quality":...,
+"speed_p50_ms":..., "cost_per_case_usd":..., "reliability":..., "commercial_readiness":...}`.
+There is deliberately **no** `overall_score` column.
+
+Blind review (`eco_benchmark_reviews`): id, review_batch_id, run_id FK, result_id FK,
+reviewer_id FK users, **alias_label str(8)** (e.g. "Model A") — reviewer-facing identity;
+scores JSONB per rubric dimension, comment, submitted_at nullable, created_at.
+`UNIQUE(result_id, reviewer_id)`. The API **never returns provider/model identity for a
+review batch until every reviewer in the batch has `submitted_at` set**
+(`ECO_BLIND_REVIEW_SEALED`). Alias assignment is a random permutation stored server-side
+in `eco_review_batches.alias_map JSONB` and excluded from all reviewer-facing responses.
+
+### 3.7 Part G — production telemetry evidence
+
+`eco_telemetry_snapshots`: id, entity_kind, entity_id, window_start, window_end,
+org_id nullable (**null ⇒ cross-tenant aggregate**), sample_size int,
+metrics JSONB (`{"success_rate":..., "retry_rate":..., "latency_p50_ms":...,
+"latency_p95_ms":..., "effective_cost_usd_avg":..., "human_approval_rate":...,
+"revision_rate":..., "client_acceptance_rate":..., "error_distribution":{...}}`),
+created_at. `UNIQUE(entity_kind, entity_id, org_id, window_start, window_end)`.
+
+Privacy rules (hard, service-enforced):
+
+- Cross-tenant rows (`org_id IS NULL`) are only written when `sample_size >= 20` **and**
+  at least 3 distinct orgs contributed (`ECO_TELEMETRY_THRESHOLD`).
+- Org-scoped rows are only readable by that org's members or platform admin.
+- Divergence detection compares benchmark `dimension_scores` vs telemetry metrics and, when
+  |z| > 2 on a comparable dimension, creates a `eco_change_events` row with
+  `change_type="lifecycle"`, `severity="degraded"`, `field="benchmark_production_divergence"`
+  — **it never mutates rankings.**
+
+### 3.8 Part H/I — dependency graph & impact
+
+`eco_dependency_edges`: id, from_kind str(40), from_id str(26), to_kind, to_id,
+constraint_type (`requires_model_version|requires_capability|requires_api_version|
+requires_node_package|requires_license|requires_runtime_feature|uses`),
+constraint_spec JSONB (`{"version_range":">=2.0 <3.0"}`), org_id nullable (private
+component edges are org-scoped), created_at.
+`UNIQUE(from_kind, from_id, to_kind, to_id, constraint_type)`,
+indexes on `(to_kind, to_id)` and `(from_kind, from_id)`.
+Node kinds span both worlds: `provider|model|model_version|tool|node_package|
+workflow_pack|workflow_pack_release|skill_pack|project_template|learning_path|
+assessment|capability|commercial_project|cohort`.
+
+Impact analysis (Part I) is computed, stored:
+`eco_impact_analyses`: id, change_event_id FK, root_kind, root_id, classification
+(`informational|update_available|degraded|breaking|security_critical|sunset_risk`),
+summary JSONB (counts per kind), deadline_at nullable (from sunset), computed_at, status
+(`open|acknowledged|resolved`).
+`eco_impact_items`: id, analysis_id FK CASCADE, node_kind, node_id, depth int, path JSONB
+(list of edge ids), active_usage JSONB (`{"active_cohorts":3,"running_projects":1}`),
+recommended_action str(40) (`none|review|update|migrate|block`).
+Traversal: BFS from root over reversed edges, `max_depth=6`, visited-set for **cycle
+safety**, cap 5 000 nodes (`ECO_IMPACT_TOO_LARGE` past cap — analysis stored truncated
+with `summary.truncated=true`).
+
+### 3.9 Part J/L — replacement & lifecycle
+
+`eco_replacement_edges`: id, from_kind, from_id, to_kind, to_id, edge_type
+(`supersedes|recommended_replacement|compatible_alternative|migration_required`),
+rationale text, created_by, created_at. `UNIQUE(from_kind,from_id,to_kind,to_id,edge_type)`.
+
+`eco_replacement_candidates`: id, deprecated_kind, deprecated_id, candidate_kind,
+candidate_id, score Numeric(5,4), hard_compatible bool, hard_failures JSONB list
+(each `{"code":"IO_TYPE_MISMATCH","detail":...}`), score_breakdown JSONB (per-factor:
+io_compatibility, capability_coverage, benchmark, production_reliability, cost, latency,
+license, availability, binding_compat, migration_effort — weights sum to 1.0),
+explanation JSONB (human-readable factor lines, mirrors ADR-012 explain contract),
+status (`proposed|under_review|approved|rejected`), decided_by/at, created_at.
+**Hard rule: `hard_compatible=false` candidates are returned in a separate
+`incompatible` list, never interleaved into the ranked list, regardless of score**
+(mirrors matching-engine constraint/scoring split).
+Scoring reuses `app/services/matching` primitives via its public functions; weights
+configurable per request, defaults:
+`{"io":0.2,"capability":0.15,"benchmark":0.15,"reliability":0.15,"cost":0.1,
+"latency":0.05,"license":0.05,"availability":0.05,"bindings":0.05,"migration":0.05}`.
+
+`eco_lifecycle_transitions`: id, entity_kind, entity_id, from_status, to_status,
+reason (`official_sunset|security_advisory|license_incompatibility|benchmark_regression|
+production_failure_threshold|manual_decision`), note, actor_id, created_at.
+Valid transitions (service-enforced):
+
+```
+discovered → under_review | blocked
+under_review → verified | blocked | discovered
+verified → recommended | watch | deprecated | blocked
+recommended → watch | deprecated | blocked
+watch → recommended | deprecated | blocked
+deprecated → retired | watch
+blocked → under_review | retired
+retired → (terminal)
+```
+
+Deprecation **never deletes** anything; historical evidence rows are untouched.
+
+### 3.10 Part K — component drafts
+
+`eco_component_drafts`: id, draft_type (`workflow_pack|skill_pack_update|project_template|
+capability_mapping|provider_offering|benchmark_suite`), title, payload JSONB (the draft
+artifact body), source_kind/source_id (provenance entity), source_observation_ids JSONB
+list, validation JSONB (`{"valid":true,"errors":[]}`), status
+(`draft|in_review|approved|rejected|published`), org_id nullable, created_by,
+reviewed_by/at, published_ref str(26) nullable (id of the created product entity),
+created_at, updated_at.
+**Publishing requires status=approved and an explicit second call by a human with author/
+admin rights; the service refuses `draft→published` in one step**
+(`ECO_DRAFT_NOT_APPROVED`). Draft generation never downloads or executes external code;
+ComfyUI drafts reuse the existing `comfyui_import` parser (declarative parse only).
+
+### 3.11 Part M — controlled rollout
+
+`eco_rollout_plans`: id, replacement_candidate_id FK, scope_type
+(`benchmark_only|internal_org|selected_cohort|selected_installation`), scope_ref str(26)
+nullable, baseline JSONB (metrics snapshot of incumbent), candidate_metrics JSONB,
+comparison JSONB (per-dimension deltas), status
+(`draft|running|evaluating|promoted|rejected|aborted`), decided_by/at, note, created_at,
+updated_at. Promote/reject are explicit POST actions; **no automatic promotion path
+exists.** Promotion writes an `eco_replacement_edges(recommended_replacement)` row and a
+lifecycle transition; it never rewrites existing `WorkflowStepBinding`s.
+
+### 3.12 Part P — watchlists
+
+`eco_watchlists`: id, owner_id FK users, org_id nullable, name, created_at.
+`eco_watch_items`: id, watchlist_id FK CASCADE, target_kind (`provider|model|tool|
+workflow|github_repo|capability|component`), target_id str(26) nullable, target_ref
+str(300) nullable (for external refs like repo URLs), created_at.
+`UNIQUE(watchlist_id, target_kind, coalesce(target_id,''), coalesce(target_ref,''))`
+implemented as a service-level check + partial unique indexes.
+
+## 4. Services & algorithms
+
+| service                   | responsibility                                                                                                                                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sources.py`              | CRUD, robots/ToS attestation, pause/resume, circuit breaker                                                                                                                                                         |
+| `sync.py`                 | orchestrated fetch: SSRF guard → conditional GET (ETag/Last-Modified) → size-capped stream → adapter parse → observations + idempotency; retry w/ exponential backoff (3 tries, 2^n s), per-source rate-limit check |
+| `adapters.py`             | pluggable parsers keyed by `adapter_key` (json_catalog, github_releases, huggingface, comfyui_repo, pricing_json, manual). Each returns `list[NormalizedObservation]`; parser_version stamped                       |
+| `change_detection.py`     | diff normalized payload vs latest prior observation for the same (source, external_ref, event_type family); emits typed `eco_change_events` for price/limits/license/api/version/lifecycle/region/security          |
+| `catalog.py`              | canonical CRUD, alias registry                                                                                                                                                                                      |
+| `resolution.py`           | official-id → alias → similarity (trigram over names+aliases) → optional LLM suggestion; auto-merge policy per §3.3                                                                                                 |
+| `capability_mapping.py`   | mapping CRUD + evidence-level upgrade rules                                                                                                                                                                         |
+| `pricing.py`              | price observations, reconciliation workflow, approval → control-plane facade call                                                                                                                                   |
+| `benchmark.py`            | suite/case CRUD, run execution via provider adapters (mock in tests), budget cap enforcement (run aborts at cap with status failed + `ECO_BUDGET_EXCEEDED`), dimension aggregation                                  |
+| `blind_review.py`         | batch creation, alias permutation, sealed identity, submit + reveal                                                                                                                                                 |
+| `telemetry.py`            | aggregates WorkflowRun/StepRun + evaluation + client delivery into snapshots; privacy thresholds; divergence detection                                                                                              |
+| `graph.py`                | dependency edge CRUD + graph queries; syncs edges from workflow pack releases (`requires_capabilities`, offerings)                                                                                                  |
+| `impact.py`               | BFS impact computation §3.8                                                                                                                                                                                         |
+| `replacement.py`          | candidate generation + scoring §3.9                                                                                                                                                                                 |
+| `drafts.py`               | draft generation/validation/review/publish §3.10                                                                                                                                                                    |
+| `lifecycle.py`            | transition state machine §3.9                                                                                                                                                                                       |
+| `rollout.py`              | plan lifecycle §3.11                                                                                                                                                                                                |
+| `watchlists.py`           | watch CRUD + matching changes → notifications                                                                                                                                                                       |
+| `dashboard.py`            | workspace aggregates (Part P)                                                                                                                                                                                       |
+| `intelligence_signals.py` | Part N/O: approved-signal projection for registry/matching + workforce gap detection                                                                                                                                |
+
+### 4.1 Security (`security.py`, Part Q)
+
+- `validate_external_url(url)`: https/http only; hostname resolves; rejects literal IPs in
+  private/reserved ranges (RFC1918, loopback, link-local, ULA, metadata 169.254.169.254),
+  rejects userinfo, non-standard ports (allow 80/443/8443), `.internal`/`.local` TLDs.
+  Raises `EcoSecurityError("ECO_SSRF_BLOCKED")`.
+- `bounded_json_loads(raw, max_bytes=5MB, max_depth=20, max_string=100_000,
+max_keys=10_000)`: pre-checks size; custom depth/width walk post-parse; raises
+  `ECO_PAYLOAD_TOO_LARGE` / `ECO_PAYLOAD_TOO_DEEP`.
+- `sanitize_text(s, max_len)`: strips NUL/control chars (mirrors R87 lesson), enforces len.
+- LLM extraction (when enabled) uses a fixed instruction frame; the fetched text is passed
+  as fenced _data_; output must validate against a strict Pydantic schema; any tool-call or
+  instruction-like output is discarded; result rows always get
+  `extraction_method="llm"` + `confidence<=0.7` and require human verification before the
+  fact can drive any downstream automation.
+- Archive handling (ComfyUI repos): entries validated against path traversal (`..`,
+  absolute paths), per-file and total size caps; only `.json` workflow files parsed.
+- **No code execution / no dependency installation anywhere in this package.**
+
+### 4.2 Worker topics (outbox reuse, Part R)
+
+`eco.sync_source {source_id}`, `eco.run_benchmark {run_id}`,
+`eco.compute_impact {change_event_id}`, `eco.telemetry_window {window_start,window_end}`,
+`eco.generate_candidates {entity_kind,entity_id}`. Handlers registered in
+`app/ecosystem/worker.py`, consumed by the existing control-plane worker loop pattern
+(FOR UPDATE SKIP LOCKED). All handlers idempotent (keyed on natural ids). Tests drive
+handlers inline (established pattern).
+
+## 5. APIs (Part R) — all under `/api/v1/ecosystem/*`
+
+Read = authenticated; org-scoped reads gated by membership; **all mutations of platform
+intelligence = platform admin** (`UserRole.ADMIN`), analyst mutations noted below. Errors
+use the standard envelope with machine codes listed in §7.
+
+```
+POST/GET/PATCH        /sources, /sources/{id}         + POST /sources/{id}/sync
+GET                   /sources/{id}/sync-runs
+GET                   /observations                    (filters: source, event_type, entity)
+POST                  /observations                    (manual analyst input; admin)
+POST                  /observations/{id}/verify
+GET                   /changes                         (+ POST /changes/{id}/acknowledge)
+GET/POST/PATCH        /catalog/{kind}, /catalog/{kind}/{id}   kind ∈ providers|tools|models|
+                                                        model-versions|workflows|agents|node-packages
+GET                   /resolution-candidates  + POST /resolution-candidates/{id}/confirm|reject
+GET/POST/PATCH        /capability-mappings
+GET                   /pricing/observations   + POST /pricing/observations/{id}/reconcile
+GET                   /availability
+CRUD                  /benchmark/suites, /benchmark/suites/{id}/cases
+POST/GET              /benchmark/runs (+ /runs/{id}, /runs/{id}/results, /runs/compare?ids=)
+POST                  /benchmark/review-batches, GET /review-batches/{id}/assignments,
+                      POST /reviews/{id}/submit, POST /review-batches/{id}/reveal
+GET                   /telemetry/snapshots
+GET/POST/DELETE       /graph/edges, GET /graph/node/{kind}/{id}
+POST/GET              /impact/analyses (+ /impact/analyses/{id})
+POST/GET              /replacements/candidates (+ confirm/reject)
+POST                  /lifecycle/{kind}/{id}/transition
+CRUD                  /drafts (+ POST /drafts/{id}/submit-review|approve|reject|publish)
+CRUD                  /rollouts (+ POST /rollouts/{id}/start|promote|reject|abort)
+CRUD                  /watchlists, /watchlists/{id}/items
+GET                   /dashboard          (operator workspace aggregate)
+GET                   /signals/matching   (approved signals only — Part N)
+GET                   /signals/workforce  (emerging/obsolete capability report — Part O)
+```
+
+## 6. Integration (facade only)
+
+`app/ecosystem/facade.py` exports:
+
+- `get_registry_badges(db, pack_ids) -> {pack_id: ["benchmark_verified", "sunset_risk", ...]}`
+  — derived only from `human_verified` observations / completed benchmark runs / lifecycle.
+- `get_matching_signals(db, offering_ids) -> {offering_id: {benchmark, reliability,
+availability, cost_efficiency, deprecation_risk, license_ok}}` — **only entities in
+  lifecycle `verified|recommended` contribute; raw observations never leak** (Part N).
+  Matching consumes these as _optional_ soft-scoring inputs behind a request flag.
+- `get_workforce_signals(db) -> list[CapabilityGapSignal]` — joins verified emerging
+  capabilities with talent facade demand data (Part O); planning output only.
+- `record_production_telemetry(...)` — called from workflow runtime hooks (optional).
+
+Product code imports only this module (talent/controlplane precedent).
+
+## 7. Error codes
+
+`ECO_SSRF_BLOCKED` 422 · `ECO_PAYLOAD_TOO_LARGE` 413 · `ECO_PAYLOAD_TOO_DEEP` 422 ·
+`ECO_SOURCE_PAUSED` 409 · `ECO_ROBOTS_NOT_ATTESTED` 422 · `ECO_RATE_LIMITED` 429 ·
+`ECO_MERGE_CONFIRMATION_REQUIRED` 409 · `ECO_OBSERVATION_IMMUTABLE` 409 ·
+`ECO_PRICING_NOT_APPROVED` 409 · `ECO_BUDGET_EXCEEDED` 402 ·
+`ECO_BLIND_REVIEW_SEALED` 409 · `ECO_TELEMETRY_THRESHOLD` 422 ·
+`ECO_IMPACT_TOO_LARGE` 422 · `ECO_HARD_INCOMPATIBLE` 409 ·
+`ECO_DRAFT_NOT_APPROVED` 409 · `ECO_INVALID_TRANSITION` 409 ·
+`ECO_ROLLOUT_NOT_EVALUATED` 409 · `NOT_FOUND` 404 (uniform, no existence oracle) ·
+`FORBIDDEN` 403.
+
+## 8. Frontend (Part S)
+
+Under `apps/web/src/app/(dashboard)/ecosystem/`:
+`sources`, `discoveries`, `catalog`, `changes`, `pricing`, `conflicts`,
+`benchmarks` (suites/runs/compare/blind-review), `components` (graph/impact/replacements/
+drafts/rollouts), `operator` (watchlists/calendar/approvals/health). Server components +
+client interactivity islands, matching existing dashboard patterns.
+
+## 9. Testing (Part T)
+
+Unit + DB-less endpoint tests + property tests over: ingestion idempotency (same raw_hash
+no-ops), ETag 304 path, malformed/oversized/deep JSON, timeout/retry/backoff, SSRF matrix
+(private IPs, metadata endpoint, userinfo, schemes), parser provenance stamping, alias
+conflicts, low-confidence merge blocking, source conflict surfacing (two sources disagree ⇒
+both observations retained + conflict flag), deterministic benchmark snapshots, provider
+failure capture, cost capture + budget abort, blind-review identity hiding until all
+submitted, transitive impact w/ cycles, private-edge org isolation, hard-incompatibility
+separation, draft-only generation (publish gate), hostile prompt injection fixtures, nested
+JSON bombs, archive traversal names, malicious URLs, cross-tenant telemetry leakage.
+Full E2E (`tests/e2e_ecosystem_lifecycle.py` + endpoint-level
+`test_eco_e2e_flow.py`): add source → sync discovers new model version → observation +
+resolution candidate → human verify → benchmark old vs new → cheaper w/ acceptable quality
+→ impact finds affected Workflow Pack → replacement candidate → update draft → rollout →
+promote → registry badge reflects verified component.
+
+## 10. Out of scope (enforced, not just documented)
+
+No crawling beyond registered adapters; no auth/paywall/robots bypass (attestation flag);
+no auto-publish (draft gate); no auto-migration (rollout gate + no binding rewrites); no
+third-party code execution/installation (no such code path exists); no autonomous price
+changes (reconciliation gate); no private-user-data scraping; no hiring decisions.
