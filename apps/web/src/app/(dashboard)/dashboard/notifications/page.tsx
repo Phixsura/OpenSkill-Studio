@@ -86,6 +86,7 @@ export default function NotificationsPage() {
   const {
     data: prefData,
     isLoading: prefLoading,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isError: _isErr2,
   } = useQuery({
     queryKey: ["talent-notification-preferences"],

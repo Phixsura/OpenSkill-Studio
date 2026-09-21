@@ -95,7 +95,9 @@ export default function CreatorShortlistPage() {
 
   const {
     data: assignmentsData,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isError: _isErr2,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isLoading: _isLoad2,
   } = useQuery({
     queryKey: ["creator-assignments", orgId, projectId],

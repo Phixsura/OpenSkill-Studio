@@ -36,11 +36,7 @@ export default function NewProjectPage() {
 
   const submitting = useRef(false);
 
-  const {
-    data: templatesData,
-    isError: templatesError,
-    isLoading,
-  } = useQuery({
+  const { data: templatesData, isError: templatesError } = useQuery({
     queryKey: ["project-templates", orgId],
     queryFn: () => apiWithAuth<{ data: Template[] }>(`/orgs/${orgId}/project-templates`),
   });

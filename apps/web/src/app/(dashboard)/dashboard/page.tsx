@@ -48,7 +48,9 @@ export default function DashboardPage() {
 
   const {
     data: overviewData,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isError: _isErr2,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isLoading: _isLoad2,
   } = useQuery({
     queryKey: ["my-overview"],

@@ -45,7 +45,9 @@ export default function PortfolioPage() {
 
   const {
     data: itemsData,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isError: _isErr2,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isLoading: _isLoad2,
   } = useQuery({
     queryKey: ["portfolio-items"],
@@ -55,7 +57,9 @@ export default function PortfolioPage() {
   const queryClient = useQueryClient();
   const {
     data: badgesData,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isError: _isErr3,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isLoading: _isLoad3,
   } = useQuery({
     queryKey: ["portfolio-badges"],

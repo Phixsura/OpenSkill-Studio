@@ -244,11 +244,7 @@ function PipelineFunnel({ placements }: { placements: PlacementAnalytics }) {
 /* ── Page ────────────────────────────────────────────────── */
 
 export default function TalentDashboardPage() {
-  const {
-    data: gapsData,
-    isLoading: gapsLoading,
-    isError,
-  } = useQuery({
+  const { data: gapsData, isLoading: gapsLoading } = useQuery({
     queryKey: ["talent-gaps"],
     queryFn: () => apiWithAuth<{ data: GapItem[] }>("/talent/intelligence/gaps?limit=10"),
   });
@@ -256,6 +252,7 @@ export default function TalentDashboardPage() {
   const {
     data: coverageData,
     isLoading: coverageLoading,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isError: _isErr2,
   } = useQuery({
     queryKey: ["talent-coverage"],
@@ -265,6 +262,7 @@ export default function TalentDashboardPage() {
   const {
     data: placementsData,
     isLoading: placementsLoading,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isError: _isErr3,
   } = useQuery({
     queryKey: ["talent-placements"],

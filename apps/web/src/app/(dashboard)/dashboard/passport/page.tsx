@@ -278,11 +278,7 @@ function ScoreTrendChart({ capabilities }: { capabilities: CapabilityScore[] }) 
 export default function PassportPage() {
   const queryClient = useQueryClient();
 
-  const {
-    data: passportData,
-    isLoading: passportLoading,
-    isError,
-  } = useQuery({
+  const { data: passportData, isLoading: passportLoading } = useQuery({
     queryKey: ["passport"],
     queryFn: () => apiWithAuth<{ data: PassportData }>("/talent/passport"),
   });

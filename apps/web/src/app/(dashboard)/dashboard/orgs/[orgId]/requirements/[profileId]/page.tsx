@@ -58,7 +58,7 @@ export default function RequirementProfilePage() {
   const synced = useRef(false);
   const [fields, setFields] = useState<Record<string, string>>({});
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["requirement-profile", orgId, profileId],
     queryFn: () =>
       apiWithAuth<{ data: Profile }>(`/orgs/${orgId}/requirement-profiles/${profileId}`),

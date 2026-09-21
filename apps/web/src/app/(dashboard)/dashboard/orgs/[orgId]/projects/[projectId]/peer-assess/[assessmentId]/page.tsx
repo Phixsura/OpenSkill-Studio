@@ -51,6 +51,7 @@ export default function PeerAssessPage() {
   const {
     data: subData,
     isError,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isLoading: _isLoad2,
   } = useQuery({
     queryKey: ["peer-sub", submissionId],

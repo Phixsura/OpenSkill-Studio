@@ -48,11 +48,7 @@ export default function NewRequirementPage() {
   const [extractionUnavailable, setExtractionUnavailable] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const {
-    data: capsData,
-    isError,
-    isLoading,
-  } = useQuery({
+  const { data: capsData } = useQuery({
     queryKey: ["capabilities"],
     queryFn: () => apiWithAuth<{ data: Capability[] }>("/capabilities"),
   });
