@@ -61,6 +61,7 @@ def load_handlers() -> None:
     import app.controlplane.services.rating  # noqa: F401
     import app.controlplane.services.revenue_share  # noqa: F401
     import app.controlplane.services.settlement_handlers  # noqa: F401
+    import app.ecosystem.worker  # noqa: F401 — eco.* topics (ADR-016)
 
 
 def _worker_id() -> str:
