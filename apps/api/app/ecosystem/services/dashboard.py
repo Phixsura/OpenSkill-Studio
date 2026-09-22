@@ -37,6 +37,69 @@ class DashboardService:
                 stale += 1
         return stale
 
+    async def trending(self, *, days: int = 7, limit: int = 10) -> list[dict]:
+        """HF/Civitai trending bar: entities ranked by observation velocity —
+        current-window observation count vs the previous window of equal
+        length, with distinct-source corroboration. Pure evidence counting:
+        no engagement scores, no editorial weighting."""
+        from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+        from app.exceptions import AppError
+
+        if not (1 <= days <= 90):
+            raise AppError("VALIDATION_ERROR", "days must be 1-90", 422)
+        now = datetime.now(UTC)
+        window_start = now - timedelta(days=days)
+        prev_start = now - timedelta(days=2 * days)
+        rows = await self.db.execute(
+            select(
+                EcosystemObservation.canonical_entity_kind,
+                EcosystemObservation.canonical_entity_id,
+                func.count(EcosystemObservation.id),
+                func.count(func.distinct(EcosystemObservation.source_id)),
+            )
+            .where(
+                EcosystemObservation.canonical_entity_id.isnot(None),
+                EcosystemObservation.observed_at >= window_start,
+            )
+            .group_by(
+                EcosystemObservation.canonical_entity_kind,
+                EcosystemObservation.canonical_entity_id,
+            )
+            .order_by(func.count(EcosystemObservation.id).desc())
+            .limit(limit * 3)
+        )
+        out = []
+        for kind, entity_id, count, sources in rows:
+            prev = await self.db.scalar(
+                select(func.count(EcosystemObservation.id)).where(
+                    EcosystemObservation.canonical_entity_id == entity_id,
+                    EcosystemObservation.observed_at >= prev_start,
+                    EcosystemObservation.observed_at < window_start,
+                )
+            ) or 0
+            name = entity_id
+            model = CATALOG_KIND_TO_MODEL.get(kind)
+            if model is not None:
+                entity = await self.db.get(model, entity_id)
+                if entity is not None:
+                    name = entity.canonical_name
+            out.append(
+                {
+                    "entity_kind": kind,
+                    "entity_id": entity_id,
+                    "canonical_name": name,
+                    "observations": int(count),
+                    "distinct_sources": int(sources),
+                    "previous_window": int(prev),
+                    "velocity": (
+                        round(int(count) / int(prev), 2) if prev else None  # None = new, not infinite
+                    ),
+                }
+            )
+            if len(out) >= limit:
+                break
+        return out
+
     async def coverage(self) -> dict:
         """Backstage maturity bar: per-kind catalog completeness — how many
         entities have a capability mapping, any benchmark, and any price

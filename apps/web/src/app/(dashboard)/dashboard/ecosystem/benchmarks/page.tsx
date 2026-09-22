@@ -86,6 +86,35 @@ const FAMILIES = [
 export default function BenchmarksPage() {
   const [selectedSuite, setSelectedSuite] = useState<string | null>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [portableDoc, setPortableDoc] = useState<string | null>(null);
+  const [importText, setImportText] = useState("");
+  const [portError, setPortError] = useState<string | null>(null);
+
+  const exportSuite = async (suiteId: string) => {
+    setPortError(null);
+    try {
+      const res = await apiWithAuth<{ data: unknown }>(
+        `/ecosystem/benchmark/suites/${suiteId}/export`,
+      );
+      setPortableDoc(JSON.stringify(res.data, null, 2));
+    } catch (e) {
+      setPortError(e instanceof ApiError ? e.message : "Export failed");
+    }
+  };
+  const importSuite = async () => {
+    setPortError(null);
+    try {
+      const doc = JSON.parse(importText) as Record<string, unknown>;
+      await apiWithAuth(`/ecosystem/benchmark/suites/import`, {
+        method: "POST",
+        body: JSON.stringify(doc),
+      });
+      setImportText("");
+      await suites.refetch();
+    } catch (e) {
+      setPortError(e instanceof ApiError ? e.message : "Invalid JSON or import failed");
+    }
+  };
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -258,10 +287,53 @@ export default function BenchmarksPage() {
                   {s.family} · {s.capability_key} · ×{s.repeat_count} · cap $
                   {Number(s.budget_usd_cap).toFixed(2)}
                 </div>
+                <span
+                  role="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    exportSuite(s.id);
+                  }}
+                  className="mt-2 inline-block rounded-md border px-2 py-0.5 text-xs hover:bg-[hsl(var(--secondary))]"
+                >
+                  Export JSON
+                </span>
               </button>
             ))}
           </div>
         )}
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-lg font-semibold">Portable suites</h2>
+        {portError && (
+          <div className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">
+            {portError}
+          </div>
+        )}
+        {portableDoc && (
+          <textarea
+            readOnly
+            value={portableDoc}
+            rows={6}
+            className="w-full rounded-md border bg-[hsl(var(--background))] px-3 py-2 font-mono text-xs"
+          />
+        )}
+        <div className="flex gap-2">
+          <textarea
+            placeholder="Paste an exported suite JSON to import (lands in draft; key collisions rejected)"
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            rows={2}
+            className="flex-1 rounded-md border bg-[hsl(var(--background))] px-3 py-2 font-mono text-xs"
+          />
+          <button
+            onClick={importSuite}
+            disabled={!importText.trim()}
+            className="rounded-md border px-3 py-2 text-sm hover:bg-[hsl(var(--secondary))] disabled:opacity-50"
+          >
+            Import suite
+          </button>
+        </div>
       </section>
 
       <section>

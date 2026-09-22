@@ -22,6 +22,17 @@ async def dashboard_overview(
     return {"data": await DashboardService(db).overview()}
 
 
+@router.get("/dashboard/trending", response_model=DataResponse[list])
+async def trending_entities(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Entities ranked by observation velocity (evidence counting only)."""
+    return {"data": await DashboardService(db).trending(days=days, limit=limit)}
+
+
 @router.get("/dashboard/coverage", response_model=DataResponse[dict])
 async def catalog_coverage(
     db: AsyncSession = Depends(get_db),

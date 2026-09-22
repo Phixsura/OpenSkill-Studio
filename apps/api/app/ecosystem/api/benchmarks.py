@@ -47,6 +47,28 @@ async def list_suites(
     return {"data": await BenchmarkService(db).list_suites(family=family, status=status, limit=limit)}
 
 
+@router.post("/suites/import", response_model=DataResponse[SuiteResponse], status_code=201)
+async def import_suite(
+    document: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """Import a portable suite export (draft status; key collisions rejected)."""
+    suite = await BenchmarkService(db).import_suite(document, created_by=user.id)
+    await db.commit()
+    return {"data": suite}
+
+
+@router.get("/suites/{suite_id}/export", response_model=DataResponse[dict])
+async def export_suite(
+    suite_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Portable suite document (definition + cases + fingerprint; no runs)."""
+    return {"data": await BenchmarkService(db).export_suite(suite_id)}
+
+
 @router.get("/suites/{suite_id}", response_model=DataResponse[SuiteResponse])
 async def get_suite(
     suite_id: str,

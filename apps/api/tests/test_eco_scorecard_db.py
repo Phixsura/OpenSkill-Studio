@@ -10,6 +10,7 @@ from app.ecosystem.models.catalog import AIModel
 from app.ecosystem.models.mapping import AvailabilityRecord
 from app.ecosystem.models.observation import EcosystemObservation
 from app.ecosystem.services.catalog import CatalogService
+from app.exceptions import AppError
 from tests.test_eco_services_db import _mk_source
 
 
@@ -117,3 +118,52 @@ async def test_dashboard_coverage_counts_evidence_dimensions(db):
         assert set(kind_stats) == {
             "total", "with_capability_mapping", "with_benchmark", "with_pricing"
         }
+
+async def test_trending_ranks_by_velocity_with_corroboration(db):
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.services.dashboard import DashboardService
+
+    hot = AIModel(canonical_name="HotGen", slug=f"hot-{str(ULID()).lower()}")
+    cold = AIModel(canonical_name="ColdGen", slug=f"cold-{str(ULID()).lower()}")
+    db.add_all([hot, cold])
+    await db.flush()
+    now = datetime.now(UTC)
+    s1 = await _mk_source(db)
+    s2 = await _mk_source(db)
+    # hot: 4 obs this week from 2 sources, 1 last week → velocity 4.0
+    for i, src in enumerate([s1, s1, s2, s2]):
+        db.add(EcosystemObservation(
+            source_id=src.id, event_type="model_released",
+            canonical_entity_kind="model", canonical_entity_id=hot.id,
+            raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+            observed_at=now - timedelta(days=1, hours=i),
+        ))
+    db.add(EcosystemObservation(
+        source_id=s1.id, event_type="model_released",
+        canonical_entity_kind="model", canonical_entity_id=hot.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        observed_at=now - timedelta(days=10),
+    ))
+    # cold: 1 obs this week
+    db.add(EcosystemObservation(
+        source_id=s1.id, event_type="model_released",
+        canonical_entity_kind="model", canonical_entity_id=cold.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        observed_at=now - timedelta(days=2),
+    ))
+    await db.flush()
+
+    rows = await DashboardService(db).trending(days=7, limit=50)
+    by_id = {r["entity_id"]: r for r in rows}
+    assert by_id[hot.id]["observations"] == 4
+    assert by_id[hot.id]["distinct_sources"] == 2
+    assert by_id[hot.id]["velocity"] == 4.0
+    assert by_id[hot.id]["canonical_name"] == "HotGen"
+    assert by_id[cold.id]["velocity"] is None  # new, not infinite
+    # hot ranks above cold
+    ids = [r["entity_id"] for r in rows]
+    assert ids.index(hot.id) < ids.index(cold.id)
+
+    with pytest.raises(AppError):
+        await DashboardService(db).trending(days=0)

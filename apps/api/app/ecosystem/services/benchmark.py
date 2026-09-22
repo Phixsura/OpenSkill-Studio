@@ -274,6 +274,78 @@ class BenchmarkService:
         await self.db.flush()
         return case
 
+    SUITE_EXPORT_VERSION = 1
+
+    async def export_suite(self, suite_id: str) -> dict:
+        """HELM portable-suite bar: a self-contained, versioned JSON document
+        (definition + cases + fingerprint) that another deployment can import.
+        Runs/results are never exported — they belong to the environment that
+        produced them."""
+        suite = await self.get_suite(suite_id)
+        cases = await self.list_cases(suite_id)
+        return {
+            "format": "openskill.benchmark-suite",
+            "version": self.SUITE_EXPORT_VERSION,
+            "suite": {
+                "key": suite.key,
+                "name": suite.name,
+                "family": suite.family,
+                "capability_key": suite.capability_key,
+                "description": suite.description,
+                "rubric": suite.rubric or [],
+                "human_review_policy": suite.human_review_policy or {},
+                "automated_metrics": suite.automated_metrics or [],
+                "budget_usd_cap": float(suite.budget_usd_cap),
+                "repeat_count": suite.repeat_count,
+            },
+            "cases": [
+                {
+                    "name": c.name,
+                    "prompt": c.prompt,
+                    "reference_assets": c.reference_assets or [],
+                    "constraints": c.constraints or {},
+                    "weight": float(c.weight or 1.0),
+                    "sort_order": c.sort_order,
+                }
+                for c in cases
+            ],
+            "cases_fingerprint": _cases_fingerprint(cases),
+        }
+
+    async def import_suite(self, document: dict, *, created_by: str) -> BenchmarkSuite:
+        """Import an exported suite document. Untrusted content: bounded,
+        sanitized, validated by the same paths as manual creation; the suite
+        arrives in draft status and key collisions are rejected (never
+        silently merged)."""
+        if not isinstance(document, dict) or document.get("format") != "openskill.benchmark-suite":
+            raise AppError("VALIDATION_ERROR", "Not a benchmark-suite export document", 422)
+        if document.get("version") != self.SUITE_EXPORT_VERSION:
+            raise AppError("VALIDATION_ERROR", "Unsupported suite export version", 422)
+        spec = document.get("suite")
+        cases = document.get("cases")
+        if not isinstance(spec, dict) or not isinstance(cases, list) or not cases:
+            raise AppError("VALIDATION_ERROR", "Export must carry a suite and 1+ cases", 422)
+        if len(cases) > 200:
+            raise AppError("VALIDATION_ERROR", "At most 200 cases per import", 422)
+        from app.ecosystem.schemas import CreateCaseRequest, CreateSuiteRequest
+
+        try:
+            suite_req = CreateSuiteRequest(
+                **{k: spec.get(k) for k in CreateSuiteRequest.model_fields if spec.get(k) is not None}
+            )
+            case_reqs = [
+                CreateCaseRequest(
+                    **{k: c.get(k) for k in CreateCaseRequest.model_fields if isinstance(c, dict) and c.get(k) is not None}
+                )
+                for c in cases
+            ]
+        except Exception as exc:  # noqa: BLE001 — pydantic detail surfaced as 422
+            raise AppError("VALIDATION_ERROR", f"Invalid suite document: {exc}", 422) from None
+        suite = await self.create_suite(created_by=created_by, **suite_req.model_dump())
+        for case_req in case_reqs:
+            await self.add_case(suite.id, **case_req.model_dump())
+        return suite
+
     async def list_cases(self, suite_id: str) -> list[BenchmarkCase]:
         rows = await self.db.scalars(
             select(BenchmarkCase)

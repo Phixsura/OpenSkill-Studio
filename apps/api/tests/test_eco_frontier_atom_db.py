@@ -100,3 +100,43 @@ async def test_atom_feed_escapes_untrusted_change_content(db):
     assert "<script>" not in body  # untrusted content XML-escaped
     assert "&lt;script&gt;" in body
     assert "urn:openskill:eco-change:" in body
+
+async def test_suite_export_import_roundtrip(db):
+    from app.ecosystem.services.benchmark import BenchmarkService
+    from app.exceptions import AppError as _AppError
+
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=3)
+    svc = BenchmarkService(db)
+
+    doc = await svc.export_suite(suite.id)
+    assert doc["format"] == "openskill.benchmark-suite"
+    assert len(doc["cases"]) == 3
+    assert len(doc["cases_fingerprint"]) == 64
+    assert "runs" not in doc  # results never travel
+
+    # Same key collides — never silently merged
+    import pytest as _pytest
+    with _pytest.raises(_AppError) as exc:
+        await svc.import_suite(doc, created_by=admin.id)
+    assert exc.value.code == "ECO_SUITE_EXISTS"
+
+    # New key imports cleanly with identical case content
+    doc["suite"]["key"] = doc["suite"]["key"] + "-copy"
+    imported = await svc.import_suite(doc, created_by=admin.id)
+    assert imported.status == "draft"
+    re_exported = await svc.export_suite(imported.id)
+    assert re_exported["cases_fingerprint"] != ""  # fingerprint computed
+    assert [c["prompt"] for c in re_exported["cases"]] == [
+        c["prompt"] for c in doc["cases"]
+    ]
+
+    # Garbage documents rejected
+    with _pytest.raises(_AppError):
+        await svc.import_suite({"format": "something-else"}, created_by=admin.id)
+    with _pytest.raises(_AppError):
+        await svc.import_suite(
+            {"format": "openskill.benchmark-suite", "version": 1,
+             "suite": {"key": "x"}, "cases": []},
+            created_by=admin.id,
+        )

@@ -53,6 +53,20 @@ export default function EcosystemOverviewPage() {
         >;
       }>("/ecosystem/dashboard/coverage"),
   });
+  const trending = useQuery({
+    queryKey: ["eco-trending"],
+    queryFn: () =>
+      apiWithAuth<{
+        data: {
+          entity_kind: string;
+          entity_id: string;
+          canonical_name: string;
+          observations: number;
+          distinct_sources: number;
+          velocity: number | null;
+        }[];
+      }>("/ecosystem/dashboard/trending?days=7&limit=8"),
+  });
   const feed = useQuery({
     queryKey: ["eco-feed-preview"],
     queryFn: () =>
@@ -116,6 +130,26 @@ export default function EcosystemOverviewPage() {
             <StatCard label="Drafts in review" value={overview.drafts_in_review} />
             <StatCard label="Active rollouts" value={overview.rollouts_active} />
           </div>
+          {(trending.data?.data ?? []).length > 0 && (
+            <div>
+              <h2 className="mb-3 text-lg font-semibold">Trending (7d observation velocity)</h2>
+              <div className="flex flex-wrap gap-2">
+                {(trending.data?.data ?? []).map((t) => (
+                  <span
+                    key={t.entity_id}
+                    className="rounded-full border bg-[hsl(var(--card))] px-3 py-1 text-xs shadow-sm"
+                    title={`${t.observations} observations from ${t.distinct_sources} sources`}
+                  >
+                    {t.canonical_name}
+                    <span className="ml-1 text-[hsl(var(--muted-foreground))]">
+                      ({t.entity_kind}) ·{" "}
+                      {t.velocity === null ? "new" : `${t.velocity}× vs prior week`}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <div>
             <h2 className="mb-3 text-lg font-semibold">Catalog coverage</h2>
             <div className="overflow-x-auto rounded-lg border shadow-sm">

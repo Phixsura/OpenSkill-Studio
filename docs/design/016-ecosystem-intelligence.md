@@ -790,3 +790,19 @@ becomes visible per dimension; incomplete entities are never hidden.
   useSearchParams; state syncs on submit).
 - **Benchmark trend in catalog Inspect**: latest reliability + improving/
   declining/stable arrow + run count, from `/benchmark/score-history`.
+
+## 34. Trending (2026-09-22, round 26)
+
+HF/Civitai trending bar: `GET /ecosystem/dashboard/trending?days=&limit=` —
+entities ranked by observation count in the current window, each row carrying
+distinct-source corroboration and `velocity` (current/previous equal-length
+window; `null` = newly observed, never infinite). Pure evidence counting — no
+engagement scores, no editorial weighting. Surfaced as chips on the Overview.
+
+## 35. Portable suites (2026-09-22, round 27)
+
+HELM open-suite culture: `GET /benchmark/suites/{id}/export` — a versioned,
+self-contained JSON document (definition + cases + fingerprint; runs/results
+NEVER travel). `POST /benchmark/suites/import` (platform-admin) re-validates
+through the same Pydantic schemas as manual creation, caps at 200 cases,
+lands in draft status, and rejects key collisions rather than merging.
