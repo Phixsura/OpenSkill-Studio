@@ -822,3 +822,27 @@ Enterprise export bar: `GET /ecosystem/audit.csv` (platform-admin, up to 10k
 rows) — the eco audit slice as CSV with csv-module quoting AND spreadsheet
 formula defusal (cells starting with = + - @ get a leading apostrophe), so
 untrusted audit content can never execute in Excel/Sheets.
+
+## 38. Security advisory registry (2026-09-22, round 30)
+
+Snyk/Dependabot bar: structured advisories replace loose security events.
+
+- `eco_security_advisories` (migration eco05a00005): advisory_ref (unique),
+  severity, affected name + semver range, fixed_in, status
+  open|mitigated|dismissed. Registration is a curated platform-admin act.
+- Registration emits ONE `security`/`security_advisory` change event
+  (critical/high → `security_critical`, else `breaking`) on the
+  `internal:security-desk` source — rides the normal fan-out.
+- `GET /security/advisories/{id}/affected` resolves affected catalog entities:
+  exact-insensitive name/alias match + `version_in_range` with FAIL-OPEN
+  semantics — an unparseable version is `unknown_fail_open`, never "safe".
+- Never auto-blocks or auto-migrates; lifecycle transitions stay human.
+- UI: Security page (register, list, affected resolution, mitigate/dismiss);
+  Overview gains `security_advisories_open`.
+
+### §38.1 Watcher fan-out (round 31)
+
+Registration also emits one `security_advisory_affects` change event PER
+affected entity (capped at 50), carrying `canonical_entity_id` — so watchers
+of a hit entity are notified through the normal watch/webhook/Atom fan-out:
+"a model I watch has a CVE" arrives without polling.

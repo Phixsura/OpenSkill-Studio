@@ -24,6 +24,7 @@ const TABS = [
   { href: "/dashboard/ecosystem/changes", label: "Change Feed" },
   { href: "/dashboard/ecosystem/pricing", label: "Pricing" },
   { href: "/dashboard/ecosystem/compare", label: "Compare" },
+  { href: "/dashboard/ecosystem/security", label: "Security" },
   { href: "/dashboard/ecosystem/benchmarks", label: "Benchmark Lab" },
   { href: "/dashboard/ecosystem/review", label: "Blind Review" },
   { href: "/dashboard/ecosystem/components", label: "Components" },

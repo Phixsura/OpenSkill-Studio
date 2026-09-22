@@ -9,6 +9,7 @@ sliding-window limiter — generic despite its talent-era module path).
 from fastapi import APIRouter, Depends
 
 from app.core.rate_limit import rate_limit
+from app.ecosystem.api.advisories import router as advisories_router
 from app.ecosystem.api.benchmarks import router as benchmarks_router
 from app.ecosystem.api.catalog import router as catalog_router
 from app.ecosystem.api.dashboard import router as dashboard_router
@@ -44,3 +45,4 @@ ecosystem_router.include_router(drafts_router)
 ecosystem_router.include_router(rollouts_router)
 ecosystem_router.include_router(watchlists_router)
 ecosystem_router.include_router(dashboard_router)
+ecosystem_router.include_router(advisories_router)

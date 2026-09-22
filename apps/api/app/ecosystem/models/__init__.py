@@ -1,6 +1,11 @@
 """Ecosystem intelligence models (ADR-016). Importing this module registers
 all eco_* tables on the shared SQLAlchemy Base metadata."""
 
+from app.ecosystem.models.advisory import (  # noqa: F401
+    ADVISORY_SEVERITIES,
+    ADVISORY_STATUSES,
+    SecurityAdvisory,
+)
 from app.ecosystem.models.benchmark import (  # noqa: F401
     BENCHMARK_FAMILIES,
     RUN_STATUSES,

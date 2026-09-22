@@ -568,3 +568,33 @@ class QuickWatchRequest(BaseModel):
 
     target_kind: str = Field(max_length=30)
     target_id: str = Field(min_length=26, max_length=26)
+
+
+class CreateAdvisoryRequest(BaseModel):
+    """Structured security advisory registration (ADR-016 §38)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    advisory_ref: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=300)
+    severity: str = Field(max_length=10)
+    affected_ref: str = Field(min_length=1, max_length=300)
+    affected_kind: str | None = Field(default=None, max_length=30)
+    affected_range: str | None = Field(default=None, max_length=100)
+    fixed_in: str | None = Field(default=None, max_length=50)
+    description: str | None = Field(default=None, max_length=5000)
+    source_observation_id: str | None = Field(default=None, min_length=26, max_length=26)
+
+
+class AdvisoryResponse(_Orm):
+    id: str
+    advisory_ref: str
+    title: str
+    severity: str
+    description: str | None
+    affected_kind: str | None
+    affected_ref: str
+    affected_range: str | None
+    fixed_in: str | None
+    status: str
+    created_at: datetime

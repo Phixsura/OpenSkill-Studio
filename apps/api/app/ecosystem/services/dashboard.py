@@ -144,6 +144,7 @@ class DashboardService:
 
     async def overview(self) -> dict:
         """Ecosystem health snapshot for the operator workspace."""
+        from app.ecosystem.models.advisory import SecurityAdvisory as _SecurityAdvisory
         week_ago = datetime.now(UTC) - timedelta(days=7)
         return {
             "sources_stale": await self._stale_source_count(),
@@ -178,6 +179,9 @@ class DashboardService:
             ),
             "changes_unacknowledged": await self._count(
                 select(ChangeEvent.id).where(ChangeEvent.acknowledged.is_(False))
+            ),
+            "security_advisories_open": await self._count(
+                select(_SecurityAdvisory.id).where(_SecurityAdvisory.status == "open")
             ),
             "security_critical_open": await self._count(
                 select(ChangeEvent.id).where(
