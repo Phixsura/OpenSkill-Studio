@@ -205,12 +205,17 @@ class BlindReviewService:
     async def reveal(self, batch_id: str) -> dict:
         """Reveal identities — refused until every review is submitted."""
         batch = await self.get_batch(batch_id)
+        # Row lock: concurrent reveals serialize; a second reveal re-reads
+        # "revealed" and is refused, so the score fold-back runs exactly once.
+        await self.db.refresh(batch, with_for_update=True)
         if batch.status == "open":
             raise AppError(
                 "ECO_BLIND_REVIEW_SEALED",
                 "Identities stay hidden until all reviewers submit",
                 409,
             )
+        if batch.status == "revealed":
+            raise AppError("ECO_INVALID_TRANSITION", "Batch already revealed", 409)
         batch.status = "revealed"
         await self.db.flush()
         # Fold human dimensions back into each run's preserved scores +

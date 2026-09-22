@@ -648,9 +648,13 @@ class LifecycleService:
         """Apply a validated lifecycle transition (Part L state machine)."""
         if to_status not in LIFECYCLE_STATUSES:
             raise AppError("VALIDATION_ERROR", f"Unknown lifecycle status: {to_status}", 422)
+        # Row lock: concurrent transitions serialize so the state machine
+        # always validates against the CURRENT status, and the transition
+        # audit log matches the entity's actual path.
         if reason is not None and reason not in DEPRECATION_REASONS:
             raise AppError("VALIDATION_ERROR", f"Unknown reason: {reason}", 422)
         entity = await CatalogService(self.db).get(kind, entity_id)
+        await self.db.refresh(entity, with_for_update=True)
         from_status = entity.lifecycle_status
         if to_status not in LIFECYCLE_TRANSITIONS.get(from_status, frozenset()):
             raise AppError(

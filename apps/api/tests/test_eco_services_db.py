@@ -904,3 +904,15 @@ async def test_watchlist_ownership_uniform_404(db):
     b = await svc.add_item(watchlist.id, owner.id, target_kind="provider",
                            target_id="P" * 26)
     assert a.id == b.id
+
+async def test_retired_entities_never_recommended(db):
+    deprecated = await _mk_model_version(db, "RetOld")
+    retired = await _mk_model_version(db, "RetGone", lifecycle="retired")
+    good = await _mk_model_version(db, "RetNew")
+    ranked, incompatible = await ReplacementService(db).generate_candidates(
+        deprecated_kind="model_version", deprecated_id=deprecated.id
+    )
+    all_ids = {c.candidate_id for c in ranked} | {c.candidate_id for c in incompatible}
+    assert good.id in {c.candidate_id for c in ranked}
+    # Retired is history — appears in NEITHER channel
+    assert retired.id not in all_ids

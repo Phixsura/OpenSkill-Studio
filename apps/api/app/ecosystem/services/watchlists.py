@@ -120,6 +120,14 @@ class WatchlistService:
         """GitHub watch-button bar: one click watches an entity. Gets or
         creates the user's "Default" watchlist and adds the item idempotently.
         Returns (watchlist, item)."""
+        # get-or-create fence: a per-user transaction advisory lock keeps two
+        # concurrent first clicks from creating two "Default" lists
+        from sqlalchemy import text as sql_text
+
+        await self.db.execute(
+            sql_text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"eco-quick-watch:{owner_id}"},
+        )
         default = await self.db.scalar(
             select(Watchlist).where(
                 Watchlist.owner_id == owner_id, Watchlist.name == "Default"

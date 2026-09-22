@@ -952,3 +952,25 @@ Concurrency sweep over the remaining unguarded read-modify-writes:
   conditional UPDATE — a concurrently-completing run is left alone; recent
   runs untouched; idempotent. The claim fence already prevented re-execution;
   this drains the queue metric and gives the operator an actionable state.
+
+## 48. Residual read-modify-write sweep (2026-09-23, round 42)
+
+Final concurrency pass over the remaining unguarded paths:
+
+- **Blind-review reveal**: row lock + explicit refusal on `revealed` — the
+  human-score fold-back and preference-Elo computation run exactly once.
+- **Lifecycle transition**: entity row lock so the state machine always
+  validates against the CURRENT status and the transition log matches the
+  entity's actual path.
+- **quick_watch get-or-create**: per-user `pg_advisory_xact_lock` — two
+  concurrent first clicks can never create two "Default" lists (race-tested).
+
+### §48.1 Retired entities never recommended (round 42 fix)
+
+The residual-sweep race tests exposed a real product defect: the replacement
+candidate pool did not exclude RETIRED entities — a retired model version
+could rank as a recommended replacement (and crowd live candidates out of the
+top-N). Fixed: retired entities appear in NEITHER channel (blocked entities
+still surface in the hard-incompatible channel so the operator sees why).
+Race tests additionally self-clean their committed fixtures (retire on exit)
+so committed test data can never pollute other tests' candidate pools.

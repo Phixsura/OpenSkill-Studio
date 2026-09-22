@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 from ulid import ULID
 
 from app.core.database import AsyncSessionLocal
@@ -111,3 +112,32 @@ async def test_quick_watch_creates_default_list_idempotently(db):
     assert wl2.id == wl1.id
     assert item2.id == item1.id
     assert len(await svc.list_for_owner(user.id)) == 1
+
+async def test_concurrent_quick_watch_creates_one_default_list(db):
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.models.replacement import Watchlist
+    from app.ecosystem.services.watchlists import WatchlistService
+
+    user = await _mk_user(db)
+    model = AIModel(canonical_name="RaceWatch", slug=f"rw-{str(ULID()).lower()}")
+    db.add(model)
+    await db.commit()
+    user_id, model_id = user.id, model.id
+
+    async def watch():
+        async with AsyncSessionLocal() as session:
+            await WatchlistService(session).quick_watch(
+                user_id, target_kind="model", target_id=model_id
+            )
+            await session.commit()
+
+    await asyncio.gather(watch(), watch())
+    async with AsyncSessionLocal() as session:
+        lists = list(await session.scalars(
+            select(Watchlist).where(
+                Watchlist.owner_id == user_id, Watchlist.name == "Default"
+            )
+        ))
+        assert len(lists) == 1  # advisory lock: never two Default lists

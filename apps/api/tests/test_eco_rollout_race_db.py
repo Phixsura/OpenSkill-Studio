@@ -55,16 +55,30 @@ async def test_concurrent_promote_records_edge_once(db):
                 await session.rollback()
                 return exc.code
 
-    results = await asyncio.gather(promote(), promote())
-    assert sorted(results) == ["ECO_INVALID_TRANSITION", "promoted"], results
-    async with AsyncSessionLocal() as session:
-        edges = list(await session.scalars(
-            select(ReplacementEdge).where(
-                ReplacementEdge.from_id == dep_id,
-                ReplacementEdge.edge_type == "recommended_replacement",
-            )
-        ))
-        assert len(edges) == 1  # side effect recorded exactly once
+    try:
+        results = await asyncio.gather(promote(), promote())
+        assert sorted(results) == ["ECO_INVALID_TRANSITION", "promoted"], results
+        async with AsyncSessionLocal() as session:
+            edges = list(await session.scalars(
+                select(ReplacementEdge).where(
+                    ReplacementEdge.from_id == dep_id,
+                    ReplacementEdge.edge_type == "recommended_replacement",
+                )
+            ))
+            assert len(edges) == 1  # side effect recorded exactly once
+    finally:
+        # Committed rows must not pollute other tests' candidate pools:
+        # retire the fixture model versions (retired never rank as candidates)
+        from app.ecosystem.models.catalog import ModelVersion
+
+        async with AsyncSessionLocal() as session:
+            for mv in await session.scalars(
+                select(ModelVersion).where(
+                    ModelVersion.canonical_name.like("Race%")
+                )
+            ):
+                mv.lifecycle_status = "retired"
+            await session.commit()
 
 
 async def test_stuck_running_runs_are_closed_not_zombied(db):

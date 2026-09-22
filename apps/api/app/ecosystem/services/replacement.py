@@ -134,6 +134,11 @@ class ReplacementService:
             entity = await self.db.get(CATALOG_KIND_TO_MODEL[deprecated_kind], cand_id)
             if entity is None:
                 continue
+            # A retired entity is history, never a recommendation — it neither
+            # ranks nor appears as hard-incompatible (blocked entities DO show
+            # in the incompatible channel so the operator sees why)
+            if entity.lifecycle_status == "retired":
+                continue
             cand_maps = await self._mappings(deprecated_kind, cand_id)
             failures = check_hard_compatibility(dep_maps, cand_maps, entity)
             breakdown, explanation = await self._soft_scores(
