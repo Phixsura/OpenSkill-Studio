@@ -76,6 +76,7 @@ AUDIT_ACTIONS = frozenset(
         "eco.rollout_decided",
         "eco.draft_published",
         "eco.conflict_resolved",
+        "eco.advisory_status",
         # revenue share / settlements
         "revshare.rule_activated",
         "revshare.rule_retired",

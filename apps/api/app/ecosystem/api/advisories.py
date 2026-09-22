@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import AdvisoryResponse, CreateAdvisoryRequest
 from app.ecosystem.services.advisories import AdvisoryService
 from app.models.user import User
@@ -59,6 +59,10 @@ async def transition_advisory(
 ):
     advisory = await AdvisoryService(db).transition(
         advisory_id, to_status=to_status, actor_id=user.id
+    )
+    await eco_audit(
+        db, user, action="eco.advisory_status", target_type="eco_security_advisory",
+        target_id=advisory_id, after={"status": to_status},
     )
     await db.commit()
     return {"data": advisory}

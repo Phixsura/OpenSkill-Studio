@@ -926,3 +926,17 @@ serialize — the loser re-reads `published` and is refused; the
 materialization side effect (`_publish` creating a WorkflowPack) can never
 run twice. Proven by a two-session `asyncio.gather` race test asserting
 exactly one winner, one `ECO_DRAFT_NOT_APPROVED`, and exactly one pack.
+
+## 46. Merge & reconcile fences + advisory audit (2026-09-22, round 40)
+
+Concurrency sweep over the remaining unguarded read-modify-writes:
+
+- **merge_entities**: locks BOTH rows in deterministic id order (no deadly
+  embrace with a concurrent opposite-direction merge) and re-checks retired
+  status inside the lock — A→B racing B→A now has exactly one winner; both
+  entities can never end up retired.
+- **reconcile**: row lock before the already-decided check — two concurrent
+  approvals serialize and a cost rate is minted exactly once.
+- **advisory audit**: status transitions now write `eco.advisory_status` to
+  the immutable commercial audit trail.
+  Proven by two-session race tests (opposite merges, double approval).

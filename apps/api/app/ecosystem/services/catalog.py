@@ -436,6 +436,16 @@ class CatalogService:
             raise AppError("VALIDATION_ERROR", "Cannot merge an entity into itself", 422)
         source = await self.get(kind, source_id)
         target = await self.get(kind, target_id)
+        # Concurrent-merge fence: lock BOTH rows in a deterministic order (by
+        # id — no deadly embrace with a concurrent B→A merge), then re-check
+        # inside the lock that neither side was already retired by a racing
+        # merge. Without this, A→B racing B→A retires both entities.
+        for entity in sorted((source, target), key=lambda e: e.id):
+            await self.db.refresh(entity, with_for_update=True)
+        if source.lifecycle_status == "retired" or target.lifecycle_status == "retired":
+            raise AppError(
+                "ECO_INVALID_TRANSITION", "Entity already merged/retired", 409
+            )
         from sqlalchemy import update
 
         from app.ecosystem.models.catalog import EntityAlias

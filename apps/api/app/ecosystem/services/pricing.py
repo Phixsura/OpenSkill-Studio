@@ -278,6 +278,9 @@ class PricingService:
         row = await self.db.get(PriceObservation, price_obs_id)
         if not row:
             raise AppError("NOT_FOUND", "Price observation not found", 404)
+        # Row lock: two concurrent approvals must serialize — the loser then
+        # re-reads "approved" and is refused, so a cost rate is minted once.
+        await self.db.refresh(row, with_for_update=True)
         if row.reconciliation_status in ("approved", "rejected", "superseded"):
             raise AppError("ECO_INVALID_TRANSITION", "Price observation already decided", 409)
         if decision == "under_review":
