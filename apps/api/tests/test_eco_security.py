@@ -185,3 +185,35 @@ def test_injection_detected(text):
 def test_benign_text_not_flagged():
     assert looks_like_prompt_injection("A fast image model with great quality") is False
     assert looks_like_prompt_injection(None) is False
+
+def test_default_json_byte_cap_is_5mb():
+    """Mutation-audit killer: the DEFAULT cap must reject a payload just over
+    5 MiB — a silently raised cap would let hostile feeds exhaust memory."""
+    import pytest as _pytest
+
+    from app.ecosystem.security import EcoSecurityError, bounded_json_loads
+
+    # 9000 items × ~600B: under the item cap (10k) and string cap (100k)
+    # so ONLY the byte cap can reject it — no masking by other bounds
+    element = b'"' + b"a" * 600 + b'",'
+    big = b"[" + element * 9000
+    big = big[:-1] + b"]"
+    assert len(big) > 5_242_880
+    with _pytest.raises(EcoSecurityError):
+        bounded_json_loads(big)
+    # Just under the cap parses fine
+    ok = b'"' + b"a" * 1000 + b'"'
+    assert bounded_json_loads(ok) == "a" * 1000
+
+
+def test_localhost_literal_blocked_without_dns():
+    """Mutation-audit killer: the 'localhost' literal check is its own
+    defence layer — it must block even with DNS resolution disabled."""
+    import pytest as _pytest
+
+    from app.ecosystem.security import EcoSecurityError, validate_external_url
+
+    with _pytest.raises(EcoSecurityError):
+        validate_external_url("http://localhost/feed", resolve_dns=False)
+    with _pytest.raises(EcoSecurityError):
+        validate_external_url("https://LOCALHOST:443/x", resolve_dns=False)

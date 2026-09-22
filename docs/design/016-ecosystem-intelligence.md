@@ -1072,3 +1072,21 @@ semver parsers (`workflow_pack` prerelease identifiers and the eco
 `parse_version`) with `isascii() and isdigit()`; explicit killer test pins
 `parse_version("¹.2.3") is None` and the fail-open contract for
 `version_in_range` on unparseable input.
+
+## 55. Security-layer mutation audit (2026-09-23, round 55)
+
+Eight mutants against the SSRF/payload guards: scheme allow-list widened,
+private-IP check off, loopback check off, localhost literal off, control-char
+stripping off, sanitize length cap off, JSON byte cap ×10, JSON depth cap off.
+Results:
+
+- **json-bytes-cap** SURVIVED twice before the killer landed — the 5 MiB byte
+  cap was masked first by the 100k string cap, then by the 10k item cap. The
+  final killer (9000×600 B strings: inside every other bound) proves the byte
+  cap itself rejects; a silently raised cap now fails CI.
+- **localhost literal** and **loopback** survivors are VERIFIED equivalent
+  mutants: defence-in-depth layers (public-FQDN check, is_private covering
+  127/8 and ::1) stop the same inputs — verified by executing each mutant
+  directly. A localhost-literal pin test was added anyway.
+  Six killable mutants die; the two survivors are documented redundancy, not
+  gaps.
