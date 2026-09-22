@@ -161,6 +161,7 @@ export default function WatchlistsPage() {
                 {w.muted_until && <span className="ml-2 text-xs text-amber-600">muted</span>}
               </button>
               <select
+                aria-label="Notification severity threshold"
                 value={w.min_severity ?? "info"}
                 title="Only notify at/above this severity"
                 onChange={(e) => updateList.mutate({ id: w.id, min_severity: e.target.value })}
@@ -171,6 +172,9 @@ export default function WatchlistsPage() {
                 ))}
               </select>
               <button
+                aria-label={
+                  w.muted_until ? "Unmute notifications" : "Mute notifications for 7 days"
+                }
                 title={w.muted_until ? "Unmute notifications" : "Mute notifications for 7 days"}
                 onClick={() =>
                   updateList.mutate(
@@ -192,6 +196,7 @@ export default function WatchlistsPage() {
             <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
               <div className="mb-2 flex gap-2">
                 <select
+                  aria-label="Watch target kind"
                   value={item.target_kind}
                   onChange={(e) => setItem({ ...item, target_kind: e.target.value })}
                   className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-xs"

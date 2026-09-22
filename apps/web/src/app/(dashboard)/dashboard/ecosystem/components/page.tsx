@@ -425,6 +425,7 @@ export default function ComponentsPage() {
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
             <select
+              aria-label="Filter"
               value={graphKind}
               onChange={(e) => setGraphKind(e.target.value)}
               className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-sm"

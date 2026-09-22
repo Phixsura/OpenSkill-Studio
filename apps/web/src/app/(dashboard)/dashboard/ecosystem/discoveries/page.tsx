@@ -164,6 +164,7 @@ export default function DiscoveriesPage() {
             Verify all shown ({rows.filter((o) => !o.human_verified).length})
           </button>
           <select
+            aria-label="Filter discoveries"
             value={eventType}
             onChange={(e) => setEventType(e.target.value)}
             className="rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"

@@ -149,6 +149,7 @@ export default function SourcesPage() {
             className="rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"
           />
           <select
+            aria-label="Source type"
             value={form.source_type}
             onChange={(e) => setForm({ ...form, source_type: e.target.value })}
             className="rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"
@@ -158,6 +159,7 @@ export default function SourcesPage() {
             ))}
           </select>
           <select
+            aria-label="Trust level"
             value={form.trust_level}
             onChange={(e) => setForm({ ...form, trust_level: e.target.value })}
             className="rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"
@@ -167,6 +169,7 @@ export default function SourcesPage() {
             ))}
           </select>
           <select
+            aria-label="Adapter"
             value={form.adapter_key}
             onChange={(e) => setForm({ ...form, adapter_key: e.target.value })}
             className="rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"
@@ -178,6 +181,7 @@ export default function SourcesPage() {
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
+              aria-label="Robots.txt compliant"
               checked={form.robots_compliant}
               onChange={(e) => setForm({ ...form, robots_compliant: e.target.checked })}
             />

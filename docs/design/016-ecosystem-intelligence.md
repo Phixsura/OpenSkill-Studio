@@ -897,3 +897,11 @@ CURRENT adapter over them. Append-only semantics preserved:
   the old row is never rewritten. Curated canonical resolution is inherited
   (no re-queue); `human_verified` resets to false — new content needs fresh
   review. Re-replaying with the same parser supersedes nothing.
+
+## 43. Accessibility pass (2026-09-22, round 37)
+
+Enterprise a11y bar: every `<select>` across the eleven ecosystem pages now
+carries a semantic `aria-label`, icon-only buttons (mute toggle) and bare
+checkboxes (run-comparison, robots-compliance) have accessible names. An a11y
+smoke suite renders all eight interactive pages and fails on ANY control
+without an accessible name — new unlabeled controls can't ship.

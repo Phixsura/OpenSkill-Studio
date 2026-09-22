@@ -141,6 +141,7 @@ export default function SecurityPage() {
           className="w-52 rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-xs"
         />
         <select
+          aria-label="Advisory severity"
           value={form.severity}
           onChange={(e) => setForm({ ...form, severity: e.target.value })}
           className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-xs"

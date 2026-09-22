@@ -120,6 +120,7 @@ function CompareInner() {
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <select
+          aria-label="Entity kind"
           value={kind}
           onChange={(e) => setKind(e.target.value)}
           className="rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"

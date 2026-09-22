@@ -180,6 +180,7 @@ export default function BenchmarksPage() {
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <h2 className="text-lg font-semibold">Leaderboard</h2>
           <select
+            aria-label="Leaderboard family"
             value={lbFamily}
             onChange={(e) => setLbFamily(e.target.value)}
             className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-sm"
@@ -190,6 +191,7 @@ export default function BenchmarksPage() {
             ))}
           </select>
           <select
+            aria-label="Leaderboard dimension"
             value={lbDimension}
             onChange={(e) => setLbDimension(e.target.value)}
             className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-sm"
@@ -372,6 +374,7 @@ export default function BenchmarksPage() {
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
+                        aria-label="Select run for comparison"
                         checked={compareIds.includes(r.id)}
                         onChange={() => toggleCompare(r.id)}
                         disabled={r.status !== "completed" && !compareIds.includes(r.id)}

@@ -295,6 +295,7 @@ export default function CatalogPage() {
                   </td>
                   <td className="px-4 py-3">
                     <select
+                      aria-label="Lifecycle transition"
                       defaultValue=""
                       onChange={(e) => {
                         if (e.target.value) {
